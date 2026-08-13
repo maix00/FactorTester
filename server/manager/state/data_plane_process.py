@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from scripts.data_dir import CACHE_DB_PATH
 
-from server.manager.config import ARTIFACT_DATA_PORT, PEER_CONTROL_PORT, PEER_DATA_PORT
+from server.manager.config import CLIENT_DATA_PORT, PEER_CONTROL_PORT, PEER_DATA_PORT
 from server.manager.http.security import configured_tls_paths
 from server.manager.network_endpoints import (
     peer_bind_address,
@@ -52,7 +52,7 @@ class DataPlaneProcessStateMixin:
         self,
         *,
         client_host: str,
-        client_port: int = ARTIFACT_DATA_PORT,
+        client_port: int = CLIENT_DATA_PORT,
         client_control_endpoint: str,
         client_data_endpoint: str,
         peer_host: str = "",

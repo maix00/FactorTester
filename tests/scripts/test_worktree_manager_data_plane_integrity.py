@@ -82,3 +82,31 @@ def test_cancel_removes_only_staging_file(tmp_path) -> None:
 
     assert target.read_bytes() == b"retained"
     assert not writer.staging_path.exists()
+
+
+def test_completed_resume_verifies_promoted_file_without_rewriting_it(
+    tmp_path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    raw = b"abcdef"
+    target.write_bytes(raw)
+    writer = VerifiedStagingWriter(
+        target,
+        expected_size=len(raw),
+        expected_sha256=hashlib.sha256(raw).hexdigest(),
+        resume_offset=len(raw),
+    )
+
+    assert writer.finish() == target
+    assert target.read_bytes() == raw
+    assert not writer.staging_path.exists()
+
+
+def test_completed_resume_rejects_missing_promoted_file(tmp_path) -> None:
+    with pytest.raises(IntegrityError, match="no promoted destination"):
+        VerifiedStagingWriter(
+            tmp_path / "artifact.bin",
+            expected_size=6,
+            expected_sha256=hashlib.sha256(b"abcdef").hexdigest(),
+            resume_offset=6,
+        )

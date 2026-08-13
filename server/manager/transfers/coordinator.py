@@ -254,7 +254,10 @@ class TransferCoordinator:
                 raise ConnectionError("transfer peer gateway is unavailable")
             value = self.peer_gateway.resume_offset(transfer, attempt)
         selected = int(value)
-        if not 0 <= selected < transfer.expected_size:
+        # An exact-end offset means the destination committed and verified the
+        # file, but the final HTTP response did not reach the request owner.
+        # Preserve that durable fact as a zero-byte convergence Attempt.
+        if not 0 <= selected <= transfer.expected_size:
             raise ValueError("destination resume offset is invalid")
         return selected
 

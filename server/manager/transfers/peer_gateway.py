@@ -48,7 +48,7 @@ class TransferPeerGateway:
             result = int(value.get("resume_offset"))
         except (TypeError, ValueError) as exc:
             raise ConnectionError("peer resume response is incomplete") from exc
-        if not 0 <= result < transfer.expected_size:
+        if not 0 <= result <= transfer.expected_size:
             raise ConnectionError("peer resume offset is invalid")
         return result
 

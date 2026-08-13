@@ -43,9 +43,13 @@ def _coordinator(tmp_path) -> TransferCoordinator:
 class _PeerGateway:
     def __init__(self) -> None:
         self.imported: list[tuple[str, str]] = []
+        self.resume_value = 0
 
     def import_context(self, transfer, attempt) -> None:
         self.imported.append((transfer.transfer_id, attempt.attempt_id))
+
+    def resume_offset(self, _transfer, _attempt) -> int:
+        return self.resume_value
 
 
 def _download() -> DownloadRequest:
@@ -140,3 +144,44 @@ def test_idempotent_retry_reuses_attempt_but_rotates_ticket(tmp_path) -> None:
         (first.transfer_id, first.attempt_id),
         (retry.transfer_id, retry.attempt_id),
     ]
+
+
+def test_upload_retry_accepts_completed_destination_as_zero_byte_attempt(
+    tmp_path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    endpoints = {"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)}
+    request = UploadRequest(
+        idempotency_key="upload-response-lost",
+        principal="alice",
+        storage_server_id="node-a",
+        job_id="job-1",
+        artifact_name="source.py",
+        expected_size=6,
+        expected_sha256=hashlib.sha256(b"abcdef").hexdigest(),
+        expires_at=4_000_000_000.0,
+    )
+    first = coordinator.prepare_upload(request, endpoints=endpoints, now=100.0)
+    coordinator.attempts.transition(
+        first.attempt_id, "failed", now=101.0, error="response lost",
+    )
+    coordinator.requests.transition(
+        first.transfer_id, "retry_wait", expected="dispatched", now=101.0,
+    )
+    coordinator.peer_gateway.resume_value = 6
+
+    retry = coordinator.prepare_upload(request, endpoints=endpoints, now=102.0)
+
+    assert retry.transfer_id == first.transfer_id
+    assert retry.attempt_id != first.attempt_id
+    assert retry.resume_offset == retry.expected_size == 6
+    coordinator.tickets.verify(
+        retry.bearer,
+        required_role=TransferTicketRole.CLIENT_UPLOAD,
+        attempt_id=retry.attempt_id,
+        node_id="",
+        start_offset=6,
+        end_offset=6,
+        consume=True,
+        now=103.0,
+    )

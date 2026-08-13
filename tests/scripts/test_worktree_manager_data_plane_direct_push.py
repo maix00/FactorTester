@@ -43,7 +43,7 @@ def _data_plane(runtime: DataPlaneRuntime, *, peer: bool = False):
         thread.join(timeout=2)
 
 
-def _direct_push_context(path: Path, raw: bytes):
+def _direct_push_context(path: Path, raw: bytes, *, resume_offset: int = 0):
     requests = TransferStore(path, server_id="selected-manager")
     transfer = requests.create(
         NewTransfer(
@@ -76,7 +76,7 @@ def _direct_push_context(path: Path, raw: bytes):
             request_owner_manager_id="selected-manager",
             source_server_id="selected-manager",
             destination_server_id="storage-node",
-            resume_offset=0,
+            resume_offset=resume_offset,
             expires_at=transfer.expires_at,
             routes=AttemptRouteSnapshot(
                 client_data_endpoint="http://client-placeholder:7997",
@@ -180,3 +180,96 @@ def test_client_upload_streams_to_wireguard_destination_without_relay_copy(
     destination = destination_runtime.destination_path(transfer, attempt)
     assert destination.read_bytes() == raw
     assert not any((tmp_path / "requester-staging").rglob("*"))
+
+
+def test_zero_byte_retry_converges_after_destination_committed_response_lost(
+    tmp_path,
+) -> None:
+    raw = b"class UploadedFactor:\n    pass\n"
+    requester_db = tmp_path / "requester.sqlite"
+    destination_db = tmp_path / "destination.sqlite"
+    transfer, attempt = _direct_push_context(
+        requester_db, raw, resume_offset=len(raw),
+    )
+    TransferReplicaStore(
+        destination_db, server_id="storage-node",
+    ).import_context(transfer, attempt)
+    destination_runtime = DataPlaneRuntime(
+        server_id="storage-node",
+        transfer_database=destination_db,
+        staging_root=tmp_path / "destination-staging",
+        origin_resolver=lambda _transfer: Path("/not-an-origin"),
+    )
+    destination = destination_runtime.destination_path(transfer, attempt)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(raw)
+    destination_bearer = destination_runtime.tickets.issue(
+        transfer_id=transfer.transfer_id,
+        attempt_id=attempt.attempt_id,
+        role=TransferTicketRole.DESTINATION_WRITE,
+        principal=transfer.principal,
+        node_id="selected-manager",
+        start_offset=len(raw),
+        end_offset=len(raw),
+        expires_at=transfer.expires_at,
+        max_uses=1,
+    ).bearer
+
+    with _data_plane(destination_runtime, peer=True) as destination_endpoint:
+        for database in (requester_db, destination_db):
+            with TransferAttemptStore(
+                database,
+                server_id=(
+                    "selected-manager"
+                    if database == requester_db
+                    else "storage-node"
+                ),
+            )._connect() as connection:
+                connection.execute(
+                    "UPDATE transfer_attempts "
+                    "SET destination_peer_data_endpoint=? WHERE attempt_id=?",
+                    (destination_endpoint, attempt.attempt_id),
+                )
+        requester_runtime = DataPlaneRuntime(
+            server_id="selected-manager",
+            transfer_database=requester_db,
+            staging_root=tmp_path / "requester-staging",
+            origin_resolver=lambda _transfer: Path("/not-an-origin"),
+            destination_ticket_provider=lambda _context: destination_bearer,
+            destination_endpoint_provider=lambda _context: destination_endpoint,
+        )
+        client_bearer = requester_runtime.tickets.issue(
+            transfer_id=transfer.transfer_id,
+            attempt_id=attempt.attempt_id,
+            role=TransferTicketRole.CLIENT_UPLOAD,
+            principal=transfer.principal,
+            node_id="",
+            start_offset=len(raw),
+            end_offset=len(raw),
+            expires_at=transfer.expires_at,
+            max_uses=1,
+        ).bearer
+        with _data_plane(requester_runtime) as client_endpoint:
+            request = Request(
+                client_endpoint + f"/v1/transfers/{attempt.attempt_id}/upload",
+                data=b"",
+                headers={
+                    "Authorization": f"Bearer {client_bearer}",
+                    "Content-Length": "0",
+                    "Content-Type": "application/octet-stream",
+                },
+                method="PUT",
+            )
+            with urlopen(request, timeout=2) as response:
+                assert response.status == 201
+
+    assert destination.read_bytes() == raw
+    assert not destination.with_name(
+        f".{destination.name}.transfer.tmp"
+    ).exists()
+    assert requester_runtime.requests.require(
+        transfer.transfer_id,
+    ).status is TransferStatus.COMPLETED
+    assert destination_runtime.attempts.require(
+        attempt.attempt_id,
+    ).status.value == "completed"

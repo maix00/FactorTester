@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import Sequence
 
-from server.manager.config import ARTIFACT_DATA_PORT, PEER_DATA_PORT
+from server.manager.config import CLIENT_DATA_PORT, PEER_DATA_PORT
 from server.manager.data_plane.artifacts import ArtifactOriginResolver
 from server.manager.data_plane.context import DataPlaneRuntime
 from server.manager.data_plane.server import (
@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run FactorTester transfer data")
     parser.add_argument("--server-id", required=True)
     parser.add_argument("--client-host", default="0.0.0.0")
-    parser.add_argument("--client-port", type=int, default=ARTIFACT_DATA_PORT)
+    parser.add_argument("--client-port", type=int, default=CLIENT_DATA_PORT)
     parser.add_argument("--peer-host", default="")
     parser.add_argument("--peer-port", type=int, default=PEER_DATA_PORT)
     parser.add_argument("--transfer-database", required=True)

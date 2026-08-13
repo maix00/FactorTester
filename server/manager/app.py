@@ -21,7 +21,7 @@ from types import ModuleType
 from typing import Sequence
 
 from server.manager.config import (
-    ARTIFACT_DATA_PORT,
+    CLIENT_DATA_PORT,
     PEER_CONTROL_PORT,
     PEER_DATA_PORT,
 )
@@ -61,7 +61,7 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     )
     parser.add_argument("--peer-port", type=int, default=PEER_CONTROL_PORT)
     parser.add_argument("--data-host", default="0.0.0.0")
-    parser.add_argument("--data-port", type=int, default=ARTIFACT_DATA_PORT)
+    parser.add_argument("--data-port", type=int, default=CLIENT_DATA_PORT)
     parser.add_argument("--peer-data-port", type=int, default=PEER_DATA_PORT)
     parser.add_argument(
         "--public-endpoint",
@@ -108,7 +108,7 @@ def main(
     *,
     runtime_module: ModuleType | None = None,
 ) -> int:
-    """Start the Manager and its local artifact data plane.
+    """Start the Manager and its client/peer transfer data plane.
 
     ``runtime_module`` is an internal compatibility seam for the old import
     path and tests.  Production callers should simply invoke ``main()``.

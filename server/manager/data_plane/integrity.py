@@ -53,7 +53,23 @@ class VerifiedStagingWriter:
         self.resume_offset = int(resume_offset)
         if self.expected_size < 0 or not 0 <= self.resume_offset <= self.expected_size:
             raise ValueError("staging size or resume offset is invalid")
-        if self.resume_offset:
+        self._already_complete = (
+            self.expected_size > 0
+            and self.resume_offset == self.expected_size
+        )
+        if self._already_complete:
+            if not self.target.is_file():
+                raise IntegrityError(
+                    "completed resume offset has no promoted destination"
+                )
+            verify_file(
+                self.target,
+                expected_size=self.expected_size,
+                expected_sha256=self.expected_sha256,
+            )
+            self._stream = None
+            self.bytes_written = self.expected_size
+        elif self.resume_offset:
             if (
                 not self.staging_path.is_file()
                 or self.staging_path.stat().st_size != self.resume_offset
@@ -74,12 +90,18 @@ class VerifiedStagingWriter:
         if self.bytes_written + len(raw) > self.expected_size:
             self.cancel()
             raise IntegrityError("received bytes exceed expected size")
+        if self._stream is None:  # pragma: no cover - bounded by size above
+            raise RuntimeError("completed staging writer has no stream")
         self._stream.write(raw)
         self.bytes_written += len(raw)
 
     def finish(self) -> Path:
         if self._closed:
             raise RuntimeError("staging writer is closed")
+        if self._already_complete:
+            self._closed = True
+            return self.target
+        assert self._stream is not None
         self._stream.flush()
         os.fsync(self._stream.fileno())
         self._stream.close()
@@ -98,16 +120,19 @@ class VerifiedStagingWriter:
 
     def cancel(self) -> None:
         if not self._closed:
-            self._stream.close()
+            if self._stream is not None:
+                self._stream.close()
             self._closed = True
-        self.staging_path.unlink(missing_ok=True)
+        if not self._already_complete:
+            self.staging_path.unlink(missing_ok=True)
 
     def preserve(self) -> Path:
         """Close a partial stream without making it visible as a final file."""
 
         if not self._closed:
-            self._stream.flush()
-            os.fsync(self._stream.fileno())
-            self._stream.close()
+            if self._stream is not None:
+                self._stream.flush()
+                os.fsync(self._stream.fileno())
+                self._stream.close()
             self._closed = True
-        return self.staging_path
+        return self.target if self._already_complete else self.staging_path
