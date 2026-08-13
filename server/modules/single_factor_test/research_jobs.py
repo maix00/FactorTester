@@ -54,6 +54,10 @@ from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
+from server.services.federated_factor_sources import (
+    freeze_sources as freeze_federated_factor_sources,
+    source_free_manifest as federated_source_manifest,
+)
 from server.services.factor_registry import transient_factor_source_scope
 from server.services.transient_factor_sources import (
     cleanup_scope,
@@ -464,6 +468,22 @@ def prepare_manager_run_context(data: dict, *, owner: str) -> dict:
     local_request = deepcopy(data)
     local_request.pop(MANAGER_RUN_CONTEXT_KEY, None)
     prepared = _prepare_local_research_run_request(local_request, owner=owner)
+    portable_sources = freeze_federated_factor_sources(
+        prepared, owner=owner,
+    )
+    prepared["portable_factor_sources"] = portable_sources
+    all_sources = [
+        *(prepared.get("transient_sources") or []),
+        *portable_sources,
+    ]
+    prepared["run_spec"]["factor_source_policy"] = (
+        {
+            "mode": "transient_run_source",
+            "transport": "manager_frozen",
+            "files": federated_source_manifest(all_sources),
+        }
+        if all_sources else {"mode": "metadata_only"}
+    )
     return create_manager_run_context(prepared, owner=owner)
 
 
@@ -496,10 +516,16 @@ def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
         for item in prepared.get("transient_sources") or []
         if isinstance(item, dict) and item.get("factor_id")
     }
+    portable_overrides = {
+        str(item.get("canonical_family_ref") or ""): item
+        for item in prepared.get("portable_factor_sources") or []
+        if isinstance(item, dict) and item.get("canonical_family_ref")
+    }
     plans: list[dict[str, object]] = []
     with transient_factor_source_scope(
         owner=owner,
         overrides=source_overrides,
+        portable_overrides=portable_overrides,
     ):
         for kind in prepared["analyses"]:
             output_requests = output_requests_for_analysis(
@@ -975,8 +1001,10 @@ def submit_research_run():
     margin_execution_profile = prepared["margin_execution_profile"]
     run_spec = prepared["run_spec"]
     transient_sources = prepared.get("transient_sources") or []
+    portable_sources = prepared.get("portable_factor_sources") or []
+    retained_factor_sources = [*transient_sources, *portable_sources]
     factor_input_bytes = sum(
-        int(item.get("source_bytes") or 0) for item in transient_sources
+        int(item.get("source_bytes") or 0) for item in retained_factor_sources
     )
     strategy_source_bytes = sum(
         len(str(item.get("source_code") or "").encode("utf-8"))
@@ -1002,7 +1030,11 @@ def submit_research_run():
             "requested_input_bytes": retained_input_bytes,
             "quota_bytes": quota,
         }), 507
-    transient_scope = create_scope(owner=owner, entries=transient_sources)
+    transient_scope = create_scope(
+        owner=owner,
+        entries=transient_sources,
+        portable_entries=portable_sources,
+    )
     transient_strategy_scope = create_strategy_scope(
         owner=owner,
         entries=prepared.get("transient_strategy_sources") or [],
@@ -1072,7 +1104,7 @@ def submit_research_run():
                 kind,
                 payload,
                 run_spec_hash=str(run["run_spec_hash"]),
-                transient_factor_sources=transient_sources,
+                transient_factor_sources=retained_factor_sources,
                 transient_strategy_sources=(
                     prepared.get("transient_strategy_sources") or []
                     if kind == "backtest" else []

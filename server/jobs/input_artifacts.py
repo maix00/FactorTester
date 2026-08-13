@@ -18,8 +18,19 @@ STRATEGY_SPEC_PREFIX = "strategy_spec__"
 RUN_DEPENDENCY_PREFIX = "run_dependency__"
 
 
-def factor_source_artifact_name(factor_id: str) -> str:
-    return f"{FACTOR_SOURCE_PREFIX}{str(factor_id).strip()}"
+def factor_source_artifact_name(
+    factor_id: str,
+    *,
+    canonical_family_ref: str = "",
+) -> str:
+    name = f"{FACTOR_SOURCE_PREFIX}{str(factor_id).strip()}"
+    canonical_family_ref = str(canonical_family_ref or "").strip()
+    if canonical_family_ref:
+        digest = hashlib.sha256(
+            canonical_family_ref.encode("utf-8")
+        ).hexdigest()[:16]
+        name = f"{name}__{digest}"
+    return name
 
 
 def strategy_source_artifact_name(source_path: str) -> str:
@@ -151,11 +162,20 @@ def retain_factor_sources(
         job_id=job_id,
         owner=owner,
         entries=[{
-            "name": factor_source_artifact_name(str(entry["factor_id"])),
+            "name": factor_source_artifact_name(
+                str(entry["factor_id"]),
+                canonical_family_ref=str(
+                    entry.get("canonical_family_ref") or ""
+                ),
+            ),
             "artifact_kind": "factor_source",
             "file_name": f"{entry['factor_id']}.py",
             "logical_path": str(entry["path"]),
-            "title_zh": f"临时因子源码：{entry['factor_id']}",
+            "title_zh": (
+                f"跨服务器运行因子源码：{entry['canonical_family_ref']}"
+                if entry.get("canonical_family_ref")
+                else f"临时因子源码：{entry['factor_id']}"
+            ),
             "content_type": "text/x-python",
             "content": str(entry["source_code"]).encode("utf-8"),
             "content_hash": str(entry["source_sha256"]),
@@ -266,8 +286,14 @@ def load_retained_factor_sources(
     *,
     job_id: str,
     owner: str,
+    manifest: Iterable[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Reconstruct transient entries from retained Job input artifacts."""
+    manifest_by_path = {
+        str(item.get("path") or ""): item
+        for item in manifest
+        if isinstance(item, dict) and item.get("path")
+    }
     entries: list[dict[str, Any]] = []
     for metadata in repository.list_artifacts(job_id=job_id, owner=owner):
         name = str(metadata.get("name") or "")
@@ -278,20 +304,36 @@ def load_retained_factor_sources(
             or not name.startswith(FACTOR_SOURCE_PREFIX)
         ):
             continue
-        factor_id = name[len(FACTOR_SOURCE_PREFIX):]
+        logical_path = str(metadata.get("logical_path") or "")
+        prior = manifest_by_path.get(logical_path, {})
+        factor_id = str(prior.get("factor_id") or "").strip()
+        if not factor_id:
+            factor_id = name[len(FACTOR_SOURCE_PREFIX):].split("__", 1)[0]
         path = resolve_artifact_path(
             str(metadata["relative_path"]),
             expected_hash=str(metadata["content_hash"]),
         )
         source_code = path.read_text(encoding="utf-8")
-        entries.append({
+        entry = {
             "factor_id": factor_id,
-            "path": f"custom_factors/{factor_id}.py",
+            "path": logical_path or f"custom_factors/{factor_id}.py",
             "source_code": source_code,
             "source_sha256": str(metadata["content_hash"]),
             "source_bytes": int(metadata["size_bytes"]),
-        })
-    return sorted(entries, key=lambda item: item["factor_id"])
+        }
+        for key in (
+            "canonical_family_ref", "source_kind", "source_owner",
+            "source_access_policy",
+        ):
+            if prior.get(key):
+                entry[key] = str(prior[key])
+        entries.append(entry)
+    return sorted(
+        entries,
+        key=lambda item: (
+            str(item.get("canonical_family_ref") or ""), item["factor_id"],
+        ),
+    )
 
 
 def load_retained_strategy_sources(
