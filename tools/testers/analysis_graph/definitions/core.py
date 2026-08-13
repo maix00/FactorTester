@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .options import AnalysisOptionDefinition
@@ -19,6 +19,7 @@ class CoreAxisDefinition:
     resolution_adapter: str = "identity"
     options: tuple[AnalysisOptionDefinition, ...] = ()
     help_text: str = ""
+    value_contract: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.authoring_key:
@@ -37,6 +38,7 @@ class CoreAxisDefinition:
             "resolution_adapter": self.resolution_adapter,
             "options": [option.to_dict() for option in self.options],
             "help_text": self.help_text,
+            "value_contract": dict(self.value_contract),
         }
 
 

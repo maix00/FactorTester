@@ -18,6 +18,7 @@ class AnalysisGraphDefinition:
     projection: str = "tree"
     authoritative_model: str = "dag"
     overlay_modes: tuple[str, ...] = ("core_test", "auxiliary_analysis")
+    authoring_contract: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.label:
@@ -25,6 +26,8 @@ class AnalysisGraphDefinition:
         keys = [item.key for item in self.analysis_types]
         if len(keys) != len(set(keys)):
             raise ValueError("analysis graph contains duplicate analysis types")
+        if self.authoring_contract is not None and not self.authoring_contract:
+            raise ValueError("analysis graph authoring contract cannot be empty")
 
     def type_by_key(self, key: str) -> AnalysisTypeDefinition:
         for item in self.analysis_types:
@@ -39,6 +42,7 @@ class AnalysisGraphDefinition:
             "projection": self.projection,
             "authoritative_model": self.authoritative_model,
             "overlay_modes": list(self.overlay_modes),
+            "authoring_contract": dict(self.authoring_contract or {}),
             "core_test": self.core_test.to_dict(),
             "analysis_types": [
                 item.to_dict()

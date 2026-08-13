@@ -22,6 +22,13 @@ def ic_analysis_graph_definition() -> AnalysisGraphDefinition:
             axis_definitions=ic_core_axis_definitions(),
         ),
         analysis_types=builtin_ic_analyses(),
+        authoring_contract={
+            "schema_version": 1,
+            "core_tests_key": "core_tests",
+            "analyses_key": "analyses",
+            "factor_subject_refs_key": "factor_subject_refs",
+            "output_requests_key": "output_requests",
+        },
     )
 
 

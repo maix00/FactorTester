@@ -15,6 +15,13 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
     manifest = ic_analysis_graph_definition().to_dict()
 
     assert manifest["key"] == "ic_analysis_graph"
+    assert manifest["authoring_contract"] == {
+        "schema_version": 1,
+        "core_tests_key": "core_tests",
+        "analyses_key": "analyses",
+        "factor_subject_refs_key": "factor_subject_refs",
+        "output_requests_key": "output_requests",
+    }
     assert manifest["core_test"]["axes"] == [
         "product_scope_ref",
         "factor_ref",
@@ -29,23 +36,43 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
     assert axes["factor_ref"] == {
         "key": "factor_ref",
         "label": "因子",
-        "authoring_key": "factor_selections",
+        "authoring_key": "factor_refs",
         "control_template": "reference_multi_select",
         "source_adapter": "selected_factors",
         "accepts_many": True,
         "resolution_adapter": "frozen_factor_members",
         "options": [],
         "help_text": "选择冻结因子或因子集合；集合在冻结运行配置时展开为具体因子",
+        "value_contract": {
+            "item_type": "frozen_factor_ref",
+            "minimum_items": 1,
+            "unique_items": True,
+        },
     }
-    assert axes["horizon"]["authoring_key"] == "forward_return_horizons"
+    assert axes["horizon"]["authoring_key"] == "horizon"
     assert axes["horizon"]["control_template"] == "base_multiplier_grid"
     assert axes["horizon"]["resolution_adapter"] == "per_factor_frequency"
     assert axes["horizon"]["accepts_many"] is True
-    assert axes["entry_delay_bars"]["authoring_key"] == "ic_lags"
+    assert axes["horizon"]["value_contract"] == {
+        "modes": ["scale_aware", "explicit"],
+        "default_mode": "scale_aware",
+        "base_values": ["signal"],
+        "allow_physical_frequency_base": True,
+        "multiplier_minimum": 1,
+        "multiplier_integer_only": True,
+        "minimum_multipliers": 1,
+    }
+    assert axes["entry_delay_bars"]["authoring_key"] == "entry_delay_bars"
+    assert axes["entry_delay_bars"]["value_contract"] == {
+        "item_type": "integer",
+        "minimum": 0,
+        "minimum_items": 1,
+        "unique_items": True,
+    }
+    assert axes["method"]["authoring_key"] == "methods"
     assert axes["method"]["options"] == [
         {"value": "rank", "label": "Rank IC"},
         {"value": "pearson", "label": "Pearson IC"},
-        {"value": "both", "label": "Rank + Pearson"},
     ]
     analyses = {item["key"]: item for item in manifest["analysis_types"]}
     assert list(analyses) == [
