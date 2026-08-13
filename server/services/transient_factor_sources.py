@@ -84,28 +84,57 @@ def validate_entries(raw: Any) -> list[dict[str, Any]]:
     return entries
 
 
-def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def create_scope(
+    *,
+    owner: str,
+    entries: Iterable[dict[str, Any]],
+    portable_entries: Iterable[dict[str, Any]] = (),
+) -> dict[str, Any]:
     """Persist an isolated source scope and return its source-free manifest."""
     owner = str(owner or "").strip()
     if not owner:
         raise ValueError("transient factor source owner is required")
     validated = validate_entries(list(entries))
-    if not validated:
+    from server.services.federated_factor_sources import (
+        validate_entries as validate_portable_entries,
+    )
+
+    portable = validate_portable_entries(list(portable_entries))
+    normalized = [
+        {
+            **entry,
+            "canonical_family_ref": f"{owner}:{entry['factor_id']}",
+            "source_kind": "custom",
+            "source_owner": owner,
+            "source_access_policy": "transient_run_source",
+        }
+        for entry in validated
+    ]
+    normalized.extend(portable)
+    canonical_refs = [
+        str(item["canonical_family_ref"]) for item in normalized
+    ]
+    if len(canonical_refs) != len(set(canonical_refs)):
+        raise ValueError("duplicate transient factor source identity")
+    if not normalized:
         return {"scope_id": "", "files": [], "mode": "metadata_only"}
     scope_id = uuid.uuid4().hex
     root = _scope_path(scope_id)
-    custom = root / "custom_factors"
-    custom.mkdir(parents=True, mode=0o700)
+    root.mkdir(parents=True, mode=0o700)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope_id": scope_id,
         "owner": str(owner),
         "created_at": time.time(),
         "files": [],
     }
     try:
-        for entry in validated:
-            path = custom / f"{entry['factor_id']}.py"
+        for entry in normalized:
+            relative_path = Path(str(entry["path"]))
+            path = (root / relative_path).resolve()
+            if root not in path.parents:
+                raise ValueError("transient factor source path escapes its scope")
+            path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             fd = os.open(path, flags, 0o600)
             try:
@@ -138,8 +167,15 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
     }
 
 
-def load_source(scope_id: str, factor_id: str, *, owner: str = "") -> str | None:
-    """Load one source only when the scope manifest belongs to *owner*."""
+def load_source_record(
+    scope_id: str,
+    factor_id: str,
+    *,
+    owner: str = "",
+    source_kind: str = "",
+    source_owner: str = "",
+) -> dict[str, Any] | None:
+    """Load one hash-checked record from a scope owned by the task user."""
     owner = str(owner or "").strip()
     if not owner:
         return None
@@ -148,27 +184,53 @@ def load_source(scope_id: str, factor_id: str, *, owner: str = "") -> str | None
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         if str(manifest.get("owner") or "") != owner:
             return None
-        allowed = {
-            str(item.get("factor_id") or "")
-            for item in manifest.get("files") or []
-            if isinstance(item, dict)
-        }
-        if factor_id not in allowed:
+        allowed = []
+        for item in manifest.get("files") or []:
+            if (
+                not isinstance(item, dict)
+                or str(item.get("factor_id") or "") != factor_id
+            ):
+                continue
+            item_kind = str(item.get("source_kind") or "custom")
+            item_owner = str(item.get("source_owner") or owner)
+            if source_kind and item_kind != source_kind:
+                continue
+            if source_owner and item_owner != source_owner:
+                continue
+            allowed.append(item)
+        if len(allowed) != 1:
             return None
-        path = root / "custom_factors" / f"{factor_id}.py"
+        entry = allowed[0]
+        path = (root / str(entry.get("path") or "")).resolve()
+        if root not in path.parents:
+            return None
         source = path.read_text(encoding="utf-8")
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        declared = next(
-            (
-                str(item.get("source_sha256") or "")
-                for item in manifest.get("files") or []
-                if isinstance(item, dict) and str(item.get("factor_id") or "") == factor_id
-            ),
-            "",
-        )
-        return source if digest == declared else None
+        declared = str(entry.get("source_sha256") or "")
+        if digest != declared:
+            return None
+        return {**entry, "source_code": source}
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return None
+
+
+def load_source(
+    scope_id: str,
+    factor_id: str,
+    *,
+    owner: str = "",
+    source_kind: str = "",
+    source_owner: str = "",
+) -> str | None:
+    """Load one source only when the scope manifest belongs to *owner*."""
+    record = load_source_record(
+        scope_id,
+        factor_id,
+        owner=owner,
+        source_kind=source_kind,
+        source_owner=source_owner,
+    )
+    return str(record.get("source_code") or "") if record else None
 
 
 def cleanup_scope(scope_id: str) -> bool:
@@ -206,7 +268,9 @@ def scope_status(scope_id: str) -> str:
             factor_id = str(item.get("factor_id") or "")
             if not _ID.fullmatch(factor_id):
                 return "corrupt"
-            path = root / "custom_factors" / f"{factor_id}.py"
+            path = (root / str(item.get("path") or "")).resolve()
+            if root not in path.parents:
+                return "corrupt"
             stat = path.stat()
             if stat.st_size != int(item.get("source_bytes") or -1):
                 return "corrupt"

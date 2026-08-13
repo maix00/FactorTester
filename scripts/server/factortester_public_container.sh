@@ -13,6 +13,7 @@ Usage: scripts/server/factortester_public_container.sh COMMAND [ARGS...]
 Commands:
   check-source   require a clean checkout and exact FACTORTESTER_REVISION
   config         render and validate Compose configuration
+  container-id   print one service's current container ID
   build          build both versioned images explicitly
   up             start/reconcile from existing images; never builds or pulls
   restart-app    restart only FactorTester; PostgreSQL remains running
@@ -177,6 +178,7 @@ shift
 case "$command" in
   check-source) check_source ;;
   config) "${compose[@]}" config "$@" ;;
+  container-id) "${compose[@]}" ps --quiet "$@" ;;
   build) check_source; "${compose[@]}" build "$@" ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;

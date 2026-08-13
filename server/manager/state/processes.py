@@ -122,10 +122,13 @@ class ProcessStateMixin:
     def start(self, path: Path, port: int) -> str:
         path = path.resolve()
         if self.is_running(path):
+            self.service_intents.mark_running(path, port)
             return "already running"
         existing = self.processes.get(self.key(path))
         if existing is not None and existing.daemon.poll() is None:
-            return self.restart_api(path, port)
+            message = self.restart_api(path, port)
+            self.service_intents.mark_running(path, port)
+            return message
         if existing is not None:
             self.processes.pop(self.key(path), None)
         if not (path / "start_server.py").exists():
@@ -161,7 +164,50 @@ class ProcessStateMixin:
             socket_path=socket_path,
             deployment_id=deployment_id,
         )
+        self.service_intents.mark_running(path, port)
         return f"started api pid {api.pid}, daemon pid {daemon.pid}"
+
+    def restore_desired_services(self) -> list[dict[str, object]]:
+        """Reconcile persisted intent with current, executable worktrees."""
+        intents = self.service_intents.services()
+        if not intents:
+            return []
+        worktrees = {
+            self.key(item.path): item
+            for item in self.worktrees()
+            if item.port
+        }
+        restored: list[dict[str, object]] = []
+        for intent in intents:
+            path = Path(str(intent["path"])).resolve()
+            port = int(intent["port"])
+            worktree = worktrees.get(self.key(path))
+            if worktree is None or worktree.port != port:
+                self.service_intents.mark_stopped(path)
+                restored.append({
+                    "path": str(path),
+                    "port": port,
+                    "status": "removed",
+                })
+                continue
+            try:
+                message = self.start(path, port)
+            except (OSError, RuntimeError, ValueError) as exc:
+                restored.append({
+                    "path": str(path),
+                    "port": port,
+                    "status": "error",
+                    "error": str(exc),
+                })
+                continue
+            restored.append({
+                "path": str(path),
+                "port": port,
+                "status": (
+                    "running" if message == "already running" else "started"
+                ),
+            })
+        return restored
 
     def restart_api(self, path: Path, port: int) -> str:
         path = path.resolve()
@@ -240,11 +286,19 @@ class ProcessStateMixin:
         self.processes.pop(self.key(path), None)
         return self.start(path, port)
 
-    def stop(self, path: Path, *, force: bool = False) -> str:
+    def stop(
+        self,
+        path: Path,
+        *,
+        force: bool = False,
+        preserve_intent: bool = False,
+    ) -> str:
         path = path.resolve()
         bundle = self._bundle_for_path(path)
         if not bundle:
             self.processes.pop(self.key(path), None)
+            if not preserve_intent:
+                self.service_intents.mark_stopped(path)
             return "not running"
         if not force and bundle.daemon.poll() is None:
             health = self._daemon_request(bundle, "health")
@@ -254,6 +308,8 @@ class ProcessStateMixin:
         self._terminate(bundle.api)
         self._terminate(bundle.daemon)
         self.processes.pop(self.key(path), None)
+        if not preserve_intent:
+            self.service_intents.mark_stopped(path)
         return "stopped"
 
     def stop_all(self) -> None:
@@ -262,7 +318,7 @@ class ProcessStateMixin:
         for key in list(self.processes):
             bundle = self.processes.get(key)
             if bundle:
-                self.stop(Path(key), force=True)
+                self.stop(Path(key), force=True, preserve_intent=True)
         self.processes.clear()
         self.stop_data_plane()
         self.stop_vibe()

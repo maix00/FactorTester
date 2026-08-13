@@ -336,10 +336,22 @@ def retry_test_job(job_id: str):
     )
     data = request.get_json(silent=True) or {}
     job_spec = deepcopy(old.job_spec)
+    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else {}
+    factor_policy = (
+        run_spec.get("factor_source_policy")
+        if isinstance(run_spec, dict) else {}
+    )
+    factor_manifest = (
+        list(factor_policy.get("files") or [])
+        if isinstance(factor_policy, dict) else []
+    )
     factor_sources: list[dict] = []
     if factor_scope_id:
         factor_sources = load_retained_factor_sources(
-            repository(), job_id=old.job_id, owner=old.owner,
+            repository(),
+            job_id=old.job_id,
+            owner=old.owner,
+            manifest=factor_manifest,
         )
         if not factor_sources:
             return jsonify({
@@ -368,7 +380,6 @@ def retry_test_job(job_id: str):
         list(job_spec.get("strategy_specs") or [])
         if old.kind == "backtest" else []
     )
-    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else {}
     dependency_policy = (
         run_spec.get("run_input_dependency_policy")
         if isinstance(run_spec, dict) else {}
@@ -464,8 +475,18 @@ def retry_test_job(job_id: str):
     job: JobRecord | None = None
     try:
         if factor_sources:
+            portable_sources = [
+                item for item in factor_sources
+                if item.get("canonical_family_ref")
+            ]
+            transient_sources = [
+                item for item in factor_sources
+                if not item.get("canonical_family_ref")
+            ]
             retry_scope = create_factor_source_scope(
-                owner=old.owner, entries=factor_sources,
+                owner=old.owner,
+                entries=transient_sources,
+                portable_entries=portable_sources,
             )
             retry_factor_scope_id = str(retry_scope.get("scope_id") or "")
             job_spec["transient_factor_source_scope_id"] = (
