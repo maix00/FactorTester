@@ -29,7 +29,7 @@ services:
       FACTORTESTER_PUBLIC_SERVER: "1"
       FACTORTESTER_REQUIRE_DEVICE_AUTH: "1"
       FACTORTESTER_REQUIRE_LOGIN_FOR_UI: "1"
-      FACTORTESTER_REQUIRE_PEER_LISTENERS: ${FACTORTESTER_REQUIRE_PEER_LISTENERS:-0}
+      FACTORTESTER_REQUIRE_PEER_LISTENERS: ${FACTORTESTER_REQUIRE_PEER_LISTENERS:-1}
       FACTORTESTER_SERVER_ID: ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
       FACTORTESTER_SERVICE_DEBUG: "0"
       FACTORTESTER_STARTUP_TIMEOUT: ${FACTORTESTER_STARTUP_TIMEOUT:-180}
@@ -45,6 +45,10 @@ services:
           curl --fail --silent --show-error --insecure
           https://127.0.0.1:7997/healthz >/dev/null &&
           curl --fail --silent --show-error
+          http://$${FACTORTESTER_FEDERATION_LOCAL_ADDRESS}:17998/healthz >/dev/null &&
+          curl --fail --silent --show-error
+          http://$${FACTORTESTER_FEDERATION_LOCAL_ADDRESS}:17997/healthz >/dev/null &&
+          curl --fail --silent --show-error
           http://127.0.0.1:8000/api/me >/dev/null
       interval: 10s
       timeout: 5s
@@ -58,10 +62,12 @@ services:
     ports:
       - ${FACTORTESTER_PUBLIC_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-7998}:7998
       - ${FACTORTESTER_PUBLIC_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-7997}:7997
-      - ${FACTORTESTER_FEDERATION_UDP_HOST_PORT:-52820}:51820/udp
+      - ${FACTORTESTER_FEDERATION_UDP_HOST_PORT:-51820}:51820/udp
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_forward: "1"
     volumes:
       - type: bind
         source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
@@ -127,10 +133,12 @@ services:
       transport:
         ipv4_address: 172.30.186.3
     ports:
-      - ${FACTORTESTER_DB_WIREGUARD_UDP_HOST_PORT:-52821}:51821/udp
+      - ${FACTORTESTER_DB_WIREGUARD_UDP_HOST_PORT:-51821}:51821/udp
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_forward: "1"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - type: bind

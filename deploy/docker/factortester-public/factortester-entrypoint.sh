@@ -37,6 +37,10 @@ trap shutdown EXIT INT TERM
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
+[[ "$(sysctl -n net.ipv4.ip_forward)" == "1" ]] || {
+    echo "FactorTester WireGuard gateway requires IPv4 forwarding" >&2
+    exit 2
+}
 local_overlay_address="${FACTORTESTER_FEDERATION_LOCAL_ADDRESS:?set FACTORTESTER_FEDERATION_LOCAL_ADDRESS}"
 ip -o address show dev "$interface" | grep -Fq " $local_overlay_address/" || {
     echo "WireGuard interface $interface does not own $local_overlay_address" >&2
@@ -99,7 +103,7 @@ if python -m server.manager.app --help 2>&1 | grep -q -- '--overlay-bind-address
         --public-endpoint "${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}"
         --public-data-endpoint "${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:?set FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT}"
     )
-elif [[ "${FACTORTESTER_REQUIRE_PEER_LISTENERS:-0}" == "1" ]]; then
+elif [[ "${FACTORTESTER_REQUIRE_PEER_LISTENERS:-1}" == "1" ]]; then
     echo "This FactorTester revision lacks the #184 peer listener contract" >&2
     exit 2
 fi

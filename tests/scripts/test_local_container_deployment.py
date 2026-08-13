@@ -36,3 +36,4 @@ def test_local_manager_enables_wireguard_only_peer_surfaces() -> None:
     assert "17997" in command
     assert "17998" not in published
     assert "17997" not in published
+    assert "${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}" in command

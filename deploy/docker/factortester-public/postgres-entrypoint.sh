@@ -32,6 +32,10 @@ trap shutdown_wireguard EXIT
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
+[[ "$(sysctl -n net.ipv4.ip_forward)" == "1" ]] || {
+    echo "PostgreSQL WireGuard gateway requires IPv4 forwarding" >&2
+    exit 2
+}
 database_local_address="${FACTORTESTER_DATABASE_LOCAL_ADDRESS:?set FACTORTESTER_DATABASE_LOCAL_ADDRESS}"
 ip -o address show dev "$interface" | grep -Fq " $database_local_address/" || {
     echo "WireGuard interface $interface does not own $database_local_address" >&2

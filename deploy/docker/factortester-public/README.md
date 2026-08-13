@@ -20,6 +20,22 @@ and UDP `51821` (database tunnel). Do not open TCP `8000`, TCP `5432`, TCP
 `17998`, or TCP `17997` in the public security group. Only authorized server
 nodes receive a database-tunnel peer; Swift clients do not.
 
+## WireGuard membership authority
+
+WireGuard does not discover or distribute peers. Each server generates its
+FactorTester and PostgreSQL tunnel secrets locally; only the corresponding
+public keys leave that server. A cluster deployment administrator maintains a
+versioned public inventory and signs it with an owner-only inventory authority.
+The Manager and PostgreSQL never receive that signing secret.
+
+Use `scripts/server/factortester_wireguard_inventory.py` to generate a local
+identity, sign or verify the public inventory, and render one node's `0600`
+configuration. A private/NAT node has one gateway record in each tunnel;
+future nodes are added to the signed inventory rather than entered as
+individual peers in web settings. Application discovery remains separate:
+the configured bootstrap returns credential-free nodes, and a direct Manager
+relationship is authenticated only when a task or transfer needs that node.
+
 ## Versioned deployment
 
 Copy `public.env.example` outside the repository, replace all example values,

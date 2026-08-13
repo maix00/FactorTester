@@ -34,6 +34,7 @@ def test_public_compose_has_exactly_two_business_containers() -> None:
 
 def test_public_compose_never_publishes_internal_service_or_postgres() -> None:
     services = _compose()["services"]
+    source = (DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8")
 
     assert _published_container_ports(services["factortester-public"]) == {
         7998, 7997, 51820,
@@ -41,6 +42,8 @@ def test_public_compose_never_publishes_internal_service_or_postgres() -> None:
     assert _published_container_ports(services["postgresql-control"]) == {51821}
     assert 8000 not in _published_container_ports(services["factortester-public"])
     assert 5432 not in _published_container_ports(services["postgresql-control"])
+    assert "FACTORTESTER_FEDERATION_UDP_HOST_PORT:-51820" in source
+    assert "FACTORTESTER_DB_WIREGUARD_UDP_HOST_PORT:-51821" in source
 
 
 def test_public_compose_enforces_immutable_main_runtime() -> None:
@@ -91,6 +94,20 @@ def test_wireguard_identities_are_separate_and_db_has_no_swift_peer_source() -> 
     assert "/run/secrets/federation-wireguard" not in db_mounts
     assert "FACTORTESTER_DB_ALLOWED_WIREGUARD_CIDRS" in database["environment"]
     assert "SWIFT" not in repr(database).upper()
+
+
+def test_public_wireguard_gateways_explicitly_enable_forwarding() -> None:
+    services = _compose()["services"]
+
+    for service_name in ("factortester-public", "postgresql-control"):
+        service = services[service_name]
+        assert service["sysctls"]["net.ipv4.ip_forward"] == "1"
+
+    entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(
+        encoding="utf-8",
+    )
+    assert "net.ipv4.ip_forward" in entrypoint
+    assert "FACTORTESTER_REQUIRE_PEER_LISTENERS:-1" in entrypoint
 
 
 def test_private_database_network_is_not_the_udp_transport_network() -> None:

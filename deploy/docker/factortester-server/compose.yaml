@@ -63,7 +63,7 @@ services:
       - --server-role
       - ${FACTORTESTER_SERVER_ROLE:-feat}
       - --server-id
-      - ${FACTORTESTER_SERVER_ID:-local-feat}
+      - ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
       - --state-root
       - ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
       - --no-browser
