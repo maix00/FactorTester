@@ -1,17 +1,35 @@
 """Durable cross-node transfer domain."""
 
 from server.manager.transfers.models import (
+    AttemptStatus,
+    IssuedTransferTicket,
     NewTransfer,
+    NewTransferAttempt,
+    NewTransferCommand,
     OutboxMessage,
+    TransferAttemptRecord,
+    TransferCommandRecord,
+    TransferMode,
     TransferOperation,
     TransferRecord,
     TransferStatus,
+    TransferTicketGrant,
+    TransferTicketRole,
 )
 
 __all__ = [
+    "AttemptStatus",
+    "IssuedTransferTicket",
     "NewTransfer",
+    "NewTransferAttempt",
+    "NewTransferCommand",
     "OutboxMessage",
+    "TransferAttemptRecord",
+    "TransferCommandRecord",
+    "TransferMode",
     "TransferOperation",
     "TransferRecord",
     "TransferStatus",
+    "TransferTicketGrant",
+    "TransferTicketRole",
 ]

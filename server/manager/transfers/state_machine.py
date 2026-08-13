@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from server.manager.transfers.models import TransferStatus
+from server.manager.transfers.models import AttemptStatus, TransferStatus
 
 
 TERMINAL_TRANSFER_STATUSES = frozenset({
@@ -85,4 +85,53 @@ def require_transfer_transition(
     if target not in ALLOWED_TRANSFER_TRANSITIONS[current]:
         raise ValueError(
             f"invalid transfer transition: {current.value} -> {target.value}"
+        )
+
+
+TERMINAL_ATTEMPT_STATUSES = frozenset({
+    AttemptStatus.COMPLETED,
+    AttemptStatus.FAILED,
+    AttemptStatus.EXPIRED,
+    AttemptStatus.CANCELLED,
+})
+
+
+ALLOWED_ATTEMPT_TRANSITIONS: dict[
+    AttemptStatus, frozenset[AttemptStatus]
+] = {
+    AttemptStatus.PLANNED: frozenset({
+        AttemptStatus.WAITING_PRODUCER,
+        AttemptStatus.WAITING_CONSUMER,
+        AttemptStatus.STREAMING,
+        *TERMINAL_ATTEMPT_STATUSES,
+    }),
+    AttemptStatus.WAITING_PRODUCER: frozenset({
+        AttemptStatus.STREAMING,
+        *TERMINAL_ATTEMPT_STATUSES,
+    }),
+    AttemptStatus.WAITING_CONSUMER: frozenset({
+        AttemptStatus.STREAMING,
+        *TERMINAL_ATTEMPT_STATUSES,
+    }),
+    AttemptStatus.STREAMING: frozenset({
+        AttemptStatus.VERIFYING,
+        *TERMINAL_ATTEMPT_STATUSES,
+    }),
+    AttemptStatus.VERIFYING: frozenset({
+        AttemptStatus.COMPLETED,
+        AttemptStatus.FAILED,
+        AttemptStatus.EXPIRED,
+        AttemptStatus.CANCELLED,
+    }),
+    **{status: frozenset() for status in TERMINAL_ATTEMPT_STATUSES},
+}
+
+
+def require_attempt_transition(
+    current: AttemptStatus,
+    target: AttemptStatus,
+) -> None:
+    if target not in ALLOWED_ATTEMPT_TRANSITIONS[current]:
+        raise ValueError(
+            f"invalid attempt transition: {current.value} -> {target.value}"
         )

@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import json
 import secrets
-import sqlite3
-import threading
 import time
 from pathlib import Path
 
-from tools.data.sqlite.db import connect_sqlite
-
-from server.manager.storage.transfers.schema import ensure_transfer_schema
+from server.manager.storage.transfers.database import TransferDatabase
 from server.manager.storage.transfers.outbox import (
     acknowledge_message,
     claim_messages,
@@ -31,30 +27,11 @@ from server.manager.transfers.models import (
 from server.manager.transfers.state_machine import require_transfer_transition
 
 
-class TransferStore:
+class TransferStore(TransferDatabase):
     """Persist a request and every delivery intent in one local transaction."""
 
     def __init__(self, path: str | Path, *, server_id: str) -> None:
-        self.path = Path(path).expanduser().resolve()
-        self.server_id = required(server_id, field="server_id")
-        self._schema_lock = threading.Lock()
-        self._schema_ready = False
-        self._ensure_schema()
-
-    def _connect(self) -> sqlite3.Connection:
-        connection = connect_sqlite(self.path, foreign_keys=True)
-        connection.execute("PRAGMA journal_mode = WAL")
-        return connection
-
-    def _ensure_schema(self) -> None:
-        if self._schema_ready:
-            return
-        with self._schema_lock:
-            if self._schema_ready:
-                return
-            with self._connect() as connection:
-                ensure_transfer_schema(connection)
-            self._schema_ready = True
+        super().__init__(path, server_id=server_id)
 
     def create(
         self,
