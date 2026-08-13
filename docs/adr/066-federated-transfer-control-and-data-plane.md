@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for staged implementation on 2026-08-13. This decision supersedes
-ADR-065 and amends the cross-node portions of ADR-057.
+Superseded by ADR-067 on 2026-08-13. The NAT/SSE relay design in this ADR was
+never retained as the final production transfer protocol.
 
 ## Context
 

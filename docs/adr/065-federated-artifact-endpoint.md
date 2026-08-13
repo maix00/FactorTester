@@ -2,8 +2,8 @@
 
 ## Status
 
-Superseded by ADR-066. Retained as the historical reverse-tunnel migration
-record until the ADR-066 cutover is complete.
+Superseded by ADR-067. Retained only as the historical reverse-tunnel proposal;
+distinct tunnel endpoint advertisement is no longer a production protocol.
 
 ## Context
 

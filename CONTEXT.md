@@ -43,16 +43,25 @@ ADR-047。
 ### Federated Transfer / Transfer Attempt
 
 跨服务器生成物下载和提交物上传由 `Transfer` 表达。`Transfer` 是请求方 Manager
-本地 SQLite 中的持久权威事实；一次具体网络尝试属于 `Transfer Attempt`。文件的唯一
-持久副本由 `storage_server_id` 标识，公网中继只做有限内存、带背压的字节会合，不创建
-镜像副本。
+本地 SQLite 中的持久权威事实；一次具体网络尝试属于不可变的 `Transfer Attempt`。
+文件的唯一持久副本由 `storage_server_id` 标识，请求方节点不创建中继镜像。
 
-每次 Attempt 固定 `request_owner_manager_id`（请求权威）、
-`relay_owner_manager_id`（承载 7997 字节流）、`connection_owner_manager_id`
-（持有目标节点 SSE 控制连接）以及 source/destination/storage 节点。节点可达时 7997
-直连；NAT 后节点不可达时，由该节点收到 7998 控制命令后主动连接 relay 的 7997。
-PostgreSQL 只保存节点身份、可重建的全局索引与最终审计，不进入文件传输关键路径。
-完整决策见 ADR-066。
+客户端只使用公开的 7998 控制面和 7997 数据面：先在 7998 获得短期、角色受限的
+capability，再以不携带 Manager Cookie 的连接在 7997 上传或下载。服务器节点之间只走
+FactorTester 自己的 WireGuard 网络：17998 负责签名控制请求、服务转发和 Attempt 上下文，
+17997 负责字节流。四个端点均由节点显式发布，内部端点不得从公网 URL 推断；8000、8141
+等执行 worktree 端口始终留在所属 Manager 后面。节点公告 v2 对四个端点、节点身份、
+签发时间、nonce 与短期租约整体作 Ed25519 签名；接收方持久防重放状态，发送方持久单调
+签发时钟，节点重启或时钟回拨也不能让旧公告覆盖新路由。
+
+本地生成物由 7997 直接读取唯一副本；远端生成物经
+`客户端 ← 请求节点:7997 ← WireGuard ← 存储节点:17997` 流式返回，不在请求节点落盘。
+提交物按相反方向直达目标节点的私有 staging，完成长度与 SHA-256 校验后原子发布；中断
+重试只根据目标节点已验证的 offset 创建新 Attempt。WireGuard 不可用时明确返回
+`node_unreachable`，不得退回公网地址、SSH 反向隧道、NAT push/pull 或 SSE 命令模式。
+
+PostgreSQL 使用独立 WireGuard 身份，只保存用户、机构/层级、设备、配额与审计投影，
+不进入文件字节路径或已授权 Transfer 的关键路径。完整决策见 ADR-067。
 
 ### 因子 (Factor)
 
