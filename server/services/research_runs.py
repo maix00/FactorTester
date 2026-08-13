@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 from pathlib import Path
 import sqlite3
 import threading
@@ -18,6 +17,7 @@ from server.services import direct_trial_plan_registry
 from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
+from server.services.research_run_identity import RUN_SPEC_VERSION, hash_run_spec
 from server.services.research_graph.trial_plan.binding import validate_branch_binding
 from server.services.research_run_inputs import (
     derive_sample_identity_or_none,
@@ -37,7 +37,6 @@ from server.services.research_run_projections import (
 from tools.data.sqlite.db import connect_sqlite
 
 
-RUN_SPEC_VERSION = 2
 _SCHEMA_READY_PATHS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 
@@ -280,13 +279,6 @@ def create_run(
         **persisted_sample,
         "created_at": created_at,
     }
-
-
-def hash_run_spec(run_spec: dict[str, Any]) -> str:
-    """Return the canonical immutable identity used by ResearchRun."""
-    return hashlib.sha256(
-        orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
-    ).hexdigest()
 
 
 def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:

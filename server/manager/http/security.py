@@ -1,4 +1,4 @@
-"""Small helpers for optional TLS on the Manager and artifact data planes."""
+"""Small helpers for optional TLS on Manager and client transfer surfaces."""
 
 from __future__ import annotations
 

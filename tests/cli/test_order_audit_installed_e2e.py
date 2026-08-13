@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
 import threading
 from contextlib import contextmanager
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, Response, jsonify, request, session
 from werkzeug.serving import make_server
 
 
@@ -30,22 +31,43 @@ def order_audit_server():
     def modules():
         return jsonify(success=True, modules=[])
 
-    @app.get("/api/jobs/job-1/artifacts/order_audit")
-    def order_audit():
+    raw = json.dumps({
+        "run_id": "run-1",
+        "strategies": {"A1": {"groups": [{
+            "order_group_id": "G1",
+            "status": "partially_filled",
+            "products": ["RB.SHF"],
+            "requested_quantity": 10.0,
+            "filled_quantity": 6.0,
+            "active_leaves": 4.0,
+            "terminal_unfilled": 4.0,
+            "child_count": 1,
+        }]}},
+    }, separators=(",", ":")).encode()
+
+    @app.post("/api/jobs/job-1/artifacts/order_audit/access")
+    def order_audit_access():
         assert session.get("username") == "alice"
         return jsonify(
-            run_id="run-1",
-            strategies={"A1": {"groups": [{
-                "order_group_id": "G1",
-                "status": "partially_filled",
-                "products": ["RB.SHF"],
-                "requested_quantity": 10.0,
-                "filled_quantity": 6.0,
-                "active_leaves": 4.0,
-                "terminal_unfilled": 4.0,
-                "child_count": 1,
-            }]}},
+            success=True,
+            artifact={
+                "name": "order_audit",
+                "content_type": "application/json",
+                "content_hash": hashlib.sha256(raw).hexdigest(),
+                "size_bytes": len(raw),
+            },
+            access={
+                "url": request.host_url.rstrip("/") + "/data/order_audit",
+                "bearer": "order-audit-capability",
+                "expected_size": len(raw),
+            },
         )
+
+    @app.get("/data/order_audit")
+    def order_audit_data():
+        assert not request.cookies
+        assert request.headers["Authorization"] == "Bearer order-audit-capability"
+        return Response(raw, content_type="application/json")
 
     server = make_server("127.0.0.1", 0, app)
     thread = threading.Thread(target=server.serve_forever)

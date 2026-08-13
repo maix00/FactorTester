@@ -212,7 +212,12 @@ class CoreGetRoutesMixin:
             # explicitly permitting those object URLs; without this WebKit
             # silently reports the preview as unreadable even though /preview
             # returned a valid image.
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; img-src 'self' blob: data: https:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "connect-src 'self' http: https:",
+            )
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Cache-Control", "no-store")
@@ -229,6 +234,7 @@ class CoreGetRoutesMixin:
         parsed = urlparse(self.path)
         handlers = (
             self._get_entry_routes,
+            self._get_transfer_access_status,
             self._get_job_list_routes,
             self._get_client_research_routes,
             self._get_public_research_routes,

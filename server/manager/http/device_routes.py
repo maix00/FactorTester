@@ -22,6 +22,7 @@ from server.manager.http.pages import (
     device_authorization_page,
     safe_login_next,
 )
+from server.manager.http.localization import preferred_locale
 from server.manager.http.responses import json_response
 from server.manager.storage.control_db import (
     ControlDatabaseError,
@@ -131,11 +132,20 @@ class DeviceNetworkRoutesMixin:
             count = self.state.device_registry.public_device_count(username=username)
             if count >= PUBLIC_DEVICE_LIMIT:
                 raise PublicDeviceLimitError(username=username, count=count)
+            language = str(
+                self.state.user_preferences.read(username).get("language")
+                or "system"
+            )
+            if language == "system":
+                language = preferred_locale(
+                    self.headers.get("Accept-Language", "")
+                )
             grant = self.state.device_authorizations.issue(
                 username=username,
                 target_server_id=target_server_id,
                 target_endpoint=target_endpoint,
                 device_name=str(payload.get("device_name") or ""),
+                preferred_language=language,
             )
             query = urlencode({
                 "token": str(grant["token"]),
@@ -261,10 +271,24 @@ class DeviceNetworkRoutesMixin:
         query = parse_qs(parsed.query, keep_blank_values=True)
         token = query.get("token", [""])[0]
         next_path = query.get("next", ["/"])[0]
+        language = self.headers.get("Accept-Language", "")
+        try:
+            authorization = self.state.device_authorizations.preview(
+                token, target_server_id=self.state.server_id,
+            )
+            snapshot = str(
+                authorization.get("preferred_language") or "system"
+            )
+            if snapshot != "system":
+                language = snapshot
+        except (ControlDatabaseError, DeviceAuthorizationError):
+            # Keep the public page generic for invalid/expired grants.  The
+            # one-time token is authoritatively checked again on redemption.
+            pass
         self._send_html(device_authorization_page(
             token,
             next_path,
-            accept_language=self.headers.get("Accept-Language", ""),
+            accept_language=language,
         ))
 
     def _device_list(self) -> None:

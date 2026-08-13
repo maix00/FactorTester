@@ -1,0 +1,10 @@
+*
+!deploy/
+deploy/*
+!deploy/docker/
+deploy/docker/*
+!deploy/docker/factortester-server/
+deploy/docker/factortester-server/*
+!deploy/docker/factortester-server/WireGuard.Dockerfile
+!deploy/docker/factortester-server/wireguard-entrypoint.sh
+!deploy/docker/factortester-server/wireguard-healthcheck.sh

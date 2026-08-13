@@ -6,13 +6,13 @@ create_app() 负责：
   2. 设置 session secret key 和过期时间（30天）
   3. 注册所有 Blueprint（auth / core / templates / shared / sft / mfa / cn_futures / cf / admin）
 """
+from __future__ import annotations
+
 import sys, os
 from datetime import timedelta
-from flask import Flask
-from server.services.session_secret import load_session_secret
 
 
-def create_app() -> Flask:
+def create_app():
     """
     创建并配置 Flask 应用。
 
@@ -20,6 +20,12 @@ def create_app() -> Flask:
       - 开发模式：__file__ 指向源码文件
       - 打包模式：sys.frozen 为 True 时使用 PyInstaller 的 _MEIPASS
     """
+    # Keep application-only imports inside the factory. Deployment modules
+    # under ``server.deployment`` must be usable before runtime .settings,
+    # SQLite, Flask, or session state exists on a new host.
+    from flask import Flask
+    from server.services.session_secret import load_session_secret
+
     # Project root is one level above this package (server/)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if getattr(sys, 'frozen', False):

@@ -3,6 +3,16 @@ import XCTest
 @testable import FTClient
 
 final class TestJobsServiceTests: XCTestCase {
+    func testArtifactTransferAccessRequiresHTTPURLAndCapability() throws {
+        let data = Data(#"{"access":{"url":"https://factor.example:7997/v1/transfers/a/download","bearer":"capability","expected_size":6}}"#.utf8)
+
+        let value = try TestJobsService.decodeArtifactTransferAccess(data)
+
+        XCTAssertEqual(value.url.port, 7997)
+        XCTAssertEqual(value.bearer, "capability")
+        XCTAssertEqual(value.expectedSize, 6)
+    }
+
     func testProgressDecoderReadsHeartbeatSnapshot() {
         let value = TestJobsService.decodeProgress(
             #"{"status":"running","latest_progress":{"event":"signal_progress","data":{"phase":"event_replay","completed":2,"total":4,"percent":50}}}"#

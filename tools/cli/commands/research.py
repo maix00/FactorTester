@@ -24,7 +24,7 @@ from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_reporting.references.factor_set_git import (
     validate_factor_set_reference,
 )
-from tools.cli.release.job_archive import extract_job_archive
+from tools.cli.release.artifact_paths import artifact_destination
 from tools.cli.release.job_cache import job_cache_directory
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.commands.research_report_common import scope_options
@@ -1332,16 +1332,24 @@ def job_download_all(job_id: str, output: Path | None) -> None:
     client = client_from_config()
     if output is None:
         output = job_cache_directory(job_id)
-    response = client.job_artifact_archive(job_id)
     output = output.expanduser().resolve()
-    files = extract_job_archive(response.content, output)
+    files = []
+    size_bytes = 0
+    for artifact in client.list_job_artifacts(job_id):
+        if str(artifact.get("state") or "active") != "active":
+            continue
+        name = str(artifact.get("name") or "").strip()
+        if not name:
+            continue
+        target = artifact_destination(output, artifact)
+        receipt = client.job_artifact_to_path(job_id, name, target)
+        files.append(target)
+        size_bytes += int(receipt["size_bytes"])
     click.echo(_json({
         "job_id": job_id,
         "path": str(output),
         "files": [str(path) for path in files],
-        "content_type": response.content_type,
-        "content_hash": hashlib.sha256(response.content).hexdigest(),
-        "size_bytes": len(response.content),
+        "size_bytes": size_bytes,
     }))
 
 

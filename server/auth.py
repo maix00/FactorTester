@@ -45,15 +45,8 @@ def _is_public_job_gateway_read() -> bool:
     if request.method != 'GET':
         return False
     path = request.path
-    if path.endswith('/artifacts/archive'):
-        return False
     if path == '/api/jobs':
         return True
-    if path.endswith("/preview"):
-        return bool(re.fullmatch(
-            r'/api/jobs/[A-Za-z0-9._-]{1,128}/artifacts/[^/]{1,512}/preview',
-            path,
-        ))
     return bool(re.fullmatch(
         r'/api/jobs/[A-Za-z0-9._-]{1,128}'
         r'(?:/result|/artifacts)?',
@@ -107,7 +100,7 @@ def _check_login():
 
     # Anonymous job list/detail/result/artifact reads are exposed only
     # through the loopback Manager gateway.  Mutations, progress streams,
-    # storage and artifact archives still require a user session.
+    # storage and all artifact bytes still require Manager authorization.
     if _is_public_job_gateway_read():
         return None
     if _is_public_graph_gateway_read():

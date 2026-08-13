@@ -10,9 +10,7 @@ from .client_base import ClientMixinBase
 
 class OrderAuditClientMixin(ClientMixinBase):
     def job_order_audit(self, job_id: str) -> dict[str, Any]:
-        response = self.session.download(
-            f"/api/jobs/{job_id}/artifacts/order_audit",
-        )
+        response = self.job_artifact(job_id, "order_audit")
         if response.content_type != "application/json":
             raise ValueError("order_audit artifact is not JSON")
         value = json.loads(response.content.decode("utf-8"))
