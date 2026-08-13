@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import signal
-import socket
 import sys
 import threading
 import webbrowser
@@ -162,10 +161,10 @@ def main(
             url = f"{scheme}://localhost:{args.port}/"
             print(f"Worktree Flask manager running at {url}")
             try:
-                lan_ip = socket.gethostbyname(socket.gethostname())
-                if lan_ip and not lan_ip.startswith("127."):
+                for lan_ip in runtime_module.Handler.state.local_internal_addresses():
                     print(f"  局域网访问: {scheme}://{lan_ip}:{args.port}/")
             except Exception:
+                # Address display is advisory and must not stop the listener.
                 pass
             if not args.no_browser:
                 webbrowser.open(url)

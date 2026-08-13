@@ -1,0 +1,113 @@
+name: ${FACTORTESTER_COMPOSE_PROJECT:-factortester-local-server}
+
+services:
+  wireguard:
+    build:
+      context: ../../..
+      dockerfile: deploy/docker/factortester-server/WireGuard.Dockerfile
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      FACTORTESTER_WIREGUARD_SECRET_DIR: /run/secrets/wireguard
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/wireguard-healthcheck"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 5s
+    ports:
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-27998}:7998"
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-27997}:7997"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${FACTORTESTER_WIREGUARD_CONFIG_DIR:?set FACTORTESTER_WIREGUARD_CONFIG_DIR}
+        target: /run/secrets/wireguard
+        read_only: true
+
+  manager:
+    build:
+      context: ../../..
+      dockerfile: deploy/docker/factortester-server/FactorTester.Dockerfile
+      args:
+        FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
+        FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
+    command:
+      - python
+      - -m
+      - server.manager.app
+      - --repo
+      - ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7998"
+      - --python
+      - /usr/local/bin/python
+      - --data-root
+      - ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
+      - --server-role
+      - ${FACTORTESTER_SERVER_ROLE:-feat}
+      - --server-id
+      - ${FACTORTESTER_SERVER_ID:-local-feat}
+      - --state-root
+      - ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
+      - --no-browser
+    depends_on:
+      wireguard:
+        condition: service_healthy
+    environment:
+      FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT: ${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:-}
+      FACTORTESTER_HOT_RELOAD: ${FACTORTESTER_HOT_RELOAD:-0}
+      FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
+      FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_LAN_ADDRESS:?set FACTORTESTER_LAN_ADDRESS}
+      FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:-}
+      FACTORTESTER_REQUIRE_LOGIN_FOR_UI: ${FACTORTESTER_REQUIRE_LOGIN_FOR_UI:-0}
+      FACTORTESTER_ALLOW_PUBLIC_REGISTRATION: ${FACTORTESTER_ALLOW_PUBLIC_REGISTRATION:-1}
+      FACTORTESTER_REQUIRE_DEVICE_AUTH: ${FACTORTESTER_REQUIRE_DEVICE_AUTH:-0}
+      FACTORTESTER_PUBLIC_SERVER: ${FACTORTESTER_PUBLIC_SERVER:-0}
+      FACTORTESTER_REPO_ROOT: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+      HOME: /home/factortester
+      PYTHONPATH: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:7998/', timeout=3).read(1)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    network_mode: service:wireguard
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    working_dir: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+    volumes:
+      - type: bind
+        source: ${FACTORTESTER_GIT_ROOT:?set FACTORTESTER_GIT_ROOT}
+        target: ${FACTORTESTER_GIT_ROOT:?set FACTORTESTER_GIT_ROOT}
+      - type: bind
+        source: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+        target: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+      - type: bind
+        source: ${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}
+        target: ${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_FEDERATION_CA_SOURCE:?set FACTORTESTER_FEDERATION_CA_SOURCE}
+        target: /run/trust/federation-ca.crt
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
+        target: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
+      - type: bind
+        source: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
+        target: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}

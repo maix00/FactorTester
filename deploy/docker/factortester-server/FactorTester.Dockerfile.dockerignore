@@ -1,0 +1,6 @@
+**
+!deploy/
+!deploy/requirements-linux.txt
+!deploy/docker/
+!deploy/docker/factortester-server/
+!deploy/docker/factortester-server/manager-entrypoint.sh
