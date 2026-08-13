@@ -55,7 +55,8 @@ objects, builds the SHA-tagged application image with Docker's layer cache,
 backs up PostgreSQL, switches only the application container, and verifies both
 the runtime and database restore before accepting the release. After acceptance
 it retains the newest three revisions recorded as verified in
-`deployments.log`; set `FACTORTESTER_PUBLIC_RELEASE_RETENTION` to another
+`/opt/factortester/deployments.log`; set
+`FACTORTESTER_PUBLIC_RELEASE_RETENTION` to another
 positive integer when more rollback depth is required. Cleanup is limited to
 old `factortester-public:<40-character SHA>` tags and their matching release
 worktrees. It never removes the PostgreSQL image, volumes, other projects, or
