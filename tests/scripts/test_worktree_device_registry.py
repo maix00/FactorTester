@@ -170,13 +170,17 @@ def test_public_device_authorization_is_single_use_and_stores_only_a_hash(tmp_pa
         target_server_id="public-main",
         target_endpoint="https://203.0.113.10:7998",
         device_name="公网上的 Mac",
+        preferred_language="en",
     )
 
     payload = (tmp_path / "authorizations.json").read_text(encoding="utf-8")
     assert grant["token"] not in payload
+    preview = store.preview(grant["token"], target_server_id="public-main")
+    assert preview["preferred_language"] == "en"
     consumed = store.consume(grant["token"], target_server_id="public-main")
     assert consumed["username"] == "alice@default"
     assert consumed["target_endpoint"] == "https://203.0.113.10:7998"
+    assert consumed["preferred_language"] == "en"
 
     with pytest.raises(DeviceAuthorizationError, match="invalid or expired"):
         store.consume(grant["token"], target_server_id="public-main")

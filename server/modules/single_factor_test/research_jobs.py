@@ -12,6 +12,12 @@ from flask import jsonify, request
 import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
+from server.services.research_run_context import (
+    MANAGER_RUN_CONTEXT_KEY,
+    RunRequestError as _RunRequestError,
+    create_manager_run_context,
+    load_manager_run_context,
+)
 from server.services import (
     external_factor_artifacts,
     factor_revisions,
@@ -79,19 +85,6 @@ _TASK_NAME_LIMIT = 160
 _PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
-class _RunRequestError(ValueError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int = 400,
-        details: dict | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.details = details or {}
-
-
 def _normalise_task_name(value: object) -> str:
     """Keep a task label short and separate from the immutable RunSpec hash."""
     return " ".join(str(value or "").split())[:_TASK_NAME_LIMIT]
@@ -112,7 +105,7 @@ def _normalise_acting_profile_ref(value: object) -> str:
     return f"profile:{raw}"
 
 
-def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
+def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     task_name = _normalise_task_name(
         data.get("task_name") if "task_name" in data else data.get("name")
     )
@@ -464,6 +457,21 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "strategy_plan": strategy_plan,
         "run_input_dependencies": run_input_dependencies,
     }
+
+
+def prepare_manager_run_context(data: dict, *, owner: str) -> dict:
+    """Freeze origin-owned authoring state before selecting an executor."""
+    local_request = deepcopy(data)
+    local_request.pop(MANAGER_RUN_CONTEXT_KEY, None)
+    prepared = _prepare_local_research_run_request(local_request, owner=owner)
+    return create_manager_run_context(prepared, owner=owner)
+
+
+def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
+    context = data.get(MANAGER_RUN_CONTEXT_KEY)
+    if context is not None:
+        return load_manager_run_context(context, owner=owner)
+    return _prepare_local_research_run_request(data, owner=owner)
 
 
 def _run_request_error_response(exc: _RunRequestError):

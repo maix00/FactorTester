@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR-068. Retained only as the historical reverse-tunnel proposal;
+distinct tunnel endpoint advertisement is no longer a production protocol.
 
 ## Context
 

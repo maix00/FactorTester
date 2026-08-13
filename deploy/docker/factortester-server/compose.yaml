@@ -18,8 +18,8 @@ services:
       retries: 12
       start_period: 5s
     ports:
-      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-27998}:7998"
-      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-27997}:7997"
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-7998}:7998"
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-7997}:7997"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -46,6 +46,16 @@ services:
       - 0.0.0.0
       - --port
       - "7998"
+      - --overlay-bind-address
+      - ${FACTORTESTER_FEDERATION_LOCAL_ADDRESS:?set FACTORTESTER_FEDERATION_LOCAL_ADDRESS}
+      - --peer-port
+      - "17998"
+      - --data-host
+      - 0.0.0.0
+      - --data-port
+      - "7997"
+      - --peer-data-port
+      - "17997"
       - --python
       - /usr/local/bin/python
       - --data-root
@@ -53,7 +63,7 @@ services:
       - --server-role
       - ${FACTORTESTER_SERVER_ROLE:-feat}
       - --server-id
-      - ${FACTORTESTER_SERVER_ID:-local-feat}
+      - ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
       - --state-root
       - ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
       - --no-browser
@@ -72,7 +82,7 @@ services:
       FACTORTESTER_PUBLIC_SERVER: ${FACTORTESTER_PUBLIC_SERVER:-0}
       FACTORTESTER_REPO_ROOT: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
       HOME: /home/factortester
-      PYTHONPATH: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}
+      PYTHONPATH: ${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}:${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}/tools/cli/agent-harness
     healthcheck:
       test:
         - CMD
@@ -108,6 +118,9 @@ services:
       - type: bind
         source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
         target: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
+      - type: bind
+        source: ${FACTORTESTER_RUNTIME_DATA_ROOT:?set FACTORTESTER_RUNTIME_DATA_ROOT}
+        target: ${FACTORTESTER_RUNTIME_DATA_ROOT:?set FACTORTESTER_RUNTIME_DATA_ROOT}
       - type: bind
         source: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
         target: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}

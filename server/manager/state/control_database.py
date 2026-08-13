@@ -25,10 +25,11 @@ class ControlDatabaseStateMixin:
         self.control_store = candidate
         self.device_registry.control_store = candidate
         self.device_authorizations.control_store = candidate
+        self.user_preferences.control_store = candidate
         return {
             **self.control_database_settings.status(),
             "healthy": True,
             "service_restart_required": bool(
-                self.processes or self.artifact_data_process
+                self.processes or self.data_plane_process
             ),
         }

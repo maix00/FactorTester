@@ -6,7 +6,12 @@ import os
 import ssl
 from pathlib import Path
 from typing import Mapping
-from urllib.request import Request, urlopen
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    Request,
+    build_opener,
+)
 
 
 FEDERATION_CA_FILE_ENV = "FACTORTESTER_FEDERATION_CA_FILE"
@@ -43,10 +48,15 @@ class FederationTransport:
             self.ssl_context = context
 
     def open(self, request: Request, *, timeout: float):
-        if self.ssl_context is None:
-            return urlopen(request, timeout=timeout)
-        return urlopen(
-            request,
-            timeout=timeout,
-            context=self.ssl_context,
-        )
+        handlers = [_RejectPeerRedirects()]
+        if self.ssl_context is not None:
+            handlers.append(HTTPSHandler(context=self.ssl_context))
+        return build_opener(*handlers).open(request, timeout=timeout)
+
+
+class _RejectPeerRedirects(HTTPRedirectHandler):
+    """Do not forward node signatures or transfer bearers across redirects."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, url):
+        del request, file_pointer, code, message, headers, url
+        return None

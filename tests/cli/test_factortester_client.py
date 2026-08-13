@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -119,20 +120,44 @@ def fake_server() -> Iterator[str]:
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
 
-    @app.get("/api/jobs/job-1/artifacts/equity_curve_report")
-    def job_artifact():
+    artifact_values = {
+        "equity_curve_report": (
+            b"<svg><title>curve</title></svg>", "image/svg+xml",
+        ),
+        "order_audit": (
+            b'{"run_id":"run-1","strategies":{"A1":{"groups":['
+            b'{"order_group_id":"G1"}]}}}',
+            "application/json",
+        ),
+    }
+
+    @app.post("/api/jobs/job-1/artifacts/<name>/access")
+    def job_artifact_access(name: str):
         assert session.get("username") == "alice"
-        return Response(
-            b"<svg><title>curve</title></svg>",
-            content_type="image/svg+xml",
+        raw, content_type = artifact_values[name]
+        return jsonify(
+            success=True,
+            artifact={
+                "name": name,
+                "content_type": content_type,
+                "content_hash": hashlib.sha256(raw).hexdigest(),
+                "size_bytes": len(raw),
+            },
+            access={
+                "url": request.host_url.rstrip("/") + f"/data/{name}",
+                "bearer": f"capability-{name}",
+                "expected_size": len(raw),
+            },
         )
 
-    @app.get("/api/jobs/job-1/artifacts/order_audit")
-    def order_audit_artifact():
-        assert session.get("username") == "alice"
-        return jsonify(
-            run_id="run-1",
-            strategies={"A1": {"groups": [{"order_group_id": "G1"}]}},
+    @app.get("/data/<name>")
+    def job_artifact_data(name: str):
+        assert not request.cookies
+        assert request.headers["Authorization"] == f"Bearer capability-{name}"
+        raw, content_type = artifact_values[name]
+        return Response(
+            raw,
+            content_type=content_type,
         )
 
     @app.get("/admin/api/server-instances")
@@ -423,9 +448,8 @@ def test_binary_artifact_download_enforces_size_limit(
     client.login("alice", "pw")
 
     with pytest.raises(ValueError, match="download limit"):
-        client.session.download(
-            "/api/jobs/job-1/artifacts/equity_curve_report",
-            maximum_bytes=8,
+        client.job_artifact(
+            "job-1", "equity_curve_report", maximum_bytes=8,
         )
 
 

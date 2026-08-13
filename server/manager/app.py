@@ -10,6 +10,7 @@ and shutdown.  It is the production entry point used by systemd and by
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
@@ -17,6 +18,18 @@ import webbrowser
 from pathlib import Path
 from types import ModuleType
 from typing import Sequence
+
+from server.manager.config import (
+    CLIENT_DATA_PORT,
+    PEER_CONTROL_PORT,
+    PEER_DATA_PORT,
+)
+from server.manager.http.peer_handler import peer_control_handler
+from server.manager.network_endpoints import (
+    client_endpoint_for_port,
+    peer_bind_address,
+    validate_client_endpoint,
+)
 
 
 def _runtime_module() -> ModuleType:
@@ -40,6 +53,30 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7998)
+    parser.add_argument(
+        "--overlay-bind-address",
+        "--peer-host",
+        dest="overlay_bind_address",
+        default="",
+        help=(
+            "this node's FactorTester WireGuard address; required to enable "
+            "peer control (--peer-host is a compatibility alias)"
+        ),
+    )
+    parser.add_argument("--peer-port", type=int, default=PEER_CONTROL_PORT)
+    parser.add_argument("--data-host", default="0.0.0.0")
+    parser.add_argument("--data-port", type=int, default=CLIENT_DATA_PORT)
+    parser.add_argument("--peer-data-port", type=int, default=PEER_DATA_PORT)
+    parser.add_argument(
+        "--public-endpoint",
+        default="",
+        help="Client-visible Manager endpoint; never inferred for peers",
+    )
+    parser.add_argument(
+        "--public-data-endpoint",
+        default="",
+        help="Client-visible transfer data endpoint",
+    )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument(
         "--data-root",
@@ -75,7 +112,7 @@ def main(
     *,
     runtime_module: ModuleType | None = None,
 ) -> int:
-    """Start the Manager and its local artifact data plane.
+    """Start the Manager and its client/peer transfer data plane.
 
     ``runtime_module`` is an internal compatibility seam for the old import
     path and tests.  Production callers should simply invoke ``main()``.
@@ -104,6 +141,42 @@ def main(
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")
 
+    scheme = "https" if tls_paths is not None else "http"
+    control_endpoint = str(
+        args.public_endpoint
+        or os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+        or ""
+    ).strip().rstrip("/")
+    if not control_endpoint:
+        control_endpoint = f"{scheme}://127.0.0.1:{args.port}"
+    control_endpoint = validate_client_endpoint(
+        control_endpoint, name="public Manager endpoint",
+    )
+    data_endpoint = str(
+        args.public_data_endpoint
+        or os.environ.get("FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT")
+        or ""
+    ).strip().rstrip("/")
+    if not data_endpoint:
+        data_endpoint = client_endpoint_for_port(
+            control_endpoint,
+            args.data_port,
+            name="public transfer data endpoint",
+        )
+    else:
+        data_endpoint = validate_client_endpoint(
+            data_endpoint, name="public transfer data endpoint",
+        )
+    runtime_module.Handler.state.configure_data_plane(
+        client_host=args.data_host,
+        client_port=args.data_port,
+        client_control_endpoint=control_endpoint,
+        client_data_endpoint=data_endpoint,
+        overlay_bind_address=args.overlay_bind_address,
+        peer_port=args.peer_data_port,
+        peer_control_port=args.peer_port,
+    )
+
     # The control plane is bound before 7997.  Other worktree services (8000
     # and feature ports) remain explicitly managed by the control plane.
     server = runtime_module.ThreadingHTTPServer(
@@ -130,8 +203,26 @@ def main(
         pass
 
     ipv6_server = None
+    peer_server = None
     try:
         try:
+            if args.overlay_bind_address:
+                overlay_bind_address = peer_bind_address(
+                    args.overlay_bind_address,
+                )
+                peer_server = runtime_module.ThreadingHTTPServer(
+                    (overlay_bind_address, args.peer_port),
+                    peer_control_handler(runtime_module.Handler.state),
+                )
+                threading.Thread(
+                    target=peer_server.serve_forever,
+                    name="manager-peer-control",
+                    daemon=True,
+                ).start()
+                print(
+                    "  Peer control: "
+                    f"http://{overlay_bind_address}:{args.peer_port}/"
+                )
             if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
                 try:
                     ipv6_server = runtime_module.IPv6LoopbackHTTPServer(
@@ -155,7 +246,7 @@ def main(
                     # IPv4 remains usable on systems where IPv6 is disabled.
                     print(f"  IPv6 loopback unavailable: {exc}")
 
-            print(runtime_module.Handler.state.start_artifact_data_plane())
+            print(runtime_module.Handler.state.start_data_plane())
             runtime_module.Handler.state.start_configured_federation()
             scheme = "https" if tls_context is not None else "http"
             url = f"{scheme}://localhost:{args.port}/"
@@ -172,6 +263,9 @@ def main(
         except KeyboardInterrupt:
             pass
     finally:
+        if peer_server is not None:
+            peer_server.shutdown()
+            peer_server.server_close()
         if ipv6_server is not None:
             ipv6_server.shutdown()
             ipv6_server.server_close()

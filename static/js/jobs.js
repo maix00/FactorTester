@@ -20,7 +20,6 @@
     const origin = job.__origin || '';
     const actions = document.createElement('div'); actions.className='job-actions';
     const details = document.createElement('a'); details.textContent='查看配置/生成物'; details.href=origin+'/jobs/'+encodeURIComponent(job.job_id); actions.appendChild(details);
-    const archive = document.createElement('a'); archive.textContent='一键下载'; archive.href=origin+'/api/jobs/'+encodeURIComponent(job.job_id)+'/artifacts/archive'; archive.download='job-'+job.job_id+'-artifacts.zip'; actions.appendChild(archive);
     const clear = document.createElement('button'); clear.textContent='清空该任务'; clear.onclick=async()=>{ await api('/api/jobs/'+encodeURIComponent(job.job_id)+'/artifacts',{method:'DELETE'},origin); await load(); }; actions.appendChild(clear);
     head.append(info, actions); card.appendChild(head);
     const progress = document.createElement('div'); progress.className='progress'; progress.innerHTML='<i></i>'; card.appendChild(progress);

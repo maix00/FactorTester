@@ -6,7 +6,10 @@ import json
 import socket
 import ssl
 import threading
+from contextlib import contextmanager
 from http.client import HTTPConnection, HTTPSConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError
 from urllib.request import Request
 
 from cryptography import x509
@@ -16,6 +19,52 @@ from cryptography.x509.oid import NameOID
 
 from server.manager import runtime as manager
 from server.manager.domain.federation_transport import FederationTransport
+
+
+@contextmanager
+def _redirect_servers():
+    leaked: list[str] = []
+
+    class Target(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            leaked.append(self.headers.get("Authorization", ""))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, _format, *_args):
+            pass
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{target.server_port}/stolen",
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, _format, *_args):
+            pass
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    threads = [
+        threading.Thread(target=value.serve_forever, daemon=True)
+        for value in (target, redirect)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        yield redirect.server_port, leaked
+    finally:
+        for value in (target, redirect):
+            value.shutdown()
+            value.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
 
 
 def _self_signed_certificate(tmp_path):
@@ -124,3 +173,19 @@ def test_federation_transport_trusts_an_explicit_private_ca(tmp_path) -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_federation_transport_never_redirects_node_credentials() -> None:
+    with _redirect_servers() as (port, leaked):
+        request = Request(
+            f"http://127.0.0.1:{port}/peer",
+            headers={"Authorization": "Bearer peer-secret"},
+        )
+        try:
+            FederationTransport().open(request, timeout=3)
+        except HTTPError as exc:
+            assert exc.code == 302
+        else:  # pragma: no cover - security invariant
+            raise AssertionError("peer redirect was unexpectedly followed")
+
+    assert leaked == []

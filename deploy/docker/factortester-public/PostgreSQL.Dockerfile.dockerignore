@@ -1,0 +1,8 @@
+**
+!deploy/
+deploy/*
+!deploy/docker/
+deploy/docker/*
+!deploy/docker/factortester-public/
+!deploy/docker/factortester-public/postgres-entrypoint.sh
+!deploy/docker/factortester-public/postgres-init-control.sh
