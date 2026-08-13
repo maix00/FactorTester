@@ -9,6 +9,7 @@ from .contracts import (
     AnalysisTargetCardinality,
     AnalysisTargetOrigin,
     AnalysisTypeDefinition,
+    CoreAxisDefinition,
     CoreTestDefinition,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "AnalysisTargetCardinality",
     "AnalysisTargetOrigin",
     "AnalysisTypeDefinition",
+    "CoreAxisDefinition",
     "CoreTestDefinition",
 ]

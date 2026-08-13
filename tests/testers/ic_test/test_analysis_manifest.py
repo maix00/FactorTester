@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from tools.testers.analysis_graph import AnalysisTargetOrigin
+import pytest
+
+from tools.testers.analysis_graph import (
+    AnalysisTargetOrigin,
+    CoreAxisDefinition,
+    CoreTestDefinition,
+)
 from tools.testers.ic_test.analysis_graph import ic_analysis_graph_definition
 from tools.testers.settings import backtest_setting_registry
 
@@ -16,6 +22,30 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "entry_delay_bars",
         "method",
         "return_price_basis",
+    ]
+    axes = {
+        item["key"]: item for item in manifest["core_test"]["axis_definitions"]
+    }
+    assert axes["factor_ref"] == {
+        "key": "factor_ref",
+        "label": "因子",
+        "authoring_key": "factor_selections",
+        "control_template": "reference_multi_select",
+        "source_adapter": "selected_factors",
+        "accepts_many": True,
+        "resolution_adapter": "frozen_factor_members",
+        "options": [],
+        "help_text": "选择冻结因子或因子集合；集合在冻结运行配置时展开为具体因子",
+    }
+    assert axes["horizon"]["authoring_key"] == "forward_return_horizons"
+    assert axes["horizon"]["control_template"] == "base_multiplier_grid"
+    assert axes["horizon"]["resolution_adapter"] == "per_factor_frequency"
+    assert axes["horizon"]["accepts_many"] is True
+    assert axes["entry_delay_bars"]["authoring_key"] == "ic_lags"
+    assert axes["method"]["options"] == [
+        {"value": "rank", "label": "Rank IC"},
+        {"value": "pearson", "label": "Pearson IC"},
+        {"value": "both", "label": "Rank + Pearson"},
     ]
     analyses = {item["key"]: item for item in manifest["analysis_types"]}
     assert list(analyses) == [
@@ -64,3 +94,17 @@ def test_ic_application_manifest_exposes_graph_without_web_field_knowledge() -> 
 
 def test_analysis_target_origin_enum_is_stable_for_clients() -> None:
     assert [item.value for item in AnalysisTargetOrigin] == ["core", "analysis"]
+
+
+def test_core_axis_contract_cannot_drift_from_execution_axes() -> None:
+    with pytest.raises(ValueError, match="exactly match"):
+        CoreTestDefinition(
+            label="Core",
+            axes=("factor_ref", "horizon"),
+            output_kinds=("ic_series",),
+            axis_definitions=(
+                CoreAxisDefinition(
+                    "factor_ref", "因子", "factor_selections", "reference_select",
+                ),
+            ),
+        )
