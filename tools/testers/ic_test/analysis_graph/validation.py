@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tools.testers.analysis_graph import AnalysisTargetOrigin, AnalysisTypeDefinition
+from tools.testers.analysis_graph import AnalysisTypeDefinition
 from tools.testers.ic_test.core import ICCoreTest
 
+from .attachment import assess_analysis_attachment
 from .registry import ic_analysis_graph_definition
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ def validate_ic_analysis_graph(graph: ICAnalysisGraph) -> None:
     definitions = ic_analysis_graph_definition()
     for node in graph.analyses:
         definition = definitions.type_by_key(node.analysis_type)
-        _validate_node(node, definition, cores, nodes)
+        _validate_node(graph, node, definition)
 
 
 def _validate_dependencies(
@@ -64,51 +65,20 @@ def _validate_dependencies(
 
 
 def _validate_node(
+    graph: ICAnalysisGraph,
     node: ICAnalysisNode,
     definition: AnalysisTypeDefinition,
-    cores: dict[str, ICCoreTest],
-    nodes: dict[str, ICAnalysisNode],
 ) -> None:
-    contract = definition.input_contract
-    target_count = len(node.target_refs)
-    if target_count < contract.minimum_targets or (
-        contract.maximum_targets is not None
-        and target_count > contract.maximum_targets
-    ):
-        raise ValueError(
-            f"analysis {node.node_id} target count {target_count} violates "
-            f"{contract.minimum_targets}..{contract.maximum_targets}"
+    assessment = assess_analysis_attachment(
+        graph,
+        node.analysis_type,
+        node.target_refs,
+    )
+    if assessment.issues:
+        reasons = "; ".join(
+            f"{issue.code}: {issue.message}" for issue in assessment.issues
         )
-
-    origins = {
-        AnalysisTargetOrigin.CORE if target in cores else AnalysisTargetOrigin.ANALYSIS
-        for target in node.target_refs
-    }
-    unsupported = origins - set(contract.target_origins)
-    if unsupported:
-        if contract.target_origins == (AnalysisTargetOrigin.CORE,):
-            raise ValueError(f"analysis {node.node_id} only accepts core targets")
-        raise ValueError(f"analysis {node.node_id} has unsupported target origins")
-
-    for target in node.target_refs:
-        kinds = _target_output_kinds(target, cores, nodes)
-        if set(contract.accepted_kinds).isdisjoint(kinds):
-            raise ValueError(
-                f"analysis {node.node_id} cannot consume target {target}: "
-                f"expected {sorted(contract.accepted_kinds)}, got {sorted(kinds)}"
-            )
-
-    core_targets = [cores[target] for target in node.target_refs if target in cores]
-    if core_targets:
-        _validate_core_axes(node, contract.same_axes, contract.varying_axes, core_targets)
-        missing_inputs = set(definition.required_core_inputs) - set.intersection(
-            *(set(target.output_kinds) for target in core_targets)
-        )
-        if missing_inputs:
-            raise ValueError(
-                f"analysis {node.node_id} requires unavailable core inputs: "
-                f"{sorted(missing_inputs)}"
-            )
+        raise ValueError(f"analysis {node.node_id} is incompatible: {reasons}")
 
     allowed_parameters = {item.key for item in definition.parameters}
     unknown_parameters = set(node.parameters) - allowed_parameters
@@ -123,34 +93,9 @@ def _validate_node(
         if item.required and item.key not in node.parameters
     }
     if missing:
-        raise ValueError(f"analysis {node.node_id} is missing parameters: {sorted(missing)}")
-
-
-def _target_output_kinds(
-    target: str,
-    cores: dict[str, ICCoreTest],
-    nodes: dict[str, ICAnalysisNode],
-) -> frozenset[str]:
-    if target in cores:
-        return cores[target].output_kinds
-    output = ic_analysis_graph_definition().type_by_key(
-        nodes[target].analysis_type,
-    ).output_kind
-    return frozenset((output,))
-
-
-def _validate_core_axes(
-    node: ICAnalysisNode,
-    same_axes: tuple[str, ...],
-    varying_axes: tuple[str, ...],
-    targets: list[ICCoreTest],
-) -> None:
-    for axis in same_axes:
-        if len({item.axis_value(axis) for item in targets}) != 1:
-            raise ValueError(f"analysis {node.node_id} requires the same {axis}")
-    for axis in varying_axes:
-        if len({item.axis_value(axis) for item in targets}) < 2:
-            raise ValueError(f"analysis {node.node_id} requires varying {axis}")
+        raise ValueError(
+            f"analysis {node.node_id} is missing parameters: {sorted(missing)}"
+        )
 
 
 __all__ = ["validate_ic_analysis_graph"]

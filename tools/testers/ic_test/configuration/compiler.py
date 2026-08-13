@@ -7,7 +7,7 @@ from typing import Any, Iterable, Mapping
 from tools.testers.ic_test.analysis_graph import ICAnalysisGraph
 from tools.testers.ic_test.core import ICCoreTestBlock, expand_core_test_blocks
 
-from .analyses import analysis_nodes_from_settings
+from .analysis_compilation import analysis_nodes_from_settings
 from .horizon import ICHorizonPolicy
 from .inputs import (
     correlation_methods,

@@ -69,15 +69,26 @@ def test_planner_keeps_only_analysis_nodes_owned_by_each_partition() -> None:
         node.node_id: node for node in configuration.analysis_graph.analyses
     }
 
+    def target_scopes(ref: str) -> set[str]:
+        if ref in cores:
+            return {cores[ref].product_scope_ref}
+        return {
+            scope
+            for target in nodes[ref].target_refs
+            for scope in target_scopes(target)
+        }
+
     for plan in plans:
         assert len(plan.analysis_node_ids) == len(set(plan.analysis_node_ids))
+        positions = {
+            node_id: index for index, node_id in enumerate(plan.analysis_node_ids)
+        }
         for node_id in plan.analysis_node_ids:
-            target_scopes = {
-                cores[target].product_scope_ref
+            assert target_scopes(node_id) == {plan.product_scope_ref}
+            assert all(
+                target not in nodes or positions[target] < positions[node_id]
                 for target in nodes[node_id].target_refs
-                if target in cores
-            }
-            assert target_scopes == {plan.product_scope_ref}
+            )
 
 
 def test_planner_rejects_a_partition_that_does_not_match_the_frozen_graph() -> None:
@@ -100,4 +111,3 @@ def test_execution_plan_round_trips_with_a_content_addressed_identity() -> None:
 
     assert restored == plan
     assert restored.plan_ref == plan.plan_ref
-

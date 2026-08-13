@@ -69,7 +69,7 @@ def test_combine_analysis_requires_equal_values_on_fixed_axes() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="same method"):
+    with pytest.raises(ValueError, match="same_axis"):
         graph.validate()
 
 
@@ -94,7 +94,7 @@ def test_half_life_cannot_mix_return_price_bases() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="same return_price_basis"):
+    with pytest.raises(ValueError, match="same_axis"):
         graph.validate()
 
 

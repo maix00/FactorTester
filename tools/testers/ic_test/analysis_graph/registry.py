@@ -30,9 +30,9 @@ def _single_core_input(kind: str) -> AnalysisInputContract:
 def ic_analysis_graph_definition() -> AnalysisGraphDefinition:
     """Return the sole backend-owned IC analysis registry.
 
-    The current executable analyses all consume core IC outputs.  The generic
-    graph contract supports analysis-on-analysis dependencies, but none are
-    advertised until an executor actually implements that input type.
+    Registered input/output kinds are also the attachment contract consumed by
+    authoring clients.  Analysis-on-analysis support remains part of the graph
+    model, but no downstream type is published before its Job adapter exists.
     """
 
     analyses = (

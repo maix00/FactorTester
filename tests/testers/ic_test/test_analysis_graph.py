@@ -91,7 +91,7 @@ def test_analysis_graph_rejects_analysis_target_for_core_only_type() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="only accepts core targets"):
+    with pytest.raises(ValueError, match="target_origin"):
         graph.validate()
 
 
@@ -110,5 +110,5 @@ def test_analysis_graph_rejects_incompatible_cross_horizon_group() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="same product_scope_ref"):
+    with pytest.raises(ValueError, match="same_axis"):
         graph.validate()
