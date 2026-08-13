@@ -1,0 +1,15 @@
+[Unit]
+Description=Publish the newest verified FactorTester main revision
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=@GIT_ROOT@/repo.git
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+Group=@DEPLOY_GROUP@
+EnvironmentFile=-/etc/factortester-container/auto-update.env
+ExecStart=@BIN_ROOT@/auto_update_public_main.sh
+TimeoutStartSec=45min
+PrivateTmp=true

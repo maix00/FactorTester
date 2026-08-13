@@ -8,10 +8,17 @@ Core Blueprint — 应用入口和页面路由。
   - 工具类源码页 AST 解析 + 折叠渲染
 """
 
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, current_app, jsonify, render_template
 from server.services.session_runtime import current_user
 
 core_bp = Blueprint('core', __name__)
+
+
+@core_bp.route('/favicon.svg', methods=['GET'])
+@core_bp.route('/favicon.ico', methods=['GET'])
+def favicon():
+    """Serve the site identity for explicit and browser-default requests."""
+    return current_app.send_static_file('favicon.svg')
 
 
 @core_bp.route('/', methods=['GET'])

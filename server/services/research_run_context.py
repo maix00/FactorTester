@@ -16,11 +16,13 @@ from typing import Any
 import orjson
 
 from server.services import research_configurations
+from server.services.federated_factor_sources import validate_context_sources
 from server.services.research_run_identity import hash_run_spec
 
 
 MANAGER_RUN_CONTEXT_KEY = "_manager_run_context"
-MANAGER_RUN_CONTEXT_SCHEMA_VERSION = 1
+MANAGER_RUN_CONTEXT_SCHEMA_VERSION = 2
+_SUPPORTED_MANAGER_RUN_CONTEXT_VERSIONS = {1, 2}
 
 
 class RunRequestError(ValueError):
@@ -48,6 +50,12 @@ def create_manager_run_context(
     run_spec = prepared.get("run_spec")
     if not isinstance(run_spec, dict):
         raise RunRequestError("manager run context requires a RunSpec")
+    try:
+        validate_context_sources(prepared, owner=owner)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RunRequestError(
+            str(exc), details={"code": "invalid_manager_run_context"},
+        ) from exc
     context = {
         "schema_version": MANAGER_RUN_CONTEXT_SCHEMA_VERSION,
         "owner": owner,
@@ -74,7 +82,8 @@ def load_manager_run_context(
             "manager run context must be an object",
             details={"code": "invalid_manager_run_context"},
         )
-    if int(value.get("schema_version") or 0) != MANAGER_RUN_CONTEXT_SCHEMA_VERSION:
+    schema_version = int(value.get("schema_version") or 0)
+    if schema_version not in _SUPPORTED_MANAGER_RUN_CONTEXT_VERSIONS:
         raise RunRequestError(
             "unsupported manager run context schema",
             details={"code": "invalid_manager_run_context"},
@@ -103,6 +112,13 @@ def load_manager_run_context(
             "manager run context RunSpec hash does not match",
             details={"code": "invalid_manager_run_context"},
         )
+    if schema_version >= 2:
+        try:
+            validate_context_sources(prepared, owner=owner)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RunRequestError(
+                str(exc), details={"code": "invalid_manager_run_context"},
+            ) from exc
 
     workspace_id = str(prepared.get("workspace_id") or "").strip()
     analyses = prepared.get("analyses")

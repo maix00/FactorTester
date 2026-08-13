@@ -16,6 +16,8 @@ class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
     def _get_entry_routes(self, parsed) -> bool:
+        if parsed.path in {"/favicon.svg", "/favicon.ico"}:
+            return self._serve_site_icon()
         if parsed.path == "/compliance":
             requested = parse_qs(parsed.query, keep_blank_values=True).get(
                 "next", ["/"]
@@ -142,6 +144,23 @@ class CoreGetRoutesMixin:
             json_response(self, {"modules": modules})
             return True
         return False
+
+    def _serve_site_icon(self) -> bool:
+        try:
+            body = (
+                self.state.runtime_source_root / "static/favicon.svg"
+            ).read_bytes()
+        except OSError:
+            self.send_error(404)
+            return True
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     def _get_session_and_shell_routes(self, parsed) -> bool:
         if parsed.path == "/api/session":
