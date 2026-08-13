@@ -71,3 +71,28 @@ def test_signal_relative_policy_requires_a_factor_frequency() -> None:
 
     with pytest.raises(ValueError, match="signal frequency"):
         policy.resolve(None)
+
+
+@pytest.mark.parametrize("multiplier", [0, -1, 1.5, True])
+def test_horizon_multiplier_must_be_a_positive_integer(multiplier) -> None:
+    with pytest.raises(ValueError, match="positive integers"):
+        ICHorizonPolicy.from_value({
+            "sampling": "explicit",
+            "bases": ["signal"],
+            "multipliers": [multiplier],
+        })
+
+
+def test_explicit_horizon_policy_round_trips_base_and_multiplier_authorship() -> None:
+    policy = ICHorizonPolicy.from_value({
+        "sampling": "explicit",
+        "bases": ["signal", "DAY1"],
+        "multipliers": [1, 3, 5],
+    })
+
+    assert ICHorizonPolicy.from_dict(policy.to_dict()) == policy
+    assert policy.to_dict() == {
+        "mode": "explicit",
+        "bases": ["signal", "DAY1"],
+        "multipliers": [1, 3, 5],
+    }
