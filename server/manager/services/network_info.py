@@ -9,9 +9,32 @@ from its federation registry and configuration.
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from typing import Any, Iterable
 from urllib.parse import urlparse
+
+
+LAN_ADDRESSES_ENV = "FACTORTESTER_LAN_ADDRESSES"
+
+
+def _usable_lan_address(value: object) -> str | None:
+    """Return a displayable IPv4 LAN address, excluding local-only values."""
+    raw = str(value or "").strip()
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    if not isinstance(address, ipaddress.IPv4Address):
+        return None
+    if (
+        address.is_loopback
+        or address.is_unspecified
+        or address.is_link_local
+        or address.is_multicast
+    ):
+        return None
+    return str(address)
 
 
 def public_manager_targets(
@@ -71,12 +94,27 @@ def public_manager_targets(
 def local_internal_addresses(
     *,
     hostnames: Iterable[str] | None = None,
+    configured: Iterable[str] | None = None,
 ) -> list[str]:
-    """Discover this host's private/loopback IPv4 addresses.
+    """Return addresses that another LAN device can use for this Manager.
 
-    ``hostnames`` is injectable so the discovery rule can be tested without
-    depending on the machine running the test suite.
+    A deployment can provide ``FACTORTESTER_LAN_ADDRESSES`` as a comma-separated
+    authoritative list. This is required behind container networking, where
+    automatic discovery sees a Docker bridge address instead of the host LAN.
+    ``hostnames`` and ``configured`` are injectable for deterministic tests.
     """
+    explicit = configured
+    if explicit is None:
+        raw_configured = os.environ.get(LAN_ADDRESSES_ENV)
+        if raw_configured is not None:
+            explicit = raw_configured.split(",")
+    if explicit is not None:
+        return sorted({
+            address
+            for value in explicit
+            if (address := _usable_lan_address(value)) is not None
+        })
+
     values: set[str] = set()
     names = (
         set(hostnames)
@@ -91,15 +129,10 @@ def local_internal_addresses(
         except OSError:
             continue
         for info in infos:
-            address = str(info[4][0] or "").strip()
-            try:
-                parsed = ipaddress.ip_address(address)
-            except ValueError:
-                continue
-            if parsed.is_private or parsed.is_loopback:
+            address = _usable_lan_address(info[4][0])
+            if address is not None:
                 values.add(address)
-    values.add("127.0.0.1")
-    return sorted(values, key=lambda value: (value == "127.0.0.1", value))
+    return sorted(values)
 
 
 def server_network_info(

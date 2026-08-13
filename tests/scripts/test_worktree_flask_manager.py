@@ -84,7 +84,7 @@ def _running_dual_loopback_manager(state):
 
 
 def test_manager_binds_all_interfaces_for_lan_web_by_default(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ) -> None:
     observed = {"events": []}
 
@@ -106,6 +106,11 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     monkeypatch.setattr(manager.ManagerState, "cleanup_detached_worktrees", lambda self: [])
     monkeypatch.setattr(
         manager.ManagerState,
+        "local_internal_addresses",
+        lambda self: ["192.168.50.10"],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
         "start_artifact_data_plane",
         lambda self: observed["events"].append("artifact") or "artifact",
     )
@@ -119,6 +124,10 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     assert manager_app.main(runtime_module=manager) == 0
     assert observed["address"] == ("0.0.0.0", 7998)
     assert observed["events"] == ["bind", "artifact", "serve"]
+    output = capsys.readouterr().out
+    assert "局域网访问: http://192.168.50.10:7998/" in output
+    assert "172.18." not in output
+    assert "127.0.0.1" not in output
 
 
 def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> None:

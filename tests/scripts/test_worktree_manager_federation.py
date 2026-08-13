@@ -19,6 +19,7 @@ from server.manager.domain.federation import (
     ServiceRoute,
     TargetUnavailable,
 )
+from server.manager.services.network_info import local_internal_addresses
 
 
 def _registration(
@@ -145,6 +146,26 @@ def test_public_device_targets_are_server_discovered_https_peers(tmp_path) -> No
     assert info["internal_addresses"]
     assert info["manager_port"] == 7998
     assert all(item["endpoint"].startswith("https://") for item in targets)
+
+
+def test_lan_addresses_exclude_loopback_and_local_only_values() -> None:
+    assert local_internal_addresses(configured=[
+        "127.0.0.1",
+        "0.0.0.0",
+        "169.254.1.5",
+        "192.168.50.10",
+        "192.168.50.10",
+    ]) == ["192.168.50.10"]
+
+
+def test_configured_lan_addresses_override_container_hostname_discovery(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_LAN_ADDRESSES", "192.168.50.10")
+
+    assert local_internal_addresses(hostnames=["container-hostname"]) == [
+        "192.168.50.10",
+    ]
 
 
 def test_public_manager_network_info_uses_its_request_endpoint(tmp_path) -> None:
