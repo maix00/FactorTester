@@ -37,3 +37,21 @@ def test_local_manager_enables_wireguard_only_peer_surfaces() -> None:
     assert "17998" not in published
     assert "17997" not in published
     assert "${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}" in command
+
+
+def test_local_manager_mounts_existing_runtime_data_root() -> None:
+    manager = _compose()["services"]["manager"]
+    mounts = {
+        (item.get("source"), item.get("target"))
+        for item in manager["volumes"]
+        if isinstance(item, dict)
+    }
+
+    expected = (
+        "${FACTORTESTER_RUNTIME_DATA_ROOT:?set "
+        "FACTORTESTER_RUNTIME_DATA_ROOT}",
+    )
+    assert (expected[0], expected[0]) in mounts
+    assert "FACTORTESTER_RUNTIME_DATA_ROOT=" in (
+        DEPLOYMENT / "server.env.example"
+    ).read_text(encoding="utf-8")

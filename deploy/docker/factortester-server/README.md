@@ -75,9 +75,11 @@ their normal degraded/error response and recover after connectivity returns.
 ## Mount boundary
 
 The Manager needs the Git common repository, stable Manager worktree, runtime
-`.settings` file, and data root at the same absolute paths used on the host.
-The settings file is mounted read-only; the surrounding parent directory is
-not exposed. This lets `git
+`.settings` file, publication root, and the existing application data root at
+the same absolute paths used on the host. Set `FACTORTESTER_RUNTIME_DATA_ROOT`
+to the directory referenced by `.settings` for SQLite, source data, caches, and
+logs. That directory is mounted explicitly; the broader GTHT parent directory
+is not exposed. The settings file remains read-only. This lets `git
 worktree list` resolve current and future issue worktrees without exposing the
 Docker socket. The application container receives those mounts; the
 WireGuard sidecar receives only its configuration directory. The application
