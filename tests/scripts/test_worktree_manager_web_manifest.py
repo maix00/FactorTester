@@ -705,6 +705,18 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "location.reload();" in coordinator
 
 
+def test_web_shell_restores_an_http_only_manager_cookie_without_a_saved_token() -> None:
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "state.token = savedToken();" in coordinator
+    assert 'state.session = await api("/api/session")' in coordinator
+    assert "if (!state.token) return;" not in coordinator
+    assert "const hadSavedToken = Boolean(state.token);" in coordinator
+    assert "if (hadSavedToken)" in coordinator
+
+
 def test_home_prefers_the_discovered_public_server_over_the_peer_callback() -> None:
     coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
 

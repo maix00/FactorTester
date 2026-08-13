@@ -1188,6 +1188,21 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in english_body
 
 
+def test_public_compliance_page_bootstraps_device_login_with_visible_status() -> None:
+    from server.manager.http.pages import compliance_page
+
+    body = compliance_page("/jobs").decode("utf-8")
+
+    assert 'id="device-auth-status"' in body
+    assert 'role="status"' in body
+    assert "正在检查本浏览器的设备凭证" in body
+    assert "检测到已登记设备，正在自动登录" in body
+    assert "当前浏览器来源没有已登记的设备密钥" in body
+    assert "设备自动登录失败" in body
+    assert 'window.addEventListener("online",authenticate)' in body
+    assert 'document.addEventListener("visibilitychange"' in body
+
+
 def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
     tmp_path, monkeypatch,
 ) -> None:
