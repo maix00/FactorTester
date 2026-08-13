@@ -17,6 +17,7 @@ from server.manager.transfers.node_agent import NodeAgent
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.security import NodeAuthenticator
 from server.manager.transfers.origin_tickets import OriginTicketIssuer
+from server.manager.transfers.producer_tickets import ProducerTicketIssuer
 
 
 class TransferStateMixin:
@@ -49,6 +50,12 @@ class TransferStateMixin:
         self.origin_ticket_issuer = OriginTicketIssuer(
             manager_id=self.server_id,
             replicas=self.transfer_replicas,
+            tickets=self.transfer_tickets,
+        )
+        self.producer_ticket_issuer = ProducerTicketIssuer(
+            manager_id=self.server_id,
+            requests=self.transfer_store,
+            attempts=self.transfer_attempts,
             tickets=self.transfer_tickets,
         )
         self.node_agent: NodeAgent | None = None

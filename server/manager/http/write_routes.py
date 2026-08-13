@@ -63,6 +63,12 @@ class WriteRoutesMixin:
         if parsed.path == "/api/federation/transfers/origin-ticket":
             self._transfer_origin_ticket()
             return
+        if parsed.path == "/api/federation/transfers/producer-ticket":
+            self._transfer_producer_ticket()
+            return
+        if parsed.path == "/api/federation/transfers/commands":
+            self._transfer_command_import()
+            return
         if parsed.path == "/api/federation/sync/events":
             self._federation_sync_events()
             return

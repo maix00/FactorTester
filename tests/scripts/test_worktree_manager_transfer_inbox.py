@@ -54,3 +54,23 @@ def test_inbox_lease_survives_restart_and_completion_is_owner_bound(tmp_path) ->
     store.complete(claimed.command_id, claimant="agent-a", now=107.0)
     assert store.claim(claimant="agent-c", now=140.0) == []
 
+
+def test_failed_execution_is_released_only_after_retry_delay(tmp_path) -> None:
+    store = TransferInboxStore(
+        tmp_path / "transfers.sqlite", server_id="office-a",
+    )
+    store.receive(_command(), now=100.0)
+    claimed = store.claim(claimant="agent-a", now=101.0)[0]
+
+    store.retry(
+        claimed.command_id,
+        claimant="agent-a",
+        error="relay unavailable",
+        delay=5,
+        now=102.0,
+    )
+
+    assert store.claim(claimant="agent-b", now=106.9) == []
+    retried = store.claim(claimant="agent-b", now=107.0)[0]
+    assert retried.delivery_attempt == 2
+    assert retried.last_error == "relay unavailable"

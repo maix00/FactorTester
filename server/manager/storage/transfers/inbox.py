@@ -151,3 +151,37 @@ class TransferInboxStore(TransferDatabase):
                 """,
                 (current, current, identifier),
             )
+
+    def retry(
+        self,
+        command_id: str,
+        *,
+        claimant: str,
+        error: str,
+        delay: float = 1.0,
+        now: float | None = None,
+    ) -> None:
+        identifier = required(command_id, field="command_id")
+        owner = required(claimant, field="claimant")
+        current = time.time() if now is None else float(now)
+        retry_at = current + max(0.1, float(delay))
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT status, lease_owner FROM transfer_inbox "
+                "WHERE command_id=?",
+                (identifier,),
+            ).fetchone()
+            if row is None:
+                raise KeyError("transfer command not found")
+            if str(row["status"]) != "leased" or str(row["lease_owner"]) != owner:
+                raise RuntimeError("transfer inbox lease owner changed")
+            connection.execute(
+                """
+                UPDATE transfer_inbox
+                SET status='leased', lease_owner='', lease_expires_at=?,
+                    updated_at=?, last_error=?
+                WHERE command_id=?
+                """,
+                (retry_at, current, str(error or "")[:2000], identifier),
+            )

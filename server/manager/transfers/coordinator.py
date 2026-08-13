@@ -19,6 +19,7 @@ from server.manager.transfers.models import (
     NewTransferAttempt,
     TransferAttemptRecord,
     TransferOperation,
+    TransferMode,
     TransferStatus,
     TransferTicketRole,
 )
@@ -39,6 +40,7 @@ class TransferCoordinator:
         requests: TransferStore,
         attempts: TransferAttemptStore,
         tickets: TransferTicketStore,
+        command_dispatcher=None,
     ) -> None:
         self.manager_id = str(manager_id or "").strip()
         self.data_endpoint = str(data_endpoint or "").strip().rstrip("/")
@@ -48,6 +50,7 @@ class TransferCoordinator:
         self.requests = requests
         self.attempts = attempts
         self.tickets = tickets
+        self.command_dispatcher = command_dispatcher
 
     def prepare_download(
         self,
@@ -81,6 +84,19 @@ class TransferCoordinator:
             observations=observations,
             now=now,
         )
+        # Planning transitions the durable request to dispatched.  Always
+        # build an at-least-once command from the authoritative post-transition
+        # row so a retry produces the same canonical payload hash.
+        transfer = self.requests.require(transfer.transfer_id)
+        if attempt.mode in {
+            TransferMode.SOURCE_PUSH,
+            TransferMode.DESTINATION_PULL,
+        }:
+            if self.command_dispatcher is None:
+                raise ConnectionError(
+                    f"{attempt.mode.value} command dispatcher is unavailable"
+                )
+            self.command_dispatcher.dispatch(transfer, attempt)
         expiry = min(
             transfer.expires_at,
             attempt.expires_at,
