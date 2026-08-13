@@ -105,12 +105,44 @@ def test_v5_nat_attempt_is_archived_and_never_loaded_as_wireguard_route(
             ).fetchall()
         }
 
-    assert version == "6"
+    assert version == "7"
     assert active == 0
     assert archived[0:2] == ("source_push", "waiting_consumer")
     assert "WireGuard-direct" in archived[2]
     assert "source_peer_data_endpoint" in columns
     assert "relay_data_endpoint" not in columns
+
+
+def test_v6_endpoint_registry_upgrades_additively_to_signed_advertisements(
+    tmp_path,
+) -> None:
+    path = tmp_path / "transfers.sqlite"
+    store = TransferStore(path, server_id="node-a")
+    del store
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE transfer_meta SET value='6' WHERE key='schema_version'"
+        )
+        connection.execute("DROP TABLE transfer_node_advertisement_state")
+        connection.execute("DROP TABLE transfer_node_advertisement_nonces")
+        connection.execute("DROP TABLE transfer_node_advertisement_clock")
+
+    TransferStore(path, server_id="node-a")
+
+    with sqlite3.connect(path) as connection:
+        version = connection.execute(
+            "SELECT value FROM transfer_meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert version == "7"
+    assert "transfer_node_advertisement_nonces" in tables
+    assert "transfer_node_advertisement_state" in tables
+    assert "transfer_node_advertisement_clock" in tables
 
 
 def test_future_schema_version_is_rejected_without_modification(tmp_path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 from click.testing import CliRunner
@@ -123,6 +124,31 @@ class FakeClient:
             content=b"<svg><title>curve</title></svg>",
             content_type="image/svg+xml",
         )
+
+    def list_job_artifacts(self, job_id):
+        assert job_id == "job-curve"
+        return [{
+            "name": "equity_curve_report",
+            "file_name": "curve.svg",
+            "content_type": "image/svg+xml",
+            "content_hash": hashlib.sha256(
+                b"<svg><title>curve</title></svg>"
+            ).hexdigest(),
+            "size_bytes": 31,
+            "state": "active",
+            "role": "output",
+        }]
+
+    def job_artifact_to_path(self, job_id, name, destination):
+        response = self.job_artifact(job_id, name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(response.content)
+        return {
+            "path": str(destination),
+            "size_bytes": len(response.content),
+            "content_hash": hashlib.sha256(response.content).hexdigest(),
+            "content_type": response.content_type,
+        }
 
     def job_order_audit(self, job_id):
         assert job_id == "job-orders"
@@ -1423,6 +1449,25 @@ def test_job_artifact_writes_binary_file_and_prints_only_receipt(
     assert receipt["content_type"] == "image/svg+xml"
     assert receipt["path"] == str(target.resolve())
     assert "svg" not in receipt
+
+
+def test_job_download_all_uses_individual_data_plane_transfers(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake
+    )
+    output = tmp_path / "artifacts"
+
+    result = CliRunner().invoke(cli, [
+        "job", "download-all", "job-curve", "--output", str(output),
+    ])
+
+    assert result.exit_code == 0, result.output
+    receipt = json.loads(result.output)
+    assert (output / "curve.svg").read_bytes().startswith(b"<svg>")
+    assert receipt["files"] == [str((output / "curve.svg").resolve())]
 
 
 def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:

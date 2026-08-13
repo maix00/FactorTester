@@ -1,6 +1,6 @@
 (() => {
   function artifactPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}/preview${portQuery}`;
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
   }
 
   async function mount(context, target, options) {

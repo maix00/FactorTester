@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 import signal
 import socket
 import subprocess
@@ -13,7 +12,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from server.jobs.artifact_data_plane import ArtifactTicketCodec, artifact_data_port
 from server.manager.config import VIBE_TRADING_PORT
 from server.manager.storage.control_db import CONTROL_DATABASE_ENV
 from server.manager.state.models import ServiceBundle
@@ -68,28 +66,6 @@ class ProcessStateMixin:
         self.vibe_process = None
         return "stopped Vibe-Trading"
 
-    def artifact_ticket_codec(self) -> ArtifactTicketCodec:
-        """Return the Manager's codec shared with its 7997 child process."""
-        self.artifact_ticket_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            secret = self.artifact_ticket_path.read_bytes()
-        except FileNotFoundError:
-            secret = secrets.token_bytes(32)
-            try:
-                fd = os.open(
-                    self.artifact_ticket_path,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                )
-            except FileExistsError:
-                secret = self.artifact_ticket_path.read_bytes()
-            else:
-                try:
-                    os.write(fd, secret)
-                finally:
-                    os.close(fd)
-        return ArtifactTicketCodec(secret)
-
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
@@ -121,7 +97,6 @@ class ProcessStateMixin:
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
             "FACTORTESTER_SERVER_ID": self.server_id,
             "FACTORTESTER_SERVER_ROLE": self.server_role,
-            "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
         })
         self._inject_control_database_env(env)
         return env, deployment_id, socket_path

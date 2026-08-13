@@ -111,11 +111,17 @@ class NodeKey:
         path: str,
         body: bytes,
     ) -> str:
-        private = Ed25519PrivateKey.from_private_bytes(_decode(self.private_key))
-        return _encode(private.sign(request_signature_message(
+        return self.sign_bytes(request_signature_message(
             challenge=challenge,
             method=method,
             path=path,
             body=body,
-        )))
+        ))
 
+    def sign_bytes(self, value: bytes) -> str:
+        """Sign one protocol-owned canonical byte sequence."""
+
+        if not isinstance(value, bytes):
+            raise TypeError("signed value must be bytes")
+        private = Ed25519PrivateKey.from_private_bytes(_decode(self.private_key))
+        return _encode(private.sign(value))

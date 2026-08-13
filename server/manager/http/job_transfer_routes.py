@@ -25,11 +25,16 @@ class JobTransferRoutesMixin:
         if parsed.path != _SUBMISSION_ACCESS_PATH:
             return False
         session = self._session()
-        if session is None:
+        if session is None and self.state.require_login_for_ui:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
         try:
             payload = self._json_body(64 * 1024)
             name = _submission_name(payload.get("name"))
@@ -43,7 +48,7 @@ class JobTransferRoutesMixin:
                 self.headers.get("Idempotency-Key") or secrets.token_hex(16)
             ).strip()
             access = self.state.prepare_submission_upload(
-                principal=str(session["username"]),
+                principal=principal,
                 storage_server_id=storage_server_id,
                 job_id=job_id,
                 name=name,
@@ -72,14 +77,19 @@ class JobTransferRoutesMixin:
         if match is None:
             return False
         session = self._session()
-        if session is None:
+        if session is None and self.state.require_login_for_ui:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
         try:
             value = self.state.transfer_access_status(
-                match.group(1), principal=str(session["username"]),
+                match.group(1), principal=principal,
             )
         except KeyError:
             json_response(
@@ -94,7 +104,7 @@ class JobTransferRoutesMixin:
         if match is None:
             return False
         session = self._session()
-        if session is None:
+        if session is None and self.state.require_login_for_ui:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -108,7 +118,11 @@ class JobTransferRoutesMixin:
                 400,
             )
             return True
-        principal = str(session["username"])
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
         idempotency = str(
             self.headers.get("Idempotency-Key") or secrets.token_hex(16)
         ).strip()
@@ -123,6 +137,11 @@ class JobTransferRoutesMixin:
             if selected is None:
                 raise KeyError("artifact was not found")
             route, artifact = selected
+            if (
+                principal == "__public_jobs__"
+                and str(artifact.get("artifact_role") or "output") == "input"
+            ):
+                raise PermissionError("登录后才能查看运行输入")
             access = self.state.prepare_artifact_download(
                 principal=principal,
                 storage_server_id=route.server_id,
@@ -148,6 +167,11 @@ class JobTransferRoutesMixin:
                 404,
             )
             return True
+        except PermissionError as exc:
+            json_response(
+                self, {"success": False, "error": str(exc)}, 401,
+            )
+            return True
         except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
             json_response(
                 self, {"success": False, "error": str(exc)}, 503,
@@ -162,6 +186,7 @@ class JobTransferRoutesMixin:
                     artifact.get("content_type") or "application/octet-stream"
                 ),
                 "size_bytes": int(artifact.get("size_bytes") or 0),
+                "content_hash": str(artifact.get("content_hash") or ""),
             },
             "access": access,
         })

@@ -42,8 +42,6 @@ def _registration(*, peer: bool = True) -> dict[str, object]:
         "server_id": "node-a",
         "role": "main",
         "endpoint": "https://198.51.100.10:7998",
-        "artifact_endpoint": "https://198.51.100.10:7997",
-        "artifact_port": 7997,
         "proxy_token": "secret",
         "ports": [{"port": 8000, "online": True}],
     }

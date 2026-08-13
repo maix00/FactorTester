@@ -17,7 +17,7 @@
 
   function accessPath(path) {
     const url = new URL(path, window.location.origin);
-    url.pathname = url.pathname.replace(/\/preview$/, "") + "/access";
+    url.pathname = url.pathname.replace(/\/$/, "") + "/access";
     return url.pathname + url.search;
   }
 
@@ -29,7 +29,12 @@
     }
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", `Bearer ${access.bearer}`);
-    const response = await fetch(access.url, {...options, headers});
+    const response = await fetch(access.url, {
+      ...options,
+      credentials: "omit",
+      redirect: "error",
+      headers,
+    });
     if (!response.ok) {
       const value = await response.json().catch(() => ({}));
       const error = value?.error;

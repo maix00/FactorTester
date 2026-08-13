@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import time
-import zipfile
 
 from flask import Flask
 import orjson
@@ -107,16 +105,18 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
         result_summary={"success": True},
     )
 
+    manifest = client.get("/api/jobs/job-full/artifacts")
     loaded = client.get("/api/jobs/job-full/artifacts/result")
     archive = client.get("/api/jobs/job-full/artifacts/archive")
     cleared = client.delete("/api/jobs/job-full/artifacts")
     job = client.get("/api/jobs/job-full")
 
-    assert loaded.status_code == 200
-    assert loaded.get_json()["curve"] == [1, 2, 3]
-    assert 'filename="result.json"' in loaded.headers["Content-Disposition"]
-    with zipfile.ZipFile(io.BytesIO(archive.data)) as bundle:
-        assert bundle.namelist() == ["result.json"]
+    assert manifest.status_code == 200
+    assert manifest.get_json()["artifacts"][0]["content_hash"] == (
+        hashlib.sha256(raw).hexdigest()
+    )
+    assert loaded.status_code == 404
+    assert archive.status_code == 404
     assert cleared.get_json()["deleted_files"] == 1
     assert not target.exists()
     assert job.status_code == 200
@@ -138,7 +138,7 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert repository.storage_usage(owner="alice") == 0
 
 
-def test_artifact_archive_preserves_distinct_input_logical_paths(
+def test_artifact_manifest_preserves_distinct_input_logical_paths(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
@@ -177,19 +177,17 @@ def test_artifact_archive_preserves_distinct_input_logical_paths(
             title_zh=f"策略配置 {index}",
         )
 
-    response = client.get("/api/jobs/job-input-archive/artifacts/archive")
+    response = client.get("/api/jobs/job-input-archive/artifacts")
 
     assert response.status_code == 200
-    with zipfile.ZipFile(io.BytesIO(response.data)) as bundle:
-        assert bundle.namelist() == [
-            "inputs/run_dependency/strategies/alpha/settings.yaml",
-            "inputs/run_dependency/strategies/beta/settings.yaml",
-        ]
-        assert bundle.read(bundle.namelist()[0]) == b"strategy: 0\n"
-        assert bundle.read(bundle.namelist()[1]) == b"strategy: 1\n"
+    artifacts = response.get_json()["artifacts"]
+    assert [item["logical_path"] for item in artifacts] == [
+        "strategies/alpha/settings.yaml",
+        "strategies/beta/settings.yaml",
+    ]
 
 
-def test_public_gateway_can_preview_image_but_cannot_download_it(
+def test_service_port_never_serves_public_artifact_bytes(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
@@ -226,11 +224,8 @@ def test_public_gateway_can_preview_image_but_cannot_download_it(
         "/api/jobs/job-preview/artifacts/equity_curve_report",
     )
 
-    assert preview.status_code == 200
-    assert preview.data == raw
-    assert preview.content_type == "image/svg+xml"
-    assert preview.headers["Content-Disposition"].startswith("inline;")
-    assert download.status_code == 401
+    assert preview.status_code == 404
+    assert download.status_code == 404
 
 
 def test_public_gateway_cannot_discover_or_preview_job_input_source(
@@ -277,7 +272,7 @@ def test_public_gateway_cannot_discover_or_preview_job_input_source(
     assert detail.get_json()["task_detail"]["artifacts"] == []
     assert manifest.status_code == 200
     assert manifest.get_json()["artifacts"] == []
-    assert preview.status_code == 401
+    assert preview.status_code == 404
     assert b"PrivateFactor" not in preview.data
 
 

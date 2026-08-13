@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
-import io
 import time
-import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from flask import Response, jsonify, request, session, stream_with_context
 import orjson
@@ -16,7 +13,6 @@ import orjson
 from server.jobs.artifacts import (
     artifact_root,
     default_user_quota_bytes,
-    resolve_artifact_path,
 )
 from server.jobs.input_artifacts import artifact_role, FACTOR_SOURCE_PREFIX
 from server.jobs.ports import detect_port
@@ -354,26 +350,6 @@ def _artifact_storage_summary(
         result[f"{prefix}_artifact_count"] += 1
         result[f"{prefix}_artifact_bytes"] += size
     return result
-
-
-def _artifact_archive_member(
-    metadata: dict[str, object], path: Path | None = None,
-) -> str:
-    """Keep retained inputs distinct without changing output filenames."""
-    file_name = _artifact_file_name(metadata, path)
-    if artifact_role(metadata) != "input":
-        return file_name
-    raw_path = str(metadata.get("logical_path") or file_name).replace("\\", "/")
-    logical_path = PurePosixPath(raw_path)
-    parts = tuple(part for part in logical_path.parts if part not in {"", "."})
-    if logical_path.is_absolute() or not parts or ".." in parts:
-        parts = (file_name,)
-    kind = str(metadata.get("artifact_kind") or "input").strip()
-    safe_kind = "".join(
-        character if character.isalnum() or character in {"-", "_"} else "-"
-        for character in kind
-    ).strip("-") or "input"
-    return PurePosixPath("inputs", safe_kind, *parts).as_posix()
 
 
 def _task_detail(
@@ -872,111 +848,3 @@ def list_test_job_artifacts(job_id: str):
             for item in artifacts
         ],
     })
-
-
-@sft_bp.get("/api/jobs/<job_id>/artifacts/archive")
-def download_test_job_artifacts_archive(job_id: str):
-    if session.get("manager_gateway_public_jobs"):
-        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
-    job, error = require_job(job_id)
-    if error:
-        return error
-    archive = io.BytesIO()
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
-        for metadata in repository().list_artifacts(
-            job_id=job.job_id, owner=job.owner,
-        ):
-            if metadata["state"] != "active":
-                continue
-            try:
-                path = resolve_artifact_path(
-                    str(metadata["relative_path"]),
-                    expected_hash=str(metadata["content_hash"]),
-                )
-            except FileNotFoundError:
-                continue
-            raw = path.read_bytes()
-            bundle.writestr(_artifact_archive_member(metadata, path), raw)
-    archive.seek(0)
-    return Response(
-        archive.read(),
-        content_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="job-{job.job_id}-artifacts.zip"'
-        },
-    )
-
-
-def _get_test_job_artifact(job_id: str, name: str, *, preview: bool):
-    job, error = require_job(job_id)
-    if error:
-        return error
-    owner = job.owner
-    metadata = repository().load_artifact(
-        job_id=job_id,
-        name=name,
-        owner=owner,
-    )
-    if metadata is None:
-        return jsonify({
-            "success": False,
-            "error": "artifact not found",
-        }), 404
-    if (
-        session.get("manager_gateway_public_jobs")
-        and artifact_role(metadata) == "input"
-    ):
-        return jsonify({
-            "success": False,
-            "error": "登录后才能查看运行输入",
-        }), 401
-    if metadata["state"] != "active":
-        return jsonify({
-            "success": False,
-            "error": "artifact was deleted",
-            "artifact": metadata,
-        }), 410
-    try:
-        path = resolve_artifact_path(
-            str(metadata["relative_path"]),
-            expected_hash=str(metadata["content_hash"]),
-        )
-    except FileNotFoundError:
-        return jsonify({
-            "success": False,
-            "error": "artifact file is unavailable",
-        }), 410
-    raw = path.read_bytes()
-    try:
-        # resolve_artifact_path already verified the digest; retain this
-        # branch for metadata implementations that return non-string hashes.
-        if hashlib.sha256(raw).hexdigest() != str(metadata["content_hash"]):
-            raise RuntimeError
-    except RuntimeError:
-        return jsonify({
-            "success": False,
-            "error": "artifact integrity check failed",
-        }), 500
-    return Response(
-        raw,
-        content_type=str(metadata["content_type"]),
-        headers={
-            "Content-Disposition": (
-                f'inline; filename="{_artifact_file_name(metadata, path)}"'
-                if preview or session.get("manager_gateway_public_jobs")
-                else f'attachment; filename="{_artifact_file_name(metadata, path)}"'
-            ),
-        },
-    )
-
-
-@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>/preview")
-def preview_test_job_artifact(job_id: str, name: str):
-    return _get_test_job_artifact(job_id, name, preview=True)
-
-
-@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
-def get_test_job_artifact(job_id: str, name: str):
-    if session.get("manager_gateway_public_jobs"):
-        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
-    return _get_test_job_artifact(job_id, name, preview=False)

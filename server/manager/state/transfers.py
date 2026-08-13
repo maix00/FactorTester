@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import secrets
+import time
+
 from server.manager.storage.transfers import (
     NodeEndpointStore,
     NodeIdentityRegistry,
@@ -16,6 +19,12 @@ from server.manager.network_endpoints import (
     validate_server_endpoints,
 )
 from server.manager.transfers.destination_tickets import DestinationTicketIssuer
+from server.manager.transfers.node_advertisements import (
+    ADVERTISEMENT_SCHEMA_VERSION,
+    normalized_lease,
+    signed_advertisement,
+    verify_advertisement,
+)
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.origin_tickets import OriginTicketIssuer
 from server.manager.transfers.security import NodeAuthenticator
@@ -78,22 +87,30 @@ class TransferStateMixin:
         endpoints = self._transfer_server_endpoints
         if endpoints is None:
             raise RuntimeError("transfer endpoints are not configured")
+        requested = time.time() if now is None else float(now)
+        current = self.transfer_endpoints.next_advertisement_issued_at(
+            self.server_id,
+            requested=requested,
+        )
+        lease = normalized_lease(ttl)
         self.transfer_endpoints.advertise(
             self.server_id,
             endpoints,
-            ttl=ttl,
-            now=now,
+            ttl=lease,
+            now=current,
         )
-        return {
-            "schema_version": 1,
+        return signed_advertisement({
+            "schema_version": ADVERTISEMENT_SCHEMA_VERSION,
             "node_id": self.server_id,
             "identity": self.node_key.public_record(),
             "client_control_endpoint": endpoints.client_control_endpoint,
             "client_data_endpoint": endpoints.client_data_endpoint,
             "peer_control_endpoint": endpoints.peer_control_endpoint,
             "peer_data_endpoint": endpoints.peer_data_endpoint,
-            "lease_seconds": max(5.0, min(300.0, float(ttl))),
-        }
+            "issued_at": current,
+            "lease_seconds": lease,
+            "nonce": secrets.token_urlsafe(24),
+        }, node_key=self.node_key)
 
     def accept_transfer_node_advertisement(
         self,
@@ -101,23 +118,15 @@ class TransferStateMixin:
         *,
         now: float | None = None,
     ):
-        if not isinstance(value, dict) or value.get("schema_version") != 1:
-            raise ValueError("unsupported transfer node advertisement")
-        node_id = str(value.get("node_id") or "").strip()
-        identity = value.get("identity")
-        if not node_id or not isinstance(identity, dict):
-            raise ValueError("transfer node identity is required")
-        if str(identity.get("node_id") or "").strip() != node_id:
-            raise ValueError("transfer node identity does not match advertisement")
+        current = time.time() if now is None else float(now)
+        verified = verify_advertisement(value, now=current)
         endpoints = endpoints_from_advertisement(value)
-        try:
-            ttl = float(value.get("lease_seconds") or 30.0)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("transfer node lease is invalid") from exc
-        self.node_identities.enroll(identity)
-        return self.transfer_endpoints.advertise(
-            node_id,
+        self.node_identities.enroll(verified.identity, now=current)
+        return self.transfer_endpoints.accept_advertisement(
+            verified.node_id,
             endpoints,
-            ttl=ttl,
-            now=now,
+            nonce=verified.nonce,
+            issued_at=verified.issued_at,
+            expires_at=verified.expires_at,
+            now=current,
         )

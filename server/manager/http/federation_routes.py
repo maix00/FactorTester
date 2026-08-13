@@ -11,11 +11,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from server.jobs.artifact_data_plane import (
-    artifact_data_endpoint,
-    artifact_data_port,
-    artifact_data_url,
-)
 from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.responses import json_response
 
@@ -54,7 +49,7 @@ class FederationRoutesMixin:
                 raise ValueError("transfer node advertisement is required")
             self.state.accept_transfer_node_advertisement(advertisement)
             value = self.state.federation_registry.register(payload)
-        except (TypeError, ValueError) as exc:
+        except (PermissionError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return
         public = {
@@ -78,14 +73,8 @@ class FederationRoutesMixin:
         if advertised_endpoint:
             try:
                 federation_config = self.state.federation_config()
-                artifact_endpoint = str(
-                    os.environ.get("FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT")
-                    or federation_config.get("artifact_endpoint")
-                    or ""
-                ).strip().rstrip("/")
                 peer = self.state.peer_registration_payload(
                     advertised_endpoint,
-                    artifact_endpoint=artifact_endpoint,
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
@@ -231,95 +220,6 @@ class FederationRoutesMixin:
         json_response(self, {
             "success": True,
             "reports": self.state.sync_federation_once(),
-        })
-
-    def _federation_artifact_ticket(self) -> None:
-        """Mint a ticket for this Manager's host-local 7997 data plane."""
-        if not self._has_federation_proxy_token():
-            json_response(
-                self,
-                {"success": False, "error": "federation proxy is unauthorized"},
-                401,
-            )
-            return
-        try:
-            payload = self._json_body(64 * 1024)
-            server_id = str(payload.get("server_id") or "").strip()
-            job_id = str(payload.get("job_id") or "").strip()
-            name = str(payload.get("name") or "").strip()
-            principal = str(payload.get("principal") or "").strip()
-            preview = bool(payload.get("preview"))
-            archive = bool(payload.get("archive"))
-            if server_id != self.state.server_id:
-                raise ValueError("federation target server_id does not match")
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", job_id):
-                raise ValueError("job_id is invalid")
-            if archive:
-                name = "__archive__"
-            elif not name or "/" in name or "\\" in name or ".." in name:
-                raise ValueError("artifact name is invalid")
-            if not principal:
-                raise ValueError("federation principal is required")
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
-            return
-        from server.jobs.repository import JobRepository
-
-        repository = JobRepository()
-        job = repository.load(job_id)
-        if job is None:
-            json_response(self, {"success": False, "error": "job was not found"}, 404)
-            return
-        if principal != "__public_jobs__" and job.owner != principal:
-            json_response(self, {"success": False, "error": "job was not found"}, 404)
-            return
-        if not archive:
-            metadata = repository.load_artifact(
-                job_id=job_id,
-                name=name,
-                owner=job.owner,
-            )
-            if metadata is None or str(metadata.get("state") or "") != "active":
-                json_response(self, {"success": False, "error": "artifact was not found"}, 404)
-                return
-            if (
-                principal == "__public_jobs__"
-                and str(metadata.get("artifact_role") or "output") == "input"
-            ):
-                json_response(self, {"success": False, "error": "登录后才能查看运行输入"}, 401)
-                return
-        endpoint = str(
-            os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or ""
-        ).strip().rstrip("/")
-        if not endpoint:
-            host = str(self.headers.get("Host") or "").strip()
-            if host:
-                endpoint = f"http://{host}"
-        try:
-            data_endpoint = artifact_data_endpoint(
-                endpoint=endpoint or "http://127.0.0.1:7998",
-                port=artifact_data_port(),
-            )
-            ticket = self.state.artifact_ticket_codec().issue(
-                owner=job.owner,
-                job_id=job_id,
-                name=name,
-                server_id=self.state.server_id,
-                preview=preview,
-            )
-        except (OSError, ValueError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 503)
-            return
-        json_response(self, {
-            "success": True,
-            "ticket": ticket,
-            "data_endpoint": data_endpoint,
-            "url": artifact_data_url(
-                data_endpoint,
-                job_id=job_id,
-                name=name,
-                ticket=ticket,
-            ),
         })
 
     def _federation_proxy(self) -> None:

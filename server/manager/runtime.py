@@ -233,7 +233,6 @@ class ManagerState(
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.capability_path = self.state_root / "manager-capability.key"
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
-        self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
         self._init_transfer_state()
         self._init_transfer_access()

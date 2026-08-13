@@ -189,7 +189,7 @@ final class TestJobsService {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(
             configuration: configuration,
-            delegate: SelfSignedTrustDelegate(),
+            delegate: SelfSignedTrustDelegate(rejectsRedirects: true),
             delegateQueue: nil
         )
     }()

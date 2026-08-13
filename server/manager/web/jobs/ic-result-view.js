@@ -24,8 +24,8 @@
       || names.has("ic_quantile_portfolio_statistics_data");
   }
 
-  function previewPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}/preview${portQuery}`;
+  function artifactPath(jobID, artifact, portQuery) {
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
   }
 
   function configurationPayload(configuration) {
@@ -54,7 +54,7 @@
   async function payloads(context, artifacts, jobID, portQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
       const response = await FTJobArtifacts.fetch(
-        context, previewPath(jobID, artifact, portQuery),
+        context, artifactPath(jobID, artifact, portQuery),
       );
       return [artifact.name, JSON.parse(await response.text())];
     }));

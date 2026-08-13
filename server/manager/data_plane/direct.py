@@ -1,4 +1,4 @@
-"""Directly pull a reachable source 7997 stream without local persistence."""
+"""Pull a source node's WireGuard 17997 stream without local persistence."""
 
 from __future__ import annotations
 

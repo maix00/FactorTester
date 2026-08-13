@@ -119,13 +119,14 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
             assert response.read() == raw
 
 
-def test_artifact_transfer_access_requires_manager_session(tmp_path) -> None:
+def test_public_artifact_transfer_access_requires_manager_session(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "repo",
         "python",
         server_id="local-feat",
         state_root=tmp_path / "manager-state",
     )
+    state.require_login_for_ui = True
     manager.Handler.state = state
     server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
 
@@ -137,6 +138,112 @@ def test_artifact_transfer_access_requires_manager_session(tmp_path) -> None:
         )
         with pytest.raises(HTTPError) as denied:
             urlopen(request)
+
+    assert denied.value.code == 401
+
+
+def test_local_unprotected_manager_uses_anonymous_transfer_principal(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="feat",
+        branch="feat",
+        revision="test",
+        port=8141,
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    monkeypatch.setattr(
+        state,
+        "route_json",
+        lambda *_args, **_values: {
+            "success": True,
+            "artifacts": [{
+                "name": "result.bin",
+                "file_name": "result.bin",
+                "content_type": "application/octet-stream",
+                "size_bytes": 6,
+                "content_hash": hashlib.sha256(b"result").hexdigest(),
+                "state": "active",
+            }],
+        },
+    )
+
+    def prepare(**values):
+        captured.update(values)
+        return {
+            "url": "http://127.0.0.1:7997/v1/transfers/a/download",
+            "bearer": "capability",
+            "expected_size": 6,
+        }
+
+    monkeypatch.setattr(state, "prepare_artifact_download", prepare)
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        with urlopen(Request(
+            endpoint + "/api/jobs/job-1/artifacts/result.bin/access?port=8141",
+            data=b"",
+            method="POST",
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert captured["principal"] == "__public_jobs__"
+
+
+def test_local_unprotected_manager_does_not_expose_input_artifact(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="feat",
+        branch="feat",
+        revision="test",
+        port=8141,
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    monkeypatch.setattr(
+        state,
+        "route_json",
+        lambda *_args, **_values: {
+            "success": True,
+            "artifacts": [{
+                "name": "factor_source.py",
+                "file_name": "factor_source.py",
+                "artifact_role": "input",
+                "content_type": "text/x-python",
+                "size_bytes": 6,
+                "content_hash": hashlib.sha256(b"secret").hexdigest(),
+                "state": "active",
+            }],
+        },
+    )
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        with pytest.raises(HTTPError) as denied:
+            urlopen(Request(
+                endpoint
+                + "/api/jobs/job-1/artifacts/factor_source.py/access?port=8141",
+                data=b"",
+                method="POST",
+            ))
 
     assert denied.value.code == 401
 
