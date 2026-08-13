@@ -247,6 +247,19 @@ def main(
                     print(f"  IPv6 loopback unavailable: {exc}")
 
             print(runtime_module.Handler.state.start_data_plane())
+            for restored in runtime_module.Handler.state.restore_desired_services():
+                status = str(restored.get("status") or "")
+                message = (
+                    "Manager service intent "
+                    f"{status}: {restored.get('path')}:{restored.get('port')}"
+                )
+                if status == "error":
+                    print(
+                        f"{message} ({restored.get('error')})",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(message)
             runtime_module.Handler.state.start_configured_federation()
             scheme = "https" if tls_context is not None else "http"
             url = f"{scheme}://localhost:{args.port}/"

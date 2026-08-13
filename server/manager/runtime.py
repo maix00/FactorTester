@@ -74,6 +74,7 @@ from server.manager.storage.control_db import control_store_from_env
 from server.manager.storage.control_database_settings import (
     ControlDatabaseSettingsStore,
 )
+from server.manager.storage.service_intents import ServiceIntentStore
 from server.manager.http.security import (
     configured_tls_paths,
     enable_server_tls,
@@ -238,6 +239,9 @@ class ManagerState(
         )
         self.log_dir = self.state_root / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.service_intents = ServiceIntentStore(
+            self.state_root / "desired-services.json",
+        )
         self.capability_path = self.state_root / "manager-capability.key"
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
         self.release_root = self.state_root / "client-releases"
