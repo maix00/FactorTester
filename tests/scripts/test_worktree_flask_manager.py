@@ -1642,6 +1642,18 @@ def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> N
     assert result[0].port == 8000
 
 
+def test_service_load_projects_live_daemon_health() -> None:
+    assert manager.ManagerState._load_from_health({
+        "active_executors": 2,
+        "active_planners": 1,
+        "queue_depth": 4,
+    }) == {
+        "load": 10.0,
+        "active_jobs": 3,
+        "queue_depth": 4,
+    }
+
+
 def test_detached_manager_exposes_configured_fixed_service_instance(
     tmp_path, monkeypatch,
 ) -> None:

@@ -79,6 +79,7 @@ class RoutingStateMixin:
             "active_jobs": active,
             "queue_depth": queued,
         }
+        return payload
 
     def local_service_load(self, port: int) -> dict[str, object]:
         health: dict[str, object] | None = None
