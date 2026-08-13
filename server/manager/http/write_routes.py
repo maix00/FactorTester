@@ -57,6 +57,12 @@ class WriteRoutesMixin:
         if parsed.path == "/api/federation/node/control/ack":
             self._node_control_ack()
             return
+        if parsed.path == "/api/federation/transfers/context":
+            self._transfer_context_import()
+            return
+        if parsed.path == "/api/federation/transfers/origin-ticket":
+            self._transfer_origin_ticket()
+            return
         if parsed.path == "/api/federation/sync/events":
             self._federation_sync_events()
             return

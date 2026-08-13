@@ -48,7 +48,7 @@ class NodeControlClient:
         reachable_from: tuple[str, ...],
         timeout: float,
     ) -> list[dict[str, object]]:
-        value = self._signed_json(
+        value = self.signed_json(
             "/api/federation/node/control/poll",
             {
                 "after_sequence": max(0, int(after_sequence)),
@@ -64,7 +64,7 @@ class NodeControlClient:
         return [item for item in commands if isinstance(item, dict)]
 
     def acknowledge(self, command_id: str) -> None:
-        self._signed_json(
+        self.signed_json(
             "/api/federation/node/control/ack",
             {"command_id": str(command_id or "").strip()},
         )
@@ -128,7 +128,7 @@ class NodeControlClient:
         if response is not None:
             response.close()
 
-    def _signed_json(
+    def signed_json(
         self,
         path: str,
         payload: dict[str, object],

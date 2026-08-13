@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from server.manager.domain.federation_transport import FederationTransport
 from server.manager.data_plane.relay import RelayRegistry
 from server.manager.storage.transfers import (
     TransferAttemptStore,
@@ -30,6 +31,9 @@ class DataPlaneRuntime:
         transfer_database: str | Path,
         staging_root: str | Path,
         origin_resolver: Callable[[TransferRecord], Path],
+        origin_ticket_provider: Callable[[TransferContext], str] | None = None,
+        source_endpoint_provider: Callable[[TransferContext], str] | None = None,
+        transport: FederationTransport | None = None,
         relay_buffer_bytes: int = 4 * 1024 * 1024,
         relay_timeout: float = 30.0,
     ) -> None:
@@ -43,6 +47,9 @@ class DataPlaneRuntime:
         self.staging_root = Path(staging_root).expanduser().resolve()
         self.staging_root.mkdir(parents=True, exist_ok=True)
         self.origin_resolver = origin_resolver
+        self.origin_ticket_provider = origin_ticket_provider
+        self.source_endpoint_provider = source_endpoint_provider
+        self.transport = transport or FederationTransport()
         self.relays = RelayRegistry(
             max_buffer_bytes=relay_buffer_bytes,
             rendezvous_timeout=relay_timeout,

@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 from server.manager.data_plane.destination import receive_destination
+from server.manager.data_plane.direct import serve_direct_pull
 from server.manager.data_plane.integrity import IntegrityError
 from server.manager.data_plane.origin import serve_local_consumer, serve_origin
 from server.manager.data_plane.relay import RelayConflict, RelayTimeout
@@ -46,6 +47,11 @@ class DataPlaneHandler(BaseHTTPRequestHandler):
                 and context.attempt.mode is TransferMode.LOCAL
             ):
                 handler = serve_local_consumer
+            elif (
+                route.action == "consumer"
+                and context.attempt.mode is TransferMode.DIRECT_PULL
+            ):
+                handler = serve_direct_pull
             handler(self, self.server.runtime, context)
         except PermissionError as exc:
             json_error(self, 403, str(exc))

@@ -32,6 +32,7 @@ from server.manager.http.control_database_routes import ControlDatabaseRoutesMix
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.federation.node_control import NodeControlRoutesMixin
+from server.manager.http.federation.transfers import TransferFederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
@@ -338,6 +339,7 @@ class Handler(
     ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
     NodeControlRoutesMixin,
+    TransferFederationRoutesMixin,
     CatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,

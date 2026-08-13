@@ -10,11 +10,13 @@ from server.manager.storage.transfers import (
     TransferInboxStore,
     TransferStore,
     TransferTicketStore,
+    TransferReplicaStore,
 )
 from server.manager.transfers.node_hub import NodeControlHub
 from server.manager.transfers.node_agent import NodeAgent
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.security import NodeAuthenticator
+from server.manager.transfers.origin_tickets import OriginTicketIssuer
 
 
 class TransferStateMixin:
@@ -29,6 +31,7 @@ class TransferStateMixin:
         self.transfer_attempts = TransferAttemptStore(**common)
         self.transfer_inbox = TransferInboxStore(**common)
         self.transfer_tickets = TransferTicketStore(**common)
+        self.transfer_replicas = TransferReplicaStore(**common)
         self.node_identities = NodeIdentityRegistry(**common)
         self.node_commands = NodeCommandQueue(**common)
         self.node_presence = NodePresenceStore(**common)
@@ -42,6 +45,11 @@ class TransferStateMixin:
             self.node_commands,
             self.node_presence,
             manager_id=self.server_id,
+        )
+        self.origin_ticket_issuer = OriginTicketIssuer(
+            manager_id=self.server_id,
+            replicas=self.transfer_replicas,
+            tickets=self.transfer_tickets,
         )
         self.node_agent: NodeAgent | None = None
 
