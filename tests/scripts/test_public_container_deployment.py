@@ -262,6 +262,17 @@ def test_public_verifier_loads_database_url_from_runtime_secret() -> None:
     assert "psycopg.connect(os.environ[\"FACTORTESTER_CONTROL_DATABASE_URL\"])" in script
 
 
+def test_public_verifier_migrates_and_checks_control_database_schema() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "control_store_from_env" in script
+    assert "control_store.ensure_schema()" in script
+    assert "CONTROL_DATABASE_SCHEMA_VERSION" in script
+    assert "select coalesce(max(version), 0) from control_schema_migrations" in script
+
+
 def test_public_verifier_checks_real_host_port_bindings() -> None:
     script = (
         ROOT / "scripts" / "server" / "factortester_public_container.sh"
