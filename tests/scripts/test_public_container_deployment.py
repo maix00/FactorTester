@@ -187,3 +187,15 @@ def test_public_compose_exposes_reproducible_package_mirror_inputs() -> None:
     assert "PIP_INDEX_URL" in app_args
     assert "DEBIAN_BOOTSTRAP_MIRROR" in database_args
     assert "DEBIAN_BOOTSTRAP_SECURITY_MIRROR" in database_args
+
+
+def test_postgres_image_provides_sysctl_used_by_its_entrypoint() -> None:
+    dockerfile = (DEPLOYMENT / "PostgreSQL.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    entrypoint = (DEPLOYMENT / "postgres-entrypoint.sh").read_text(
+        encoding="utf-8",
+    )
+
+    assert "sysctl" in entrypoint
+    assert re.search(r"(?m)^\s+procps \\?$", dockerfile)

@@ -22,6 +22,7 @@ RUN sed -i \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
         iproute2 \
         iptables \
+        procps \
         wireguard-tools \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 0700 /etc/wireguard \
