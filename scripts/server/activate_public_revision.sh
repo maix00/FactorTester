@@ -10,7 +10,8 @@ release_root="$container_root/releases"
 release_path="$release_root/$revision"
 next_env="$production_env.next-$revision"
 rollback_env="$production_env.before-$revision"
-deployment_log="$container_root/deployments.log"
+deployment_log="$git_root/deployments.log"
+publish_lock="$git_root/.publish.lock"
 
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || {
   echo "revision must be a full Git SHA" >&2
@@ -20,7 +21,7 @@ deployment_log="$container_root/deployments.log"
   echo "FACTORTESTER_PUBLIC_RELEASE_RETENTION must be a positive integer" >&2
   exit 2
 }
-for command in awk date docker find flock git install sed sudo; do
+for command in awk chmod date docker find flock git install sed sudo touch; do
   command -v "$command" >/dev/null || {
     echo "missing deployment command: $command" >&2
     exit 2
@@ -106,11 +107,14 @@ cleanup_old_application_releases() {
 }
 
 install -d "$release_root"
-exec 9>"$container_root/.publish.lock"
+exec 9>"$publish_lock"
 flock -n 9 || {
   echo "another public release is in progress" >&2
   exit 75
 }
+chmod 0600 "$publish_lock"
+touch "$deployment_log"
+chmod 0600 "$deployment_log"
 
 if [[ ! -e "$release_path/.git" ]]; then
   git --git-dir="$git_root/repo.git" worktree add \
