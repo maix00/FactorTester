@@ -12,6 +12,7 @@ from server.manager.domain.federation import (
     ServiceRoute,
     TargetUnavailable,
 )
+from server.manager.network_endpoints import server_endpoints
 from tests.federation_fixtures import federation_registration as _registration
 
 def test_federation_config_public_view_redacts_registration_token(tmp_path) -> None:
@@ -147,28 +148,129 @@ def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monke
     assert state.route_for().port == 8000
 
 
-def test_one_bootstrap_response_discovers_multiple_federated_nodes(tmp_path) -> None:
+def _federated_state(tmp_path, server_id: str, octet: int):
+    root = tmp_path / server_id
+    root.mkdir()
     state = manager.ManagerState(
-        tmp_path,
+        root,
         "python",
         server_role="feat",
-        server_id="node-a",
-        state_root=tmp_path / "manager-state",
+        server_id=server_id,
+        state_root=root / "manager-state",
     )
-    bootstrap = _registration("node-b", latency_ms=100, load=2)
-    third = _registration("node-c", latency_ms=40, load=1)
-    self_echo = _registration("node-a", latency_ms=1, load=0)
+    state.configure_transfer_endpoints(server_endpoints(
+        client_control_endpoint=f"https://{server_id}.example:7998",
+        client_data_endpoint=f"https://{server_id}.example:7997",
+        overlay_bind_address=f"10.77.0.{octet}",
+    ))
+    return state
 
-    state.accept_federation_catalog({
+
+def _catalog_entry(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in {"endpoint", "proxy_token", "latency_ms"}
+    }
+
+
+def test_one_bootstrap_discovers_nodes_then_registers_them_directly(tmp_path) -> None:
+    state = _federated_state(tmp_path, "node-a", 10)
+    bootstrap = _federated_state(tmp_path, "node-b", 11)
+    third = _federated_state(tmp_path, "node-c", 12)
+    bootstrap_payload = bootstrap.registration_payload(
+        "https://node-b.example:7998",
+    )
+    third_payload = third.registration_payload(
+        "https://node-c.example:7998",
+    )
+
+    direct_urls = state.accept_federation_catalog({
         "success": True,
         "bootstrap_server_id": "node-b",
-        "nodes": [bootstrap, third, self_echo],
+        "peer": bootstrap_payload,
+        "nodes": [
+            _catalog_entry(bootstrap_payload),
+            _catalog_entry(third_payload),
+        ],
         "_roundtrip_ms": 7,
     })
 
-    routes = state.federation_registry.routes(include_offline=True)
-    assert {route.server_id for route in routes} == {"node-b", "node-c"}
-    assert state.federation_registry.find(server_id="node-b").latency_ms == 7
-    # A bootstrap's RTT to another node is not this node's RTT; transitive
-    # discovery must not turn that foreign measurement into local routing data.
-    assert state.federation_registry.find(server_id="node-c").latency_ms is None
+    registered = state.federation_registry.servers(include_offline=True)
+    assert {item["server_id"] for item in registered} == {"node-b"}
+    assert state.federation_registry.describe("node-b")["latency_ms"] == 7
+    assert state.federation_registry.describe("node-c") is None
+    assert direct_urls == (
+        "http://10.77.0.12:17998/api/federation/register",
+    )
+
+
+def test_replayed_catalog_does_not_refresh_direct_route_lease(tmp_path) -> None:
+    receiver = _federated_state(tmp_path, "node-a", 10)
+    sender = _federated_state(tmp_path, "node-b", 11)
+    peer = sender.registration_payload("https://node-b.example:7998")
+    response = {
+        "bootstrap_server_id": "node-b",
+        "peer": peer,
+        "nodes": [],
+        "_roundtrip_ms": 7,
+    }
+
+    receiver.accept_federation_catalog(response)
+    receiver.federation_registry._servers["node-b"]["last_seen"] = 1.0
+    receiver.accept_federation_catalog(response)
+
+    assert receiver.federation_registry.describe("node-b")["last_seen"] == 1.0
+
+
+def test_discovered_route_authenticates_only_when_selected(tmp_path) -> None:
+    state = _federated_state(tmp_path, "node-a", 10)
+    bootstrap = _federated_state(tmp_path, "node-b", 11)
+    third = _federated_state(tmp_path, "node-c", 12)
+    bootstrap_payload = bootstrap.registration_payload(
+        "https://node-b.example:7998",
+    )
+    third_payload = third.registration_payload(
+        "https://node-c.example:7998",
+    )
+    third_payload["ports"] = [{
+        "port": 8141,
+        "branch": "fix/issue-141-demo",
+        "revision": "c" * 40,
+        "features": ["research"],
+        "online": True,
+        "load": {"load": 1, "active_jobs": 0, "queue_depth": 1},
+    }]
+
+    class LazyAnnouncer:
+        calls: list[tuple[str, str]] = []
+
+        def activate(self, server_id: str, registration_url: str) -> None:
+            self.calls.append((server_id, registration_url))
+            state.accept_federation_registration(
+                third_payload,
+                observed_latency_ms=9,
+            )
+
+    announcer = LazyAnnouncer()
+    state.federation_announcer = announcer
+    state.accept_federation_catalog({
+        "bootstrap_server_id": "node-b",
+        "peer": bootstrap_payload,
+        "nodes": [_catalog_entry(third_payload)],
+        "_roundtrip_ms": 7,
+    })
+
+    assert state.federation_registry.describe("node-c") is None
+    assert state.federation_discovered_nodes()[0]["authenticated"] is False
+    assert announcer.calls == []
+
+    route = state.route_for(server_id="node-c", port=8141)
+
+    assert route.server_id == "node-c"
+    assert route.port == 8141
+    assert route.latency_ms == 9
+    assert announcer.calls == [(
+        "node-c",
+        "http://10.77.0.12:17998/api/federation/register",
+    )]

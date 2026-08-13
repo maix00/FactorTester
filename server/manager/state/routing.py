@@ -10,17 +10,11 @@ import time
 from pathlib import Path
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.domain.federation import (
-    FederationAnnouncer,
     ServiceRoute,
     TargetNotFound,
     TargetUnavailable,
 )
 from server.manager.http.gateway import GatewayResponse
-from server.manager.services.network_info import (
-    local_internal_addresses,
-    public_manager_targets,
-    server_network_info as build_server_network_info,
-)
 from server.manager.state.models import Worktree
 
 
@@ -422,13 +416,24 @@ class RoutingStateMixin:
             return self._local_route(port=int(port), online=True)
 
         if server_id or port is not None or branch or feature:
-            return self.federation_registry.find(
-                server_id=server_id,
-                port=port,
-                branch=branch,
-                feature=feature,
-                online_only=True,
-            )
+            try:
+                return self.federation_registry.find(
+                    server_id=server_id,
+                    port=port,
+                    branch=branch,
+                    feature=feature,
+                    online_only=True,
+                )
+            except (TargetNotFound, TargetUnavailable) as original:
+                activated = self._activate_discovered_route(
+                    server_id=server_id,
+                    port=port,
+                    branch=branch,
+                    feature=feature,
+                )
+                if activated is not None:
+                    return activated
+                raise original
 
         peer_routes = self.federation_registry.routes(include_offline=True)
         if peer_routes:
@@ -442,7 +447,42 @@ class RoutingStateMixin:
         preferred = self.preferred_service_port()
         if preferred is not None:
             return self.route_for(port=preferred)
+        activated = self._activate_discovered_route()
+        if activated is not None:
+            return activated
         raise TargetNotFound("no online service target")
+
+    def _activate_discovered_route(
+        self,
+        *,
+        server_id: str = "",
+        port: int | None = None,
+        branch: str = "",
+        feature: str = "",
+    ) -> ServiceRoute | None:
+        candidates = self.federation_directory.candidates(
+            server_id=server_id,
+            port=port,
+            branch=branch,
+            feature=feature,
+        )
+        failures: list[str] = []
+        for node in candidates:
+            node_id = str(node.get("server_id") or "")
+            try:
+                self.activate_federated_node(node_id)
+                return self.federation_registry.find(
+                    server_id=node_id,
+                    port=port,
+                    branch=branch,
+                    feature=feature,
+                    online_only=True,
+                )
+            except (TargetNotFound, TargetUnavailable) as exc:
+                failures.append(str(exc))
+        if failures:
+            raise TargetUnavailable("; ".join(failures))
+        return None
 
     @staticmethod
     def route_selection_key(route: ServiceRoute) -> tuple[float, float, int, str, int]:
@@ -502,298 +542,6 @@ class RoutingStateMixin:
                 principal=principal,
             )
         return self.service_json(route.port, path, principal)
-
-    def registration_payload(
-        self,
-        endpoint: str,
-        *,
-        ports: tuple[int, ...] | list[int] | set[int] | None = None,
-    ) -> dict[str, object]:
-        routes = self.local_service_routes(include_offline=True)
-        online_ports = {
-            route.port for route in routes if route.online
-        }
-        if ports is not None:
-            # Preserve configured attachment ports, while also advertising
-            # every service that is currently online.  New issue worktrees
-            # therefore become visible without editing a hard-coded list.
-            online_ports.update(int(value) for value in ports)
-        routes = [
-            route for route in routes
-            if route.port in online_ports and route.online
-        ]
-        payload = {
-            "schema_version": 1,
-            "server_id": self.server_id,
-            "role": self.server_role,
-            "branch": self.fixed_branch or (routes[0].branch if routes else ""),
-            "revision": self._revision_for_path(),
-            "features": list(self.server_features),
-            "endpoint": str(endpoint).rstrip("/"),
-            "proxy_token": self.federation_proxy_token(),
-            "load": self.local_server_load(routes),
-            "latency_ms": self.federation_bootstrap_latency_ms,
-            "ports": [
-                {
-                    "port": route.port,
-                    "branch": route.branch,
-                    "revision": route.revision,
-                    "features": list(route.features),
-                    "online": route.online,
-                    "load": {
-                        "load": route.load,
-                        "active_jobs": route.active_jobs,
-                        "queue_depth": route.queue_depth,
-                    },
-                }
-                for route in routes
-            ],
-        }
-        if self._transfer_server_endpoints is not None:
-            payload["transfer_node"] = self.transfer_node_advertisement()
-        return payload
-
-    @staticmethod
-    def local_server_load(routes: list[ServiceRoute]) -> dict[str, object]:
-        return {
-            "load": float(sum(route.load for route in routes)),
-            "active_jobs": sum(route.active_jobs for route in routes),
-            "queue_depth": sum(route.queue_depth for route in routes),
-        }
-
-    def advertised_federation_ports(self) -> tuple[int, ...]:
-        """Return the currently online service ports for peer discovery."""
-        return tuple(sorted(
-            route.port
-            for route in self.local_service_routes(include_offline=False)
-            if route.online
-        ))
-
-    def federation_registration_payload(
-        self,
-        endpoint: str,
-    ) -> dict[str, object]:
-        ports = self.advertised_federation_ports()
-        return self.registration_payload(
-            endpoint,
-            ports=ports,
-        )
-
-    def peer_registration_payload(
-        self,
-        endpoint: str,
-    ) -> dict[str, object]:
-        """Compatibility alias for schema-v1 two-node callers."""
-        return self.federation_registration_payload(endpoint)
-
-    def accept_federation_catalog(self, response: dict[str, object]) -> None:
-        """Merge a bootstrap response into this node's federated directory.
-
-        ``peer`` remains accepted for the two-node v1 response.  The canonical
-        response is ``nodes``: a set keyed by stable ``server_id``.  Only the
-        responding bootstrap receives this request's measured RTT; latency
-        copied from another node would not describe a route from this node.
-        """
-        try:
-            self.federation_bootstrap_latency_ms = max(
-                0.0, float(response.get("_roundtrip_ms") or 0.0),
-            )
-        except (TypeError, ValueError):
-            self.federation_bootstrap_latency_ms = None
-        raw_nodes = response.get("nodes")
-        plural_response = isinstance(raw_nodes, list)
-        nodes = (
-            [item for item in raw_nodes if isinstance(item, dict)]
-            if plural_response
-            else [response.get("peer")]
-        )
-        bootstrap_server_id = str(
-            response.get("bootstrap_server_id") or ""
-        ).strip()
-        for candidate in nodes:
-            if not isinstance(candidate, dict):
-                continue
-            node_id = str(candidate.get("server_id") or "").strip()
-            if not node_id or node_id == self.server_id:
-                continue
-            node = dict(candidate)
-            measured_here = (
-                not plural_response or node_id == bootstrap_server_id
-            )
-            node["latency_ms"] = (
-                self.federation_bootstrap_latency_ms
-                if measured_here else None
-            )
-            try:
-                self.federation_registry.register(node)
-            except (TypeError, ValueError) as exc:
-                print(
-                    f"[federation] node registration was invalid: {exc}",
-                    flush=True,
-                )
-                continue
-            advertisement = node.get("transfer_node")
-            if isinstance(advertisement, dict):
-                try:
-                    self.accept_transfer_node_advertisement(advertisement)
-                except (PermissionError, TypeError, ValueError) as exc:
-                    print(
-                        "[federation] node transfer endpoints were invalid: "
-                        f"{exc}",
-                        flush=True,
-                    )
-
-    def accept_peer_registration(self, response: dict[str, object]) -> None:
-        """Compatibility alias for schema-v1 two-node callers."""
-        self.accept_federation_catalog(response)
-        # A peer heartbeat only updates service discovery.  Task summaries are
-        # fetched on demand from the cross-server task-list tab.
-
-    def start_federation_announcer(
-        self,
-        *,
-        bootstrap_url: str,
-        registration_token: str,
-        endpoint: str,
-        ports: tuple[int, ...] | list[int] | set[int] | None = None,
-        interval: float = 10.0,
-    ) -> None:
-        if self.federation_announcer is not None:
-            return
-        self.federation_sync.set_interval(interval)
-        selected_ports = (
-            None
-            if ports is None
-            else tuple(sorted({int(value) for value in ports}))
-        )
-        self.federation_announcer = FederationAnnouncer(
-            bootstrap_url=bootstrap_url,
-            registration_token=registration_token,
-            payload_factory=lambda: self.registration_payload(
-                endpoint,
-                ports=selected_ports,
-            ),
-            response_handler=self.accept_federation_catalog,
-            transport=self.federation_gateway.transport,
-            interval=interval,
-        )
-        self.federation_announcer.start()
-        # Do not start a background task projection worker for every attach.
-
-    def stop_federation_announcer(self) -> None:
-        announcer = self.federation_announcer
-        self.federation_announcer = None
-        if announcer is not None:
-            announcer.stop()
-
-    def start_federation_sync(self) -> None:
-        """Start event synchronization over the existing 7998 control plane."""
-        self.federation_sync.start()
-
-    def stop_federation_sync(self) -> None:
-        self.federation_sync.stop()
-
-    def sync_federation_once(self) -> list[dict[str, object]]:
-        """Run one synchronous control-event pull for an admin/manual action."""
-        return self.federation_sync.sync_once()
-
-    def federation_config(self, *, public: bool = False) -> dict[str, object]:
-        value = self.federation_config_store.load()
-        return (
-            self.federation_config_store.public(value)
-            if public else value
-        )
-
-    def federation_config_status(self) -> dict[str, object]:
-        value = self.federation_config()
-        selected = {int(item) for item in value.get("ports") or []}
-        available = self.local_service_routes(include_offline=True)
-        targets = [
-            {
-                **route.as_dict(),
-                "selected": route.port in selected,
-            }
-            for route in available
-        ]
-        return {
-            "enabled": bool(value.get("enabled")),
-            "active": self.federation_announcer is not None,
-            "sync": self.federation_sync.status(),
-            "role": self.server_role,
-            "server_id": self.server_id,
-            "targets": targets,
-        }
-
-    def public_device_targets(self) -> list[dict[str, object]]:
-        """Compatibility seam for the Manager's public target projection."""
-        return public_manager_targets(
-            self.federation_registry,
-            source_server_id=self.server_id,
-        )
-
-    @staticmethod
-    def local_internal_addresses() -> list[str]:
-        """Compatibility seam for server-provided local address discovery."""
-        return local_internal_addresses()
-
-    def server_network_info(self, *, request_endpoint: str = "") -> dict[str, object]:
-        """Compatibility seam for the server-provided network projection."""
-        return build_server_network_info(
-            registry=self.federation_registry,
-            federation_config=self.federation_config(),
-            source_server_id=self.server_id,
-            server_role=self.server_role,
-            public_server=self.public_server,
-            request_endpoint=request_endpoint,
-        )
-
-    def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
-        candidate = self.federation_config_store.merged(payload)
-        enabled = bool(candidate.get("enabled"))
-        selected = {int(item) for item in candidate.get("ports") or []}
-        available = {
-            route.port for route in self.local_service_routes(include_offline=True)
-        }
-        unknown = sorted(selected - available)
-        if unknown:
-            raise ValueError(
-                "selected service port is not owned by this Manager: "
-                + ", ".join(str(item) for item in unknown)
-            )
-        if enabled:
-            for field in (
-                "bootstrap_url", "public_endpoint", "registration_token",
-            ):
-                if not str(candidate.get(field) or "").strip():
-                    raise ValueError(f"{field} is required when attachment is enabled")
-        self.stop_federation_announcer()
-        self.stop_federation_sync()
-        saved = self.federation_config_store.save(candidate)
-        if enabled:
-            self.start_federation_announcer(
-                bootstrap_url=str(saved["bootstrap_url"]),
-                registration_token=str(saved["registration_token"]),
-                endpoint=str(saved["public_endpoint"]),
-                # An empty selection means automatic discovery: every service
-                # port that is online at heartbeat time is advertised.  The
-                # announcer keeps this list dynamic instead of pinning one
-                # issue worktree such as 8141.
-                ports=tuple(sorted(selected)),
-                interval=float(saved["interval"]),
-            )
-        return {
-            "config": self.federation_config(public=True),
-            "status": self.federation_config_status(),
-        }
-
-    def start_configured_federation(self) -> None:
-        value = self.federation_config()
-        if not bool(value.get("enabled")):
-            return
-        try:
-            self.update_federation_config({})
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"[federation] configured bootstrap is unavailable: {exc}", flush=True)
 
     def service_ports(self) -> list[int]:
         try:

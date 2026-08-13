@@ -53,6 +53,7 @@ from server.manager.storage.job_index import ManagerJobIndex
 from server.manager.storage.sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
 from server.manager.domain.federation import (
     FederatedGateway,
+    FederationNodeDirectory,
     FederationConfigStore,
     FederatedServerRegistry,
     FederationAnnouncer,
@@ -84,6 +85,10 @@ from server.manager.state.models import (
 )
 from server.manager.state.sessions import SessionStateMixin
 from server.manager.state.control_database import ControlDatabaseStateMixin
+from server.manager.state.federation_membership import (
+    FederationMembershipStateMixin,
+)
+from server.manager.state.federation_settings import FederationSettingsStateMixin
 from server.manager.state.routing import RoutingStateMixin
 from server.manager.state.jobs import JobProjectionStateMixin
 from server.manager.state.worktrees import WorktreeStateMixin
@@ -128,6 +133,8 @@ class IPv6LoopbackHTTPServer(ThreadingHTTPServer):
 class ManagerState(
     SessionStateMixin,
     ControlDatabaseStateMixin,
+    FederationMembershipStateMixin,
+    FederationSettingsStateMixin,
     RoutingStateMixin,
     JobProjectionStateMixin,
     WorktreeStateMixin,
@@ -274,6 +281,7 @@ class ManagerState(
         )
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
+        self.federation_directory = FederationNodeDirectory()
         self.federation_sync = FederationSyncWorker(
             server_id=self.server_id,
             job_index=self.job_index,
@@ -283,7 +291,6 @@ class ManagerState(
             ),
             local_refresh=self.refresh_local_job_projection,
         )
-        self.federation_bootstrap_latency_ms: float | None = None
         self._capability_cache: dict[
             tuple[str, int, str], tuple[float, dict[str, object]]
         ] = {}

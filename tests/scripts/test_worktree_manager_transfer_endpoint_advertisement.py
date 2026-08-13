@@ -190,3 +190,4 @@ def test_federation_registration_payload_includes_transfer_node(tmp_path) -> Non
     assert payload["transfer_node"]["peer_control_endpoint"] == (
         "http://10.77.0.10:17998"
     )
+    assert "latency_ms" not in payload

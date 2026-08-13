@@ -37,10 +37,22 @@ compatibility aliases during migration; new configuration is written using
 
 A non-public node configures one current `bootstrap_url` on private port
 17998. The bootstrap is a seed and availability gateway, not a primary server.
-Its authenticated registration response contains an expiring node directory
-keyed by `server_id`, so one registration can discover the third and later
-servers. The legacy singular `peer` response remains temporarily for older
-nodes.
+Its authenticated registration response contains an expiring, credential-free
+node directory keyed by `server_id`, so one registration can discover the
+third and later servers. A directory entry carries signed identity/endpoint
+metadata but never another node's proxy bearer. The legacy singular `peer`
+response remains temporarily for the directly responding node and older
+callers.
+
+Discovery is not authentication. A node does not immediately register with
+every directory entry. When selection of a port, capability, task destination,
+artifact owner, or submission owner first requires a discovered node, the
+requesting Manager verifies the signed directory entry and performs one direct
+registration against that node's 17998 endpoint. Only then does the node enter
+the authenticated route registry. One background scheduler renews the
+configured bootstrap and the direct relationships that have actually been
+activated; it does not create one listener/thread or eager heartbeat per
+discovered node.
 
 Only the response's `bootstrap_server_id` receives the measured request RTT.
 Latency copied from another node is discarded because it was measured from a
@@ -72,8 +84,12 @@ forwarding and never persists or mirrors artifact/submission bytes.
 
 The first-enrollment bundle contains only the selected bootstrap's public key,
 UDP endpoint, the joining node's allocated address, the cluster inventory
-verification key, and a one-time/restricted registration credential. Operators
-do not fill one form field per future peer.
+verification key, and the restricted federation registration credential.
+Issue #185 currently uses one cluster-scoped bearer for direct application
+registration; it is stored owner-only and never appears in discovery output.
+Replacing it with per-node or one-time enrollment credentials is a later
+security migration and is not claimed by this ADR. Operators do not fill one
+form field per future peer.
 
 ### Authority and rotation
 
@@ -92,12 +108,14 @@ independently.
 ## Consequences
 
 - Adding a server does not add a new user-managed settings field.
-- A node can discover and route to more than the one server used to bootstrap.
+- A node can discover more than the one server used to bootstrap, while only
+  nodes selected for actual work become authenticated routes.
 - Public-key metadata can scale to any number of nodes without centralizing
   private keys.
-- Bootstrap loss affects new directory refreshes, but already leased routes
-  and existing WireGuard state continue until expiry; an approved standby can
-  then become the active gateway.
+- Bootstrap loss affects new directory refreshes. Activated direct relations
+  continue renewing independently; never-activated directory records expire
+  without creating credentials. Existing WireGuard state remains independent,
+  and an approved standby can later become the active gateway.
 - Routed private-node traffic may add one public-gateway network hop, but it
   avoids application-layer file relays, duplicate storage, SSH tunnels, and
   inbound NAT requirements.

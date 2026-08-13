@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
+import pytest
 from server.manager import runtime as manager
 from server.manager.domain.federation import FederatedGateway, ServiceRoute
 from server.manager.http.peer_handler import peer_control_handler
@@ -76,6 +78,101 @@ def test_authenticated_bootstrap_returns_multi_node_directory(
     }
     assert value["peer"]["server_id"] == "node-b"
     assert "node-a" not in {item["server_id"] for item in value["nodes"]}
+    assert all("proxy_token" not in item for item in value["nodes"])
+
+    direct_registration_urls = joining.accept_federation_catalog({
+        **value,
+        "_roundtrip_ms": 7,
+    })
+    assert joining.federation_registry.describe("node-b") is not None
+    assert joining.federation_registry.describe("node-c") is None
+    assert direct_registration_urls == (
+        "http://10.77.0.12:17998/api/federation/register",
+    )
+
+
+@pytest.mark.parametrize("tamper", ["server_id", "endpoint"])
+def test_registration_rejects_unsigned_route_identity_before_mutation(
+    tmp_path,
+    tamper,
+) -> None:
+    joining = _federated_state(tmp_path, "node-a", 10)
+    bootstrap = _federated_state(tmp_path, "node-b", 11)
+    bootstrap.federation_registration_token = "cluster-token"
+    payload = joining.registration_payload("https://node-a.example:7998")
+    if tamper == "server_id":
+        payload["server_id"] = "forged-node"
+    else:
+        payload["endpoint"] = "https://forged.example:7998"
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0), peer_control_handler(bootstrap),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+        request = Request(
+            endpoint + "/api/federation/register",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer cluster-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as raised:
+            urlopen(request, timeout=3)
+        assert raised.value.code == 400
+        raised.value.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert bootstrap.federation_registry.describe("node-a") is None
+    assert bootstrap.federation_registry.describe("forged-node") is None
+    with pytest.raises(KeyError):
+        bootstrap.transfer_endpoints.require("node-a")
+
+
+def test_registration_response_uses_signed_public_endpoint_not_host_header(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    joining = _federated_state(tmp_path, "node-a", 10)
+    bootstrap = _federated_state(tmp_path, "node-b", 11)
+    bootstrap.federation_registration_token = "cluster-token"
+    monkeypatch.delenv("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT", raising=False)
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0), peer_control_handler(bootstrap),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+        request = Request(
+            endpoint + "/api/federation/register",
+            data=json.dumps(
+                joining.federation_registration_payload()
+            ).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer cluster-token",
+                "Content-Type": "application/json",
+                "Host": "10.77.0.11:17998",
+            },
+            method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            value = json.load(response)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert value["peer"]["endpoint"] == "https://node-b.example:7998"
+    assert value["peer"]["transfer_node"]["client_control_endpoint"] == (
+        "https://node-b.example:7998"
+    )
 
 def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -> None:
     class ServiceHandler(BaseHTTPRequestHandler):

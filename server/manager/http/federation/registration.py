@@ -6,6 +6,30 @@ import os
 import sys
 from server.manager.http.responses import json_response
 
+
+_CATALOG_FIELDS = {
+    "schema_version",
+    "server_id",
+    "role",
+    "branch",
+    "revision",
+    "features",
+    "ports",
+    "load",
+    "lease_seconds",
+    "transfer_node",
+}
+
+
+def _catalog_entry(value: dict[str, object]) -> dict[str, object]:
+    """Project public discovery metadata without any routing credential."""
+    return {
+        key: item
+        for key, item in value.items()
+        if key in _CATALOG_FIELDS
+    }
+
+
 class FederationRegistrationRoutesMixin:
     def _federation_register(self) -> None:
         if not self._has_federation_registration_token():
@@ -17,11 +41,7 @@ class FederationRegistrationRoutesMixin:
             return
         try:
             payload = self._json_body(512 * 1024)
-            advertisement = payload.get("transfer_node")
-            if not isinstance(advertisement, dict):
-                raise ValueError("transfer node advertisement is required")
-            self.state.accept_transfer_node_advertisement(advertisement)
-            value = self.state.federation_registry.register(payload)
+            value = self.state.accept_federation_registration(payload)
         except (PermissionError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return
@@ -30,27 +50,16 @@ class FederationRegistrationRoutesMixin:
             for key, item in value.items()
             if key not in {"proxy_token"}
         }
-        forwarded_proto = str(
-            self.headers.get("X-Forwarded-Proto") or "http"
-        ).split(",", 1)[0].strip().lower()
-        if forwarded_proto not in {"http", "https"}:
-            forwarded_proto = "http"
         advertised_endpoint = os.environ.get(
             "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT", ""
         ).strip().rstrip("/")
-        if not advertised_endpoint:
-            host = str(self.headers.get("Host") or "").strip()
-            if host:
-                advertised_endpoint = f"{forwarded_proto}://{host}"
         peer = None
-        if advertised_endpoint:
-            try:
-                federation_config = self.state.federation_config()
-                peer = self.state.federation_registration_payload(
-                    advertised_endpoint,
-                )
-            except (OSError, RuntimeError, ValueError) as exc:
-                sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
+        try:
+            peer = self.state.federation_registration_payload(
+                advertised_endpoint,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
         joining_server_id = str(value.get("server_id") or "").strip()
         catalog_by_id: dict[str, dict[str, object]] = {}
         if isinstance(peer, dict):
@@ -75,7 +84,7 @@ class FederationRegistrationRoutesMixin:
             # A joining server configures one bootstrap, while routing remains
             # keyed by stable server_id and can grow beyond the current pair.
             "nodes": [
-                catalog_by_id[node_id]
+                _catalog_entry(catalog_by_id[node_id])
                 for node_id in sorted(catalog_by_id)
             ],
             # This is returned only over the already authenticated

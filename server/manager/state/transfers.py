@@ -119,8 +119,52 @@ class TransferStateMixin:
         now: float | None = None,
     ):
         current = time.time() if now is None else float(now)
+        verified, endpoints = self.validate_transfer_node_advertisement(
+            value,
+            now=current,
+        )
+        return self.install_transfer_node_advertisement(
+            verified,
+            endpoints,
+            now=current,
+        )
+
+    def validate_transfer_node_advertisement(
+        self,
+        value: dict[str, object],
+        *,
+        expected_node_id: str = "",
+        now: float | None = None,
+    ):
+        """Validate a signed advertisement without changing local state."""
+        current = time.time() if now is None else float(now)
         verified = verify_advertisement(value, now=current)
+        expected = str(expected_node_id or "").strip()
+        if expected and verified.node_id != expected:
+            raise ValueError(
+                "federation server_id does not match signed node_id"
+            )
         endpoints = endpoints_from_advertisement(value)
+        try:
+            enrolled = self.node_identities.require(verified.node_id)
+        except KeyError:
+            enrolled = None
+        if (
+            enrolled is not None
+            and enrolled.fingerprint != verified.identity["fingerprint"]
+        ):
+            raise ValueError("node key change requires explicit rotation")
+        return verified, endpoints
+
+    def install_transfer_node_advertisement(
+        self,
+        verified,
+        endpoints: ServerEndpoints,
+        *,
+        now: float,
+    ):
+        """Install one already verified direct-node identity and endpoint."""
+        current = float(now)
         self.node_identities.enroll(verified.identity, now=current)
         return self.transfer_endpoints.accept_advertisement(
             verified.node_id,

@@ -6,6 +6,7 @@ lives in a focused module.
 
 from .announcer import FederationAnnouncer
 from .config import FEDERATION_CONFIG_SCHEMA_VERSION, FederationConfigStore
+from .directory import FederationNodeDirectory
 from .gateway import MAX_ENVELOPE_BYTES, FederatedGateway
 from .models import (
     FederationError,
@@ -29,6 +30,7 @@ __all__ = [
     "FederatedServerRegistry",
     "FederationAnnouncer",
     "FederationConfigStore",
+    "FederationNodeDirectory",
     "FederationError",
     "FederationSyncWorker",
     "ServiceRoute",

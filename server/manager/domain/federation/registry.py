@@ -178,13 +178,18 @@ class FederatedServerRegistry:
         os.replace(temporary, self.path)
 
     def register(self, payload: dict[str, object]) -> dict[str, object]:
-        normalised = _normalise_registration(payload)
+        normalised = self.validate(payload)
         normalised["last_seen"] = time.time()
         normalised["lease_seconds"] = self.lease_seconds
         with self._lock:
             self._servers[str(normalised["server_id"])] = normalised
             self._save()
         return self.describe(str(normalised["server_id"])) or normalised
+
+    @staticmethod
+    def validate(payload: dict[str, object]) -> dict[str, object]:
+        """Validate one direct route without mutating its lease."""
+        return _normalise_registration(payload)
 
     def unregister(self, server_id: str) -> bool:
         with self._lock:
@@ -349,4 +354,3 @@ class FederatedServerRegistry:
         except TargetNotFound:
             return False
         return True
-
