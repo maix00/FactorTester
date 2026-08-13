@@ -711,8 +711,11 @@ def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> No
             restored = json.loads(response.read())
 
     assert updated["preferences"]["language"] == "en"
+    assert updated["preferences"]["configured"] is True
     assert restored["preferences"]["language"] == "en"
+    assert restored["preferences"]["configured"] is True
     assert state.user_preferences.read("other-user")["language"] == "system"
+    assert state.user_preferences.read("other-user")["configured"] is False
 
 
 def test_language_preference_uses_postgres_once_then_local_cache(tmp_path) -> None:
@@ -737,6 +740,7 @@ def test_language_preference_uses_postgres_once_then_local_cache(tmp_path) -> No
     )
 
     assert preferences.read("alice")["language"] == "en"
+    assert preferences.read("alice")["configured"] is True
     assert preferences.read("alice")["language"] == "en"
     assert control.loads == ["alice"]
 
@@ -768,6 +772,7 @@ def test_language_preference_migrates_legacy_local_value_once(tmp_path) -> None:
     shared = UserPreferenceStore(root, control_store=control)
 
     assert shared.read("alice")["language"] == "en"
+    assert shared.read("alice")["configured"] is True
     assert shared.read("alice")["language"] == "en"
     assert control.loads == ["alice"]
     assert control.updates == [("alice", "en")]
@@ -787,9 +792,75 @@ def test_language_preference_caches_missing_postgres_default(tmp_path) -> None:
         tmp_path / "preferences", control_store=control,
     )
 
-    assert preferences.read("alice")["language"] == "system"
-    assert preferences.read("alice")["language"] == "system"
+    first = preferences.read("alice")
+    restored = preferences.read("alice")
+
+    assert first == {
+        "schema_version": 1,
+        "language": "system",
+        "configured": False,
+    }
+    assert restored == first
     assert control.loads == ["alice"]
+
+
+def test_cached_default_is_not_migrated_as_explicit_system(tmp_path) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language}
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences", control_store=control,
+    )
+    assert preferences.read("alice")["configured"] is False
+    cached = preferences._read_local("alice")
+    cached["cached_at"] = 0
+    preferences._atomic_write(preferences._path("alice"), cached)
+
+    assert preferences.read("alice")["configured"] is False
+    assert control.loads == ["alice", "alice"]
+    assert control.updates == []
+
+
+def test_legacy_cached_default_is_refreshed_without_becoming_explicit(
+    tmp_path,
+) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language}
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences", control_store=control,
+    )
+    preferences._atomic_write(preferences._path("alice"), {
+        "schema_version": 1,
+        "language": "system",
+        "cached_at": 10**20,
+    })
+
+    assert preferences.read("alice")["configured"] is False
+    assert control.loads == ["alice"]
+    assert control.updates == []
 
 
 def test_language_preference_write_reports_control_database_outage(tmp_path) -> None:

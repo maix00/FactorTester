@@ -49,6 +49,14 @@ to a peer. That UI suggested an offline service could be offered remotely.
    Managers cache them locally for five minutes, so normal page/API reads do
    not put PostgreSQL on every-request paths. A one-time device grant stores a
    concrete language snapshot so rendering at another origin remains stable.
+   The preference projection exposes whether a PostgreSQL row is configured;
+   an absent row is not equivalent to an explicit `system` selection. On
+   first authenticated synchronization, a native client may bootstrap the
+   missing row only from a language value already scoped to that same
+   principal. A process-wide or last-used language must never be assigned to
+   a different account. Older Managers that omit the additive configured flag
+   remain authoritative to newer clients, preventing an unsafe upload during
+   a mixed-version rollout.
 
 ## Consequences
 
