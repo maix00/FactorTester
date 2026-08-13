@@ -19,7 +19,15 @@ from server.manager.system import extract_issue_number as _extract_issue_number,
 
 class WorktreeStateMixin:
     """Own executable worktree identity without starting or stopping services."""
+    @staticmethod
+    def _immutable_source() -> bool:
+        return str(
+            os.environ.get("FACTORTESTER_IMMUTABLE_SOURCE") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
     def _worktree_entries(self) -> list[dict[str, str]]:
+        if self._immutable_source():
+            return []
         out = subprocess.check_output(
             ["git", "worktree", "list", "--porcelain"],
             cwd=self.repo,
@@ -41,6 +49,8 @@ class WorktreeStateMixin:
 
     def cleanup_detached_worktrees(self) -> list[Path]:
         """Remove stale Manager source snapshots without crossing ownership."""
+        if self._immutable_source():
+            return []
         try:
             entries = self._worktree_entries()
         except (OSError, subprocess.CalledProcessError):
@@ -105,10 +115,7 @@ class WorktreeStateMixin:
         try:
             entries = self._worktree_entries()
         except (OSError, subprocess.CalledProcessError):
-            immutable = str(
-                os.environ.get("FACTORTESTER_IMMUTABLE_SOURCE") or ""
-            ).strip().lower() in {"1", "true", "yes", "on"}
-            if not immutable:
+            if not self._immutable_source():
                 raise
             entries = []
 
