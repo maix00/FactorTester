@@ -111,18 +111,31 @@ def compliance_page(
         ),
         "storageUnavailable": _text(strings, "设备凭证存储不可用"),
         "notApproved": _text(strings, "设备未获批准"),
+        "checking": "正在检查本浏览器的设备凭证……",
+        "authenticating": "检测到已登记设备，正在自动登录……",
+        "noCredential": (
+            "当前浏览器来源没有已登记的设备密钥。请使用登记时相同的浏览器和 "
+            "HTTPS 地址，或从内网设置页为此浏览器重新授权。"
+        ),
+        "failed": (
+            "设备自动登录失败。请确认设备仍在白名单中，或从内网设置页重新授权。"
+        ),
+        "success": "设备验证成功，正在进入 FactorTester……",
     }
     return f"""<!doctype html><html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>
 <body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7"><p>{_html(strings, PUBLIC_DEVICE_COMPLIANCE_NOTICE)}</p>
 <p id="public-device-count">{html.escape(messages["loading"])}</p>
+<p id="device-auth-status" role="status" aria-live="polite">{html.escape(messages["checking"])}</p>
 <script>
 const nextPath={_script(safe_login_next(next_path))};const messages={_script(messages)};const format=(template,values)=>Object.entries(values).reduce((text,[key,value])=>text.split(`{{${{key}}}}`).join(String(value)),template);const b64=value=>{{const text=atob(value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4));return Uint8Array.from(text,ch=>ch.charCodeAt(0));}};const b64url=value=>{{const bytes=new Uint8Array(value);let text="";for(const byte of bytes)text+=String.fromCharCode(byte);return btoa(text).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");}};
 const openDB=()=>new Promise((resolve,reject)=>{{if(!window.indexedDB)return reject(new Error(messages.storageUnavailable));const request=indexedDB.open("factortester-device",1);request.onupgradeneeded=()=>request.result.createObjectStore("credentials",{{keyPath:"device_id"}});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error(messages.storageUnavailable));}});
 const credentials=async()=>{{const db=await openDB();return new Promise((resolve,reject)=>{{const values=[];const request=db.transaction("credentials").objectStore("credentials").openCursor();request.onsuccess=event=>{{const cursor=event.target.result;if(cursor){{values.push(cursor.value);cursor.continue();}}else{{db.close();resolve(values);}}}};request.onerror=()=>{{db.close();reject(request.error||new Error(messages.storageUnavailable));}};}});}};
-const post=async(path,body)=>{{const response=await fetch(path,{{method:"POST",headers:{{"Content-Type":"application/json"}},credentials:"same-origin",body:JSON.stringify(body)}});let payload={{}};try{{payload=await response.json();}}catch{{}}if(!response.ok||!payload.success)throw new Error(payload.error||messages.notApproved);return payload;}};
+const post=async(path,body)=>{{const response=await fetch(path,{{method:"POST",headers:{{"Content-Type":"application/json"}},credentials:"same-origin",cache:"no-store",body:JSON.stringify(body)}});let payload={{}};try{{payload=await response.json();}}catch{{}}if(!response.ok||!payload.success){{const error=new Error(payload.error||messages.notApproved);error.status=response.status;throw error;}}return payload;}};
 const countLabel=document.querySelector("#public-device-count");const loadCount=async()=>{{try{{const response=await fetch("/api/device/summary",{{credentials:"same-origin",cache:"no-store"}});const payload=await response.json();if(!response.ok||!payload.success)throw new Error(messages.unavailable);const values={{users:Number(payload.public_user_count||0),devices:Number(payload.public_device_count||0),limit:Number(payload.public_device_limit||{PUBLIC_DEVICE_LIMIT})}};countLabel.textContent=format(payload.scope==="account"?messages.account:messages.system,values);}}catch(_){{countLabel.textContent=messages.unavailable;}}}};loadCount();
-const authenticate=async()=>{{try{{for(const credential of await credentials()){{try{{const challenge=await post("/api/device/challenge",{{device_id:credential.device_id}});const signature=await crypto.subtle.sign({{name:"ECDSA",hash:"SHA-256"}},credential.private_key,b64(challenge.challenge));await post("/api/device/verify",{{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature)}});window.location.replace(nextPath);return;}}catch(_){{}}}}}}catch(_){{}}}};authenticate();
+const statusLabel=document.querySelector("#device-auth-status");const setStatus=value=>{{statusLabel.textContent=value;}};const wait=delay=>new Promise(resolve=>setTimeout(resolve,delay));let authenticationRunning=false;
+const authenticate=async()=>{{if(authenticationRunning)return;authenticationRunning=true;try{{const saved=await credentials();if(!saved.length){{setStatus(messages.noCredential);return;}}setStatus(messages.authenticating);for(const credential of saved){{for(const delay of [0,400,1200]){{if(delay)await wait(delay);try{{const challenge=await post("/api/device/challenge",{{device_id:credential.device_id}});const signature=await crypto.subtle.sign({{name:"ECDSA",hash:"SHA-256"}},credential.private_key,b64(challenge.challenge));await post("/api/device/verify",{{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature)}});setStatus(messages.success);window.location.replace(nextPath);return;}}catch(error){{if(error?.status===403)break;}}}}}}setStatus(messages.failed);}}catch(_){{setStatus(messages.failed);}}finally{{authenticationRunning=false;}}}};
+window.addEventListener("online",authenticate);document.addEventListener("visibilitychange",()=>{{if(document.visibilityState==="visible")authenticate();}});authenticate();
 </script></body></html>""".encode("utf-8")
 
 
