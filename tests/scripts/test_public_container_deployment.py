@@ -163,3 +163,14 @@ def test_postgres_healthcheck_requires_control_database() -> None:
 
     assert "factortester_control" in healthcheck
     assert "pg_isready -U postgres -d postgres" not in healthcheck
+
+
+def test_postgres_image_bootstraps_ca_before_using_https_mirrors() -> None:
+    dockerfile = (DEPLOYMENT / "PostgreSQL.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+
+    ca_install = dockerfile.index("ca-certificates")
+    https_mirror_switch = dockerfile.index("RUN sed -i")
+
+    assert ca_install < https_mirror_switch

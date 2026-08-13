@@ -3,12 +3,16 @@ FROM postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf7
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
 
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN sed -i \
         -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
         -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
-    && apt-get install --yes --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
         iproute2 \
         iptables \
         wireguard-tools \
