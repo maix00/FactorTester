@@ -37,6 +37,21 @@ class TransferPeerGateway:
         )
         return _bearer(value)
 
+    def resume_offset(self, transfer, attempt) -> int:
+        value = self._client(
+            attempt.routes.destination_peer_control_endpoint,
+        ).signed_json(
+            "/api/federation/transfers/resume-offset",
+            {"attempt_id": attempt.attempt_id},
+        )
+        try:
+            result = int(value.get("resume_offset"))
+        except (TypeError, ValueError) as exc:
+            raise ConnectionError("peer resume response is incomplete") from exc
+        if not 0 <= result < transfer.expected_size:
+            raise ConnectionError("peer resume offset is invalid")
+        return result
+
     def _client(self, endpoint: str) -> NodeControlClient:
         return NodeControlClient(
             endpoint,

@@ -13,7 +13,7 @@
     if (!artifact) throw new Error(context.t("运行输入不存在或已经清除"));
     const path = artifactPath(jobID, artifact.name, loaded.portQuery);
     const previewPath = artifactPath(jobID, artifact.name, loaded.portQuery, true);
-    const response = await context.raw(previewPath);
+    const response = await FTJobArtifacts.fetch(context, previewPath);
     const source = await response.text();
     if (context.isRouteCurrent?.() === false) return;
 

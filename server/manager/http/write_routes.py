@@ -64,6 +64,10 @@ class WriteRoutesMixin:
             return
         if self._serve_manager_application(parsed, method="POST"):
             return
+        if self._issue_artifact_transfer_access(parsed):
+            return
+        if self._issue_submission_transfer_access(parsed):
+            return
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/public-research/sync":

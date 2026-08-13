@@ -29,6 +29,6 @@ class ControlDatabaseStateMixin:
             **self.control_database_settings.status(),
             "healthy": True,
             "service_restart_required": bool(
-                self.processes or self.artifact_data_process
+                self.processes or self.data_plane_process
             ),
         }

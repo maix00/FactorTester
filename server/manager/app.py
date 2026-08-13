@@ -19,7 +19,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Sequence
 
-from server.manager.config import PEER_CONTROL_PORT
+from server.jobs.artifact_data_plane import artifact_data_endpoint
+from server.manager.config import (
+    ARTIFACT_DATA_PORT,
+    PEER_CONTROL_PORT,
+    PEER_DATA_PORT,
+)
 from server.manager.http.peer_handler import peer_control_handler
 from server.manager.network_endpoints import peer_bind_address
 
@@ -51,6 +56,19 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
         help="FactorTester WireGuard address; required to enable peer control",
     )
     parser.add_argument("--peer-port", type=int, default=PEER_CONTROL_PORT)
+    parser.add_argument("--data-host", default="0.0.0.0")
+    parser.add_argument("--data-port", type=int, default=ARTIFACT_DATA_PORT)
+    parser.add_argument("--peer-data-port", type=int, default=PEER_DATA_PORT)
+    parser.add_argument(
+        "--public-endpoint",
+        default="",
+        help="Client-visible Manager endpoint; never inferred for peers",
+    )
+    parser.add_argument(
+        "--public-data-endpoint",
+        default="",
+        help="Client-visible transfer data endpoint",
+    )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument(
         "--data-root",
@@ -114,6 +132,26 @@ def main(
     removed = runtime_module.Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")
+
+    scheme = "https" if tls_paths is not None else "http"
+    control_endpoint = str(args.public_endpoint or "").strip().rstrip("/")
+    if not control_endpoint:
+        control_endpoint = f"{scheme}://127.0.0.1:{args.port}"
+    data_endpoint = str(args.public_data_endpoint or "").strip().rstrip("/")
+    if not data_endpoint:
+        data_endpoint = artifact_data_endpoint(
+            endpoint=control_endpoint,
+            port=args.data_port,
+        )
+    runtime_module.Handler.state.configure_data_plane(
+        client_host=args.data_host,
+        client_port=args.data_port,
+        client_control_endpoint=control_endpoint,
+        client_data_endpoint=data_endpoint,
+        peer_host=args.peer_host,
+        peer_port=args.peer_data_port,
+        peer_control_port=args.peer_port,
+    )
 
     # The control plane is bound before 7997.  Other worktree services (8000
     # and feature ports) remain explicitly managed by the control plane.
@@ -182,7 +220,7 @@ def main(
                     # IPv4 remains usable on systems where IPv6 is disabled.
                     print(f"  IPv6 loopback unavailable: {exc}")
 
-            print(runtime_module.Handler.state.start_artifact_data_plane())
+            print(runtime_module.Handler.state.start_data_plane())
             runtime_module.Handler.state.start_configured_federation()
             scheme = "https" if tls_context is not None else "http"
             url = f"{scheme}://localhost:{args.port}/"

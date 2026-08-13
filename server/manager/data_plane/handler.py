@@ -108,6 +108,32 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
 class ClientDataPlaneHandler(_DataPlaneHandler):
     surface = DataPlaneSurface.CLIENT
 
+    def end_headers(self) -> None:
+        origin = str(self.headers.get("Origin") or "").strip().rstrip("/")
+        if origin and origin in self.server.runtime.allowed_origins:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header(
+                "Access-Control-Expose-Headers",
+                "Accept-Ranges, Content-Length, Content-Range, ETag",
+            )
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        origin = str(self.headers.get("Origin") or "").strip().rstrip("/")
+        if not origin or origin not in self.server.runtime.allowed_origins:
+            json_error(self, 403, "client origin is not allowed")
+            return
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, PUT, OPTIONS")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type, Range",
+        )
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
 
 class PeerDataPlaneHandler(_DataPlaneHandler):
     surface = DataPlaneSurface.PEER

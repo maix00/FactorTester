@@ -28,11 +28,11 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
     if expected_size < 0:
         raise ValueError("expected_size must not be negative")
     expected_sha256 = str(request.expected_sha256 or "").strip().lower()
-    if expected_sha256 and (
+    if (
         len(expected_sha256) != 64
         or any(value not in "0123456789abcdef" for value in expected_sha256)
     ):
-        raise ValueError("expected_sha256 must be a SHA-256 hex digest")
+        raise ValueError("expected_sha256 must be a complete SHA-256 hex digest")
     expires_at = float(request.expires_at)
     if expires_at <= now:
         raise ValueError("transfer request expiry must be in the future")
@@ -100,5 +100,4 @@ def same_request(row: sqlite3.Row, request: NewTransfer) -> bool:
         and str(row["artifact_name"]) == request.artifact_name
         and int(row["expected_size"]) == request.expected_size
         and str(row["expected_sha256"]) == request.expected_sha256
-        and float(row["expires_at"]) == request.expires_at
     )

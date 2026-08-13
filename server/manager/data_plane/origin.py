@@ -20,7 +20,7 @@ def serve_origin(
         context,
         role=TransferTicketRole.ORIGIN_READ,
     )
-    serve_local_file(handler, runtime, context)
+    _serve_with_lifecycle(handler, runtime, context)
 
 
 def serve_local_download(
@@ -34,7 +34,17 @@ def serve_local_download(
         context,
         role=TransferTicketRole.CLIENT_DOWNLOAD,
     )
-    serve_local_file(handler, runtime, context)
+    _serve_with_lifecycle(handler, runtime, context)
+
+
+def _serve_with_lifecycle(handler, runtime, context) -> None:
+    runtime.lifecycle.start(context.attempt.attempt_id)
+    try:
+        serve_local_file(handler, runtime, context)
+    except BaseException as exc:
+        runtime.lifecycle.fail(context.attempt.attempt_id, exc)
+        raise
+    runtime.lifecycle.complete(context.attempt.attempt_id)
 
 
 def serve_local_file(

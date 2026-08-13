@@ -40,3 +40,5 @@ class TransferAccess:
     path: str
     bearer: str
     expires_at: float
+    resume_offset: int
+    expected_size: int

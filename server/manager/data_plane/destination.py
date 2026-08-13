@@ -23,33 +23,39 @@ def receive_destination(
 
 
 def _write_verified(handler, runtime, context) -> None:
-    remaining = _content_length(handler)
-    expected_remaining = (
-        context.attempt.expected_size - context.attempt.resume_offset
-    )
-    if remaining != expected_remaining:
-        raise ValueError(
-            f"destination expected {expected_remaining} request bytes, "
-            f"received {remaining}"
-        )
-    target = runtime.destination_path(context.transfer, context.attempt)
-    writer = VerifiedStagingWriter(
-        target,
-        expected_size=context.attempt.expected_size,
-        expected_sha256=context.attempt.expected_sha256,
-        resume_offset=context.attempt.resume_offset,
-    )
+    writer = None
     try:
+        runtime.lifecycle.start(context.attempt.attempt_id)
+        remaining = _content_length(handler)
+        expected_remaining = (
+            context.attempt.expected_size - context.attempt.resume_offset
+        )
+        if remaining != expected_remaining:
+            raise ValueError(
+                f"destination expected {expected_remaining} request bytes, "
+                f"received {remaining}"
+            )
+        target = runtime.destination_path(context.transfer, context.attempt)
+        writer = VerifiedStagingWriter(
+            target,
+            expected_size=context.attempt.expected_size,
+            expected_sha256=context.attempt.expected_sha256,
+            resume_offset=context.attempt.resume_offset,
+        )
         while remaining:
             chunk = handler.rfile.read(min(1024 * 1024, remaining))
             if not chunk:
                 raise ValueError("destination request ended before Content-Length")
             writer.write(chunk)
             remaining -= len(chunk)
+        runtime.lifecycle.verify(context.attempt.attempt_id)
         writer.finish()
-    except BaseException:
-        writer.cancel()
+    except BaseException as exc:
+        if writer is not None:
+            writer.preserve()
+        runtime.lifecycle.fail(context.attempt.attempt_id, exc)
         raise
+    runtime.lifecycle.complete(context.attempt.attempt_id)
     empty_response(handler, 201)
 
 

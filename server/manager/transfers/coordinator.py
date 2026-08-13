@@ -15,6 +15,7 @@ from server.manager.transfers.coordinator_models import (
     UploadRequest,
 )
 from server.manager.transfers.models import (
+    AttemptStatus,
     AttemptRouteSnapshot,
     NewTransfer,
     NewTransferAttempt,
@@ -38,6 +39,8 @@ class TransferCoordinator:
         requests: TransferStore,
         attempts: TransferAttemptStore,
         tickets: TransferTicketStore,
+        peer_gateway=None,
+        local_resume_offset_provider=None,
     ) -> None:
         self.manager_id = str(manager_id or "").strip()
         self.client_data_endpoint = str(
@@ -48,6 +51,8 @@ class TransferCoordinator:
         self.requests = requests
         self.attempts = attempts
         self.tickets = tickets
+        self.peer_gateway = peer_gateway
+        self.local_resume_offset_provider = local_resume_offset_provider
 
     def prepare_download(
         self,
@@ -113,6 +118,18 @@ class TransferCoordinator:
         attempt = self._attempt(
             transfer, endpoints=endpoints, now=now,
         )
+        transfer = self.requests.require(transfer.transfer_id)
+        if source_server_id != destination_server_id:
+            if self.peer_gateway is None:
+                raise ConnectionError("transfer peer gateway is unavailable")
+            self.peer_gateway.import_context(transfer, attempt)
+        if transfer.status is TransferStatus.PLANNED:
+            self.requests.transition(
+                transfer.transfer_id,
+                TransferStatus.DISPATCHED,
+                expected=TransferStatus.PLANNED,
+                now=now,
+            )
         role = (
             TransferTicketRole.CLIENT_DOWNLOAD
             if operation is TransferOperation.DOWNLOAD
@@ -144,6 +161,8 @@ class TransferCoordinator:
             path=f"/v1/transfers/{attempt.attempt_id}/{action}",
             bearer=ticket.bearer,
             expires_at=expiry,
+            resume_offset=attempt.resume_offset,
+            expected_size=attempt.expected_size,
         )
 
     def _attempt(
@@ -156,7 +175,23 @@ class TransferCoordinator:
         if transfer.attempt:
             existing = self.attempts.latest(transfer.transfer_id)
             if existing is not None:
-                return existing
+                if existing.status is not AttemptStatus.FAILED:
+                    return existing
+                if transfer.status is not TransferStatus.RETRY_WAIT:
+                    return existing
+                resume_offset = self._retry_offset(transfer, existing)
+                transfer = self.requests.transition(
+                    transfer.transfer_id,
+                    TransferStatus.PLANNED,
+                    expected=TransferStatus.RETRY_WAIT,
+                    now=now,
+                )
+                return self._begin_attempt(
+                    transfer,
+                    endpoints=endpoints,
+                    now=now,
+                    resume_offset=resume_offset,
+                )
         if transfer.status is TransferStatus.CREATED:
             transfer = self.requests.transition(
                 transfer.transfer_id,
@@ -164,6 +199,18 @@ class TransferCoordinator:
                 expected=TransferStatus.CREATED,
                 now=now,
             )
+        return self._begin_attempt(
+            transfer, endpoints=endpoints, now=now, resume_offset=0,
+        )
+
+    def _begin_attempt(
+        self,
+        transfer,
+        *,
+        endpoints: Mapping[str, NodeEndpoint],
+        now: float,
+        resume_offset: int,
+    ):
         plan = plan_transfer(TransferPlanningRequest(
             operation=transfer.operation,
             request_owner_manager_id=self.manager_id,
@@ -179,7 +226,7 @@ class TransferCoordinator:
             request_owner_manager_id=plan.request_owner_manager_id,
             source_server_id=plan.source_server_id,
             destination_server_id=plan.destination_server_id,
-            resume_offset=0,
+            resume_offset=resume_offset,
             expires_at=transfer.expires_at,
             routes=AttemptRouteSnapshot(
                 client_data_endpoint=plan.client_data_endpoint,
@@ -193,13 +240,23 @@ class TransferCoordinator:
                 ),
             ),
         ), now=now)
-        self.requests.transition(
-            transfer.transfer_id,
-            TransferStatus.DISPATCHED,
-            expected=TransferStatus.PLANNED,
-            now=now,
-        )
         return attempt
+
+    def _retry_offset(self, transfer, attempt) -> int:
+        if transfer.operation is TransferOperation.DOWNLOAD:
+            return 0
+        if transfer.destination_server_id == self.manager_id:
+            if self.local_resume_offset_provider is None:
+                return 0
+            value = self.local_resume_offset_provider(transfer, attempt)
+        else:
+            if self.peer_gateway is None:
+                raise ConnectionError("transfer peer gateway is unavailable")
+            value = self.peer_gateway.resume_offset(transfer, attempt)
+        selected = int(value)
+        if not 0 <= selected < transfer.expected_size:
+            raise ValueError("destination resume offset is invalid")
+        return selected
 
 
 __all__ = [

@@ -15,7 +15,6 @@ from pathlib import Path
 
 from server.jobs.artifact_data_plane import ArtifactTicketCodec, artifact_data_port
 from server.manager.config import VIBE_TRADING_PORT
-from server.manager.http.security import configured_tls_paths
 from server.manager.storage.control_db import CONTROL_DATABASE_ENV
 from server.manager.state.models import ServiceBundle
 from server.manager.system import safe_name
@@ -90,64 +89,6 @@ class ProcessStateMixin:
                 finally:
                     os.close(fd)
         return ArtifactTicketCodec(secret)
-
-    def start_artifact_data_plane(self) -> str:
-        """Start one host-wide 7997 byte service beside Manager 7998."""
-        process = self.artifact_data_process
-        if process is not None and process.poll() is None:
-            return f"artifact data service already running (pid {process.pid})"
-        port = artifact_data_port()
-        if self._port_is_in_use(port):
-            # A separately supervised data service may already own this host's
-            # port.  Do not kill it; ticket verification remains possible when
-            # both processes use the configured shared secret file.
-            return f"artifact data port {port} already in use"
-        self.artifact_ticket_codec()
-        log_file = self.log_dir / f"artifact-data-{port}.log"
-        log = log_file.open("ab", buffering=0)
-        env = os.environ.copy()
-        env.update({
-            "GTHT_ARTIFACT_TICKET_SECRET_FILE": str(self.artifact_ticket_path),
-            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
-            "FACTORTESTER_SERVER_ID": self.server_id,
-            "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
-        })
-        self._inject_control_database_env(env)
-        artifact_tls_paths = configured_tls_paths(
-            os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
-            or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT"),
-            os.environ.get("FACTORTESTER_ARTIFACT_TLS_KEY")
-            or os.environ.get("FACTORTESTER_MANAGER_TLS_KEY"),
-            certificate_env="FACTORTESTER_ARTIFACT_TLS_CERT",
-            private_key_env="FACTORTESTER_ARTIFACT_TLS_KEY",
-        )
-        if artifact_tls_paths is not None:
-            env.update({
-                "FACTORTESTER_ARTIFACT_TLS_CERT": str(artifact_tls_paths[0]),
-                "FACTORTESTER_ARTIFACT_TLS_KEY": str(artifact_tls_paths[1]),
-            })
-        process = subprocess.Popen(
-            [
-                self.python,
-                "-m", "server.manager.services.artifacts",
-                "--host", "0.0.0.0",
-                "--port", str(port),
-                "--server-id", self.server_id,
-            ],
-            cwd=self.repo,
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        self.artifact_data_process = process
-        return f"started artifact data pid {process.pid} on {port}"
-
-    def stop_artifact_data_plane(self) -> None:
-        process = self.artifact_data_process
-        self.artifact_data_process = None
-        if process is not None:
-            self._terminate(process)
 
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
@@ -343,5 +284,5 @@ class ProcessStateMixin:
             if bundle:
                 self.stop(Path(key), force=True)
         self.processes.clear()
-        self.stop_artifact_data_plane()
+        self.stop_data_plane()
         self.stop_vibe()

@@ -24,7 +24,9 @@
 
   async function loadPayloads(context, artifacts, jobID, portQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
-      const response = await context.raw(previewPath(jobID, artifact, portQuery));
+      const response = await FTJobArtifacts.fetch(
+        context, previewPath(jobID, artifact, portQuery),
+      );
       return [artifact.name, JSON.parse(await response.text())];
     }));
     return Object.fromEntries(pairs);

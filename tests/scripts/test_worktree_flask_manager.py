@@ -106,7 +106,7 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     monkeypatch.setattr(manager.ManagerState, "cleanup_detached_worktrees", lambda self: [])
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "start_data_plane",
         lambda self: observed["events"].append("artifact") or "artifact",
     )
     monkeypatch.setattr(manager_app.webbrowser, "open", lambda _url: None)
@@ -159,7 +159,7 @@ def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> No
     )
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "start_data_plane",
         lambda self: "artifact",
     )
     monkeypatch.setattr(manager_app.signal, "signal", set_signal)

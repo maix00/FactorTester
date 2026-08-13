@@ -15,8 +15,34 @@
     return `${(value / 1024 ** 2).toFixed(1)} MiB`;
   }
 
+  function accessPath(path) {
+    const url = new URL(path, window.location.origin);
+    url.pathname = url.pathname.replace(/\/preview$/, "") + "/access";
+    return url.pathname + url.search;
+  }
+
+  async function fetchArtifact(context, path, options = {}) {
+    const issued = await context.api(accessPath(path), {method: "POST"});
+    const access = issued?.access || {};
+    if (!access.url || !access.bearer) {
+      throw new Error(context.t("生成物传输授权无效"));
+    }
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${access.bearer}`);
+    const response = await fetch(access.url, {...options, headers});
+    if (!response.ok) {
+      const value = await response.json().catch(() => ({}));
+      const error = value?.error;
+      throw Object.assign(new Error(
+        typeof error === "object" ? error.message : error
+          || `${context.t("读取生成物失败")} (HTTP ${response.status})`,
+      ), {status: response.status});
+    }
+    return response;
+  }
+
   async function saveBlob(context, path, fileName) {
-    const response = await context.raw(path);
+    const response = await fetchArtifact(context, path);
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -68,7 +94,7 @@
         await saveBlob(context, path, fileName);
         continue;
       }
-      const response = await context.raw(path);
+      const response = await fetchArtifact(context, path);
       const relative = artifactDownloadParts(artifact);
       let target = directory;
       for (const part of relative.slice(0, -1)) {
@@ -205,6 +231,7 @@
     declarationArtifacts,
     downloadAllArtifacts,
     effectiveDeclarations,
+    fetch: fetchArtifact,
     lazyArtifactPreview,
     saveBlob,
   };

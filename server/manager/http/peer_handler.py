@@ -52,6 +52,9 @@ class PeerControlHandler(
             "/api/federation/transfers/destination-ticket": (
                 self._transfer_destination_ticket
             ),
+            "/api/federation/transfers/resume-offset": (
+                self._transfer_resume_offset
+            ),
         }
         selected = handlers.get(urlparse(self.path).path)
         if selected is None:

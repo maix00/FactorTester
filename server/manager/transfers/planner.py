@@ -104,12 +104,24 @@ def plan_transfer(
     """Freeze a local or direct route; never infer or fall back to public URLs."""
 
     operation = _operation(request)
+    local = request.source_server_id == request.destination_server_id
+    if local:
+        return TransferPlan(
+            mode=TransferMode.LOCAL,
+            request_owner_manager_id=request.request_owner_manager_id,
+            source_server_id=request.source_server_id,
+            destination_server_id=request.destination_server_id,
+            client_data_endpoint=request.client_data_endpoint.rstrip("/"),
+            source_peer_data_endpoint="",
+            source_peer_control_endpoint="",
+            destination_peer_data_endpoint="",
+            destination_peer_control_endpoint="",
+        )
     source = _required_endpoint(endpoints, request.source_server_id, now=now)
     destination = _required_endpoint(
         endpoints, request.destination_server_id, now=now,
     )
-    local = request.source_server_id == request.destination_server_id
-    mode = TransferMode.LOCAL if local else (
+    mode = (
         TransferMode.DIRECT_PULL
         if operation is TransferOperation.DOWNLOAD
         else TransferMode.DIRECT_PUSH

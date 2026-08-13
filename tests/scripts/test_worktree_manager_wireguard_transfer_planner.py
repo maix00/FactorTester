@@ -91,7 +91,7 @@ def test_missing_peer_endpoint_is_explicitly_node_unreachable() -> None:
     assert denied.value.server_id == "node-a"
 
 
-def test_local_plan_keeps_public_entry_but_freezes_private_self_route() -> None:
+def test_local_plan_needs_no_wireguard_self_route() -> None:
     request = TransferPlanningRequest(
         operation=TransferOperation.DOWNLOAD,
         request_owner_manager_id="node-b",
@@ -103,10 +103,11 @@ def test_local_plan_keeps_public_entry_but_freezes_private_self_route() -> None:
 
     plan = plan_transfer(
         request,
-        endpoints={"node-b": _node("node-b", 2)},
+        endpoints={},
         now=101.0,
     )
 
     assert plan.mode is TransferMode.LOCAL
     assert plan.client_data_endpoint.endswith(":7997")
-    assert plan.source_peer_data_endpoint.endswith(":17997")
+    assert plan.source_peer_data_endpoint == ""
+    assert plan.destination_peer_data_endpoint == ""

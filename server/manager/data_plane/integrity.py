@@ -101,3 +101,13 @@ class VerifiedStagingWriter:
             self._stream.close()
             self._closed = True
         self.staging_path.unlink(missing_ok=True)
+
+    def preserve(self) -> Path:
+        """Close a partial stream without making it visible as a final file."""
+
+        if not self._closed:
+            self._stream.flush()
+            os.fsync(self._stream.fileno())
+            self._stream.close()
+            self._closed = True
+        return self.staging_path

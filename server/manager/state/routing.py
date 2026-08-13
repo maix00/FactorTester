@@ -233,7 +233,7 @@ class RoutingStateMixin:
         source = source or {}
         target_routes = list(routes or [route])
         target_ports = sorted({item.port for item in target_routes})
-        return {
+        payload = {
             "server_id": route.server_id,
             "server_role": route.role,
             "server_branch": route.branch,

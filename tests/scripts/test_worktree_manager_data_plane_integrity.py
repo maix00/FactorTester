@@ -73,11 +73,12 @@ def test_cancel_removes_only_staging_file(tmp_path) -> None:
     target = tmp_path / "artifact.bin"
     target.write_bytes(b"retained")
     writer = VerifiedStagingWriter(
-        target, expected_size=3, expected_sha256="",
+        target,
+        expected_size=3,
+        expected_sha256=hashlib.sha256(b"abc").hexdigest(),
     )
     writer.write(b"new")
     writer.cancel()
 
     assert target.read_bytes() == b"retained"
     assert not writer.staging_path.exists()
-
