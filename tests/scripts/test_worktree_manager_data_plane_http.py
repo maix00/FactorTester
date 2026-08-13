@@ -37,7 +37,12 @@ def _running(runtime: DataPlaneRuntime):
         thread.join(timeout=2)
 
 
-def _runtime(tmp_path, *, raw: bytes = b"abcdef"):
+def _runtime(
+    tmp_path,
+    *,
+    raw: bytes = b"abcdef",
+    mode: TransferMode = TransferMode.LOCAL,
+):
     path = tmp_path / "transfers.sqlite"
     requests = TransferStore(path, server_id="public-b2")
     transfer = requests.create(
@@ -63,7 +68,7 @@ def _runtime(tmp_path, *, raw: bytes = b"abcdef"):
         NewTransferAttempt(
             attempt_key="http-transfer:1",
             transfer_id=transfer.transfer_id,
-            mode=TransferMode.LOCAL,
+            mode=mode,
             relay_owner_manager_id="public-b2",
             connection_owner_manager_id="",
             source_server_id="public-b2",
@@ -140,7 +145,9 @@ def test_origin_download_requires_authorization_header_and_supports_range(
 
 
 def test_relay_streams_producer_to_consumer_without_staging_copy(tmp_path) -> None:
-    runtime, _transfer, attempt = _runtime(tmp_path)
+    runtime, _transfer, attempt = _runtime(
+        tmp_path, mode=TransferMode.SOURCE_PUSH,
+    )
     producer_ticket = _ticket(
         runtime,
         attempt,

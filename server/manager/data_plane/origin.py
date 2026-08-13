@@ -20,6 +20,28 @@ def serve_origin(
         context,
         role=TransferTicketRole.ORIGIN_READ,
     )
+    serve_local_file(handler, runtime, context)
+
+
+def serve_local_consumer(
+    handler,
+    runtime: DataPlaneRuntime,
+    context: TransferContext,
+) -> None:
+    authorize(
+        handler,
+        runtime,
+        context,
+        role=TransferTicketRole.CONSUMER,
+    )
+    serve_local_file(handler, runtime, context)
+
+
+def serve_local_file(
+    handler,
+    runtime: DataPlaneRuntime,
+    context: TransferContext,
+) -> None:
     path = runtime.origin_path(context)
     size = path.stat().st_size
     if size != context.attempt.expected_size:
@@ -60,4 +82,3 @@ def serve_origin(
                 raise RuntimeError("transfer origin ended unexpectedly")
             handler.wfile.write(chunk)
             remaining -= len(chunk)
-

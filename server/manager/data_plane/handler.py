@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from server.manager.data_plane.destination import receive_destination
 from server.manager.data_plane.integrity import IntegrityError
-from server.manager.data_plane.origin import serve_origin
+from server.manager.data_plane.origin import serve_local_consumer, serve_origin
 from server.manager.data_plane.relay import RelayConflict, RelayTimeout
 from server.manager.data_plane.relay_routes import (
     receive_producer,
@@ -16,6 +16,7 @@ from server.manager.data_plane.relay_routes import (
 )
 from server.manager.data_plane.responses import empty_response, json_error
 from server.manager.data_plane.routes import match_transfer_route, method_allowed
+from server.manager.transfers.models import TransferMode
 
 
 class DataPlaneHandler(BaseHTTPRequestHandler):
@@ -34,12 +35,18 @@ class DataPlaneHandler(BaseHTTPRequestHandler):
             return
         try:
             context = self.server.runtime.context(route.attempt_id)
-            {
+            handler = {
                 "origin": serve_origin,
                 "producer": receive_producer,
                 "consumer": serve_consumer,
                 "destination": receive_destination,
-            }[route.action](self, self.server.runtime, context)
+            }[route.action]
+            if (
+                route.action == "consumer"
+                and context.attempt.mode is TransferMode.LOCAL
+            ):
+                handler = serve_local_consumer
+            handler(self, self.server.runtime, context)
         except PermissionError as exc:
             json_error(self, 403, str(exc))
         except KeyError as exc:

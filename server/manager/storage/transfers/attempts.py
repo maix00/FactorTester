@@ -118,6 +118,17 @@ class TransferAttemptStore(TransferDatabase):
             raise KeyError("transfer attempt not found")
         return attempt_record(row)
 
+    def latest(self, transfer_id: str) -> TransferAttemptRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM transfer_attempts
+                WHERE transfer_id=? ORDER BY ordinal DESC LIMIT 1
+                """,
+                (required(transfer_id, field="transfer_id"),),
+            ).fetchone()
+        return attempt_record(row) if row is not None else None
+
     def transition(
         self,
         attempt_id: str,
