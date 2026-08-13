@@ -50,30 +50,3 @@ def register_core_fields(app: ApplicationSettings) -> None:
         ),
         chip_template="IC: {value}",
     ))
-    _register_cross_section_fields(app)
-
-
-def _register_cross_section_fields(app: ApplicationSettings) -> None:
-    app.register_setting(SettingDefinition(
-        "group_adjust", "组内去均值", "cross_section", "select", "off",
-        ScopePolicy.LOCAL_ONLY, module="cross_section",
-        options=(
-            SettingOption("off", "关闭"),
-            SettingOption("on", "按组调整收益"),
-        ),
-        chip_template="组调整: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "by_group", "分组 IC", "cross_section", "select", "off",
-        ScopePolicy.LOCAL_ONLY, module="cross_section",
-        options=(
-            SettingOption("off", "关闭"),
-            SettingOption("on", "按组输出"),
-        ),
-        chip_template="分组IC: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "min_cross_section_count", "最小截面样本数", "cross_section",
-        "number", 5, ScopePolicy.LOCAL_ONLY, module="cross_section",
-        minimum=2, step=1, chip_template="最小样本: {value}",
-    ))

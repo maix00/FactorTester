@@ -34,13 +34,6 @@ def _register_result_tabs(app: ApplicationSettings) -> None:
             "quantile_portfolio_statistics", "Quantile Portfolio Statistics",
             "quantile_portfolio_statistics", 55,
         ),
-        ResultTabDefinition(
-            "by_group_ic", "By Group IC", "cross_section", 60,
-            requires={"by_group": ("on",)},
-        ),
-        ResultTabDefinition(
-            "coverage_missing", "Coverage / Missing", "cross_section", 70,
-        ),
     ):
         app.register_result_tab(tab)
 

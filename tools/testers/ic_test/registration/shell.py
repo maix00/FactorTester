@@ -72,7 +72,6 @@ def _register_modules(app: ApplicationSettings) -> None:
         SettingModule("return_definition", "收益率定义", "analysis", 50),
         SettingModule("ic_delay", "IC Delay", "analysis", 60),
         SettingModule("ic_method", "IC 类型", "analysis", 70),
-        SettingModule("cross_section", "截面处理", "analysis", 80),
         SettingModule("ic_summary", "IC 汇总", "analysis", 90),
         SettingModule(
             "quantile_portfolio_statistics", "分组组合统计", "analysis", 95,
@@ -107,7 +106,6 @@ def _register_tabs(app: ApplicationSettings) -> None:
         SettingTab("return_frequency", "前瞻收益", local, "settings-grid", 40),
         SettingTab("delay", "Delay", local, "settings-grid", 50),
         SettingTab("ic_method", "IC 类型", local, "settings-grid", 55),
-        SettingTab("cross_section", "截面处理", local, "settings-grid", 58),
         SettingTab("summary", "汇总", local, "settings-grid", 60),
         SettingTab(
             "quantile_portfolio_statistics", "分组组合", local,
