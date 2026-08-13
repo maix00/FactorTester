@@ -481,6 +481,64 @@ def test_run_capability_preview_accepts_origin_manager_frozen_context(
     assert JobRepository().list(owner="alice") == []
 
 
+def test_frozen_manager_context_carries_canonical_factor_source_to_executor(
+    client, monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+
+    # The executor deliberately has no local canonical source registry.  It
+    # must use the exact source frozen by the origin Manager for this Run.
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda _factor_id: None,
+    )
+
+    response = client.post("/api/runs/capability-preview", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["capability"] is True
+
+
+def test_frozen_manager_context_rejects_tampered_factor_source(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+    sources = context["prepared"]["portable_factor_sources"]
+    assert sources
+    sources[0]["source_code"] += "\n# tampered after Manager freeze\n"
+    encoded = sources[0]["source_code"].encode("utf-8")
+    sources[0]["source_sha256"] = hashlib.sha256(encoded).hexdigest()
+    sources[0]["source_bytes"] = len(encoded)
+
+    response = client.post("/api/runs/capability-preview", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "invalid_manager_run_context"
+
+
 def test_run_submission_accepts_origin_manager_frozen_context(
     client, monkeypatch,
 ) -> None:
@@ -514,6 +572,74 @@ def test_run_submission_accepts_origin_manager_frozen_context(
     jobs = JobRepository().list(owner="alice", run_id=value["run_id"])
     assert len(jobs) == 1
     assert jobs[0].summary()["task_name"] == "federated IC smoke"
+
+
+def test_frozen_manager_context_persists_source_for_remote_execution(
+    client, monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "task_name": "portable source IC",
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda _factor_id: None,
+    )
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    job = JobRepository().list(
+        owner="alice", run_id=response.get_json()["run_id"],
+    )[0]
+    assert job.summary()["factor_source_policy"]["scope_status"] == "available"
+    scope_id = str(job.job_spec["transient_factor_source_scope_id"])
+    with factor_registry.transient_factor_source_scope(
+        scope_id, owner="alice",
+    ):
+        source = factor_registry.resolve_factor_family_source(
+            "public:MmRet", username="alice",
+        )
+    assert source["canonical_family_ref"] == "public:MmRet"
+    assert "class MmRet" in source["source_code"]
+    retained = [
+        item for item in JobRepository().list_artifacts(
+            job_id=job.job_id, owner="alice",
+        )
+        if item["artifact_kind"] == "factor_source"
+    ]
+    assert len(retained) == 2
+
+    repository = JobRepository()
+    repository.transition(job.job_id, "planning")
+    repository.transition(
+        job.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_portable_source", "message": "test retry"},
+    )
+    retry = client.post(f"/api/jobs/{job.job_id}/retry")
+    assert retry.status_code == 202, retry.get_data(as_text=True)
+    retried = repository.require(retry.get_json()["job_id"], owner="alice")
+    with factor_registry.transient_factor_source_scope(
+        str(retried.job_spec["transient_factor_source_scope_id"]),
+        owner="alice",
+    ):
+        retried_source = factor_registry.resolve_factor_family_source(
+            "public:MmRet", username="alice",
+        )
+    assert "class MmRet" in retried_source["source_code"]
 
 
 def test_manager_run_context_rejects_tampered_runspec(client) -> None:

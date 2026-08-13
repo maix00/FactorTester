@@ -2139,6 +2139,112 @@ def test_manager_reclaims_services_after_control_process_restart(tmp_path, monke
     assert bundle.daemon.pid == 41002
 
 
+def test_manager_restores_desired_services_after_graceful_restart(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "issue-141-service"
+    path.mkdir()
+    (path / "start_server.py").write_text("", encoding="ascii")
+    (path / "scripts").mkdir()
+    (path / "scripts" / "research_job_daemon.py").write_text(
+        "", encoding="ascii",
+    )
+    worktree = manager.Worktree(
+        path=path,
+        branch="fix/issue-141-service",
+        head="abc12345",
+        label="fix/issue-141-service",
+        port=8141,
+    )
+    created = []
+
+    def fake_popen(command, **kwargs):
+        process = _Process(command)
+        created.append((process, kwargs))
+        return process
+
+    monkeypatch.setattr(manager.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n",
+    )
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
+    monkeypatch.setattr(
+        manager.ManagerState, "worktrees", lambda _self: [worktree],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+
+    first = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    first.start(path, 8141)
+    first.stop_all()
+
+    restarted = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    restored = restarted.restore_desired_services()
+
+    assert restored == [{
+        "path": str(path.resolve()),
+        "port": 8141,
+        "status": "started",
+    }]
+    assert restarted.is_running(path)
+    assert restarted.daemon_running(path)
+    assert len(created) == 4
+
+
+def test_explicit_service_stop_clears_restart_intent(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "issue-141-service"
+    path.mkdir()
+    (path / "start_server.py").write_text("", encoding="ascii")
+    (path / "scripts").mkdir()
+    (path / "scripts" / "research_job_daemon.py").write_text(
+        "", encoding="ascii",
+    )
+    worktree = manager.Worktree(
+        path=path,
+        branch="fix/issue-141-service",
+        head="abc12345",
+        label="fix/issue-141-service",
+        port=8141,
+    )
+
+    monkeypatch.setattr(
+        manager.subprocess,
+        "Popen",
+        lambda command, **_kwargs: _Process(command),
+    )
+    monkeypatch.setattr(
+        manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n",
+    )
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
+    monkeypatch.setattr(
+        manager.ManagerState, "worktrees", lambda _self: [worktree],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+
+    state = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    state.start(path, 8141)
+    state.stop(path, force=True)
+
+    restarted = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    assert restarted.restore_desired_services() == []
+    assert not restarted.is_running(path)
+
+
 def test_service_env_adds_repo_harness_without_losing_pythonpath(
     tmp_path,
     monkeypatch,

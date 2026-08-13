@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import stat
 from pathlib import Path
+import subprocess
 
 import yaml
 
@@ -280,3 +283,168 @@ def test_public_verifier_checks_real_host_port_bindings() -> None:
 
     assert ".HostConfig.PortBindings" in script
     assert '"${compose[@]}" port postgresql-control 5432' not in script
+
+
+def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
+    publish_path = ROOT / "scripts" / "server" / "publish_public_main.sh"
+    publish = publish_path.read_text(encoding="utf-8")
+    activate = (
+        ROOT / "scripts" / "server" / "activate_public_revision.sh"
+    ).read_text(encoding="utf-8")
+
+    assert publish_path.stat().st_mode & stat.S_IXUSR
+    assert re.search(r'git -C "\$repo_root" push origin main', publish)
+    assert 'main:refs/heads/main' in publish
+    assert "activate_public_revision.sh" in publish
+    assert "worktree add" in activate
+    assert "--detach" in activate
+    assert "build factortester-public" in activate
+    assert "backup" in activate
+    assert "restart-app" in activate
+    assert "restore-check" in activate
+    assert "verify" in activate
+    assert "rollback" in activate
+    assert "FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3" in activate
+    assert "docker image rm" in activate
+    assert "git --git-dir=\"$git_root/repo.git\" worktree remove" in activate
+    assert " container-id factortester-public" in activate
+    assert " container-id postgresql-control" in activate
+    assert "factortester-public-postgresql-control-1" not in activate
+    assert "docker system prune" not in publish
+    assert "docker system prune" not in activate
+    assert activate.index(" backup") < activate.index("restart-app")
+    assert activate.index("restart-app") < activate.index(" verify")
+    assert "101.133.144.27" not in publish
+    assert "/Users/maxdeux/.ssh" not in publish
+
+
+def test_public_main_auto_update_is_server_local_and_timer_driven() -> None:
+    updater_path = ROOT / "scripts" / "server" / "auto_update_public_main.sh"
+    installer_path = (
+        ROOT / "scripts" / "server" / "install_public_auto_update.sh"
+    )
+    service = (
+        ROOT / "deploy" / "systemd" / "factortester-public-update.service.in"
+    ).read_text(encoding="utf-8")
+    timer = (
+        ROOT / "deploy" / "systemd" / "factortester-public-update.timer"
+    ).read_text(encoding="utf-8")
+    updater = updater_path.read_text(encoding="utf-8")
+    installer = installer_path.read_text(encoding="utf-8")
+
+    assert updater_path.stat().st_mode & stat.S_IXUSR
+    assert installer_path.stat().st_mode & stat.S_IXUSR
+    assert "git --git-dir=\"$git_root/repo.git\" fetch" in updater
+    assert "refs/heads/main:refs/heads/main" in updater
+    assert "merge-base --is-ancestor" in updater
+    assert "activate_public_revision.sh" in updater
+    assert "2222" not in updater
+    assert "ssh" not in updater
+    assert "ExecStart=" in service
+    assert "@DEPLOY_USER@" in service
+    assert "OnCalendar=" in timer
+    assert "Persistent=true" in timer
+    assert "systemctl enable --now factortester-public-update.timer" in installer
+
+
+def test_public_auto_update_fetches_and_activates_new_main(tmp_path) -> None:
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    container_root = tmp_path / "container"
+    production_env = tmp_path / "public.env"
+    marker = tmp_path / "activated.txt"
+    fake_bin = tmp_path / "bin"
+    source.mkdir()
+    container_root.mkdir()
+    fake_bin.mkdir()
+
+    subprocess.run(
+        ["git", "init", "--initial-branch=main"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.invalid"],
+        cwd=source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "FactorTester Tests"],
+        cwd=source,
+        check=True,
+    )
+    activation = source / "scripts" / "server" / "activate_public_revision.sh"
+    activation.parent.mkdir(parents=True)
+    activation.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FACTORTESTER_TEST_MARKER\"\n",
+        encoding="utf-8",
+    )
+    activation.chmod(0o755)
+    subprocess.run(["git", "add", "."], cwd=source, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    old_revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=source, text=True,
+    ).strip()
+
+    subprocess.run(
+        ["git", "init", "--bare", str(target / "repo.git")],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git", f"--git-dir={target / 'repo.git'}", "fetch",
+            str(source), f"{old_revision}:refs/heads/main",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (source / "revision.txt").write_text("next\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=source, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "next"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    new_revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=source, text=True,
+    ).strip()
+    production_env.write_text(
+        f"FACTORTESTER_REVISION={old_revision}\n", encoding="utf-8",
+    )
+    fake_sudo = fake_bin / "sudo"
+    fake_sudo.write_text("#!/bin/sh\nexec \"$@\"\n", encoding="utf-8")
+    fake_sudo.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment.update({
+        "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+        "FACTORTESTER_REMOTE_GIT_ROOT": str(target),
+        "FACTORTESTER_REMOTE_CONTAINER_ROOT": str(container_root),
+        "FACTORTESTER_REMOTE_PUBLIC_ENV": str(production_env),
+        "FACTORTESTER_PUBLIC_MAIN_REMOTE": str(source),
+        "FACTORTESTER_TEST_MARKER": str(marker),
+    })
+    subprocess.run(
+        [str(ROOT / "scripts" / "server" / "auto_update_public_main.sh")],
+        check=True,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    arguments = marker.read_text(encoding="utf-8").splitlines()
+    assert arguments == [
+        new_revision,
+        str(target),
+        str(container_root),
+        str(production_env),
+        "3",
+    ]

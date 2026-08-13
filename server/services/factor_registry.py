@@ -66,6 +66,9 @@ _active_transient_source_scope: ContextVar[str] = ContextVar(
 _active_transient_source_overrides: ContextVar[dict[str, str]] = ContextVar(
     "active_transient_factor_source_overrides", default={}
 )
+_active_portable_source_overrides: ContextVar[dict[str, dict[str, str]]] = ContextVar(
+    "active_portable_factor_source_overrides", default={}
+)
 _active_transient_source_owner: ContextVar[str] = ContextVar(
     "active_transient_factor_source_owner", default=""
 )
@@ -77,40 +80,98 @@ def transient_factor_source_scope(
     *,
     owner: str = "",
     overrides: dict[str, str] | None = None,
+    portable_overrides: dict[str, object] | None = None,
 ):
     owner = str(owner or "").strip()
-    if overrides and not owner:
+    if (overrides or portable_overrides) and not owner:
         raise ValueError("transient factor source override owner is required")
     token = _active_transient_source_scope.set(str(scope_id or "").strip())
     override_token = _active_transient_source_overrides.set(
         dict(overrides or {})
     )
+    normalized_portable: dict[str, dict[str, str]] = {}
+    for canonical_ref, value in (portable_overrides or {}).items():
+        if isinstance(value, dict):
+            source_code = str(value.get("source_code") or "")
+            source_policy = str(value.get("source_access_policy") or "")
+        else:
+            source_code = str(value or "")
+            source_policy = (
+                "public" if str(canonical_ref).startswith("public:")
+                else "owner_only"
+            )
+        if source_code:
+            normalized_portable[str(canonical_ref)] = {
+                "source_code": source_code,
+                "source_access_policy": source_policy,
+            }
+    portable_token = _active_portable_source_overrides.set(normalized_portable)
     owner_token = _active_transient_source_owner.set(owner)
     try:
         yield
     finally:
         _active_transient_source_scope.reset(token)
         _active_transient_source_overrides.reset(override_token)
+        _active_portable_source_overrides.reset(portable_token)
         _active_transient_source_owner.reset(owner_token)
 
 
-def _transient_source(owner: str, factor_id: str) -> str:
-    owner = str(owner or "").strip()
-    if not owner:
-        return ""
-    override = _active_transient_source_overrides.get().get(str(factor_id))
-    bound_owner = _active_transient_source_owner.get()
-    if override and (not bound_owner or bound_owner == owner):
-        return override
+def _active_run_source_record(
+    source_kind: str,
+    source_owner: str,
+    factor_id: str,
+) -> tuple[str, str]:
+    source_kind = str(source_kind or "").strip()
+    source_owner = str(source_owner or "").strip()
+    factor_id = str(factor_id or "").strip()
+    task_owner = _active_transient_source_owner.get()
+    if not source_kind or not source_owner or not factor_id or not task_owner:
+        return "", ""
+    canonical_ref = (
+        f"public:{factor_id}"
+        if source_kind == "public" else f"{source_owner}:{factor_id}"
+    )
+    override = _active_portable_source_overrides.get().get(canonical_ref)
+    if override:
+        policy = str(override.get("source_access_policy") or "")
+        source_mode = "" if policy in {"public", "owner_only"} else policy
+        return str(override.get("source_code") or ""), source_mode
+    if source_kind == "custom" and source_owner == task_owner:
+        override = _active_transient_source_overrides.get().get(factor_id)
+        if override:
+            return override, "transient_run_source"
     scope_id = _active_transient_source_scope.get()
     if not scope_id:
-        return ""
+        return "", ""
     try:
-        from server.services.transient_factor_sources import load_source
+        from server.services.transient_factor_sources import load_source_record
 
-        return str(load_source(scope_id, factor_id, owner=owner) or "")
+        record = load_source_record(
+            scope_id,
+            factor_id,
+            owner=task_owner,
+            source_kind=source_kind,
+            source_owner=source_owner,
+        )
+        if not record:
+            return "", ""
+        policy = str(record.get("source_access_policy") or "")
+        source_mode = "" if policy in {"public", "owner_only"} else policy
+        return str(record.get("source_code") or ""), source_mode
     except Exception:
-        return ""
+        return "", ""
+
+
+def _active_run_source(
+    source_kind: str,
+    source_owner: str,
+    factor_id: str,
+) -> str:
+    return _active_run_source_record(source_kind, source_owner, factor_id)[0]
+
+
+def _transient_source(owner: str, factor_id: str) -> str:
+    return _active_run_source("custom", owner, factor_id)
 
 
 # ── 页级缓存操作 ──
@@ -216,7 +277,10 @@ def _split_factor_owner_ref(ref: str) -> tuple[str | None, str]:
 
 
 def _public_factor_source_exists(factor_id: str) -> bool:
-    return bool(load_public_factor_source(factor_id))
+    return bool(
+        _active_run_source("public", "public", factor_id)
+        or load_public_factor_source(factor_id)
+    )
 
 
 def _is_registered_shared_factor(
@@ -252,6 +316,8 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     if owner == "public":
         return "public", "public", factor_id, f"public:{factor_id}"
     if owner:
+        if _active_run_source("custom", owner, factor_id):
+            return "custom", owner, factor_id, f"{owner}:{factor_id}"
         owner_visible = bool(
             active_user
             and (
@@ -295,12 +361,9 @@ def resolve_factor_family_source(
         module_name,
         username,
     )
-    source_code = ""
-    source_mode = ""
-    if source_kind == "custom":
-        source_code = _transient_source(owner, factor_id)
-        if source_code:
-            source_mode = "transient_run_source"
+    source_code, source_mode = _active_run_source_record(
+        source_kind, owner, factor_id,
+    )
     if not source_code:
         source_code = (
             load_public_factor_source(factor_id)
@@ -338,12 +401,10 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     source_kind, owner, factor_id, cache_key = _resolve_factor_family_ref(module_name, username)
     source_code = ""
 
-    transient_source = ""
-    if source_kind == "custom":
-        transient_source = _transient_source(owner, factor_id)
+    transient_source = _active_run_source(source_kind, owner, factor_id)
 
     if source_kind == "public":
-        source_code = load_public_factor_source(factor_id) or ''
+        source_code = transient_source or load_public_factor_source(factor_id) or ''
         if not source_code:
             raise ImportError(
                 f"Cannot load factor '{factor_id}': not found in public factor registry"
