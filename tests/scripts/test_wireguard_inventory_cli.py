@@ -50,6 +50,26 @@ def test_cli_generates_owner_only_keys_without_printing_private_material(
         assert derived == (node / "wireguard.pub").read_text().strip()
 
 
+def test_deployment_cli_import_does_not_load_runtime_settings() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import server.deployment.wireguard; "
+                "assert 'scripts.data_dir' not in sys.modules"
+            ),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_cli_signs_verifies_and_renders_owner_only_node_config(tmp_path) -> None:
     authority = tmp_path / "authority"
     local = tmp_path / "local"
