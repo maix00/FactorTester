@@ -551,7 +551,7 @@ class RoutingStateMixin:
                 endpoint=endpoint,
                 port=artifact_data_port(),
             )
-        return {
+        payload = {
             "schema_version": 1,
             "server_id": self.server_id,
             "role": self.server_role,

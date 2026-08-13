@@ -10,6 +10,7 @@ and shutdown.  It is the production entry point used by systemd and by
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import socket
 import sys
@@ -19,14 +20,17 @@ from pathlib import Path
 from types import ModuleType
 from typing import Sequence
 
-from server.jobs.artifact_data_plane import artifact_data_endpoint
 from server.manager.config import (
     ARTIFACT_DATA_PORT,
     PEER_CONTROL_PORT,
     PEER_DATA_PORT,
 )
 from server.manager.http.peer_handler import peer_control_handler
-from server.manager.network_endpoints import peer_bind_address
+from server.manager.network_endpoints import (
+    client_endpoint_for_port,
+    peer_bind_address,
+    validate_client_endpoint,
+)
 
 
 def _runtime_module() -> ModuleType:
@@ -134,14 +138,30 @@ def main(
         print(f"Removed {len(removed)} detached worktree(s)")
 
     scheme = "https" if tls_paths is not None else "http"
-    control_endpoint = str(args.public_endpoint or "").strip().rstrip("/")
+    control_endpoint = str(
+        args.public_endpoint
+        or os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+        or ""
+    ).strip().rstrip("/")
     if not control_endpoint:
         control_endpoint = f"{scheme}://127.0.0.1:{args.port}"
-    data_endpoint = str(args.public_data_endpoint or "").strip().rstrip("/")
+    control_endpoint = validate_client_endpoint(
+        control_endpoint, name="public Manager endpoint",
+    )
+    data_endpoint = str(
+        args.public_data_endpoint
+        or os.environ.get("FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT")
+        or ""
+    ).strip().rstrip("/")
     if not data_endpoint:
-        data_endpoint = artifact_data_endpoint(
-            endpoint=control_endpoint,
-            port=args.data_port,
+        data_endpoint = client_endpoint_for_port(
+            control_endpoint,
+            args.data_port,
+            name="public transfer data endpoint",
+        )
+    else:
+        data_endpoint = validate_client_endpoint(
+            data_endpoint, name="public transfer data endpoint",
         )
     runtime_module.Handler.state.configure_data_plane(
         client_host=args.data_host,

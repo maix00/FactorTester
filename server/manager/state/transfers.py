@@ -121,6 +121,3 @@ class TransferStateMixin:
             ttl=ttl,
             now=now,
         )
-
-    def stop_node_agent(self) -> None:
-        """Compatibility lifecycle hook; direct peers need no background agent."""

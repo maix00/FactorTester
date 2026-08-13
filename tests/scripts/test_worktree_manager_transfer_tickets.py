@@ -16,7 +16,7 @@ def test_ticket_is_hash_only_and_bound_to_attempt_role_node_and_range(
     issued = store.issue(
         transfer_id="transfer-1",
         attempt_id="attempt-1",
-        role=TransferTicketRole.PRODUCER,
+        role=TransferTicketRole.ORIGIN_READ,
         principal="alice",
         node_id="office-a",
         start_offset=4,
@@ -27,7 +27,7 @@ def test_ticket_is_hash_only_and_bound_to_attempt_role_node_and_range(
 
     grant = store.verify(
         issued.bearer,
-        required_role=TransferTicketRole.PRODUCER,
+        required_role=TransferTicketRole.ORIGIN_READ,
         attempt_id="attempt-1",
         node_id="office-a",
         start_offset=4,
@@ -45,7 +45,7 @@ def test_ticket_is_hash_only_and_bound_to_attempt_role_node_and_range(
     with pytest.raises(PermissionError, match="role"):
         store.verify(
             issued.bearer,
-            required_role=TransferTicketRole.CONSUMER,
+            required_role=TransferTicketRole.DESTINATION_WRITE,
             attempt_id="attempt-1",
             node_id="office-a",
             start_offset=4,
@@ -55,7 +55,7 @@ def test_ticket_is_hash_only_and_bound_to_attempt_role_node_and_range(
     with pytest.raises(PermissionError, match="range"):
         store.verify(
             issued.bearer,
-            required_role=TransferTicketRole.PRODUCER,
+            required_role=TransferTicketRole.ORIGIN_READ,
             attempt_id="attempt-1",
             node_id="office-a",
             start_offset=0,
@@ -106,7 +106,7 @@ def test_ticket_expiry_revocation_and_single_use_are_enforced(tmp_path) -> None:
     expiring = store.issue(
         transfer_id="transfer-2",
         attempt_id="attempt-2",
-        role=TransferTicketRole.CONSUMER,
+        role=TransferTicketRole.CLIENT_DOWNLOAD,
         principal="alice",
         node_id="",
         start_offset=0,
@@ -117,7 +117,7 @@ def test_ticket_expiry_revocation_and_single_use_are_enforced(tmp_path) -> None:
     with pytest.raises(PermissionError, match="expired"):
         store.verify(
             expiring.bearer,
-            required_role=TransferTicketRole.CONSUMER,
+            required_role=TransferTicketRole.CLIENT_DOWNLOAD,
             attempt_id="attempt-2",
             node_id="",
             start_offset=0,

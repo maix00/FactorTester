@@ -57,3 +57,22 @@ def test_registration_rejects_public_address_disguised_as_peer_endpoint(
         assert "peer" in str(exc).lower() or "wireguard" in str(exc).lower()
     else:  # pragma: no cover - security invariant
         raise AssertionError("public peer endpoint was accepted")
+
+
+def test_federation_registration_payload_includes_transfer_node(tmp_path) -> None:
+    source = _state(tmp_path, "node-a")
+    source.configure_transfer_endpoints(server_endpoints(
+        client_control_endpoint="https://198.51.100.10:7998",
+        client_data_endpoint="https://198.51.100.10:7997",
+        peer_host="10.77.0.10",
+    ), now=100.0)
+
+    payload = source.registration_payload(
+        "https://198.51.100.10:7998",
+        artifact_endpoint="https://198.51.100.10:7997",
+    )
+
+    assert payload["transfer_node"]["node_id"] == "node-a"
+    assert payload["transfer_node"]["peer_control_endpoint"] == (
+        "http://10.77.0.10:17998"
+    )

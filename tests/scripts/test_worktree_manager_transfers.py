@@ -12,106 +12,61 @@ from server.manager.transfers.models import (
 )
 
 
-def test_transfer_request_and_dispatch_survive_manager_restart(tmp_path) -> None:
-    path = tmp_path / "transfers.sqlite"
-    store = TransferStore(path, server_id="public-b2")
-
-    transfer = store.create(
-        NewTransfer(
-            idempotency_key="alice:job-1:result:download",
-            operation=TransferOperation.DOWNLOAD,
-            principal="alice",
-            request_owner_manager_id="public-b2",
-            relay_owner_manager_id="public-b2",
-            source_server_id="office-a",
-            destination_server_id="public-b2",
-            storage_server_id="office-a",
-            job_id="job-1",
-            artifact_name="result",
-            expected_size=6,
-            expected_sha256=("bef57ec7f53a6d40beb640a780a639c83bc29ac8"
-                             "a9816f1fc6c5c6dcd93c4721"),
-            expires_at=200.0,
+def _request(**changes) -> NewTransfer:
+    value = NewTransfer(
+        idempotency_key="alice:job-1:result:download",
+        operation=TransferOperation.DOWNLOAD,
+        principal="alice",
+        request_owner_manager_id="node-b",
+        source_server_id="node-a",
+        destination_server_id="node-b",
+        storage_server_id="node-a",
+        job_id="job-1",
+        artifact_name="result.bin",
+        expected_size=6,
+        expected_sha256=(
+            "bef57ec7f53a6d40beb640a780a639c83bc29ac8"
+            "a9816f1fc6c5c6dcd93c4721"
         ),
-        dispatch_to="public-b1",
-        now=100.0,
+        expires_at=200.0,
+    )
+    return replace(value, **changes)
+
+
+def test_transfer_request_survives_manager_restart(tmp_path) -> None:
+    path = tmp_path / "transfers.sqlite"
+    created = TransferStore(path, server_id="node-b").create(
+        _request(), now=100.0,
     )
 
-    restarted = TransferStore(path, server_id="public-b2")
-    restored = restarted.require(transfer.transfer_id)
-    pending = restarted.claim_outbox(
-        claimant="public-b2-dispatcher",
-        limit=10,
-        lease_seconds=30,
-        now=101.0,
+    restored = TransferStore(path, server_id="node-b").require(
+        created.transfer_id,
     )
 
-    assert restored == transfer
-    assert len(pending) == 1
-    assert pending[0].transfer_id == transfer.transfer_id
-    assert pending[0].target_manager_id == "public-b1"
-    assert pending[0].event_type == "transfer.requested"
-    assert pending[0].payload["source_server_id"] == "office-a"
-    assert pending[0].payload["relay_owner_manager_id"] == "public-b2"
+    assert restored == created
+    assert restored.request_owner_manager_id == "node-b"
+    assert restored.storage_server_id == "node-a"
 
 
 def test_transfer_creation_is_idempotent_but_rejects_conflicting_content(
     tmp_path,
 ) -> None:
-    store = TransferStore(tmp_path / "transfers.sqlite", server_id="public-b2")
-    request = NewTransfer(
-        idempotency_key="alice:job-1:result:download",
-        operation=TransferOperation.DOWNLOAD,
-        principal="alice",
-        request_owner_manager_id="public-b2",
-        relay_owner_manager_id="public-b2",
-        source_server_id="office-a",
-        destination_server_id="public-b2",
-        storage_server_id="office-a",
-        job_id="job-1",
-        artifact_name="result",
-        expected_size=6,
-        expected_sha256=("bef57ec7f53a6d40beb640a780a639c83bc29ac8"
-                         "a9816f1fc6c5c6dcd93c4721"),
-        expires_at=200.0,
-    )
+    store = TransferStore(tmp_path / "transfers.sqlite", server_id="node-b")
+    request = _request()
 
-    first = store.create(request, dispatch_to="public-b1", now=100.0)
-    duplicate = store.create(request, dispatch_to="public-b1", now=101.0)
+    first = store.create(request, now=100.0)
+    duplicate = store.create(request, now=101.0)
 
     assert duplicate == first
-    assert len(store.claim_outbox(
-        claimant="dispatcher", now=102.0,
-    )) == 1
     with pytest.raises(ValueError, match="idempotency key conflicts"):
         store.create(
-            replace(request, artifact_name="different"),
-            dispatch_to="public-b1",
-            now=103.0,
+            replace(request, artifact_name="different.bin"), now=102.0,
         )
 
 
 def test_transfer_state_changes_are_guarded_and_replay_safe(tmp_path) -> None:
-    store = TransferStore(tmp_path / "transfers.sqlite", server_id="public-b2")
-    transfer = store.create(
-        NewTransfer(
-            idempotency_key="transfer-state",
-            operation=TransferOperation.DOWNLOAD,
-            principal="alice",
-            request_owner_manager_id="public-b2",
-            relay_owner_manager_id="public-b2",
-            source_server_id="office-a",
-            destination_server_id="public-b2",
-            storage_server_id="office-a",
-            job_id="job-1",
-            artifact_name="result",
-            expected_size=0,
-            expected_sha256="",
-            expires_at=200.0,
-        ),
-        dispatch_to="public-b1",
-        now=100.0,
-    )
+    store = TransferStore(tmp_path / "transfers.sqlite", server_id="node-b")
+    transfer = store.create(_request(idempotency_key="transfer-state"), now=100.0)
 
     planned = store.transition(
         transfer.transfer_id,

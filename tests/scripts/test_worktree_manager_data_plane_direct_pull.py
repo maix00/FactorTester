@@ -10,24 +10,30 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from server.manager import runtime as manager
-from server.manager.data_plane.server import DataPlaneHTTPServer, DataPlaneRuntime
+from server.manager.data_plane.context import DataPlaneRuntime
+from server.manager.data_plane.server import (
+    ClientDataPlaneHTTPServer,
+    PeerDataPlaneHTTPServer,
+)
 from server.manager.storage.transfers import (
     TransferAttemptStore,
+    TransferReplicaStore,
     TransferStore,
     TransferTicketStore,
 )
 from server.manager.transfers.coordinator import DownloadRequest, TransferCoordinator
-from server.manager.transfers.node_client import NodeControlClient
-from server.manager.transfers.node_keys import NodeKey
-from server.manager.transfers.planner import NodeReachability
-from server.manager.transfers.wire import transfer_context_payload
+from server.manager.transfers.models import TransferTicketRole
+from server.manager.transfers.planner import NodeEndpoint
+
+
+class _NoopPeerGateway:
+    @staticmethod
+    def import_context(_transfer, _attempt) -> None:
+        pass
 
 
 @contextmanager
-def _manager(state):
-    manager.Handler.state = state
-    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+def _running(server):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -38,226 +44,127 @@ def _manager(state):
         thread.join(timeout=2)
 
 
-@contextmanager
-def _data_plane(runtime):
-    server = DataPlaneHTTPServer(("127.0.0.1", 0), runtime=runtime)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
-
-
-def test_direct_pull_streams_public_origin_through_selected_manager_7997(
-    tmp_path,
-) -> None:
-    raw = b"public-to-public-artifact"
-    source_state = manager.ManagerState(
-        tmp_path / "source-manager", "python", server_id="public-b1",
+def _node(
+    node_id: str, data_endpoint: str, octet: int, *, now: float,
+) -> NodeEndpoint:
+    return NodeEndpoint(
+        server_id=node_id,
+        peer_data_endpoint=data_endpoint,
+        peer_control_endpoint=f"http://10.77.0.{octet}:17998",
+        observed_at=now,
+        expires_at=now + 600,
+        online=True,
     )
-    source_state.federation_registration_token = "enroll-secret"
+
+
+@contextmanager
+def _direct_download(tmp_path, raw: bytes):
+    source_db = tmp_path / "source.sqlite"
+    requester_db = tmp_path / "requester.sqlite"
     source_file = tmp_path / "source.bin"
     source_file.write_bytes(raw)
-    requester_db = tmp_path / "requester.sqlite"
-    requester_key = NodeKey.load_or_create(
-        tmp_path / "public-b2.key", node_id="public-b2",
-    )
-    coordinator = TransferCoordinator(
-        manager_id="public-b2",
-        data_endpoint="http://placeholder:7997",
-        requests=TransferStore(requester_db, server_id="public-b2"),
-        attempts=TransferAttemptStore(requester_db, server_id="public-b2"),
-        tickets=TransferTicketStore(requester_db, server_id="public-b2"),
-    )
     now = time.time()
-
-    with _manager(source_state) as source_manager:
-        peer_client = NodeControlClient(
-            source_manager,
-            key=requester_key,
-            enrollment_token="enroll-secret",
+    source_runtime = DataPlaneRuntime(
+        server_id="node-a",
+        transfer_database=source_db,
+        staging_root=tmp_path / "source-staging",
+        origin_resolver=lambda _transfer: source_file,
+    )
+    source_server = PeerDataPlaneHTTPServer(
+        ("127.0.0.1", 0), runtime=source_runtime,
+    )
+    with _running(source_server) as source_endpoint:
+        coordinator = TransferCoordinator(
+            manager_id="node-b",
+            client_data_endpoint="http://client-placeholder:7997",
+            requests=TransferStore(requester_db, server_id="node-b"),
+            attempts=TransferAttemptStore(requester_db, server_id="node-b"),
+            tickets=TransferTicketStore(requester_db, server_id="node-b"),
+            peer_gateway=_NoopPeerGateway(),
         )
-        peer_client.enroll()
         access = coordinator.prepare_download(
             DownloadRequest(
-                idempotency_key="direct-pull-http",
+                idempotency_key="wireguard-direct-download",
                 principal="alice",
-                storage_server_id="public-b1",
+                storage_server_id="node-a",
                 job_id="job-1",
                 artifact_name="result.bin",
                 expected_size=len(raw),
                 expected_sha256=hashlib.sha256(raw).hexdigest(),
                 expires_at=now + 600,
             ),
-            observations={
-                "public-b1": NodeReachability(
-                    server_id="public-b1",
-                    data_endpoint="http://source-placeholder:7997",
-                    reachable_from=frozenset({"public-b2"}),
-                    connection_owner_manager_id="public-b1",
-                    observed_at=now,
-                    expires_at=now + 60,
-                    online=True,
-                ),
-                "public-b2": NodeReachability(
-                    server_id="public-b2",
-                    data_endpoint="http://requester-placeholder:7997",
-                    reachable_from=frozenset({"public-b2"}),
-                    connection_owner_manager_id="public-b2",
-                    observed_at=now,
-                    expires_at=now + 60,
-                    online=True,
+            endpoints={
+                "node-a": _node("node-a", source_endpoint, 1, now=now),
+                "node-b": _node(
+                    "node-b", "http://10.77.0.2:17997", 2, now=now,
                 ),
             },
             now=now,
         )
         transfer = coordinator.requests.require(access.transfer_id)
         attempt = coordinator.attempts.require(access.attempt_id)
-        peer_client.signed_json(
-            "/api/federation/transfers/context",
-            transfer_context_payload(transfer, attempt),
+        TransferReplicaStore(
+            source_db, server_id="node-a",
+        ).import_context(transfer, attempt, now=now)
+        origin_bearer = source_runtime.tickets.issue(
+            transfer_id=transfer.transfer_id,
+            attempt_id=attempt.attempt_id,
+            role=TransferTicketRole.ORIGIN_READ,
+            principal=transfer.principal,
+            node_id="node-b",
+            start_offset=0,
+            end_offset=len(raw),
+            expires_at=transfer.expires_at,
+        ).bearer
+        requester_runtime = DataPlaneRuntime(
+            server_id="node-b",
+            transfer_database=requester_db,
+            staging_root=tmp_path / "requester-staging",
+            origin_resolver=lambda _transfer: Path("/not-local"),
+            origin_ticket_provider=lambda _context: origin_bearer,
         )
-        source_runtime = DataPlaneRuntime(
-            server_id="public-b1",
-            transfer_database=source_state.transfer_database_path,
-            staging_root=tmp_path / "source-staging",
-            origin_resolver=lambda _transfer: source_file,
+        requester_server = ClientDataPlaneHTTPServer(
+            ("127.0.0.1", 0), runtime=requester_runtime,
         )
-        with _data_plane(source_runtime) as source_data:
-            requester_runtime = DataPlaneRuntime(
-                server_id="public-b2",
-                transfer_database=requester_db,
-                staging_root=tmp_path / "requester-staging",
-                origin_resolver=lambda _transfer: Path("/not-local"),
-                origin_ticket_provider=lambda _context: (
-                    peer_client.signed_json(
-                        "/api/federation/transfers/origin-ticket",
-                        {"attempt_id": attempt.attempt_id},
-                    )["bearer"]
-                ),
-                source_endpoint_provider=lambda _context: source_data,
+        with _running(requester_server) as requester_endpoint:
+            yield requester_endpoint, access, requester_runtime
+
+
+def test_direct_pull_streams_range_and_head_without_relay_copy(tmp_path) -> None:
+    raw = b"wireguard-direct-artifact"
+    with _direct_download(tmp_path, raw) as (endpoint, access, runtime):
+        headers = {"Authorization": f"Bearer {access.bearer}"}
+        with urlopen(Request(
+            endpoint + access.path,
+            headers={**headers, "Range": "bytes=10-15"},
+        )) as response:
+            assert response.status == 206
+            assert response.headers["Content-Range"] == (
+                f"bytes 10-15/{len(raw)}"
             )
-            with _data_plane(requester_runtime) as requester_data:
-                request = Request(
-                    requester_data + access.path,
-                    headers={
-                        "Authorization": f"Bearer {access.bearer}",
-                        "Range": "bytes=7-15",
-                    },
-                )
-                with urlopen(request, timeout=2) as response:
-                    received = response.read()
-                    status = response.status
-                    content_range = response.headers["Content-Range"]
+            assert response.read() == raw[10:16]
+        with urlopen(Request(
+            endpoint + access.path, headers=headers, method="HEAD",
+        )) as response:
+            assert response.status == 200
+            assert response.headers["Content-Length"] == str(len(raw))
+            assert response.read() == b""
 
-    assert status == 206
-    assert received == raw[7:16]
-    assert content_range == f"bytes 7-15/{len(raw)}"
-    assert list((tmp_path / "requester-staging").rglob("*")) == []
+    assert not any(runtime.staging_root.rglob("*"))
 
 
-def test_direct_pull_forwards_unsatisfied_range_without_dropping_connection(
-    tmp_path,
-) -> None:
+def test_direct_pull_forwards_unsatisfied_range(tmp_path) -> None:
     raw = b"short"
-    source_state = manager.ManagerState(
-        tmp_path / "source-manager", "python", server_id="public-b1",
-    )
-    source_state.federation_registration_token = "enroll-secret"
-    source_file = tmp_path / "source.bin"
-    source_file.write_bytes(raw)
-    requester_db = tmp_path / "requester.sqlite"
-    requester_key = NodeKey.load_or_create(
-        tmp_path / "public-b2.key", node_id="public-b2",
-    )
-    coordinator = TransferCoordinator(
-        manager_id="public-b2",
-        data_endpoint="http://placeholder:7997",
-        requests=TransferStore(requester_db, server_id="public-b2"),
-        attempts=TransferAttemptStore(requester_db, server_id="public-b2"),
-        tickets=TransferTicketStore(requester_db, server_id="public-b2"),
-    )
-    now = time.time()
-
-    with _manager(source_state) as source_manager:
-        peer_client = NodeControlClient(
-            source_manager,
-            key=requester_key,
-            enrollment_token="enroll-secret",
-        )
-        peer_client.enroll()
-        access = coordinator.prepare_download(
-            DownloadRequest(
-                idempotency_key="direct-pull-invalid-range",
-                principal="alice",
-                storage_server_id="public-b1",
-                job_id="job-1",
-                artifact_name="result.bin",
-                expected_size=len(raw),
-                expected_sha256=hashlib.sha256(raw).hexdigest(),
-                expires_at=now + 600,
-            ),
-            observations={
-                "public-b1": NodeReachability(
-                    server_id="public-b1",
-                    data_endpoint="http://source-placeholder:7997",
-                    reachable_from=frozenset({"public-b2"}),
-                    connection_owner_manager_id="public-b1",
-                    observed_at=now,
-                    expires_at=now + 60,
-                    online=True,
-                ),
-                "public-b2": NodeReachability(
-                    server_id="public-b2",
-                    data_endpoint="http://requester-placeholder:7997",
-                    reachable_from=frozenset({"public-b2"}),
-                    connection_owner_manager_id="public-b2",
-                    observed_at=now,
-                    expires_at=now + 60,
-                    online=True,
-                ),
+    with _direct_download(tmp_path, raw) as (endpoint, access, _runtime):
+        request = Request(
+            endpoint + access.path,
+            headers={
+                "Authorization": f"Bearer {access.bearer}",
+                "Range": "bytes=99-100",
             },
-            now=now,
         )
-        transfer = coordinator.requests.require(access.transfer_id)
-        attempt = coordinator.attempts.require(access.attempt_id)
-        peer_client.signed_json(
-            "/api/federation/transfers/context",
-            transfer_context_payload(transfer, attempt),
-        )
-        source_runtime = DataPlaneRuntime(
-            server_id="public-b1",
-            transfer_database=source_state.transfer_database_path,
-            staging_root=tmp_path / "source-staging",
-            origin_resolver=lambda _transfer: source_file,
-        )
-        with _data_plane(source_runtime) as source_data:
-            requester_runtime = DataPlaneRuntime(
-                server_id="public-b2",
-                transfer_database=requester_db,
-                staging_root=tmp_path / "requester-staging",
-                origin_resolver=lambda _transfer: Path("/not-local"),
-                origin_ticket_provider=lambda _context: (
-                    peer_client.signed_json(
-                        "/api/federation/transfers/origin-ticket",
-                        {"attempt_id": attempt.attempt_id},
-                    )["bearer"]
-                ),
-                source_endpoint_provider=lambda _context: source_data,
-            )
-            with _data_plane(requester_runtime) as requester_data:
-                request = Request(
-                    requester_data + access.path,
-                    headers={
-                        "Authorization": f"Bearer {access.bearer}",
-                        "Range": "bytes=99-100",
-                    },
-                )
-                with pytest.raises(HTTPError) as denied:
-                    urlopen(request, timeout=2)
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
 
     assert denied.value.code == 416
     assert denied.value.headers["Content-Range"] == f"bytes */{len(raw)}"

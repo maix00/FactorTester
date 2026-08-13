@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from server.manager.config import PEER_CONTROL_PORT, PEER_DATA_PORT
 
@@ -43,6 +43,34 @@ def validate_client_endpoint(value: str, *, name: str) -> str:
     if parsed.username or parsed.password:
         raise ValueError(f"{name} must not contain credentials")
     return selected
+
+
+def client_endpoint_for_port(
+    endpoint: str,
+    port: int,
+    *,
+    name: str = "client endpoint",
+) -> str:
+    """Derive a sibling public listener without inferring any peer route."""
+
+    selected = validate_client_endpoint(endpoint, name=name)
+    parsed = urlparse(selected)
+    try:
+        selected_port = int(port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} port must be an integer") from exc
+    if not 1 <= selected_port <= 65535:
+        raise ValueError(f"{name} port must be between 1 and 65535")
+    host = parsed.hostname or ""
+    rendered_host = f"[{host}]" if ":" in host else host
+    return urlunparse((
+        parsed.scheme,
+        f"{rendered_host}:{selected_port}",
+        "",
+        "",
+        "",
+        "",
+    ))
 
 
 def validate_peer_endpoint(value: str, *, name: str, port: int) -> str:

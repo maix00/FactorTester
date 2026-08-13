@@ -13,49 +13,48 @@ from server.manager.storage.transfers import (
 from server.manager.transfers.coordinator import DownloadRequest, TransferCoordinator
 from server.manager.transfers.models import TransferMode, TransferTicketRole
 from server.manager.transfers.origin_tickets import OriginTicketIssuer
-from server.manager.transfers.planner import NodeReachability
+from server.manager.transfers.planner import NodeEndpoint
+
+
+class _NoopPeerGateway:
+    @staticmethod
+    def import_context(_transfer, _attempt) -> None:
+        pass
+
+
+def _node(node_id: str, octet: int) -> NodeEndpoint:
+    return NodeEndpoint(
+        server_id=node_id,
+        peer_data_endpoint=f"http://10.77.0.{octet}:17997",
+        peer_control_endpoint=f"http://10.77.0.{octet}:17998",
+        observed_at=1.0,
+        expires_at=4_000_000_000.0,
+        online=True,
+    )
 
 
 def _direct_context(tmp_path):
     requester_path = tmp_path / "requester.sqlite"
     coordinator = TransferCoordinator(
-        manager_id="public-b2",
-        data_endpoint="http://public-b2:7997",
-        requests=TransferStore(requester_path, server_id="public-b2"),
-        attempts=TransferAttemptStore(requester_path, server_id="public-b2"),
-        tickets=TransferTicketStore(requester_path, server_id="public-b2"),
+        manager_id="node-b",
+        client_data_endpoint="https://factor.example:7997",
+        requests=TransferStore(requester_path, server_id="node-b"),
+        attempts=TransferAttemptStore(requester_path, server_id="node-b"),
+        tickets=TransferTicketStore(requester_path, server_id="node-b"),
+        peer_gateway=_NoopPeerGateway(),
     )
     access = coordinator.prepare_download(
         DownloadRequest(
             idempotency_key="direct-download",
             principal="alice",
-            storage_server_id="public-b1",
+            storage_server_id="node-a",
             job_id="job-1",
             artifact_name="result.bin",
             expected_size=6,
             expected_sha256="a" * 64,
             expires_at=4_000_000_000.0,
         ),
-        observations={
-            "public-b1": NodeReachability(
-                server_id="public-b1",
-                data_endpoint="http://public-b1:7997",
-                reachable_from=frozenset({"public-b2"}),
-                connection_owner_manager_id="public-b1",
-                observed_at=1.0,
-                expires_at=4_000_000_000.0,
-                online=True,
-            ),
-            "public-b2": NodeReachability(
-                server_id="public-b2",
-                data_endpoint="http://public-b2:7997",
-                reachable_from=frozenset({"public-b2"}),
-                connection_owner_manager_id="public-b2",
-                observed_at=1.0,
-                expires_at=4_000_000_000.0,
-                online=True,
-            ),
-        },
+        endpoints={"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)},
         now=100.0,
     )
     return (
@@ -67,39 +66,36 @@ def _direct_context(tmp_path):
 def test_transfer_replica_preserves_ids_and_is_idempotent(tmp_path) -> None:
     transfer, attempt = _direct_context(tmp_path)
     source_path = tmp_path / "source.sqlite"
-    replicas = TransferReplicaStore(source_path, server_id="public-b1")
+    replicas = TransferReplicaStore(source_path, server_id="node-a")
 
     first = replicas.import_context(transfer, attempt, now=101.0)
     duplicate = TransferReplicaStore(
-        source_path, server_id="public-b1",
+        source_path, server_id="node-a",
     ).import_context(transfer, attempt, now=102.0)
 
     assert duplicate == first
-    restored_transfer, restored_attempt = first
-    assert restored_transfer.transfer_id == transfer.transfer_id
-    assert restored_attempt.attempt_id == attempt.attempt_id
-    assert restored_attempt.mode is TransferMode.DIRECT_PULL
+    assert first[0].transfer_id == transfer.transfer_id
+    assert first[1].attempt_id == attempt.attempt_id
+    assert first[1].mode is TransferMode.DIRECT_PULL
     with pytest.raises(ValueError, match="replica conflicts"):
         replicas.import_context(
-            replace(transfer, artifact_name="changed"), attempt, now=103.0,
+            replace(transfer, artifact_name="changed.bin"), attempt, now=103.0,
         )
 
 
 def test_source_issues_origin_ticket_only_to_request_owner(tmp_path) -> None:
     transfer, attempt = _direct_context(tmp_path)
     source_path = tmp_path / "source.sqlite"
-    replicas = TransferReplicaStore(source_path, server_id="public-b1")
+    replicas = TransferReplicaStore(source_path, server_id="node-a")
     replicas.import_context(transfer, attempt, now=101.0)
-    tickets = TransferTicketStore(source_path, server_id="public-b1")
+    tickets = TransferTicketStore(source_path, server_id="node-a")
     issuer = OriginTicketIssuer(
-        manager_id="public-b1",
-        replicas=replicas,
-        tickets=tickets,
+        manager_id="node-a", replicas=replicas, tickets=tickets,
     )
 
     issued = issuer.issue(
         attempt_id=attempt.attempt_id,
-        requester_node_id="public-b2",
+        requester_node_id="node-b",
         now=102.0,
     )
 
@@ -107,7 +103,7 @@ def test_source_issues_origin_ticket_only_to_request_owner(tmp_path) -> None:
         issued.bearer,
         required_role=TransferTicketRole.ORIGIN_READ,
         attempt_id=attempt.attempt_id,
-        node_id="public-b2",
+        node_id="node-b",
         start_offset=0,
         end_offset=6,
         now=103.0,
@@ -115,16 +111,16 @@ def test_source_issues_origin_ticket_only_to_request_owner(tmp_path) -> None:
     with pytest.raises(PermissionError, match="request owner"):
         issuer.issue(
             attempt_id=attempt.attempt_id,
-            requester_node_id="public-b3",
+            requester_node_id="node-c",
             now=104.0,
         )
 
 
-def test_replica_rejects_context_for_another_source_server(tmp_path) -> None:
+def test_replica_rejects_context_for_non_storage_server(tmp_path) -> None:
     transfer, attempt = _direct_context(tmp_path)
     replicas = TransferReplicaStore(
-        tmp_path / "wrong-source.sqlite", server_id="public-b3",
+        tmp_path / "wrong-source.sqlite", server_id="node-c",
     )
 
-    with pytest.raises(PermissionError, match="source server"):
+    with pytest.raises(PermissionError, match="storage server"):
         replicas.import_context(transfer, attempt, now=101.0)
