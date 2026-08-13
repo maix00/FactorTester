@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from tools.testers.ic_test.configuration import compile_ic_run_configuration
+from tools.testers.ic_test.configuration import (
+    CompiledICRunConfiguration,
+    compile_ic_run_configuration,
+)
 
 
 ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
@@ -185,3 +188,29 @@ def test_compiler_rejects_unfrozen_factors_and_false_cross_section_capabilities(
         _compile(by_group="on")
     with pytest.raises(ValueError, match="min_cross_section_count is not executable"):
         _compile(min_cross_section_count=10)
+
+
+def test_frozen_configuration_round_trips_without_authoring_fields() -> None:
+    compiled = _compile()
+
+    restored = CompiledICRunConfiguration.from_dict(compiled.to_dict())
+
+    assert restored == compiled
+    assert restored.configuration_ref == compiled.configuration_ref
+
+
+def test_frozen_configuration_rejects_tampered_core_identity() -> None:
+    payload = _compile().to_dict()
+    payload["analysis_graph"]["core_tests"][0]["horizon"] = "DAY99"
+
+    with pytest.raises(ValueError, match="core_test_ref does not match"):
+        CompiledICRunConfiguration.from_dict(payload)
+
+
+def test_frozen_configuration_rejects_incomplete_job_partitions() -> None:
+    payload = _compile().to_dict()
+    first_partition = next(iter(payload["job_partitions"].values()))
+    first_partition.pop()
+
+    with pytest.raises(ValueError, match="job partitions must contain every core test"):
+        CompiledICRunConfiguration.from_dict(payload)

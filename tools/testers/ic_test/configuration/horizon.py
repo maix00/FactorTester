@@ -91,6 +91,17 @@ class ICHorizonPolicy:
             tuple(value.get("multipliers") or (1,)),
         )
 
+    @classmethod
+    def from_dict(cls, value: Any) -> ICHorizonPolicy:
+        if not isinstance(value, dict):
+            raise ValueError("horizon policy must be an object")
+        mode = str(value.get("mode") or "").strip()
+        return cls(
+            mode,
+            tuple(value.get("bases") or ()),
+            tuple(value.get("multipliers") or ()),
+        )
+
     def resolve(self, signal_frequency: Any | None) -> tuple[str, ...]:
         signal = DataFreq(signal_frequency) if signal_frequency else None
         if self.mode == "scale_aware":

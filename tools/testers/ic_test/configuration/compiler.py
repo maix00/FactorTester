@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from tools.testers.ic_test.analysis_graph import ICAnalysisGraph
@@ -20,34 +17,7 @@ from .inputs import (
     reject_unimplemented_cross_section_settings,
     unique_texts,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class CompiledICRunConfiguration:
-    horizon_policy: ICHorizonPolicy
-    analysis_graph: ICAnalysisGraph
-    primary_core_refs: tuple[str, ...]
-    job_partitions: Mapping[str, tuple[str, ...]]
-    output_requests: tuple[str, ...] = ()
-
-    @property
-    def configuration_ref(self) -> str:
-        payload = json.dumps(
-            self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-        ).encode()
-        return f"ic-run-configuration:v1:{hashlib.sha256(payload).hexdigest()}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": 1,
-            "horizon_policy": self.horizon_policy.to_dict(),
-            "analysis_graph": self.analysis_graph.to_dict(),
-            "primary_core_refs": list(self.primary_core_refs),
-            "job_partitions": {
-                key: list(value) for key, value in sorted(self.job_partitions.items())
-            },
-            "output_requests": list(self.output_requests),
-        }
+from .model import CompiledICRunConfiguration
 
 
 def compile_ic_run_configuration(

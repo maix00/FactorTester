@@ -53,6 +53,23 @@ class ICAnalysisNode:
             "parameters": _json_copy(self.parameters),
         }
 
+    @classmethod
+    def from_dict(cls, value: Any) -> ICAnalysisNode:
+        if not isinstance(value, dict):
+            raise ValueError("IC analysis node must be an object")
+        targets = value.get("target_refs")
+        if not isinstance(targets, list):
+            raise ValueError("IC analysis target_refs must be a list")
+        parameters = value.get("parameters", {})
+        if not isinstance(parameters, dict):
+            raise ValueError("IC analysis parameters must be an object")
+        return cls(
+            node_id=value.get("node_id"),
+            analysis_type=value.get("analysis_type"),
+            target_refs=tuple(targets),
+            parameters=parameters,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ICAnalysisGraph:
@@ -90,6 +107,19 @@ class ICAnalysisGraph:
                 for item in sorted(self.analyses, key=lambda value: value.node_id)
             ],
         }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> ICAnalysisGraph:
+        if not isinstance(value, dict) or value.get("schema_version") != 1:
+            raise ValueError("IC analysis graph schema_version must be 1")
+        core_values = value.get("core_tests")
+        analysis_values = value.get("analyses")
+        if not isinstance(core_values, list) or not isinstance(analysis_values, list):
+            raise ValueError("IC analysis graph nodes must be lists")
+        return cls(
+            core_tests=tuple(ICCoreTest.from_dict(item) for item in core_values),
+            analyses=tuple(ICAnalysisNode.from_dict(item) for item in analysis_values),
+        ).validate()
 
 
 __all__ = ["ICAnalysisGraph", "ICAnalysisNode"]

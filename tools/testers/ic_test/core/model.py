@@ -90,3 +90,20 @@ class ICCoreTest:
 
     def to_dict(self) -> dict[str, Any]:
         return {"core_test_ref": self.core_test_ref, **self.identity}
+
+    @classmethod
+    def from_dict(cls, value: Any) -> ICCoreTest:
+        if not isinstance(value, dict):
+            raise ValueError("IC core test must be an object")
+        item = cls(
+            product_scope_ref=value.get("product_scope_ref"),
+            factor_ref=value.get("factor_ref"),
+            horizon=value.get("horizon"),
+            entry_delay_bars=value.get("entry_delay_bars"),
+            method=value.get("method"),
+            return_price_basis=value.get("return_price_basis"),
+        )
+        supplied_ref = str(value.get("core_test_ref") or "").strip()
+        if supplied_ref != item.core_test_ref:
+            raise ValueError("core_test_ref does not match the frozen core identity")
+        return item

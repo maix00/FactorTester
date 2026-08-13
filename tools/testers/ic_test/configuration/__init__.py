@@ -1,7 +1,8 @@
 """Canonical IC run-configuration compiler."""
 
-from .compiler import CompiledICRunConfiguration, compile_ic_run_configuration
+from .compiler import compile_ic_run_configuration
 from .horizon import ICHorizonPolicy
+from .model import CompiledICRunConfiguration
 
 __all__ = [
     "CompiledICRunConfiguration",
