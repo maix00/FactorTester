@@ -105,20 +105,42 @@ final class LanguageStore: ObservableObject {
     func synchronize(principal value: String?) async {
         let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         principal = normalized?.isEmpty == false ? normalized : nil
-        apply(cachedLanguage(for: principal))
+        let ownerScoped = principal.flatMap(ownerScopedLanguage(for:))
+        if let ownerScoped {
+            apply(ownerScoped)
+        } else if principal == nil {
+            apply(lastCachedLanguage())
+        }
         guard let principal else { return }
         if let remote = try? await preferences.read(principal: principal) {
-            apply(remote)
-            defaults.set(remote.rawValue, forKey: userKey(principal))
+            if remote.configured {
+                apply(remote.language)
+                defaults.set(
+                    remote.language.rawValue,
+                    forKey: userKey(principal)
+                )
+            } else if let ownerScoped {
+                // Only an owner-scoped value is safe to bootstrap. The global
+                // last selection may belong to another account on this Mac.
+                apply(ownerScoped)
+                try? await preferences.update(
+                    language: ownerScoped,
+                    principal: principal
+                )
+            } else {
+                apply(remote.language)
+            }
         }
     }
 
-    private func cachedLanguage(for principal: String?) -> AppLanguage {
-        let lastSelection = defaults.string(forKey: Self.defaultsKey)
+    private func lastCachedLanguage() -> AppLanguage {
+        defaults.string(forKey: Self.defaultsKey)
             .flatMap(AppLanguage.init(rawValue:)) ?? selection
-        guard let principal else { return lastSelection }
-        return defaults.string(forKey: userKey(principal))
-            .flatMap(AppLanguage.init(rawValue:)) ?? lastSelection
+    }
+
+    private func ownerScopedLanguage(for principal: String) -> AppLanguage? {
+        defaults.string(forKey: userKey(principal))
+            .flatMap(AppLanguage.init(rawValue:))
     }
 
     private func apply(_ language: AppLanguage) {
