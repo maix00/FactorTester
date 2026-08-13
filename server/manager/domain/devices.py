@@ -25,6 +25,7 @@ DEVICE_REGISTRY_SCHEMA_VERSION = 2
 PUBLIC_DEVICE_LIMIT = 3
 DEVICE_AUTHORIZATION_SCHEMA_VERSION = 1
 DEVICE_AUTHORIZATION_TTL_SECONDS = 10 * 60
+DEVICE_AUTHORIZATION_LANGUAGES = {"system", "zh-Hans", "en"}
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -652,12 +653,16 @@ class DeviceAuthorizationStore:
         target_server_id: str,
         target_endpoint: str,
         device_name: str = "",
+        preferred_language: str = "zh-Hans",
     ) -> dict[str, object]:
         owner = str(username or "").strip()
         target = str(target_server_id or "").strip()
         endpoint = str(target_endpoint or "").strip().rstrip("/")
+        language = str(preferred_language or "").strip()
         if not owner or len(owner) > 256 or not target or len(target) > 128 or not endpoint:
             raise DeviceAuthorizationError("device authorization fields are invalid")
+        if language not in DEVICE_AUTHORIZATION_LANGUAGES:
+            raise DeviceAuthorizationError("device authorization language is invalid")
         token = secrets.token_urlsafe(32)
         now = time.time()
         expires_at = now + self.ttl_seconds
@@ -669,6 +674,7 @@ class DeviceAuthorizationStore:
                 target_server_id=target,
                 target_endpoint=endpoint,
                 device_name=str(device_name or "").strip()[:128],
+                preferred_language=language,
                 expires_at=expires_at,
                 source_server_id=self.server_id,
             )
@@ -685,6 +691,7 @@ class DeviceAuthorizationStore:
                     "target_server_id": target,
                     "target_endpoint": endpoint,
                     "device_name": str(device_name or "").strip()[:128],
+                    "preferred_language": language,
                     "expires_at": expires_at,
                     "source_server_id": self.server_id,
                 }
@@ -695,10 +702,40 @@ class DeviceAuthorizationStore:
             "target_server_id": target,
             "target_endpoint": endpoint,
             "device_name": str(device_name or "").strip()[:128],
+            "preferred_language": language,
             "expires_at": expires_at,
             "expires_in": int(self.ttl_seconds),
             "backend": self.backend,
         }
+
+    def preview(self, token: object, *, target_server_id: str) -> dict[str, object]:
+        """Read a live grant without consuming its one-time redemption."""
+        token_hash = authorization_token_hash(token)
+        target = str(target_server_id or "").strip()
+        if not target:
+            raise DeviceAuthorizationError("device authorization target is invalid")
+        if self.control_store is not None:
+            record = self.control_store.preview_device_authorization(
+                token_hash=token_hash,
+                target_server_id=target,
+            )
+            if record is None:
+                raise DeviceAuthorizationError(
+                    "device authorization is invalid or expired"
+                )
+            return dict(record)
+        with self._lock:
+            value = self._values.get(token_hash)
+            if (
+                value is None
+                or value.get("used_at")
+                or float(value.get("expires_at") or 0) <= time.time()
+                or str(value.get("target_server_id") or "") != target
+            ):
+                raise DeviceAuthorizationError(
+                    "device authorization is invalid or expired"
+                )
+            return dict(value)
 
     def consume(self, token: object, *, target_server_id: str) -> dict[str, object]:
         token_hash = authorization_token_hash(token)

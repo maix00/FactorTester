@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 import signal
 import socket
 import subprocess
@@ -13,9 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from server.jobs.artifact_data_plane import ArtifactTicketCodec, artifact_data_port
 from server.manager.config import VIBE_TRADING_PORT
-from server.manager.http.security import configured_tls_paths
 from server.manager.storage.control_db import CONTROL_DATABASE_ENV
 from server.manager.state.models import ServiceBundle
 from server.manager.system import safe_name
@@ -69,86 +66,6 @@ class ProcessStateMixin:
         self.vibe_process = None
         return "stopped Vibe-Trading"
 
-    def artifact_ticket_codec(self) -> ArtifactTicketCodec:
-        """Return the Manager's codec shared with its 7997 child process."""
-        self.artifact_ticket_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            secret = self.artifact_ticket_path.read_bytes()
-        except FileNotFoundError:
-            secret = secrets.token_bytes(32)
-            try:
-                fd = os.open(
-                    self.artifact_ticket_path,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                )
-            except FileExistsError:
-                secret = self.artifact_ticket_path.read_bytes()
-            else:
-                try:
-                    os.write(fd, secret)
-                finally:
-                    os.close(fd)
-        return ArtifactTicketCodec(secret)
-
-    def start_artifact_data_plane(self) -> str:
-        """Start one host-wide 7997 byte service beside Manager 7998."""
-        process = self.artifact_data_process
-        if process is not None and process.poll() is None:
-            return f"artifact data service already running (pid {process.pid})"
-        port = artifact_data_port()
-        if self._port_is_in_use(port):
-            # A separately supervised data service may already own this host's
-            # port.  Do not kill it; ticket verification remains possible when
-            # both processes use the configured shared secret file.
-            return f"artifact data port {port} already in use"
-        self.artifact_ticket_codec()
-        log_file = self.log_dir / f"artifact-data-{port}.log"
-        log = log_file.open("ab", buffering=0)
-        env = os.environ.copy()
-        env.update({
-            "GTHT_ARTIFACT_TICKET_SECRET_FILE": str(self.artifact_ticket_path),
-            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
-            "FACTORTESTER_SERVER_ID": self.server_id,
-            "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
-        })
-        self._inject_control_database_env(env)
-        artifact_tls_paths = configured_tls_paths(
-            os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
-            or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT"),
-            os.environ.get("FACTORTESTER_ARTIFACT_TLS_KEY")
-            or os.environ.get("FACTORTESTER_MANAGER_TLS_KEY"),
-            certificate_env="FACTORTESTER_ARTIFACT_TLS_CERT",
-            private_key_env="FACTORTESTER_ARTIFACT_TLS_KEY",
-        )
-        if artifact_tls_paths is not None:
-            env.update({
-                "FACTORTESTER_ARTIFACT_TLS_CERT": str(artifact_tls_paths[0]),
-                "FACTORTESTER_ARTIFACT_TLS_KEY": str(artifact_tls_paths[1]),
-            })
-        process = subprocess.Popen(
-            [
-                self.python,
-                "-m", "server.manager.services.artifacts",
-                "--host", "0.0.0.0",
-                "--port", str(port),
-                "--server-id", self.server_id,
-            ],
-            cwd=self.repo,
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        self.artifact_data_process = process
-        return f"started artifact data pid {process.pid} on {port}"
-
-    def stop_artifact_data_plane(self) -> None:
-        process = self.artifact_data_process
-        self.artifact_data_process = None
-        if process is not None:
-            self._terminate(process)
-
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
@@ -163,8 +80,16 @@ class ProcessStateMixin:
         ]
         if harness_root not in python_path:
             python_path.insert(0, harness_root)
+        source_revision = str(env.get("GTHT_SOURCE_REVISION") or "").strip()
+        if not source_revision:
+            source_revision = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=path, text=True
+            ).strip()
+        service_debug = str(
+            env.get("FACTORTESTER_SERVICE_DEBUG", "1")
+        ).strip().lower() in {"1", "true", "yes", "on"}
         env.update({
-            "FLASK_DEBUG": "1",
+            "FLASK_DEBUG": "1" if service_debug else "0",
             "FACTORTESTER_WERKZEUG_RELOADER": "0",
             # ADR 056 makes 7998 the only cross-host control-plane entry.
             # Service ports stay reachable from this Manager and from the
@@ -174,13 +99,10 @@ class ProcessStateMixin:
             "PYTHONPATH": os.pathsep.join(python_path),
             "GTHT_DEPLOYMENT_ID": deployment_id,
             "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
-            "GTHT_SOURCE_REVISION": subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=path, text=True
-            ).strip(),
+            "GTHT_SOURCE_REVISION": source_revision,
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
             "FACTORTESTER_SERVER_ID": self.server_id,
             "FACTORTESTER_SERVER_ROLE": self.server_role,
-            "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
         })
         self._inject_control_database_env(env)
         return env, deployment_id, socket_path
@@ -342,5 +264,5 @@ class ProcessStateMixin:
             if bundle:
                 self.stop(Path(key), force=True)
         self.processes.clear()
-        self.stop_artifact_data_plane()
+        self.stop_data_plane()
         self.stop_vibe()

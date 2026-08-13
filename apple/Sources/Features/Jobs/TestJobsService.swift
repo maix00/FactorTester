@@ -180,6 +180,20 @@ final class TestJobsService {
         )
     }()
 
+    lazy var transferSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        // 7997 accepts only the short-lived capability. Never forward the
+        // Manager login cookie merely because both listeners share a host.
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(
+            configuration: configuration,
+            delegate: SelfSignedTrustDelegate(rejectsRedirects: true),
+            delegateQueue: nil
+        )
+    }()
+
     func list(port: Int? = nil) async throws -> [TestJob] {
         let suffix = port.map { "&port=\($0)" } ?? "&port=all"
         let json = try await request(path: "/api/jobs?limit=20\(suffix)", port: port, allowAnonymous: true)
@@ -361,107 +375,6 @@ final class TestJobsService {
         _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE", port: port)
     }
 
-    func download(
-        jobID: String,
-        port: Int,
-        artifact: TestJobArtifact
-    ) async throws -> URL {
-        let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        let encodedName = artifact.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? artifact.name
-        let data = try await requestData(path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)", port: port)
-        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let destination = root.appendingPathComponent(artifact.fileName)
-        try data.write(to: destination, options: .atomic)
-        return destination
-    }
-
-    func artifactTable(
-        jobID: String,
-        port: Int,
-        artifact: TestJobArtifact
-    ) async throws -> TestJobArtifactTable {
-        let encodedJob = jobID.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? jobID
-        let encodedName = artifact.name.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? artifact.name
-        let data = try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/preview",
-            port: port,
-            allowAnonymous: true
-        )
-        return try Self.decodeArtifactTable(data)
-    }
-
-    func artifactData(
-        jobID: String,
-        port: Int,
-        artifact: TestJobArtifact
-    ) async throws -> Data {
-        let encodedJob = jobID.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? jobID
-        let encodedName = artifact.name.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? artifact.name
-        return try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/preview",
-            port: port,
-            allowAnonymous: true
-        )
-    }
-
-    func downloadAll(jobID: String, port: Int) async throws -> URL {
-        let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        let data = try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/archive",
-            port: port
-        )
-        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let archive = root.appendingPathComponent(".job-\(jobID)-artifacts.zip")
-        try? FileManager.default.removeItem(at: archive)
-        // Remove the ZIP left by the previous client once a new extraction
-        // succeeds; the task directory should contain the usable files only.
-        let legacyArchive = root.appendingPathComponent("job-\(jobID)-artifacts.zip")
-        try data.write(to: archive, options: .atomic)
-#if os(macOS)
-        do {
-            try extractArchive(archive, into: root)
-            try FileManager.default.removeItem(at: archive)
-            try? FileManager.default.removeItem(at: legacyArchive)
-        } catch {
-            // Keep the temporary archive when extraction fails so the user can
-            // recover it instead of silently losing the downloaded bytes.
-            throw error
-        }
-#endif
-        return root
-    }
-
-#if os(macOS)
-    private func extractArchive(_ archive: URL, into directory: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", archive.path, directory.path]
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .flatMap { $0.isEmpty ? nil : $0 }
-                ?? L10n.text("无法解压任务生成物")
-            throw TestJobsRequestError(statusCode: nil, responseText: message)
-        }
-    }
-#endif
-
     private func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port, allowAnonymous: allowAnonymous)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -485,7 +398,7 @@ final class TestJobsService {
         return value
     }
 
-    private func requestData(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> Data {
+    func requestData(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> Data {
         let request = try makeRequest(
             path: path,
             method: method,
@@ -547,7 +460,7 @@ final class TestJobsService {
         return request
     }
 
-    private static func responseText(_ data: Data) -> String? {
+    static func responseText(_ data: Data) -> String? {
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for key in ["error", "message", "detail"] {
                 if let value = object[key] as? String, !value.isEmpty { return value }

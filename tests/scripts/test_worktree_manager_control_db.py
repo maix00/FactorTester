@@ -29,6 +29,8 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "control_users" in schema
     assert "control_devices" in schema
     assert "control_device_authorizations" in schema
+    assert "control_user_preferences" in schema
+    assert "preferred_language" in schema
     assert "public_key" in schema
     assert "public_access" in schema
     assert "last_seen_at" in schema
@@ -36,7 +38,7 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "client_type" in schema
     assert "enrollment_ip" in schema
     assert "last_seen_ip" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 4
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 5
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:
@@ -248,6 +250,7 @@ def test_manager_switches_control_database_only_after_connection_succeeds(
     assert connected
     assert state.device_registry.control_store is state.control_store
     assert state.device_authorizations.control_store is state.control_store
+    assert state.user_preferences.control_store is state.control_store
     assert CONTROL_DATABASE_ENV not in os.environ
 
     monkeypatch.setattr(

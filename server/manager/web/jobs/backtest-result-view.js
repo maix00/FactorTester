@@ -18,13 +18,15 @@
       || Boolean(summary?.metrics && Object.keys(summary.metrics).length);
   }
 
-  function previewPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}/preview${portQuery}`;
+  function artifactPath(jobID, artifact, portQuery) {
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
   }
 
   async function loadPayloads(context, artifacts, jobID, portQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
-      const response = await context.raw(previewPath(jobID, artifact, portQuery));
+      const response = await FTJobArtifacts.fetch(
+        context, artifactPath(jobID, artifact, portQuery),
+      );
       return [artifact.name, JSON.parse(await response.text())];
     }));
     return Object.fromEntries(pairs);

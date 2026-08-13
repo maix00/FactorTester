@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .client_base import ClientMixinBase
-from .http import BinaryResponse
+from .http import BinaryResponse, DEFAULT_BINARY_LIMIT
 
 
 class ResearchClientMixin(ClientMixinBase):
@@ -382,15 +384,59 @@ class ResearchClientMixin(ClientMixinBase):
             self.session.post(f"/api/jobs/{job_id}/continue", payload)
         )
 
-    def job_artifact(self, job_id: str, name: str) -> BinaryResponse:
-        return self.session.download(
-            f"/api/jobs/{job_id}/artifacts/{name}"
+    def job_artifact(
+        self,
+        job_id: str,
+        name: str,
+        *,
+        maximum_bytes: int = DEFAULT_BINARY_LIMIT,
+    ) -> BinaryResponse:
+        issued, access, artifact = self._job_artifact_access(job_id, name)
+        del issued
+        return self.session.capability_download(
+            access,
+            maximum_bytes=maximum_bytes,
+            expected_sha256=str(artifact.get("content_hash") or ""),
+            content_type=str(
+                artifact.get("content_type") or "application/octet-stream"
+            ),
         )
 
-    def job_artifact_archive(self, job_id: str) -> BinaryResponse:
-        return self.session.download(
-            f"/api/jobs/{job_id}/artifacts/archive"
-        )
+    def job_artifact_to_path(
+        self,
+        job_id: str,
+        name: str,
+        destination: str | Path,
+    ) -> dict[str, Any]:
+        _issued, access, artifact = self._job_artifact_access(job_id, name)
+        return {
+            "job_id": str(job_id),
+            "name": str(name),
+            **self.session.capability_download_to_path(
+                access,
+                destination,
+                expected_sha256=str(artifact.get("content_hash") or ""),
+                content_type=str(
+                    artifact.get("content_type") or "application/octet-stream"
+                ),
+            ),
+        }
+
+    def _job_artifact_access(
+        self,
+        job_id: str,
+        name: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        issued = self._expect_success(self.session.post(
+            f"/api/jobs/{quote(str(job_id), safe='')}/artifacts/"
+            f"{quote(str(name), safe='')}/access",
+            {},
+        ))
+        access = issued.get("access")
+        artifact = issued.get("artifact")
+        if not isinstance(access, dict) or not isinstance(artifact, dict):
+            raise ValueError("artifact transfer authorization is incomplete")
+        return issued, access, artifact
 
     def job_artifact_capabilities(self) -> list[dict[str, Any]]:
         data = self._expect_success(

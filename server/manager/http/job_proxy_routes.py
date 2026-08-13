@@ -9,12 +9,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
-from server.jobs.artifact_data_plane import (
-    ArtifactTicketError,
-    artifact_data_endpoint,
-    artifact_data_port,
-    artifact_data_url,
-)
 from server.manager.domain.federation import (
     ServiceRoute,
     TargetNotFound,
@@ -65,8 +59,16 @@ class JobProxyRoutesMixin:
             return True
         body = self.rfile.read(length)
         content_type = str(self.headers.get("Content-Type") or "application/json")
-        if method == "POST" and parsed.path == "/api/runs":
+        run_request = method == "POST" and parsed.path in {
+            "/api/runs", "/api/runs/preview", "/api/runs/capability-preview",
+        }
+        if run_request:
             body = self._normalise_run_submission_identity(
+                body, principal=str(session["username"]),
+            )
+            if body is None:
+                return True
+            body = self._prepare_manager_run_context(
                 body, principal=str(session["username"]),
             )
             if body is None:
@@ -187,127 +189,10 @@ class JobProxyRoutesMixin:
             for value in self._job_ports(parsed, principal)
         ]
 
-    def _artifact_ticket_for_route(
-        self,
-        route: ServiceRoute,
-        *,
-        job_id: str,
-        name: str,
-        principal: str,
-        preview: bool,
-        archive: bool = False,
-    ) -> dict[str, object]:
-        if route.remote:
-            return self.state.federation_gateway.artifact_ticket(
-                route,
-                job_id=job_id,
-                name=name,
-                principal=principal,
-                preview=preview,
-                archive=archive,
-            )
-        from server.jobs.repository import JobRepository
-
-        repository = JobRepository()
-        job = repository.load(job_id)
-        if job is None or (
-            principal != "__public_jobs__" and job.owner != principal
-        ):
-            raise KeyError("artifact was not found")
-        if archive:
-            name = "__archive__"
-        else:
-            metadata = repository.load_artifact(
-                job_id=job_id,
-                name=name,
-                owner=job.owner,
-            )
-            if metadata is None or str(metadata.get("state") or "") != "active":
-                raise KeyError("artifact was not found")
-            if (
-                principal == "__public_jobs__"
-                and str(metadata.get("artifact_role") or "output") == "input"
-            ):
-                raise PermissionError("登录后才能查看运行输入")
-        ticket = self.state.artifact_ticket_codec().issue(
-            owner=job.owner,
-            job_id=job_id,
-            name=name,
-            server_id=self.state.server_id,
-            preview=preview,
-        )
-        endpoint = route.artifact_endpoint or artifact_data_endpoint(
-            endpoint=route.endpoint or "http://127.0.0.1:7998",
-            port=route.artifact_port or artifact_data_port(),
-        )
-        return {
-            "success": True,
-            "ticket": ticket,
-            "data_endpoint": endpoint,
-            "url": artifact_data_url(
-                endpoint,
-                job_id=job_id,
-                name=name,
-                ticket=ticket,
-            ),
-        }
-
-    def _redirect_artifact_to_data_plane(
-        self,
-        parsed,
-        *,
-        job_id: str,
-        name: str,
-        principal: str,
-        preview: bool,
-        archive: bool = False,
-    ) -> bool:
-        try:
-            routes = self._job_routes(parsed, principal)
-        except TargetUnavailable as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 503)
-            return True
-        except (TargetNotFound, ValueError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 502)
-            return True
-        for route in routes:
-            try:
-                value = self._artifact_ticket_for_route(
-                    route,
-                    job_id=job_id,
-                    name=name,
-                    principal=principal,
-                    preview=preview,
-                    archive=archive,
-                )
-            except PermissionError as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 401)
-                return True
-            except (ConnectionError, KeyError, OSError, ValueError, ArtifactTicketError):
-                continue
-            url = str(value.get("url") or "").strip()
-            if not url:
-                continue
-            self.send_response(307)
-            self.send_header("Location", url)
-            self.send_header("Cache-Control", "no-store")
-            self.send_header(
-                "X-FactorTester-Artifact-Data-Port",
-                str(route.artifact_port or artifact_data_port()),
-            )
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return True
-        # Compatibility fallback: a separately supervised/older service may
-        # not have the 7997 data plane yet.  The normal service gateway can
-        # still return the artifact, while new Managers use the redirect
-        # above and keep large files off the 7998 control-plane hop.
-        return False
-
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
-            r"(/result|/artifacts(?:/archive|/[^/]{1,512}(?:/preview)?)?"
+            r"(/result|/artifacts(?:/generate)?"
             r"|/group-detail|/group-ranking-detail|/group-snapshot"
             r"|/group-order-flow)?",
             parsed.path,
@@ -325,8 +210,7 @@ class JobProxyRoutesMixin:
         public = (
             session is None
             and method == "GET"
-            and (suffix_value in {"", "/result", "/artifacts"}
-                 or suffix_value.endswith("/preview"))
+            and suffix_value in {"", "/result", "/artifacts"}
         )
         if session is None and not public:
             json_response(
@@ -343,24 +227,6 @@ class JobProxyRoutesMixin:
                 self, {"success": False, "error": "invalid artifact name"}, 400,
             )
             return True
-        artifact_match = re.fullmatch(
-            r"/artifacts/([^/]+)(/preview)?", suffix,
-        )
-        archive = suffix == "/artifacts/archive"
-        if method == "GET" and (artifact_match is not None or archive):
-            redirected = self._redirect_artifact_to_data_plane(
-                parsed,
-                job_id=unquote(match.group(1)),
-                name=(
-                    "__archive__" if archive
-                    else unquote(artifact_match.group(1))
-                ),
-                principal=principal,
-                preview=bool(artifact_match and artifact_match.group(2)),
-                archive=archive,
-            )
-            if redirected:
-                return True
         path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
         if method == "POST":
