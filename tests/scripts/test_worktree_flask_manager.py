@@ -1747,8 +1747,8 @@ def test_federation_attachment_allows_automatic_port_discovery(
 
 
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
-    detached = tmp_path / "detached"
-    detached.mkdir()
+    detached = tmp_path / ".workspace" / "manager-sources" / "detached"
+    detached.mkdir(parents=True)
     porcelain = (
         f"worktree {tmp_path}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1778,8 +1778,8 @@ def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monke
 
 
 def test_cleanup_detached_worktrees_skips_bare_repository_marker(tmp_path, monkeypatch) -> None:
-    detached = tmp_path / "detached"
-    detached.mkdir()
+    detached = tmp_path / ".workspace" / "manager-sources" / "detached"
+    detached.mkdir(parents=True)
     bare = tmp_path / "repo.git"
     porcelain = (
         f"worktree {tmp_path}\n"
@@ -1810,7 +1810,7 @@ def test_cleanup_detached_worktrees_skips_bare_repository_marker(tmp_path, monke
 
 
 def test_cleanup_detached_worktrees_leaves_missing_paths_to_prune(tmp_path, monkeypatch) -> None:
-    missing = tmp_path / "missing-detached"
+    missing = tmp_path / ".workspace" / "manager-sources" / "missing-detached"
     porcelain = (
         f"worktree {tmp_path}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1841,8 +1841,8 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
 ) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
-    active_source = tmp_path / "manager-source"
-    active_source.mkdir()
+    active_source = repository / ".workspace" / "manager-sources" / ("a" * 40)
+    active_source.mkdir(parents=True)
     porcelain = (
         f"worktree {repository}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1866,6 +1866,39 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
     state = manager.ManagerState(repository, "python")
 
     assert state.cleanup_detached_worktrees() == []
+    assert commands == [["git", "worktree", "prune", "--expire", "now"]]
+
+
+def test_cleanup_detached_worktrees_preserves_external_release(
+    tmp_path, monkeypatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    release = tmp_path / "deploy" / "releases" / ("b" * 40)
+    release.mkdir(parents=True)
+    porcelain = (
+        f"worktree {repository}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {release}\n"
+        f"HEAD {'b' * 40}\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(repository, "python")
+
+    assert state.cleanup_detached_worktrees() == []
+    assert release.exists()
     assert commands == [["git", "worktree", "prune", "--expire", "now"]]
 
 

@@ -40,11 +40,14 @@ class WorktreeStateMixin:
         return entries
 
     def cleanup_detached_worktrees(self) -> list[Path]:
-        """Remove disposable detached worktrees and prune stale metadata."""
+        """Remove stale Manager source snapshots without crossing ownership."""
         try:
             entries = self._worktree_entries()
         except (OSError, subprocess.CalledProcessError):
             return []
+        managed_source_root = (
+            self.repo / ".workspace" / "manager-sources"
+        ).resolve()
         removed: list[Path] = []
         for entry in entries:
             # ``git worktree list --porcelain`` includes the bare repository
@@ -56,7 +59,14 @@ class WorktreeStateMixin:
             if not raw_path:
                 continue
             worktree_path = Path(raw_path).resolve()
-            if worktree_path == self.repo:
+            try:
+                worktree_path.relative_to(managed_source_root)
+            except ValueError:
+                # A shared Git object store can also own deployment releases,
+                # issue worktrees, and checkouts managed by other tools.  A
+                # Manager only owns its immutable source cache and must not
+                # remove an unrelated detached checkout merely because it has
+                # no branch.
                 continue
             # A Manager launched from an immutable commit checkout is itself
             # a detached worktree.  Removing its live source tree at startup
