@@ -2,12 +2,14 @@
 
 from server.manager.storage.transfers.attempts import TransferAttemptStore
 from server.manager.storage.transfers.inbox import TransferInboxStore
+from server.manager.storage.transfers.node_identities import NodeIdentityRegistry
 from server.manager.storage.transfers.repository import TransferStore
 from server.manager.storage.transfers.tickets import TransferTicketStore
 
 __all__ = [
     "TransferAttemptStore",
     "TransferInboxStore",
+    "NodeIdentityRegistry",
     "TransferStore",
     "TransferTicketStore",
 ]
