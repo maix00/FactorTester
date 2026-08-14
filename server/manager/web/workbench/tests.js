@@ -6,7 +6,6 @@
       application: "factor_evaluation", nav: "factors", title: "因子序列",
     },
   };
-
   async function show(context, kind, options = {}) {
     const definition = definitions[kind];
     if (!definition) throw new Error(context.t("未知测试类型"));
@@ -49,9 +48,15 @@
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = definitions[kind].application;
     // Catalogs and adapters load only when their backend-declared tab is used.
+    // The route only loads the small workbench coordinator.  Settings are a
+    // separate code seam because their tab/chip renderer is not needed by
+    // the route guard or by the initial API requests.  Start both requests
+    // together so code fetch and server latency overlap, then construct the
+    // state only after the settings implementation is available.
     const [manifest, workspaces] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
       context.api("/api/workspaces"),
+      FTTestLazyCode.loadGroup("workbench-settings"),
     ]);
     const state = {
       kind, manifest,
@@ -130,7 +135,7 @@
   function ensureControl(context, state, field, refresh) {
     const descriptor = window.FTStaticLoader?.controlDescriptor?.(field?.control_template);
     if (!descriptor?.group) return Promise.resolve();
-    return FTTestLazyCode.loadGroup(descriptor.group).then(() => refresh?.());
+    return FTTestControlLoader.ensure(state, descriptor.group, refresh);
   }
 
   function ensureLazyKey(context, state, key, refresh) {

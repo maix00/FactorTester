@@ -29,7 +29,9 @@ single source of truth for the script order and semantic module groups.
   catalog seam, with the public side sourced from the same Manager catalog as
   the factor-library page and the local side supplied only by the embedded
   client's frozen Git-revision bridge; `workbench/test-run-batch.js` is the single IC/backtest submission
-  seam and retains each frozen RunSpec and Job link in the originating page
+  seam and retains each frozen RunSpec and Job link in the originating page;
+  `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
+  group, not with the shared settings shell
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)
@@ -83,10 +85,19 @@ the shell. The route-dispatch fixture is the contract for this split.
 
 ## Loading contract
 
-The current IIFE order is intentional:
+Within every loaded group the IIFE order is intentional:
 
 ```text
-core → report → research/jobs/catalog/workbench/profile/settings → app
+core → report/research/jobs/catalog/workbench/profile/settings → app
+
+The production shell does not eagerly execute that whole graph. It executes
+only `initial_groups: ["core", "app"]`; `FTStaticLoader.ensureRoute()` loads
+the route group after authentication, and a tester then requests
+`workbench-settings` while its backend manifest and workspace projection are
+being fetched. This distinction is important: a tab or container being
+visible is not permission to download every implementation behind all other
+tabs. The manifest group, not a DOM `display:none`/collapse state, is the code
+loading boundary.
 ```
 
 The manager renders `research.html` from this manifest. Do not change a script
@@ -146,15 +157,22 @@ responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
 
 The workbench loading groups are also semantic boundaries: `workbench-core`
-contains only the settings shell, compiler, state and generic chip/content
-adapters; `workbench-run` contains the run-spec/submit/result code. IC grid
-controls, factor-role bindings, and product override editors each live in a
-separate control group and are loaded when a field using that registered
-control is first rendered. Factor, product, backtest, and template code remain
-separate. A route may load `workbench-core`, but the run group is
-requested only when the run surface is materialized; a tab-specific group is
-requested only when its registered adapter is opened. The same rule applies
-to jobs: the `jobs` route loads only the list formatter, progress and list
+contains only the route coordinator, compiler, state and generic lazy-code
+seams. `workbench-settings` contains the shared tab/chip settings renderer and
+is fetched when a tester route has authenticated and received its backend
+manifest; it is not part of the initial shell and does not include any catalog,
+strategy-list, chart, or run-submission implementation. `workbench-run`
+contains run-spec/submit/result code and is requested only when the run surface
+is materialized. The backtest `FTTabListChip` and strategy editors belong to
+`workbench-backtest`, which is loaded only after the strategy-list tab is
+opened, rather than being pulled into every IC or factor-evaluation page.
+IC grid controls, factor-role bindings, and product override editors each live
+in a separate control group and are loaded once when a field using that
+registered control is first rendered; `test-control-loader.js` coalesces
+multiple fields requesting the same group and batches their repaint callbacks.
+Factor, product, and template code remain separate. A tab-specific group is
+requested only when its registered adapter is opened. The same rule applies to
+jobs: the `jobs` route loads only the list formatter, progress and list
 controller (about 20 KiB); `job-detail` adds charts, artifact viewers, result
 models and input/configuration pages only when a concrete task is opened. The
 formatter is loaded before the list controller, so the detail page can reuse

@@ -320,7 +320,7 @@ def test_backend_registered_run_fields_compile_into_run_requests() -> None:
 
     settings = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
     assert '/api/backtest/settings/group_test' in settings
-    assert 'FTTestRunFields.field(manifest, "service_port")' in settings
+    assert 'item?.key === "service_port"' in settings
 
 
 def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> None:
@@ -535,6 +535,14 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench/test-run-results.js",
         "workbench/test-run-batch.js",
     }
+    assert set(manifest["groups"]["workbench-settings"]) == {
+        "workbench/test-setting-chips.js",
+        "workbench/tab-chip-content.js",
+        "workbench/test-settings.js",
+        "workbench/test-content-adapters.js",
+    }
+    assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-backtest"]
+    assert "workbench/tab-list-chip.js" not in research_static._initial_scripts(manifest)
     assert not set(manifest["groups"]["workbench-run"]) & set(
         research_static._initial_scripts(manifest)
     )
@@ -544,8 +552,12 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
     assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
     assert manifest["group_dependencies"]["workbench-run"] == [
-        "workbench-core", "workbench-ic-controls",
+        "workbench-settings", "workbench-ic-controls",
     ]
+    assert manifest["group_dependencies"]["settings"] == ["core"]
+    assert not set(manifest["groups"]["workbench-settings"]) & set(
+        research_static._initial_scripts(manifest)
+    )
     assert "ensureRunCode" in source
 
 
