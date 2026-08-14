@@ -20,6 +20,7 @@ from server.manager.http.visitor_access import (
     VISITOR_MODE,
     VisitorMode,
     request_origin,
+    target_compliance_url,
     target_visitor_url,
     visitor_cookie,
 )
@@ -247,6 +248,35 @@ class RequestSecurityMixin:
         ).strip()
         return target if target.startswith("https://") else ""
 
+    def _redirect_configured_ingress(self, parsed, *, next_path: str) -> bool:
+        """Move an ingress navigation to the canonical public IP origin.
+
+        The grant only authorizes the target compliance page to display the
+        existing visitor entry.  It does not create a visitor session; that
+        still requires an explicit click on the visitor link.
+        """
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        store = getattr(self.state, "visitor_access", None)
+        if not (
+            store is not None
+            and target_origin
+            and current_origin in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+            and current_origin != target_origin
+        ):
+            return False
+        grant = store.issue_grant(target_origin)
+        self._send_redirect(
+            target_compliance_url(
+                target_origin,
+                grant=grant,
+                next_path=manager_safe_login_next(next_path),
+            )
+        )
+        return True
+
     def _send_redirect(self, location: str, *, cookie: str = "") -> None:
         self.send_response(303)
         self.send_header("Location", location)
@@ -342,21 +372,44 @@ class RequestSecurityMixin:
         next_path: str = "/",
         *,
         show_visitor_entry: bool | None = None,
+        visitor_grant: str = "",
     ) -> None:
         if show_visitor_entry is None:
             show_visitor_entry = (
                 self._visitor_mode() is None
                 and self._visitor_entry_origin_allowed()
             )
-        visitor_entry_href = ""
-        if show_visitor_entry:
-            visitor_entry_href = (
-                "/visitor?next="
-                + quote(manager_safe_login_next(next_path), safe="/?=&%")
-            )
-        device_auth_target = ""
+        visitor_grant = str(visitor_grant or "").strip()
         current_origin = self._request_origin()
         target_origin = self._visitor_redirect_target()
+        store = getattr(self.state, "visitor_access", None)
+        grant_is_valid = bool(
+            visitor_grant
+            and self._visitor_mode() is None
+            and store is not None
+            and current_origin == target_origin
+            and store.valid_grant(
+                visitor_grant,
+                target_origin=target_origin,
+            )
+        )
+        show_visitor_entry = bool(show_visitor_entry or grant_is_valid)
+        visitor_entry_href = ""
+        if show_visitor_entry:
+            safe_next = quote(
+                manager_safe_login_next(next_path),
+                safe="/?=&%",
+            )
+            if grant_is_valid:
+                visitor_entry_href = (
+                    "/visitor?grant="
+                    + quote(visitor_grant, safe="")
+                    + "&next="
+                    + safe_next
+                )
+            else:
+                visitor_entry_href = "/visitor?next=" + safe_next
+        device_auth_target = ""
         if (
             current_origin
             and target_origin
@@ -469,6 +522,14 @@ class RequestSecurityMixin:
 
         if path == "/login":
             return True
+
+        if method == "GET" and not path.startswith("/api/"):
+            requested = path + (f"?{parsed.query}" if parsed.query else "")
+            if self._redirect_configured_ingress(
+                parsed,
+                next_path=requested,
+            ):
+                return False
 
         # Signed client release files are distribution artifacts, not an
         # interactive user interface.  They must remain downloadable before a

@@ -87,12 +87,33 @@ class CoreGetRoutesMixin:
             requested = parse_qs(parsed.query, keep_blank_values=True).get(
                 "next", ["/"]
             )[0]
-            self._serve_compliance_page(str(requested or "/"))
+            requested = str(requested or "/")
+            if self._redirect_configured_ingress(
+                parsed,
+                next_path=requested,
+            ):
+                return True
+            visitor_grant = parse_qs(
+                parsed.query,
+                keep_blank_values=True,
+            ).get("grant", [""])[0]
+            self._serve_compliance_page(
+                requested,
+                visitor_grant=str(visitor_grant or ""),
+            )
             return True
         if parsed.path == "/visitor":
             self._serve_visitor_entry(parsed)
             return True
         if parsed.path == "/login":
+            requested = parse_qs(parsed.query, keep_blank_values=True).get(
+                "next", ["/"]
+            )[0]
+            if self._redirect_configured_ingress(
+                parsed,
+                next_path=str(requested or "/"),
+            ):
+                return True
             self._serve_login_page(parsed)
             return True
         if parsed.path == "/device-authorize":
