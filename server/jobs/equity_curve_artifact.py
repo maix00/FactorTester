@@ -102,7 +102,11 @@ def _extract_series(result: dict[str, Any]) -> list[dict[str, Any]]:
         if len(finite) < 2:
             continue
         label = str(
-            raw.get("name") or raw.get("key") or raw.get("factor_alias")
+            raw.get("display_name")
+            or raw.get("name")
+            or raw.get("strategy_id")
+            or raw.get("group_id")
+            or raw.get("factor_alias")
             or f"Group {index + 1}"
         )[:80]
         timeline = timestamps if isinstance(timestamps, list) else []

@@ -2149,7 +2149,7 @@ const combination = FTBacktestGroupModel.addLongShort(
   state, child.id, roots[2].id, "硅多空",
 );
 const before = {{
-  rootAliases: roots.map(group => group.shortAlias),
+  rootNames: roots.map(group => group.name),
   childParent: child.parentId,
   childMask: child.productMask,
   childOverride: child.position_policy,
@@ -2159,7 +2159,7 @@ state.selectedBacktestGroupIDs = [roots[0].id];
 FTBacktestGroupModel.removeSelected(state);
 console.log(JSON.stringify({{
   before,
-  remainingAliases: state.analysis.groups.map(group => group.shortAlias),
+  remainingNames: state.analysis.groups.map(group => group.name),
   remainingCombinations: state.analysis.ls_configs.length,
 }}));
 """
@@ -2167,13 +2167,19 @@ console.log(JSON.stringify({{
         ["node", "-e", program], check=True, capture_output=True, text=True,
     )
     value = json.loads(result.stdout)
-    assert value["before"]["rootAliases"] == ["A1", "A2", "A3"]
+    assert all(
+        name.startswith("batch:1/bg_")
+        for name in value["before"]["rootNames"]
+    )
     assert value["before"]["childParent"].startswith("bg_")
     assert value["before"]["childMask"] == {"SI.GFE": True}
     assert value["before"]["childOverride"] == "buy_and_hold"
     assert value["before"]["combination"][0].startswith("dg_")
     assert value["before"]["combination"][1].startswith("bg_")
-    assert value["remainingAliases"] == ["A2", "A3"]
+    assert all(
+        name.startswith("batch:1/bg_")
+        for name in value["remainingNames"]
+    )
     assert value["remainingCombinations"] == 0
 
 

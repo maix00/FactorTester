@@ -22,8 +22,22 @@
       group.batchId = resolveBatch(parent, nextSeen);
       return group.batchId;
     };
-    state.analysis.groups.forEach(group => resolveBatch(group));
-    const batchIDs = new Set(state.analysis.groups.map(group => group.batchId));
+    state.analysis.groups.forEach(group => {
+      resolveBatch(group);
+      // Remove deprecated display-only aliases without making them part of
+      // the authoring or execution schema again.
+      removeDeprecatedDisplayMetadata(group);
+      if (!group.name) group.name = defaultName(group.batchId, group.id);
+    });
+    state.analysis.ls_configs.forEach(item => {
+      removeDeprecatedDisplayMetadata(item);
+      if (!item.batchId) item.batchId = `batch:${item.id || "long-short"}`;
+      if (!item.name) item.name = defaultName(item.batchId, item.id);
+    });
+    const batchIDs = new Set([
+      ...state.analysis.groups.map(group => group.batchId),
+      ...state.analysis.ls_configs.map(item => item.batchId),
+    ]);
     const numericBatchIDs = [...batchIDs]
       .map(value => /^batch:(\d+)$/.exec(String(value))?.[1])
       .filter(Boolean).map(Number);
@@ -40,17 +54,25 @@
   function nextID(state) {
     normalize(state);
     state.backtestBatchSequence += 1;
-    const existing = new Set(state.analysis.groups.map(group => group.batchId));
+    const existing = new Set([
+      ...state.analysis.groups.map(group => group.batchId),
+      ...state.analysis.ls_configs.map(item => item.batchId),
+    ]);
     while (existing.has(`batch:${state.backtestBatchSequence}`)) state.backtestBatchSequence += 1;
     return `batch:${state.backtestBatchSequence}`;
   }
 
-  function generatedName(state, requested) {
-    const base = String(requested || "策略").trim() || "策略";
-    let candidate = base;
-    let suffix = 2;
-    while (hasName(state, candidate)) candidate = `${base} (${suffix++})`;
-    return candidate;
+  function defaultName(batchId, strategyId) {
+    const batch = String(batchId || "batch:?").trim() || "batch:?";
+    const strategy = String(strategyId || "strategy:?").trim() || "strategy:?";
+    return `${batch}/${strategy}`;
+  }
+
+  function removeDeprecatedDisplayMetadata(item) {
+    Object.keys(item || {}).forEach(key => {
+      const normalized = String(key).replace(/[_-]/g, "").toLocaleLowerCase();
+      if (normalized.startsWith("short") && normalized.endsWith("alias")) delete item[key];
+    });
   }
 
   function uniqueName(state, requested, exceptID = "") {
@@ -84,7 +106,9 @@
     }
     for (const item of rootsAndChildren(state)) {
       const root = roots.get(item.group.id) || item.group;
-      const key = root.batchId || `batch:${root.id}`;
+      // This is the authoring event for the concrete strategy, not an
+      // execution partition. Runtime execution still uses one frozen config.
+      const key = item.group.batchId || root.batchId || `batch:${root.id}`;
       if (!batches.has(key)) {
         batches.set(key, {key, root, order: batches.size + 1, items: []});
       }
@@ -94,6 +118,6 @@
   }
 
   window.FTBacktestGroupBatches = Object.freeze({
-    generatedName, groupBatches, nextID, normalize, uniqueName,
+    defaultName, groupBatches, nextID, normalize, uniqueName,
   });
 })();

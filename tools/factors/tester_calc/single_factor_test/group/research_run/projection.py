@@ -181,12 +181,20 @@ def serialize_event_execution(
     comparison_strategies = []
     split = pd.Timestamp(evaluation_split) if evaluation_split else None
     display_name_counts = Counter(
-        str(owner.get("group_name") or owner.get("group_id") or "")
+        str(
+            owner.get("display_name")
+            or owner.get("group_name")
+            or owner.get("strategy_id")
+            or owner.get("group_id")
+            or ""
+        )
         for owner in execution["group_owner"]
     )
 
     for owner in execution["group_owner"]:
-        strategy_id = str(owner.get("group_id") or "")
+        strategy_id = str(
+            owner.get("strategy_id") or owner.get("group_id") or ""
+        )
         if strategy_id not in portfolios:
             raise ValueError(
                 f"{engine_result.get('engine')} result missing portfolio "
@@ -208,7 +216,9 @@ def serialize_event_execution(
                 f"portfolio {strategy_id!r} returned an empty equity curve"
             )
         returns = pd.Series(equity, index=index).pct_change().fillna(0.0)
-        display_name = str(owner.get("group_name") or strategy_id)
+        display_name = str(
+            owner.get("display_name") or owner.get("group_name") or strategy_id
+        )
         metrics_key = (
             display_name
             if display_name_counts[display_name] == 1
@@ -245,8 +255,12 @@ def serialize_event_execution(
                 settings=settings,
             )
         groups.append({
-            "key": display_name,
-            "name": display_name,
+            # Canonical result identity.  `group_id` remains only as the
+            # transport selector required by existing group-detail routes;
+            # `key` and `name` are not strategy fields and are intentionally
+            # not emitted by this new writer.
+            "strategy_id": strategy_id,
+            "display_name": display_name,
             "group_id": strategy_id,
             "metrics_key": metrics_key,
             "group_index": int(owner.get("group_index") or 0),

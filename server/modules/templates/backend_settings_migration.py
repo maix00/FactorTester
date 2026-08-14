@@ -10,10 +10,13 @@ from tools.testers.settings import backtest_setting_registry
 
 STRUCTURAL_GROUP_KEYS = {
     "id", "name", "parentId", "testerId", "factorAlias", "splitCount", "groupIndex",
-    "isAllGroups", "addBatch", "needsRegenerate", "startDate", "endDate", "shortAlias",
+    "isAllGroups", "addBatch", "needsRegenerate", "startDate", "endDate",
     "overrides", "_expanded", "productMask", "product_names", "productNames", "batchId",
+    "product_path_selection", "product_path_selection_id",
 }
-STRUCTURAL_LS_KEYS = {"id", "name", "shortAlias", "longGroupId", "shortGroupId", "needsRegenerate", "metadata"}
+STRUCTURAL_LS_KEYS = {
+    "id", "name", "batchId", "longGroupId", "shortGroupId", "needsRegenerate", "metadata",
+}
 LEGACY_LOCAL_KEYS = {"dates", "initialCapital", "calendarFreq", "backendBacktestSettings"}
 LEGACY_GROUP_KEYS = {
     "feeMode", "feeRate", "feeMap", "feeSensitivity", "useCloseToday",
@@ -290,6 +293,7 @@ def _migrate_items(items: Any, backend_group_values: dict[str, dict[str, Any]], 
     for item in items:
         if not isinstance(item, dict):
             continue
+        _normalize_strategy_identity(item)
         backend = _legacy_group_values(item)
         existing_backend = backend_group_values.get(str(item.get("id") or ""))
         if isinstance(existing_backend, dict):
@@ -303,6 +307,12 @@ def _migrate_items(items: Any, backend_group_values: dict[str, dict[str, Any]], 
             backend["rebalance_trigger"] = "on_factor_signal"
             backend["position_policy"] = "buy_and_hold"
         item.update(backend)
+        # The template snapshot is a backend contract, not a copy of the
+        # browser's view model.  Keep registered settings and structural
+        # fields only; unknown display metadata is discarded here.  This
+        # makes old aliases disappear without keeping their names in the
+        # runtime schema or serializer.
+        contract_keys = structural_keys | set(defaults) | set(backend)
         for key in list(item.keys()):
             if key == "rebalance_mode":
                 item.pop(key, None)
@@ -310,10 +320,31 @@ def _migrate_items(items: Any, backend_group_values: dict[str, dict[str, Any]], 
             if key in LEGACY_GROUP_KEYS:
                 item.pop(key, None)
                 continue
+            if key not in contract_keys:
+                item.pop(key, None)
+                continue
             if key in structural_keys:
                 continue
             if key in defaults and item.get(key) == defaults[key]:
                 item.pop(key, None)
+
+
+def _normalize_strategy_identity(item: dict[str, Any]) -> None:
+    """Collapse historical strategy identity spellings before whitelisting."""
+    if not str(item.get("id") or "").strip():
+        for key in ("strategy_id", "group_id"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                item["id"] = value
+                break
+    if not str(item.get("name") or "").strip():
+        for key in ("display_name", "group_name", "key"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                item["name"] = value
+                break
+    for key in ("strategy_id", "group_id", "display_name", "group_name", "key"):
+        item.pop(key, None)
 
 
 def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:

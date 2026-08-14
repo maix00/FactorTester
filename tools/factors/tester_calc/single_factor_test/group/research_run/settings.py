@@ -12,7 +12,7 @@ from tools.testers.settings.resolver import resolve_group_settings
 from .factor_roles import resolve_factor, resolve_factor_role_bindings
 
 
-_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
+_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "_expanded"}
 _AUTO_INFERRED_LEDGER_DEFAULTS = {
     "cost_basis_method": "WeightAverage",
     "daily_mark_to_market_enabled": False,
@@ -288,7 +288,7 @@ def resolve_group_strategy_settings(
     group_settings["split_count"] = int(raw_split_count)
     group_settings["group_index"] = int(group.get("groupIndex", 1)) - 1
     group_settings["display_name"] = str(
-        group.get("shortAlias") or group.get("name") or group_id
+        group.get("name") or group_id
     )
 
     selection_id = group_product_path_selection_id(group)
@@ -415,7 +415,7 @@ def resolve_long_short_strategy_settings(
     settings["strategy_kind"] = "long_short"
     settings["strategy_id"] = strategy_id
     settings["display_name"] = str(
-        config.get("shortAlias") or config.get("name") or strategy_id
+        config.get("name") or strategy_id
     )
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
@@ -436,14 +436,13 @@ def build_group_owner_rows(
     for index, group in enumerate(groups):
         if not isinstance(group, dict):
             continue
+        strategy_id = str(group.get("id") or f"group-{index}")
+        display_name = str(group.get("name") or f"G{index}")
         rows.append({
-            "group_id": str(group.get("id") or f"group-{index}"),
-            "group_name": str(
-                group.get("shortAlias")
-                or group.get("name")
-                or group.get("key")
-                or f"G{index}"
-            ),
+            "strategy_id": strategy_id,
+            "display_name": display_name,
+            "group_id": strategy_id,
+            "group_name": display_name,
             "group_index": int(group.get("groupIndex", 1)) - 1,
             "product_path_selection_id": group_product_path_selection_id(group),
             "factor_alias": str(group.get("factorAlias", "")),
@@ -472,11 +471,12 @@ def build_long_short_owner_rows(
             ),
             {},
         ) or {}
+        display_name = str(config.get("name") or group_id)
         rows.append({
+            "strategy_id": group_id,
+            "display_name": display_name,
             "group_id": group_id,
-            "group_name": str(
-                config.get("shortAlias") or config.get("name") or group_id
-            ),
+            "group_name": display_name,
             "group_index": -1,
             "product_path_selection_id": str(
                 first_source.get("product_path_selection_id") or ""

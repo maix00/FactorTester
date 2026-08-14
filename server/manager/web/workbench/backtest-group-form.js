@@ -21,7 +21,7 @@
     const current = editor.strategyKind === "long_short"
       ? state.analysis.ls_configs.find(item => item.id === editor.strategyID)
       : model().find(state, editor.strategyID);
-    const name = input("text", current?.name || current?.shortAlias || "");
+    const name = input("text", current?.name || "");
     name.placeholder = context.t("策略名称");
     name.required = true;
     form.append(field(context.t("名称"), name));

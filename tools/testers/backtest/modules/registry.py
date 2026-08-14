@@ -336,8 +336,15 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
           - ...other settings
         """
         parsed: dict[str, Any] = dict(config)
-        parsed.setdefault("strategy_id", config.get("group_id", ""))
-        parsed.setdefault("display_name", config.get("group_name") or config.get("group_id", ""))
+        strategy_id = str(
+            config.get("strategy_id") or config.get("group_id") or config.get("id") or ""
+        ).strip()
+        display_name = str(
+            config.get("display_name") or config.get("group_name")
+            or config.get("name") or strategy_id
+        ).strip()
+        parsed["strategy_id"] = strategy_id
+        parsed["display_name"] = display_name
         parsed.setdefault("strategy_kind", "group")
         return parsed
 
@@ -449,8 +456,14 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
           - ...other settings (inherited from source group)
         """
         parsed: dict[str, Any] = dict(config)
-        parsed.setdefault("strategy_id", config.get("name", ""))
-        parsed.setdefault("display_name", config.get("name", ""))
+        strategy_id = str(
+            config.get("strategy_id") or config.get("id") or ""
+        ).strip()
+        display_name = str(
+            config.get("display_name") or config.get("name") or strategy_id
+        ).strip()
+        parsed["strategy_id"] = strategy_id
+        parsed["display_name"] = display_name
         parsed.setdefault("strategy_kind", "long_short")
         return parsed
 
@@ -480,9 +493,7 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
 def _group_display_name(raw_group: dict[str, Any]) -> str:
     """Extract the display name from a frontend group payload."""
     return str(
-        raw_group.get("shortAlias")
-        or raw_group.get("name")
-        or raw_group.get("key")
+        raw_group.get("name")
         or f'group-{raw_group.get("groupIndex", "?")}'
     )
 

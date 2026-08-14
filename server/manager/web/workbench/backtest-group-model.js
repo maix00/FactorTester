@@ -2,7 +2,7 @@
   const structuralKeys = new Set([
     "id", "name", "parentId", "product_path_selection",
     "product_path_selection_id", "factorAlias", "splitCount", "groupIndex",
-    "isAllGroups", "shortAlias", "productMask", "needsRegenerate",
+    "isAllGroups", "productMask", "needsRegenerate",
     "batchId",
   ]);
   let sequence = 0;
@@ -56,24 +56,7 @@
   }
 
   function groupLabel(group) {
-    return group?.shortAlias || group?.name || group?.id || "";
-  }
-
-  function nextLetter(groups) {
-    const used = new Set(groups.filter(group => !group.parentId).map(group => (
-      String(group.shortAlias || "").match(/^([A-Z]+)/)?.[1]
-    )).filter(Boolean));
-    let value = 1;
-    while (used.has(columnLetter(value))) value += 1;
-    return columnLetter(value);
-  }
-
-  function columnLetter(value) {
-    let result = "";
-    for (let number = value; number > 0; number = Math.floor((number - 1) / 26)) {
-      result = String.fromCharCode(65 + ((number - 1) % 26)) + result;
-    }
-    return result;
+    return group?.name || group?.id || "";
   }
 
   function addBaseBatch(state, draft) {
@@ -99,20 +82,18 @@
     // Repeating the same draft therefore deliberately receives a new ID.
     const batchId = FTBacktestGroupBatches.nextID(state);
     factorAliases.forEach(factorAlias => {
-      const letter = nextLetter(state.analysis.groups);
       const factorGroups = indexes.map(index => {
-        const shortAlias = `${letter}${index}`;
         const useRequestedName = factorAliases.length === 1 && indexes.length === 1;
+        const id = identifier("bg", useRequestedName ? draft.id : "");
         const requestedName = draft.name && useRequestedName
-          ? String(draft.name).trim()
-          : `${FTTestProducts.groupLabel(selection)}_${factorAlias}_${splitCount}组_第${index}组`;
-        const name = draft.name && useRequestedName
+          ? String(draft.name).trim() : "";
+        const name = requestedName
           ? uniqueName(state, requestedName)
-          : FTBacktestGroupBatches.generatedName(state, requestedName);
+          : FTBacktestGroupBatches.defaultName(batchId, id);
         return {
-          id: identifier("bg", useRequestedName ? draft.id : ""),
+          id,
           batchId,
-          name, shortAlias, parentId: null,
+          name, parentId: null,
           product_path_selection: FTTestProducts.projection(selection),
           product_path_selection_id: selectionId,
           factorAlias,
@@ -133,14 +114,17 @@
     if (!parent) throw new Error("parent group is required");
     const productMask = productMaskFrom(draft.productMask);
     const requestedName = String(draft.name || "").trim();
-    const fallbackName = `${groupLabel(parent)} 派生组`;
+    // A derived strategy is its own authoring event. It may inherit the
+    // parent's settings, but it must not be folded into the parent's batch.
+    const batchId = FTBacktestGroupBatches.nextID(state);
+    const id = identifier("dg", draft.id);
     const name = requestedName
       ? uniqueName(state, requestedName)
-      : FTBacktestGroupBatches.generatedName(state, fallbackName);
+      : FTBacktestGroupBatches.defaultName(batchId, id);
     const group = {
       ...explicitOverrides(draft.overrides),
-      id: identifier("dg", draft.id),
-      batchId: parent.batchId || `batch:${parent.id}`,
+      id,
+      batchId,
       name,
       parentId: parent.id,
       productMask,
@@ -177,16 +161,15 @@
     if (longID === shortID || !find(state, longID) || !find(state, shortID)) {
       throw new Error("two different groups are required");
     }
-    const longGroup = find(state, longID);
-    const shortGroup = find(state, shortID);
     const requestedName = String(name || "").trim();
-    const fallbackName = `${groupLabel(longGroup)}/${groupLabel(shortGroup)}`;
+    const batchId = FTBacktestGroupBatches.nextID(state);
+    const id = identifier("ls");
     const item = {
-      id: identifier("ls"),
+      id,
+      batchId,
       name: requestedName
         ? uniqueName(state, requestedName)
-        : FTBacktestGroupBatches.generatedName(state, fallbackName),
-      shortAlias: `${groupLabel(longGroup)}/${groupLabel(shortGroup)}`,
+        : FTBacktestGroupBatches.defaultName(batchId, id),
       longGroupId: longID,
       shortGroupId: shortID,
       feeMode: "inherit",
@@ -219,7 +202,6 @@
     const longGroupId = item.longGroupId;
     item.longGroupId = item.shortGroupId;
     item.shortGroupId = longGroupId;
-    item.shortAlias = `${groupLabel(find(state, item.longGroupId))}/${groupLabel(find(state, item.shortGroupId))}`;
     item.needsRegenerate = true;
     return item;
   }

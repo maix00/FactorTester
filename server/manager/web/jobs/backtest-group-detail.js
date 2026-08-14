@@ -38,7 +38,7 @@
                 portQuery: options.portQuery,
                 title: `${context.t("派生组配置")} · ${entry?.label || ""}`,
                 derivedPrefill: {
-                  parentID: String(entry?.group_id || entry?.key || ""),
+                  parentID: String(entry?.strategy_id || entry?.group_id || entry?.key || ""),
                   products,
                   name: `${entry?.label || context.t("分组")} ${context.t("精选")}`,
                 },

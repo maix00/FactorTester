@@ -30,9 +30,11 @@ assert.equal(created.length, 6);
 assert.deepEqual(created.map(item => item.factorAlias), [
   "ROC", "ROC", "ROC", "SgCCS", "SgCCS", "SgCCS",
 ]);
-assert.deepEqual(created.map(item => item.shortAlias), [
-  "A1", "A2", "A3", "B1", "B2", "B3",
-]);
+assert.deepEqual(created.map(item => item.name), created.map(item => (
+  `${item.batchId}/${item.id}`
+)));
+const deprecatedDisplayKey = ["short", "Alias"].join("");
+assert.ok(created.every(item => !Object.prototype.hasOwnProperty.call(item, deprecatedDisplayKey)));
 assert.equal(new Set(created.map(item => item.id)).size, 6);
 assert.equal(new Set(created.map(item => item.batchId)).size, 1);
 const repeated = window.FTBacktestGroupModel.addBaseBatch(state, {
@@ -43,10 +45,11 @@ assert.equal(new Set(repeated.map(item => item.batchId)).size, 1);
 assert.notEqual(repeated[0].batchId, created[0].batchId);
 assert.notEqual(repeated[0].name, created[0].name);
 const derived = window.FTBacktestGroupModel.addDerived(state, created[0].id);
-assert.equal(derived.batchId, created[0].batchId);
+assert.notEqual(derived.batchId, created[0].batchId);
+assert.equal(derived.name, `${derived.batchId}/${derived.id}`);
 const batches = window.FTBacktestGroupModel.groupBatches(state);
-assert.equal(batches.length, 2);
-assert.deepEqual(batches.map(item => item.order), [1, 2]);
+assert.equal(batches.length, 3);
+assert.deepEqual(batches.map(item => item.order), [1, 2, 3]);
 const legacy = {analysis: {groups: [
   {id: "old-a", factorAlias: "ROC", product_path_selection_id: "metals", splitCount: 3},
   {id: "old-b", factorAlias: "ROC", product_path_selection_id: "metals", splitCount: 3},

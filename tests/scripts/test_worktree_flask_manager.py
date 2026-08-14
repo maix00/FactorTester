@@ -1663,6 +1663,11 @@ def test_public_compliance_page_bootstraps_device_login_with_visible_status() ->
     assert 'document.addEventListener("visibilitychange"' in body
     assert "handoff_url" in body
     assert "MAX_AUTHENTICATION_RUNS" in body
+    assert "scheduleAuthenticationRetry" in body
+    assert "transientFailure" in body
+    assert 'authenticate().finally(loadCount)' in body
+    assert 'window.addEventListener("load",startAuthentication' in body
+    assert "设备连接暂时失败，正在自动重试" in body
     assert "签名阶段失败" in body
     assert 'redirect:"error"' in body
     assert 'mode:"same-origin"' in body

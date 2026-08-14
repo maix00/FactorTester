@@ -118,7 +118,7 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
                 'incremental_buy_and_hold_fixed_leverage': '增量式 Hold（固定杠杆）',
             }
             for group in flat_groups[:8]:
-                label = group.get('shortAlias') or group.get('name') or group.get('id') or '未命名组'
+                label = group.get('name') or group.get('id') or '未命名组'
                 group_index = group.get('groupIndex', '未设置')
                 group_count_value = group.get('splitCount', '未设置')
                 factor_alias = group.get('factorAlias') or '因子未设置'
@@ -135,7 +135,7 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
             if len(flat_groups) > 8:
                 group_parts.append(f"…另 {len(flat_groups) - 8} 个组")
             for ls_config in ls_configs[:4]:
-                label = ls_config.get('shortAlias') or ls_config.get('name') or ls_config.get('id') or '未命名 Long-Short'
+                label = ls_config.get('name') or ls_config.get('id') or '未命名 Long-Short'
                 group_parts.append(
                     f"Long-Short {label} · Long {ls_config.get('longGroupId') or '未设置'} · Short {ls_config.get('shortGroupId') or '未设置'}"
                 )

@@ -55,6 +55,37 @@ def test_net_returns_come_from_fee_adjusted_ledger_equity() -> None:
     assert artifact["series"][1]["returns"] == [0.0, -0.1]
 
 
+def test_net_returns_prefer_canonical_strategy_identity_and_display_name() -> None:
+    artifact = project_net_returns(
+        engine_result={
+            "engine": "native",
+            "portfolios": {
+                "strategy-1": {
+                    "display_equity_curve": {
+                        "2024-01-01T00:00:00": 100.0,
+                        "2024-01-02T00:00:00": 101.0,
+                    },
+                },
+            },
+        },
+        group_owner=[{
+            "strategy_id": "strategy-1",
+            "display_name": "batch:1/strategy-1",
+        }],
+    )
+
+    assert artifact["series"] == [{
+        "strategy_id": "strategy-1",
+        "display_name": "batch:1/strategy-1",
+        "factor_alias": "",
+        "timestamps": [
+            "2024-01-01T00:00:00",
+            "2024-01-02T00:00:00",
+        ],
+        "returns": [0.0, 0.01],
+    }]
+
+
 @pytest.mark.parametrize(
     "portfolio",
     [

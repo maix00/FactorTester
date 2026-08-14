@@ -383,7 +383,8 @@ def _persisted_group(value: Any) -> dict[str, Any]:
 def _bounded_chart_groups(groups: list[Any], *, byte_budget: int) -> tuple[list[dict[str, Any]], bool]:
     """Keep the Web chart contract even when the full job result is truncated."""
     scalar_keys = (
-        "key", "name", "group_id", "group_index", "product_path_selection_id",
+        "strategy_id", "display_name", "key", "name", "group_id", "group_index",
+        "product_path_selection_id",
         "factor_alias", "engine", "allocation_policy", "rebalance_trigger",
         "position_policy", "target_trace_available", "snapshot_available",
         "is_ls", "ls_info",
