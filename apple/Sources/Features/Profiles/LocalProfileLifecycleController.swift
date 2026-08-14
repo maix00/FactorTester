@@ -10,13 +10,19 @@ extension LocalProfileController {
         principalRef: String
     ) async {
         await perform {
-            let created = try await ReleaseCommand.runObject([
+            var createArguments = [
                 "client", "profile", "create",
                 "--profile-id", id, "--display-name", name,
                 "--server-url", serverURL,
                 "--agent-id", agentID, "--role", role,
                 "--principal-ref", principalRef,
-            ], executable: self.cliPath)
+            ]
+            if let managerURL = ManagerConfig.shared.baseURL?.absoluteString {
+                createArguments += ["--manager-url", managerURL]
+            }
+            let created = try await ReleaseCommand.runObject(
+                createArguments, executable: self.cliPath
+            )
             let planURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("factor-worktree-\(UUID()).json")
             defer { try? FileManager.default.removeItem(at: planURL) }

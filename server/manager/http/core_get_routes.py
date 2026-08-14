@@ -12,7 +12,6 @@ from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
 from server.manager.web.assets import asset_revision, shell_bytes, static_file
 
-
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 

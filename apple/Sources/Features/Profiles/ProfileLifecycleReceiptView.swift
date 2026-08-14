@@ -16,6 +16,19 @@ struct ProfileLifecycleReceiptView: View {
                 if !receipt.profileID.isEmpty {
                     LabeledContent("Profile", value: receipt.profileID)
                 }
+                if !receipt.serverSyncStatus.isEmpty {
+                    LabeledContent("服务器 Profile 投影") {
+                        Text(receipt.serverSyncPending ? "等待同步" : "已同步")
+                            .foregroundStyle(
+                                receipt.serverSyncPending ? .orange : .secondary
+                            )
+                    }
+                    if receipt.serverSyncPending && !receipt.serverSyncReason.isEmpty {
+                        Text(receipt.serverSyncReason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 LabeledContent("Git 保留") {
                     if receipt.branchRetained && receipt.commitsRetained {
                         Text("分支与提交均保留")
