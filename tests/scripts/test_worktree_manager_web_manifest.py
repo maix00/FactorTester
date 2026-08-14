@@ -356,14 +356,42 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
-    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-previews"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-ic"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-backtest"]
     assert manifest["route_groups"]["jobs"] == ["jobs"]
-    assert manifest["route_groups"]["job"] == ["job-detail"]
+    assert manifest["route_groups"]["job"] == ["job-detail-core"]
+    assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
+    assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
+    assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/jobs.js",
     }
-    assert "jobs/detail.js" in manifest["groups"]["job-detail"]
-    assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail"]
+    assert "jobs/detail.js" in manifest["groups"]["job-detail-core"]
+    assert "jobs/input-detail.js" in manifest["groups"]["job-detail-input"]
+    assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail-previews"]
+    assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
+    assert "jobs/ic-result-view.js" in manifest["groups"]["job-detail-ic"]
+    assert "jobs/backtest-result-view.js" in manifest["groups"]["job-detail-backtest"]
+    assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
+    assert manifest["group_dependencies"]["job-detail-previews"] == [
+        "job-detail-core", "report", "charts",
+    ]
+    assert "output-choice" in manifest["group_dependencies"]["job-detail-core"]
+    core_detail = set(manifest["groups"]["job-detail-core"])
+    assert "jobs/detail.js" in core_detail
+    assert not core_detail.intersection({
+        "jobs/highcharts-viewers.js", "jobs/job-artifact-viewers.js",
+        "jobs/ic-result-view.js", "jobs/backtest-result-view.js",
+        "jobs/factor-series-view.js", "core/market-data.js",
+    })
+    artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(encoding="utf-8")
+    detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    run_results = (WEB_ROOT / "workbench" / "test-run-results.js").read_text(encoding="utf-8")
+    assert 'loadGroups?.(["job-detail-previews"])' in artifacts
+    assert 'loadGroups?.([group])' in detail
+    assert 'loadGroups?.(["job-detail"])' not in run_results
+    assert 'job-detail-ic' in run_results and 'job-detail-backtest' in run_results
     assert "group_external_scripts" in loader
     assert manifest["initial_groups"] == ["core", "app"]
     initial = set(research_static._initial_scripts(manifest))
@@ -376,6 +404,12 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     )[0]
     assert 'loadGroup("workbench-factors")' not in state_loader
     assert "FTTestRunFields.initialValues" not in state_loader
+    initial_render = tests_module.split("function render", 1)[1].split(
+        "window.FTTests", 1
+    )[0]
+    assert "ensureSettingsCode(context, state" in initial_render
+    assert "ensureRunCode(context, state" in initial_render
+    assert "ensureRunBatchCode(context, state" in initial_render
     # A login-only deep link must not trigger feature code loading before the
     # existing route guard has rendered its login view.
     assert "if (!state.session && protectedRouteKinds.has(route.kind))" in coordinator
@@ -522,7 +556,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     template_actions = (WEB_ROOT / "workbench" / "templates" / "actions.js").read_text(
         encoding="utf-8",
     )
-    first_load = source.split("const [manifest, workspaces]", 1)[1].split("]);", 1)[0]
+    first_load = source.split(
+        "const [manifest, workspaces, savedWorkspaceConfiguration]", 1
+    )[1].split("]);", 1)[0]
     for endpoint in (
         "/api/catalog/factors", "/api/catalog/product-groups",
         "/api/data_source_categories", "/api/configuration-templates",
@@ -538,12 +574,26 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "ensureOutputCapabilities" in source
     assert "ensureProfiles" in source
     assert "workbench-run" in manifest["groups"]
+    assert manifest["group_dependencies"]["workbench-run"] == [
+        "workbench-core", "workbench-settings-fields",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-batch"] == [
+        "workbench-run", "workbench-products",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-results"] == [
+        "workbench-run",
+    ]
     assert set(manifest["groups"]["workbench-run"]) == {
         "workbench/test-run-fields.js",
         "workbench/test-outputs.js",
-        "workbench/test-run-results.js",
-        "workbench/test-run-batch.js",
+        "workbench/test-run-summary.js",
     }
+    assert manifest["groups"]["workbench-run-batch"] == [
+        "workbench/test-run-batch.js",
+    ]
+    assert manifest["groups"]["workbench-run-results"] == [
+        "workbench/test-run-results.js",
+    ]
     assert manifest["groups"]["workbench-run-submit"] == [
         "workbench/test-configuration.js",
     ]
@@ -567,15 +617,17 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert not set(manifest["groups"]["workbench-run"]) & set(
         research_static._initial_scripts(manifest)
     )
+    assert not set(manifest["groups"]["workbench-run-batch"]) & set(
+        research_static._initial_scripts(manifest)
+    )
     assert "workbench/factor-roles.js" not in manifest["groups"]["workbench-core"]
     assert "workbench/custom-product-overrides.js" not in manifest["groups"]["workbench-core"]
     assert manifest["control_groups"]["ic_horizon_grid"]["group"] == "workbench-ic-controls"
     assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
     assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
     assert manifest["group_dependencies"]["workbench-run"] == [
-        "workbench-core",
+        "workbench-core", "workbench-settings-fields",
     ]
-    assert "workbench-settings-fields" not in manifest["group_dependencies"]["workbench-run"]
     assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
     assert manifest["group_dependencies"]["workbench-backtest"] == [
         "workbench-settings", "workbench-settings-fields",
@@ -588,9 +640,18 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         research_static._initial_scripts(manifest)
     )
     assert "ensureRunCode" in source
+    assert "ensureRunBatchCode" in source
     assert "ensureSettingsCode" in source
     assert "ensureRunSubmitCode" in source
     assert "workbench-run-submit" in source
+    lazy_code = (WEB_ROOT / "workbench" / "test-lazy-code.js").read_text(
+        encoding="utf-8",
+    )
+    assert '"workbench-run-batch"' in lazy_code
+    assert "ensureGroupCode" in lazy_code
+    run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
+    assert 'loadGroups?.(["workbench-run-results"])' in run_batch
+    assert "FTTestRunSummary?.planSummary" in run_batch
     assert 'run_inputs: "workbench-source-inputs"' in (
         WEB_ROOT / "workbench" / "test-lazy-code.js"
     ).read_text(encoding="utf-8")

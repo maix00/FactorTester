@@ -47,15 +47,16 @@
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = definitions[kind].application;
-    // Catalogs and adapters load only when their backend-declared tab is used.
-    // The route only loads the small workbench coordinator.  In particular,
-    // do not fetch the settings renderer here: it used to sit in this
-    // Promise.all and made the first screen wait for the whole tab/chip
-    // implementation before it could paint.  The renderer is loaded by the
-    // explicit settings-code seam after the lightweight state is ready.
-    const [manifest, workspaces] = await Promise.all([
+    const savedWorkspaceID = localStorage.getItem(`ft-${kind}-workspace`) || "";
+    const savedWorkspaceConfigurationPromise = savedWorkspaceID
+      ? context.api(`/api/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
+        .then(value => ({value, error: null}))
+        .catch(error => ({value: null, error}))
+      : Promise.resolve({value: null, error: null});
+    const [manifest, workspaces, savedWorkspaceConfiguration] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
       context.api("/api/workspace-summaries"),
+      savedWorkspaceConfigurationPromise,
     ]);
     const state = {
       kind, manifest,
@@ -69,15 +70,22 @@
       lazy: FTTestState.lazyState(),
       runValues: initialRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
+      runBatchCode: {status: "idle", error: "", promise: null},
       settingsCode: {status: "idle", error: "", promise: null},
       settingsInitialized: false,
       settingsFieldsCode: {status: "idle", error: "", promise: null},
     };
     FTTestState.restoreWorkspace(state);
     if (state.workspace && !state.workspace.configuration) {
-      const workspaceID = encodeURIComponent(state.workspace.workspace_id);
-      const value = await context.api(`/api/workspaces/${workspaceID}/configuration`);
-      state.workspace.configuration = value.configuration || null;
+      let value = null;
+      if (state.workspace.workspace_id === savedWorkspaceID) {
+        if (savedWorkspaceConfiguration.error) throw savedWorkspaceConfiguration.error;
+        value = savedWorkspaceConfiguration.value;
+      } else {
+        const workspaceID = encodeURIComponent(state.workspace.workspace_id);
+        value = await context.api(`/api/workspaces/${workspaceID}/configuration`);
+      }
+      state.workspace.configuration = value?.configuration || null;
       FTTestState.applyWorkspaceConfiguration(state);
     }
     if (options.factorRef) state.factorRef = options.factorRef;
@@ -113,25 +121,14 @@
   }
 
   function ensureRunCode(context, state, refresh) {
-    if (window.FTTestRunFields && window.FTTestRunBatch) return Promise.resolve();
-    const record = state.runCode || (state.runCode = {
-      status: "idle", error: "", promise: null,
-    });
-    if (record.status === "ready") return Promise.resolve();
-    if (record.status === "loading" && record.promise) return record.promise;
-    record.status = "loading";
-    record.error = "";
-    record.promise = FTTestLazyCode.loadGroup("workbench-run")
-      .then(() => {
-        record.status = "ready";
-        refresh?.();
-      })
-      .catch(error => {
-        record.status = "error";
-        record.error = error.message || String(error);
-        refresh?.();
-      });
-    return record.promise;
+    if (window.FTTestRunFields) return Promise.resolve();
+    return FTTestLazyCode.ensureGroupCode(
+      state, "runCode", "workbench-run", null, refresh,
+    );
+  }
+
+  function ensureRunBatchCode(context, state, refresh) {
+    return FTTestLazyCode.ensureRunBatchCode(state, refresh);
   }
 
   function initializeSettings(state) {
@@ -150,48 +147,17 @@
       initializeSettings(state);
       return Promise.resolve();
     }
-    const record = state.settingsCode || (state.settingsCode = {
-      status: "idle", error: "", promise: null,
-    });
-    if (record.status === "ready") return Promise.resolve();
-    if (record.status === "loading" && record.promise) return record.promise;
-    if (record.status === "error") return Promise.resolve();
-    record.status = "loading";
-    record.error = "";
-    record.promise = FTTestLazyCode.loadGroup("workbench-settings")
-      .then(() => {
-        initializeSettings(state);
-        record.status = "ready";
-        refresh?.();
-      })
-      .catch(error => {
-        record.status = "error";
-        record.error = error.message || String(error);
-        refresh?.();
-      });
-    return record.promise;
+    return FTTestLazyCode.ensureGroupCode(
+      state, "settingsCode", "workbench-settings",
+      () => initializeSettings(state), refresh,
+    );
   }
 
   function ensureSettingsFieldsCode(context, state, refresh) {
     if (window.FTTestSettingFields) return Promise.resolve();
-    const record = state.settingsFieldsCode || (state.settingsFieldsCode = {
-      status: "idle", error: "", promise: null,
-    });
-    if (record.status === "ready") return Promise.resolve();
-    if (record.status === "loading" && record.promise) return record.promise;
-    record.status = "loading";
-    record.error = "";
-    record.promise = FTTestLazyCode.loadGroup("workbench-settings-fields")
-      .then(() => {
-        record.status = "ready";
-        refresh?.();
-      })
-      .catch(error => {
-        record.status = "error";
-        record.error = error.message || String(error);
-        refresh?.();
-      });
-    return record.promise;
+    return FTTestLazyCode.ensureGroupCode(
+      state, "settingsFieldsCode", "workbench-settings-fields", null, refresh,
+    );
   }
 
   function ensureRunSubmitCode(context, state) {
@@ -297,6 +263,13 @@
       if (!error) {
         ensureSettingsCode(context, state, () => render(context, state));
       }
+      // Settings and run-spec code are independent dynamic groups. Starting
+      // both from the lightweight manifest state avoids a serial waterfall;
+      // neither group loads field controls, catalogs, strategy editors, or
+      // result viewers for tabs that have not been mounted.
+      if (!state.runCode?.error) {
+        ensureRunCode(context, state, () => render(context, state));
+      }
       context.content.replaceChildren(root);
       return;
     }
@@ -352,11 +325,22 @@
     if (window.FTTestRunBatch) {
       root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     } else {
-      const runCode = state.runCode || {};
-      root.append(runCode.status === "error"
-        ? FTUI.empty(context.t("读取运行配置失败"), runCode.error)
-        : FTUI.loading(context.t("正在读取运行配置…")));
-      ensureRunCode(context, state, () => render(context, state));
+      const runBatchCode = state.runBatchCode || {};
+      if (FTTestLazyCode.hasSelectedProductPaths(state)) {
+        root.append(runBatchCode.status === "error"
+          ? FTUI.empty(context.t("读取任务代码失败"), runBatchCode.error)
+          : FTUI.loading(context.t("正在读取产品路径任务代码…")));
+        ensureRunBatchCode(context, state, () => render(context, state));
+      } else {
+        const deferred = document.createElement("section");
+        deferred.className = "test-run-batch test-code-deferred-panel";
+        const title = document.createElement("strong");
+        title.textContent = context.t("产品路径任务");
+        const note = document.createElement("small");
+        note.textContent = context.t("选择产品路径后加载任务代码");
+        deferred.append(title, note);
+        root.append(deferred);
+      }
     }
     context.content.replaceChildren(root);
   }
@@ -369,6 +353,7 @@
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
+    ensureRunBatchCode,
     ensureSettingsCode,
     ensureSettingsFieldsCode,
     ensureRunSubmitCode,

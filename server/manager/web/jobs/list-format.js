@@ -89,6 +89,13 @@
     return host ? serverID + " · " + host : serverID;
   }
 
+  function referenceURL(kind, target) {
+    if (!target) return "";
+    const value = String(target);
+    if (value.startsWith("factortester://")) return value;
+    return `factortester://${String(kind || "reference").replaceAll("_", "-")}/${encodeURIComponent(value)}`;
+  }
+
   function artifactCell(job, prefix, context) {
     const root = document.createElement("div");
     root.className = "job-artifact-cell";
@@ -102,6 +109,7 @@
 
   window.FTJobListFormat = Object.freeze({
     artifactCell, date, displayProfile, formatBytes, jobPort, kindTitle,
-    scalar, serverLabel, statusPill, table, taskCell, taskHash, taskTitle, text,
+    referenceURL, scalar, serverLabel, statusPill, table, taskCell, taskHash,
+    taskTitle, text,
   });
 })();

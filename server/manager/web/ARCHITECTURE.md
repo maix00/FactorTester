@@ -36,8 +36,12 @@ single source of truth for the script order and semantic module groups.
   `workbench/factor-family-picker.js` is the searchable public/local family
   catalog seam, with the public side sourced from the same Manager catalog as
   the factor-library page and the local side supplied only by the embedded
-  client's frozen Git-revision bridge; `workbench/test-run-batch.js` is the single IC/backtest submission
-  seam and retains each frozen RunSpec and Job link in the originating page;
+  client's frozen Git-revision bridge; `workbench/test-run-fields.js` and
+  `workbench/test-run-summary.js` are the lightweight run-surface seam;
+  `workbench/test-run-batch.js` is loaded separately only after a product path
+  is selected, and owns IC/backtest submission plus each frozen RunSpec and Job
+  link; `workbench/test-run-results.js` is another result-code group loaded only
+  after a submitted Job has a result to inspect;
   `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
   group, not with the shared settings shell; template presentation and
   persistence actions are kept together under `workbench/templates/` and are
@@ -184,11 +188,19 @@ manifest; it is not part of the initial shell and does not include any catalog,
 strategy-list, chart, run-submission, or field-control implementation.
 `workbench-settings-fields` owns the shared editable-row/control adapter and
 is requested by the active settings panel or another surface that explicitly
-needs a field control; `workbench-run` does not depend on it. `workbench-source-inputs` owns uploaded factor,
+needs a field control. The default run tab depends on this small adapter so it
+can render its registered fields without pulling in any catalog or strategy
+code. `workbench-source-inputs` owns uploaded factor,
 strategy, and dependency inspection; a `run_inputs` tab loads that code only
 when opened, while the factor picker declares it as a dependency. `workbench-run`
-contains run-spec/submit/result code and is requested only when the run surface
-is materialized. The backtest `FTTabListChip` and strategy editors belong to
+contains only run-spec fields, output choices and the lightweight run summary;
+it is requested when the run surface is materialized. The separate
+`workbench-run-batch` group depends on it and on the product adapter, and is
+requested only when a saved or newly selected product path creates an actual
+task batch. `workbench-run-results` depends on `workbench-run` and contains only
+the submitted-Job result bridge, loaded after a Job exists rather than while the
+empty run panel is first painted. The backtest `FTTabListChip`
+and strategy editors belong to
 `workbench-backtest`, which is loaded only after the strategy-list tab is
 opened, rather than being pulled into every IC or factor-evaluation page.
 IC grid controls, factor-role bindings, and product override editors each live
@@ -198,10 +210,17 @@ multiple fields requesting the same group and batches their repaint callbacks.
 Factor, product, and template code remain separate. A tab-specific group is
 requested only when its registered adapter is opened. The same rule applies to
 jobs: the `jobs` route loads only the list formatter, progress and list
-controller (about 20 KiB); `job-detail` adds charts, artifact viewers, result
-models and input/configuration pages only when a concrete task is opened. The
-formatter is loaded before the list controller, so the detail page can reuse
-the stable helper seam without recreating formatting logic.
+controller (about 20 KiB). Opening a task first loads `job-detail-core`, which
+contains only fields, progress, configuration links, artifact metadata and
+actions. `job-detail-ic`, `job-detail-backtest`, and `job-detail-factor-series`
+are selected from the frozen task/result identity; they are not loaded for a
+configuration-only task. The `job-detail-previews` group is loaded only when a
+result declaration is expanded, so Highcharts, price data, table viewers, and
+image adapters are not executed merely because a task has artifacts.
+`job-detail-input` is separate from the normal detail route and is loaded only
+for an explicitly opened input file. The formatter is loaded before the list
+controller, so detail and list pages reuse the stable helper seam without
+recreating formatting logic.
 
 ## Embedded Swift navigation
 

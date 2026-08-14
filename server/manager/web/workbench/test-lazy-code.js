@@ -4,6 +4,41 @@
       ? window.FTStaticLoader.loadGroups([group]) : Promise.resolve();
   }
 
+  function ensureGroupCode(state, key, group, onReady, refresh) {
+    const record = state[key] || (state[key] = {
+      status: "idle", error: "", promise: null,
+    });
+    if (record.status === "ready") return Promise.resolve();
+    if (record.status === "loading" && record.promise) return record.promise;
+    if (record.status === "error") return Promise.resolve();
+    record.status = "loading";
+    record.error = "";
+    record.promise = loadGroup(group)
+      .then(() => {
+        onReady?.();
+        record.status = "ready";
+        refresh?.();
+      })
+      .catch(error => {
+        record.status = "error";
+        record.error = error.message || String(error);
+        refresh?.();
+      });
+    return record.promise;
+  }
+
+  function hasSelectedProductPaths(state) {
+    return Boolean(
+      state.groupRefs?.length || state.groupRef
+      || window.FTTestProducts?.selectedGroups?.(state)?.length,
+    );
+  }
+
+  function ensureRunBatchCode(state, refresh) {
+    if (window.FTTestRunBatch) return Promise.resolve();
+    return ensureGroupCode(state, "runBatchCode", "workbench-run-batch", null, refresh);
+  }
+
   function codeGroupForTab(tab) {
     return {
       factor_selection: "workbench-factors",
@@ -52,6 +87,7 @@
   }
 
   window.FTTestLazyCode = Object.freeze({
-    codeGroupForTab, deferredPanel, fallbackGroupReferences, groupID, loadGroup,
+    codeGroupForTab, deferredPanel, ensureGroupCode, ensureRunBatchCode,
+    fallbackGroupReferences, groupID, hasSelectedProductPaths, loadGroup,
   });
 })();

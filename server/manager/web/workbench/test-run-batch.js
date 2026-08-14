@@ -19,6 +19,43 @@
     return String(FTTestProducts.groupID(group) || "");
   }
 
+  function ensureResultCode(state, item, refresh) {
+    if (window.FTTestRunResults) return Promise.resolve(true);
+    if (!item.resultCodePromise) {
+      item.resultCodeLoading = true;
+      item.resultCodePromise = Promise.resolve(
+        window.FTStaticLoader?.loadGroups?.(["workbench-run-results"]),
+      )
+        .then(() => {
+          if (!window.FTTestRunResults) throw new Error("结果查看器不可用");
+          return true;
+        })
+        .catch(error => {
+          item.resultError = error.message || String(error);
+          return false;
+        })
+        .finally(() => {
+          item.resultCodeLoading = false;
+          refresh?.();
+        });
+    }
+    return item.resultCodePromise;
+  }
+
+  function resultPanel(context, state, item, refresh) {
+    if (!window.FTTestRunResults) {
+      if (item.jobID) void ensureResultCode(state, item, refresh);
+      const root = document.createElement("div");
+      if (!item.jobID) return root;
+      root.className = "test-run-inline-results";
+      root.append(item.resultError
+        ? FTUI.empty(context.t("读取结果失败"), item.resultError)
+        : FTUI.loading(context.t("正在读取结果查看器…")));
+      return root;
+    }
+    return FTTestRunResults.render(context, state, item, refresh);
+  }
+
   function synchronize(state) {
     const prior = new Map((state.testRunBatch || []).map(item => [item.groupID, item]));
     state.testRunBatch = FTTestProducts.selectedGroups(state).map(group => {
@@ -232,7 +269,7 @@
       error.className = "test-run-error"; error.textContent = item.error;
       root.append(error);
     }
-    root.append(FTTestRunResults.render(context, state, item, refresh));
+    root.append(resultPanel(context, state, item, refresh));
     return root;
   }
 
@@ -283,7 +320,7 @@
       context.button(context.t("全部运行"), () => runAll(context, state, refresh)),
     );
     heading.append(copy, actions); root.append(heading);
-    const matrix = FTTestRunResults.planSummary(context, state);
+    const matrix = FTTestRunSummary?.planSummary?.(context, state);
     if (matrix) root.append(matrix);
     if (!groups.length) {
       root.append(FTUI.empty(context.t("尚未选择产品组"), context.t("请先在测试对象中选择产品组")));

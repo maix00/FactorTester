@@ -123,13 +123,6 @@
     return preferred.length ? [...new Set(preferred)] : discovered;
   }
 
-  function referenceURL(kind, target) {
-    if (!target) return "";
-    const value = String(target);
-    if (value.startsWith("factortester://")) return value;
-    return `factortester://${String(kind || "reference").replaceAll("_", "-")}/${encodeURIComponent(value)}`;
-  }
-
   function renderedCell(context, value, row, key, presentations) {
     if (value && typeof value === "object") {
       const pre = document.createElement("pre");
@@ -140,7 +133,7 @@
     const presentation = presentations[key];
     if (presentation?.presentation === "reference") {
       const target = row[presentation.target_ref_field];
-      const url = referenceURL(presentation.kind, target);
+      const url = FTJobListFormat.referenceURL(presentation.kind, target);
       if (url) return FTRichText.inline(`[${String(value ?? target)}](${url})`, context);
     }
     return FTRichText.inline(String(value ?? ""), context);
@@ -179,5 +172,8 @@
     return FTPriceChart.render(context, target, payload);
   }
 
-  window.FTJobArtifactViewers = {mount, priceChart, tableModel, referenceURL};
+  window.FTJobArtifactViewers = {
+    mount, priceChart, tableModel,
+    referenceURL: FTJobListFormat.referenceURL,
+  };
 })();
