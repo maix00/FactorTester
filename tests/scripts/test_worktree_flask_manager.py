@@ -1848,6 +1848,68 @@ def test_public_device_authorization_page_uses_grant_language_snapshot(
     assert "Authorize public device" in body
 
 
+def test_public_device_authorization_redeem_keeps_current_origin_session(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    grant = state.device_authorizations.issue(
+        username="alice@default",
+        target_server_id="public-main",
+        target_endpoint="https://101.133.144.27:7998",
+    )
+    monkeypatch.setattr(manager.Handler, "_has_secure_ui_transport", lambda _self: True)
+    monkeypatch.setattr(manager.Handler, "_is_loopback_client", lambda _self: False)
+    monkeypatch.setattr(
+        state.device_registry,
+        "enroll",
+        lambda **_values: {"device_id": "device-bound-to-alice"},
+    )
+    monkeypatch.setattr(
+        state,
+        "login_device",
+        lambda username, *, origin: state._issue_session(
+            username,
+            "user",
+            authentication="device",
+            origin=origin,
+        ),
+    )
+
+    headers = {
+        **_visitor_request_headers("101.133.144.27:7998"),
+        "Content-Type": "application/json",
+    }
+    with _running_manager(state) as base_url:
+        redeem = Request(
+            f"{base_url}/api/device/authorization/redeem",
+            data=json.dumps({
+                "token": grant["token"],
+                "device_id": "device-bound-to-alice",
+                "public_key": {"kty": "EC"},
+            }).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(redeem) as response:
+            payload = json.loads(response.read())
+            cookie = response.headers["Set-Cookie"].split(";", 1)[0]
+
+        home = Request(
+            f"{base_url}/",
+            headers={
+                "Host": "101.133.144.27:7998",
+                "Cookie": cookie,
+            },
+        )
+        with urlopen(home) as response:
+            assert response.status == 200
+
+    assert payload["success"] is True
+
+
 def test_public_device_authorization_link_requires_secure_transport(
     tmp_path, monkeypatch,
 ) -> None:

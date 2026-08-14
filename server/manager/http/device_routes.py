@@ -238,6 +238,7 @@ class DeviceNetworkRoutesMixin:
             )
             token, principal, role = self.state.login_device(
                 str(authorization.get("username") or ""),
+                origin=self._request_origin(),
             )
         except PublicDeviceLimitError as exc:
             json_response(self, {
