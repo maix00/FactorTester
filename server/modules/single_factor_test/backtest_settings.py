@@ -173,6 +173,21 @@ def get_backtest_setting_application(application: str):
     return jsonify({"success": True, **settings_manifest})
 
 
+@sft_bp.get("/api/backtest/settings/<application>/summary")
+def get_backtest_setting_application_summary(application: str):
+    try:
+        settings_manifest = backtest_setting_registry.get(application).summary()
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    registry = _registry_for(application)
+    settings_manifest["executable_modules"] = registry.module_manifest()
+    if application == "single_factor_page":
+        settings_manifest["shared_global_default_keys"] = backtest_setting_registry.shared_global_default_keys(
+            ("factor_evaluation", "ic_test", "group_test")
+        )
+    return jsonify({"success": True, **settings_manifest})
+
+
 @sft_bp.get("/api/backtest/settings/<application>/tabs/<tab_key>")
 def get_backtest_setting_tab(application: str, tab_key: str):
     try:

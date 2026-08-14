@@ -1191,3 +1191,23 @@ def test_order_execution_price_basis_is_not_a_public_setting() -> None:
             group_values={"group-1": {}},
             group_ids=("group-1",),
         )
+
+
+def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() -> None:
+    application = backtest_setting_registry.get("group_test")
+    summary = application.summary()
+    full = application.manifest()
+
+    assert summary["manifest_mode"] == "summary"
+    assert summary["full_manifest_url"] == "/api/backtest/settings/group_test"
+    assert set(summary["defaults"]) == set(full["defaults"])
+    for key, field in summary["defaults"].items():
+        assert field["value"] == full["defaults"][key]["value"]
+        assert field["tab_key"] == full["defaults"][key]["tab_key"]
+        if "options" in full["defaults"][key]:
+            assert field["options"] == full["defaults"][key]["options"]
+        assert "help_text" not in field
+
+    tab = application.tab_manifest("engine")
+    assert tab["defaults"]
+    assert any("options" in field for field in tab["defaults"].values())

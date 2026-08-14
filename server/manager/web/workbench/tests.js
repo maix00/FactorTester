@@ -54,7 +54,7 @@
         .catch(error => ({value: null, error}))
       : Promise.resolve({value: null, error: null});
     const [manifest, workspaces, savedWorkspaceConfiguration] = await Promise.all([
-      context.api(`/api/backtest/settings/${application}`),
+      context.api(`/api/backtest/settings/${application}/summary`),
       context.api("/api/workspace-summaries"),
       savedWorkspaceConfigurationPromise,
     ]);
@@ -74,6 +74,8 @@
       settingsCode: {status: "idle", error: "", promise: null},
       settingsInitialized: false,
       settingsFieldsCode: {status: "idle", error: "", promise: null},
+      settingsTabLoads: Object.create(null),
+      settingsLoadedTabs: new Set(),
     };
     FTTestState.restoreWorkspace(state);
     if (state.workspace && !state.workspace.configuration) {
@@ -301,6 +303,11 @@
       ensureSettingsFieldsCode: () => ensureSettingsFieldsCode(
         context, state, () => render(context, state),
       ),
+      ensureSettingsTab: tabKey => FTTestSettingsSchema.ensureTab(
+        context, state, tabKey, () => render(context, state),
+      ),
+      settingsTabReady: tabKey => state.settingsLoadedTabs.has(tabKey),
+      settingsTabLoadState: tabKey => state.settingsTabLoads[tabKey],
       ensureTab: tab => ensureTab(context, state, tab, () => render(context, state)),
       onChipOpen: tabKey => {
         const runTab = state.manifest.run_settings?.key;
@@ -356,6 +363,9 @@
     ensureRunBatchCode,
     ensureSettingsCode,
     ensureSettingsFieldsCode,
+    ensureSettingsTab: (context, state, tabKey, refresh) => (
+      FTTestSettingsSchema.ensureTab(context, state, tabKey, refresh)
+    ),
     ensureRunSubmitCode,
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)

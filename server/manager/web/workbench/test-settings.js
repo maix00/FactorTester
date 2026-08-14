@@ -148,6 +148,19 @@
       options.ensureSettingsFieldsCode?.();
       return panel;
     }
+    if (item.fields.length && options.ensureSettingsTab
+      && !options.settingsTabReady?.(item.tab.key)) {
+      const load = options.settingsTabLoadState?.(item.tab.key);
+      if (load?.status === "error") {
+        panel.append(FTUI.empty(
+          context.t("读取设置字段失败"), load.error || context.t("请重试"),
+        ));
+      } else {
+        panel.append(FTUI.loading(context.t("正在读取此设置字段…")));
+      }
+      options.ensureSettingsTab(item.tab.key);
+      return panel;
+    }
     const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
     const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
     if (lazyKey && lazyState?.status !== "ready") {

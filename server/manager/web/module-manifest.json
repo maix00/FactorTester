@@ -202,7 +202,8 @@
       "workbench/test-setting-chips.js",
       "workbench/tab-chip-content.js",
       "workbench/test-settings.js",
-      "workbench/test-content-adapters.js"
+      "workbench/test-content-adapters.js",
+      "workbench/test-settings-schema.js"
     ],
     "workbench-settings-fields": [
       "workbench/test-setting-fields.js"
@@ -362,6 +363,7 @@
     "workbench/test-setting-fields.js",
     "workbench/tab-list-chip.js",
     "workbench/test-settings.js",
+    "workbench/test-settings-schema.js",
     "workbench/backtest-group-overrides.js",
     "workbench/factor-selection.js",
     "workbench/factor-set-selection.js",

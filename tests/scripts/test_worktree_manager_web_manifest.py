@@ -559,6 +559,8 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     first_load = source.split(
         "const [manifest, workspaces, savedWorkspaceConfiguration]", 1
     )[1].split("]);", 1)[0]
+    assert "/api/backtest/settings/${application}/summary" in first_load
+    assert "/api/backtest/settings/${application}`" not in first_load
     for endpoint in (
         "/api/catalog/factors", "/api/catalog/product-groups",
         "/api/data_source_categories", "/api/configuration-templates",
@@ -602,6 +604,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench/tab-chip-content.js",
         "workbench/test-settings.js",
         "workbench/test-content-adapters.js",
+        "workbench/test-settings-schema.js",
     }
     assert manifest["groups"]["workbench-settings-fields"] == [
         "workbench/test-setting-fields.js",
