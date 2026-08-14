@@ -8,6 +8,9 @@ from tools.testers.analysis_graph import (
     CoreTestDefinition,
 )
 from tools.testers.ic_test.analysis_graph import ic_analysis_graph_definition
+from tools.testers.ic_test.analysis_graph.runtime.adapters import (
+    builtin_runtime_adapters,
+)
 from tools.testers.settings import backtest_setting_registry
 
 
@@ -117,6 +120,13 @@ def test_ic_application_manifest_exposes_graph_without_web_field_knowledge() -> 
     manifest = backtest_setting_registry.get("ic_test").manifest()
 
     assert manifest["analysis_graph"] == ic_analysis_graph_definition().to_dict()
+
+
+def test_every_manifest_analysis_has_a_typed_runtime_adapter() -> None:
+    registered = {
+        item.key for item in ic_analysis_graph_definition().analysis_types
+    }
+    assert registered == set(builtin_runtime_adapters())
 
 
 def test_analysis_target_origin_enum_is_stable_for_clients() -> None:
