@@ -30,6 +30,7 @@ class Element {
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute(name, value) { this[name] = String(value); }
 }
 global.document = {createElement: tag => new Element(tag)};
 vm.runInThisContext(fs.readFileSync(

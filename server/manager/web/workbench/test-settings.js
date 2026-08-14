@@ -160,9 +160,10 @@
       sectionHeader.className = "test-settings-manager-section-heading";
       const title = document.createElement("b");
       title.textContent = context.t(section.label);
-      const description = document.createElement("small");
-      description.textContent = context.t(section.description || "");
-      sectionHeader.append(title, description);
+      sectionHeader.append(title);
+      if (section.description) {
+        sectionHeader.title = context.t(section.description);
+      }
       list.append(sectionHeader);
       section.items.forEach(item => {
         const row = document.createElement("label");
@@ -183,16 +184,13 @@
         const label = document.createElement("b");
         label.textContent = context.t(item.tab.label || item.tab.key);
         copy.append(label);
-        if (item.tab.help_text) {
-          const help = document.createElement("small");
-          help.textContent = context.t(item.tab.help_text);
-          copy.append(help);
-        }
+        if (item.tab.help_text) row.title = context.t(item.tab.help_text);
         const defaults = FTTestSettingChips.render({
           manifest,
           values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
           context,
           mountedTabs: [item.tab.key],
+          includeRun: false,
           includeEmpty: true,
           includeUnregistered: true,
           includeHidden: true,
@@ -246,9 +244,14 @@
     const copy = document.createElement("span");
     const label = document.createElement("b");
     label.textContent = field.label || key;
-    const help = document.createElement("small");
-    help.textContent = field.help_text || context.t("由测试配置保存并冻结");
-    copy.append(label, help);
+    copy.append(label);
+    if (field.help_text) {
+      const help = document.createElement("small");
+      help.className = "test-setting-help";
+      help.textContent = field.help_text;
+      help.title = field.help_text;
+      copy.append(help);
+    }
     const editable = FTSettingRules.isEditable(field, values);
     if (!editable && Object.keys(field.editable_when || {}).length) {
       const mode = document.createElement("small");

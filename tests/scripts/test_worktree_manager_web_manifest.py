@@ -31,7 +31,8 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert manifest["styles"] == [
         "styles/app.css", "styles/report.css", "styles/outputs/artifacts.css",
         "styles/outputs/backtest-results.css",
-        "styles/workbench.css", "styles/task-inputs.css",
+        "styles/workbench.css", "styles/workbench-settings.css",
+        "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -677,6 +678,13 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     tab_content = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
         encoding="utf-8"
     )
+    output_choices = (WEB_ROOT / "core" / "output-choices.js").read_text(
+        encoding="utf-8"
+    )
+    test_outputs = (WEB_ROOT / "workbench" / "test-outputs.js").read_text(
+        encoding="utf-8"
+    )
+    generation = (WEB_ROOT / "jobs" / "generation.js").read_text(encoding="utf-8")
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
 
@@ -698,7 +706,12 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert 'key: "__manage__"' in settings
     assert 'label: context.t("+ 设置")' in settings
     assert "previewDefaultsForTab" in settings
+    assert "includeRun: false" in settings
     assert "includeEmpty: true" in settings
+    assert "tab-chip-description" not in tab_content
+    assert "fieldValueSelector" in output_choices
+    assert "FTOutputChoices.fieldValueSelector" in test_outputs
+    assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
     assert "function jobPath(item)" in run_batch
