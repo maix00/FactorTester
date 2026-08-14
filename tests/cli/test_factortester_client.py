@@ -44,6 +44,19 @@ def fake_server() -> Iterator[str]:
         session["keep_login"] = bool(request.get_json().get("keep_login"))
         return jsonify(success=True, keep_login=session["keep_login"])
 
+    @app.post("/api/client/profiles/sync")
+    def sync_profile():
+        assert session.get("username") == "alice"
+        payload = request.get_json()
+        assert payload["profile"]["profile_id"] == "maxa"
+        return jsonify(
+            success=True,
+            status="synced",
+            synced=True,
+            pending=False,
+            profile={"profile_id": "maxa"},
+        )
+
     @app.post("/logout")
     def logout():
         session.clear()
@@ -339,6 +352,10 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
 
     assert client.login("alice", "pw")["username"] == "alice"
     assert client.set_keep_login(True)["keep_login"] is True
+    assert client.sync_profile({
+        "profile_id": "maxa",
+        "display_name": "Max A",
+    })["synced"] is True
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"

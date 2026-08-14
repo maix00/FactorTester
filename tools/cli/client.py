@@ -41,6 +41,13 @@ class FactorTesterClient(
     def current_principal(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/api/me"))
 
+    def sync_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """Synchronize a source-free local Profile projection to its Manager."""
+        return self._expect_success(self.session.post(
+            "/api/client/profiles/sync",
+            {"profile": profile},
+        ))
+
     def set_keep_login(self, enabled: bool) -> dict[str, Any]:
         return self._expect_success(
             self.session.post("/api/keep_login", {

@@ -317,7 +317,10 @@ class ManagerState(
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
         )
-        self.client_state = ClientStateService(control_store=self.control_store)
+        self.client_state = ClientStateService(
+            control_store=self.control_store,
+            profile_cache_root=self.state_root / "profile-cache",
+        )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,
             registry=self.federation_registry,
