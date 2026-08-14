@@ -294,6 +294,9 @@ def _migrate_items(items: Any, backend_group_values: dict[str, dict[str, Any]], 
         if not isinstance(item, dict):
             continue
         _normalize_strategy_identity(item)
+        if "splitCount" in structural_keys and "splitCount" not in item and "groupCount" in item:
+            item["splitCount"] = int(item["groupCount"])
+            item["groupIndex"] = int(item.get("groupIndex") or 0) + 1
         backend = _legacy_group_values(item)
         existing_backend = backend_group_values.get(str(item.get("id") or ""))
         if isinstance(existing_backend, dict):
