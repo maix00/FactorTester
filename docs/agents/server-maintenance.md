@@ -1,16 +1,42 @@
 # Server Maintenance Agent Contract
 
-## Entry conditions
+## Separate local development from server operations
 
-Start this flow only for a concrete backend anomaly, unresolved capability gap,
-approved backend change, migration, or high-risk graph change. A passing
-Backend Assurance Gate is the deterministic fast path: continue research
-without a verifier or LLM review.
+There are three different activities and they must not be collapsed into one
+login requirement:
 
-The authenticated account must be a developer. The server, not the client,
-authorizes `server_maintenance`, `backend_verifier`, `implementation_agent`,
-and `server_backend_code`. Ordinary sessions may submit bounded anomaly
-evidence but cannot claim these roles.
+| Activity | What it covers | Required authority |
+|---|---|---|
+| Local repository work | Inspecting, editing, testing, and committing source in the current checkout | The user's repository task authorization and normal local tooling |
+| FactorTester runtime maintenance | Protected Manager actions, bounded maintenance cases, server-side migrations, or production-like validation | An authenticated developer and the server-issued `server_maintenance`, `backend_verifier`, `implementation_agent`, or `server_backend_code` authority as applicable |
+| Release/deployment | Merge/push, transfer to the public host, remote reload, rollback, Docker/WireGuard/SSH operations | Explicit release authorization plus the separate remote administrator/Aliyun transport credential |
+
+Private backend code under the local checkout is not, by itself, a reason to
+stop local source work or demand a remote maintenance role. The protected
+server roles apply when the agent invokes the server's runtime authorization
+or mutates a deployed environment. Git merge/push and public deployment are
+separate approvals even when the source change is already committed.
+
+The CLI's local Manager credential is URL-scoped and stored in macOS Keychain
+under `com.gtht.factortester.manager`; use `factortester manager status` to
+inspect the authenticated Manager principal without exposing the bearer value.
+That token is not the ordinary FactorTester browser/CLI session cookie used by
+`resume.py`, and it is not an Aliyun SSH credential. A `401` from the bounded
+FactorTester resume endpoint therefore does not prove that no Manager
+administrator is available locally.
+
+## Entry conditions for runtime maintenance
+
+Start the runtime-maintenance flow only for a concrete backend anomaly,
+unresolved capability gap, approved backend change, migration, or high-risk
+graph change. A passing Backend Assurance Gate is the deterministic fast path:
+continue research without a verifier or LLM review.
+
+The authenticated account must be a developer for this flow. The server, not
+the client, authorizes `server_maintenance`, `backend_verifier`,
+`implementation_agent`, and `server_backend_code`. Ordinary sessions may
+submit bounded anomaly evidence but cannot claim these roles. Do not request
+this packet merely to edit or test local source.
 
 ## Bounded startup
 

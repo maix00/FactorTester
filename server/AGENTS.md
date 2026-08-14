@@ -1,8 +1,15 @@
 # Server Agent Scope
 
-Code under `server/` is private backend implementation. An Agent may inspect or
-change it only when its authenticated FactorTester account is a developer and
-its invocation has server-derived `server_backend_code` authority.
+Code under `server/` is private backend implementation. An Agent working in the
+local repository may inspect, edit, test, and commit it as part of an
+authorized source task; this does not require a remote FactorTester login,
+`server_maintenance` role, or Aliyun SSH access.
+
+The server-derived `server_backend_code` authority is required when an Agent
+uses a protected server runtime path to apply or validate a backend change.
+Remote publication, service reload, Docker/WireGuard/SSH maintenance, and
+rollback are a separate release operation and require explicit deployment
+authorization plus the remote administrator/Aliyun transport credential.
 
 Use the private
 [`server-maintenance` Skill](skills/server-maintenance/SKILL.md) for a concrete
