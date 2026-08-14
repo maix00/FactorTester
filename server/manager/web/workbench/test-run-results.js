@@ -66,7 +66,7 @@
     item.resultError = "";
     rerender?.();
     try {
-      await window.FTStaticLoader?.loadGroups?.(["jobs"]);
+      await window.FTStaticLoader?.loadGroups?.(["job-detail"]);
       recordDetail(item, await window.FTJobs.loadDetail(context, item.port, item.jobID));
       return true;
     } catch (error) {

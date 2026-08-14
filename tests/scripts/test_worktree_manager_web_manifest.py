@@ -353,7 +353,14 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
-    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["jobs"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail"]
+    assert manifest["route_groups"]["jobs"] == ["jobs"]
+    assert manifest["route_groups"]["job"] == ["job-detail"]
+    assert set(manifest["groups"]["jobs"]) == {
+        "jobs/list-format.js", "jobs/progress.js", "jobs/jobs.js",
+    }
+    assert "jobs/detail.js" in manifest["groups"]["job-detail"]
+    assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail"]
     assert "group_external_scripts" in loader
     assert manifest["initial_groups"] == ["core", "app"]
     initial = set(research_static._initial_scripts(manifest))

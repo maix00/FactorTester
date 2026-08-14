@@ -9,7 +9,7 @@
   "initial_external_scripts": [],
   "group_external_scripts": {
     "report": ["katex/katex.min.js"],
-    "jobs": ["vendor/highcharts/highstock.min.js"],
+    "job-detail": ["vendor/highcharts/highstock.min.js"],
     "catalog": ["vendor/highcharts/highstock.min.js"]
   },
   "group_dependencies": {
@@ -17,7 +17,7 @@
     "catalog-core": ["core"],
     "output-choice": ["core"],
     "research": ["report"],
-    "jobs": ["report", "charts", "output-choice"],
+    "job-detail": ["jobs", "report", "research", "charts", "output-choice"],
     "catalog": ["catalog-core", "charts"],
     "workbench-core": ["output-choice"],
     "workbench-run": ["workbench-core"],
@@ -33,13 +33,13 @@
     "reference": ["report", "research"],
     "research": ["research"],
     "jobs": ["jobs"],
-    "job": ["jobs"],
-    "job-configuration": ["jobs", "research"],
-    "job-input": ["jobs"],
+    "job": ["job-detail"],
+    "job-configuration": ["job-detail"],
+    "job-input": ["job-detail"],
     "ic-test": ["workbench-core"],
     "backtest": ["workbench-core"],
     "factor-evaluation": ["workbench-core"],
-    "factor-series": ["jobs"],
+    "factor-series": ["job-detail"],
     "test-template": ["workbench-templates"],
     "factor-families": ["catalog"],
     "factor-sets": ["catalog"],
@@ -110,8 +110,12 @@
       "research/workspaces.js"
     ],
     "jobs": [
-      "core/market-data.js",
       "jobs/list-format.js",
+      "jobs/progress.js",
+      "jobs/jobs.js"
+    ],
+    "job-detail": [
+      "core/market-data.js",
       "jobs/highcharts-viewers.js",
       "jobs/factor-series-model.js",
       "jobs/factor-series-chart.js",
@@ -131,8 +135,6 @@
       "jobs/ic-result-view.js",
       "jobs/backtest-result-view.js",
       "jobs/generation.js",
-      "jobs/progress.js",
-      "jobs/jobs.js",
       "jobs/actions.js",
       "jobs/input-detail.js",
       "jobs/detail.js"

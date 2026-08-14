@@ -151,8 +151,11 @@ run-spec/submit/result code, and factor, product, backtest, and template code
 remain separate. A route may load `workbench-core`, but the run group is
 requested only when the run surface is materialized; a tab-specific group is
 requested only when its registered adapter is opened. The same rule applies
-to jobs: the formatter is loaded before the list controller, so the detail
-page can reuse the stable helper seam without recreating formatting logic.
+to jobs: the `jobs` route loads only the list formatter, progress and list
+controller (about 20 KiB); `job-detail` adds charts, artifact viewers, result
+models and input/configuration pages only when a concrete task is opened. The
+formatter is loaded before the list controller, so the detail page can reuse
+the stable helper seam without recreating formatting logic.
 
 ## Embedded Swift navigation
 
