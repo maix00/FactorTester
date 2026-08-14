@@ -32,6 +32,7 @@ class ServiceRoute:
     proxy_token: str = ""
     remote: bool = False
     online: bool = True
+    public_server: bool = False
     load: float = 0.0
     active_jobs: int = 0
     queue_depth: int = 0
@@ -48,9 +49,9 @@ class ServiceRoute:
             "endpoint": self.endpoint,
             "remote": self.remote,
             "online": self.online,
+            "public_server": self.public_server,
             "load": self.load,
             "active_jobs": self.active_jobs,
             "queue_depth": self.queue_depth,
             "latency_ms": self.latency_ms,
         }
-

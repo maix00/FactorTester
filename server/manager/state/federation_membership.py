@@ -11,6 +11,7 @@ from server.manager.domain.federation import (
     TargetUnavailable,
 )
 from server.manager.network_endpoints import validate_client_endpoint
+from server.manager.services.network_info import local_internal_addresses
 
 
 class FederationMembershipStateMixin:
@@ -38,6 +39,10 @@ class FederationMembershipStateMixin:
             "schema_version": 1,
             "server_id": self.server_id,
             "role": self.server_role,
+            "public_server": bool(self.public_server),
+            "internal_addresses": (
+                [] if self.public_server else local_internal_addresses()
+            ),
             "branch": self.fixed_branch or (routes[0].branch if routes else ""),
             "revision": self._revision_for_path(),
             "features": list(self.server_features),
@@ -361,4 +366,3 @@ class FederationMembershipStateMixin:
         self.federation_announcer = None
         if announcer is not None:
             announcer.stop()
-

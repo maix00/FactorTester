@@ -89,7 +89,11 @@ class DeviceNetworkRoutesMixin:
 
     def _server_network_info(self) -> None:
         session = self._session()
-        if session is None and not self._is_private_lan_client():
+        if (
+            session is None
+            and self._visitor_mode() is None
+            and not self._is_private_lan_client()
+        ):
             json_response(self, {"success": False, "error": "login required"}, 401)
             return
         host = self.headers.get("Host", "").strip()

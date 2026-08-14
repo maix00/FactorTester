@@ -354,10 +354,27 @@ class RequestSecurityMixin:
                 "/visitor?next="
                 + quote(manager_safe_login_next(next_path), safe="/?=&%")
             )
+        device_auth_target = ""
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        if (
+            current_origin
+            and target_origin
+            and current_origin != target_origin
+            and current_origin in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+        ):
+            device_auth_target = (
+                target_origin
+                + "/compliance?next="
+                + quote(manager_safe_login_next(next_path), safe="/?=&%")
+            )
         body = manager_compliance_page(
             next_path,
             accept_language=self.headers.get("Accept-Language", ""),
             visitor_entry_href=visitor_entry_href,
+            device_auth_target=device_auth_target,
         )
         self._send_html(body)
 
@@ -417,9 +434,9 @@ class RequestSecurityMixin:
 
         if method == "GET" and path == "/api/server/network-info":
             # The local home page may display the Manager-provided LAN
-            # address before login.  A public endpoint still needs a session;
-            # the route itself repeats this distinction as defence in depth.
-            if self._is_private_lan_client():
+            # and public-node summary in visitor mode as well as on a LAN.
+            # The route itself repeats this distinction as defence in depth.
+            if self._is_private_lan_client() or self._visitor_mode() is not None:
                 return True
 
         if path in {"/api/device/challenge", "/api/device/verify"}:

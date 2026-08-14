@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import secrets
 import threading
@@ -32,6 +33,34 @@ def _features(value: object) -> tuple[str, ...]:
         if str(item).strip()
     }
     return tuple(sorted(values))
+
+
+def _internal_addresses(value: object) -> list[str]:
+    """Normalize advertised LAN addresses without accepting public endpoints."""
+    if value is None:
+        return []
+    values = value.split(",") if isinstance(value, str) else value
+    if not isinstance(values, (list, tuple, set)):
+        raise ValueError("internal_addresses must be a list")
+    result: set[str] = set()
+    for item in values:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError as exc:
+            raise ValueError("internal_addresses must contain IP addresses") from exc
+        if (
+            address.is_loopback
+            or address.is_unspecified
+            or address.is_link_local
+            or address.is_multicast
+            or not address.is_private
+        ):
+            raise ValueError("internal_addresses must contain private IP addresses")
+        result.add(address.compressed)
+    return sorted(result)
 
 
 def _port_descriptors(value: object) -> list[dict[str, object]]:
@@ -105,6 +134,13 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
         "schema_version": REGISTRY_SCHEMA_VERSION,
         "server_id": server_id,
         "role": role,
+        # ``role`` was historically the only public/private hint. Preserve
+        # that default for old registry files while allowing future nodes to
+        # declare their network scope explicitly.
+        "public_server": bool(payload.get("public_server", role == "main")),
+        "internal_addresses": _internal_addresses(
+            payload.get("internal_addresses")
+        ),
         "branch": str(payload.get("branch") or "").strip(),
         "revision": str(payload.get("revision") or "").strip(),
         "features": list(_features(payload.get("features"))),
@@ -285,6 +321,9 @@ class FederatedServerRegistry:
                     proxy_token=str(server.get("proxy_token") or ""),
                     remote=True,
                     online=online and bool(descriptor.get("online", True)),
+                    public_server=bool(
+                        server.get("public_server", server.get("role") == "main")
+                    ),
                     load=float(metrics["load"]),
                     active_jobs=int(metrics["active_jobs"]),
                     queue_depth=int(metrics["queue_depth"]),
