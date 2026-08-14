@@ -118,6 +118,7 @@
     try {
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
+      await window.FTTests?.ensureRunSubmitCode?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs/preview"), {
         method: "POST",
@@ -144,6 +145,7 @@
     try {
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
+      await window.FTTests?.ensureRunSubmitCode?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs"), {
         method: "POST",

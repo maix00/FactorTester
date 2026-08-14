@@ -12,11 +12,14 @@
   function create(context, state, options = {}) {
     const render = options.render || (() => {});
     const ensureRunCode = options.ensureRunCode || (() => Promise.resolve());
+    const ensureRunSubmitCode = options.ensureRunSubmitCode
+      || (() => Promise.resolve());
 
     async function save() {
       const name = prompt(context.t("模板名称"));
       if (!name?.trim()) return;
       await ensureRunCode();
+      await ensureRunSubmitCode();
       await FTTestLazyCode.loadGroup("workbench-factors");
       await FTTestLazyCode.loadGroup("workbench-products");
       const group = selectedExecutionGroup(context, state);
@@ -31,6 +34,7 @@
 
     async function load(template) {
       await ensureRunCode();
+      await ensureRunSubmitCode();
       await FTTestLazyCode.loadGroup("workbench-factors");
       await FTTestLazyCode.loadGroup("workbench-products");
       if (!state.workspace) {
@@ -73,6 +77,7 @@
       if (!confirm(`${context.t("用当前设置覆盖模板")}「${template.name}」？`)) return;
       try {
         await ensureRunCode();
+        await ensureRunSubmitCode();
         await FTTestLazyCode.loadGroup("workbench-factors");
         await FTTestLazyCode.loadGroup("workbench-products");
         const group = selectedExecutionGroup(context, state);

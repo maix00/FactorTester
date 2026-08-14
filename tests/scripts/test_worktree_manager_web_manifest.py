@@ -532,12 +532,14 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "ensureProfiles" in source
     assert "workbench-run" in manifest["groups"]
     assert set(manifest["groups"]["workbench-run"]) == {
-        "workbench/test-configuration.js",
         "workbench/test-run-fields.js",
         "workbench/test-outputs.js",
         "workbench/test-run-results.js",
         "workbench/test-run-batch.js",
     }
+    assert manifest["groups"]["workbench-run-submit"] == [
+        "workbench/test-configuration.js",
+    ]
     assert set(manifest["groups"]["workbench-settings"]) == {
         "workbench/test-setting-chips.js",
         "workbench/tab-chip-content.js",
@@ -557,11 +559,16 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert manifest["group_dependencies"]["workbench-run"] == [
         "workbench-settings", "workbench-ic-controls",
     ]
+    assert manifest["group_dependencies"]["workbench-run-submit"] == [
+        "workbench-run",
+    ]
     assert manifest["group_dependencies"]["settings"] == ["core"]
     assert not set(manifest["groups"]["workbench-settings"]) & set(
         research_static._initial_scripts(manifest)
     )
     assert "ensureRunCode" in source
+    assert "ensureRunSubmitCode" in source
+    assert "workbench-run-submit" in source
 
 
 def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:

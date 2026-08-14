@@ -1409,6 +1409,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "/api/workspaces" in scripts["tests.js"]
     assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["test-run-batch.js"]
+    assert "ensureRunSubmitCode" in scripts["test-run-batch.js"]
+    assert "workbench-run-submit" in scripts["tests.js"]
     assert 'analyses: [state.kind]' in scripts["test-run-batch.js"]
     assert "/api/runs" in scripts["test-run-batch.js"]
     assert 'servicePath("/api/runs/preview")' in scripts["test-run-batch.js"]

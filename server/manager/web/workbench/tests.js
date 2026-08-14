@@ -132,6 +132,14 @@
     return record.promise;
   }
 
+  function ensureRunSubmitCode(context, state) {
+    // Building and persisting a configuration is an action boundary, not a
+    // render dependency. Keep the compiler/Workspace writer out of the
+    // initial test page and load it only when preview/run/template actions
+    // actually need it. The loader coalesces repeated clicks safely.
+    return FTTestLazyCode.loadGroup("workbench-run-submit");
+  }
+
   function ensureControl(context, state, field, refresh) {
     const descriptor = window.FTStaticLoader?.controlDescriptor?.(field?.control_template);
     if (!descriptor?.group) return Promise.resolve();
@@ -220,6 +228,7 @@
     root.className = "test-workbench";
     const templateActions = FTTestTemplateActions.create(context, state, {
       ensureRunCode: () => ensureRunCode(context, state),
+      ensureRunSubmitCode: () => ensureRunSubmitCode(context, state),
       render: () => render(context, state),
     });
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
@@ -283,6 +292,7 @@
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
+    ensureRunSubmitCode,
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)
     ),

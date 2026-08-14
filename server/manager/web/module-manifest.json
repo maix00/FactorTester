@@ -25,6 +25,7 @@
     "workbench-factor-controls": ["workbench-core"],
     "workbench-product-controls": ["workbench-core"],
     "workbench-run": ["workbench-settings", "workbench-ic-controls"],
+    "workbench-run-submit": ["workbench-run"],
     "workbench-factors": ["workbench-core", "catalog-core"],
     "workbench-products": ["workbench-core", "catalog-core"],
     "workbench-backtest": ["workbench-settings"],
@@ -186,11 +187,13 @@
       "workbench/custom-product-overrides.js"
     ],
     "workbench-run": [
-      "workbench/test-configuration.js",
       "workbench/test-run-fields.js",
       "workbench/test-outputs.js",
       "workbench/test-run-results.js",
       "workbench/test-run-batch.js"
+    ],
+    "workbench-run-submit": [
+      "workbench/test-configuration.js"
     ],
     "workbench-factors": [
       "workbench/factor-selection.js",
