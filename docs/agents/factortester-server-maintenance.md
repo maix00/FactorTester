@@ -1,4 +1,4 @@
-# Server Maintenance Agent Contract
+# FactorTester Server Maintenance Agent Contract
 
 ## Separate local development from server operations
 
@@ -78,7 +78,11 @@ new Skill requires approval there.
 If no suitable Skill exists, create or revise one according to skill-creator:
 keep `SKILL.md` concise, put detailed references or scripts in dedicated
 folders, load them progressively, validate the package, and bind its reviewed
-hash. A Skill proposal does not grant backend authority.
+hash. The repository copy at `server/skills/factortester-server-maintenance/`
+is the canonical source and is registered under the same
+`$factortester-server-maintenance` name
+as the user-level skill package; keep their `SKILL.md`, UI metadata, and
+references synchronized. A Skill proposal does not grant backend authority.
 
 ## Safe implementation
 
@@ -97,6 +101,31 @@ hash. A Skill proposal does not grant backend authority.
 Existing unaffected research jobs continue. Affected work pauses at its
 capability gap and resumes only after the approved implementation and exact
 compatibility checks pass.
+
+## Infrastructure cases
+
+Docker, WireGuard, and SSH operations are part of this contract only when the
+Maintenance Case explicitly authorizes the target server and operation. Read
+the private `factortester-server-maintenance` Skill's
+`references/infrastructure.md` before
+changing a Compose project, tunnel identity, peer inventory, release checkout,
+or public deployment. Keep client surfaces at 7998/7997 and keep peer surfaces
+17998/17997 private to the FactorTester WireGuard overlay. PostgreSQL has its
+own WireGuard identity and lifecycle; it is not an artifact transfer queue.
+
+The public host does not fetch GitHub. An authorized publisher sends a clean,
+exact `main` revision over the existing maintenance SSH transport, then uses
+the native public release transaction to build, back up, activate, verify, and
+retain a rollback target. A local `2222` forwarding or SSH transport setting
+is an operator detail, never a public application port. Do not expose 22, 8000,
+5432, 17998, or 17997 merely to make publication or federation work.
+
+WireGuard public-key distribution belongs to the deployment coordinator and a
+signed inventory, not to PostgreSQL, Manager settings, a container image, or a
+client request. Private keys remain owner-only and never enter `.env`, Git,
+logs, client bundles, or the Agent response. A Docker context may be used by
+an authorized operator to administer a remote Docker daemon over SSH; it is not
+FactorTester federation and must not be mounted into an application container.
 
 ## Confidentiality boundary
 

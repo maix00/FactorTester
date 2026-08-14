@@ -38,7 +38,7 @@ def operator_set(ctx: click.Context, mode: str, admin_port: int, as_json: bool) 
         click.echo("说明: 当前用户没有服务器源码，平台代码缺口只能记录并交给维护者；仍可通过因子 workspace 修改可写因子。")
     else:
         click.echo(
-            "说明: 平台代码修复后，先阅读 server-maintenance Skill，"
+            "说明: 平台代码修复后，先阅读 factortester-server-maintenance Skill，"
             "再运行 `factortester manager restart-fleet --help`，"
             "按其参数通过 7998 执行受控重启。"
         )

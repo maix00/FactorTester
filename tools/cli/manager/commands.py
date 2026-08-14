@@ -37,7 +37,8 @@ def _authenticated_client() -> tuple[ManagerClient, ManagerCredentialStore]:
 def manager() -> None:
     """Configure, authenticate, and control the independent Manager.
 
-    Source-owner maintenance uses the private ``server-maintenance`` Skill;
+    Source-owner maintenance uses the private
+    ``factortester-server-maintenance`` Skill;
     discover the approved transaction with ``restart-fleet --help``.
     """
 
@@ -182,7 +183,8 @@ def restart_fleet(
 ) -> None:
     """Restart Manager and restore exactly its previously running services.
 
-    Read the private ``server-maintenance`` Skill before using this command.
+    Read the private ``factortester-server-maintenance`` Skill before using
+    this command.
 
     This is the same transaction used by ``client release``.  It deliberately
     requires an explicit source worktree and ``--yes`` so a maintenance agent
