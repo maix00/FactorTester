@@ -90,7 +90,11 @@
       context.api("/api/backtest/settings/group_test"),
     ]);
     if (!current(context)) return;
-    const servicePort = FTTestRunFields.field(manifest, "service_port");
+    // Settings only needs backend-declared field metadata.  Do not load the
+    // entire test run workbench just to look up this one service-port field.
+    const servicePort = (manifest?.run_fields || []).find(item => (
+      item?.key === "service_port"
+    ));
     if (!servicePort) throw new Error(context.t("运行字段缺少服务端口声明"));
     const input = document.createElement("input"); input.className = "inline-setting";
     input.inputMode = "numeric";

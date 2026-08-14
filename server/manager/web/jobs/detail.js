@@ -4,6 +4,65 @@
     formatBytes, taskTitle,
   } = FTJobs;
 
+  function resultGroup(job, artifacts = [], result = null) {
+    const kind = String(job?.kind || job?.job_type || job?.application || "")
+      .toLowerCase();
+    if (kind.includes("factor_evaluation")
+      || (kind.includes("factor") && kind.includes("series"))) {
+      return "job-detail-factor-series";
+    }
+    if (kind.includes("ic") || kind.includes("information_coefficient")) {
+      return "job-detail-ic";
+    }
+    if (kind.includes("backtest") || kind.includes("group_test")
+      || kind.includes("portfolio")) {
+      return "job-detail-backtest";
+    }
+    const names = new Set((artifacts || []).map(item => String(item.name || "").toLowerCase()));
+    if ([...names].some(name => name.startsWith("ic_") || name.includes("ic_statistics"))) {
+      return "job-detail-ic";
+    }
+    if ([...names].some(name => name.includes("equity") || name.includes("margin")
+      || name.includes("group_execution"))) {
+      return "job-detail-backtest";
+    }
+    if (result && typeof result === "object"
+      && (result.equity_curve || result.portfolios || result.groups)) {
+      return "job-detail-backtest";
+    }
+    return "";
+  }
+
+  async function loadResultGroup(job, artifacts, result) {
+    const group = resultGroup(job, artifacts, result);
+    if (group) await window.FTStaticLoader?.loadGroups?.([group]);
+    return group;
+  }
+
+  function resultSections(context, job, taskDetail, payload, activeArtifacts,
+    results, jobID, portQuery) {
+    const content = document.createDocumentFragment();
+    const factorSeries = window.FTFactorSeriesResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
+      configuration: taskDetail.configuration || {},
+      resultSummary: results || payload.result_summary || {},
+    });
+    if (factorSeries) content.append(factorSeries);
+    const icResults = window.FTICResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+      configuration: taskDetail.configuration || {},
+    });
+    if (icResults) content.append(icResults);
+    const backtestResults = window.FTBacktestResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+      configuration: taskDetail.configuration || {},
+      resultSummary: payload.result_summary || taskDetail.results?.summary || {},
+      job,
+    });
+    if (backtestResults) content.append(backtestResults);
+    return content;
+  }
+
   function fieldSection(context, title, value) {
     const section = document.createElement("section"); section.className = "job-section";
     const heading = document.createElement("h2"); heading.textContent = title; section.append(heading);
@@ -203,24 +262,11 @@
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = outputArtifacts.filter(item => item.state === "active");
-    const factorSeries = window.FTFactorSeriesResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
-      configuration: taskDetail.configuration || {},
-      resultSummary: results || payload.result_summary || {},
-    });
-    if (factorSeries) root.append(factorSeries);
-    const icResults = window.FTICResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery,
-      configuration: taskDetail.configuration || {},
-    });
-    if (icResults) root.append(icResults);
-    const backtestResults = window.FTBacktestResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery,
-      configuration: taskDetail.configuration || {},
-      resultSummary: payload.result_summary || taskDetail.results?.summary || {},
-      job,
-    });
-    if (backtestResults) root.append(backtestResults);
+    const resultGroupName = resultGroup(job, activeArtifacts, results);
+    const resultHost = document.createElement("div");
+    resultHost.className = "job-result-host";
+    if (resultGroupName) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
+    root.append(resultHost);
     declarations.forEach(declaration => {
       const previewArtifacts = FTJobArtifacts.declarationArtifacts(
         declaration, activeArtifacts,
@@ -232,17 +278,10 @@
       }
     });
     if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
+    const generationHost = document.createElement("div");
     if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
-      let capabilities = [];
-      let capabilityError = "";
-      try {
-        capabilities = await FTJobGeneration.capabilities(context, portQuery);
-      } catch (error) { capabilityError = error.message; }
-      if (!isCurrent()) return;
-      root.append(FTJobGeneration.panel(context, {
-        capabilities, error: capabilityError, jobID, portQuery,
-        taskDetail, payload, onGenerated: detailPage,
-      }));
+      generationHost.className = "job-generation-host";
+      root.append(generationHost);
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("输出生成物"); artifactSection.append(artifactTitle);
@@ -251,7 +290,37 @@
       item => downloadArtifact(item, context.t("登录后才能下载生成物")),
     ));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
-    root.append(artifactSection); context.content.replaceChildren(root);
+    root.append(artifactSection);
+    // Paint the metadata and configuration immediately.  Result code and
+    // capability discovery are independent follow-up work, not a prerequisite
+    // for displaying this page.
+    context.content.replaceChildren(root);
+    if (resultGroupName) {
+      loadResultGroup(job, activeArtifacts, results).then(() => {
+        if (!isCurrent()) return;
+        resultHost.replaceChildren(resultSections(
+          context, job, taskDetail, payload, activeArtifacts, results, jobID, portQuery,
+        ));
+      }).catch(error => {
+        if (isCurrent()) resultHost.replaceChildren(FTUI.empty(
+          context.t("结果查看器不可用"), error.message || String(error),
+        ));
+      });
+    }
+    if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
+      (async () => {
+        let capabilities = [];
+        let capabilityError = "";
+        try {
+          capabilities = await FTJobGeneration.capabilities(context, portQuery);
+        } catch (error) { capabilityError = error.message; }
+        if (!isCurrent()) return;
+        generationHost.replaceChildren(FTJobGeneration.panel(context, {
+          capabilities, error: capabilityError, jobID, portQuery,
+          taskDetail, payload, onGenerated: detailPage,
+        }));
+      })();
+    }
     if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, portQuery, progress);
 
     async function detailPage() { return window.FTJobs.detail(context, port, jobID, serverID); }

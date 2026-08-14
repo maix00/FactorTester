@@ -101,6 +101,52 @@ class ApplicationSettings:
             return module.order
         return (len(self.tabs) + 1) * 10
 
+    @staticmethod
+    def _default_manifest_value(
+        index: int, key: str, setting: SettingDefinition,
+    ) -> dict[str, Any]:
+        return {
+            "order": index,
+            "value": setting.default,
+            "label": setting.label,
+            "control_template": setting.control_template,
+            "tab_key": setting.tab,
+            "scope_policy": setting.scope_policy.value,
+            "module": setting.module,
+            "chip_template": setting.chip_template,
+            "adapter_managed": setting.adapter_managed,
+            "show_chip": setting.show_chip,
+            "execution_policy": setting.execution_policy,
+            "info_overlay": setting.info_overlay,
+            "has_instance": setting.instance_class is not None,
+            "minimum": setting.minimum,
+            "maximum": setting.maximum,
+            "step": setting.step,
+            "help_text": setting.help_text,
+            "engine_defaults": dict(setting.engine_defaults),
+            "serialization": dict(setting.serialization),
+            "visible_when": {
+                source_key: list(values)
+                for source_key, values in setting.visible_when.items()
+            },
+            "editable_when": {
+                source_key: list(values)
+                for source_key, values in setting.editable_when.items()
+            },
+            "default_when": {
+                source_key: dict(values)
+                for source_key, values in setting.default_when.items()
+            },
+            "disabled_values_by_engine": {
+                engine: list(values)
+                for engine, values in setting.disabled_values_by_engine.items()
+            },
+            "options": [
+                {"value": option.value, "label": option.label}
+                for option in setting.options
+            ],
+        }
+
     def register_chip_field(self, chip: ChipDefinition) -> None:
         if chip.key in self.chip_fields:
             raise ValueError(f"duplicate chip field: {chip.key}")
@@ -186,47 +232,7 @@ class ApplicationSettings:
                 for mount in TabMountPoint
             },
             "defaults": {
-                key: {
-                    "order": index,
-                    "value": setting.default,
-                    "label": setting.label,
-                    "control_template": setting.control_template,
-                    "tab_key": setting.tab,
-                    "scope_policy": setting.scope_policy.value,
-                    "module": setting.module,
-                    "chip_template": setting.chip_template,
-                    "adapter_managed": setting.adapter_managed,
-                    "show_chip": setting.show_chip,
-                    "execution_policy": setting.execution_policy,
-                    "info_overlay": setting.info_overlay,
-                    "has_instance": setting.instance_class is not None,
-                    "minimum": setting.minimum,
-                    "maximum": setting.maximum,
-                    "step": setting.step,
-                    "help_text": setting.help_text,
-                    "engine_defaults": dict(setting.engine_defaults),
-                    "serialization": dict(setting.serialization),
-                    "visible_when": {
-                        key: list(values)
-                        for key, values in setting.visible_when.items()
-                    },
-                    "editable_when": {
-                        key: list(values)
-                        for key, values in setting.editable_when.items()
-                    },
-                    "default_when": {
-                        key: dict(values)
-                        for key, values in setting.default_when.items()
-                    },
-                    "disabled_values_by_engine": {
-                        engine: list(values)
-                        for engine, values in setting.disabled_values_by_engine.items()
-                    },
-                    "options": [
-                        {"value": option.value, "label": option.label}
-                        for option in setting.options
-                    ],
-                }
+                key: self._default_manifest_value(index, key, setting)
                 for index, (key, setting) in enumerate(self.settings.items(), start=1)
             },
             "chip_fields": [
@@ -263,6 +269,11 @@ class ApplicationSettings:
             tab = self.tabs[tab_key]
         except KeyError as exc:
             raise KeyError(f"unknown setting tab: {tab_key}") from exc
+        tab_defaults = {
+            key: self._default_manifest_value(index, key, setting)
+            for index, (key, setting) in enumerate(self.settings.items(), start=1)
+            if setting.tab == tab_key
+        }
         return {
             "schema_version": 1,
             "application": self.application,
@@ -275,7 +286,36 @@ class ApplicationSettings:
                 for setting in self.settings.values()
                 if setting.tab == tab_key
             ],
+            "defaults": {
+                key: value for key, value in tab_defaults.items()
+            },
         }
+
+    def summary(self) -> dict[str, Any]:
+        """Return the first-paint manifest without tab-only control metadata.
+
+        The full application manifest remains available for exports and older
+        clients. The summary retains defaults, visibility, serialization,
+        option labels, and chip identity data, while omitting heavyweight
+        help/range metadata; those arrive from ``tab_manifest`` when a tab is
+        actually opened.
+        """
+        manifest = self.manifest()
+        compact_defaults: dict[str, Any] = {}
+        for key, field_value in manifest.get("defaults", {}).items():
+            compact_defaults[key] = {
+                name: value
+                for name, value in field_value.items()
+                if name not in {
+                    "help_text", "info_overlay", "minimum", "maximum", "step",
+                }
+            }
+        manifest["defaults"] = compact_defaults
+        manifest["manifest_mode"] = "summary"
+        manifest["full_manifest_url"] = (
+            f"/api/backtest/settings/{self.application}"
+        )
+        return manifest
 
 
 class BacktestSettingRegistry:

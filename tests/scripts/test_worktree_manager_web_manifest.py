@@ -51,7 +51,12 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for line in html.splitlines()
         if 'href="/research-static/' in line and 'stylesheet' in line
     ]
-    assert script_paths == [*manifest["external_scripts"], *manifest["scripts"]]
+    initial_scripts = [
+        *manifest.get("initial_external_scripts", manifest["external_scripts"]),
+        *research_static._initial_scripts(manifest),
+    ]
+    assert script_paths == initial_scripts
+    assert set(initial_scripts).issubset(set(manifest["scripts"]))
     assert style_paths == [*manifest["external_styles"], *manifest["styles"]]
 
     discovered_scripts = {
@@ -315,7 +320,7 @@ def test_backend_registered_run_fields_compile_into_run_requests() -> None:
 
     settings = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
     assert '/api/backtest/settings/group_test' in settings
-    assert 'FTTestRunFields.field(manifest, "service_port")' in settings
+    assert 'item?.key === "service_port"' in settings
 
 
 def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> None:
@@ -331,19 +336,84 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     expected = tmp_path / "registered-controls.json"
     expected.write_text(json.dumps(registered), encoding="utf-8")
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_setting_control_contract.js"
-    module = WEB_ROOT / "workbench" / "test-settings.js"
+    modules = [
+        WEB_ROOT / "workbench" / "test-setting-fields.js",
+        WEB_ROOT / "workbench" / "test-settings.js",
+    ]
     result = subprocess.run(
-        ["node", str(fixture), str(module), str(expected)], cwd=ROOT,
+        ["node", str(fixture), *(str(path) for path in modules), str(expected)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
 
-def test_research_shell_loads_the_owned_highstock_runtime() -> None:
+def test_research_shell_defers_heavy_chart_runtime() -> None:
     shell = research_static.shell_bytes().decode("utf-8")
+    loader = (WEB_ROOT / "core" / "module-loader.js").read_text(encoding="utf-8")
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
+    tests_module = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
-    assert '/research-static/vendor/highcharts/highstock.min.js?v=' in shell
+    assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-previews"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-ic"]
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-backtest"]
+    assert manifest["route_groups"]["jobs"] == ["jobs"]
+    assert manifest["route_groups"]["job"] == ["job-detail-core"]
+    assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
+    assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
+    assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
+    assert manifest["group_dependencies"]["research"] == ["report", "profile"]
+    assert set(manifest["groups"]["jobs"]) == {
+        "jobs/list-format.js", "jobs/progress.js", "jobs/jobs.js",
+    }
+    assert "jobs/detail.js" in manifest["groups"]["job-detail-core"]
+    assert "jobs/input-detail.js" in manifest["groups"]["job-detail-input"]
+    assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail-previews"]
+    assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
+    assert "jobs/ic-result-view.js" in manifest["groups"]["job-detail-ic"]
+    assert "jobs/backtest-result-view.js" in manifest["groups"]["job-detail-backtest"]
+    assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
+    assert manifest["group_dependencies"]["job-detail-previews"] == [
+        "job-detail-core", "report", "charts",
+    ]
+    assert "output-choice" in manifest["group_dependencies"]["job-detail-core"]
+    core_detail = set(manifest["groups"]["job-detail-core"])
+    assert "jobs/detail.js" in core_detail
+    assert not core_detail.intersection({
+        "jobs/highcharts-viewers.js", "jobs/job-artifact-viewers.js",
+        "jobs/ic-result-view.js", "jobs/backtest-result-view.js",
+        "jobs/factor-series-view.js", "core/market-data.js",
+    })
+    artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(encoding="utf-8")
+    detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    run_results = (WEB_ROOT / "workbench" / "test-run-results.js").read_text(encoding="utf-8")
+    assert 'loadGroups?.(["job-detail-previews"])' in artifacts
+    assert 'loadGroups?.([group])' in detail
+    assert 'loadGroups?.(["job-detail"])' not in run_results
+    assert 'job-detail-ic' in run_results and 'job-detail-backtest' in run_results
+    assert "group_external_scripts" in loader
+    assert manifest["initial_groups"] == ["core", "app"]
+    initial = set(research_static._initial_scripts(manifest))
+    assert not any(path.startswith("workbench/") for path in initial)
+    assert not any(path.startswith("catalog/") for path in initial)
+    assert "preload" in loader
+    assert "protectedRouteKinds" in coordinator
+    state_loader = tests_module.split("async function loadState", 1)[1].split(
+        "function lazyReady", 1
+    )[0]
+    assert 'loadGroup("workbench-factors")' not in state_loader
+    assert "FTTestRunFields.initialValues" not in state_loader
+    initial_render = tests_module.split("function render", 1)[1].split(
+        "window.FTTests", 1
+    )[0]
+    assert "ensureSettingsCode(context, state" in initial_render
+    assert "ensureRunCode(context, state" in initial_render
+    assert "ensureRunBatchCode(context, state" in initial_render
+    # A login-only deep link must not trigger feature code loading before the
+    # existing route guard has rendered its login view.
+    assert "if (!state.session && protectedRouteKinds.has(route.kind))" in coordinator
 
 
 def test_product_price_chart_is_interactive_ohlcv() -> None:
@@ -470,6 +540,7 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
         WEB_ROOT / "workbench" / "test-setting-chips.js",
         WEB_ROOT / "workbench" / "tab-chip-content.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
+        WEB_ROOT / "workbench" / "test-setting-fields.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
@@ -478,6 +549,189 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
+    source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    template_actions = (WEB_ROOT / "workbench" / "templates" / "actions.js").read_text(
+        encoding="utf-8",
+    )
+    first_load = source.split(
+        "const [manifest, workspaces, savedWorkspaceConfiguration]", 1
+    )[1].split("]);", 1)[0]
+    assert "/api/backtest/settings/${application}/summary" in first_load
+    assert "/api/backtest/settings/${application}`" not in first_load
+    for endpoint in (
+        "/api/catalog/factors", "/api/catalog/product-groups",
+        "/api/data_source_categories", "/api/configuration-templates",
+        "/api/jobs/artifact-capabilities", "/api/client/profiles",
+    ):
+        assert endpoint not in first_load
+    assert "/api/workspace-summaries" in first_load
+    assert "workbench-settings" not in first_load
+    assert "FTTestInputState.initialize" not in first_load
+    assert "FTTestState.initializeInputState(state)" in source
+    assert "/api/workspaces/${workspaceID}/configuration" in source
+    assert "FTTestFactors.prepare(state)" in template_actions
+    assert "function ensureLazyKey" in source
+    assert "ensureProductsForExecution" in source
+    assert "ensureOutputCapabilities" in source
+    assert 'loadGroup("output-choice")' in source
+    assert "ensureProfiles" in source
+    assert "workbench-run" in manifest["groups"]
+    assert manifest["group_dependencies"]["workbench-run"] == [
+        "workbench-core", "workbench-settings-controls",
+    ]
+    assert manifest["group_dependencies"]["workbench-settings-fields"] == [
+        "workbench-settings-controls",
+    ]
+    assert manifest["group_dependencies"]["workbench-settings-controls"] == [
+        "workbench-core",
+    ]
+    assert manifest["group_dependencies"]["workbench-settings-chips"] == [
+        "workbench-settings",
+    ]
+    assert manifest["group_dependencies"]["workbench-input-state"] == [
+        "workbench-core",
+    ]
+    assert manifest["group_dependencies"]["workbench-core"] == []
+    assert "workbench/templates/actions.js" in manifest["groups"]["workbench-core"]
+    assert "workbench/templates/actions.js" not in manifest["groups"]["workbench-templates"]
+    assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
+    assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
+    assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
+    assert manifest["group_dependencies"]["workbench-run-batch"] == [
+        "workbench-run", "workbench-products",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-batch-actions"] == [
+        "workbench-run-batch", "workbench-input-state",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-results"] == [
+        "workbench-run",
+    ]
+    assert set(manifest["groups"]["workbench-run"]) == {
+        "workbench/test-run-fields.js",
+        "workbench/test-outputs.js",
+    }
+    assert manifest["groups"]["workbench-run-batch"] == [
+        "workbench/run-batch/model.js",
+        "workbench/test-run-summary.js",
+        "workbench/test-run-batch.js",
+    ]
+    assert manifest["groups"]["workbench-run-batch-actions"] == [
+        "workbench/run-batch/actions.js",
+    ]
+    assert manifest["groups"]["workbench-run-results"] == [
+        "workbench/test-run-results.js",
+    ]
+    assert manifest["groups"]["workbench-run-submit"] == [
+        "workbench/test-configuration.js",
+    ]
+    assert set(manifest["groups"]["workbench-settings"]) == {
+        "workbench/tab-chip-content.js",
+        "workbench/test-settings.js",
+        "workbench/test-content-adapters.js",
+    }
+    assert manifest["groups"]["workbench-settings-chips"] == [
+        "workbench/test-setting-chips.js",
+    ]
+    assert manifest["groups"]["workbench-settings-fields"] == [
+        "workbench/test-control-loader.js",
+        "workbench/test-settings-schema.js",
+    ]
+    assert manifest["groups"]["workbench-settings-controls"] == [
+        "workbench/test-setting-fields.js",
+    ]
+    assert manifest["groups"]["workbench-input-state"] == [
+        "workbench/test-input-state.js",
+    ]
+    assert manifest["groups"]["workbench-source-inputs"] == [
+        "workbench/test-source-upload.js",
+    ]
+    assert manifest["group_dependencies"]["workbench-factors"] == [
+        "workbench-core", "catalog-core", "workbench-source-inputs",
+    ]
+    assert manifest["group_dependencies"]["workbench-source-inputs"] == [
+        "workbench-input-state",
+    ]
+    assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-backtest"]
+    assert "workbench/tab-list-chip.js" not in research_static._initial_scripts(manifest)
+    assert not set(manifest["groups"]["workbench-run"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert not set(manifest["groups"]["workbench-run-batch"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert not set(manifest["groups"]["workbench-run-batch-actions"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert "workbench/factor-roles.js" not in manifest["groups"]["workbench-core"]
+    assert "workbench/custom-product-overrides.js" not in manifest["groups"]["workbench-core"]
+    assert manifest["control_groups"]["ic_horizon_grid"]["group"] == "workbench-ic-controls"
+    assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
+    assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
+    assert manifest["group_dependencies"]["workbench-run"] == [
+        "workbench-core", "workbench-settings-controls",
+    ]
+    assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
+    assert manifest["group_dependencies"]["workbench-backtest"] == [
+        "workbench-settings", "workbench-settings-controls",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-submit"] == [
+        "workbench-run", "workbench-compiler",
+    ]
+    assert manifest["group_dependencies"]["workbench-ic-controls"] == [
+        "workbench-core", "workbench-compiler",
+    ]
+    assert manifest["groups"]["workbench-compiler"] == [
+        "workbench/test-configuration-compiler.js",
+    ]
+    assert "workbench/test-configuration-compiler.js" not in manifest[
+        "groups"]["workbench-core"]
+    assert "workbench/test-input-state.js" not in manifest["groups"]["workbench-core"]
+    assert manifest["group_dependencies"]["settings"] == ["core"]
+    assert not set(manifest["groups"]["workbench-settings"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert "ensureRunCode" in source
+    assert "ensureRunBatchCode" in source
+    assert "ensureSettingsCode" in source
+    assert "ensureSettingsChipsCode" in source
+    assert "ensureRunSubmitCode" in source
+    assert "workbench-run-submit" in source
+    settings_source = (WEB_ROOT / "workbench" / "test-settings.js").read_text(
+        encoding="utf-8",
+    )
+    assert "if (window.FTTestSettingChips)" in settings_source
+    assert "ensureSettingsChipsCode" in source
+    output_source = (WEB_ROOT / "workbench" / "test-outputs.js").read_text(
+        encoding="utf-8",
+    )
+    assert "if (!window.FTOutputChoices)" in output_source
+    lazy_code = (WEB_ROOT / "workbench" / "test-lazy-code.js").read_text(
+        encoding="utf-8",
+    )
+    assert '"workbench-run-batch"' in lazy_code
+    assert '"workbench-run-batch-actions"' in lazy_code
+    assert "ensureRunBatchActionsCode" in lazy_code
+    assert "ensureGroupCode" in lazy_code
+    run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
+    run_actions = (WEB_ROOT / "workbench" / "run-batch" / "actions.js").read_text(
+        encoding="utf-8",
+    )
+    assert 'loadGroups?.(["workbench-run-results"])' in run_batch
+    assert "FTTestRunSummary?.planSummary" in run_batch
+    assert "ensureRunBatchActionsCode" in run_batch
+    assert "context.api(" not in run_batch
+    assert "FTTestInputState.requestBody" not in run_batch
+    assert "FTTestConfiguration.save" not in run_batch
+    assert "context.api(" in run_actions
+    assert "FTTestInputState.requestBody" in run_actions
+    assert "FTTestConfiguration.save" in run_actions
+    assert 'run_inputs: "workbench-source-inputs"' in (
+        WEB_ROOT / "workbench" / "test-lazy-code.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:
@@ -524,8 +778,9 @@ def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_model.js"
     model = WEB_ROOT / "jobs" / "backtest-result-model.js"
+    runtime = WEB_ROOT / "jobs" / "backtest-runtime-model.js"
     result = subprocess.run(
-        ["node", str(fixture), str(model)], cwd=ROOT,
+        ["node", str(fixture), str(model), str(runtime)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -562,9 +817,14 @@ def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_detail_parts.js"
-    module = WEB_ROOT / "jobs" / "backtest-group-detail-parts.js"
+    detail = (WEB_ROOT / "jobs" / "backtest-group-detail.js").read_text(encoding="utf-8")
+    assert "FTBacktestGroupDetailProducts" in detail
+    modules = [
+        WEB_ROOT / "jobs" / "backtest-group-products.js",
+        WEB_ROOT / "jobs" / "backtest-group-detail-parts.js",
+    ]
     result = subprocess.run(
-        ["node", str(fixture), str(module)], cwd=ROOT,
+        ["node", str(fixture), *(str(module) for module in modules)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -675,6 +935,9 @@ def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> No
 
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
+    run_fields = (WEB_ROOT / "workbench" / "test-run-fields.js").read_text(
+        encoding="utf-8"
+    )
     tab_content = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
         encoding="utf-8"
     )
@@ -687,13 +950,15 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     generation = (WEB_ROOT / "jobs" / "generation.js").read_text(encoding="utf-8")
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
+    groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
 
     assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
     assert 'bar.className = options.barClass || "backend-settings-tab-bar"' in tab_content
     assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
     assert "options.onActivate?.(key)" in tab_content
     assert "FTTabChipContent.create" in settings
-    groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
+    assert 'groupBy: "tab"' in settings
+    assert 'groupBy: "tab"' in groups
     overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
         encoding="utf-8"
     )
@@ -708,14 +973,21 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "previewDefaultsForTab" in settings
     assert "includeRun: false" in settings
     assert "includeEmpty: true" in settings
+    assert "按顺序完成配置" not in settings
+    assert "选择要挂载到测试配置的设置" not in settings
+    assert "test-setting-help" not in settings
+    assert "test-setting-help" not in run_fields
     assert "tab-chip-description" not in tab_content
     assert "fieldValueSelector" in output_choices
     assert "FTOutputChoices.fieldValueSelector" in test_outputs
     assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
-    assert "function jobPath(item)" in run_batch
-    assert "function runSpecPath(item)" in run_batch
+    run_batch_model = (WEB_ROOT / "workbench" / "run-batch" / "model.js").read_text(
+        encoding="utf-8",
+    )
+    assert "function jobPath(item)" in run_batch_model
+    assert "function runSpecPath(item)" in run_batch_model
     assert '"查看运行配置", runSpecPath(item)' in run_batch
 
 

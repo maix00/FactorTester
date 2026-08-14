@@ -2,6 +2,7 @@
   const adapters = Object.freeze({
     settings: Object.freeze({}),
     test_templates: Object.freeze({
+      lazyKey: "templates",
       render: options => FTTestTemplates.panel(
         options.context,
         options.state.templates,
@@ -10,22 +11,26 @@
       ),
     }),
     factor_selection: Object.freeze({
+      lazyKey: "factors",
       render: options => FTTestFactors.panel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
       ),
     }),
     product_path_selection: Object.freeze({
+      lazyKey: "products",
       render: options => FTTestProducts.panel(
         options.context, options.state, options.refresh,
       ),
     }),
     category_selection: Object.freeze({
+      lazyKey: "categories",
       render: options => FTTestCategories.panel(
         options.context, options.state, options.refresh,
       ),
     }),
     run_inputs: Object.freeze({
+      lazyKey: "run_inputs",
       render: options => FTTestSourceUpload.strategyPanel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
@@ -51,6 +56,10 @@
     return typeof adapter.render === "function" ? adapter.render(options) : null;
   }
 
+  function lazyKey(tab) {
+    return descriptor(tab)?.lazyKey || "";
+  }
+
   function chipSources(state, item = null) {
     const values = {};
     for (const chip of state.manifest?.chip_fields || []) {
@@ -62,6 +71,7 @@
 
   function sourceValues(adapter, state, item = null) {
     if (adapter === "selected_factors") {
+      if (!window.FTTestFactorSelection || !window.FTTestFactors) return {};
       const factors = item?.factorAlias || item?.factor_alias
         ? [item.factorAlias || item.factor_alias]
         : state.kind === "ic"
@@ -70,6 +80,7 @@
       return {factorAlias: factors.map(FTTestFactorSelection.factorAlias).filter(Boolean)};
     }
     if (adapter === "selected_product_paths") {
+      if (!window.FTTestProducts) return {};
       return {product_path_selection: item?.product_path_selection
         ? [item.product_path_selection] : FTTestProducts.selectedProjections(state)};
     }
@@ -82,7 +93,14 @@
       };
     }
     if (adapter === "run_inputs") {
-      const counts = FTTestInputState.counts(state);
+      // The source-state module is intentionally deferred until the input
+      // tab or a submission path is used.  Chips can still render a cheap
+      // count from the lightweight state shape during route bootstrap.
+      const counts = window.FTTestInputState?.counts?.(state) || {
+        factors: (state.transientFactorSources || []).length,
+        strategies: (state.transientStrategySources || []).length,
+        dependencies: (state.runInputDependencies || []).length,
+      };
       const total = counts.factors + counts.strategies + counts.dependencies;
       return total ? {run_input_count: total} : {};
     }
@@ -90,6 +108,6 @@
   }
 
   window.FTTestContentAdapters = Object.freeze({
-    chipSources, hasContent, name, render,
+    chipSources, hasContent, lazyKey, name, render,
   });
 })();

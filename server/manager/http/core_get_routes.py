@@ -117,10 +117,18 @@ class CoreGetRoutesMixin:
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("X-Content-Type-Options", "nosniff")
-            # 7998 serves the web shell directly from the selected worktree.
-            # Do not cache source assets: a changed JS/CSS file is visible on
-            # the next navigation without restarting the manager process.
-            self.send_header("Cache-Control", "no-store")
+            # The shell and module manifest are deliberately revalidated so a
+            # worktree change is visible without restarting Manager.  Every
+            # versioned module/style URL carries the asset revision from that
+            # manifest, so keeping those immutable is safe and avoids
+            # downloading and reparsing the same lazy code on every route.
+            relative = parsed.path.removeprefix("/research-static/")
+            if relative in {"", "research.html", "module-manifest.json"}:
+                self.send_header("Cache-Control", "no-store")
+            else:
+                self.send_header(
+                    "Cache-Control", "public, max-age=31536000, immutable",
+                )
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

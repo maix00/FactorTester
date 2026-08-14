@@ -1,54 +1,6 @@
 (() => {
   const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
 
-  function factorCount(state) {
-    const selected = window.FTTestFactorSelection?.selectedIDs?.(state) || [];
-    if (selected.length) return selected.length;
-    const values = Array.isArray(state.values?.factor_selections)
-      ? state.values.factor_selections : [];
-    return values.length || (state.factorRef ? 1 : 0);
-  }
-
-  function evaluationPlan(state) {
-    return FTICConfiguration.evaluationPlan({
-      values: state.values,
-      factorCount: factorCount(state),
-      productCount: FTTestProducts.selectedGroups(state).length,
-    });
-  }
-
-  function planSummary(context, state) {
-    if (state.kind !== "ic") return null;
-    const plan = evaluationPlan(state);
-    const root = document.createElement("div");
-    root.className = "test-run-matrix";
-    const label = document.createElement("strong");
-    label.textContent = context.t("评估矩阵");
-    const values = [
-      ["因子", plan.factors],
-      ["收益期", plan.horizons == null
-        ? "按因子频率展开"
-        : `${plan.exact ? "" : "≤"}${plan.horizons}`],
-      ["延迟", plan.delays],
-      ["IC 类型", plan.methods],
-      ["产品任务", plan.jobs],
-    ];
-    root.append(label, ...values.map(([name, value]) => {
-      const chip = document.createElement("span");
-      chip.textContent = `${context.t(name)} ${value}`;
-      return chip;
-    }));
-    if (plan.slicesPerJob != null) {
-      const total = document.createElement("small");
-      const template = plan.exact
-        ? "每个产品任务复用因子值，计算 %lld 个评估切片"
-        : "每个产品任务复用因子值，最多计算 %lld 个评估切片；物理时长重复项会去重";
-      total.textContent = context.t(template).replace("%lld", String(plan.slicesPerJob));
-      root.append(total);
-    }
-    return root;
-  }
-
   function recordDetail(item, loaded) {
     item.detailPayload = loaded.payload;
     item.taskDetail = loaded.taskDetail;
@@ -60,13 +12,54 @@
     return item;
   }
 
-  async function refresh(context, item, rerender) {
+  function resultCode(state) {
+    if (state.kind === "ic") {
+      return {group: "job-detail-ic", global: "FTICResults"};
+    }
+    if (state.kind === "backtest") {
+      return {group: "job-detail-backtest", global: "FTBacktestResults"};
+    }
+    return null;
+  }
+
+  async function ensureResultCode(state, item, rerender) {
+    const descriptor = resultCode(state);
+    if (!descriptor || window[descriptor.global]) return true;
+    if (!item.resultCodePromise) {
+      item.resultCodeLoading = true;
+      item.resultCodePromise = Promise.resolve(
+        window.FTStaticLoader?.loadGroups?.([descriptor.group]),
+      )
+        .then(() => {
+          if (!window[descriptor.global]) {
+            throw new Error("结果查看器不可用");
+          }
+        })
+        .catch(error => {
+          item.resultError = error.message || String(error);
+          throw error;
+        })
+        .finally(() => {
+          item.resultCodeLoading = false;
+          rerender?.();
+        });
+    }
+    try {
+      await item.resultCodePromise;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function refresh(context, state, item, rerender) {
     if (!item.jobID || item.resultLoading) return false;
     item.resultLoading = true;
     item.resultError = "";
     rerender?.();
     try {
       recordDetail(item, await window.FTJobs.loadDetail(context, item.port, item.jobID));
+      await ensureResultCode(state, item, rerender);
       return true;
     } catch (error) {
       item.resultError = error.message || String(error);
@@ -103,7 +96,7 @@
     if (!item.jobID) return root;
     const toolbar = document.createElement("div");
     toolbar.className = "test-run-result-actions";
-    const reload = context.button("↻", () => refresh(context, item, rerender), context.t("刷新任务结果"));
+    const reload = context.button("↻", () => refresh(context, state, item, rerender), context.t("刷新任务结果"));
     reload.disabled = Boolean(item.resultLoading);
     toolbar.append(reload);
     root.append(toolbar);
@@ -122,6 +115,12 @@
       hint.textContent = context.t("任务提交后可在此刷新并查看完整测试结果");
       root.append(hint); return root;
     }
+    const descriptor = resultCode(state);
+    if (descriptor && !window[descriptor.global]) {
+      ensureResultCode(state, item, rerender);
+      root.append(window.FTUI.loading(context.t("正在加载结果查看器…")));
+      return root;
+    }
     const section = resultSection(context, state, item);
     if (section) root.append(section);
     else {
@@ -136,6 +135,6 @@
   }
 
   window.FTTestRunResults = Object.freeze({
-    evaluationPlan, planSummary, recordDetail, refresh, render, resultSection,
+    recordDetail, refresh, render, resultSection,
   });
 })();

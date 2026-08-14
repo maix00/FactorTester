@@ -29,6 +29,8 @@
   padding: 0 10px;
   color: var(--muted);
   background: var(--panel);
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -68,32 +70,29 @@
   background: color-mix(in srgb, var(--soft) 55%, var(--panel));
 }
 .backend-settings-chip-row:empty { display: none; }
-.backend-setting-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; color: inherit; background: var(--panel); font: inherit; font-size: 12px; white-space: normal; }
+.backend-setting-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; color: inherit; background: var(--panel); font: inherit; font-size: 11px; line-height: 1.2; white-space: normal; }
 button.backend-setting-chip { cursor: pointer; }
 button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .backend-setting-chip-label { flex: 0 0 auto; color: var(--muted); }
 .backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
 .backend-settings-host { min-width: 0; padding: 8px 12px 10px; }
 .shared-field-value-selector { min-width: 0; }
-.test-settings-manager { display: grid; gap: 7px; padding: 9px 0 11px; }
-.test-settings-manager > p { margin: 0; color: var(--muted); font-size: 12px; }
+.test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
 .test-settings-manager-list { display: grid; overflow: hidden; }
-.test-settings-manager-list > label { min-height: 38px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.test-settings-manager-list > label:last-child { border-bottom: 0; }
-.test-settings-manager-row-body { display: grid; gap: 2px; min-width: 0; }
+.test-settings-manager-row { display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding: 6px 0; border-top: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 12px; }
+.test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 2px 0 0; flex: 0 0 auto; }
+.test-settings-manager-row-body { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
 .test-settings-manager-row-body > span:first-child { display: block; min-width: 0; }
 .test-settings-manager-row-body small { color: var(--muted); line-height: 1.25; }
-.test-settings-manager-defaults { min-width: 0; padding: 0; border: 0; background: transparent; }
+.test-settings-manager-defaults { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; }
+.test-settings-manager-defaults .backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
 .test-settings-manager-defaults .backend-setting-chip { min-width: 0; padding-top: 3px; padding-bottom: 3px; white-space: nowrap; }
 .test-settings-manager-defaults .backend-setting-chip-label, .test-settings-manager-defaults .backend-setting-chip-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-settings-manager-defaults .backend-setting-chip-value { max-width: 22rem; }
 .test-setting-rows { min-width: 0; }
-.test-setting-row { min-height: 54px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row:last-child { border-bottom: 0; }
 .test-setting-row > span { display: grid; gap: 2px; min-width: 0; }
-.test-setting-row small { color: var(--muted); line-height: 1.25; }
-.test-setting-help { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.test-setting-mode-note { color: var(--warning-text, #9a6700) !important; }
 .test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
 .factor-role-bindings { display: grid; gap: 6px; min-width: 0; }
 .factor-role-bindings > label { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 8px; align-items: center; }

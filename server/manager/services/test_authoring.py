@@ -42,6 +42,12 @@ class TestAuthoringService:
     )
     _TEMPLATE_RE = re.compile(r"/api/configuration-templates/([^/]{1,128})")
     _SETTINGS_RE = re.compile(r"/api/backtest/settings/([^/]{1,128})")
+    _SETTINGS_SUMMARY_RE = re.compile(
+        r"/api/backtest/settings/([^/]{1,128})/summary"
+    )
+    _SETTINGS_TAB_RE = re.compile(
+        r"/api/backtest/settings/([^/]{1,128})/tabs/([^/]{1,128})"
+    )
 
     @classmethod
     def handles(cls, path: str, method: str) -> bool:
@@ -49,11 +55,14 @@ class TestAuthoringService:
             return bool(
                 path in {
                     "/api/workspaces",
+                    "/api/workspace-summaries",
                     "/api/configuration-templates",
                     "/api/data_source_categories",
                     "/api/jobs/artifact-capabilities",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
+                or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
+                or cls._SETTINGS_TAB_RE.fullmatch(path)
                 or cls._WORKSPACE_RE.fullmatch(path)
                 or cls._CONFIG_RE.fullmatch(path)
             )
@@ -90,6 +99,14 @@ class TestAuthoringService:
             ) from exc
 
     def get(self, path: str, *, owner: str) -> TestAuthoringResponse:
+        if match := self._SETTINGS_SUMMARY_RE.fullmatch(path):
+            return TestAuthoringResponse(self._settings_manifest(
+                unquote(match.group(1)), mode="summary",
+            ))
+        if match := self._SETTINGS_TAB_RE.fullmatch(path):
+            return TestAuthoringResponse(self._settings_tab_manifest(
+                unquote(match.group(1)), unquote(match.group(2)),
+            ))
         if match := self._SETTINGS_RE.fullmatch(path):
             return TestAuthoringResponse(self._settings_manifest(
                 unquote(match.group(1)),
@@ -114,6 +131,12 @@ class TestAuthoringService:
             return TestAuthoringResponse({
                 "success": True,
                 "workspaces": research_workspaces.list_workspaces(owner=owner),
+            })
+        if path == "/api/workspace-summaries":
+            from server.services import research_workspaces
+            return TestAuthoringResponse({
+                "success": True,
+                "workspaces": research_workspaces.list_workspace_summaries(owner=owner),
             })
         if path == "/api/configuration-templates":
             from server.services import research_configurations
@@ -234,13 +257,16 @@ class TestAuthoringService:
         raise TestAuthoringError("test authoring route not found", 404)
 
     @staticmethod
-    def _settings_manifest(application: str) -> dict[str, Any]:
+    def _settings_manifest(
+        application: str, *, mode: str = "full",
+    ) -> dict[str, Any]:
         from tools.testers.backtest.modules.registry import BacktestModuleRegistry
         from tools.testers.home import HomeModuleRegistry
         from tools.testers.settings import backtest_setting_registry
 
         try:
-            manifest = backtest_setting_registry.get(application).manifest()
+            app = backtest_setting_registry.get(application)
+            manifest = app.summary() if mode == "summary" else app.manifest()
         except KeyError as exc:
             raise TestAuthoringError(str(exc), 404) from exc
         module = HomeModuleRegistry().find(application)
@@ -257,6 +283,26 @@ class TestAuthoringService:
                     "factor_evaluation", "ic_test", "group_test",
                 ))
             )
+        return {"success": True, **manifest}
+
+    @staticmethod
+    def _settings_tab_manifest(application: str, tab_key: str) -> dict[str, Any]:
+        from tools.testers.backtest.modules.registry import BacktestModuleRegistry
+        from tools.testers.home import HomeModuleRegistry
+        from tools.testers.settings import backtest_setting_registry
+
+        try:
+            manifest = backtest_setting_registry.get(application).tab_manifest(tab_key)
+        except KeyError as exc:
+            raise TestAuthoringError(str(exc), 404) from exc
+        module = HomeModuleRegistry().find(application)
+        registry = (
+            module.sub_registry
+            if module is not None
+            and isinstance(module.sub_registry, BacktestModuleRegistry)
+            else BacktestModuleRegistry()
+        )
+        manifest["executable_modules"] = registry.module_manifest()
         return {"success": True, **manifest}
 
     @staticmethod

@@ -5,6 +5,90 @@
     "max_script_lines": 400,
     "max_style_lines": 500
   },
+  "initial_groups": ["core", "app"],
+  "initial_external_scripts": [],
+  "group_external_scripts": {
+    "report": ["katex/katex.min.js"],
+    "job-detail-previews": ["vendor/highcharts/highstock.min.js"],
+    "job-detail-factor-series": ["vendor/highcharts/highstock.min.js"],
+    "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
+    "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
+    "job-detail-input": ["katex/katex.min.js"],
+    "catalog": ["vendor/highcharts/highstock.min.js"]
+  },
+  "group_dependencies": {
+    "charts": ["core"],
+    "catalog-core": ["core"],
+    "output-choice": ["core"],
+    "workbench-compiler": ["core"],
+    "workbench-input-state": ["workbench-core"],
+    "workbench-settings-controls": ["workbench-core"],
+    "workbench-settings-chips": ["workbench-settings"],
+    "research-reference": ["core"],
+    "research": ["report", "profile"],
+    "job-detail-core": ["jobs", "research-reference", "output-choice"],
+    "job-detail-input": ["job-detail-core"],
+    "job-detail-previews": ["job-detail-core", "report", "charts"],
+    "job-detail-factor-series": ["job-detail-core", "charts"],
+    "job-detail-ic": ["job-detail-core", "report"],
+    "job-detail-backtest": ["job-detail-core", "report", "charts"],
+    "catalog": ["catalog-core", "charts"],
+    "workbench-core": [],
+    "workbench-settings": ["workbench-core"],
+    "workbench-settings-fields": ["workbench-settings-controls"],
+    "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
+    "workbench-factor-controls": ["workbench-core"],
+    "workbench-product-controls": ["workbench-core"],
+    "workbench-source-inputs": ["workbench-input-state"],
+    "workbench-run": ["workbench-core", "workbench-settings-controls"],
+    "workbench-run-batch": ["workbench-run", "workbench-products"],
+    "workbench-run-batch-actions": ["workbench-run-batch", "workbench-input-state"],
+    "workbench-run-results": ["workbench-run"],
+    "workbench-run-submit": ["workbench-run", "workbench-compiler"],
+    "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
+    "workbench-products": ["workbench-core", "catalog-core"],
+    "workbench-backtest": ["workbench-settings", "workbench-settings-controls"],
+    "workbench-templates": ["workbench-core"],
+    "settings": ["core"]
+  },
+  "control_groups": {
+    "ic_horizon_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
+    "ic_delay_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
+    "ic_decay_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
+    "factor_role_bindings": {"group": "workbench-factor-controls", "global": "FTTestFactorRoles"},
+    "custom_product_overrides": {"group": "workbench-product-controls", "global": "FTCustomProductOverrides"}
+  },
+  "route_groups": {
+    "report": ["report", "research"],
+    "public-reference": ["research-reference"],
+    "reference": ["research-reference"],
+    "research": ["research"],
+    "jobs": ["jobs"],
+    "job": ["job-detail-core"],
+    "job-configuration": ["job-detail-core"],
+    "job-input": ["job-detail-input"],
+    "ic-test": ["workbench-core"],
+    "backtest": ["workbench-core"],
+    "factor-evaluation": ["workbench-core"],
+    "factor-series": ["workbench-core"],
+    "test-template": ["workbench-templates"],
+    "factor-families": ["catalog"],
+    "factor-sets": ["catalog"],
+    "factor-family": ["catalog"],
+    "factor": ["catalog"],
+    "factor-set": ["catalog"],
+    "factors": ["catalog"],
+    "product-group": ["catalog"],
+    "product": ["catalog"],
+    "product-reference": ["catalog"],
+    "product-sources": ["catalog"],
+    "product-groups": ["catalog"],
+    "products": ["catalog"],
+    "profile": ["profile"],
+    "profiles": ["profile"],
+    "settings": ["settings"],
+    "manager": ["settings"]
+  },
   "external_styles": [
     "katex/katex.min.css"
   ],
@@ -19,11 +103,20 @@
   ],
   "groups": {
     "core": [
+      "core/module-loader.js",
       "core/i18n.js",
       "core/icons.js",
-      "core/shared-ui.js",
-      "core/price-chart.js",
-      "core/market-data.js",
+      "core/shared-ui.js"
+    ],
+    "charts": [
+      "core/price-chart.js"
+    ],
+    "catalog-core": [
+      "catalog/factor-model.js",
+      "catalog/product-category-model.js",
+      "catalog/product-tree.js"
+    ],
+    "output-choice": [
       "core/output-choices.js"
     ],
     "report": [
@@ -40,86 +133,151 @@
       "report/report-entry.js"
     ],
     "research": [
-      "research/run-spec-view.js",
-      "research/reference.js",
       "research/graph.js",
       "research/local.js",
       "research/shared.js",
       "research/workspaces.js"
     ],
+    "research-reference": [
+      "research/run-spec-view.js",
+      "research/reference.js"
+    ],
     "jobs": [
+      "jobs/list-format.js",
+      "jobs/progress.js",
+      "jobs/jobs.js"
+    ],
+    "job-detail-core": [
+      "jobs/artifacts.js",
+      "jobs/generation.js",
+      "jobs/actions.js",
+      "jobs/detail.js"
+    ],
+    "job-detail-input": [
+      "jobs/input-detail.js"
+    ],
+    "job-detail-previews": [
+      "core/market-data.js",
       "jobs/highcharts-viewers.js",
+      "jobs/job-artifact-viewers.js"
+    ],
+    "job-detail-factor-series": [
       "jobs/factor-series-model.js",
       "jobs/factor-series-chart.js",
+      "jobs/factor-series-view.js"
+    ],
+    "job-detail-ic": [
       "jobs/ic-result-model.js",
       "jobs/ic-portfolio-view.js",
       "jobs/ic-result-charts.js",
+      "jobs/ic-result-view.js"
+    ],
+    "job-detail-backtest": [
+      "jobs/backtest-runtime-model.js",
       "jobs/backtest-result-model.js",
       "jobs/backtest-analysis-api.js",
       "jobs/backtest-analysis-ui.js",
+      "jobs/backtest-group-products.js",
       "jobs/backtest-group-detail-parts.js",
       "jobs/backtest-group-detail.js",
       "jobs/backtest-ranking-view.js",
       "jobs/backtest-snapshot-view.js",
-      "jobs/job-artifact-viewers.js",
-      "jobs/artifacts.js",
-      "jobs/factor-series-view.js",
-      "jobs/ic-result-view.js",
-      "jobs/backtest-result-view.js",
-      "jobs/generation.js",
-      "jobs/progress.js",
-      "jobs/jobs.js",
-      "jobs/actions.js",
-      "jobs/input-detail.js",
-      "jobs/detail.js"
+      "jobs/backtest-result-view.js"
     ],
     "catalog": [
-      "catalog/factor-model.js",
       "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
       "catalog/factor-details.js",
       "catalog/factors.js",
-      "catalog/product-category-model.js",
       "catalog/product-category-overlay.js",
-      "catalog/product-tree.js",
       "catalog/source-list.js",
       "catalog/products.js",
       "catalog/details.js"
     ],
-    "workbench": [
+    "workbench-core": [
       "workbench/setting-rules.js",
-      "workbench/test-input-state.js",
-      "workbench/test-configuration-compiler.js",
-      "workbench/ic-configuration.js",
-      "workbench/ic-horizon-settings.js",
-      "workbench/factor-roles.js",
-      "workbench/custom-product-overrides.js",
-      "workbench/test-setting-chips.js",
+      "workbench/test-lazy-code.js",
+      "workbench/templates/actions.js",
+      "workbench/test-state.js",
+      "workbench/tests.js"
+    ],
+    "workbench-input-state": [
+      "workbench/test-input-state.js"
+    ],
+    "workbench-compiler": [
+      "workbench/test-configuration-compiler.js"
+    ],
+    "workbench-settings": [
       "workbench/tab-chip-content.js",
-      "workbench/tab-list-chip.js",
       "workbench/test-settings.js",
-      "workbench/backtest-group-overrides.js",
+      "workbench/test-content-adapters.js"
+    ],
+    "workbench-settings-chips": [
+      "workbench/test-setting-chips.js"
+    ],
+    "workbench-settings-fields": [
+      "workbench/test-control-loader.js",
+      "workbench/test-settings-schema.js"
+    ],
+    "workbench-settings-controls": [
+      "workbench/test-setting-fields.js"
+    ],
+    "workbench-ic-controls": [
+      "workbench/ic-configuration.js",
+      "workbench/ic-horizon-settings.js"
+    ],
+    "workbench-factor-controls": [
+      "workbench/factor-roles.js"
+    ],
+    "workbench-product-controls": [
+      "workbench/custom-product-overrides.js"
+    ],
+    "workbench-run": [
+      "workbench/test-run-fields.js",
+      "workbench/test-outputs.js"
+    ],
+    "workbench-run-batch": [
+      "workbench/run-batch/model.js",
+      "workbench/test-run-summary.js",
+      "workbench/test-run-batch.js"
+    ],
+    "workbench-run-batch-actions": [
+      "workbench/run-batch/actions.js"
+    ],
+    "workbench-run-results": [
+      "workbench/test-run-results.js"
+    ],
+    "workbench-run-submit": [
+      "workbench/test-configuration.js"
+    ],
+    "workbench-factors": [
       "workbench/factor-selection.js",
       "workbench/factor-set-selection.js",
       "workbench/factor-family-picker.js",
-      "workbench/test-source-upload.js",
-      "workbench/test-factors.js",
+      "workbench/test-factor-catalog.js",
+      "workbench/test-factor-editor.js",
+      "workbench/test-factor-candidates.js",
+      "workbench/test-factors.js"
+    ],
+    "workbench-source-inputs": [
+      "workbench/test-source-upload.js"
+    ],
+    "workbench-products": [
       "workbench/product-group-creator.js",
       "workbench/test-products.js",
-      "workbench/test-categories.js",
+      "workbench/test-categories.js"
+    ],
+    "workbench-backtest": [
+      "workbench/tab-list-chip.js",
+      "workbench/backtest-group-overrides.js",
       "workbench/backtest-group-batches.js",
       "workbench/backtest-group-model.js",
       "workbench/strategy-list.js",
       "workbench/backtest-group-form.js",
-      "workbench/backtest-groups.js",
-      "workbench/test-configuration.js",
-      "workbench/test-templates.js",
-      "workbench/test-content-adapters.js",
-      "workbench/test-run-fields.js",
-      "workbench/test-outputs.js",
-      "workbench/test-run-results.js",
-      "workbench/test-run-batch.js",
-      "workbench/tests.js"
+      "workbench/backtest-groups.js"
+    ],
+    "workbench-templates": [
+      "workbench/test-templates.js"
     ],
     "profile": [
       "profile/profiles.js"
@@ -145,16 +303,19 @@
     "vendor/highcharts/highstock.min.js"
   ],
   "scripts": [
+    "core/module-loader.js",
     "core/i18n.js",
     "core/icons.js",
     "core/price-chart.js",
     "core/market-data.js",
+    "jobs/list-format.js",
     "jobs/highcharts-viewers.js",
     "jobs/factor-series-model.js",
     "jobs/factor-series-chart.js",
     "jobs/ic-result-model.js",
     "jobs/ic-portfolio-view.js",
     "jobs/ic-result-charts.js",
+    "jobs/backtest-runtime-model.js",
     "jobs/backtest-result-model.js",
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
@@ -181,6 +342,7 @@
     "jobs/ic-result-view.js",
     "jobs/backtest-analysis-api.js",
     "jobs/backtest-analysis-ui.js",
+    "jobs/backtest-group-products.js",
     "jobs/backtest-group-detail-parts.js",
     "jobs/backtest-group-detail.js",
     "jobs/backtest-ranking-view.js",
@@ -206,19 +368,27 @@
     "workbench/setting-rules.js",
     "workbench/test-input-state.js",
     "workbench/test-configuration-compiler.js",
+    "workbench/test-lazy-code.js",
+    "workbench/test-control-loader.js",
+    "workbench/test-state.js",
     "workbench/ic-configuration.js",
     "workbench/ic-horizon-settings.js",
     "workbench/factor-roles.js",
     "workbench/custom-product-overrides.js",
     "workbench/test-setting-chips.js",
     "workbench/tab-chip-content.js",
+    "workbench/test-setting-fields.js",
     "workbench/tab-list-chip.js",
     "workbench/test-settings.js",
+    "workbench/test-settings-schema.js",
     "workbench/backtest-group-overrides.js",
     "workbench/factor-selection.js",
     "workbench/factor-set-selection.js",
     "workbench/factor-family-picker.js",
     "workbench/test-source-upload.js",
+    "workbench/test-factor-catalog.js",
+    "workbench/test-factor-editor.js",
+    "workbench/test-factor-candidates.js",
     "workbench/test-factors.js",
     "workbench/product-group-creator.js",
     "workbench/test-products.js",
@@ -229,12 +399,16 @@
     "workbench/backtest-group-form.js",
     "workbench/backtest-groups.js",
     "workbench/test-configuration.js",
+    "workbench/templates/actions.js",
     "workbench/test-templates.js",
     "workbench/test-content-adapters.js",
     "workbench/test-run-fields.js",
     "workbench/test-outputs.js",
+    "workbench/run-batch/model.js",
+    "workbench/test-run-summary.js",
     "workbench/test-run-results.js",
     "workbench/test-run-batch.js",
+    "workbench/run-batch/actions.js",
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",

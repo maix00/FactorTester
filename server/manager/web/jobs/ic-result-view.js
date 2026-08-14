@@ -77,7 +77,7 @@
 
   function factorReference(context, factor) {
     if (!factor?.factorRef) return document.createTextNode(factor?.factorAlias || "Factor");
-    const url = window.FTJobArtifactViewers.referenceURL("factor", factor.factorRef);
+    const url = FTJobListFormat.referenceURL("factor", factor.factorRef);
     return window.FTRichText.inline(`[${factor.factorAlias}](${url})`, context);
   }
 

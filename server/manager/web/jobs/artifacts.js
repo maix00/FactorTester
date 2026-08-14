@@ -204,15 +204,24 @@
     target.className = "artifact-preview";
     const details = collapsible(declaration.label || declaration.name, target);
     let loaded = false;
+    let loading = false;
     details.addEventListener("toggle", async () => {
-      if (!details.open || loaded) return;
-      loaded = true;
+      if (!details.open || loaded || loading) return;
+      loading = true;
       try {
+        // Artifact viewers are intentionally outside the core job-detail
+        // group.  Configuration/status pages must not execute chart, table,
+        // or price-viewer code until a user expands this declaration.
+        await window.FTStaticLoader?.loadGroups?.(["job-detail-previews"]);
+        if (!window.FTJobArtifactViewers) {
+          throw new Error(context.t("生成物查看器不可用"));
+        }
         for (let index = 0; index < artifacts.length; index += 1) {
           try {
             await FTJobArtifactViewers.mount(context, target, {
               declaration, artifact: artifacts[index], jobID, portQuery,
             });
+            loaded = true;
             return;
           } catch (error) {
             const canFallback = index + 1 < artifacts.length
@@ -222,6 +231,8 @@
         }
       } catch (error) {
         target.textContent = error.message;
+      } finally {
+        loading = false;
       }
     });
     return details;

@@ -38,6 +38,7 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "performance_profile", "margin_execution_profile",
     ]
     for fields in (ic_fields, backtest_fields):
+        assert all("chip_group" not in field for field in fields.values())
         assert fields["task_name"]["default"] == ""
         assert fields["task_name"]["placement"] == "run_identity"
         assert fields["acting_profile_ref"]["default"] == ""
@@ -63,7 +64,6 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "options": [],
         "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
         "enabled_payload": None,
-        "chip_group": "连接",
     }
     assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"
@@ -1191,3 +1191,23 @@ def test_order_execution_price_basis_is_not_a_public_setting() -> None:
             group_values={"group-1": {}},
             group_ids=("group-1",),
         )
+
+
+def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() -> None:
+    application = backtest_setting_registry.get("group_test")
+    summary = application.summary()
+    full = application.manifest()
+
+    assert summary["manifest_mode"] == "summary"
+    assert summary["full_manifest_url"] == "/api/backtest/settings/group_test"
+    assert set(summary["defaults"]) == set(full["defaults"])
+    for key, field in summary["defaults"].items():
+        assert field["value"] == full["defaults"][key]["value"]
+        assert field["tab_key"] == full["defaults"][key]["tab_key"]
+        if "options" in full["defaults"][key]:
+            assert field["options"] == full["defaults"][key]["options"]
+        assert "help_text" not in field
+
+    tab = application.tab_manifest("engine")
+    assert tab["defaults"]
+    assert any("options" in field for field in tab["defaults"].values())

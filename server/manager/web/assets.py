@@ -151,7 +151,10 @@ def shell_bytes() -> bytes:
     template = (WEB_ROOT / "research.html").read_text(encoding="utf-8")
     manifest = _module_manifest()
     styles = [*manifest.get("external_styles", []), *manifest.get("styles", [])]
-    scripts = [*manifest.get("external_scripts", []), *manifest.get("scripts", [])]
+    scripts = [
+        *manifest.get("initial_external_scripts", manifest.get("external_scripts", [])),
+        *_initial_scripts(manifest),
+    ]
     revision = asset_revision()
 
     def tag_path(relative: str) -> str:
@@ -183,6 +186,26 @@ def shell_bytes() -> bytes:
     rendered = rendered.replace("<!-- FT_STATIC_STYLES -->", style_tags)
     rendered = rendered.replace("<!-- FT_STATIC_SCRIPTS -->", script_tags)
     return rendered.encode("utf-8")
+
+
+def _initial_scripts(manifest: dict) -> list[str]:
+    """Return the synchronous shell scripts from the manifest groups.
+
+    The complete ``scripts`` list remains the ownership/declaration boundary,
+    while only the small core/app groups are put in the initial document.  A
+    browser-side loader fetches the other groups when their route is entered.
+    Older test manifests without ``initial_groups`` retain the previous eager
+    behavior.
+    """
+    groups = manifest.get("initial_groups")
+    if not groups:
+        return list(manifest.get("scripts", []))
+    by_group = manifest.get("groups", {})
+    return [
+        relative
+        for group in groups
+        for relative in by_group.get(group, [])
+    ]
 
 
 def static_file(relative: str) -> tuple[bytes, str]:

@@ -23,7 +23,15 @@ class Element {
 }
 
 global.document = {createElement: tagName => new Element(tagName)};
-global.FTTestFactors = {panel: () => new Element("factor-panel")};
+global.FTUI = {
+  loading: () => new Element("loading"),
+  empty: () => new Element("empty"),
+};
+let factorPanelCalls = 0;
+global.FTTestFactors = {panel: () => {
+  factorPanelCalls += 1;
+  return new Element("factor-panel");
+}};
 global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => values};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
@@ -59,6 +67,27 @@ const manifest = {
   }],
 };
 
+// The settings shell must remain renderable while the shared field-control
+// implementation is still being fetched.  Only the active panel requests it;
+// chips and the tab bar do not pull the control code into the initial pass.
+const deferredFields = window.FTTestSettingFields;
+delete window.FTTestSettingFields;
+let requestedFieldCode = 0;
+const deferred = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
+  t: value => value,
+}, {
+  activeTab: "factor", mountedTabs: ["factor", "time"],
+  chipSources: {factorAlias: ["ROC 1m"]},
+  lazyState: () => ({status: "ready"}),
+  ensureSettingsFieldsCode: () => { requestedFieldCode += 1; },
+});
+assert.equal(requestedFieldCode, 1, "active settings panel should request field code");
+assert.equal(
+  deferred.children[2].children[0].children[0].children[0].tagName,
+  "loading",
+);
+window.FTTestSettingFields = deferredFields;
+
 function render(factorAlias, onChipOpen) {
   return FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
     t: value => value,
@@ -66,6 +95,7 @@ function render(factorAlias, onChipOpen) {
     activeTab: "factor",
     mountedTabs: ["factor", "time"],
     chipSources: {factorAlias: [factorAlias]},
+    lazyState: () => ({status: "ready"}),
     onTabChange: onChipOpen,
   });
 }
@@ -79,31 +109,54 @@ assert.equal(initial.hidden_default, "default");
 
 let opened = "";
 const first = render("ROC 1m", tabKey => { opened = tabKey; });
+assert.equal(factorPanelCalls, 1, "the active ready tab should load its adapter");
 assert.deepEqual(first.children.map(item => item.className), [
-  "test-settings-intro",
   "backend-settings-tab-bar",
   "test-settings-current",
   "backend-settings-host",
 ]);
-assert.ok(first.children[1].children.every(button => button.children.length === 1),
+assert.ok(first.children[0].children.every(button => button.children.length === 1),
   "test setting tabs should render only their title");
-assert.equal(first.children[1].children[0].children[0].textContent, "因子");
-const chipRow = first.children[2].children[1];
-assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");
-chipRow.children[0].listeners.click();
+assert.equal(first.children[0].children[0].children[0].textContent, "因子");
+const chipRow = first.children[1].children[1];
+const factorGroup = chipRow.children.find(item => item.className === "backend-settings-chip-group");
+assert.ok(factorGroup, "tab-based chip group should be present");
+const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(factorChip.children[1].textContent, "ROC 1m");
+factorChip.listeners.click();
 assert.equal(opened, "factor");
 
-const host = first.children[3];
+const host = first.children[2];
+assert.equal(host.children[1].children.length, 0,
+  "inactive settings tabs should not render their content on first load");
+assert.equal(host.children[2].children.length, 0,
+  "the settings manager should be lazy until its tab is opened");
+const manageButton = first.children[0].children[first.children[0].children.length - 1];
+manageButton.listeners.click();
 const managePanel = host.children[host.children.length - 1];
 const manager = managePanel.children[0];
-const managerList = manager.children[1];
+const managerList = manager.children[0];
 const timeRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "时间范围");
 assert.ok(timeRow, "+ 设置 content should list every tab");
 assert.ok(timeRow.children[1].children[1].children.length >= 1,
   "+ 设置 content should show default chips");
-assert.equal(timeRow.children[1].children[1].children[0].children[1].textContent, "未设置（默认）");
+const defaultGroup = timeRow.children[1].children[1].children[0];
+const defaultChip = defaultGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(defaultChip.children[1].textContent, "未设置（默认）");
 
 const updated = render("SgCCS 5m", () => {});
-assert.equal(updated.children[2].children[1].children[0].children[1].textContent, "SgCCS 5m");
+const updatedGroup = updated.children[1].children[1].children.find(
+  item => item.className === "backend-settings-chip-group",
+);
+const updatedChip = updatedGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(updatedChip.children[1].textContent, "SgCCS 5m");
+
+const callsBeforeLazyRender = factorPanelCalls;
+FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {t: value => value}, {
+  activeTab: "factor", mountedTabs: ["factor"],
+  lazyState: () => ({status: "idle"}), ensureTab: () => {},
+});
+assert.equal(factorPanelCalls, callsBeforeLazyRender,
+  "an idle tab must not execute its adapter code");
 console.log("ok");

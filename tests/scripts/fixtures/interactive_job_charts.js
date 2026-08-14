@@ -5,6 +5,10 @@ const vm = require("node:vm");
 (async () => {
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/jobs/list-format.js", "utf8",
+), {filename: "list-format.js"});
+global.FTJobListFormat = window.FTJobListFormat;
+vm.runInThisContext(fs.readFileSync(
   "server/manager/web/jobs/highcharts-viewers.js", "utf8",
 ), {filename: "highcharts-viewers.js"});
 vm.runInThisContext(fs.readFileSync(

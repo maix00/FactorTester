@@ -16,7 +16,9 @@
   }
 
   function render(context, target, detail, options = {}, entry = null) {
-    const p = window.FTBacktestGroupDetailParts;
+    const p = Object.assign(
+      {}, window.FTBacktestGroupDetailParts, window.FTBacktestGroupDetailProducts,
+    );
     const section = (title, key, fallback, build, open = false) => (
       FTBacktestAnalysisUI.section(
         context, title, summaryText(detail, key, fallback), build, open,

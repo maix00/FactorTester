@@ -50,7 +50,6 @@
       fullValue: expanded(value),
       tabKey,
       category: "run",
-      group: field.chip_group || context.t("运行选项"),
       sortOrder: 1000 + Number(field.order || 0),
       order: Number(field.order || 0),
     };
@@ -125,30 +124,53 @@
     const root = document.createElement("div");
     root.className = "backend-settings-chip-row";
     const all = descriptors(options);
+    const groupBy = options.groupBy || "tab";
     const grouped = new Map();
     for (const descriptor of all) {
-      const group = descriptor.group || "";
+      const group = groupKey(descriptor, groupBy);
       if (!grouped.has(group)) grouped.set(group, []);
       grouped.get(group).push(descriptor);
     }
     const groups = [...grouped.entries()];
-    if (groups.length === 1 && groups[0][0] === "") {
-      for (const descriptor of groups[0][1]) root.append(renderChip(descriptor, options));
+    if (groupBy === "none") {
+      for (const descriptor of all) root.append(renderChip(descriptor, options));
       return root;
     }
     groups.forEach(([group, items]) => {
       const host = document.createElement("div");
       host.className = group ? "backend-settings-chip-group" : "backend-settings-chip-group ungrouped";
-      if (group && groups.length > 1) {
+      const label = groupLabel(group, items, options, groupBy);
+      if (label && (groupBy === "tab" || groups.length > 1)) {
         const heading = document.createElement("small");
         heading.className = "backend-settings-chip-group-label";
-        heading.textContent = options.context?.t(group) || group;
+        heading.textContent = label;
         host.append(heading);
       }
       for (const descriptor of items) host.append(renderChip(descriptor, options));
       root.append(host);
     });
     return root;
+  }
+
+  function groupKey(descriptor, groupBy) {
+    if (groupBy === "tab") return descriptor.tabKey || "";
+    if (groupBy === "descriptor") return descriptor.group || "";
+    return "";
+  }
+
+  function groupLabel(group, items, options, groupBy) {
+    if (!group) return "";
+    const context = options.context || {t: value => value};
+    if (groupBy === "tab") {
+      const manifest = options.manifest || {};
+      if (manifest.run_settings?.key === group) {
+        return context.t(manifest.run_settings.label || group);
+      }
+      const tabs = Object.values(manifest.tab_lists || {}).flat();
+      const tab = tabs.find(item => item.key === group);
+      return context.t(tab?.label || items[0]?.tabLabel || group);
+    }
+    return context.t(group);
   }
 
   function renderChip(descriptor, options) {

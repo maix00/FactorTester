@@ -128,3 +128,23 @@ def list_workspaces(*, owner: str) -> list[dict[str, Any]]:
         )
         result.append(workspace)
     return result
+
+
+def list_workspace_summaries(*, owner: str) -> list[dict[str, Any]]:
+    """Return workspace identity rows without decoding every configuration.
+
+    The authoring shell only needs these fields to populate its workspace
+    selector.  The selected workspace configuration is loaded separately,
+    keeping large factor/path payloads out of the initial page request.
+    """
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT * FROM research_workspaces
+            WHERE owner=? AND deleted_at IS NULL
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            (owner,),
+        ).fetchall()
+    return [_row_payload(row) or {} for row in rows]

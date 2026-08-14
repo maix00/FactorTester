@@ -23,10 +23,18 @@
 
   async function initialize(context, state) {
     if (!fieldDescriptor(state)) return;
+    prepare(state);
+    await loadCatalog(context, state);
+  }
+
+  // Keep the execution path usable before the factor-set tab is opened.  The
+  // catalog is intentionally not fetched here; only the small in-memory
+  // cache needed by a later submission is prepared.
+  function prepare(state) {
+    if (!fieldDescriptor(state)) return;
     state.factorSetCatalog = state.factorSetCatalog || {
       items: [], busy: false, error: "", runInputs: new Map(),
     };
-    await loadCatalog(context, state);
   }
 
   async function loadCatalog(context, state, query = "") {
@@ -270,5 +278,7 @@
     return await handler.postMessage({action, ...payload});
   }
 
-  window.FTTestFactorSets = Object.freeze({descriptors, initialize, panel, selections});
+  window.FTTestFactorSets = Object.freeze({
+    descriptors, initialize, panel, prepare, selections,
+  });
 })();

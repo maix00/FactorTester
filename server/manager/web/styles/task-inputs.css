@@ -1,7 +1,7 @@
-.content:has(> .test-workbench),
+.content:has(> .test-workbench) { padding: 22px 36px 30px; }
 .content:has(> .job-detail),
 .content:has(> .job-input-detail) { padding: 14px 18px 24px; }
-.test-workbench { display: grid; gap: 6px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
+.test-workbench { display: grid; gap: 6px; width: 100%; max-width: 1280px; margin: 0 auto; font-size: 13px; }
 .test-workbench > section, .test-workbench > .test-settings-shell,
 .test-workbench > .test-run-options { min-width: 0; }
 .test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }
@@ -16,41 +16,40 @@
 .test-workbench .test-object-field select,
 .test-workbench .test-factor-parameters input,
 .test-workbench .test-factor-parameters select { min-height: 28px; padding: 4px 7px; }
-.test-workbench .backend-settings-host { padding: 0 12px 10px; }
+.test-workbench .backend-settings-host { padding: 8px 14px 12px; }
 .test-workbench .backend-settings-tab-bar { min-height: 36px; padding: 6px 12px; }
 .test-workbench .backend-settings-tab-bar button { height: 28px; }
-.test-workbench .backend-settings-chip-row { gap: 6px; padding: 6px 10px; }
+.test-workbench .backend-settings-chip-row { gap: 5px; padding: 6px 10px; }
 .test-workbench .backend-settings-chip-group { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .test-workbench .backend-settings-chip-group-label { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-weight: 650; }
-.test-workbench .backend-setting-chip { gap: 5px; padding: 4px 9px; }
+.test-workbench .backend-setting-chip { gap: 4px; padding: 3px 8px; font-size: 11px; }
 .test-workbench .test-settings-manager { gap: 7px; padding: 8px 0 10px; }
 .test-workbench .test-settings-manager-list > label { min-height: 38px; padding: 5px 8px; }
-.test-workbench .test-settings-shell { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
-.test-workbench .test-settings-intro { display: grid; gap: 2px; padding: 8px 12px 6px; border-bottom: 1px solid var(--line); }
-.test-workbench .test-settings-intro strong { font-size: 15px; }
-.test-workbench .test-settings-intro span { color: var(--muted); font-size: 12px; line-height: 1.3; }
+.test-workbench .test-settings-shell { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
 .test-workbench .test-settings-current { display: grid; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
 .test-workbench .test-settings-current > strong { font-size: 12px; }
 .test-workbench .test-settings-current .backend-settings-chip-row { padding: 0; border: 0; background: transparent; }
 .test-workbench .test-run-settings-content { display: grid; gap: 8px; min-width: 0; padding: 4px 0 10px; }
+.test-workbench .test-run-field-rows { display: grid; grid-template-columns: minmax(0, 1fr); }
+.test-workbench .test-run-field-rows .test-setting-row { grid-column: 1 / -1; }
 .test-workbench .test-run-settings-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .test-workbench .test-run-settings-content .test-output-content { padding-top: 8px; border-top: 1px solid var(--line); }
 .test-workbench .test-settings-shell > .backend-settings-tab-bar { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--soft); }
 .test-workbench .test-settings-shell > .backend-settings-tab-bar button { display: inline-flex; align-items: center; min-width: 0; min-height: 29px; padding: 0 9px; text-align: center; white-space: nowrap; }
 .test-workbench .test-settings-shell .tab-chip-label { overflow: hidden; text-overflow: ellipsis; }
 .test-workbench .test-settings-shell > .backend-settings-host { border: 0; border-radius: 0; background: var(--panel); }
-.test-workbench .test-settings-manager { gap: 7px; padding: 8px 0 10px; }
-.test-workbench .test-settings-manager > p { margin: 0; color: var(--muted); line-height: 1.45; }
+.test-workbench .test-settings-manager { gap: 4px; padding: 7px 0 9px; }
 .test-workbench .test-settings-manager-list { display: grid; gap: 0; }
 .test-workbench .test-settings-manager-section-heading { display: grid; gap: 2px; padding: 7px 9px 2px; }
 .test-workbench .test-settings-manager-section-heading b { font-size: 12px; }
 .test-workbench .test-settings-manager-section-heading small { color: var(--muted); line-height: 1.35; }
-.test-workbench .test-settings-manager-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; min-height: 38px; padding: 5px 8px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--panel); cursor: pointer; }
-.test-workbench .test-settings-manager-row:last-child { border-bottom: 0; }
-.test-workbench .test-settings-manager-row-body { display: grid; gap: 2px; min-width: 0; }
+.test-workbench .test-settings-manager-row { display: flex; align-items: flex-start; gap: 7px; min-height: 0; padding: 6px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; cursor: pointer; }
+.test-workbench .test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 2px 0 0; }
+.test-workbench .test-settings-manager-row-body { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
 .test-workbench .test-settings-manager-row-body > span:first-child { display: block; }
 .test-workbench .test-settings-manager-row-body small { color: var(--muted); line-height: 1.3; }
-.test-workbench .test-settings-manager-defaults { padding: 0; border: 0; background: transparent; }
+.test-workbench .test-settings-manager-defaults { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; }
+.test-workbench .test-settings-manager-defaults .backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
 .test-workbench .test-settings-manager-defaults .backend-setting-chip { min-width: 0; white-space: nowrap; }
 .test-workbench .test-settings-manager-defaults .backend-setting-chip-label,
 .test-workbench .test-settings-manager-defaults .backend-setting-chip-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -108,6 +107,10 @@
 .test-workbench .backtest-group-override-panel { padding: 7px 0 0; }
 .test-workbench .test-run-matrix { gap: 4px; padding: 5px 8px; }
 .test-workbench .test-run-tabs button { min-width: 112px; padding: 5px 8px; }
+
+@media (max-width: 720px) {
+  .content:has(> .test-workbench) { padding: 16px 18px 24px; }
+}
 .test-workbench .test-run-panel { gap: 7px; padding: 9px; }
 .factor-family-picker-row { padding: 7px 9px; }
 .test-product-group-creator { gap: 8px; padding: 11px; }

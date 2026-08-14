@@ -33,11 +33,9 @@
       panel.className = ["tab-chip-content-panel", item.panelClass || ""]
         .filter(Boolean).join(" ");
       panel.hidden = true;
-      const content = typeof item.render === "function" ? item.render() : item.content;
-      if (content) panel.append(content);
       button.addEventListener("click", () => activate(item.key));
       bar.append(button); host.append(panel);
-      entries.set(item.key, {button, panel});
+      entries.set(item.key, {button, panel, item, loaded: false});
     }
 
     if (actions.length) {
@@ -65,6 +63,13 @@
         const active = entryKey === key;
         entry.button.classList.toggle("active", active);
         entry.panel.hidden = !active;
+      }
+      const entry = entries.get(key);
+      if (entry && !entry.loaded) {
+        const content = typeof entry.item.render === "function"
+          ? entry.item.render() : entry.item.content;
+        if (content) entry.panel.append(content);
+        entry.loaded = true;
       }
       if (notify) options.onActivate?.(key);
       return key;

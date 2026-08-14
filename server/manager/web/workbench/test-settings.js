@@ -1,10 +1,27 @@
 (() => {
-  const supportedControlTemplates = Object.freeze([
-    "boolean", "custom", "custom_product_overrides", "date",
-    "factor_role_bindings", "ic_decay_grid", "ic_delay_grid",
-    "ic_horizon_grid", "number", "select", "text", "time",
-  ]);
-  const supportedControlSet = new Set(supportedControlTemplates);
+  const fields = () => window.FTTestSettingFields;
+
+  // The settings shell is intentionally usable before the field-control
+  // module arrives.  This keeps the tab bar, chips and manager responsive;
+  // the active panel asks for the control implementation only when it needs
+  // to materialize an editable row.
+  function declaredFieldsForTab(tabKey, manifest) {
+    return Object.entries(manifest?.defaults || {})
+      .filter(([, field]) => field?.tab_key === tabKey)
+      .sort((left, right) => Number(left[1]?.order || 0) - Number(right[1]?.order || 0));
+  }
+
+  function fieldsForTab(tabKey, manifest) {
+    return fields()?.fieldsForTab(tabKey, manifest)
+      || declaredFieldsForTab(tabKey, manifest);
+  }
+
+  function visibleFields(tab, manifest, values) {
+    return fields()?.visibleFields(tab, manifest, values)
+      || fieldsForTab(tab.key, manifest).filter(([, field]) => (
+        !field.adapter_managed && FTSettingRules.isVisible(field, values)
+      ));
+  }
   function initialMountedTabs(manifest, saved) {
     const tabs = manifest?.tab_lists?.["local-settings"] || [];
     const available = new Set(tabs.filter(tab => (
@@ -18,9 +35,9 @@
   }
 
   function initialValues(manifest, saved = {}, mountedTabs) {
-    return FTICHorizonSettings.normalizeSettingValues(
-      manifest, FTSettingRules.initialValues(manifest, saved, {mountedTabs}),
-    );
+    const values = FTSettingRules.initialValues(manifest, saved, {mountedTabs});
+    return window.FTICHorizonSettings?.normalizeSettingValues
+      ? FTICHorizonSettings.normalizeSettingValues(manifest, values) : values;
   }
 
   function render(manifest, values, context, options = {}) {
@@ -29,21 +46,12 @@
     const tabs = manifest.tab_lists?.["local-settings"] || [];
     const available = tabs.map(tab => ({
       tab, fields: visibleFields(tab, manifest, values),
-      allFields: fieldsForTab(tab.key, manifest).filter(([, field]) => !field.adapter_managed),
+      allFields: fieldsForTab(tab.key, manifest)
+        .filter(([, field]) => !field.adapter_managed),
     })).filter(item => item.allFields.length || FTTestContentAdapters.hasContent(item.tab));
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
     let tabset = null;
-    const intro = document.createElement("div");
-    intro.className = "test-settings-intro";
-    const introTitle = document.createElement("strong");
-    introTitle.textContent = context.t("按顺序完成配置");
-    const introText = document.createElement("span");
-    introText.textContent = context.t(
-      "先确认研究对象，再固定样本与核心计算；附加分析不会改变核心测试身份",
-    );
-    intro.append(introTitle, introText);
-    root.append(intro);
     const items = [];
     const runTab = manifest?.run_settings;
     if (runTab?.key && options.state) {
@@ -51,9 +59,13 @@
         key: runTab.key,
         label: context.t(runTab.label || runTab.key),
         panelClass: "run-settings-tab-panel",
-        render: () => FTTestRunFields.panel(
-          context, options.state, options.refresh,
-        ),
+        render: () => {
+          if (!window.FTTestRunFields) {
+            options.ensureRunCode?.();
+            return FTUI.loading(context.t("正在读取运行配置…"));
+          }
+          return FTTestRunFields.panel(context, options.state, options.refresh);
+        },
       });
     }
     items.push(...visible.map(item => ({
@@ -74,27 +86,30 @@
       onActivate: key => options.onTabChange?.(key),
     });
     root.append(tabset.bar);
-    const chips = FTTestSettingChips.render({
-      manifest, values, context,
-      mountedTabs: [...mounted],
-      sources: options.chipSources || {},
-      runValues: options.state?.runValues || {},
-      outputRequests: options.state?.outputRequests || [],
-      outputCapabilities: options.state?.outputCapabilities || [],
-      profiles: options.state?.profiles || [],
-      extraDescriptors: options.extraChips || [],
-      onOpen: tabKey => {
-        if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
-        else options.onChipOpen?.(tabKey);
-      },
-    });
-    if (chips.children.length) {
-      const current = document.createElement("section");
-      current.className = "test-settings-current";
-      const heading = document.createElement("strong");
-      heading.textContent = context.t("当前选择");
-      current.append(heading, chips);
-      root.append(current);
+    if (window.FTTestSettingChips) {
+      const chips = FTTestSettingChips.render({
+        manifest, values, context,
+        mountedTabs: [...mounted],
+        sources: options.chipSources || {},
+        runValues: options.state?.runValues || {},
+        outputRequests: options.state?.outputRequests || [],
+        outputCapabilities: options.state?.outputCapabilities || [],
+        profiles: options.state?.profiles || [],
+        extraDescriptors: options.extraChips || [],
+        groupBy: "tab",
+        onOpen: tabKey => {
+          if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
+          else options.onChipOpen?.(tabKey);
+        },
+      });
+      if (chips.children.length) {
+        const current = document.createElement("section");
+        current.className = "test-settings-current";
+        const heading = document.createElement("strong");
+        heading.textContent = context.t("当前选择");
+        current.append(heading, chips);
+        root.append(current);
+      }
     }
     root.append(tabset.host);
     root.activate = tabKey => {
@@ -130,17 +145,48 @@
   function tabPanel(item, manifest, values, context, options) {
     const panel = document.createElement("div");
     panel.className = "test-settings-tab-content";
-    const adapted = FTTestContentAdapters.render(item.tab, {
-      context, state: options.state, refresh: options.refresh,
-      tab: item.tab,
-      actions: options.actions || {},
-    });
-    if (adapted) panel.append(adapted);
+    if (!fields()) {
+      panel.append(FTUI.loading(context.t("正在读取设置控件…")));
+      options.ensureSettingsFieldsCode?.();
+      return panel;
+    }
+    if (item.fields.length && options.ensureSettingsTab
+      && !options.settingsTabReady?.(item.tab.key)) {
+      const load = options.settingsTabLoadState?.(item.tab.key);
+      if (load?.status === "error") {
+        panel.append(FTUI.empty(
+          context.t("读取设置字段失败"), load.error || context.t("请重试"),
+        ));
+      } else {
+        panel.append(FTUI.loading(context.t("正在读取此设置字段…")));
+      }
+      options.ensureSettingsTab(item.tab.key);
+      return panel;
+    }
+    const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
+    const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
+    if (lazyKey && lazyState?.status !== "ready") {
+      if (lazyState?.status === "error") {
+        panel.append(FTUI.empty(
+          context.t("读取失败"), lazyState.error || context.t("请重试"),
+        ));
+      } else {
+        panel.append(FTUI.loading(context.t("正在读取此设置…")));
+      }
+      options.ensureTab?.(item.tab);
+    } else {
+      const adapted = FTTestContentAdapters.render(item.tab, {
+        context, state: options.state, refresh: options.refresh,
+        tab: item.tab,
+        actions: options.actions || {},
+      });
+      if (adapted) panel.append(adapted);
+    }
     if (item.fields.length) {
       const rows = document.createElement("div");
       rows.className = "test-setting-rows";
       item.fields.forEach(([key, field]) => {
-        rows.append(settingRow(key, field, manifest, values, context, options));
+        rows.append(fields().settingRow(key, field, manifest, values, context, options));
       });
       panel.append(rows);
     }
@@ -150,9 +196,6 @@
   function settingsManager(manifest, available, mounted, values, context, options) {
     const root = document.createElement("div");
     root.className = "test-settings-manager";
-    const intro = document.createElement("p");
-    intro.textContent = context.t("选择要挂载到测试配置的设置，未挂载项使用后端默认值");
-    root.append(intro);
     const list = document.createElement("div");
     list.className = "test-settings-manager-list";
     settingsSections(manifest, available).forEach(section => {
@@ -185,19 +228,23 @@
         label.textContent = context.t(item.tab.label || item.tab.key);
         copy.append(label);
         if (item.tab.help_text) row.title = context.t(item.tab.help_text);
-        const defaults = FTTestSettingChips.render({
-          manifest,
-          values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
-          context,
-          mountedTabs: [item.tab.key],
-          includeRun: false,
-          includeEmpty: true,
-          includeUnregistered: true,
-          includeHidden: true,
-          sources: {},
-        });
-        defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
-        body.append(copy, defaults);
+        body.append(copy);
+        if (window.FTTestSettingChips) {
+          const defaults = FTTestSettingChips.render({
+            manifest,
+            values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
+            context,
+            mountedTabs: [item.tab.key],
+            includeRun: false,
+            includeEmpty: true,
+            includeUnregistered: true,
+            includeHidden: true,
+            groupBy: "tab",
+            sources: {},
+          });
+          defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
+          body.append(defaults);
+        }
         row.append(toggle, body);
         list.append(row);
       });
@@ -226,156 +273,16 @@
     }
   }
 
-  function visibleFields(tab, manifest, values) {
-    return fieldsForTab(tab.key, manifest).filter(([, field]) => {
-      return !field.adapter_managed && FTSettingRules.isVisible(field, values);
-    });
-  }
-
-  function fieldsForTab(tabKey, manifest) {
-    return Object.entries(manifest.defaults || {})
-      .filter(([, field]) => field.tab_key === tabKey)
-      .sort((left, right) => Number(left[1].order || 0) - Number(right[1].order || 0));
-  }
-
-  function settingRow(key, field, manifest, values, context, options) {
-    const row = document.createElement("div");
-    row.className = "test-setting-row";
-    const copy = document.createElement("span");
-    const label = document.createElement("b");
-    label.textContent = field.label || key;
-    copy.append(label);
-    if (field.help_text) {
-      const help = document.createElement("small");
-      help.className = "test-setting-help";
-      help.textContent = field.help_text;
-      help.title = field.help_text;
-      copy.append(help);
-    }
-    const editable = FTSettingRules.isEditable(field, values);
-    if (!editable && Object.keys(field.editable_when || {}).length) {
-      const mode = document.createElement("small");
-      mode.className = "test-setting-mode-note";
-      mode.textContent = context.t("当前模式使用自动值");
-      copy.append(mode);
-    }
-    row.append(copy, inputFor(key, field, manifest, values, context, options, !editable));
-    return row;
-  }
-
-  function commit(key, field, manifest, values, value, options) {
-    if (typeof options.onCommit === "function") {
-      options.onCommit({key, field, value});
-    } else {
-      FTSettingRules.setValue(manifest, values, key, field, value);
-    }
-    options.refresh?.();
-  }
-
-  function commitPatch(manifest, values, patch, options) {
-    if (typeof options.onPatch === "function") {
-      options.onPatch(patch);
-    } else {
-      FTSettingRules.patchValues(manifest, values, patch);
-    }
-    options.refresh?.();
-  }
-
-  function inputFor(key, field, manifest, values, context, options, disabled) {
-    if (!supportedControlSet.has(field.control_template)) {
-      throw new Error(`未实现的测试设置控件: ${field.control_template}`);
-    }
-    const value = FTSettingRules.valueFor(key, field, values);
-    if (field.control_template === "ic_horizon_grid") {
-      return FTICHorizonSettings.renderHorizon({
-        value, context, disabled,
-        onChange: next => commit(key, field, manifest, values, next, options),
-      });
-    }
-    if (field.control_template === "ic_delay_grid") {
-      return FTICHorizonSettings.renderDelays({
-        value, context, disabled,
-        onChange: next => commit(key, field, manifest, values, next, options),
-      });
-    }
-    if (field.control_template === "ic_decay_grid") {
-      return FTICHorizonSettings.renderDecayLags({
-        value, context, disabled,
-        onChange: next => commit(key, field, manifest, values, next, options),
-      });
-    }
-    if (field.control_template === "factor_role_bindings") {
-      return FTTestFactorRoles.render({
-        field, values, context, disabled, value,
-        onChange: next => commit(key, field, manifest, values, next, options),
-      });
-    }
-    if (field.control_template === "custom_product_overrides") {
-      return FTCustomProductOverrides.render({
-        key, field, manifest, values, context, disabled,
-        onPatch: patch => commitPatch(manifest, values, patch, options),
-      });
-    }
-    let control;
-    if (field.control_template === "boolean") {
-      control = document.createElement("input");
-      control.type = "checkbox";
-      control.checked = Boolean(value);
-      control.disabled = disabled;
-      control.addEventListener("change", () => {
-        commit(key, field, manifest, values, control.checked, options);
-      });
-      return control;
-    }
-    if (field.control_template === "select" && field.options?.length) {
-      control = document.createElement("select");
-      const disabledValues = FTSettingRules.disabledValues(field, values);
-      for (const option of field.options) {
-        const item = document.createElement("option");
-        item.value = String(option.value ?? "");
-        item.textContent = option.label || item.value;
-        item.disabled = disabledValues.has(item.value);
-        control.append(item);
-      }
-      control.value = String(value ?? "");
-    } else if (field.control_template === "custom") {
-      control = document.createElement("textarea");
-      control.className = "json-code json-editor";
-      control.rows = 3;
-      control.value = JSON.stringify(value ?? null, null, 2);
-      control.disabled = disabled;
-      control.addEventListener("change", () => {
-        try {
-          const next = JSON.parse(control.value);
-          control.setCustomValidity("");
-          commit(key, field, manifest, values, next, options);
-        } catch (_) {
-          control.setCustomValidity(context.t("JSON 格式无效"));
-          control.reportValidity?.();
-        }
-      });
-      return control;
-    } else {
-      control = document.createElement("input");
-      control.type = ["date", "time", "number"].includes(field.control_template)
-        ? field.control_template : "text";
-      control.value = value ?? "";
-      if (field.minimum != null) control.min = field.minimum;
-      if (field.maximum != null) control.max = field.maximum;
-      if (field.step != null) control.step = field.step;
-    }
-    control.disabled = disabled;
-    control.addEventListener("change", () => {
-      const next = control.type === "number" && control.value !== ""
-        ? Number(control.value) : control.value;
-      commit(key, field, manifest, values, next, options);
-    });
-    return control;
-  }
-
   window.FTTestSettings = Object.freeze({
-    initialValues, render, controlFor: inputFor,
-    initialMountedTabs, resetTabValues, supportedControlTemplates,
-    supportsControl: control => supportedControlSet.has(control),
+    initialValues, render,
+    controlFor: (...args) => {
+      if (!fields()) throw new Error("设置控件代码尚未加载");
+      return fields().inputFor(...args);
+    },
+    initialMountedTabs, resetTabValues,
+    get supportedControlTemplates() {
+      return fields()?.supportedControlTemplates || [];
+    },
+    supportsControl: control => Boolean(fields()?.supportsControl(control)),
   });
 })();

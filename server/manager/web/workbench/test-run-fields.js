@@ -55,11 +55,9 @@
     const label = document.createElement("b"); label.textContent = context.t(item.label);
     copy.append(label);
     if (item.help_text) {
-      const help = document.createElement("small");
-      help.className = "test-setting-help";
-      help.textContent = context.t(item.help_text);
-      help.title = help.textContent;
-      copy.append(help);
+      const hint = context.t(item.help_text);
+      root.title = hint;
+      root.setAttribute("aria-label", `${label.textContent}: ${hint}`);
     }
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
@@ -70,6 +68,9 @@
         {
           onCommit: ({key, value}) => { state.runValues[key] = value; },
           refresh,
+          ensureControl: field => window.FTTests?.ensureControl?.(
+            context, state, field, refresh,
+          ),
         },
         false,
       );
@@ -89,6 +90,17 @@
     user.value = "";
     user.textContent = context.t("用户本人（不绑定 Profile）");
     control.append(user);
+    if (!state.profilesLoaded) {
+      const deferred = document.createElement("option");
+      deferred.value = "";
+      deferred.textContent = context.t("点击后读取其他提交身份…");
+      deferred.disabled = true;
+      control.append(deferred);
+      control.addEventListener("focus", () => {
+        window.FTTests?.ensureProfiles?.(context, state, refresh);
+        refresh?.();
+      }, {once: true});
+    }
     (Array.isArray(state.profiles) ? state.profiles : []).forEach(profile => {
       const profileID = String(profile.profile_id || "").trim();
       if (!profileID) return;
@@ -115,10 +127,15 @@
       "这些字段只作用于本次提交；提交后会冻结到 Job 和 RunSpec，不写入可复用测试模板",
     );
     root.append(note);
-    const identity = forPlacement(state.manifest, "run_identity");
-    if (identity.length) root.append(rows(context, state, identity, refresh));
-    const regular = forPlacement(state.manifest, "run_options");
-    if (regular.length) root.append(rows(context, state, regular, refresh));
+    const standard = [
+      ...forPlacement(state.manifest, "run_identity"),
+      ...forPlacement(state.manifest, "run_options"),
+    ].sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    if (standard.length) {
+      const standardRows = rows(context, state, standard, refresh);
+      standardRows.classList?.add?.("test-run-field-rows");
+      root.append(standardRows);
+    }
     const advanced = forPlacement(state.manifest, "advanced_run_options");
     if (advanced.length) {
       const details = document.createElement("details");

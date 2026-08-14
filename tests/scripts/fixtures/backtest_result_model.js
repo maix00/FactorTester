@@ -6,6 +6,9 @@ global.window = {};
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-result-model.js",
 });
+vm.runInThisContext(fs.readFileSync(process.argv[3], "utf8"), {
+  filename: "backtest-runtime-model.js",
+});
 
 const payloads = {
   equity_curve_data: {
@@ -117,7 +120,7 @@ assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(enriched.summary),
   product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
   timestamp_ms: 1700000000000,
 });
-assert.deepEqual(window.FTBacktestResultModel.runtimeRows(enriched.summary), [
+assert.deepEqual(window.FTBacktestRuntimeModel.rows(enriched.summary), [
   {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
   {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},
   {type: "产品范围", status: "提示", detail: "排除无覆盖产品"},

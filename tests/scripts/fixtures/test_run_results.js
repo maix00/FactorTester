@@ -22,11 +22,16 @@ vm.runInThisContext(fs.readFileSync(
 global.FTICHorizonSettings = window.FTICHorizonSettings;
 
 vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/workbench/test-run-summary.js", "utf8",
+), {filename: "test-run-summary.js"});
+
+vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/test-run-results.js", "utf8",
 ), {filename: "test-run-results.js"});
 
 const results = window.FTTestRunResults;
-const explicit = results.evaluationPlan({
+const summary = window.FTTestRunSummary;
+const explicit = summary.evaluationPlan({
   kind: "ic",
   selectedFactorIDs: ["factor:one", "factor:two"],
   groups: [{id: "day"}, {id: "night"}],
@@ -43,7 +48,7 @@ assert.deepEqual(explicit, {
   methods: 2, jobs: 2, slicesPerJob: 48, exact: false,
 });
 
-const automatic = results.evaluationPlan({
+const automatic = summary.evaluationPlan({
   kind: "ic", selectedFactorIDs: ["factor:one"], groups: [{id: "all"}],
   values: {
     forward_return_horizons: {sampling: "scale_aware"},

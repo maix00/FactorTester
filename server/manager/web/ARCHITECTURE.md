@@ -15,7 +15,18 @@ single source of truth for the script order and semantic module groups.
   `research/local.js` owns the client-download/local projection page and
   `research/shared.js` owns publication visibility and owned-report source
   resolution
-- `jobs/`: job lists, progress, detail fields, artifacts, and viewers
+- `jobs/`: job lists, progress, detail fields, artifacts, and viewers;
+  `jobs/list-format.js` is the pure list/detail formatting seam (status,
+  identity, artifact cells, and shared scalar helpers), while `jobs/jobs.js`
+  owns scope state, pagination, and navigation. Backtest group-detail
+  rendering is split at the product-analysis seam: `jobs/backtest-group-products.js`
+  owns product identity, fee coverage, entry-frequency selection, and product
+  contribution views; `jobs/backtest-group-detail-parts.js` owns the remaining
+  group metrics and diagnostics. `jobs/backtest-group-detail.js` composes both
+  adapters without duplicating their helpers. `jobs/backtest-result-model.js`
+  owns persisted curve/metric normalization; `jobs/backtest-runtime-model.js`
+  owns runtime fallback, market-rule, and capital-diagnostic rows consumed by
+  the result view
 - `catalog/`: source catalog, products, factors, product groups, and catalog
   details; `catalog/source-list.js` owns the data-source page and receives the
   shared catalog loading seam from `catalog/products.js`
@@ -25,8 +36,25 @@ single source of truth for the script order and semantic module groups.
   `workbench/factor-family-picker.js` is the searchable public/local family
   catalog seam, with the public side sourced from the same Manager catalog as
   the factor-library page and the local side supplied only by the embedded
-  client's frozen Git-revision bridge; `workbench/test-run-batch.js` is the single IC/backtest submission
-  seam and retains each frozen RunSpec and Job link in the originating page
+  client's frozen Git-revision bridge; `workbench/test-run-fields.js` and
+  `workbench/test-run-summary.js` are the lightweight run-surface seam;
+  `workbench/run-batch/model.js` owns batch identity, state transitions, and
+  frozen RunSpec/Job links. `workbench/test-run-batch.js` is loaded separately
+  only after a product path is selected and owns the batch view and result
+  bridge. `workbench/run-batch/actions.js` is a second, action-only group: it
+  contains source serialization, compiler loading, preview, and submission
+  network code and is loaded only when the user explicitly previews or runs a
+  batch. This keeps the common matrix view cheap without weakening the public
+  `FTTestRunBatch` seam; its action methods are deferred adapters.
+  `workbench/test-run-results.js` is another result-code group loaded only
+  after a submitted Job has a result to inspect;
+  `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
+  group, not with the shared settings shell; template presentation remains in
+  the lazy `workbench-templates` group, while its small persistence action
+  factory is loaded by `workbench-core` because the shared settings renderer
+  constructs that seam for every test. `workbench/test-setting-fields.js` owns
+  the manifest field projection, row construction, and control adapters, while
+  `workbench/test-settings.js` remains the tab/chip orchestration Module
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)
@@ -80,16 +108,43 @@ the shell. The route-dispatch fixture is the contract for this split.
 
 ## Loading contract
 
-The current IIFE order is intentional:
+Within every loaded group the IIFE order is intentional:
 
 ```text
-core → report → research/jobs/catalog/workbench/profile/settings → app
+core → report/research/jobs/catalog/workbench/profile/settings → app
+
+The production shell does not eagerly execute that whole graph. It executes
+only `initial_groups: ["core", "app"]`; `FTStaticLoader.ensureRoute()` loads
+the route group after authentication. A tester first fetches only its backend
+manifest and workspace projection, paints a lightweight loading state, and
+then requests `workbench-settings` through the explicit `ensureSettingsCode`
+seam. This distinction is important: a tab or container being visible is not
+permission to download every implementation behind all other tabs. The
+manifest group, not a DOM `display:none`/collapse state, is the code loading
+boundary. Within a tester, `workbench-settings` is only the tab/chip shell;
+its first response uses `/api/backtest/settings/<application>/summary`, which
+contains identity, defaults, and tab descriptors but not control options or
+help overlays. `/api/backtest/settings/<application>/tabs/<tab_key>` is
+requested only when a field-bearing tab is opened and supplies that tab's
+complete schema. `workbench-settings-fields` is fetched only when the active
+tab first needs editable rows. Hiding an unmounted tab therefore does not
+download its field-control implementation or its tab schema merely because
+its metadata exists. The first authoring request uses
+`/api/workspace-summaries`, which returns workspace identity only; the
+selected workspace then loads one `/api/workspaces/<id>/configuration`
+payload. Do not put full configurations back into the list response.
 ```
 
 The manager renders `research.html` from this manifest. Do not change a script
 path or load order without running the manifest and static-shell tests. A
 future ES-module loader may replace this contract, but until then an implicit
-global must not be read before the group that defines it has loaded.
+global must not be read before the group that defines it has loaded.  The
+research group therefore depends on the profile group because
+`research/workspaces.js` renders the nested Profiles section.  The template
+action factory is loaded with `workbench-core`: `workbench/tests.js` creates
+its action seam for the settings shell on every test render, while the
+heavier template presentation/detail module remains in the lazy
+`workbench-templates` group.
 
 The manager also refuses to serve an unlisted Web-root `.js` or `.css` asset at
 runtime. This is intentional: an old URL must fail visibly after a module is
@@ -141,6 +196,58 @@ stylesheet limit. These are split points, not a reason to create shallow
 one-function files. When a module approaches its limit, extract a cohesive
 responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
+
+The workbench loading groups are also semantic boundaries: `workbench-core`
+contains only the route coordinator, state and generic lazy-code seams. The
+`workbench-compiler` group owns the configuration compiler and is requested
+only by the run-submit seam or IC controls that actually compile an execution
+request. `workbench-settings` contains the shared tab/content shell and is
+fetched when a tester route has authenticated and received its backend
+manifest; it is not part of the initial shell and does not include any catalog,
+strategy-list, chart, run-submission, or field-control implementation. The
+value-to-chip formatter is a separate `workbench-settings-chips` group. The
+shell paints without it, then requests that group and adds the current/default
+chips; a collapsed panel never becomes a reason to download chip code.
+`workbench-settings-controls` owns only the shared editable-row/control
+adapter. The default run tab depends on this small adapter so it can render
+its registered fields without pulling in tab-schema or control-loader code.
+`workbench-settings-fields` adds the tab-schema and control-loader seam and is
+requested only when a field-bearing settings tab is activated. `workbench-input-state`
+owns the source text state and is not part of `workbench-core`; it is pulled in
+by source upload, factor-set, and run-batch/submit paths that actually need to
+read or serialize source code. `workbench-source-inputs` owns uploaded factor,
+strategy, and dependency inspection; a `run_inputs` tab loads that code only
+when opened, while the factor picker declares it as a dependency. `workbench-run`
+contains only run-spec fields and output choices; it is requested when the run
+surface is materialized. The separate `workbench-run-batch` group owns the run
+matrix summary, batch model, and view, depends on it and on the product adapter,
+and is requested only when a saved or newly selected product path creates an
+actual task batch. `workbench-run-batch-actions` depends on that view and on
+`workbench-input-state`; it is requested only by the explicit preview/run
+action seam. `workbench-run-results` depends on `workbench-run` and contains only
+the submitted-Job result bridge, loaded after a Job exists rather than while the
+empty run panel is first painted. The backtest `FTTabListChip`
+and strategy editors belong to
+`workbench-backtest`, which is loaded only after the strategy-list tab is
+opened, rather than being pulled into every IC or factor-evaluation page.
+IC grid controls, factor-role bindings, and product override editors each live
+in a separate control group and are loaded once when a field using that
+registered control is first rendered; `test-control-loader.js` coalesces
+multiple fields requesting the same group and batches their repaint callbacks.
+Factor, product, and template code remain separate. A tab-specific group is
+requested only when its registered adapter is opened. The same rule applies to
+jobs: the `jobs` route loads only the list formatter, progress and list
+controller (about 20 KiB). Opening a task first loads `job-detail-core`, which
+contains only fields, progress, configuration links, artifact metadata and
+actions. `job-detail-ic`, `job-detail-backtest`, and `job-detail-factor-series`
+are selected from the frozen task/result identity; they are not loaded for a
+configuration-only task. The `job-detail-previews` group is loaded only when a
+result declaration is expanded, so Highcharts, price data, table viewers, and
+image adapters are not executed merely because a task has artifacts.
+`job-detail-input` is separate from the normal detail route and is loaded only
+for an explicitly opened input file. The formatter is loaded before the list
+controller, so detail and list pages reuse the stable helper seam without
+recreating formatting logic.
 
 ## Embedded Swift navigation
 

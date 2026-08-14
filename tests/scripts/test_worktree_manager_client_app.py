@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
+from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.test_authoring import (
@@ -1386,14 +1387,35 @@ def test_web_shell_exposes_public_asset_revision(tmp_path) -> None:
     assert f"?v={revision}" in shell
 
 
+def test_versioned_web_code_is_cached_but_shell_and_manifest_revalidate(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            assert response.headers["Cache-Control"] == "no-store"
+        with urlopen(f"{base_url}/research-static/module-manifest.json") as response:
+            assert response.headers["Cache-Control"] == "no-store"
+        with urlopen(f"{base_url}/research-static/core/icons.js?v=revision") as response:
+            assert response.headers["Cache-Control"] == (
+                "public, max-age=31536000, immutable"
+            )
+
+
 def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(base_url) as response:
             shell = response.read().decode("utf-8")
         scripts = {}
+        manifest = json.loads((research_static.WEB_ROOT / "module-manifest.json").read_text())
+        initial_scripts = set(
+            research_static._initial_scripts(manifest)
+            + manifest.get("initial_external_scripts", [])
+        )
         for relative in (
-            "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-settings.js", "workbench/test-setting-fields.js",
+            "workbench/test-factors.js",
+            "workbench/test-factor-catalog.js", "workbench/test-factor-editor.js",
+            "workbench/test-factor-candidates.js",
             "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/product-group-creator.js",
@@ -1406,23 +1428,36 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/tab-chip-content.js",
             "workbench/tab-list-chip.js",
             "workbench/test-templates.js", "workbench/test-content-adapters.js",
+            "workbench/templates/actions.js",
             "workbench/test-run-results.js",
+            "workbench/run-batch/model.js",
             "workbench/test-run-batch.js",
+            "workbench/run-batch/actions.js",
             "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
-                scripts[relative.rsplit("/", 1)[-1]] = response.read().decode("utf-8")
-            assert f'/research-static/{relative}' in shell
+                key = (
+                    "run-batch-actions.js"
+                    if relative == "workbench/run-batch/actions.js"
+                    else relative.rsplit("/", 1)[-1]
+                )
+                scripts[key] = response.read().decode("utf-8")
+            if relative in initial_scripts:
+                assert f'/research-static/{relative}' in shell
+            else:
+                assert f'/research-static/{relative}' not in shell
 
     assert "/api/backtest/settings/" in scripts["tests.js"]
     assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
     assert "/api/workspaces" in scripts["tests.js"]
     assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
-    assert "/api/runs/preview" in scripts["test-run-batch.js"]
-    assert 'analyses: [state.kind]' in scripts["test-run-batch.js"]
-    assert "/api/runs" in scripts["test-run-batch.js"]
-    assert 'servicePath("/api/runs/preview")' in scripts["test-run-batch.js"]
-    assert 'servicePath("/api/runs")' in scripts["test-run-batch.js"]
+    assert "/api/runs/preview" in scripts["run-batch-actions.js"]
+    assert "ensureRunSubmitCode" in scripts["run-batch-actions.js"]
+    assert "workbench-run-submit" in scripts["tests.js"]
+    assert 'analyses: [state.kind]' in scripts["run-batch-actions.js"]
+    assert "/api/runs" in scripts["run-batch-actions.js"]
+    assert 'servicePath("/api/runs/preview")' in scripts["run-batch-actions.js"]
+    assert 'servicePath("/api/runs")' in scripts["run-batch-actions.js"]
     assert "FTICResults?.section" in scripts["test-run-results.js"]
     assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
     assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]
@@ -1430,15 +1465,19 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTabChipContent.create" in scripts["test-settings.js"]
     assert "FTTestContentAdapters.render" in scripts["test-settings.js"]
     assert "externalTabs" not in scripts["test-settings.js"]
-    assert 'nativeList("owners")' in scripts["test-factors.js"]
-    assert 'nativeList("revisions"' in scripts["test-factors.js"]
-    assert 'nativeList("families"' in scripts["test-factors.js"]
-    assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
-    assert "FTFactorFamilyPicker.open" in scripts["test-factors.js"]
+    factor_catalog = scripts["test-factor-catalog.js"]
+    factor_editor = scripts["test-factor-editor.js"]
+    factor_candidates = scripts["test-factor-candidates.js"]
+    assert 'nativeList("owners")' in factor_catalog
+    assert 'nativeList("revisions"' in factor_catalog
+    assert 'nativeList("families"' in factor_catalog
+    assert 'nativeRequest("instantiate"' in factor_editor
+    assert "FTFactorFamilyPicker.open" in factor_editor
     assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
     assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
     assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
-    assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
+    assert "restoreFrozenSelections(state)" in factor_catalog
+    assert "window.FTTestFactorCandidates" in factor_candidates
     assert "selectedProjections" in scripts["test-products.js"]
     assert "FTProductGroupCreator.open" in scripts["test-products.js"]
     assert 'context.t("构建产品路径候选")' in scripts["test-products.js"]
@@ -1492,8 +1531,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         "test-templates.js"
     ]
     assert 'iconAction(context, "删除", "trash"' in scripts["test-templates.js"]
-    assert 'method: "PUT"' in scripts["tests.js"]
-    assert 'method: "DELETE"' in scripts["tests.js"]
+    assert 'method: "PUT"' in scripts["actions.js"]
+    assert 'method: "DELETE"' in scripts["actions.js"]
 
 
 def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) -> None:
@@ -2116,7 +2155,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert "test-factor-return-frequency" not in scripts["test-factors"]
     assert "setReturnFrequency" not in scripts["factor-selection"]
     assert 'control.className = "json-code json-editor"' in (
-        ROOT / "server" / "manager" / "web" / "workbench" / "test-settings.js"
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-setting-fields.js"
     ).read_text(encoding="utf-8")
 
 
