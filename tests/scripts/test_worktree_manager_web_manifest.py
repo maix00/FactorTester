@@ -336,9 +336,12 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     expected = tmp_path / "registered-controls.json"
     expected.write_text(json.dumps(registered), encoding="utf-8")
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_setting_control_contract.js"
-    module = WEB_ROOT / "workbench" / "test-settings.js"
+    modules = [
+        WEB_ROOT / "workbench" / "test-setting-fields.js",
+        WEB_ROOT / "workbench" / "test-settings.js",
+    ]
     result = subprocess.run(
-        ["node", str(fixture), str(module), str(expected)], cwd=ROOT,
+        ["node", str(fixture), *(str(path) for path in modules), str(expected)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -470,6 +473,7 @@ def test_test_settings_restore_user_mounted_tabs_and_scoped_reset() -> None:
     files = [
         WEB_ROOT / "workbench" / "setting-rules.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
+        WEB_ROOT / "workbench" / "test-setting-fields.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
@@ -502,6 +506,7 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
         WEB_ROOT / "workbench" / "test-setting-chips.js",
         WEB_ROOT / "workbench" / "tab-chip-content.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
+        WEB_ROOT / "workbench" / "test-setting-fields.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
@@ -543,6 +548,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert set(manifest["groups"]["workbench-settings"]) == {
         "workbench/test-setting-chips.js",
         "workbench/tab-chip-content.js",
+        "workbench/test-setting-fields.js",
         "workbench/test-settings.js",
         "workbench/test-content-adapters.js",
     }

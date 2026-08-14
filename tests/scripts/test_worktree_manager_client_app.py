@@ -1377,7 +1377,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             + manifest.get("initial_external_scripts", [])
         )
         for relative in (
-            "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-settings.js", "workbench/test-setting-fields.js",
+            "workbench/test-factors.js",
             "workbench/test-factor-catalog.js", "workbench/test-factor-editor.js",
             "workbench/test-factor-candidates.js",
             "workbench/factor-family-picker.js",
@@ -2057,7 +2058,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert "test-factor-return-frequency" not in scripts["test-factors"]
     assert "setReturnFrequency" not in scripts["factor-selection"]
     assert 'control.className = "json-code json-editor"' in (
-        ROOT / "server" / "manager" / "web" / "workbench" / "test-settings.js"
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-setting-fields.js"
     ).read_text(encoding="utf-8")
 
 

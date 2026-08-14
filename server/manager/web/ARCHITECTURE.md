@@ -38,7 +38,9 @@ single source of truth for the script order and semantic module groups.
   `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
   group, not with the shared settings shell; template presentation and
   persistence actions are kept together under `workbench/templates/` and are
-  loaded as one template group
+  loaded as one template group. `workbench/test-setting-fields.js` owns the
+  manifest field projection, row construction, and control adapters, while
+  `workbench/test-settings.js` remains the tab/chip orchestration Module
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)

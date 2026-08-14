@@ -2,9 +2,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
 global.window = globalThis;
-eval(fs.readFileSync(process.argv[2], "utf8"));
+for (const modulePath of process.argv.slice(2, -1)) {
+  eval(fs.readFileSync(modulePath, "utf8"));
+}
 
-const expected = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const expected = JSON.parse(fs.readFileSync(process.argv.at(-1), "utf8"));
 assert.deepEqual(
   [...FTTestSettings.supportedControlTemplates].sort(),
   expected.sort(),
