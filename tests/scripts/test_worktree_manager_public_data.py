@@ -36,10 +36,16 @@ class _Registry:
 class _Gateway:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
+        self.payloads: list[dict[str, object]] = []
 
     def public_data(self, route, *, kind, operation, principal, payload=None):
         self.calls.append((kind, operation, principal))
+        self.payloads.append(dict(payload or {}))
         if kind == "research":
+            if operation != "list":
+                return {"value": {
+                    "publication_id": payload["publication_id"],
+                }}
             return {"reports": [{
                 "publication_id": "remote-publication",
                 "report_id": "remote-report",
@@ -69,6 +75,9 @@ class _Gateway:
 class _Research:
     def list_visible(self, _viewer):
         return []
+
+    def index(self, _publication_id, _viewer):
+        raise ValueError("publication is not local")
 
 
 class _ClientState:
@@ -131,3 +140,53 @@ def test_federated_public_data_merges_remote_research_profiles_and_factors(
     assert ("research", "list", "__public_jobs__") in gateway.calls
     assert ("catalog", "profiles", "alice") in gateway.calls
     assert ("catalog", "factors", "__public_jobs__") in gateway.calls
+
+
+def test_federated_public_research_detail_binds_publication_id_to_peer_payload():
+    gateway = _Gateway()
+    service = FederatedPublicDataService(
+        server_id="public-1",
+        registry=_Registry(_route()),
+        gateway=gateway,
+        public_research=_Research(),
+        client_state=_ClientState(),
+    )
+
+    value = service.index("remote-publication", None)
+
+    assert value == {"publication_id": "remote-publication"}
+    assert gateway.payloads[-1] == {"publication_id": "remote-publication"}
+
+
+def test_federated_public_research_cache_can_be_invalidated_after_mutation():
+    class MutableResearch:
+        def __init__(self):
+            self.reports = []
+
+        def list_visible(self, _viewer):
+            return list(self.reports)
+
+    research = MutableResearch()
+
+    class EmptyRegistry:
+        def routes(self, *, include_offline):
+            return []
+
+    service = FederatedPublicDataService(
+        server_id="public-1",
+        registry=EmptyRegistry(),
+        gateway=_Gateway(),
+        public_research=research,
+        client_state=_ClientState(),
+    )
+
+    assert service.list_visible(None) == []
+    research.reports = [{"publication_id": "new-publication"}]
+    assert service.list_visible(None) == []
+
+    service.invalidate_research_cache()
+
+    assert service.list_visible(None) == [{
+        "publication_id": "new-publication",
+        "source_server_id": "public-1",
+    }]
