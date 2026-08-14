@@ -104,18 +104,20 @@ core → report/research/jobs/catalog/workbench/profile/settings → app
 
 The production shell does not eagerly execute that whole graph. It executes
 only `initial_groups: ["core", "app"]`; `FTStaticLoader.ensureRoute()` loads
-the route group after authentication, and a tester then requests
-`workbench-settings` while its backend manifest and workspace projection are
-being fetched. This distinction is important: a tab or container being
-visible is not permission to download every implementation behind all other
-tabs. The manifest group, not a DOM `display:none`/collapse state, is the code
-loading boundary. Within a tester, `workbench-settings` is only the tab/chip
-shell; `workbench-settings-fields` is fetched when the active tab first needs
+the route group after authentication. A tester first fetches only its backend
+manifest and workspace projection, paints a lightweight loading state, and
+then requests `workbench-settings` through the explicit `ensureSettingsCode`
+seam. This distinction is important: a tab or container being visible is not
+permission to download every implementation behind all other tabs. The
+manifest group, not a DOM `display:none`/collapse state, is the code loading
+boundary. Within a tester, `workbench-settings` is only the tab/chip shell;
+`workbench-settings-fields` is fetched when the active tab first needs
 editable rows. Hiding an unmounted tab therefore does not download its field
-control implementation merely because its metadata exists. The first authoring
-request uses `/api/workspace-summaries`, which returns workspace identity only;
-the selected workspace then loads one `/api/workspaces/<id>/configuration`
-payload. Do not put full configurations back into the list response.
+control implementation merely because its metadata exists. The first
+authoring request uses `/api/workspace-summaries`, which returns workspace
+identity only; the selected workspace then loads one
+`/api/workspaces/<id>/configuration` payload. Do not put full configurations
+back into the list response.
 ```
 
 The manager renders `research.html` from this manifest. Do not change a script

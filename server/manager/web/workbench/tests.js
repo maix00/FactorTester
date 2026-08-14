@@ -48,15 +48,14 @@
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = definitions[kind].application;
     // Catalogs and adapters load only when their backend-declared tab is used.
-    // The route only loads the small workbench coordinator.  Settings are a
-    // separate code seam because their tab/chip renderer is not needed by
-    // the route guard or by the initial API requests.  Start both requests
-    // together so code fetch and server latency overlap, then construct the
-    // state only after the settings implementation is available.
+    // The route only loads the small workbench coordinator.  In particular,
+    // do not fetch the settings renderer here: it used to sit in this
+    // Promise.all and made the first screen wait for the whole tab/chip
+    // implementation before it could paint.  The renderer is loaded by the
+    // explicit settings-code seam after the lightweight state is ready.
     const [manifest, workspaces] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
       context.api("/api/workspace-summaries"),
-      FTTestLazyCode.loadGroup("workbench-settings"),
     ]);
     const state = {
       kind, manifest,
@@ -70,6 +69,8 @@
       lazy: FTTestState.lazyState(),
       runValues: initialRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
+      settingsCode: {status: "idle", error: "", promise: null},
+      settingsInitialized: false,
       settingsFieldsCode: {status: "idle", error: "", promise: null},
     };
     FTTestState.restoreWorkspace(state);
@@ -84,12 +85,6 @@
       state.groupRef = options.groupRef;
       state.groupRefs = [options.groupRef];
     }
-    state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
-      manifest, FTTestState.savedMountedTabs(state),
-    );
-    state.values = FTTestSettings.initialValues(
-      manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
-    );
     FTTestInputState.initialize(state);
     if (kind === "factor_evaluation" && state.runValues.retention_mode === "summary") {
       state.runValues.retention_mode = "full";
@@ -128,6 +123,44 @@
     record.error = "";
     record.promise = FTTestLazyCode.loadGroup("workbench-run")
       .then(() => {
+        record.status = "ready";
+        refresh?.();
+      })
+      .catch(error => {
+        record.status = "error";
+        record.error = error.message || String(error);
+        refresh?.();
+      });
+    return record.promise;
+  }
+
+  function initializeSettings(state) {
+    if (state.settingsInitialized || !window.FTTestSettings) return;
+    state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
+      state.manifest, FTTestState.savedMountedTabs(state),
+    );
+    state.values = FTTestSettings.initialValues(
+      state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
+    );
+    state.settingsInitialized = true;
+  }
+
+  function ensureSettingsCode(context, state, refresh) {
+    if (window.FTTestSettings) {
+      initializeSettings(state);
+      return Promise.resolve();
+    }
+    const record = state.settingsCode || (state.settingsCode = {
+      status: "idle", error: "", promise: null,
+    });
+    if (record.status === "ready") return Promise.resolve();
+    if (record.status === "loading" && record.promise) return record.promise;
+    if (record.status === "error") return Promise.resolve();
+    record.status = "loading";
+    record.error = "";
+    record.promise = FTTestLazyCode.loadGroup("workbench-settings")
+      .then(() => {
+        initializeSettings(state);
         record.status = "ready";
         refresh?.();
       })
@@ -255,6 +288,18 @@
   function render(context, state) {
     const root = document.createElement("div");
     root.className = "test-workbench";
+    if (!window.FTTestSettings || !state.settingsInitialized) {
+      const loading = FTUI.loading(context.t("正在读取测试设置代码…"));
+      const error = state.settingsCode?.error;
+      root.append(error
+        ? FTUI.empty(context.t("读取测试设置失败"), error)
+        : loading);
+      if (!error) {
+        ensureSettingsCode(context, state, () => render(context, state));
+      }
+      context.content.replaceChildren(root);
+      return;
+    }
     const templateActions = FTTestTemplateActions.create(context, state, {
       ensureRunCode: () => ensureRunCode(context, state),
       ensureRunSubmitCode: () => ensureRunSubmitCode(context, state),
@@ -324,6 +369,7 @@
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
+    ensureSettingsCode,
     ensureSettingsFieldsCode,
     ensureRunSubmitCode,
     ensureControl: (context, state, field, refresh) => (

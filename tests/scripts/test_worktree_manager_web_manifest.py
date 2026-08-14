@@ -530,6 +530,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     ):
         assert endpoint not in first_load
     assert "/api/workspace-summaries" in first_load
+    assert "workbench-settings" not in first_load
     assert "/api/workspaces/${workspaceID}/configuration" in source
     assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
@@ -587,6 +588,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         research_static._initial_scripts(manifest)
     )
     assert "ensureRunCode" in source
+    assert "ensureSettingsCode" in source
     assert "ensureRunSubmitCode" in source
     assert "workbench-run-submit" in source
     assert 'run_inputs: "workbench-source-inputs"' in (
