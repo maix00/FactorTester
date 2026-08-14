@@ -146,9 +146,12 @@ responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
 
 The workbench loading groups are also semantic boundaries: `workbench-core`
-contains the settings shell and compiler, `workbench-run` contains the
-run-spec/submit/result code, and factor, product, backtest, and template code
-remain separate. A route may load `workbench-core`, but the run group is
+contains only the settings shell, compiler, state and generic chip/content
+adapters; `workbench-run` contains the run-spec/submit/result code. IC grid
+controls, factor-role bindings, and product override editors each live in a
+separate control group and are loaded when a field using that registered
+control is first rendered. Factor, product, backtest, and template code remain
+separate. A route may load `workbench-core`, but the run group is
 requested only when the run surface is materialized; a tab-specific group is
 requested only when its registered adapter is opened. The same rule applies
 to jobs: the `jobs` route loads only the list formatter, progress and list
