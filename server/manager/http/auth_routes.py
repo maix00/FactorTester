@@ -90,9 +90,11 @@ class AuthenticationRoutesMixin:
                 "error": "manager login failed",
             }, 500)
             return
+        session = self.state.session(token) or {}
         json_response(self, {
             "success": True,
             "username": principal,
+            "alias": session.get("alias") or principal,
             "role": role,
             "capabilities": {
                 "manager": role == "super_admin",

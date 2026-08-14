@@ -1145,6 +1145,7 @@ console.log(JSON.stringify([
     shell = (ROOT / "server" / "manager" / "web" / "app" / "shell.js").read_text()
     assert "FTI18n.choosePreference(" in shell
     assert "FTI18n.rememberPreference(preference)" in shell
+    assert "state.session?.alias || state.session?.username" in shell
 
 
 def test_local_catalog_capability_requires_the_native_swift_bridge() -> None:

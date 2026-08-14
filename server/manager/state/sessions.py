@@ -59,7 +59,11 @@ class SessionStateMixin:
                     password,
                     control_store=LocalAccountStore(),
                 )
-        return self._issue_session(principal, role)
+        return self._issue_session(
+            principal,
+            role,
+            alias=self._alias_for_principal(principal),
+        )
 
     def login_device(
         self,
@@ -78,6 +82,7 @@ class SessionStateMixin:
         return self._issue_session(
             str(account["username"]),
             role,
+            alias=str(account.get("alias") or account["username"]),
             authentication="device",
             origin=origin,
         )
@@ -112,11 +117,42 @@ class SessionStateMixin:
             None,
         )
 
+    def _alias_for_principal(self, principal: str) -> str:
+        """Resolve the UI alias without making it an auth dependency.
+
+        The alias is presentation metadata.  A session must still be usable
+        when PostgreSQL is unavailable, so a failed central lookup falls back
+        to this Manager's existing local account table and finally to the
+        canonical principal itself.
+        """
+        value = str(principal or "").strip()
+        if not value:
+            return ""
+        stores = []
+        if self.control_store is not None:
+            stores.append(self.control_store)
+            stores.append(LocalAccountStore())
+        else:
+            stores.append(None)
+        for store in stores:
+            try:
+                account = (
+                    self._account_for_principal_from(store, value)
+                    if store is not None
+                    else self.account_for_principal(value)
+                )
+            except ControlDatabaseError:
+                continue
+            if account is not None:
+                return str(account.get("alias") or value).strip() or value
+        return value
+
     def _issue_session(
         self,
         principal: str,
         role: str,
         *,
+        alias: str = "",
         authentication: str = "password",
         origin: str = "",
     ) -> tuple[str, str, str]:
@@ -128,6 +164,7 @@ class SessionStateMixin:
                 time.time() + MANAGER_SESSION_TTL_SECONDS,
                 str(authentication or "password"),
                 str(origin or "").strip().rstrip("/"),
+                str(alias or principal).strip() or str(principal),
             )
             self._save_sessions()
         return token, principal, role
@@ -293,14 +330,18 @@ class SessionStateMixin:
                     *session[3:],
                 )
                 self._save_sessions()
-            return {
-                "username": principal,
-                "role": role,
-                "capabilities": {
-                    "manager": role == "super_admin",
-                    "research": True,
-                },
-            }
+        return {
+            "username": principal,
+            "alias": (
+                str(session[5] or "").strip()
+                if len(session) >= 6 else ""
+            ) or self._alias_for_principal(principal),
+            "role": role,
+            "capabilities": {
+                "manager": role == "super_admin",
+                "research": True,
+            },
+        }
 
     def session_allows_device_origin(self, token: str, origin: str) -> bool:
         """Allow only a device-authenticated session on its issuing origin.
@@ -364,6 +405,7 @@ class SessionStateMixin:
             }
             handoffs[self._token_hash(ticket)] = {
                 "principal": owner,
+                "alias": self._alias_for_principal(owner),
                 "role": account_role,
                 "target_origin": target,
                 "expires_at": now + DEVICE_SESSION_HANDOFF_TTL_SECONDS,
@@ -402,10 +444,12 @@ class SessionStateMixin:
         ):
             raise PermissionError("device handoff is expired or target is invalid")
         principal = str(value.get("principal") or "")
+        alias = str(value.get("alias") or "")
         role = str(value.get("role") or "")
         token, principal, role = self._issue_session(
             principal,
             role,
+            alias=alias or self._alias_for_principal(principal),
             authentication="device-handoff",
             origin=target,
         )
@@ -433,12 +477,13 @@ class SessionStateMixin:
                     expires_at,
                     str(value.get("authentication") or "password"),
                     str(value.get("origin") or "").strip().rstrip("/"),
+                    str(value.get("alias") or "").strip(),
                 )
         return sessions
 
     def _save_sessions(self) -> None:
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "sessions": {
                 token_hash: {
                     "principal": value[0],
@@ -446,6 +491,7 @@ class SessionStateMixin:
                     "expires_at": value[2],
                     "authentication": value[3] if len(value) >= 4 else "password",
                     "origin": value[4] if len(value) >= 5 else "",
+                    "alias": value[5] if len(value) >= 6 else "",
                 }
                 for token_hash, value in self._sessions.items()
             },
