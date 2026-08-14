@@ -42,9 +42,13 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
     )
 
     class Gateway:
+        def __init__(self):
+            self.calls = []
+
         def query_jobs(self, route, **kwargs):
             assert route.server_id == "remote-main"
             assert kwargs["scope"] == "mine"
+            self.calls.append(kwargs)
             return {
                 "jobs": [{
                     "job_id": "remote-job", "port": 8000,
@@ -53,7 +57,8 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
                 "total": 1, "has_more": False,
             }
 
-    state.federation_gateway = Gateway()
+    gateway = Gateway()
+    state.federation_gateway = gateway
     payload = state.aggregate_cross_server_jobs(
         principal="alice", source_scope="mine", limit=20,
     )
@@ -66,6 +71,12 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
         "remote-main", "local-feat",
     ]
     assert local_calls[0]["_allow_federation"] is False
+
+    cached = state.aggregate_cross_server_jobs(
+        principal="alice", source_scope="mine", limit=20,
+    )
+    assert cached["sync_mode"] == "cache"
+    assert gateway.calls[0]["limit"] == 20
 
 
 def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monkeypatch) -> None:

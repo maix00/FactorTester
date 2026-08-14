@@ -18,8 +18,11 @@ class ClientResearchRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
+            profile_service = getattr(self.state, "federated_public_data", None)
+            if profile_service is None:
+                profile_service = self.state.client_state
             json_response(self, {
-                "profiles": self.state.client_state.profiles(
+                "profiles": profile_service.profiles(
                     str(session["username"]),
                 ),
             })

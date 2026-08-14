@@ -40,6 +40,7 @@ class PeerControlHandler(
             "/api/federation/register": self._federation_register,
             "/api/federation/sync/events": self._federation_sync_events,
             "/api/federation/jobs/query": self._federation_jobs_query,
+            "/api/federation/public-data": self._federation_public_data,
             "/api/federation/sync/reconcile": self._federation_sync_reconcile,
             "/api/federation/proxy": self._federation_proxy,
             "/api/federation/stream": self._federation_stream,

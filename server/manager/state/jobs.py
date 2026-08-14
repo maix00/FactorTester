@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlencode, urlparse
 
@@ -14,6 +16,40 @@ from server.manager.http.gateway import GatewayResponse
 
 class JobProjectionStateMixin:
     """Own job indexing and on-demand peer aggregation semantics."""
+
+    _CROSS_SERVER_CACHE_SECONDS = 5.0
+
+    def _cross_server_cache_get(
+        self, key: tuple[object, ...],
+    ) -> dict[str, object] | None:
+        lock = getattr(self, "_cross_server_cache_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._cross_server_cache_lock = lock
+        with lock:
+            cache = getattr(self, "_cross_server_job_cache", None) or {}
+            self._cross_server_job_cache = cache
+            item = cache.get(key)
+            if item is None:
+                return None
+            timestamp, value = item
+            if time.monotonic() - float(timestamp) >= self._CROSS_SERVER_CACHE_SECONDS:
+                cache.pop(key, None)
+                return None
+            return dict(value)
+
+    def _cross_server_cache_put(
+        self, key: tuple[object, ...], value: dict[str, object],
+    ) -> dict[str, object]:
+        lock = getattr(self, "_cross_server_cache_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._cross_server_cache_lock = lock
+        with lock:
+            cache = getattr(self, "_cross_server_job_cache", None) or {}
+            cache[key] = (time.monotonic(), dict(value))
+            self._cross_server_job_cache = cache
+        return value
     def refresh_local_job_projection(self) -> None:
         """Refresh local summaries so control events are automatic.
 
@@ -559,10 +595,17 @@ class JobProjectionStateMixin:
         """
         bounded = min(100, max(1, int(limit)))
         requested_page = max(1, int(page))
-        source_limit = min(100, max(bounded * 5, 20))
+        source_limit = bounded
         source_scope = str(source_scope or "mine").strip().lower()
         if source_scope not in {"mine", "server"}:
             raise ValueError("cross-server source scope must be mine or server")
+        cache_key = (
+            str(principal), source_scope, requested_page, bounded,
+        )
+        cached = self._cross_server_cache_get(cache_key)
+        if cached is not None:
+            cached["sync_mode"] = "cache"
+            return cached
 
         combined: list[dict[str, object]] = []
         source_status: list[dict[str, object]] = []
@@ -579,7 +622,7 @@ class JobProjectionStateMixin:
                 local_payload = self.aggregate_account_jobs(
                     principal=principal,
                     scope="mine",
-                    page=1,
+                    page=requested_page,
                     limit=source_limit,
                     _allow_federation=False,
                 )
@@ -626,7 +669,7 @@ class JobProjectionStateMixin:
                 requester_server_id=self.server_id,
                 principal=principal,
                 scope=source_scope,
-                page=1,
+                page=requested_page if source_scope == "mine" else 1,
                 limit=source_limit,
             )
 
@@ -714,7 +757,7 @@ class JobProjectionStateMixin:
             for item in source_status
             if str(item.get("status") or "") in {"ok", "stale"}
         )
-        return {
+        return self._cross_server_cache_put(cache_key, {
             "success": True,
             "scope": "cross-server",
             "source_scope": source_scope,
@@ -734,4 +777,4 @@ class JobProjectionStateMixin:
                 source_status,
                 key=lambda item: str(item.get("server_id") or ""),
             ),
-        }
+        })
