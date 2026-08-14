@@ -25,7 +25,7 @@
     "workbench-settings-controls": ["workbench-core"],
     "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core"],
-    "research": ["report"],
+    "research": ["report", "profile"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
     "job-detail-input": ["job-detail-core"],
     "job-detail-previews": ["job-detail-core", "report", "charts"],
@@ -197,6 +197,7 @@
     "workbench-core": [
       "workbench/setting-rules.js",
       "workbench/test-lazy-code.js",
+      "workbench/templates/actions.js",
       "workbench/test-state.js",
       "workbench/tests.js"
     ],
@@ -276,7 +277,6 @@
       "workbench/backtest-groups.js"
     ],
     "workbench-templates": [
-      "workbench/templates/actions.js",
       "workbench/test-templates.js"
     ],
     "profile": [
