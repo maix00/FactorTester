@@ -99,7 +99,7 @@ def _device_auth_script(
         + ";const messages="
         + _script(messages)
         + r""";
-const format=(template,values)=>Object.entries(values).reduce((text,[key,value])=>text.split("{{"+key+"}}").join(String(value)),template);
+const format=(template,values)=>Object.entries(values).reduce((text,[key,value])=>text.split("{"+key+"}").join(String(value)),template);
 const b64=value=>{const text=atob(value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4));return Uint8Array.from(text,ch=>ch.charCodeAt(0));};
 const b64url=value=>{const bytes=new Uint8Array(value);let text="";for(const byte of bytes)text+=String.fromCharCode(byte);return btoa(text).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");};
 const openDB=()=>new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Object.assign(new Error(messages.storageUnavailable),{stage:"storage"}));const request=indexedDB.open("factortester-device",1);request.onupgradeneeded=()=>request.result.createObjectStore("credentials",{keyPath:"device_id"});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(Object.assign(request.error||new Error(messages.storageUnavailable),{stage:"storage"}));});
