@@ -4,3 +4,4 @@
 !deploy/docker/
 !deploy/docker/factortester-server/
 !deploy/docker/factortester-server/manager-entrypoint.sh
+!deploy/docker/factortester-server/start-fixed-service.py
