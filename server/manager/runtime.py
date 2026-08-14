@@ -24,6 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from server.manager.config import (
+    MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS,
     MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
     MANAGER_SESSION_TTL_SECONDS,
 )
@@ -80,6 +81,10 @@ from server.manager.storage.control_database_settings import (
     ControlDatabaseSettingsStore,
 )
 from server.manager.storage.service_intents import ServiceIntentStore
+from server.manager.storage.session_store import (
+    ManagerSessionStore,
+    configured_manager_sqlite_path,
+)
 from server.manager.http.security import (
     configured_trusted_proxy_networks,
     configured_tls_paths,
@@ -169,6 +174,7 @@ class ManagerState(
         managed_organizations: tuple[str, ...] | None = None,
         state_root: Path | None = None,
         fixed_daemon_socket: str | Path | None = None,
+        session_db_path: Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
@@ -269,7 +275,16 @@ class ManagerState(
         self._init_transfer_state()
         self._init_transfer_access()
         self._init_data_plane_process()
+        # Reuse the existing Manager-local SQLite database configured by
+        # .settings. It already contains local account/data projections;
+        # ManagerSessionStore adds only its own table there.
+        self.sessions_db_path = (
+            session_db_path.expanduser().resolve()
+            if session_db_path is not None
+            else configured_manager_sqlite_path()
+        )
         self.sessions_path = self.state_root / "sessions.json"
+        self.session_store = ManagerSessionStore(self.sessions_db_path)
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the
@@ -320,8 +335,10 @@ class ManagerState(
             tuple[str, int, str], tuple[float, dict[str, object]]
         ] = {}
         self._capability_cache_lock = threading.RLock()
+        self._session_lock = threading.RLock()
+        self._session_cleanup_at = time.time()
         self._sessions = self._load_sessions()
-        self._session_lock = threading.Lock()
+        self._session_cleanup_at += MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
         )
