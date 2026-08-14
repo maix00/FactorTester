@@ -13,6 +13,9 @@ from server.manager.storage.identity_migration import (
     apply_user_root_identity_migration,
     sqlite_identity_plan,
 )
+from server.manager.storage.identity_migration_files import (
+    rewrite_user_root_references,
+)
 
 
 def _database(path):
@@ -198,7 +201,51 @@ def test_user_root_migration_renames_target_and_archives_other_roots(tmp_path):
         backup_root=backup,
     )
 
-    assert counts == {"renamed": 1, "archived_other_roots": 1}
+    assert counts == {
+        "renamed": 1,
+        "archived_other_roots": 1,
+        "target_backup_created": 1,
+        "rewritten_path_files": 0,
+        "rewritten_manifest_files": 0,
+    }
     assert (parent / "GTHT@MaxJJW@123456789012" / "profile.json").exists()
     assert not (parent / "18717974771").exists()
     assert (backup / "user-roots" / "other-user").is_dir()
+    assert (backup / "user-roots" / "target-18717974771" / "profile.json").exists()
+
+
+def test_user_root_rewrites_operational_paths_but_not_evidence(tmp_path):
+    root = tmp_path / "users" / "18717974771"
+    pointer = root / "profiles" / "maxa" / "factor-worktree"
+    pointer.mkdir(parents=True)
+    (pointer / ".git").write_text(
+        "gitdir: " + str(root / "personal-workspace" / ".git" / "worktrees" / "maxa")
+    )
+    metadata = pointer / ".factor_workspace" / "manifest.json"
+    metadata.parent.mkdir()
+    metadata.write_text(json.dumps({
+        "username": "18717974771",
+        "workspace_root": str(pointer),
+    }))
+    evidence = root / "evidence.json"
+    evidence.write_text(json.dumps({
+        "path": str(root / "historical-report.json"),
+        "username": "18717974771",
+        "content_hash": "kept",
+    }))
+
+    counts = rewrite_user_root_references(
+        root,
+        old_username="18717974771",
+        new_username="GTHT@MaxJJW@123456789012",
+    )
+
+    new_root = str(root).replace("18717974771", "GTHT@MaxJJW@123456789012")
+    assert new_root in (pointer / ".git").read_text()
+    value = json.loads(metadata.read_text())
+    assert value["username"] == "GTHT@MaxJJW@123456789012"
+    assert value["workspace_root"] == str(pointer).replace(
+        "18717974771", "GTHT@MaxJJW@123456789012"
+    )
+    assert "18717974771" in evidence.read_text()
+    assert counts == {"rewritten_path_files": 2, "rewritten_manifest_files": 1}

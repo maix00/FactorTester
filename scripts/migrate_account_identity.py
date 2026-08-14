@@ -11,11 +11,15 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
+import re
 import sqlite3
 import subprocess
 import sys
 import time
+import shutil
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 # Allow the documented ``python scripts/...`` invocation to resolve the
 # repository's settings and server packages without requiring PYTHONPATH.
@@ -51,6 +55,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--new-username", default="")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--backup-dir", type=Path, default=None)
+    parser.add_argument(
+        "--postgres-backup-file",
+        type=Path,
+        default=None,
+        help="pre-created pg_dump custom-format file; skips running pg_dump",
+    )
+    parser.add_argument(
+        "--postgres-dump-ssh-host",
+        default=os.environ.get("FACTORTESTER_POSTGRES_DUMP_SSH_HOST", ""),
+        help="SSH host alias whose PostgreSQL container owns pg_dump",
+    )
+    parser.add_argument(
+        "--postgres-dump-container",
+        default=os.environ.get("FACTORTESTER_POSTGRES_DUMP_CONTAINER", ""),
+        help="remote Docker container used with --postgres-dump-ssh-host",
+    )
     parser.add_argument(
         "--state-root", type=Path, action="append", default=[],
         help="Manager state directory; may be supplied more than once",
@@ -123,8 +143,68 @@ def _read_manifest(path: Path) -> dict[str, object]:
     return value
 
 
-def _backup_postgres(url: str, destination: Path) -> None:
+def _backup_postgres(
+    url: str,
+    destination: Path,
+    *,
+    ssh_host: str = "",
+    container: str = "",
+    existing_backup: Path | None = None,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if existing_backup is not None:
+        source = existing_backup.expanduser().resolve()
+        if not source.is_file() or source.stat().st_size < 128:
+            raise RuntimeError("the pre-created PostgreSQL backup is missing or too small")
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
+        if destination.stat().st_size < 128:
+            raise RuntimeError("the PostgreSQL backup copy is unexpectedly small")
+        return
+    if ssh_host:
+        if not container or not re.fullmatch(r"[A-Za-z0-9_.-]+", container):
+            raise RuntimeError(
+                "a safe --postgres-dump-container is required with "
+                "--postgres-dump-ssh-host"
+            )
+        parsed = urlsplit(url)
+        database = unquote(parsed.path.lstrip("/"))
+        user = unquote(parsed.username or "")
+        if not database or not user:
+            raise RuntimeError(
+                "PostgreSQL URL must include database and user for remote pg_dump"
+            )
+        remote = shlex.join([
+            "docker", "exec", container, "pg_dump",
+            "--format=custom",
+            "--dbname", database,
+            "--username", user,
+        ])
+        command = [
+            "ssh",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=15",
+            ssh_host,
+            remote,
+        ]
+        try:
+            with destination.open("wb") as output:
+                subprocess.run(
+                    command,
+                    check=True,
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    timeout=180,
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(
+                "remote pg_dump failed; no account deletion was performed"
+            ) from exc
+        if destination.stat().st_size < 128:
+            raise RuntimeError(
+                "remote pg_dump produced an unexpectedly small backup"
+            )
+        return
     try:
         subprocess.run(
             ["pg_dump", "--format=custom", "--file", str(destination), url],
@@ -260,7 +340,13 @@ def _apply(args: argparse.Namespace, plan: dict[str, object]) -> None:
     url = _control_url(args)
     if not url:
         raise RuntimeError("PostgreSQL URL is required for apply")
-    _backup_postgres(url, backup_root / "control.dump")
+    _backup_postgres(
+        url,
+        backup_root / "control.dump",
+        ssh_host=str(args.postgres_dump_ssh_host or "").strip(),
+        container=str(args.postgres_dump_container or "").strip(),
+        existing_backup=args.postgres_backup_file,
+    )
 
     with _connect_postgres(url) as connection:
         apply_postgres_identity_migration(

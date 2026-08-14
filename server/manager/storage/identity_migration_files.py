@@ -6,7 +6,11 @@ import json
 import os
 import secrets
 import shutil
+import stat
 from pathlib import Path
+
+
+_TEXT_SCAN_LIMIT = 16 * 1024 * 1024
 
 
 def backup_json(source: str | Path, destination: str | Path) -> None:
@@ -17,6 +21,93 @@ def backup_json(source: str | Path, destination: str | Path) -> None:
     destination_path = Path(destination).expanduser().resolve()
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_path, destination_path)
+
+
+def backup_user_root(source: str | Path, destination: str | Path) -> None:
+    """Make a complete, recoverable copy of a principal workspace tree."""
+    source_path = Path(source).expanduser().resolve()
+    destination_path = Path(destination).expanduser().resolve()
+    if not source_path.is_dir() or source_path.is_symlink():
+        raise ValueError(f"user root is not a real directory: {source_path}")
+    if destination_path == source_path or source_path in destination_path.parents:
+        raise ValueError("user-root backup must be outside the source directory")
+    if destination_path.exists():
+        raise ValueError(f"user-root backup already exists: {destination_path}")
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source_path,
+        destination_path,
+        symlinks=True,
+        copy_function=shutil.copy2,
+    )
+
+
+def _rewrite_text_file(path: Path, replacements: dict[str, str]) -> bool:
+    """Rewrite a bounded text file while preserving its mode."""
+    if path.is_symlink():
+        return False
+    try:
+        original = path.read_bytes()
+        if len(original) > _TEXT_SCAN_LIMIT or b"\x00" in original:
+            return False
+        updated = original
+        for old, new in replacements.items():
+            updated = updated.replace(old.encode("utf-8"), new.encode("utf-8"))
+        if updated == original:
+            return False
+        mode = stat.S_IMODE(path.stat().st_mode)
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        )
+        temporary.write_bytes(updated)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+        return True
+    except OSError as exc:
+        raise RuntimeError(f"cannot rewrite migrated workspace metadata: {path}") from exc
+
+
+def rewrite_user_root_references(
+    root: str | Path,
+    *,
+    old_username: str,
+    new_username: str,
+) -> dict[str, int]:
+    """Repair moved workspace paths and operational Profile manifests.
+
+    Historical evidence and report contents keep both their original
+    principal values and their original bytes. Only Git worktree pointers and
+    generated ``.factor_workspace/manifest.json`` files are operational
+    metadata and are rewritten; changing paths inside signed evidence would
+    invalidate content/envelope hashes.
+    """
+    root_path = Path(root).expanduser().resolve()
+    parent_path = root_path.parent
+    old_path = str(parent_path / old_username)
+    new_path = str(parent_path / new_username)
+    rewritten_paths = 0
+    rewritten_manifests = 0
+    for path in root_path.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        is_git_pointer = (
+            path.name in {".git", "gitdir", "config.worktree"}
+            or (".git" in path.parts and "worktrees" in path.parts)
+        )
+        is_manifest = (
+            path.name == "manifest.json" and ".factor_workspace" in path.parts
+        )
+        if (is_git_pointer or is_manifest) and _rewrite_text_file(
+            path, {old_path: new_path}
+        ):
+            rewritten_paths += 1
+        if is_manifest:
+            if _rewrite_text_file(path, {old_username: new_username}):
+                rewritten_manifests += 1
+    return {
+        "rewritten_path_files": rewritten_paths,
+        "rewritten_manifest_files": rewritten_manifests,
+    }
 
 
 def user_root_identity_plan(
@@ -71,7 +162,7 @@ def apply_user_root_identity_migration(
     backup_root: str | Path,
     remove_other_users: bool = True,
 ) -> dict[str, int]:
-    """Rename the target user root and archive other active user roots."""
+    """Back up, rename, and repair the target user root."""
     plan = user_root_identity_plan(
         parent,
         old_username=old_username,
@@ -90,6 +181,8 @@ def apply_user_root_identity_migration(
     if archive == root or root in archive.parents:
         raise ValueError("user-root backup must be outside the user-root parent")
     archive.mkdir(parents=True, exist_ok=True)
+    target_backup = archive / f"target-{old_username}"
+    backup_user_root(old_path, target_backup)
     archived = 0
     if remove_other_users:
         for child in sorted(root.iterdir(), key=lambda item: item.name):
@@ -106,7 +199,17 @@ def apply_user_root_identity_migration(
             shutil.move(str(child), str(destination))
             archived += 1
     shutil.move(str(old_path), str(new_path))
-    return {"renamed": 1, "archived_other_roots": archived}
+    rewritten = rewrite_user_root_references(
+        new_path,
+        old_username=old_username,
+        new_username=new_username,
+    )
+    return {
+        "renamed": 1,
+        "archived_other_roots": archived,
+        "target_backup_created": 1,
+        **rewritten,
+    }
 
 
 def migrate_local_device_json(
