@@ -113,7 +113,7 @@ class NodeControlClient:
         with self.transport.open(request, timeout=timeout) as response:
             value = json.loads(response.read(1024 * 1024).decode("utf-8"))
         if not isinstance(value, dict) or value.get("success") is False:
-            raise ConnectionError("peer control response is invalid")
+            raise ValueError("peer control response is invalid")
         return value
 
 

@@ -22,6 +22,7 @@ from server.manager.data_plane.routes import (
     method_allowed,
 )
 from server.manager.transfers.models import TransferMode
+from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
 
 
@@ -55,6 +56,8 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
             json_error(self, 422, str(exc))
         except (NodeUnavailable, URLError, TimeoutError, ConnectionError) as exc:
             json_error(self, 503, str(exc), code="node_unreachable")
+        except PeerControlError as exc:
+            json_error(self, 503, str(exc), code=exc.code)
         except (BrokenPipeError, ConnectionResetError):
             return
         except RuntimeError as exc:

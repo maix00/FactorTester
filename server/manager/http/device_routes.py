@@ -540,6 +540,7 @@ class DeviceNetworkRoutesMixin:
             )
             token, principal, role = self.state.login_device(
                 str(record.get("username") or ""),
+                origin=self._request_origin(),
             )
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device verification failed: {exc}\n")

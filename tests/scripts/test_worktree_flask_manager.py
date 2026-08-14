@@ -1614,7 +1614,7 @@ def test_public_device_verify_offers_canonical_origin_handoff(
     monkeypatch.setattr(
         state,
         "login_device",
-        lambda username: ("ingress-session", username, "user"),
+        lambda username, **_values: ("ingress-session", username, "user"),
     )
 
     ingress_headers = _visitor_request_headers(
@@ -1706,9 +1706,14 @@ def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
     )
     bound_users = []
 
-    def login_device(username):
+    def login_device(username, **values):
         bound_users.append(username)
-        return "device-session", username, "user"
+        return state._issue_session(
+            username,
+            "user",
+            authentication="device",
+            origin=str(values.get("origin") or ""),
+        )
 
     monkeypatch.setattr(state, "login_device", login_device)
 
@@ -1727,7 +1732,10 @@ def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
         challenge_request = Request(
             f"{base_url}/api/device/challenge",
             data=b'{"device_id":"device-bound-to-alice"}',
-            headers={"Content-Type": "application/json"},
+            headers={
+                **_visitor_request_headers("101.133.144.27:7998"),
+                "Content-Type": "application/json",
+            },
             method="POST",
         )
         with urlopen(challenge_request) as response:
@@ -1741,15 +1749,53 @@ def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
                 "signature": "ignored-by-test-seam",
                 "username": "bob@default",
             }).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={
+                **_visitor_request_headers("101.133.144.27:7998"),
+                "Content-Type": "application/json",
+            },
             method="POST",
         )
         with urlopen(verify_request) as response:
             authenticated = json.loads(response.read())
+            session_cookie = response.headers["Set-Cookie"].split(";", 1)[0]
+
+        home_request = Request(
+            f"{base_url}/",
+            headers={
+                "Host": "101.133.144.27:7998",
+                "Cookie": session_cookie,
+            },
+        )
+        with urlopen(home_request) as response:
+            assert response.status == 200
 
     assert authenticated["username"] == "alice@default"
-    assert authenticated["token"] == "device-session"
+    assert state.session(authenticated["token"]) is not None
     assert bound_users == ["alice@default"]
+
+
+def test_device_session_is_bound_to_its_issuing_origin(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    device_token, _, _ = state._issue_session(
+        "alice@default",
+        "user",
+        authentication="device",
+        origin="https://101.133.144.27:7998",
+    )
+    password_token, _, _ = state._issue_session("alice@default", "user")
+
+    assert state.session_allows_device_origin(
+        device_token,
+        "https://101.133.144.27:7998",
+    )
+    assert not state.session_allows_device_origin(
+        device_token,
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    assert not state.session_allows_device_origin(
+        password_token,
+        "https://101.133.144.27:7998",
+    )
 
 
 def test_public_device_authorization_page_uses_shared_localization() -> None:

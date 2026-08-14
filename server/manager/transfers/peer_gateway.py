@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+from urllib.error import HTTPError, URLError
+
 from server.manager.transfers.node_client import NodeControlClient
 from server.manager.transfers.node_keys import NodeKey
+from server.manager.transfers.planner import NodeUnavailable
 from server.manager.transfers.wire import transfer_context_payload
+
+
+class PeerControlError(RuntimeError):
+    """The peer answered, but its control response was not usable."""
+
+    code = "peer_control_error"
+
+    def __init__(self, server_id: str, reason: str) -> None:
+        self.server_id = str(server_id or "").strip()
+        self.reason = str(reason or "peer control response is invalid").strip()
+        super().__init__(
+            f"node {self.server_id} control service failed: {self.reason}"
+        )
 
 
 class TransferPeerGateway:
@@ -14,33 +30,35 @@ class TransferPeerGateway:
 
     def import_context(self, transfer, attempt) -> None:
         endpoint = _storage_control_endpoint(transfer, attempt)
-        self._client(endpoint).signed_json(
+        self._signed_json(
+            transfer.storage_server_id,
+            endpoint,
             "/api/federation/transfers/context",
             transfer_context_payload(transfer, attempt),
         )
 
     def origin_ticket(self, context) -> str:
-        value = self._client(
+        value = self._signed_json(
+            context.transfer.source_server_id,
             context.attempt.routes.source_peer_control_endpoint,
-        ).signed_json(
             "/api/federation/transfers/origin-ticket",
             {"attempt_id": context.attempt.attempt_id},
         )
         return _bearer(value)
 
     def destination_ticket(self, context) -> str:
-        value = self._client(
+        value = self._signed_json(
+            context.transfer.destination_server_id,
             context.attempt.routes.destination_peer_control_endpoint,
-        ).signed_json(
             "/api/federation/transfers/destination-ticket",
             {"attempt_id": context.attempt.attempt_id},
         )
         return _bearer(value)
 
     def resume_offset(self, transfer, attempt) -> int:
-        value = self._client(
+        value = self._signed_json(
+            transfer.destination_server_id,
             attempt.routes.destination_peer_control_endpoint,
-        ).signed_json(
             "/api/federation/transfers/resume-offset",
             {"attempt_id": attempt.attempt_id},
         )
@@ -59,6 +77,27 @@ class TransferPeerGateway:
             transport=self.transport,
         )
 
+    def _signed_json(
+        self,
+        server_id: str,
+        endpoint: str,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        try:
+            return self._client(endpoint).signed_json(path, payload)
+        except HTTPError as exc:
+            raise PeerControlError(
+                server_id, f"returned HTTP {exc.code}"
+            ) from exc
+        except ValueError as exc:
+            raise PeerControlError(server_id, str(exc)) from exc
+        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+            raise NodeUnavailable(
+                server_id,
+                "WireGuard peer control endpoint is unavailable",
+            ) from exc
+
 
 def _storage_control_endpoint(transfer, attempt) -> str:
     endpoint = (
@@ -76,3 +115,6 @@ def _bearer(value: dict[str, object]) -> str:
     if not result:
         raise ConnectionError("peer ticket response is incomplete")
     return result
+
+
+__all__ = ["PeerControlError", "TransferPeerGateway"]
