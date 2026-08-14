@@ -64,7 +64,7 @@
       }
     }, context.t("从任务保留的原始结果生成表格或图像"));
     generate.className = "primary";
-    section.append(FTOutputChoices.choices(
+    section.append(FTOutputChoices.fieldValueSelector(
       context, definitions, selected, value => { selected = value; },
     ));
     const actions = document.createElement("div");

@@ -14,6 +14,13 @@
     return [...new Set(requested.filter(item => allowed.has(item)))];
   }
 
+  function fieldValueSelector(context, definitions, selected, update) {
+    const shell = document.createElement("div");
+    shell.className = "shared-field-value-selector";
+    shell.append(choices(context, definitions, selected, update));
+    return shell;
+  }
+
   function choices(context, definitions, selected, update) {
     const grid = document.createElement("div");
     grid.className = "output-choice-grid";
@@ -50,5 +57,7 @@
     return grid;
   }
 
-  window.FTOutputChoices = Object.freeze({available, choices, initialSelection});
+  window.FTOutputChoices = Object.freeze({
+    available, choices, fieldValueSelector, initialSelection,
+  });
 })();

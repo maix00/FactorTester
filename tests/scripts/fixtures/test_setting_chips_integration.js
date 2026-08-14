@@ -14,10 +14,12 @@ class Element {
     this.textContent = "";
     this.title = "";
     this.type = "";
+    this.attributes = {};
     this.classList = {toggle() {}};
   }
   append(...children) { this.children.push(...children); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
 }
 
 global.document = {createElement: tagName => new Element(tagName)};

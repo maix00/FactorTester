@@ -22,12 +22,11 @@
       label.className = "tab-chip-label";
       label.textContent = item.label || item.key;
       button.append(label);
-      if (item.description) {
-        const description = document.createElement("small");
-        description.className = "tab-chip-description";
-        description.textContent = item.description;
-        button.append(description);
-      }
+      // Keep the tab itself title-only.  The backend-provided explanation is
+      // still available on hover/accessibility surfaces without making each
+      // tab a two-line card in the compact settings bar.
+      if (item.description) button.title = item.description;
+      button.setAttribute("aria-label", label.textContent);
       if (item.buttonClass) button.classList.add(item.buttonClass);
 
       const panel = document.createElement("div");
