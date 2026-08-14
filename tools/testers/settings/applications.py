@@ -478,8 +478,13 @@ def group_test_settings() -> ApplicationSettings:
         SurfaceFlow("groups", "clone", "复制为派生组", "clone", order=30,
                     form_tab="add-derived", min_selected=1, max_selected=1),
         SurfaceFlow("groups", "edit", "编辑", "edit", order=40, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "rename", "重命名", "rename", order=45, min_selected=1, max_selected=1),
         SurfaceFlow("groups", "delete", "删除", "delete", order=50, min_selected=1,
                     button_class="btn-outline-danger"),
+        SurfaceFlow("long_short", "rename_long_short", "重命名", "rename", order=5,
+                    min_selected=1, max_selected=1),
+        SurfaceFlow("long_short", "swap_long_short", "交换多空", "swap", order=6,
+                    min_selected=1, max_selected=1),
         SurfaceFlow("long_short", "delete_long_short", "删除", "delete", order=0,
                     min_selected=1, button_class="btn-outline-danger"),
     ):

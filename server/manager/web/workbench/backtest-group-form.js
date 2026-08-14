@@ -7,12 +7,34 @@
     const title = document.createElement("h3");
     title.textContent = titleFor(context, editor.mode);
     form.append(title);
-    if (editor.mode === "ls") {
+    if (editor.mode === "rename") {
+      renderRename(context, state, editor, form, onFinish);
+    } else if (editor.mode === "ls") {
       renderLongShort(context, state, editor, form, onFinish);
     } else {
       renderGroup(context, state, editor, form, onFinish);
     }
     return form;
+  }
+
+  function renderRename(context, state, editor, form, onFinish) {
+    const current = editor.strategyKind === "long_short"
+      ? state.analysis.ls_configs.find(item => item.id === editor.strategyID)
+      : model().find(state, editor.strategyID);
+    const name = input("text", current?.name || current?.shortAlias || "");
+    name.placeholder = context.t("策略名称");
+    name.required = true;
+    form.append(field(context.t("名称"), name));
+    appendActions(context, form, () => {
+      try {
+        if (editor.strategyKind === "long_short") {
+          model().renameLongShort(state, editor.strategyID, name.value);
+        } else {
+          model().renameGroup(state, editor.strategyID, name.value);
+        }
+        onFinish();
+      } catch (error) { showError(form, error.message); }
+    }, onFinish);
   }
 
   function renderGroup(context, state, editor, form, onFinish) {
@@ -243,7 +265,7 @@
   function titleFor(context, mode) {
     return context.t({
       base: "新增分组", derived: "派生组", clone: "复制为派生组",
-      edit: "编辑分组", ls: "创建 Long-Short 组合",
+      edit: "编辑分组", rename: "重命名策略", ls: "创建 Long-Short 组合",
     }[mode] || "分组");
   }
 

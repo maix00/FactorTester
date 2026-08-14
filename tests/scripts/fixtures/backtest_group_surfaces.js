@@ -8,6 +8,7 @@ class Element {
     this.children = [];
     this.listeners = {};
     this.className = "";
+    this.dataset = {};
     this.checked = false;
     this.disabled = false;
     this.open = false;
@@ -25,6 +26,7 @@ class Element {
   }
   append(...nodes) { this.children.push(...nodes); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute(name, value) { this[name] = value; }
 }
 
 global.window = {};
@@ -50,6 +52,12 @@ vm.runInThisContext(fs.readFileSync(
   "utf8",
 ), {filename: "tab-list-chip.js"});
 global.FTTabListChip = window.FTTabListChip;
+
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "strategy-list.js"),
+  "utf8",
+), {filename: "strategy-list.js"});
+global.FTStrategyList = window.FTStrategyList;
 
 let removed = false;
 global.FTBacktestGroupModel = {

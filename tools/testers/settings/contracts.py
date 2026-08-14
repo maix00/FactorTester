@@ -138,8 +138,8 @@ class ChipDefinition:
     inherit_from_root: bool = False
     value_resolvers: dict[str, str] = field(default_factory=dict)
     clickable: bool = False
-    # 该 chip 是否为"批次键"——分组组合按这些字段成批；批次头展示它们，每组行不重复。
-    # 后端声明，前端据此渲染（取代前端硬编码的 factor_alias/product_path_selection/split_count）。
+    # 该 chip 是否显示在策略批次头部；批次边界由每次添加操作产生的
+    # batch_id 冻结，不再由字段值或配置三元组推导。
     batch_owned: bool = False
     source_adapter: str = ""
 
@@ -332,6 +332,8 @@ class SurfaceFlow:
       - "derive":  create a child item from the selected one(s) (派生)
       - "compose": combine selected items into a new derived one (Long-Short)
       - "edit":    modify the selected item
+      - "rename":  change only the display name of the selected item
+      - "swap":    exchange the two legs of a pair strategy
       - "delete":  remove the selected item(s)
       - "clone":   copy the selected item(s)
     """
@@ -346,7 +348,7 @@ class SurfaceFlow:
     requires: dict[str, Any] = field(default_factory=dict)  # structural predicates, e.g. {"has_derived_groups": True}
     button_class: str = ""          # optional presentation hint
 
-    _KINDS = ("create", "derive", "compose", "edit", "delete", "clone")
+    _KINDS = ("create", "derive", "compose", "edit", "rename", "swap", "delete", "clone")
 
     def __post_init__(self) -> None:
         if not self.surface or not self.key or not self.label:

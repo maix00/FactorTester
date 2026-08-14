@@ -2122,6 +2122,7 @@ def test_backtest_group_model_preserves_hierarchy_and_combinations() -> None:
         ROOT / "server" / "manager" / "web" / "workbench"
         / "backtest-group-model.js"
     )
+    batch_module = group_model.with_name("backtest-group-batches.js")
     program = f"""
 global.window = globalThis;
 global.FTTestProducts = {{
@@ -2133,6 +2134,7 @@ global.FTTestProducts = {{
     selected_paths: value.paths || [],
   }}),
 }};
+eval(require("fs").readFileSync({json.dumps(str(batch_module))}, "utf8"));
 eval(require("fs").readFileSync({json.dumps(str(group_model))}, "utf8"));
 const state = {{analysis: {{groups: [], ls_configs: []}}}};
 const roots = FTBacktestGroupModel.addBaseBatch(state, {{

@@ -9,6 +9,9 @@
         derive: (_state, selected) => ({mode: "derived", parentID: selected[0]?.id}),
         clone: (_state, selected) => ({mode: "clone", parentID: selected[0]?.id}),
         edit: (_state, selected) => ({mode: "edit", groupID: selected[0]?.id}),
+        rename: (_state, selected) => ({
+          mode: "rename", strategyKind: "group", strategyID: selected[0]?.id,
+        }),
         compose: (_state, selected) => ({
           mode: "ls", groupIDs: selected.map(group => group.id),
         }),
@@ -18,7 +21,12 @@
       render: longShortList,
       selected: state => FTBacktestGroupModel.selectedLongShort(state),
       removeSelected: state => FTBacktestGroupModel.removeSelectedLongShort(state),
-      actions: Object.freeze({}),
+      actions: Object.freeze({
+        rename: (_state, selected) => ({
+          mode: "rename", strategyKind: "long_short", strategyID: selected[0]?.id,
+        }),
+        swap: (_state, selected) => ({strategyKind: "long_short", strategyID: selected[0]?.id}),
+      }),
     }),
   });
 
@@ -85,47 +93,49 @@
   }
 
   function groupList(context, state, surface, refresh) {
-    const values = FTBacktestGroupModel.rootsAndChildren(state);
-    if (!values.length) {
-      return FTUI.empty(context.t("暂无分组"), context.t("先建立一个分组，或在运行时使用当前选择生成默认第一组"));
-    }
-    const table = FTUI.table([
-      "", context.t("分组"), context.t("类型"), context.t("因子"),
-      context.t("分位"), context.t("产品组或筛选"), context.t("逐组覆盖"),
-    ]);
-    for (const {group, depth} of values) {
-      const selection = document.createElement("input");
-      selection.type = selectionType(surface);
-      selection.checked = state.selectedBacktestGroupIDs.includes(group.id);
-      selection.addEventListener("change", () => {
-        FTBacktestGroupModel.toggle(
-          state, group.id, selection.checked, surface.selection,
+    const batches = FTBacktestGroupModel.groupBatches(state).map(batch => ({
+      key: batch.key,
+      label: batchLabel(context, batch),
+      description: `${batch.items.length} ${context.t("个策略")}`,
+      selected: batch.items.every(item => state.selectedBacktestGroupIDs.includes(item.group.id)),
+      expanded: batchExpanded(state, batch.key),
+      chips: groupChips(context, state, batch.root),
+      items: batch.items.map(item => ({
+        key: item.group.id,
+        // Keep the generated/renamed strategy name as the primary label.  The
+        // short alias remains a secondary identity, matching the legacy list
+        // while making the batch's strategy names visible and editable.
+        label: item.group.name || FTBacktestGroupModel.groupLabel(item.group),
+        detail: [
+          item.group.shortAlias,
+          groupDetail(context, item.group),
+        ].filter(Boolean).join(" · "),
+        depth: item.depth,
+        selected: state.selectedBacktestGroupIDs.includes(item.group.id),
+        chips: groupChips(context, state, item.group),
+        actions: rowActions(context, state, surface, item.group, refresh),
+      })),
+    }));
+    return FTStrategyList.render({
+      context, title: context.t("分组组合"),
+      count: `${state.analysis.groups.length} ${context.t("个组")} / ${batches.length} ${context.t("批")}`,
+      batches, selection: selectionType(surface) === "radio" ? "single" : "multi",
+      showConfigOpen: state.backtestGroupConfigOpen === true,
+      onToggleConfig: open => { state.backtestGroupConfigOpen = open; refresh(); },
+      onToggleBatch: (key, open) => {
+        state.backtestExpandedBatches = {...(state.backtestExpandedBatches || {}), [key]: open};
+        refresh();
+      },
+      onToggle: (item, checked) => {
+        FTBacktestGroupModel.toggle(state, item.key, checked, surface.selection); refresh();
+      },
+      onToggleBatchSelection: (batch, checked) => {
+        for (const item of batch.items) FTBacktestGroupModel.toggle(
+          state, item.group.id, checked, surface.selection,
         );
         refresh();
-      });
-      const title = document.createElement("span");
-      title.className = "backtest-group-name";
-      title.style.setProperty("--group-depth", depth);
-      const alias = document.createElement("b"); alias.textContent = FTBacktestGroupModel.groupLabel(group);
-      const name = document.createElement("small"); name.textContent = group.name || group.id;
-      title.append(alias, name);
-      const mask = Object.entries(group.productMask || {}).filter(([, enabled]) => enabled)
-        .map(([product]) => product);
-      const product = group.parentId
-        ? (mask.length ? mask.join("、") : context.t("继承父组"))
-        : FTTestProducts.groupLabel(group.product_path_selection || {})
-          || group.product_path_selection_id;
-      const overrides = Object.keys(
-        FTBacktestGroupModel.registeredOverrides(group, state.manifest),
-      ).length;
-      FTUI.appendRow(table.body, [
-        selection, title, group.parentId ? context.t("派生组") : context.t("基础组"),
-        group.factorAlias || context.t("继承父组"),
-        group.parentId ? context.t("继承父组") : `${group.groupIndex}/${group.splitCount}`,
-        product, String(overrides),
-      ]);
-    }
-    return table.shell;
+      },
+    });
   }
 
   function longShortList(context, state, surface, refresh) {
@@ -136,29 +146,22 @@
         context.t("选择两个分组后使用“创建 Long-Short 组合”"),
       );
     }
-    const section = document.createElement("div");
-    section.className = "backtest-long-short";
-    const list = document.createElement("div");
-    for (const item of values) {
-      const row = document.createElement("div");
-      const selection = document.createElement("input");
-      selection.type = selectionType(surface);
-      selection.checked = state.selectedBacktestLongShortIDs.includes(item.id);
-      selection.addEventListener("change", () => {
-        FTBacktestGroupModel.toggleLongShort(
-          state, item.id, selection.checked, surface.selection,
-        );
+    return FTStrategyList.render({
+      context, title: context.t("Long-Short 组合"), count: `${values.length} ${context.t("项")}`,
+      selection: selectionType(surface) === "radio" ? "single" : "multi",
+      batchSelection: false,
+      showConfig: false,
+      items: values.map(item => ({
+        key: item.id, label: item.name || item.shortAlias,
+        detail: `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`,
+        selected: state.selectedBacktestLongShortIDs.includes(item.id),
+        actions: rowActions(context, state, surface, item, refresh),
+      })),
+      onToggle: (item, checked) => {
+        FTBacktestGroupModel.toggleLongShort(state, item.key, checked, surface.selection);
         refresh();
-      });
-      const copy = document.createElement("span");
-      const name = document.createElement("b"); name.textContent = item.name || item.shortAlias;
-      const legs = document.createElement("small");
-      legs.textContent = `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`;
-      copy.append(name, legs);
-      row.append(selection, copy); list.append(row);
-    }
-    section.append(list);
-    return section;
+      },
+    });
   }
 
   function runFlow(context, state, surface, flow, selected, refresh) {
@@ -166,6 +169,10 @@
     if (flow.kind === "delete") {
       if (!confirm(context.t(`确定删除选中的${surface.item_label || "项目"}`))) return;
       adapter.removeSelected(state);
+      refresh(); return;
+    }
+    if (flow.kind === "swap") {
+      adapter.actions.swap?.(state, selected);
       refresh(); return;
     }
     const action = adapter.actions[flow.kind];
@@ -210,6 +217,43 @@
 
   function labelFor(state, id) {
     return FTBacktestGroupModel.groupLabel(FTBacktestGroupModel.find(state, id)) || id;
+  }
+
+  function batchExpanded(state, key) {
+    return (state.backtestExpandedBatches || {})[key] !== false;
+  }
+
+  function batchLabel(context, batch) {
+    const root = batch.root || {};
+    const descriptor = [root.factorAlias, FTTestProducts.groupLabel(root.product_path_selection || {})]
+      .filter(Boolean).join(" · ");
+    const ordinal = batch.order ? `${context.t("批次")} ${batch.order}` : context.t("策略批次");
+    return descriptor ? `${ordinal} · ${descriptor}` : ordinal;
+  }
+
+  function groupDetail(context, group) {
+    if (group.parentId) return context.t("派生组");
+    return `${context.t("基础组")} · ${group.groupIndex || 1}/${group.splitCount || 1}`;
+  }
+
+  function groupChips(context, state, group) {
+    if (!state.backtestGroupConfigOpen || !window.FTTestSettingChips) return null;
+    const node = FTTestSettingChips.render({
+      manifest: state.manifest, values: group, context,
+      mountedTabs: [], includeRun: false, includeEmpty: false,
+      sources: FTTestContentAdapters.chipSources(state, group),
+    });
+    return node.children.length ? node : null;
+  }
+
+  function rowActions(context, state, surface, item, refresh) {
+    return flows(state, surface.key)
+      .filter(flow => Number(flow.min_selected) === 1 && Number(flow.max_selected) === 1)
+      .map(flow => ({
+        label: context.t(flow.label), title: context.t(flow.label),
+        className: flow.button_class || (flow.kind === "delete" ? "danger" : ""),
+        onClick: () => runFlow(context, state, surface, flow, [item], refresh),
+      }));
   }
 
   window.FTBacktestGroups = Object.freeze({adapterFor, flows, initialize, render, surfaces});

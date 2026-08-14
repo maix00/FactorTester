@@ -14,6 +14,30 @@
 .backtest-long-short > div > div:last-child { border-bottom: 0; }
 .backtest-long-short span { display: grid; gap: 2px; }
 .backtest-long-short small { color: var(--muted); }
+.strategy-list { display: grid; gap: 8px; min-width: 0; }
+.strategy-list-heading { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.strategy-list-heading strong { min-width: 0; }
+.strategy-list-heading small { color: var(--muted); white-space: nowrap; }
+.strategy-list-config-toggle { margin-left: auto; border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; color: var(--muted); background: var(--panel); font: inherit; font-size: 12px; cursor: pointer; }
+.strategy-list-config-toggle[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.strategy-list-batch { min-width: 0; border: 1px solid var(--line); border-radius: 9px; overflow: clip; background: var(--panel); }
+.strategy-list-batch-header { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 9px; background: var(--soft); }
+.strategy-list-batch-header.selected { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--soft)); }
+.strategy-list-batch-copy, .strategy-list-item-copy { display: grid; gap: 2px; min-width: 0; }
+.strategy-list-batch-copy small, .strategy-list-item-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strategy-list-disclosure { flex: 0 0 22px; width: 22px; height: 22px; border: 0; border-radius: 5px; padding: 0; color: var(--muted); background: transparent; font-size: 16px; line-height: 20px; cursor: pointer; }
+.strategy-list-disclosure:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
+.strategy-list-batch-body { display: grid; min-width: 0; }
+.strategy-list-row { display: grid; grid-template-columns: 24px 20px minmax(130px, .72fr) minmax(0, 1.28fr) auto; gap: 7px; align-items: center; min-width: 0; padding: 7px 9px 7px calc(20px + var(--strategy-depth, 0) * 20px); border-top: 1px solid var(--line); }
+.strategy-list-row.selected { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.strategy-list-branch { display: flex; align-items: center; min-width: 0; color: var(--muted); }
+.strategy-list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.strategy-list-chips .backend-settings-chip-row { display: contents; }
+.strategy-list-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: max-content; }
+.strategy-list-action { border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; color: var(--muted); background: var(--panel); font: inherit; font-size: 11px; cursor: pointer; }
+.strategy-list-action:hover { border-color: var(--accent); color: var(--accent); }
+.strategy-list-action.danger, .strategy-list-action.btn-outline-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.strategy-list-empty { margin: 0; padding: 16px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); text-align: center; }
 .backtest-group-form { display: grid; gap: 11px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel); }
 .backtest-group-form h3 { margin: 0; font-size: 15px; }
 .backtest-group-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
@@ -129,4 +153,6 @@
   .backtest-group-override-row > :last-child { grid-column: 2; }
   .ic-grid-manual { grid-template-columns: 1fr; }
   .test-product-group-fields { grid-template-columns: 1fr; }
+  .strategy-list-row { grid-template-columns: 24px 20px minmax(0, 1fr); }
+  .strategy-list-row > .strategy-list-chips, .strategy-list-row > .strategy-list-actions { grid-column: 3; justify-content: flex-start; }
 }

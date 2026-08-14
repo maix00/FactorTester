@@ -3,6 +3,7 @@
     "id", "name", "parentId", "product_path_selection",
     "product_path_selection_id", "factorAlias", "splitCount", "groupIndex",
     "isAllGroups", "shortAlias", "productMask", "needsRegenerate",
+    "batchId",
   ]);
   let sequence = 0;
 
@@ -13,17 +14,7 @@
   }
 
   function initialize(state) {
-    state.analysis = state.analysis && typeof state.analysis === "object"
-      ? state.analysis : {};
-    state.analysis.groups = Array.isArray(state.analysis.groups)
-      ? state.analysis.groups : [];
-    state.analysis.ls_configs = Array.isArray(state.analysis.ls_configs)
-      ? state.analysis.ls_configs : [];
-    state.selectedBacktestGroupIDs = Array.isArray(state.selectedBacktestGroupIDs)
-      ? state.selectedBacktestGroupIDs : [];
-    state.selectedBacktestLongShortIDs = Array.isArray(state.selectedBacktestLongShortIDs)
-      ? state.selectedBacktestLongShortIDs : [];
-    return state.analysis;
+    return FTBacktestGroupBatches.normalize(state);
   }
 
   function selected(state) {
@@ -104,16 +95,23 @@
       ? Array.from({length: splitCount}, (_, index) => index + 1)
       : [groupIndex];
     const created = [];
+    // A batch is an authoring event, not a configuration equivalence class.
+    // Repeating the same draft therefore deliberately receives a new ID.
+    const batchId = FTBacktestGroupBatches.nextID(state);
     factorAliases.forEach(factorAlias => {
       const letter = nextLetter(state.analysis.groups);
       const factorGroups = indexes.map(index => {
         const shortAlias = `${letter}${index}`;
         const useRequestedName = factorAliases.length === 1 && indexes.length === 1;
-        const name = draft.name && useRequestedName
+        const requestedName = draft.name && useRequestedName
           ? String(draft.name).trim()
           : `${FTTestProducts.groupLabel(selection)}_${factorAlias}_${splitCount}组_第${index}组`;
+        const name = draft.name && useRequestedName
+          ? uniqueName(state, requestedName)
+          : FTBacktestGroupBatches.generatedName(state, requestedName);
         return {
           id: identifier("bg", useRequestedName ? draft.id : ""),
+          batchId,
           name, shortAlias, parentId: null,
           product_path_selection: FTTestProducts.projection(selection),
           product_path_selection_id: selectionId,
@@ -134,10 +132,16 @@
     const parent = find(state, parentID);
     if (!parent) throw new Error("parent group is required");
     const productMask = productMaskFrom(draft.productMask);
+    const requestedName = String(draft.name || "").trim();
+    const fallbackName = `${groupLabel(parent)} 派生组`;
+    const name = requestedName
+      ? uniqueName(state, requestedName)
+      : FTBacktestGroupBatches.generatedName(state, fallbackName);
     const group = {
       ...explicitOverrides(draft.overrides),
       id: identifier("dg", draft.id),
-      name: String(draft.name || `${groupLabel(parent)} 派生组`).trim(),
+      batchId: parent.batchId || `batch:${parent.id}`,
+      name,
       parentId: parent.id,
       productMask,
       needsRegenerate: true,
@@ -153,6 +157,9 @@
     if (index < 0) throw new Error("group not found");
     const current = state.analysis.groups[index];
     const next = {...current, ...patch, needsRegenerate: true};
+    if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+      next.name = uniqueName(state, String(patch.name || "").trim(), id);
+    }
     if (!next.parentId) {
       next.splitCount = positiveInteger(next.splitCount, "splitCount");
       next.groupIndex = positiveInteger(next.groupIndex, "groupIndex");
@@ -172,9 +179,13 @@
     }
     const longGroup = find(state, longID);
     const shortGroup = find(state, shortID);
+    const requestedName = String(name || "").trim();
+    const fallbackName = `${groupLabel(longGroup)}/${groupLabel(shortGroup)}`;
     const item = {
       id: identifier("ls"),
-      name: String(name || `${groupLabel(longGroup)}/${groupLabel(shortGroup)}`).trim(),
+      name: requestedName
+        ? uniqueName(state, requestedName)
+        : FTBacktestGroupBatches.generatedName(state, fallbackName),
       shortAlias: `${groupLabel(longGroup)}/${groupLabel(shortGroup)}`,
       longGroupId: longID,
       shortGroupId: shortID,
@@ -185,6 +196,31 @@
       metadata: {},
     };
     state.analysis.ls_configs.push(item);
+    return item;
+  }
+
+  function renameGroup(state, id, name) {
+    return updateGroup(state, id, {name: String(name || "").trim()});
+  }
+
+  function renameLongShort(state, id, name) {
+    initialize(state);
+    const item = state.analysis.ls_configs.find(value => value.id === id);
+    if (!item) throw new Error("Long-Short 组合不存在");
+    item.name = uniqueName(state, String(name || "").trim(), id);
+    item.needsRegenerate = true;
+    return item;
+  }
+
+  function swapLongShort(state, id) {
+    initialize(state);
+    const item = state.analysis.ls_configs.find(value => value.id === id);
+    if (!item) throw new Error("Long-Short 组合不存在");
+    const longGroupId = item.longGroupId;
+    item.longGroupId = item.shortGroupId;
+    item.shortGroupId = longGroupId;
+    item.shortAlias = `${groupLabel(find(state, item.longGroupId))}/${groupLabel(find(state, item.shortGroupId))}`;
+    item.needsRegenerate = true;
     return item;
   }
 
@@ -251,6 +287,14 @@
     return result;
   }
 
+  function uniqueName(state, requested, exceptID = "") {
+    return FTBacktestGroupBatches.uniqueName(state, requested, exceptID);
+  }
+
+  function groupBatches(state) {
+    return FTBacktestGroupBatches.groupBatches(state, find, rootsAndChildren);
+  }
+
   function registeredOverrides(group, manifest) {
     const keys = new Set(Object.keys(manifest?.defaults || {}));
     return Object.fromEntries(Object.entries(group || {}).filter(([key]) => (
@@ -279,7 +323,8 @@
   window.FTBacktestGroupModel = Object.freeze({
     addBaseBatch, addDerived, addLongShort, find, groupLabel, initialize,
     registeredOverrides, removeLongShort, removeSelected, removeSelectedLongShort,
-    rootsAndChildren, selected, selectedLongShort, selectionID, toggle,
-    toggleLongShort, updateGroup,
+    groupBatches, renameGroup, renameLongShort, rootsAndChildren, selected,
+    selectedLongShort, selectionID, toggle, toggleLongShort, updateGroup,
+    swapLongShort,
   });
 })();
