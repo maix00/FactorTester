@@ -18,7 +18,12 @@ single source of truth for the script order and semantic module groups.
 - `jobs/`: job lists, progress, detail fields, artifacts, and viewers;
   `jobs/list-format.js` is the pure list/detail formatting seam (status,
   identity, artifact cells, and shared scalar helpers), while `jobs/jobs.js`
-  owns scope state, pagination, and navigation
+  owns scope state, pagination, and navigation. Backtest group-detail
+  rendering is split at the product-analysis seam: `jobs/backtest-group-products.js`
+  owns product identity, fee coverage, entry-frequency selection, and product
+  contribution views; `jobs/backtest-group-detail-parts.js` owns the remaining
+  group metrics and diagnostics. `jobs/backtest-group-detail.js` composes both
+  adapters without duplicating their helpers
 - `catalog/`: source catalog, products, factors, product groups, and catalog
   details; `catalog/source-list.js` owns the data-source page and receives the
   shared catalog loading seam from `catalog/products.js`

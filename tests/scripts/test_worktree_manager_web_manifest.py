@@ -653,9 +653,14 @@ def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_detail_parts.js"
-    module = WEB_ROOT / "jobs" / "backtest-group-detail-parts.js"
+    detail = (WEB_ROOT / "jobs" / "backtest-group-detail.js").read_text(encoding="utf-8")
+    assert "FTBacktestGroupDetailProducts" in detail
+    modules = [
+        WEB_ROOT / "jobs" / "backtest-group-products.js",
+        WEB_ROOT / "jobs" / "backtest-group-detail-parts.js",
+    ]
     result = subprocess.run(
-        ["node", str(fixture), str(module)], cwd=ROOT,
+        ["node", str(fixture), *(str(module) for module in modules)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

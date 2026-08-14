@@ -10,11 +10,13 @@ global.window = {
     },
   },
 };
-vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
-  filename: "backtest-group-detail-parts.js",
-});
+process.argv.slice(2).forEach(modulePath => vm.runInThisContext(
+  fs.readFileSync(modulePath, "utf8"), {filename: modulePath},
+));
 
-const parts = window.FTBacktestGroupDetailParts;
+const parts = Object.assign(
+  {}, window.FTBacktestGroupDetailParts, window.FTBacktestGroupDetailProducts,
+);
 const windowSummary = parts.summarizeIntradayWindow([
   {time: "09:01", count: 2, sum: 0.01},
   {time: "09:02", count: 3, sum: -0.005},
