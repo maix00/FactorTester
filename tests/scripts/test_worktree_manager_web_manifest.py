@@ -689,8 +689,8 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
         encoding="utf-8"
     )
-    assert "FTTabChipContent.create" in groups
-    assert "actions: flows" in groups
+    assert "FTTabListChip.create" in groups
+    assert "actionsFor: surfaceKey" in groups
     assert "FTTabChipContent.create" in overrides
     assert "backtest-group-tabs" not in groups
     assert "backtest-group-toolbar" not in groups

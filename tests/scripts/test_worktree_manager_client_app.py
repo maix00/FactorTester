@@ -250,8 +250,8 @@ def test_test_settings_are_available_without_execution_service(
     assert settings["success"] is True
     assert settings["application"] == "ic_test"
     assert settings["executable_modules"]
-    assert settings["run_fields"][0]["key"] == "service_port"
-    assert settings["run_fields"][0]["freeze_target"] == "job.server_context.port"
+    assert settings["run_fields"][0]["key"] == "task_name"
+    assert settings["run_fields"][0]["freeze_target"] == "job.task_name"
     assert outputs["outputs"]
     assert isinstance(categories["categories"], list)
 
@@ -1148,6 +1148,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/backtest-groups.js",
             "workbench/test-configuration.js",
             "workbench/tab-chip-content.js",
+            "workbench/tab-list-chip.js",
             "workbench/test-templates.js", "workbench/test-content-adapters.js",
             "workbench/test-run-results.js",
             "workbench/test-run-batch.js",
@@ -1203,7 +1204,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "window.FTBacktestGroupForm" in scripts["backtest-group-form.js"]
     assert "window.FTBacktestGroups" in scripts["backtest-groups.js"]
     assert "state.manifest.flows" in scripts["backtest-groups.js"]
-    assert 'root.className = "backtest-groups"' in scripts["backtest-groups.js"]
+    assert 'className: "backtest-groups"' in scripts["backtest-groups.js"]
+    assert "FTTabListChip.create" in scripts["backtest-groups.js"]
     assert "state.manifest.surfaces" in scripts["backtest-groups.js"]
     assert "surface?.content_adapter" in scripts["backtest-groups.js"]
     assert "flow.surface === surfaceKey" in scripts["backtest-groups.js"]
@@ -1220,6 +1222,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
     assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]
     assert "window.FTTabChipContent" in scripts["tab-chip-content.js"]
+    assert "window.FTTabListChip" in scripts["tab-list-chip.js"]
     assert "/test-templates/" in scripts["test-templates.js"]
     assert "handlers.overwrite(item)" in scripts["test-templates.js"]
     assert "handlers.delete(item)" in scripts["test-templates.js"]
