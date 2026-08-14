@@ -123,6 +123,18 @@
     return row;
   }
 
+  function serverAddressWithPort(address, port) {
+    const host = String(address || "").trim();
+    const managerPort = Number(port || 0);
+    if (!host || !Number.isInteger(managerPort) || managerPort <= 0) {
+      return host;
+    }
+    const formattedHost = host.includes(":") && !host.startsWith("[")
+      ? `[${host}]`
+      : host;
+    return `${formattedHost}:${managerPort}`;
+  }
+
   async function loadHomeNetwork(root, routeToken) {
     try {
       const value = await api("/api/server/network-info");
@@ -131,15 +143,20 @@
         ? value.internal_server_addresses : [];
       const publicAddresses = Array.isArray(value.public_server_addresses)
         ? value.public_server_addresses : [];
+      const managerPort = value.manager_port;
       root.replaceChildren(
         homeNetworkRow("当前 Manager", `${value.server_id || ""} · ${value.role || ""}`),
         homeNetworkRow(
           "内网服务器 IP 地址",
-          internal.length ? internal : [t("无在线内网服务器")],
+          internal.length
+            ? internal.map(address => serverAddressWithPort(address, managerPort))
+            : [t("无在线内网服务器")],
         ),
         homeNetworkRow(
           "公网服务器 IP 地址",
-          publicAddresses.length ? publicAddresses : [t("无在线公网服务器")],
+          publicAddresses.length
+            ? publicAddresses.map(address => serverAddressWithPort(address, managerPort))
+            : [t("无在线公网服务器")],
         ),
       );
     } catch (error) {

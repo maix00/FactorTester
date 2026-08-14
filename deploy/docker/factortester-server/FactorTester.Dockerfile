@@ -47,7 +47,11 @@ RUN set -eu; \
 
 COPY deploy/docker/factortester-server/manager-entrypoint.sh \
     /usr/local/bin/factortester-manager-entrypoint
-RUN chmod 0555 /usr/local/bin/factortester-manager-entrypoint
+COPY deploy/docker/factortester-server/start-fixed-service.py \
+    /usr/local/bin/start-fixed-service
+RUN chmod 0555 \
+    /usr/local/bin/factortester-manager-entrypoint \
+    /usr/local/bin/start-fixed-service
 
 USER factortester
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/factortester-manager-entrypoint"]

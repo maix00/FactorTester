@@ -726,6 +726,8 @@ def test_home_renders_server_provided_network_addresses() -> None:
     assert '"公网服务器 IP 地址"' in coordinator
     assert 't("无在线内网服务器")' in coordinator
     assert 't("无在线公网服务器")' in coordinator
+    assert "value.manager_port" in coordinator
+    assert "serverAddressWithPort" in coordinator
     assert "content.append(line)" in coordinator
 
 
