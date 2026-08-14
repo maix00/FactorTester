@@ -10,7 +10,10 @@ from typing import Any
 
 from .factor_worktree import CanonicalFactorRepoStore
 from .local_profile import LocalProfileStore
-from .local_profile_contracts import validate_local_identifier
+from .local_profile_contracts import (
+    validate_local_identifier,
+    validate_principal_identifier,
+)
 from .locations import validate_client_root
 
 
@@ -21,7 +24,7 @@ _GIT_ENV = {
 
 
 def default_user_root(principal_ref: str) -> Path:
-    validate_local_identifier(principal_ref, "principal_ref")
+    validate_principal_identifier(principal_ref, "principal_ref")
     return (
         Path.home() / "Documents" / "FactorTester" / "users"
         / principal_ref

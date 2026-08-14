@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from .local_profile_contracts import validate_local_identifier
+from .local_profile_contracts import validate_principal_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
 from .user_layout import default_user_strategy_library
@@ -45,7 +45,7 @@ class CanonicalStrategyRepoStore:
         self.path = self.root / "settings" / "strategy-workspace.json"
 
     def register(self, path: Path, *, owner_ref: str) -> dict[str, Any]:
-        validate_local_identifier(owner_ref, "owner_ref")
+        validate_principal_identifier(owner_ref, "owner_ref")
         repo = _repo(path)
         if repo != default_user_strategy_library(owner_ref).resolve():
             raise ValueError("canonical strategy library must use the unified user layout")

@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from .report_link_kinds import REPORT_LINK_KINDS
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -39,8 +39,8 @@ def new_local_profile(
         "session_binding": (
             {
                 "principal_ref": principal_ref,
-                "session_ref": (
-                    f"session-binding://{principal_ref}/{profile_id}"
+                "session_ref": session_binding_reference(
+                    principal_ref, profile_id,
                 ),
             }
             if principal_ref else {}
@@ -51,6 +51,30 @@ def new_local_profile(
         "strategy_workspace_binding": {},
         "adapters": [],
     })
+
+
+def session_binding_reference(
+    principal_ref: str,
+    profile_id: str,
+    suffix: str = "",
+) -> str:
+    """Build an opaque reference that also supports ``org@alias@random``.
+
+    Keep the historical authority-shaped reference for principals that cannot
+    be confused with URL credentials. New compound usernames contain ``@``;
+    encode those in the path so ``urlparse`` never treats them as userinfo.
+    """
+    principal = str(principal_ref or "").strip()
+    profile = str(profile_id or "").strip()
+    tail = str(suffix or "").strip("/")
+    tail = f"/{tail}" if tail else ""
+    if "@" not in principal:
+        return f"session-binding://{principal}/{profile}{tail}"
+    return (
+        "session-binding:/"
+        f"{quote(principal, safe='')}/{quote(profile, safe='')}"
+        f"{tail}"
+    )
 
 
 def validate_local_profile(value: Any) -> dict[str, Any]:
@@ -552,6 +576,21 @@ def _workspace(value: Any) -> dict[str, Any]:
 def validate_local_identifier(value: Any, field: str) -> str:
     text = _text(value, field)
     if not _IDENTIFIER.fullmatch(text):
+        raise ValueError(f"{field} is invalid")
+    return text
+
+
+def validate_principal_identifier(value: Any, field: str) -> str:
+    """Validate a principal as one safe filesystem path component.
+
+    Profile/Agent IDs stay lowercase local identifiers. Account principals may
+    use the canonical ``organization@alias@random`` form, so they need a
+    separate validator rather than the ID regex.
+    """
+    text = _text(value, field)
+    if text in {".", ".."} or any(
+        character in text for character in ("/", "\\", "\x00")
+    ) or any(ord(character) < 32 for character in text):
         raise ValueError(f"{field} is invalid")
     return text
 
