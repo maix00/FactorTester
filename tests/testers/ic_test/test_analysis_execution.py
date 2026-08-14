@@ -81,6 +81,18 @@ def test_analysis_execution_rejects_a_missing_typed_core_output() -> None:
         execute_ic_analysis_nodes(graph, (node_id,), ICAnalysisResultStore())
 
 
+def test_duplicate_requested_analysis_is_executed_once() -> None:
+    graph, core, node_id = _graph()
+    store = ICAnalysisResultStore()
+    store.publish(
+        core.core_test_ref,
+        "ic_series",
+        pd.Series([0.1, 0.2, 0.3]),
+    )
+
+    assert execute_ic_analysis_nodes(graph, (node_id, node_id), store) == (node_id,)
+
+
 def test_autocorrelation_uses_the_registered_maximum_lag() -> None:
     core = _graph()[1]
     graph = ICAnalysisGraph((core,))

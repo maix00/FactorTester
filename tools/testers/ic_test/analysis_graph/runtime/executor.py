@@ -21,29 +21,43 @@ def execute_ic_analysis_nodes(
         raise ValueError(f"unknown requested IC analysis nodes: {unknown}")
     adapters = builtin_runtime_adapters()
     executed: list[str] = []
+    completed: set[str] = set()
+    executing: set[str] = set()
 
     def execute(node: ICAnalysisNode) -> None:
+        if node.node_id in completed:
+            return
+        if node.node_id in executing:
+            raise ValueError(
+                f"IC analysis execution encountered a cycle at {node.node_id}"
+            )
         definition = ic_analysis_graph_definition().type_by_key(node.analysis_type)
         if store.contains(node.node_id, definition.output_kind):
+            completed.add(node.node_id)
             return
-        for target_ref in node.target_refs:
-            if target_ref in nodes:
-                execute(nodes[target_ref])
-        adapter = adapters.get(node.analysis_type)
-        if adapter is None:
-            raise ValueError(
-                f"analysis type {node.analysis_type} has no runtime adapter"
+        executing.add(node.node_id)
+        try:
+            for target_ref in node.target_refs:
+                if target_ref in nodes:
+                    execute(nodes[target_ref])
+            adapter = adapters.get(node.analysis_type)
+            if adapter is None:
+                raise ValueError(
+                    f"analysis type {node.analysis_type} has no runtime adapter"
+                )
+            _validate_adapter(definition, adapter)
+            inputs = tuple({
+                kind: store.require(target_ref, kind)
+                for kind in adapter.input_kinds
+            } for target_ref in node.target_refs)
+            store.publish(
+                node.node_id,
+                adapter.output_kind,
+                adapter.execute(inputs, node.parameters),
             )
-        _validate_adapter(definition, adapter)
-        inputs = tuple({
-            kind: store.require(target_ref, kind)
-            for kind in adapter.input_kinds
-        } for target_ref in node.target_refs)
-        store.publish(
-            node.node_id,
-            adapter.output_kind,
-            adapter.execute(inputs, node.parameters),
-        )
+        finally:
+            executing.remove(node.node_id)
+        completed.add(node.node_id)
         executed.append(node.node_id)
 
     for node_id in requested_node_ids:
