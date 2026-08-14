@@ -1,4 +1,4 @@
-# Server Maintenance Agent Contract
+# FactorTester Server Maintenance Agent Contract
 
 ## Entry conditions
 
@@ -52,8 +52,9 @@ new Skill requires approval there.
 If no suitable Skill exists, create or revise one according to skill-creator:
 keep `SKILL.md` concise, put detailed references or scripts in dedicated
 folders, load them progressively, validate the package, and bind its reviewed
-hash. The repository copy at `server/skills/server-maintenance/` is the
-canonical source and is registered under the same `$server-maintenance` name
+hash. The repository copy at `server/skills/factortester-server-maintenance/`
+is the canonical source and is registered under the same
+`$factortester-server-maintenance` name
 as the user-level skill package; keep their `SKILL.md`, UI metadata, and
 references synchronized. A Skill proposal does not grant backend authority.
 
@@ -79,7 +80,8 @@ compatibility checks pass.
 
 Docker, WireGuard, and SSH operations are part of this contract only when the
 Maintenance Case explicitly authorizes the target server and operation. Read
-the private `server-maintenance` Skill's `references/infrastructure.md` before
+the private `factortester-server-maintenance` Skill's
+`references/infrastructure.md` before
 changing a Compose project, tunnel identity, peer inventory, release checkout,
 or public deployment. Keep client surfaces at 7998/7997 and keep peer surfaces
 17998/17997 private to the FactorTester WireGuard overlay. PostgreSQL has its

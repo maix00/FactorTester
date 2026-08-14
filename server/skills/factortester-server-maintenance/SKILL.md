@@ -1,5 +1,5 @@
 ---
-name: server-maintenance
+name: factortester-server-maintenance
 description: Diagnose and resolve authorized private FactorTester server maintenance cases, including backend anomalies, missing platform capabilities, database migrations, Graph publication, Docker/WireGuard/SSH deployment, and research-branch continuation. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
 ---
 
@@ -13,7 +13,7 @@ running and load only the evidence required by the current case.
 Read `server/AGENTS.md`, then run:
 
 ```bash
-python server/skills/server-maintenance/scripts/resume.py \
+python server/skills/factortester-server-maintenance/scripts/resume.py \
   --agent-id <agent-id>
 ```
 

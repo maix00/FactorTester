@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_server_agent_contract_is_private_bounded_and_reviewable() -> None:
     scoped = (ROOT / "server" / "AGENTS.md").read_text(encoding="utf-8")
     guide = (
-        ROOT / "docs" / "agents" / "server-maintenance.md"
+        ROOT / "docs" / "agents" / "factortester-server-maintenance.md"
     ).read_text(encoding="utf-8")
     text = scoped + guide
     normalized = " ".join(text.split())

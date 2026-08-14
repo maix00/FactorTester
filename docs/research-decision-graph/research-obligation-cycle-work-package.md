@@ -99,7 +99,7 @@ another open-ended design interview:
 3. user acceptance objectives and criteria are not yet a first-class bounded
    Contract projection and therefore cannot prevent silent closure;
 4. the private progressively loaded Server Maintenance Skill accepted in
-   Grill 178.2 is now packaged under `server/skills/server-maintenance/`;
+   Grill 178.2 is now packaged under `server/skills/factortester-server-maintenance/`;
    its Graph, backend and database references exist, but that completion does
    not satisfy the separate resolver, lifecycle or release gates;
 5. continuation, Evidence admission and report coverage have protocol tests,

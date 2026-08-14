@@ -2,13 +2,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SKILL_ROOT = ROOT / "server" / "skills" / "server-maintenance"
+SKILL_ROOT = ROOT / "server" / "skills" / "factortester-server-maintenance"
 
 
 def test_server_maintenance_skill_routes_all_supported_case_types() -> None:
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "name: server-maintenance" in skill
+    assert "name: factortester-server-maintenance" in skill
     assert "Docker/WireGuard/SSH deployment" in skill
     for reference in (
         "backend-change.md",
@@ -52,7 +52,7 @@ def test_server_maintenance_ui_metadata_matches_skill_contract() -> None:
         'short_description: "审计并维护私有 FactorTester 服务器、容器与网络部署"'
         in metadata
     )
-    assert 'default_prompt: "Use $server-maintenance ' in metadata
+    assert 'default_prompt: "Use $factortester-server-maintenance ' in metadata
 
 
 def test_research_skill_points_to_registered_server_maintenance_skill() -> None:
@@ -60,5 +60,5 @@ def test_research_skill_points_to_registered_server_maintenance_skill() -> None:
         ROOT / "skills" / "cli-anything-factortester-research" / "SKILL.md"
     ).read_text(encoding="utf-8")
 
-    assert "registered `$server-maintenance` Skill" in research
+    assert "registered `$factortester-server-maintenance` Skill" in research
     assert "references/infrastructure.md" in research
