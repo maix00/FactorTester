@@ -178,6 +178,9 @@
       "workbench/factor-set-selection.js",
       "workbench/factor-family-picker.js",
       "workbench/test-source-upload.js",
+      "workbench/test-factor-catalog.js",
+      "workbench/test-factor-editor.js",
+      "workbench/test-factor-candidates.js",
       "workbench/test-factors.js"
     ],
     "workbench-products": [
@@ -298,6 +301,9 @@
     "workbench/factor-set-selection.js",
     "workbench/factor-family-picker.js",
     "workbench/test-source-upload.js",
+    "workbench/test-factor-catalog.js",
+    "workbench/test-factor-editor.js",
+    "workbench/test-factor-candidates.js",
     "workbench/test-factors.js",
     "workbench/product-group-creator.js",
     "workbench/test-products.js",

@@ -1378,6 +1378,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         )
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-factor-catalog.js", "workbench/test-factor-editor.js",
+            "workbench/test-factor-candidates.js",
             "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/product-group-creator.js",
@@ -1417,15 +1419,19 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTabChipContent.create" in scripts["test-settings.js"]
     assert "FTTestContentAdapters.render" in scripts["test-settings.js"]
     assert "externalTabs" not in scripts["test-settings.js"]
-    assert 'nativeList("owners")' in scripts["test-factors.js"]
-    assert 'nativeList("revisions"' in scripts["test-factors.js"]
-    assert 'nativeList("families"' in scripts["test-factors.js"]
-    assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
-    assert "FTFactorFamilyPicker.open" in scripts["test-factors.js"]
+    factor_catalog = scripts["test-factor-catalog.js"]
+    factor_editor = scripts["test-factor-editor.js"]
+    factor_candidates = scripts["test-factor-candidates.js"]
+    assert 'nativeList("owners")' in factor_catalog
+    assert 'nativeList("revisions"' in factor_catalog
+    assert 'nativeList("families"' in factor_catalog
+    assert 'nativeRequest("instantiate"' in factor_editor
+    assert "FTFactorFamilyPicker.open" in factor_editor
     assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
     assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
     assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
-    assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
+    assert "restoreFrozenSelections(state)" in factor_catalog
+    assert "window.FTTestFactorCandidates" in factor_candidates
     assert "selectedProjections" in scripts["test-products.js"]
     assert "FTProductGroupCreator.open" in scripts["test-products.js"]
     assert 'context.t("构建产品路径候选")' in scripts["test-products.js"]
