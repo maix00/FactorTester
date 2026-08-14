@@ -20,6 +20,7 @@ struct HomeView: View {
         NavigationSplitView {
             ClientSidebar(
                 selection: sidebarSelection,
+                launchers: sidebarLaunchers,
                 openTabs: tabs,
                 open: open,
                 close: close
@@ -61,12 +62,15 @@ struct HomeView: View {
             Text(workspaceAuthorization.errorMessage ?? "")
         }
         .task {
-            async let sessionRefresh = session.refresh()
+            // The Manager filters `/api/modules` by the authenticated session.
+            // Restore that session first so the initial navigation load cannot
+            // race ahead and leave an already-authenticated user with only
+            // the public fallback modules.
+            _ = await session.refresh()
             async let moduleReload: Void = registry.reload()
             async let profileRefresh: Void = profiles.refresh()
             async let networkRefresh: Void = refreshManagerNetworkInfo()
             _ = await (
-                sessionRefresh,
                 moduleReload,
                 profileRefresh,
                 networkRefresh
@@ -83,17 +87,17 @@ struct HomeView: View {
 
     private var dashboard: some View {
         HomeDashboardView(
-            modules: registry.visibleModules(forRole: session.role).filter {
-                $0.id != "server_operations"
-            },
-            showManager: session.role == "super_admin",
+            modules: registry.visibleModules(
+                forRole: session.role,
+                isAuthenticated: session.isLoggedIn
+            ).filter(\.homeVisible),
             isLoading: registry.isLoading,
             loadError: registry.loadError,
             networkInfo: managerNetworkInfo,
             networkError: managerNetworkError,
             openModule: tap,
             openAdapter: { open(.adapter($0)) },
-            openTab: open
+            openResearch: { open(.research) }
         )
     }
 
@@ -131,10 +135,21 @@ struct HomeView: View {
                 ClientTabSelectionRouter(
                     tabs: { tabs },
                     setTabs: { tabs = $0 },
-                    setSelection: { selection = $0 }
+                    setSelection: { selection = $0 },
+                    launcher: { id in sidebarLaunchers.first { $0.id == id } }
                 ).select(id)
             }
         )
+    }
+
+    private var sidebarLaunchers: [ClientTab] {
+        let modules = registry.visibleModules(
+            forRole: session.role,
+            isAuthenticated: session.isLoggedIn
+        )
+            .filter(\.sidebarVisible)
+            .compactMap(ClientTab.sidebarLauncher)
+        return [.home] + modules
     }
 
     private func close(_ tab: ClientTab) {

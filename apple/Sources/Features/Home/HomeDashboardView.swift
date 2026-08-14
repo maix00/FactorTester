@@ -2,14 +2,13 @@ import SwiftUI
 
 struct HomeDashboardView: View {
     let modules: [Module]
-    let showManager: Bool
     let isLoading: Bool
     let loadError: String?
     let networkInfo: ManagerNetworkInfo?
     let networkError: String?
     let openModule: (Module) -> Void
     let openAdapter: (ClientAdapterModel) -> Void
-    let openTab: (ClientTab) -> Void
+    let openResearch: () -> Void
 
     private let columns = [
         GridItem(
@@ -28,19 +27,7 @@ struct HomeDashboardView: View {
                         title: "研究进度",
                         description: "查看各 Profile 的实时步骤、义务与报告",
                         systemImage: "chart.xyaxis.line"
-                    ) { openTab(.research) }
-                    DashboardShortcutCard(
-                        title: "Profiles",
-                        description: "管理研究身份、工作区与初始化来源",
-                        systemImage: "person.2.crop.square.stack"
-                    ) { openTab(.profiles) }
-                    if showManager {
-                        DashboardShortcutCard(
-                            title: "服务器管理",
-                            description: "查看端口状态并控制本机服务",
-                            systemImage: "server.rack"
-                        ) { openTab(.manager) }
-                    }
+                    ) { openResearch() }
                     ForEach(modules) { module in
                         ModuleCard(module: module) {
                             openModule(module)

@@ -1669,8 +1669,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'initializeSidebarLayout' in research
     assert 'ft-sidebar-width' in shell_module
     assert 'sidebar-collapsed' in shell_module
-    assert 'item.homeOnly' in shell_module
-    assert '"manager", "server_operations"' in shell_module
+    assert 'item.sidebarVisible' in shell_module
+    assert 'FTNavigation.fallbackModulesForSession' in shell_module
     assert 'max-height: calc(100vh - 180px)' in styles
     assert 'overflow-x: hidden' in styles
     assert '.component > details > .section-bridge' in styles
@@ -1719,7 +1719,10 @@ def test_web_site_icon_is_shared_by_flask_and_manager(tmp_path) -> None:
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/api/modules") as response:
+        with urlopen(Request(
+            f"{base_url}/api/modules",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
             value = json.loads(response.read())
 
     modules = {item["id"]: item for item in value["modules"]}
@@ -1729,6 +1732,51 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
     assert modules["backtest"]["sfSymbol"] == "chart.line.uptrend.xyaxis"
     assert modules["jobs"]["sfSymbol"] == "checklist"
     assert "single_factor_test" not in modules
+
+
+def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    state._sessions[state._token_hash("admin-token")] = (
+        "admin@1", "super_admin", float("inf"),
+    )
+    state._sessions[state._token_hash("org-admin-token")] = (
+        "org-admin@1", "org_admin", float("inf"),
+    )
+    with running_manager(state) as base_url:
+        def modules(token):
+            with urlopen(Request(
+                f"{base_url}/api/modules",
+                headers={"Authorization": f"Bearer {token}"},
+            )) as response:
+                return json.loads(response.read())["modules"]
+
+        user_modules = {item["id"]: item for item in modules("user-token")}
+        org_modules = {item["id"]: item for item in modules("org-admin-token")}
+        admin_modules = {item["id"]: item for item in modules("admin-token")}
+
+    assert "profiles" not in user_modules
+    assert "profiles" not in org_modules
+    assert "profiles" not in admin_modules
+    assert {
+        item["id"] for item in user_modules["research"]["children"]
+    } == {
+        "research.local", "research.shared", "research.graph", "research.profiles",
+    }
+    assert "admin_users" not in user_modules
+    assert not {"manager", "sqlite_web"} & set(org_modules)
+    assert {"manager", "sqlite_web"} <= set(admin_modules)
+
+
+def test_legacy_profiles_entry_redirects_to_research_tab(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        response = urlopen(Request(
+            f"{base_url}/profiles",
+            headers={"Authorization": "Bearer user-token"},
+        ))
+        assert response.geturl().endswith("/research?section=profiles")
 
 
 def test_every_home_module_has_bilingual_title_and_description(tmp_path) -> None:
@@ -1754,7 +1802,8 @@ def test_every_home_module_has_bilingual_title_and_description(tmp_path) -> None
         if item["id"] not in {"home", "settings"}
     ]
     assert cards
-    assert next(item for item in cards if item["id"] == "profiles")[
+    research = next(item for item in cards if item["id"] == "research")
+    assert next(item for item in research["children"] if item["id"] == "research.profiles")[
         "title_key"
     ] == "研究身份"
     for module in cards:
@@ -1790,10 +1839,16 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
 
 def test_manager_home_only_modules_use_distinct_symbols(tmp_path) -> None:
     state = authenticated_state(tmp_path)
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "super_admin", float("inf"),
+    )
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/core/icons.js") as response:
             icons = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/api/modules") as response:
+        with urlopen(Request(
+            f"{base_url}/api/modules",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
             modules = {item["id"]: item for item in json.loads(response.read())["modules"]}
 
     assert modules["sqlite_web"]["sfSymbol"] == "cylinder.split.1x2"

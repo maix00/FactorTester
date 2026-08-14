@@ -1,0 +1,268 @@
+"""Authoritative Manager navigation registry and access filtering."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any, Mapping
+
+
+_RESEARCH_TABS = (
+    {
+        "id": "research.local",
+        "title": "本地研究",
+        "title_key": "本地研究",
+        "description_key": "查看各 Profile 的实时步骤、义务与报告",
+        "path": "/research?section=local",
+        "requiresAuth": True,
+        "roles": [],
+    },
+    {
+        "id": "research.shared",
+        "title": "共享研究",
+        "title_key": "共享研究",
+        "description_key": "浏览已共享的研究报告与证据",
+        "path": "/research?section=shared",
+        "requiresAuth": False,
+        "roles": [],
+    },
+    {
+        "id": "research.graph",
+        "title": "研究图",
+        "title_key": "研究图",
+        "description_key": "浏览研究图与研究周期",
+        "path": "/research?section=graph",
+        "requiresAuth": True,
+        "roles": [],
+    },
+    {
+        "id": "research.profiles",
+        "title": "研究身份",
+        "title_key": "研究身份",
+        "description_key": "查看研究身份、工作区与初始化来源",
+        "path": "/research?section=profiles",
+        "requiresAuth": True,
+        "roles": [],
+    },
+)
+
+
+# This is the only top-level client navigation list.  Server-side access
+# filtering below runs before this value is returned to Web or Swift.
+_NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "home",
+        "title": "主页",
+        "title_key": "主页",
+        "desc": "选择研究模块",
+        "icon": "grid",
+        "sfSymbol": "square.grid.2x2",
+        "path": "/",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": True,
+    },
+    {
+        "id": "research",
+        "title": "研究",
+        "title_key": "研究",
+        "desc": "研究报告、研究图与研究身份",
+        "description_key": "查看各 Profile 的实时步骤、义务与报告",
+        "icon": "chart",
+        "sfSymbol": "chart.xyaxis.line",
+        "path": "/research?section=shared",
+        "requiresAuth": False,
+        "roles": [],
+        "children": list(_RESEARCH_TABS),
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": True,
+    },
+    {
+        "id": "ic-test",
+        "title": "IC 测试",
+        "title_key": "IC 测试",
+        "desc": "配置并运行因子 IC 测试",
+        "description_key": "配置并运行因子 IC 测试",
+        "icon": "IC",
+        "sfSymbol": "chart.xyaxis.line",
+        "path": "/ic-test",
+        "requiresAuth": True,
+        "roles": [],
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": False,
+        "tab_behavior": "new",
+    },
+    {
+        "id": "backtest",
+        "title": "回测",
+        "title_key": "回测",
+        "desc": "配置并运行分组回测",
+        "description_key": "配置并运行分组回测",
+        "icon": "BT",
+        "sfSymbol": "chart.line.uptrend.xyaxis",
+        "path": "/backtest",
+        "requiresAuth": True,
+        "roles": [],
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": False,
+        "tab_behavior": "new",
+    },
+    {
+        "id": "jobs",
+        "title": "测试任务",
+        "title_key": "测试任务",
+        "desc": "查看测试任务、进度、结果与生成物",
+        "description_key": "跨端口查看配置、进度、结果与生成物",
+        "icon": "任务",
+        "sfSymbol": "checklist",
+        "path": "/jobs",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": True,
+    },
+    {
+        "id": "factors",
+        "title": "因子库",
+        "title_key": "因子库",
+        "desc": "浏览公共与个人因子",
+        "description_key": "浏览 canonical 与自定义因子",
+        "icon": "function",
+        "sfSymbol": "function",
+        "path": "/factors",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": True,
+    },
+    {
+        "id": "products",
+        "title": "产品",
+        "title_key": "产品",
+        "desc": "查询产品、合约与市场资料",
+        "description_key": "查询产品、合约与市场资料",
+        "icon": "box",
+        "sfSymbol": "shippingbox",
+        "path": "/products",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": True,
+        "homeVisible": True,
+        "pinned": True,
+    },
+    {
+        "id": "manager",
+        "title": "服务器管理",
+        "title_key": "服务器管理",
+        "desc": "查看端口状态并控制本机服务",
+        "description_key": "查看端口状态并控制本机服务",
+        "icon": "server",
+        "sfSymbol": "server.rack",
+        "path": "/manager",
+        "requiresAuth": True,
+        "roles": ["super_admin"],
+        "sidebarVisible": False,
+        "homeVisible": True,
+        "pinned": False,
+        "tab_behavior": "new",
+        "capabilities": ["server.manage"],
+    },
+    {
+        "id": "sqlite_web",
+        "title": "数据库",
+        "title_key": "数据库",
+        "desc": "浏览统一 SQLite 数据库",
+        "description_key": "浏览统一 SQLite 数据库",
+        "icon": "SQL",
+        "sfSymbol": "cylinder.split.1x2",
+        "path": "/sqlite-web/",
+        "requiresAuth": True,
+        "roles": ["super_admin"],
+        "sidebarVisible": False,
+        "homeVisible": True,
+        "pinned": False,
+        "tab_behavior": "new",
+        "capabilities": ["database.read"],
+    },
+    {
+        "id": "docs",
+        "title": "技术文档",
+        "title_key": "技术文档",
+        "desc": "阅读 FactorTester 技术文档",
+        "description_key": "阅读 FactorTester 技术文档",
+        "icon": "📖",
+        "sfSymbol": "book",
+        "path": "/docs",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": True,
+        "pinned": False,
+        "tab_behavior": "new",
+    },
+    {
+        "id": "settings",
+        "title": "设置",
+        "title_key": "设置",
+        "desc": "账户与客户端设置",
+        "description_key": "账户与客户端设置",
+        "icon": "settings",
+        "sfSymbol": "person.crop.circle",
+        "path": "/settings/account",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": True,
+    },
+)
+
+
+def navigation_modules(session: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Return only modules allowed for the current Manager session."""
+    role = str((session or {}).get("role") or "")
+    authenticated = session is not None
+    capabilities = {
+        str(key)
+        for key, enabled in dict((session or {}).get("capabilities") or {}).items()
+        if enabled
+    }
+    if role == "super_admin":
+        capabilities.update({"server.manage", "user.manage", "database.read"})
+    return [
+        _visible_copy(item, role, capabilities, authenticated)
+        for item in _NAVIGATION_MODULES
+        if _allowed(item, role, capabilities, authenticated)
+    ]
+
+
+def _allowed(
+    item: Mapping[str, Any], role: str, capabilities: set[str], authenticated: bool,
+) -> bool:
+    if bool(item.get("requiresAuth", True)) and not authenticated:
+        return False
+    roles = {str(value) for value in item.get("roles") or []}
+    required = {str(value) for value in item.get("capabilities") or []}
+    return (not roles or role in roles) and (not required or required <= capabilities)
+
+
+def _visible_copy(
+    item: Mapping[str, Any], role: str, capabilities: set[str], authenticated: bool,
+) -> dict[str, Any]:
+    value = deepcopy(dict(item))
+    value.pop("capabilities", None)
+    children = value.get("children")
+    if isinstance(children, list):
+        value["children"] = [
+            _visible_copy(child, role, capabilities, authenticated)
+            for child in children
+            if isinstance(child, Mapping)
+            and _allowed(child, role, capabilities, authenticated)
+        ]
+    return value

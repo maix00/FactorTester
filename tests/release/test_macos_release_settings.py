@@ -41,7 +41,7 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert 'pendingExternalAction = action' in controller
     assert 'case "download"' in controller
     assert "ClientSidebar" in home
-    assert "openTab: open" in home
+    assert "openResearch: { open(.research) }" in home
     assert "approval" not in view.lower()
     assert 'Window("FTClient", id: "main")' in app
     assert "WindowGroup" in app
@@ -414,7 +414,7 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
         encoding="utf-8"
     )
 
-    for label in ("主页", "研究", "因子库", "产品", "Profiles", "设置"):
+    for label in ("主页", "研究", "因子库", "产品", "设置"):
         assert label in sidebar + tab_model
     assert "个人中心" not in sidebar + tab_model
     assert 'Section("已打开")' in sidebar
@@ -427,8 +427,9 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     for label in ("实时过程", "Trial Plans", "Evidence"):
         assert label not in workspace
     assert "不轮询完整 trace" in sections + live
-    for label in ("研究进度", "Profiles"):
+    for label in ("研究进度",):
         assert label in dashboard
+    assert "openTab(.profiles)" not in dashboard
     assert "Form {" not in login
     assert "Form {" not in server
     assert "SettingsEditableText" in server
@@ -516,7 +517,6 @@ def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     for identifier in (
         "sidebar.launch.home",
         "sidebar.launch.research",
-        "sidebar.launch.profiles",
         "sidebar.launch.account",
         "sidebar.launch.settings",
         "sidebar.launch.web:factor-library",

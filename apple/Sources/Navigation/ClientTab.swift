@@ -55,11 +55,15 @@ struct ClientTab: Identifiable {
         // dashboard cards through the same fresh `.web` destinations as the
         // sidebar launchers so their WebPageView always receives tab callbacks.
         switch module.id {
+        case "research": return .research
+        case "jobs": return .jobs
         case "ic-test": return .icTest()
         case "backtest": return .backtest()
+        case "manager": return .manager
         default: break
         }
-        let opensAsFreshTab = ["docs", "sqlite_web"].contains(module.id)
+        let opensAsFreshTab = module.tabBehavior == "new"
+            || ["docs", "sqlite_web"].contains(module.id)
         let tabID = opensAsFreshTab
             ? "module:\(module.id):\(UUID().uuidString)"
             : "module:\(module.id)"
@@ -70,6 +74,21 @@ struct ClientTab: Identifiable {
             systemImage: module.sfSymbol ?? "square.stack.3d.up",
             content: .module(module)
         )
+    }
+
+    /// Convert an already-authorized backend module into a stable launcher.
+    /// This is only a native renderer mapping; visibility and ordering come
+    /// from the Manager navigation response.
+    static func sidebarLauncher(_ module: Module) -> ClientTab? {
+        switch module.id {
+        case "research": return .research
+        case "ic-test": return .icTestLauncher
+        case "backtest": return .backtestLauncher
+        case "jobs": return .jobs
+        case "factors": return .factorLibrary
+        case "products": return .products
+        default: return .module(module)
+        }
     }
 
     static func adapter(_ adapter: ClientAdapterModel) -> ClientTab {
