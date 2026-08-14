@@ -3,7 +3,7 @@ Authentication Blueprint — 登录/登出/注册 + 全局请求认证守卫。
 
 核心职责：
   - before_app_request: 全局认证检查，区分公开端点/已登录/未登录/超时四种情况
-  - login: 支持 alias 模糊匹配（张三）和完整 username 精确匹配（张三@1）
+  - login: 支持 alias、机构@alias 和完整 username 精确匹配
   - logout: 清理 FactorTester 实例 + session 资源
   - register: 新建用户（需管理员权限）
   - api_me / api_keep_login / api_public_organizations: 前端状态同步 API
@@ -139,14 +139,14 @@ def login():
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
     with accounts_lock:
         accounts = load_accounts()
-    # 先精确匹配 username（如 '张三@1'），再按 alias 匹配（如 '张三'——仅当唯一时成功）
+    # 先精确匹配完整 username，再按 alias 匹配（仅当唯一时成功）。
     acct = next((a for a in accounts if a['username'] == username), None)
     if acct is None:
         candidates = [a for a in accounts if a.get('alias', a['username']) == username]
         if len(candidates) == 1:
             acct = candidates[0]
         elif len(candidates) > 1:
-            return jsonify({'success': False, 'error': f'用户名 "{username}" 存在多个账号，请使用完整名称登录（如 {username}@1、{username}@2）', 'ambiguous': True, 'candidates': [c['username'] for c in candidates]}), 400
+            return jsonify({'success': False, 'error': f'用户名 "{username}" 存在多个账号，请使用完整用户名登录', 'ambiguous': True, 'candidates': [c['username'] for c in candidates]}), 400
     if acct is None or not verify_password(password, acct['salt'], acct['hash']):
         return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
     session.permanent = True   # 持久登录，依 app.permanent_session_lifetime 过期
@@ -221,7 +221,7 @@ def register():
         return jsonify({'success': False, 'error': '机构不存在'}), 400
     with accounts_lock:
         accounts = load_accounts()
-        # 新账号 id 格式为 {organization_id}${alias}@{serial}
+        # 新账号 id 格式为 {organization_id}@{alias}@{random_digits}
         full_name = next_account_username(accounts, organization_id, username)
         salt = secrets.token_hex(16)
         role = ROLE_SUPER_ADMIN if len(accounts) == 0 else ROLE_USER

@@ -272,9 +272,11 @@ class DeviceNetworkRoutesMixin:
                 "error": "device authorization is invalid or expired",
             }, 403)
             return
+        session = self.state.session(token) or {}
         json_response(self, {
             "success": True,
             "username": principal,
+            "alias": session.get("alias") or principal,
             "role": role,
             "capabilities": {
                 "manager": role == "super_admin",
@@ -585,9 +587,11 @@ class DeviceNetworkRoutesMixin:
                 ticket=ticket,
                 next_path=next_path,
             )
+        session = self.state.session(token) or {}
         json_response(self, {
             "success": True,
             "username": principal,
+            "alias": session.get("alias") or principal,
             "role": role,
             "capabilities": {
                 "manager": role == "super_admin",

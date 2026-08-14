@@ -23,6 +23,7 @@ services:
       FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
       FACTORTESTER_HOT_RELOAD: "0"
       FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_PUBLIC_ADDRESS:?set FACTORTESTER_PUBLIC_ADDRESS}
+      FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:-default}
       FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}
       # Only explicitly configured browser ingress origins may display the
       # visitor entry. The Manager public IP is intentionally not included.

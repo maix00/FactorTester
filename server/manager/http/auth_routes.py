@@ -11,6 +11,7 @@ from server.manager.http.pages import (
     PUBLIC_REGISTRATION_NOTICE,
 )
 from server.manager.http.responses import json_response
+from server.manager.storage.control_db import ControlDatabaseError
 
 
 class AuthenticationRoutesMixin:
@@ -74,6 +75,14 @@ class AuthenticationRoutesMixin:
                 "error": str(exc),
             }, 403)
             return
+        except ControlDatabaseError as exc:
+            sys.stderr.write(f"[manager] login authority unavailable: {exc}\n")
+            json_response(self, {
+                "success": False,
+                "code": "control_database_unavailable",
+                "error": "control database is unavailable and no usable local account is available",
+            }, 503)
+            return
         except Exception as exc:
             sys.stderr.write(f"[manager] login failed: {exc}\n")
             json_response(self, {
@@ -81,9 +90,11 @@ class AuthenticationRoutesMixin:
                 "error": "manager login failed",
             }, 500)
             return
+        session = self.state.session(token) or {}
         json_response(self, {
             "success": True,
             "username": principal,
+            "alias": session.get("alias") or principal,
             "role": role,
             "capabilities": {
                 "manager": role == "super_admin",
@@ -136,6 +147,14 @@ class AuthenticationRoutesMixin:
             return
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
+            return
+        except ControlDatabaseError as exc:
+            sys.stderr.write(f"[manager] account registration unavailable: {exc}\n")
+            json_response(self, {
+                "success": False,
+                "code": "control_database_unavailable",
+                "error": "local account database is unavailable; registration cannot be queued",
+            }, 503)
             return
         json_response(
             self,

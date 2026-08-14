@@ -13,7 +13,7 @@ class User(UniqueNameObject):
     系统用户。
 
     属性：
-        name      (str)      : 全名，格式 {username}@{serial}，如 '张三@1'
+        name      (str)      : 全名，格式 {organization}@{alias}@{serial}，如 'GTHT@张三@1'
         alias     (str)      : 原始用户名，如 '张三'（用于展示）
         serial    (int)      : 序列号，从 1 开始
         is_admin  (bool)     : 是否为管理员
@@ -24,7 +24,7 @@ class User(UniqueNameObject):
         if not hasattr(self, '_initialized'):
             parts = name.rsplit('@', 1)
             if len(parts) == 2 and parts[1].isdigit():
-                alias = parts[0]
+                alias = parts[0].split('@', 1)[-1]
                 self.serial = int(parts[1])
             else:
                 alias = name

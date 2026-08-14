@@ -611,7 +611,7 @@ python start_server.py --port 54865</pre>
 
     async function init() {
         const data = await fetch('/api/me').then(r => r.json());
-        _currentUser = data.username || null;
+        _currentUser = data.alias || data.username || null;
         _isAdmin     = data.is_admin || false;
         renderUserArea();
     }
@@ -668,7 +668,7 @@ python start_server.py --port 54865</pre>
         });
         const data = await res.json();
         if (data.success) {
-            _currentUser = data.username;
+            _currentUser = data.alias || data.username;
             _isAdmin     = data.is_admin || false;
             renderUserArea();
             const nextUrl = _pendingUrl;
@@ -689,7 +689,7 @@ python start_server.py --port 54865</pre>
         });
         const data = await res.json();
         if (data.success) {
-            _currentUser = data.username;
+            _currentUser = data.alias || data.username;
             _isAdmin     = data.is_admin || false;
             renderUserArea();
             const nextUrl = _pendingUrl;

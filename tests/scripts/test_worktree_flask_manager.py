@@ -350,6 +350,7 @@ def test_manager_login_issues_ui_session_for_api_access(
             else (_ for _ in ()).throw(PermissionError("invalid"))
         ),
     )
+    monkeypatch.setattr(state, "_alias_for_principal", lambda _principal: "MaxJJW")
 
     with _running_manager(state) as base_url:
         login = Request(
@@ -373,6 +374,7 @@ def test_manager_login_issues_ui_session_for_api_access(
             refreshed_cookie = response.headers["Set-Cookie"]
 
     assert session["username"] == "root@1"
+    assert session["alias"] == "MaxJJW"
     assert session["role"] == "super_admin"
     assert session["expires_in"] == manager.MANAGER_SESSION_TTL_SECONDS
     assert f"Max-Age={30 * 24 * 60 * 60}" in cookie
@@ -1076,6 +1078,7 @@ def test_manager_session_survives_restart_without_storing_raw_token(
     restarted = manager.ManagerState(tmp_path, "python")
     assert restarted.session(token) == {
         "username": "admin@1",
+        "alias": "admin@1",
         "role": "super_admin",
         "capabilities": {"manager": True, "research": True},
     }
