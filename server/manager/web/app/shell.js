@@ -107,12 +107,17 @@
 
     async function loadModules() {
       hydrateIcons();
-      state.modules = (await api("/api/modules")).modules;
+      try {
+        const response = await api("/api/modules");
+        if (!Array.isArray(response.modules)) throw new Error("模块目录格式无效");
+        state.modules = response.modules;
+        state.modulesError = null;
+      } catch (error) {
+        state.modules = FTNavigation.fallbackModulesForSession(state.session);
+        state.modulesError = error;
+      }
       const nav = document.querySelector("#module-nav");
-      const railModules = state.modules.filter(item => !item.homeOnly && ![
-        "settings", "ic-test", "backtest", "docs", "sqlite_web",
-        "manager", "server_operations",
-      ].includes(item.id));
+      const railModules = state.modules.filter(item => item.sidebarVisible);
       nav.replaceChildren(...railModules.map(item => {
         const row = document.createElement("button");
         row.className = "nav-button";

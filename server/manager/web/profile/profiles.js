@@ -5,13 +5,15 @@
     return context.isRouteCurrent?.() !== false;
   }
 
-  async function list(context) {
-    context.activeNav("profiles"); context.setHeading("Profiles", context.t("本地研究身份"));
+  async function list(context, options = {}) {
+    const nav = options.nav || "profiles";
+    const heading = options.heading || "Profiles";
+    context.activeNav(nav); context.setHeading(heading, context.t("本地研究身份"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取本地 Profiles…")));
     const payload = await context.api("/api/client/profiles");
     if (!current(context)) return;
     cached = payload.profiles || [];
-    context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
+    context.toolbar.append(context.button("↻", () => list(context, options), context.t("刷新")));
     if (!cached.length) {
       context.content.replaceChildren(FTUI.empty(context.t("尚无已注册 Profile"), context.t("请使用 CLI 注册研究 Agent Profile")));
       return;
@@ -29,7 +31,7 @@
   }
 
   async function detail(context, profileID) {
-    context.activeNav("profiles");
+    context.activeNav("research");
     if (!cached.length) {
       const payload = await context.api("/api/client/profiles");
       if (!current(context)) return;
@@ -38,7 +40,10 @@
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
     context.setHeading(profile.display_name || profile.profile_id, `Profile · ${profile.profile_id}`);
-    context.toolbar.append(context.button("‹", () => context.navigate("/profiles"), context.t("返回 Profiles")));
+    context.toolbar.append(context.button(
+      "‹", () => context.navigate("/research?section=profiles"),
+      context.t("返回研究身份")
+    ));
     const root = document.createElement("div"); root.className = "detail-stack";
     root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows({
       profile_id: profile.profile_id, display_name: profile.display_name,

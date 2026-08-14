@@ -1,10 +1,10 @@
 import Foundation
 import Combine
 
-/// 首页模块的运行时来源 —— 从服务器拉取共享注册表并暴露给 SwiftUI。
+/// 首页模块的运行时来源 —— 从 Manager 拉取按会话过滤的导航注册表。
 ///
-/// 与 web 端 `loadModules()` 读取的是同一个 `/static/config/modules.json`，
-/// 因此「一处写注册，所有客户端的 home 都能看到」。
+/// Manager 暂时不可用时使用最小显示回退，回退只保证已有入口可见，
+/// 不承担服务端权限判断。
 @MainActor
 final class ModuleRegistry: ObservableObject {
 
@@ -18,13 +18,19 @@ final class ModuleRegistry: ObservableObject {
         do {
             modules = try await APIClient.shared.modules()
         } catch {
+            modules = Module.fallbackModules
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
     }
 
-    /// 当前用户角色下应展示的模块。
-    func visibleModules(forRole role: String?) -> [Module] {
-        modules.filter { $0.isVisible(forRole: role) }
+    /// 当前会话应展示的模块。
+    ///
+    /// Manager 返回的目录已经完成权限过滤；这里额外检查认证状态，
+    /// 仅用于 Manager 暂时不可用时的本地回退目录，不会成为权限来源。
+    func visibleModules(forRole role: String?, isAuthenticated: Bool = false) -> [Module] {
+        modules.filter {
+            (!$0.requiresAuth || isAuthenticated) && $0.isVisible(forRole: role)
+        }
     }
 }

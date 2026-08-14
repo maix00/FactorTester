@@ -67,6 +67,52 @@
     return serverID ? {serverID} : {};
   }
 
+  // Display-only fallback for a temporary Manager/API outage.  It mirrors the
+  // stable public entries and the research child tabs, but never replaces the
+  // server-side filtering performed by /api/modules when that endpoint works.
+  const fallbackModuleDefinitions = [
+    {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
+    {
+      id: "research", title: "研究", title_key: "研究",
+      description_key: "查看各 Profile 的实时步骤、义务与报告",
+      icon: "chart", sfSymbol: "chart.xyaxis.line",
+      path: "/research?section=shared", requiresAuth: false,
+      sidebarVisible: true, homeVisible: true, pinned: true,
+      children: [
+        {id: "research.local", title: "本地研究", title_key: "本地研究", path: "/research?section=local", requiresAuth: true},
+        {id: "research.shared", title: "共享研究", title_key: "共享研究", path: "/research?section=shared", requiresAuth: false},
+        {id: "research.graph", title: "研究图", title_key: "研究图", path: "/research?section=graph", requiresAuth: true},
+        {id: "research.profiles", title: "研究身份", title_key: "研究身份", path: "/research?section=profiles", requiresAuth: true},
+      ],
+    },
+    {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "jobs", title: "测试任务", title_key: "测试任务", description_key: "跨端口查看配置、进度、结果与生成物", sfSymbol: "checklist", path: "/jobs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "products", title: "产品", title_key: "产品", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "settings", title: "设置", title_key: "设置", path: "/settings/account", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
+  ];
+
+  function visibleFallbackModule(module, session) {
+    const authenticated = Boolean(session);
+    if (module.requiresAuth !== false && !authenticated) return null;
+    if (Array.isArray(module.roles) && module.roles.length
+        && !module.roles.includes(session?.role)) return null;
+    const children = Array.isArray(module.children)
+      ? module.children.map(child => visibleFallbackModule(child, session)).filter(Boolean)
+      : undefined;
+    return {...module, ...(children ? {children} : {})};
+  }
+
+  function fallbackModulesForSession(session) {
+    return fallbackModuleDefinitions
+      .map(module => visibleFallbackModule(module, session))
+      .filter(Boolean);
+  }
+
   // Keep URL classification separate from route rendering.  The shell owns
   // authentication and handlers; this seam only turns a path into a stable,
   // testable value so new modules do not grow another branch in app/coordinator.js.
@@ -170,6 +216,7 @@
   }
 
   window.FTNavigation = Object.freeze({
+    fallbackModulesForSession,
     modulePath,
     moduleForPath,
     isPinnedPath,

@@ -151,10 +151,10 @@ final class APIClient: NSObject {
         return data
     }
 
-    /// 从 Manager 7998 拉取与 Web 端同一份模块注册表，避免把模块目录
-    /// 绑定到任意一个业务服务端口。
+    /// 从 Manager 7998 拉取按当前会话过滤后的统一导航注册表，避免把
+    /// 模块目录绑定到任意一个业务服务端口或由 Swift 自行维护权限。
     func modules() async throws -> [Module] {
-        let data = try await managerRequest(path: "/static/config/modules.json")
+        let data = try await managerRequest(path: "/api/modules")
         let manifest = try decoder.decode(ModuleManifest.self, from: data)
         return manifest.modules
     }

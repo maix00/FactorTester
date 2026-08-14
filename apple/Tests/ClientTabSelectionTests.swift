@@ -70,11 +70,9 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
-    func testSidebarPublishesBothTestLaunchers() {
-        let ids = ClientSidebar.featureLaunchers.map(\.id)
-
-        XCTAssertTrue(ids.contains(ClientTab.icTestLauncher.id))
-        XCTAssertTrue(ids.contains(ClientTab.backtestLauncher.id))
+    func testBackendTestLaunchersRemainStable() {
+        XCTAssertEqual(ClientTab.icTestLauncher.id, "ic-test-launcher")
+        XCTAssertEqual(ClientTab.backtestLauncher.id, "backtest-launcher")
     }
 
     func testDashboardTestModulesUseFreshWebDestinations() throws {
@@ -106,6 +104,39 @@ final class ClientTabSelectionTests: XCTestCase {
         let databaseData = #"{"id":"sqlite_web","title":"数据库","desc":"","icon":"","sfSymbol":"cylinder.split.1x2","path":"/sqlite-web/","requiresAuth":true,"roles":[]}"#.data(using: .utf8)!
         let database = try JSONDecoder().decode(Module.self, from: databaseData)
         XCTAssertNotEqual(ClientTab.module(database).id, ClientTab.module(database).id)
+    }
+
+    func testModuleDecodesResearchChildrenAndBackendTabBehavior() throws {
+        let data = #"""
+        {
+          "id":"research",
+          "title":"研究",
+          "desc":"研究报告、研究图与研究身份",
+          "icon":"chart",
+          "sfSymbol":"chart.xyaxis.line",
+          "path":"/research?section=shared",
+          "requiresAuth":false,
+          "roles":[],
+          "children":[
+            {"id":"research.profiles","title":"研究身份","path":"/research?section=profiles","requiresAuth":true}
+          ],
+          "sidebarVisible":true,
+          "homeVisible":true,
+          "pinned":true
+        }
+        """#.data(using: .utf8)!
+        let research = try JSONDecoder().decode(Module.self, from: data)
+        XCTAssertEqual(research.children.map(\.id), ["research.profiles"])
+        XCTAssertEqual(research.children.first?.path, "/research?section=profiles")
+
+        let newTabData = #"""
+        {
+          "id":"docs","title":"技术文档","path":"/docs","requiresAuth":false,"roles":[],"tab_behavior":"new"
+        }
+        """#.data(using: .utf8)!
+        let docs = try JSONDecoder().decode(Module.self, from: newTabData)
+        XCTAssertEqual(docs.tabBehavior, "new")
+        XCTAssertNotEqual(ClientTab.module(docs).id, ClientTab.module(docs).id)
     }
 
     func testReportObjectsOpenDedicatedWebTabs() {

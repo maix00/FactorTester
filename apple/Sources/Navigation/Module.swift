@@ -1,7 +1,7 @@
 import Foundation
 
-/// 一个首页模块条目 —— 与 `/static/config/modules.json` 的 schema 对应。
-/// 这是跨客户端共享注册表的原生镜像；新增模块只改服务器那份 JSON，无需改 App。
+/// 一个首页模块条目 —— 与 Manager `/api/modules` 的 schema 对应。
+/// Manager 是权限与顺序的唯一来源；这里仅保留渲染所需的兼容镜像。
 struct Module: Codable, Identifiable, Hashable {
     let id: String
     let title: String
@@ -15,9 +15,48 @@ struct Module: Codable, Identifiable, Hashable {
     let requiresAuth: Bool
     /// 非空时仅这些角色可见。
     let roles: [String]
+    /// 后端导航树中的子选项卡。
+    let children: [Module]
+    /// 后端决定模块出现在哪些客户端导航表面；客户端只负责渲染。
+    let sidebarVisible: Bool
+    let homeVisible: Bool
+    let pinned: Bool
+    let tabBehavior: String
+
+    init(
+        id: String,
+        title: String,
+        desc: String = "",
+        icon: String = "",
+        sfSymbol: String? = nil,
+        path: String,
+        requiresAuth: Bool = true,
+        roles: [String] = [],
+        children: [Module] = [],
+        sidebarVisible: Bool = true,
+        homeVisible: Bool = true,
+        pinned: Bool = true,
+        tabBehavior: String = "standard"
+    ) {
+        self.id = id
+        self.title = title
+        self.desc = desc
+        self.icon = icon
+        self.sfSymbol = sfSymbol
+        self.path = path
+        self.requiresAuth = requiresAuth
+        self.roles = roles
+        self.children = children
+        self.sidebarVisible = sidebarVisible
+        self.homeVisible = homeVisible
+        self.pinned = pinned
+        self.tabBehavior = tabBehavior
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, desc, icon, sfSymbol, path, requiresAuth, roles
+        case id, title, desc, icon, sfSymbol, path, requiresAuth, roles,
+             children, sidebarVisible, homeVisible, pinned
+        case tabBehavior = "tab_behavior"
     }
 
     init(from decoder: Decoder) throws {
@@ -30,12 +69,58 @@ struct Module: Codable, Identifiable, Hashable {
         path = try c.decode(String.self, forKey: .path)
         requiresAuth = try c.decodeIfPresent(Bool.self, forKey: .requiresAuth) ?? true
         roles = try c.decodeIfPresent([String].self, forKey: .roles) ?? []
+        children = try c.decodeIfPresent([Module].self, forKey: .children) ?? []
+        sidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
+        homeVisible = try c.decodeIfPresent(Bool.self, forKey: .homeVisible) ?? true
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? true
+        tabBehavior = try c.decodeIfPresent(String.self, forKey: .tabBehavior) ?? "standard"
     }
 
     /// 给定当前用户角色，是否对其可见。
     func isVisible(forRole role: String?) -> Bool {
         roles.isEmpty || roles.contains(role ?? "")
     }
+
+    /// Used only when Manager 7998 is temporarily unavailable.  It keeps the
+    /// existing client usable without becoming a second permission source.
+    static let fallbackModules: [Module] = [
+        Module(
+            id: "home", title: "主页", path: "/",
+            requiresAuth: false, sidebarVisible: false, homeVisible: false
+        ),
+        Module(
+            id: "research", title: "研究",
+            desc: "研究报告、研究图与研究身份",
+            sfSymbol: "chart.xyaxis.line",
+            path: "/research?section=shared", requiresAuth: false,
+            children: [
+                Module(id: "research.local", title: "本地研究", path: "/research?section=local"),
+                Module(id: "research.shared", title: "共享研究", path: "/research?section=shared", requiresAuth: false),
+                Module(id: "research.graph", title: "研究图", path: "/research?section=graph"),
+                Module(id: "research.profiles", title: "研究身份", path: "/research?section=profiles"),
+            ]
+        ),
+        Module(id: "ic-test", title: "IC 测试", path: "/ic-test", tabBehavior: "new"),
+        Module(id: "backtest", title: "回测", path: "/backtest", tabBehavior: "new"),
+        Module(id: "jobs", title: "测试任务", path: "/jobs", requiresAuth: false),
+        Module(id: "factors", title: "因子库", path: "/factors", requiresAuth: false),
+        Module(id: "products", title: "产品", path: "/products", requiresAuth: false),
+        Module(
+            id: "manager", title: "服务器管理", sfSymbol: "server.rack",
+            path: "/manager",
+            roles: ["super_admin"], sidebarVisible: false, pinned: false
+        ),
+        Module(
+            id: "sqlite_web", title: "数据库", sfSymbol: "cylinder.split.1x2",
+            path: "/sqlite-web/",
+            roles: ["super_admin"], sidebarVisible: false, pinned: false
+        ),
+        Module(
+            id: "docs", title: "技术文档", sfSymbol: "book", path: "/docs",
+            requiresAuth: false, sidebarVisible: false, pinned: false,
+            tabBehavior: "new"
+        ),
+    ]
 }
 
 struct ModuleManifest: Codable {
