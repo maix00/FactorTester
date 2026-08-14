@@ -515,6 +515,9 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
 def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
     source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    template_actions = (WEB_ROOT / "workbench" / "templates" / "actions.js").read_text(
+        encoding="utf-8",
+    )
     first_load = source.split("const [manifest, workspaces]", 1)[1].split("]);", 1)[0]
     for endpoint in (
         "/api/catalog/factors", "/api/catalog/product-groups",
@@ -522,7 +525,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
         assert endpoint not in first_load
-    assert "FTTestFactors.prepare(state)" in source
+    assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
     assert "ensureProductsForExecution" in source
     assert "ensureOutputCapabilities" in source

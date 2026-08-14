@@ -31,7 +31,9 @@ single source of truth for the script order and semantic module groups.
   client's frozen Git-revision bridge; `workbench/test-run-batch.js` is the single IC/backtest submission
   seam and retains each frozen RunSpec and Job link in the originating page;
   `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
-  group, not with the shared settings shell
+  group, not with the shared settings shell; template presentation and
+  persistence actions are kept together under `workbench/templates/` and are
+  loaded as one template group
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)

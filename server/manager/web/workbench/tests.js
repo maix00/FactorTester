@@ -218,6 +218,10 @@
   function render(context, state) {
     const root = document.createElement("div");
     root.className = "test-workbench";
+    const templateActions = FTTestTemplateActions.create(context, state, {
+      ensureRunCode: () => ensureRunCode(context, state),
+      render: () => render(context, state),
+    });
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
       activeTab: state.settingsTabKey,
@@ -232,12 +236,7 @@
       },
       state,
       chipSources: FTTestContentAdapters.chipSources(state),
-      actions: {templates: {
-        save: () => saveTemplate(context, state),
-        load: template => loadTemplate(context, state, template),
-        overwrite: template => overwriteTemplate(context, state, template),
-        delete: template => deleteTemplate(context, state, template),
-      }},
+      actions: {templates: templateActions},
       lazyState: key => lazyStatus(state, key),
       ensureControl: field => ensureControl(
         context, state, field, () => render(context, state),
@@ -274,110 +273,6 @@
       ensureRunCode(context, state, () => render(context, state));
     }
     context.content.replaceChildren(root);
-  }
-
-  async function saveTemplate(context, state) {
-    const name = prompt(context.t("模板名称"));
-    if (!name?.trim()) return;
-    await ensureRunCode(context, state);
-    await FTTestLazyCode.loadGroup("workbench-factors");
-    await FTTestLazyCode.loadGroup("workbench-products");
-    const group = selectedExecutionGroup(context, state);
-    await FTTestConfiguration.save(context, state, group);
-    const value = await context.api(
-      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
-      {method: "POST", body: JSON.stringify({name: name.trim()})},
-    );
-    state.templates.unshift(value.template);
-    render(context, state);
-  }
-
-  async function loadTemplate(context, state, template) {
-    await FTTestLazyCode.loadGroup("workbench-factors");
-    await FTTestLazyCode.loadGroup("workbench-products");
-    if (!state.workspace) {
-      state.factorRef = template.payload?.shared?.factors?.[0]?.factor_ref || state.factorRef;
-      await FTTestConfiguration.ensureWorkspace(context, state);
-    }
-    const value = await context.api(
-      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          configuration_id: template.configuration_id,
-          expected_revision: state.workspace.configuration.revision,
-        }),
-      },
-    );
-    state.workspace.configuration = value.configuration;
-    const listed = state.workspaces.findIndex(item => item.workspace_id === state.workspace.workspace_id);
-    if (listed >= 0) state.workspaces[listed] = state.workspace;
-    FTTestState.applyWorkspaceConfiguration(state);
-    state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
-      state.manifest, FTTestState.savedMountedTabs(state),
-    );
-    state.values = FTTestSettings.initialValues(
-      state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
-    );
-    state.settingsTabKey = "";
-    state.lazy = FTTestState.lazyState();
-    state.lazy.templates.status = "ready";
-    FTTestState.seedSavedCatalogs(state);
-    state.factorCatalog = null;
-    FTTestFactors.prepare(state);
-    FTTestProducts.synchronize(state);
-    render(context, state);
-  }
-
-  async function overwriteTemplate(context, state, template) {
-    if (!confirm(`${context.t("用当前设置覆盖模板")}「${template.name}」？`)) return;
-    try {
-      await ensureRunCode(context, state);
-      await FTTestLazyCode.loadGroup("workbench-factors");
-      await FTTestLazyCode.loadGroup("workbench-products");
-      const group = selectedExecutionGroup(context, state);
-      await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(
-        `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({workspace_id: state.workspace.workspace_id}),
-        },
-      );
-      const index = state.templates.findIndex(item => (
-        item.configuration_id === template.configuration_id
-      ));
-      if (index >= 0) state.templates[index] = value.template;
-      render(context, state);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
-  async function deleteTemplate(context, state, template) {
-    if (!confirm(`${context.t("确定删除模板")}「${template.name}」？`)) return;
-    try {
-      await context.api(
-        `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
-        {method: "DELETE"},
-      );
-      state.templates = state.templates.filter(item => (
-        item.configuration_id !== template.configuration_id
-      ));
-      render(context, state);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
-  function selectedExecutionGroup(context, state) {
-    const groups = window.FTTestProducts?.selectedGroups?.(state) || [];
-    if (!groups.length) throw new Error(context.t("请选择产品组"));
-    const requested = state.kind === "ic" ? state.groupRefs : [state.groupRef];
-    if (groups.length !== requested.filter(Boolean).length) {
-      throw new Error(context.t("所选产品组已不可用，请重新选择"));
-    }
-    return groups[0];
   }
 
   window.FTTests = {

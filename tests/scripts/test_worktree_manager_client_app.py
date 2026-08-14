@@ -1392,6 +1392,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/tab-chip-content.js",
             "workbench/tab-list-chip.js",
             "workbench/test-templates.js", "workbench/test-content-adapters.js",
+            "workbench/templates/actions.js",
             "workbench/test-run-results.js",
             "workbench/test-run-batch.js",
             "workbench/tests.js",
@@ -1485,8 +1486,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         "test-templates.js"
     ]
     assert 'iconAction(context, "删除", "trash"' in scripts["test-templates.js"]
-    assert 'method: "PUT"' in scripts["tests.js"]
-    assert 'method: "DELETE"' in scripts["tests.js"]
+    assert 'method: "PUT"' in scripts["actions.js"]
+    assert 'method: "DELETE"' in scripts["actions.js"]
 
 
 def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) -> None:

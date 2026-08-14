@@ -217,6 +217,7 @@
       "workbench/backtest-groups.js"
     ],
     "workbench-templates": [
+      "workbench/templates/actions.js",
       "workbench/test-templates.js"
     ],
     "profile": [
@@ -335,6 +336,7 @@
     "workbench/backtest-group-form.js",
     "workbench/backtest-groups.js",
     "workbench/test-configuration.js",
+    "workbench/templates/actions.js",
     "workbench/test-templates.js",
     "workbench/test-content-adapters.js",
     "workbench/test-run-fields.js",
