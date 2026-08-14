@@ -6,7 +6,8 @@ import json
 import threading
 from contextlib import contextmanager
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 import pytest
 
@@ -37,6 +38,11 @@ class Registry:
 
     def servers(self, *, include_offline=False):
         return [item for item in self._servers if include_offline or item["online"]]
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
 
 
 def _server(server_id, endpoint, *, public=True, internal=None):
@@ -163,13 +169,33 @@ def test_compliance_request_from_configured_alias_points_to_public_ip(
         "X-Forwarded-For": "8.8.8.8",
     }
 
+    opener = build_opener(_NoRedirect())
     with running_manager(state) as base_url:
-        with urlopen(Request(f"{base_url}/compliance?next=/jobs", headers=headers)) as response:
+        with pytest.raises(HTTPError) as redirected:
+            opener.open(Request(
+                f"{base_url}/compliance?next=/jobs",
+                headers=headers,
+            ))
+        assert redirected.value.code == 303
+        location = redirected.value.headers["Location"]
+        assert location.startswith(
+            "https://198.51.100.10:7998/compliance?"
+        )
+        grant = parse_qs(urlparse(location).query)["grant"][0]
+        target = Request(
+            f"{base_url}/compliance?grant={grant}&next=%2Fjobs",
+            headers={
+                "Host": "198.51.100.10:7998",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-For": "8.8.8.8",
+            },
+        )
+        with urlopen(target) as response:
             body = response.read().decode("utf-8")
 
-    assert 'const deviceAuthTarget="https://198.51.100.10:7998/compliance?next=/jobs"' in body
-    assert 'id="device-auth-target"' in body
-    assert "切换到服务器公网 IP进行设备登录" in body
+    assert 'class="visitor-entry"' in body
+    assert f"grant={grant}" in body
+    assert 'id="device-auth-status"' in body
 
 
 def test_visitor_catalog_shows_internal_sources_but_rejects_their_data(

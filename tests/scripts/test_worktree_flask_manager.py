@@ -1304,7 +1304,7 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def test_visitor_entry_is_only_advertised_by_configured_ingress(
+def test_ngrok_root_redirects_to_ip_compliance_with_visitor_grant(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
@@ -1320,15 +1320,31 @@ def test_visitor_entry_is_only_advertised_by_configured_ingress(
     )
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
 
+    opener = build_opener(_NoRedirect())
     with _running_manager(state) as base_url:
         ingress = Request(
-            f"{base_url}/compliance",
+            f"{base_url}/",
             headers=_visitor_request_headers(
                 "eloquence-drizzly-fencing.ngrok-free.dev",
             ),
         )
-        with urlopen(ingress) as response:
-            ingress_body = response.read().decode("utf-8")
+        with pytest.raises(HTTPError) as redirected:
+            opener.open(ingress)
+        assert redirected.value.code == 303
+        location = redirected.value.headers["Location"]
+        assert location.startswith(
+            "https://101.133.144.27:7998/compliance?"
+        )
+        query = parse_qs(urlparse(location).query)
+        grant = query["grant"][0]
+        assert "eloquence-drizzly-fencing.ngrok-free.dev" not in location
+
+        target = Request(
+            f"{base_url}/compliance?grant={grant}&next=%2F",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(target) as response:
+            target_body = response.read().decode("utf-8")
 
         direct_ip = Request(
             f"{base_url}/compliance",
@@ -1337,22 +1353,40 @@ def test_visitor_entry_is_only_advertised_by_configured_ingress(
         with urlopen(direct_ip) as response:
             direct_body = response.read().decode("utf-8")
 
-        direct_login = Request(
-            f"{base_url}/login?next=/jobs",
+        visitor = Request(
+            f"{base_url}/visitor?grant={grant}&next=%2F",
             headers=_visitor_request_headers("101.133.144.27:7998"),
         )
-        with urlopen(direct_login) as response:
-            direct_login_body = response.read().decode("utf-8")
+        with pytest.raises(HTTPError) as redeemed:
+            opener.open(visitor)
+        assert redeemed.value.code == 303
+        visitor_cookie = redeemed.value.headers["Set-Cookie"].split(";", 1)[0]
 
-    assert 'class="visitor-entry"' in ingress_body
-    assert 'href="/visitor?next=/' in ingress_body
+        consumed = Request(
+            f"{base_url}/compliance?grant={grant}",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(consumed) as response:
+            consumed_body = response.read().decode("utf-8")
+
+        visitor_login = Request(
+            f"{base_url}/login?next=/jobs",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998",
+                cookie=visitor_cookie,
+            ),
+        )
+        with urlopen(visitor_login) as response:
+            visitor_login_body = response.read().decode("utf-8")
+
+    assert 'class="visitor-entry"' in target_body
+    assert f"grant={grant}" in target_body
     assert 'class="visitor-entry"' not in direct_body
-    assert 'href="/visitor?next=/' not in direct_body
-    assert 'class="visitor-entry"' not in direct_login_body
-    assert 'href="/visitor?next=/jobs' not in direct_login_body
+    assert 'class="visitor-entry"' not in consumed_body
+    assert 'class="visitor-entry"' not in visitor_login_body
 
 
-def test_public_session_without_current_origin_device_key_stays_on_compliance(
+def test_public_session_without_current_origin_device_key_redirects_via_ingress(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
@@ -1369,6 +1403,7 @@ def test_public_session_without_current_origin_device_key_stays_on_compliance(
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
     session_token, _, _ = state._issue_session("alice@default", "user")
 
+    opener = build_opener(_NoRedirect())
     with _running_manager(state) as base_url:
         ingress = Request(
             f"{base_url}/jobs",
@@ -1377,9 +1412,21 @@ def test_public_session_without_current_origin_device_key_stays_on_compliance(
                 cookie=f"ft-manager-session={session_token}",
             ),
         )
-        with urlopen(ingress) as response:
+        with pytest.raises(HTTPError) as ingress_redirect:
+            opener.open(ingress)
+        assert ingress_redirect.value.code == 303
+        ingress_location = ingress_redirect.value.headers["Location"]
+        assert ingress_location.startswith(
+            "https://101.133.144.27:7998/compliance?"
+        )
+        ingress_query = parse_qs(urlparse(ingress_location).query)
+        grant = ingress_query["grant"][0]
+        ingress_compliance = Request(
+            f"{base_url}/compliance?grant={grant}&next=%2Fjobs",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(ingress_compliance) as response:
             ingress_body = response.read().decode("utf-8")
-            assert response.geturl().startswith(f"{base_url}/compliance?")
 
         direct_ip = Request(
             f"{base_url}/jobs",
@@ -1388,7 +1435,16 @@ def test_public_session_without_current_origin_device_key_stays_on_compliance(
                 cookie=f"ft-manager-session={session_token}",
             ),
         )
-        with urlopen(direct_ip) as response:
+        with pytest.raises(HTTPError) as direct_redirect:
+            opener.open(direct_ip)
+        assert direct_redirect.value.code == 303
+        direct_location = direct_redirect.value.headers["Location"]
+        assert direct_location.startswith("/compliance?next=/jobs")
+        direct_compliance = Request(
+            f"{base_url}{direct_location}",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(direct_compliance) as response:
             direct_body = response.read().decode("utf-8")
             assert response.geturl().startswith(f"{base_url}/compliance?")
 
