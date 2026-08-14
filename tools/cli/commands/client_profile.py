@@ -31,6 +31,10 @@ from tools.cli.release.factor_worktree import (
 )
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
+from tools.cli.release.profile_sync import (
+    sync_profile as _sync_profile,
+)
+from tools.cli.release.local_profile_contracts import session_binding_reference
 
 
 def _json(value) -> str:
@@ -42,57 +46,6 @@ def _root_option(function):
         "--release-profile",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
     )(function)
-
-
-def _sync_profile(
-    profile: dict[str, object],
-    *,
-    server_url: str = "",
-) -> dict[str, object]:
-    """Authenticate the Profile owner and sync only its safe projection."""
-    binding = profile.get("session_binding")
-    principal_ref = str(
-        binding.get("principal_ref") or ""
-        if isinstance(binding, dict) else ""
-    ).strip()
-    if not principal_ref:
-        raise ValueError("profile has no session principal binding")
-    configured_server = profile.get("server")
-    configured_url = (
-        str(configured_server.get("base_url") or "").strip()
-        if isinstance(configured_server, dict) else ""
-    )
-    target = str(server_url or configured_url).strip()
-    if not target:
-        raise ValueError("profile has no server base URL")
-    client = FactorTesterClient(HttpSession(target))
-    try:
-        authenticated = client.current_principal()
-    except (OSError, TimeoutError):
-        return _offline_profile_sync_receipt(
-            profile, "Manager is unavailable; sync remains pending"
-        )
-    if str(authenticated.get("username") or "") != principal_ref:
-        raise ValueError("authenticated principal does not match profile")
-    try:
-        return client.sync_profile(profile)
-    except (OSError, TimeoutError):
-        return _offline_profile_sync_receipt(
-            profile, "Manager is unavailable; sync remains pending"
-        )
-
-
-def _offline_profile_sync_receipt(
-    profile: dict[str, object], reason: str,
-) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "status": "pending",
-        "synced": False,
-        "pending": True,
-        "profile_id": str(profile.get("profile_id") or ""),
-        "reason": reason,
-    }
 
 
 @click.group("profile")
@@ -139,6 +92,11 @@ def clear_ui_session(server_url: str) -> None:
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
 @click.option("--server-url", required=True)
+@click.option(
+    "--manager-url",
+    default="",
+    help="Profile 投影同步的 Manager 7998 地址；省略时按执行服务地址推导。",
+)
 @click.option("--agent-id", default="")
 @click.option(
     "--role",
@@ -152,6 +110,7 @@ def create_profile(
     profile_id: str,
     display_name: str,
     server_url: str,
+    manager_url: str,
     agent_id: str,
     role: str,
     principal_ref: str,
@@ -168,7 +127,18 @@ def create_profile(
         role=role,
         principal_ref=principal_ref,
     )
-    click.echo(_json(receipt))
+    profile = LocalProfileStore(
+        load_profile_root(release_profile)
+    ).load(profile_id)
+    control_profile_sync = _sync_profile(
+        profile, manager_url=manager_url,
+    )
+    click.echo(_json({
+        **receipt,
+        "server_visibility_verified": bool(control_profile_sync.get("synced")),
+        "server_visibility_pending": not bool(control_profile_sync.get("synced")),
+        "control_profile_sync": control_profile_sync,
+    }))
 
 
 @client_profile.command("deactivate")
@@ -223,12 +193,15 @@ def list_profiles(release_profile: Path | None) -> None:
 
 @client_profile.command("sync")
 @click.argument("profile_id", required=False)
-@click.option("--server-url", default="")
+@click.option(
+    "--manager-url", "--server-url", "manager_url", default="",
+    help="Profile 投影同步的 Manager 7998 地址。",
+)
 @_root_option
 @friendly_errors
 def sync_profiles(
     profile_id: str | None,
-    server_url: str,
+    manager_url: str,
     release_profile: Path | None,
 ) -> None:
     """Synchronize one Profile, or all locally bound Profiles, to its Manager."""
@@ -236,7 +209,7 @@ def sync_profiles(
     profiles = [store.load(profile_id)] if profile_id else store.list()
     results: list[dict[str, object]] = []
     for profile in profiles:
-        receipt = _sync_profile(profile, server_url=server_url)
+        receipt = _sync_profile(profile, manager_url=manager_url)
         results.append({
             "profile_id": str(profile.get("profile_id") or ""),
             **receipt,
@@ -356,6 +329,7 @@ def show_user_layout(
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
 @click.option("--server-url", required=True)
+@click.option("--manager-url", default="")
 @click.option("--agent-id", required=True)
 @click.option(
     "--role",
@@ -369,6 +343,7 @@ def bootstrap_profile(
     profile_id: str,
     display_name: str,
     server_url: str,
+    manager_url: str,
     agent_id: str,
     role: str,
     principal_ref: str,
@@ -431,7 +406,7 @@ def bootstrap_profile(
     })
     claim = store.claim_agent(profile_id, agent_id)
     profile = store.load(profile_id)
-    control_profile_sync = _sync_profile(profile, server_url=server_url)
+    control_profile_sync = _sync_profile(profile, manager_url=manager_url)
     claim_command = (
         f"factortester client profile claim {profile_id} {agent_id}"
     )
@@ -558,9 +533,8 @@ def bind_profile_initialization_source(
         "source_ref": f"factortester://factor-library/{owner_ref}",
         "snapshot_ref": snapshot_ref,
         "principal_ref": principal_ref,
-        "session_ref": (
-            f"session-binding://{principal_ref}/{profile_id}/"
-            f"{projection_hash}"
+        "session_ref": session_binding_reference(
+            principal_ref, profile_id, projection_hash,
         ),
         "projection_hash": projection_hash,
         "source_materialized": False,

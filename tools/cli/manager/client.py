@@ -38,6 +38,14 @@ class ManagerClient:
     def session(self) -> dict[str, Any]:
         return self._request("GET", "/api/session")
 
+    def sync_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """Write one authenticated, source-free Profile projection."""
+        return self._request(
+            "POST",
+            "/api/client/profiles/sync",
+            payload={"profile": profile},
+        )
+
     def instances(self) -> dict[str, Any]:
         return self._request("GET", "/api/worktrees")
 

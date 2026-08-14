@@ -11,6 +11,7 @@ from typing import Any
 from .locations import validate_client_root
 from .local_profile_contracts import (
     new_local_profile,
+    session_binding_reference,
     validate_local_identifier,
     validate_local_profile,
 )
@@ -185,8 +186,8 @@ class LocalProfileStore:
             )
         profile["session_binding"] = {
             "principal_ref": principal_ref,
-            "session_ref": (
-                f"session-binding://{principal_ref}/{profile_id}"
+            "session_ref": session_binding_reference(
+                principal_ref, profile_id,
             ),
         }
         return self.save(profile)
