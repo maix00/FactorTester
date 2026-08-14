@@ -14,9 +14,11 @@ from tools.cli.release.user_layout import (
     default_user_root,
 )
 from server.manager.services.profile_projection import (
+    ProfileProjectionCache,
     control_profile_projection,
     safe_profile_value,
 )
+from server.manager.storage.control_db import ControlDatabaseError
 
 
 class ClientStateService:
@@ -27,9 +29,14 @@ class ClientStateService:
         client_root: Path | None = None,
         *,
         control_store: object | None = None,
+        profile_cache_root: Path | None = None,
     ) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
         self.control_store = control_store
+        self.profile_cache = (
+            ProfileProjectionCache(profile_cache_root)
+            if profile_cache_root is not None else None
+        )
 
     def profiles(
         self,
@@ -57,16 +64,36 @@ class ClientStateService:
                 if owner == principal:
                     result.append(value)
 
+        if self.profile_cache is not None:
+            cached = self.profile_cache.read(principal)
+            indexed = {
+                str(item.get("profile_id") or ""): item
+                for item in result
+                if str(item.get("profile_id") or "")
+            }
+            for item in cached:
+                profile_id = str(item.get("profile_id") or "").strip()
+                if not profile_id:
+                    continue
+                if profile_id in indexed:
+                    merged = dict(item)
+                    merged.update(indexed[profile_id])
+                    indexed[profile_id] = merged
+                else:
+                    indexed[profile_id] = item
+            result = list(indexed.values())
+
         # A deployed public Manager does not mount a user's device-local
         # Client root.  PostgreSQL therefore supplies the safe Profile
         # identity projection when it has been migrated.  Local files remain
         # the fallback for development and for richer owner-side state.
         if self.control_store is not None:
+            self._flush_profile_cache(principal)
             try:
                 rows = self.control_store.list_profiles(principal)
             except (
-                AttributeError, ConnectionError, OSError,
-                RuntimeError, TypeError, ValueError,
+                AttributeError, ConnectionError, ControlDatabaseError,
+                OSError, RuntimeError, TypeError, ValueError,
             ):
                 rows = []
             indexed = {
@@ -99,6 +126,97 @@ class ClientStateService:
             result,
             key=lambda item: str(item.get("profile_id") or ""),
         )
+
+    def sync_profile(
+        self, principal: str, profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Durably project one local Profile and best-effort sync it to PG.
+
+        The local projection is written before the database call.  A database
+        outage therefore returns a successful *local* handoff with
+        ``status=pending`` rather than making Profile registration disappear
+        or pretending that the global copy was committed.
+        """
+        owner = str(principal or "").strip()
+        if not owner:
+            raise ValueError("profile principal is required")
+        if not isinstance(profile, dict):
+            raise ValueError("profile must be an object")
+        projected = safe_profile_value(profile)
+        if not isinstance(projected, dict):
+            raise ValueError("profile projection must be an object")
+        profile_id = str(projected.get("profile_id") or "").strip()
+        if not profile_id:
+            raise ValueError("profile_id is required")
+        display_name = str(
+            projected.get("display_name") or profile_id
+        ).strip() or profile_id
+        projected["profile_id"] = profile_id
+        projected["display_name"] = display_name
+        projected["session_binding"] = {"principal_ref": owner}
+
+        if self.profile_cache is not None:
+            self.profile_cache.upsert(owner, projected)
+
+        if self.control_store is None:
+            return self._profile_sync_receipt(
+                owner, projected, synced=False,
+                reason="control database is not configured",
+            )
+        try:
+            self.control_store.upsert_profile(
+                owner, profile_id, display_name, projected,
+            )
+        except (
+            ControlDatabaseError, ConnectionError, OSError, RuntimeError,
+        ):
+            return self._profile_sync_receipt(
+                owner, projected, synced=False,
+                reason="control database is unavailable",
+            )
+        if self.profile_cache is not None:
+            self.profile_cache.mark_synced(owner, profile_id)
+        return self._profile_sync_receipt(owner, projected, synced=True)
+
+    def _flush_profile_cache(self, principal: str) -> None:
+        if self.control_store is None or self.profile_cache is None:
+            return
+        for profile in self.profile_cache.pending(principal):
+            profile_id = str(profile.get("profile_id") or "").strip()
+            if not profile_id:
+                continue
+            display_name = str(
+                profile.get("display_name") or profile_id
+            ).strip() or profile_id
+            try:
+                self.control_store.upsert_profile(
+                    principal, profile_id, display_name, profile,
+                )
+            except (
+                ControlDatabaseError, ConnectionError, OSError, RuntimeError,
+            ):
+                return
+            self.profile_cache.mark_synced(principal, profile_id)
+
+    @staticmethod
+    def _profile_sync_receipt(
+        principal: str,
+        profile: dict[str, Any],
+        *,
+        synced: bool,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        receipt = {
+            "schema_version": 1,
+            "status": "synced" if synced else "pending",
+            "synced": bool(synced),
+            "pending": not synced,
+            "principal_ref": principal,
+            "profile": safe_profile_value(profile),
+        }
+        if reason:
+            receipt["reason"] = reason
+        return receipt
 
     def workspace(self, principal: str) -> dict[str, Any]:
         user_root = default_user_root(principal).resolve()

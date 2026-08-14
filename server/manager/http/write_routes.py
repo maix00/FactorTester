@@ -28,6 +28,8 @@ class WriteRoutesMixin:
             return
         if not self._public_login_gate(parsed, method="POST"):
             return
+        if self._post_client_research_routes(parsed):
+            return
         if parsed.path == "/api/device/challenge":
             self._device_challenge()
             return

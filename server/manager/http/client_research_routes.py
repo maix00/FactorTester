@@ -12,6 +12,27 @@ from server.manager.http.responses import json_response
 class ClientResearchRoutesMixin:
     """Expose owner-scoped local research and workspace projections."""
 
+    def _post_client_research_routes(self, parsed) -> bool:
+        if parsed.path != "/api/client/profiles/sync":
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        try:
+            payload = self._json_body(4 * 1024 * 1024)
+            profile = payload.get("profile")
+            if not isinstance(profile, dict):
+                raise ValueError("profile must be an object")
+            receipt = self.state.client_state.sync_profile(
+                str(session["username"]), profile,
+            )
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        json_response(self, {"success": True, **receipt})
+        return True
+
     def _get_client_research_routes(self, parsed) -> bool:
         if parsed.path == "/api/client/profiles":
             session = self._session()
