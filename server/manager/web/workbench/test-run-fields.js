@@ -68,6 +68,9 @@
         {
           onCommit: ({key, value}) => { state.runValues[key] = value; },
           refresh,
+          ensureControl: field => window.FTTests?.ensureControl?.(
+            context, state, field, refresh,
+          ),
         },
         false,
       );

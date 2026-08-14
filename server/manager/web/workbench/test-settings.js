@@ -287,6 +287,14 @@
     if (!supportedControlSet.has(field.control_template)) {
       throw new Error(`未实现的测试设置控件: ${field.control_template}`);
     }
+    const descriptor = window.FTStaticLoader?.controlDescriptor?.(field.control_template);
+    if (descriptor?.group && descriptor.global && !window[descriptor.global]) {
+      options.ensureControl?.(field);
+      const deferred = document.createElement("span");
+      deferred.className = "test-control-deferred";
+      deferred.textContent = context.t("正在读取此设置控件…");
+      return deferred;
+    }
     const value = FTSettingRules.valueFor(key, field, values);
     if (field.control_template === "ic_horizon_grid") {
       return FTICHorizonSettings.renderHorizon({

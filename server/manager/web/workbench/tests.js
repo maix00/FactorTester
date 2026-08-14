@@ -127,6 +127,12 @@
     return record.promise;
   }
 
+  function ensureControl(context, state, field, refresh) {
+    const descriptor = window.FTStaticLoader?.controlDescriptor?.(field?.control_template);
+    if (!descriptor?.group) return Promise.resolve();
+    return FTTestLazyCode.loadGroup(descriptor.group).then(() => refresh?.());
+  }
+
   function ensureLazyKey(context, state, key, refresh) {
     if (!key || lazyReady(state, key)) return Promise.resolve();
     const record = state.lazy[key];
@@ -228,6 +234,9 @@
         delete: template => deleteTemplate(context, state, template),
       }},
       lazyState: key => lazyStatus(state, key),
+      ensureControl: field => ensureControl(
+        context, state, field, () => render(context, state),
+      ),
       ensureRunCode: () => ensureRunCode(context, state, () => render(context, state)),
       ensureTab: tab => ensureTab(context, state, tab, () => render(context, state)),
       onChipOpen: tabKey => {
@@ -374,5 +383,8 @@
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
+    ensureControl: (context, state, field, refresh) => (
+      ensureControl(context, state, field, refresh)
+    ),
   };
 })();

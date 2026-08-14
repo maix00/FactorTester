@@ -538,6 +538,14 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert not set(manifest["groups"]["workbench-run"]) & set(
         research_static._initial_scripts(manifest)
     )
+    assert "workbench/factor-roles.js" not in manifest["groups"]["workbench-core"]
+    assert "workbench/custom-product-overrides.js" not in manifest["groups"]["workbench-core"]
+    assert manifest["control_groups"]["ic_horizon_grid"]["group"] == "workbench-ic-controls"
+    assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
+    assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
+    assert manifest["group_dependencies"]["workbench-run"] == [
+        "workbench-core", "workbench-ic-controls",
+    ]
     assert "ensureRunCode" in source
 
 

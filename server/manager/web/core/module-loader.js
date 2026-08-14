@@ -2,6 +2,7 @@
   const loaded = new Map();
   const groupLoads = new Map();
   let manifestPromise = null;
+  let manifestValue = null;
   let revision = "";
 
   function assetURL(relative) {
@@ -20,7 +21,7 @@
       }).then(response => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
-      });
+      }).then(value => { manifestValue = value; return value; });
     }
     return manifestPromise;
   }
@@ -102,6 +103,10 @@
     for (const name of names || []) await loadGroup(String(name), value);
   }
 
+  function controlDescriptor(template) {
+    return manifestValue?.control_groups?.[String(template || "")] || null;
+  }
+
   async function ensureRoute(kind) {
     const value = await manifest();
     await loadGroups(value.route_groups?.[kind] || []);
@@ -112,5 +117,5 @@
   // not append them again.
   for (const name of ["core", "app"]) loaded.set(`group:${name}`, Promise.resolve());
 
-  window.FTStaticLoader = Object.freeze({ensureRoute, loadGroups});
+  window.FTStaticLoader = Object.freeze({ensureRoute, loadGroups, controlDescriptor});
 })();
