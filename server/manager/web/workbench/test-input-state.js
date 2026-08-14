@@ -8,6 +8,7 @@
     if (!Array.isArray(state.transientFactorFamilies)) state.transientFactorFamilies = [];
     if (!Array.isArray(state.transientStrategySources)) state.transientStrategySources = [];
     if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
+    if (!Array.isArray(state.strategyInspections)) state.strategyInspections = [];
     if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
     state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
     return state;
@@ -122,6 +123,16 @@
       item => item.source === spec.source || item.strategy_id === spec.strategy_id,
       spec,
     );
+    replaceBy(
+      state.strategyInspections,
+      item => item.path === path,
+      {
+        path,
+        entrypoint: String(inspection?.entrypoint || spec.entrypoint || ""),
+        callbacks: [...new Set((inspection?.callbacks || []).map(String))].sort(),
+        requirements: clone(inspection?.requirements || spec.requirements || {}),
+      },
+    );
     return spec;
   }
 
@@ -132,6 +143,9 @@
     );
     const source = `profile:${path}`;
     state.strategySpecs = state.strategySpecs.filter(item => item.source !== source);
+    state.strategyInspections = state.strategyInspections.filter(
+      item => item.path !== path,
+    );
   }
 
   function putDependency(state, dependency) {
@@ -160,6 +174,11 @@
   function strategySource(state, path) {
     initialize(state);
     return state.transientStrategySources.find(item => item.path === path) || null;
+  }
+
+  function strategyInspection(state, path) {
+    initialize(state);
+    return state.strategyInspections.find(item => item.path === path) || null;
   }
 
   function requestBody(state) {
@@ -193,6 +212,7 @@
     removeFactor,
     removeStrategy,
     requestBody,
+    strategyInspection,
     strategySource,
   });
 })();

@@ -84,6 +84,7 @@ def inspect_strategy_source(value: Any) -> dict[str, Any]:
     return {
         "entrypoint": entrypoint,
         "callbacks": callbacks,
+        "requirements": dict(normalized.get("requirements") or {}),
         "strategy_spec": normalized,
     }
 

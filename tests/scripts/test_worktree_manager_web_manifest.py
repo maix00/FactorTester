@@ -29,7 +29,8 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
     assert manifest["styles"] == [
-        "styles/app.css", "styles/report.css", "styles/outputs.css",
+        "styles/app.css", "styles/report.css", "styles/outputs/artifacts.css",
+        "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
@@ -379,7 +380,7 @@ def test_job_result_charts_use_interactive_highcharts_data() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
-    styles = (WEB_ROOT / "styles" / "outputs.css").read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "outputs" / "artifacts.css").read_text(encoding="utf-8")
     chart_rule = styles.split(
         ".interactive-artifact-chart-canvas", 1
     )[1].split("}", 1)[0]

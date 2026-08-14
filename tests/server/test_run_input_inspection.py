@@ -51,6 +51,7 @@ def test_strategy_inspection_returns_callbacks_and_normalized_spec() -> None:
     assert payload["valid"] is True
     assert payload["entrypoint"] == "IntradayHook"
     assert payload["callbacks"] == ["on_bar", "on_order_filled"]
+    assert payload["requirements"] == {}
     assert payload["strategy_spec"]["source"] == "profile:strategies/intraday_hook.py"
     assert payload["strategy_spec"]["parameters"] == {"threshold": 0.2}
 

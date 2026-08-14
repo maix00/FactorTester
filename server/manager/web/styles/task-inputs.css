@@ -1,13 +1,13 @@
 .content:has(> .test-workbench),
 .content:has(> .job-detail),
 .content:has(> .job-input-detail) { padding: 14px 18px 24px; }
-.test-workbench { display: grid; gap: 14px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
+.test-workbench { display: grid; gap: 6px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
 .test-workbench > section, .test-workbench > .test-settings-shell,
 .test-workbench > .test-run-options { min-width: 0; }
 .test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }
 .test-workbench .section-heading h2 { margin: 0; font-size: 15px; }
 .test-workbench .section-heading p { margin: 2px 0 0; font-size: 12px; }
-.test-workbench .test-setting-row { min-height: 52px; gap: 12px; padding: 6px 0; }
+.test-workbench .test-setting-row { min-height: 39px; gap: 10px; padding: 2px 0; }
 .test-workbench .test-setting-row > span { gap: 3px; }
 .test-workbench .test-setting-row small { line-height: 1.35; }
 .test-workbench .test-setting-row input,

@@ -24,6 +24,7 @@ RUN_INPUTS = (
     {
         "kind": "strategy_source",
         "label": "上传策略 Hook",
+        "description": "上传包含 on_start、on_bar、on_quote 或订单/持仓回调的自定义策略源码；提交后随 Job 冻结保存",
         "accept": ".py,text/x-python",
         "extensions": (".py",),
         "multiple": False,

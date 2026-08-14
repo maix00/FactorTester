@@ -11,7 +11,8 @@
   "styles": [
     "styles/app.css",
     "styles/report.css",
-    "styles/outputs.css",
+    "styles/outputs/artifacts.css",
+    "styles/outputs/backtest-results.css",
     "styles/workbench.css",
     "styles/task-inputs.css"
   ],

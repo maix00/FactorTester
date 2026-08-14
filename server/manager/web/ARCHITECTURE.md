@@ -32,7 +32,9 @@ single source of truth for the script order and semantic module groups.
   final application coordinator (`app/coordinator.js`)
 - `styles/`: global shell and domain stylesheets; `styles/app.css` is the
   current shared shell stylesheet, while `styles/report.css` contains report
-  presentation rules
+  presentation rules. Output viewers are split under `styles/outputs/`:
+  `artifacts.css` owns generic/IC artifact presentation and
+  `backtest-results.css` owns backtest, snapshot, and factor-series results.
 
 The workbench has one tab/chip/content interface: `FTTabChipContent` owns tab
 buttons, hidden content panels, optional descriptions, and optional action
@@ -42,6 +44,13 @@ override tabs use the same interface inside that editor rather than defining a
 parallel tab bar. New test modules must provide manifest-backed items and
 actions to this seam; they must not introduce another tab/chip/content DOM
 contract or module-local tab CSS.
+
+Backtest custom strategies remain Job inputs rather than group records:
+`run_inputs` owns the registered source/spec/dependency upload controls, while
+the inspection response supplies the entrypoint, callbacks, and requirements
+shown in the preview and retained in Job detail. A future strategy-list view
+must reuse this input adapter and state; it must not create a second source
+store or silently turn uploaded code into a group.
 
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through
