@@ -49,10 +49,11 @@ single source of truth for the script order and semantic module groups.
   `workbench/test-run-results.js` is another result-code group loaded only
   after a submitted Job has a result to inspect;
   `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
-  group, not with the shared settings shell; template presentation and
-  persistence actions are kept together under `workbench/templates/` and are
-  loaded as one template group. `workbench/test-setting-fields.js` owns the
-  manifest field projection, row construction, and control adapters, while
+  group, not with the shared settings shell; template presentation remains in
+  the lazy `workbench-templates` group, while its small persistence action
+  factory is loaded by `workbench-core` because the shared settings renderer
+  constructs that seam for every test. `workbench/test-setting-fields.js` owns
+  the manifest field projection, row construction, and control adapters, while
   `workbench/test-settings.js` remains the tab/chip orchestration Module
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
@@ -137,7 +138,13 @@ payload. Do not put full configurations back into the list response.
 The manager renders `research.html` from this manifest. Do not change a script
 path or load order without running the manifest and static-shell tests. A
 future ES-module loader may replace this contract, but until then an implicit
-global must not be read before the group that defines it has loaded.
+global must not be read before the group that defines it has loaded.  The
+research group therefore depends on the profile group because
+`research/workspaces.js` renders the nested Profiles section.  The template
+action factory is loaded with `workbench-core`: `workbench/tests.js` creates
+its action seam for the settings shell on every test render, while the
+heavier template presentation/detail module remains in the lazy
+`workbench-templates` group.
 
 The manager also refuses to serve an unlisted Web-root `.js` or `.css` asset at
 runtime. This is intentional: an old URL must fail visibly after a module is

@@ -364,6 +364,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
+    assert manifest["group_dependencies"]["research"] == ["report", "profile"]
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/jobs.js",
     }
@@ -595,6 +596,8 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench-core",
     ]
     assert manifest["group_dependencies"]["workbench-core"] == []
+    assert "workbench/templates/actions.js" in manifest["groups"]["workbench-core"]
+    assert "workbench/templates/actions.js" not in manifest["groups"]["workbench-templates"]
     assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
