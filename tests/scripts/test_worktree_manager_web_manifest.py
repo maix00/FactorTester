@@ -638,8 +638,9 @@ def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_model.js"
     model = WEB_ROOT / "jobs" / "backtest-result-model.js"
+    runtime = WEB_ROOT / "jobs" / "backtest-runtime-model.js"
     result = subprocess.run(
-        ["node", str(fixture), str(model)], cwd=ROOT,
+        ["node", str(fixture), str(model), str(runtime)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

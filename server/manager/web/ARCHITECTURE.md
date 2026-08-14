@@ -23,7 +23,10 @@ single source of truth for the script order and semantic module groups.
   owns product identity, fee coverage, entry-frequency selection, and product
   contribution views; `jobs/backtest-group-detail-parts.js` owns the remaining
   group metrics and diagnostics. `jobs/backtest-group-detail.js` composes both
-  adapters without duplicating their helpers
+  adapters without duplicating their helpers. `jobs/backtest-result-model.js`
+  owns persisted curve/metric normalization; `jobs/backtest-runtime-model.js`
+  owns runtime fallback, market-rule, and capital-diagnostic rows consumed by
+  the result view
 - `catalog/`: source catalog, products, factors, product groups, and catalog
   details; `catalog/source-list.js` owns the data-source page and receives the
   shared catalog loading seam from `catalog/products.js`

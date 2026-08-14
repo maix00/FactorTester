@@ -98,7 +98,7 @@
   }
 
   function runtimeTable(context, model) {
-    const rows = window.FTBacktestResultModel.runtimeRows(model.summary);
+    const rows = window.FTBacktestRuntimeModel.rows(model.summary);
     if (!rows.length) return null;
     const section = document.createElement("section");
     section.className = "backtest-runtime-summary";
