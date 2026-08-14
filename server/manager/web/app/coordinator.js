@@ -111,7 +111,14 @@
     const row = document.createElement("div");
     row.className = "home-network-row";
     const key = document.createElement("span"); key.textContent = t(label);
-    const content = document.createElement("strong"); content.textContent = value;
+    const content = document.createElement("strong");
+    const values = Array.isArray(value) ? value : [value];
+    values.filter(item => String(item || "").trim()).forEach(item => {
+      const line = document.createElement("div");
+      line.textContent = String(item);
+      content.append(line);
+    });
+    if (!content.childElementCount) content.textContent = "—";
     row.append(key, content);
     return row;
   }
@@ -120,25 +127,20 @@
     try {
       const value = await api("/api/server/network-info");
       if (routeToken !== activeRouteToken) return;
-      const port = Number(value.manager_port || 0);
-      const internal = Array.isArray(value.internal_addresses)
-        ? value.internal_addresses.map(address => (
-          port ? `${address}:${port}` : String(address)
-        )).join(" · ")
-        : "";
-      const inferred = value.current_public_target || null;
-      const publicEndpoint = inferred?.endpoint
-        || (value.public_server ? value.advertised_public_endpoint : "")
-        || t("尚未由服务器提供");
-      const publicServerID = inferred?.server_id
-        || (value.public_server ? value.server_id : "");
-      const publicIdentity = publicServerID
-        ? `${publicEndpoint} (${publicServerID})`
-        : publicEndpoint;
+      const internal = Array.isArray(value.internal_server_addresses)
+        ? value.internal_server_addresses : [];
+      const publicAddresses = Array.isArray(value.public_server_addresses)
+        ? value.public_server_addresses : [];
       root.replaceChildren(
         homeNetworkRow("当前 Manager", `${value.server_id || ""} · ${value.role || ""}`),
-        homeNetworkRow("内网服务器地址", internal || t("尚未由服务器提供")),
-        homeNetworkRow("当前或推断的公网服务器", publicIdentity),
+        homeNetworkRow(
+          "内网服务器 IP 地址",
+          internal.length ? internal : [t("无在线内网服务器")],
+        ),
+        homeNetworkRow(
+          "公网服务器 IP 地址",
+          publicAddresses.length ? publicAddresses : [t("无在线公网服务器")],
+        ),
       );
     } catch (error) {
       if (routeToken !== activeRouteToken) return;

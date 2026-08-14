@@ -7,7 +7,8 @@
 
   function availableSourceIDs(definitions) {
     return (Array.isArray(definitions) ? definitions : [])
-      .filter(source => productCount(source) > 0)
+      .filter(source => productCount(source) > 0
+        && source?.visitor_data_accessible !== false)
       .map(source => String(source.id || "").trim())
       .filter(Boolean);
   }

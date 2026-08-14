@@ -30,6 +30,7 @@ from server.manager.network_endpoints import (
     peer_bind_address,
     validate_client_endpoint,
 )
+from server.manager.http.visitor_access import configured_manager_endpoint
 
 
 def _runtime_module() -> ModuleType:
@@ -151,6 +152,9 @@ def main(
         control_endpoint = f"{scheme}://127.0.0.1:{args.port}"
     control_endpoint = validate_client_endpoint(
         control_endpoint, name="public Manager endpoint",
+    )
+    runtime_module.Handler.state.manager_public_endpoint = (
+        configured_manager_endpoint(control_endpoint)
     )
     data_endpoint = str(
         args.public_data_endpoint

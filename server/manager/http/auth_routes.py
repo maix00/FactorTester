@@ -25,6 +25,18 @@ class AuthenticationRoutesMixin:
         return value
 
     def _login(self) -> None:
+        if self._visitor_mode() is not None:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "error": "访客模式不能登录，请先离开访客模式。",
+                    "code": "visitor_login_forbidden",
+                    "redirect": "/compliance?next=/",
+                },
+                403,
+            )
+            return
         if self.state.require_device_auth and not self._is_loopback_client():
             json_response(self, {
                 "success": False,

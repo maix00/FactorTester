@@ -7,6 +7,15 @@ import sys
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
+from server.manager.services.public_catalog import (
+    VisitorCatalogAccessError,
+    ensure_visitor_product_access,
+    filter_product_rows,
+    public_factor_library,
+    select_visitor_source_ids,
+    visitor_local_source_ids,
+    visitor_source_descriptors,
+)
 from server.manager.services.test_authoring import TestAuthoringError
 
 
@@ -33,21 +42,30 @@ class CatalogRoutesMixin:
         if not parsed.path.startswith("/api/catalog/"):
             return False
         session = self._session()
-        if session is None:
+        visitor = self._visitor_mode()
+        if session is None and visitor is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
-        principal = str(session["username"])
+        principal = str(
+            session["username"] if session is not None else visitor.principal
+        )
         query = parse_qs(parsed.query, keep_blank_values=True)
         category_id = str(query.get("category", [""])[0] or "").strip()
         try:
             if parsed.path == "/api/catalog/sources":
+                sources = self.state.federated_source_descriptors(
+                    refresh=str(query.get("refresh", [""])[0]).lower()
+                    in {"1", "true", "yes"},
+                )
+                if visitor is not None:
+                    sources = visitor_source_descriptors(
+                        sources, local_server_id=self.state.server_id,
+                    )
                 value = {
                     "success": True,
                     "origin": "server",
-                    "sources": self.state.federated_source_descriptors(
-                        refresh=str(query.get("refresh", [""])[0]).lower()
-                        in {"1", "true", "yes"},
-                    ),
+                    "visitor": visitor is not None,
+                    "sources": sources,
                 }
             elif parsed.path == "/api/catalog/categories":
                 value = {
@@ -57,17 +75,37 @@ class CatalogRoutesMixin:
                     "categories": self.state.client_state.product_categories(),
                 }
             elif parsed.path == "/api/catalog/products":
-                source_ids = catalog_source_ids(query)
+                if visitor is not None:
+                    descriptors = visitor_source_descriptors(
+                        self.state.federated_source_descriptors(),
+                        local_server_id=self.state.server_id,
+                    )
+                    source_ids = select_visitor_source_ids(query, descriptors)
+                    products = filter_product_rows(
+                        self.state.client_state.product_names(), source_ids,
+                    )
+                else:
+                    source_ids = catalog_source_ids(query)
+                    products = self.state.client_state.product_names(source_ids)
                 value = {
                     "success": True,
                     "origin": "server",
+                    "visitor": visitor is not None,
                     "source_ids": list(source_ids),
-                    "products": self.state.client_state.product_names(source_ids),
+                    "products": products,
                 }
             elif parsed.path == "/api/catalog/product-fields":
                 product = self.state.client_state.product_fields(
                     query.get("name", [""])[0]
                 )
+                if visitor is not None:
+                    descriptors = visitor_source_descriptors(
+                        self.state.federated_source_descriptors(),
+                        local_server_id=self.state.server_id,
+                    )
+                    ensure_visitor_product_access(
+                        product, visitor_local_source_ids(descriptors),
+                    )
                 if product is None:
                     json_response(self, {
                         "success": False, "error": "产品不存在",
@@ -80,10 +118,18 @@ class CatalogRoutesMixin:
                     "fields": product.get("fields", {}),
                 }
             elif parsed.path == "/api/catalog/tree":
-                source_ids = catalog_source_ids(query)
+                if visitor is not None:
+                    descriptors = visitor_source_descriptors(
+                        self.state.federated_source_descriptors(),
+                        local_server_id=self.state.server_id,
+                    )
+                    source_ids = select_visitor_source_ids(query, descriptors)
+                else:
+                    source_ids = catalog_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
+                    "visitor": visitor is not None,
                     "category_id": category_id,
                     "source_ids": list(source_ids),
                     "tree": self.state.client_state.product_tree(
@@ -91,7 +137,14 @@ class CatalogRoutesMixin:
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
-                source_ids = catalog_source_ids(query)
+                if visitor is not None:
+                    descriptors = visitor_source_descriptors(
+                        self.state.federated_source_descriptors(),
+                        local_server_id=self.state.server_id,
+                    )
+                    source_ids = select_visitor_source_ids(query, descriptors)
+                else:
+                    source_ids = catalog_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
@@ -102,12 +155,27 @@ class CatalogRoutesMixin:
                     ),
                 }
             elif parsed.path == "/api/catalog/contracts":
+                if visitor is not None:
+                    descriptors = visitor_source_descriptors(
+                        self.state.federated_source_descriptors(),
+                        local_server_id=self.state.server_id,
+                    )
+                    ensure_visitor_product_access(
+                        self.state.client_state.product_fields(
+                            str(query.get("product", [""])[0] or "")
+                        ),
+                        visitor_local_source_ids(descriptors),
+                    )
                 value = self.state.client_state.product_contracts(
                     str(query.get("product", [""])[0] or ""),
                     start_date=query.get("start_date", [None])[0],
                     end_date=query.get("end_date", [None])[0],
                 )
             elif parsed.path == "/api/catalog/product-groups":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户产品组"
+                    )
                 value = {
                     "success": True,
                     "origin": "server",
@@ -146,21 +214,35 @@ class CatalogRoutesMixin:
         if not parsed.path.startswith("/api/catalog/factor"):
             return False
         session = self._session()
-        if session is None:
+        visitor = self._visitor_mode()
+        if session is None and visitor is None:
             json_response(self, {
                 "success": False, "error": "login required",
             }, 401)
             return True
-        principal = str(session["username"])
+        principal = str(
+            session["username"] if session is not None else visitor.principal
+        )
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
             if parsed.path == "/api/catalog/factors":
+                if visitor is not None:
+                    json_response(self, {
+                        "success": True,
+                        "visitor": True,
+                        **public_factor_library(),
+                    })
+                    return True
                 json_response(self, {
                     "success": True,
                     **self.state.client_state.factor_library(principal),
                 })
                 return True
             if parsed.path == "/api/catalog/factor-sets":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户因子集合"
+                    )
                 items = self.state.client_state.factor_sets(
                     principal, str(query.get("query", [""])[0] or ""),
                 )
@@ -169,6 +251,10 @@ class CatalogRoutesMixin:
                 })
                 return True
             if parsed.path == "/api/catalog/factor-sets/detail":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户因子集合"
+                    )
                 offset = max(0, int(query.get("offset", ["0"])[0] or 0))
                 limit = min(100, max(
                     1, int(query.get("limit", ["100"])[0] or 100),
@@ -189,6 +275,10 @@ class CatalogRoutesMixin:
                     })
                 return True
             if parsed.path == "/api/catalog/factor-sets/descriptor":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户因子集合"
+                    )
                 value = self.state.client_state.factor_set_descriptor(
                     principal,
                     str(query.get("target_ref", [""])[0] or ""),
@@ -202,6 +292,11 @@ class CatalogRoutesMixin:
                         "success": True, "descriptor": value,
                     })
                 return True
+        except VisitorCatalogAccessError as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, int(getattr(exc, "status", 403)))
+            return True
         except (
             OSError, RuntimeError, ImportError, TypeError, ValueError, KeyError,
         ) as exc:

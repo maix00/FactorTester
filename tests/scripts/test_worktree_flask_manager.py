@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 import pytest
 
@@ -1286,6 +1286,206 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
             english_body = response.read().decode("utf-8")
         assert '<html lang="zh-Hans">' in english_body
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in english_body
+
+
+def _visitor_request_headers(host: str, *, cookie: str = "") -> dict[str, str]:
+    headers = {
+        "Host": host,
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-For": "8.8.8.8",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def test_visitor_entry_is_only_advertised_by_configured_ingress(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+
+    with _running_manager(state) as base_url:
+        ingress = Request(
+            f"{base_url}/compliance",
+            headers=_visitor_request_headers(
+                "eloquence-drizzly-fencing.ngrok-free.dev",
+            ),
+        )
+        with urlopen(ingress) as response:
+            ingress_body = response.read().decode("utf-8")
+
+        direct_ip = Request(
+            f"{base_url}/compliance",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(direct_ip) as response:
+            direct_body = response.read().decode("utf-8")
+
+        direct_login = Request(
+            f"{base_url}/login?next=/jobs",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with urlopen(direct_login) as response:
+            direct_login_body = response.read().decode("utf-8")
+
+    assert 'class="visitor-entry"' in ingress_body
+    assert 'href="/visitor?next=/' in ingress_body
+    assert 'class="visitor-entry"' not in direct_body
+    assert 'href="/visitor?next=/' not in direct_body
+    assert 'class="visitor-entry"' not in direct_login_body
+    assert 'href="/visitor?next=/jobs' not in direct_login_body
+
+
+def test_visitor_entry_redirects_to_ip_and_limits_anonymous_capabilities(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    calls = []
+
+    def aggregate_public_jobs(*, cursor, limit):
+        calls.append((cursor, limit))
+        return {
+            "public": True,
+            "jobs": [{"job_id": "job-1"}, {"job_id": "job-2"}],
+            "page": 1,
+            "total": 99,
+            "total_pages": 5,
+            "has_more": True,
+            "next_cursor": "beyond-20",
+        }
+
+    monkeypatch.setattr(state, "aggregate_public_jobs", aggregate_public_jobs)
+    opener = build_opener(_NoRedirect())
+    ingress_headers = _visitor_request_headers(
+        "eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+
+    with _running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as issued:
+            opener.open(Request(
+                f"{base_url}/visitor?next=/jobs",
+                headers=ingress_headers,
+            ))
+        assert issued.value.code == 303
+        issued_location = issued.value.headers["Location"]
+        assert issued_location.startswith(
+            "https://101.133.144.27:7998/visitor?"
+        )
+        assert "eloquence-drizzly-fencing.ngrok-free.dev" not in issued_location
+        target_query = parse_qs(urlparse(issued_location).query)
+        grant = target_query["grant"][0]
+
+        with pytest.raises(HTTPError) as redeemed:
+            opener.open(Request(
+                f"{base_url}/visitor?grant={grant}&next=%2Fjobs",
+                headers=_visitor_request_headers("101.133.144.27:7998"),
+            ))
+        assert redeemed.value.code == 303
+        assert redeemed.value.headers["Location"] == "/jobs"
+        cookie = redeemed.value.headers["Set-Cookie"].split(";", 1)[0]
+        assert cookie.startswith("ft-manager-visitor=")
+
+        shell = Request(
+            f"{base_url}/",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998", cookie=cookie,
+            ),
+        )
+        with urlopen(shell) as response:
+            assert response.status == 200
+            assert b"<title>FTClient</title>" in response.read()
+
+        jobs = Request(
+            f"{base_url}/api/jobs?scope=server&limit=100",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998", cookie=cookie,
+            ),
+        )
+        with urlopen(jobs) as response:
+            payload = json.loads(response.read())
+        assert payload["success"] is True
+        assert [item["job_id"] for item in payload["jobs"]] == [
+            "job-1", "job-2",
+        ]
+        assert payload["total"] == 2
+        assert payload["total_pages"] == 1
+        assert payload["has_more"] is False
+        assert payload["next_cursor"] is None
+        assert calls == [("", 20)]
+
+        artifact_access = Request(
+            f"{base_url}/api/jobs/example/artifacts/result.json/access",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998", cookie=cookie,
+            ),
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as artifact_denied:
+            urlopen(artifact_access)
+        assert artifact_denied.value.code == 403
+        assert "访客模式不能下载生成物" in artifact_denied.value.read().decode()
+
+        login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"alice","password":"secret"}',
+            headers={
+                **_visitor_request_headers("101.133.144.27:7998", cookie=cookie),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as login_denied:
+            urlopen(login)
+        login_payload = json.loads(login_denied.value.read())
+        assert login_denied.value.code == 403
+        assert login_payload["code"] == "visitor_login_forbidden"
+        assert login_payload["redirect"] == "/compliance?next=/"
+
+        login_page = Request(
+            f"{base_url}/login?next=/jobs",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998", cookie=cookie,
+            ),
+        )
+        with urlopen(login_page) as response:
+            login_body = response.read().decode("utf-8")
+        assert 'class="visitor-entry"' not in login_body
+        assert 'href="/visitor?next=/' not in login_body
+
+        with pytest.raises(HTTPError) as manual:
+            opener.open(Request(
+                f"{base_url}/visitor?visitor=1",
+                headers=_visitor_request_headers("101.133.144.27:7998"),
+            ))
+        assert manual.value.code == 303
+        assert manual.value.headers["Location"].startswith("/compliance?")
 
 
 def test_public_compliance_page_bootstraps_device_login_with_visible_status() -> None:

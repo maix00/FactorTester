@@ -25,16 +25,25 @@ class JobTransferRoutesMixin:
         if parsed.path != _SUBMISSION_ACCESS_PATH:
             return False
         session = self._session()
-        if session is None and self.state.require_login_for_ui:
+        visitor = self._visitor_mode()
+        if visitor is not None and not visitor.can_submit:
+            json_response(
+                self,
+                {"success": False, "error": "访客模式不能提交任务"},
+                403,
+            )
+            return True
+        if session is None and not self._anonymous_ui_allowed():
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
-        principal = (
-            str(session["username"])
-            if session is not None
-            else "__public_jobs__"
-        )
+        if session is not None:
+            principal = str(session["username"])
+        elif visitor is not None:
+            principal = visitor.principal
+        else:
+            principal = "__public_jobs__"
         try:
             payload = self._json_body(64 * 1024)
             name = _submission_name(payload.get("name"))
@@ -77,16 +86,18 @@ class JobTransferRoutesMixin:
         if match is None:
             return False
         session = self._session()
-        if session is None and self.state.require_login_for_ui:
+        visitor = self._visitor_mode()
+        if session is None and not self._anonymous_ui_allowed():
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
-        principal = (
-            str(session["username"])
-            if session is not None
-            else "__public_jobs__"
-        )
+        if session is not None:
+            principal = str(session["username"])
+        elif visitor is not None:
+            principal = visitor.principal
+        else:
+            principal = "__public_jobs__"
         try:
             value = self.state.transfer_access_status(
                 match.group(1), principal=principal,
@@ -104,7 +115,15 @@ class JobTransferRoutesMixin:
         if match is None:
             return False
         session = self._session()
-        if session is None and self.state.require_login_for_ui:
+        visitor = self._visitor_mode()
+        if visitor is not None and not visitor.can_download_artifacts:
+            json_response(
+                self,
+                {"success": False, "error": "访客模式不能下载生成物"},
+                403,
+            )
+            return True
+        if session is None and not self._anonymous_ui_allowed():
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -118,11 +137,12 @@ class JobTransferRoutesMixin:
                 400,
             )
             return True
-        principal = (
-            str(session["username"])
-            if session is not None
-            else "__public_jobs__"
-        )
+        if session is not None:
+            principal = str(session["username"])
+        elif visitor is not None:
+            principal = visitor.principal
+        else:
+            principal = "__public_jobs__"
         idempotency = str(
             self.headers.get("Idempotency-Key") or secrets.token_hex(16)
         ).strip()

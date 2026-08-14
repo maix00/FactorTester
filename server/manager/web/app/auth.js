@@ -79,6 +79,10 @@
         await context.loadModules();
         await context.renderRoute();
       } catch (error) {
+        if (error.code === "visitor_login_forbidden" && error.redirect) {
+          window.location.replace(error.redirect);
+          return;
+        }
         const field = document.querySelector("#login-error");
         field.hidden = false; field.textContent = error.message;
       }
