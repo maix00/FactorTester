@@ -73,6 +73,7 @@
       outputCapabilities: options.state?.outputCapabilities || [],
       profiles: options.state?.profiles || [],
       extraDescriptors: options.extraChips || [],
+      groupBy: "tab",
       onOpen: tabKey => {
         if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
         else options.onChipOpen?.(tabKey);
@@ -181,6 +182,7 @@
           includeEmpty: true,
           includeUnregistered: true,
           includeHidden: true,
+          groupBy: "tab",
           sources: {},
         });
         defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();

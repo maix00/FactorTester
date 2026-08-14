@@ -38,6 +38,7 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "performance_profile", "margin_execution_profile",
     ]
     for fields in (ic_fields, backtest_fields):
+        assert all("chip_group" not in field for field in fields.values())
         assert fields["task_name"]["default"] == ""
         assert fields["task_name"]["placement"] == "run_identity"
         assert fields["acting_profile_ref"]["default"] == ""
@@ -63,7 +64,6 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "options": [],
         "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
         "enabled_payload": None,
-        "chip_group": "连接",
     }
     assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"

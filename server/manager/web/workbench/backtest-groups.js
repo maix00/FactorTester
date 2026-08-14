@@ -235,6 +235,7 @@
     const node = FTTestSettingChips.render({
       manifest: state.manifest, values: group, context,
       mountedTabs: [], includeRun: false, includeEmpty: false,
+      groupBy: "tab",
       sources: FTTestContentAdapters.chipSources(state, group),
     });
     return node.children.length ? node : null;

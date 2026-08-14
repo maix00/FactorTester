@@ -113,10 +113,15 @@
       "这些字段只作用于本次提交；提交后会冻结到 Job 和 RunSpec，不写入可复用测试模板",
     );
     root.append(note);
-    const identity = forPlacement(state.manifest, "run_identity");
-    if (identity.length) root.append(rows(context, state, identity, refresh));
-    const regular = forPlacement(state.manifest, "run_options");
-    if (regular.length) root.append(rows(context, state, regular, refresh));
+    const standard = [
+      ...forPlacement(state.manifest, "run_identity"),
+      ...forPlacement(state.manifest, "run_options"),
+    ].sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    if (standard.length) {
+      const standardRows = rows(context, state, standard, refresh);
+      standardRows.classList?.add?.("test-run-field-rows");
+      root.append(standardRows);
+    }
     const advanced = forPlacement(state.manifest, "advanced_run_options");
     if (advanced.length) {
       const details = document.createElement("details");

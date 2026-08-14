@@ -30,6 +30,8 @@
 .test-workbench .test-settings-current > strong { font-size: 12px; }
 .test-workbench .test-settings-current .backend-settings-chip-row { padding: 0; border: 0; background: transparent; }
 .test-workbench .test-run-settings-content { display: grid; gap: 8px; min-width: 0; padding: 4px 0 10px; }
+.test-workbench .test-run-field-rows { display: grid; grid-template-columns: minmax(0, 1fr); }
+.test-workbench .test-run-field-rows .test-setting-row { grid-column: 1 / -1; }
 .test-workbench .test-run-settings-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .test-workbench .test-run-settings-content .test-output-content { padding-top: 8px; border-top: 1px solid var(--line); }
 .test-workbench .test-settings-shell > .backend-settings-tab-bar { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--soft); }

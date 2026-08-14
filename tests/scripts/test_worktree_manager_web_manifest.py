@@ -690,13 +690,15 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     generation = (WEB_ROOT / "jobs" / "generation.js").read_text(encoding="utf-8")
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
+    groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
 
     assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
     assert 'bar.className = options.barClass || "backend-settings-tab-bar"' in tab_content
     assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
     assert "options.onActivate?.(key)" in tab_content
     assert "FTTabChipContent.create" in settings
-    groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
+    assert 'groupBy: "tab"' in settings
+    assert 'groupBy: "tab"' in groups
     overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
         encoding="utf-8"
     )

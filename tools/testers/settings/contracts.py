@@ -245,10 +245,6 @@ class RunFieldDefinition:
     options: tuple[SettingOption, ...] = ()
     help_text: str = ""
     enabled_payload: dict[str, Any] | None = None
-    # Chips are rendered in the common run-settings bar.  The registry owns
-    # this group so clients do not infer presentation from field names.
-    chip_group: str = "运行选项"
-
     _REQUEST_LOCATIONS = ("body", "query")
     _PLACEMENTS = (
         "advanced_run_options", "global_settings", "outputs", "run_identity",

@@ -88,8 +88,11 @@ assert.ok(first.children[0].children.every(button => button.children.length === 
   "test setting tabs should render only their title");
 assert.equal(first.children[0].children[0].children[0].textContent, "因子");
 const chipRow = first.children[1].children[1];
-assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");
-chipRow.children[0].listeners.click();
+const factorGroup = chipRow.children.find(item => item.className === "backend-settings-chip-group");
+assert.ok(factorGroup, "tab-based chip group should be present");
+const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(factorChip.children[1].textContent, "ROC 1m");
+factorChip.listeners.click();
 assert.equal(opened, "factor");
 
 const host = first.children[2];
@@ -101,8 +104,14 @@ const timeRow = managerList.children.find(item => item.className === "test-setti
 assert.ok(timeRow, "+ 设置 content should list every tab");
 assert.ok(timeRow.children[1].children[1].children.length >= 1,
   "+ 设置 content should show default chips");
-assert.equal(timeRow.children[1].children[1].children[0].children[1].textContent, "未设置（默认）");
+const defaultGroup = timeRow.children[1].children[1].children[0];
+const defaultChip = defaultGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(defaultChip.children[1].textContent, "未设置（默认）");
 
 const updated = render("SgCCS 5m", () => {});
-assert.equal(updated.children[1].children[1].children[0].children[1].textContent, "SgCCS 5m");
+const updatedGroup = updated.children[1].children[1].children.find(
+  item => item.className === "backend-settings-chip-group",
+);
+const updatedChip = updatedGroup.children.find(item => item.className.includes("backend-setting-chip"));
+assert.equal(updatedChip.children[1].textContent, "SgCCS 5m");
 console.log("ok");
