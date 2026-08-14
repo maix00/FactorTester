@@ -1,6 +1,6 @@
 ---
 name: factortester-server-maintenance
-description: Diagnose and resolve authorized private FactorTester server maintenance cases, while keeping local source work, Manager control, and remote publication under separate authority boundaries. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
+description: Diagnose and resolve authorized private FactorTester server maintenance cases, including Docker/WireGuard/SSH deployment, while keeping local source work, Manager control, and remote publication under separate authority boundaries. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
 ---
 
 # Server Maintenance
