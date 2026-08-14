@@ -130,6 +130,7 @@ def compliance_page(
             "以访客模式访问公网 IP（与内网未登录访问权限一致；仅显示本服务器最近 "
             "20 条测试任务，不提供生成物下载）"
         ),
+        "visitorTestingOnly": "仅供测试使用",
     }
     visitor_entry = ""
     if visitor_entry_href:
@@ -138,7 +139,9 @@ def compliance_page(
             + html.escape(visitor_entry_href, quote=True)
             + '">'
             + html.escape(messages["visitorEntry"])
-            + "</a></p>"
+            + '</a> <span class="visitor-test-note" style="margin-left:.5rem;color:#92400e;font-size:.85em">（'
+            + html.escape(messages["visitorTestingOnly"])
+            + "）</span></p>"
         )
     return f"""<!doctype html><html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>

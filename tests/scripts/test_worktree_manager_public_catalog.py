@@ -108,6 +108,19 @@ def test_compliance_alias_can_fall_back_to_canonical_public_ip():
     assert "window.location.replace(deviceAuthTarget)" in body
 
 
+def test_visitor_entry_is_marked_for_testing_only():
+    from server.manager.http.pages import compliance_page
+
+    body = compliance_page(
+        "/jobs",
+        visitor_entry_href="/visitor?next=/jobs",
+    ).decode("utf-8")
+
+    assert 'class="visitor-entry"' in body
+    assert 'class="visitor-test-note"' in body
+    assert "（仅供测试使用）" in body
+
+
 def test_compliance_request_from_configured_alias_points_to_public_ip(
     tmp_path, monkeypatch,
 ):
