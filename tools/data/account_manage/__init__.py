@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import secrets
 import threading
 
 from .user import User
@@ -36,6 +37,7 @@ from tools.data.sqlite.account_manager import (
     save_factor_set as _save_factor_set,
     delete_factor_set as _delete_factor_set,
 )
+from server.manager.domain.organization_scope import canonical_username
 
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
@@ -136,25 +138,22 @@ def slugify_org_id(name: str) -> str:
 
 def compose_account_username(organization_id: str, alias: str, serial: int) -> str:
     org_id = (organization_id or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
-    return f'{org_id}${alias}@{serial}'
+    return canonical_username(org_id, alias, serial)
 
 
 def next_account_username(accounts: list, organization_id: str, alias: str) -> str:
     org_id = (organization_id or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
-    same_name = [
-        account for account in accounts
-        if (account.get('alias') or account.get('username')) == alias
-        and (account.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id
-    ]
-    serial = max(
-        (
-            int(account['username'].rsplit('@', 1)[1])
-            for account in same_name
-            if '@' in account.get('username', '') and account['username'].rsplit('@', 1)[1].isdigit()
-        ),
-        default=0,
-    ) + 1
-    return compose_account_username(org_id, alias, serial)
+    existing = {
+        str(account.get('username') or '')
+        for account in accounts
+        if isinstance(account, dict)
+    }
+    for _attempt in range(32):
+        serial = secrets.randbelow(900_000_000_000) + 100_000_000_000
+        candidate = compose_account_username(org_id, alias, serial)
+        if candidate not in existing:
+            return candidate
+    raise ValueError('无法生成唯一的用户名')
 
 
 def normalize_organization(org: dict) -> dict:

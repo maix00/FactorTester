@@ -605,6 +605,67 @@ class PostgresControlStore:
                     ),
                 )
 
+    def create_account(self, account: Mapping[str, Any]) -> None:
+        """Create one account idempotently for the local registration outbox."""
+        self.ensure_schema()
+        username = str(account.get("username") or "").strip()
+        if not username:
+            raise ValueError("account username is required")
+        values = (
+            username,
+            str(account.get("alias") or ""),
+            str(account.get("salt") or ""),
+            str(account.get("hash") or ""),
+            str(account.get("role") or "user"),
+            bool(account.get("is_admin")),
+            bool(account.get("is_developer")),
+            str(account.get("organization_id") or "default"),
+            str(account.get("organization_name") or ""),
+            str(account.get("level_id") or ""),
+            str(account.get("parent_username") or ""),
+        )
+        with self._connection() as connection:
+            existing = connection.execute(
+                """
+                SELECT username, alias, salt, password_hash, role,
+                       is_admin, is_developer, organization_id,
+                       organization_name, level_id, parent_username, active
+                FROM control_users WHERE username=%s
+                """,
+                (username,),
+            ).fetchone()
+            if existing is not None:
+                current = (
+                    str(_row_value(existing, "username", 0, "")),
+                    str(_row_value(existing, "alias", 1, "")),
+                    str(_row_value(existing, "salt", 2, "")),
+                    str(_row_value(existing, "password_hash", 3, "")),
+                    str(_row_value(existing, "role", 4, "user")),
+                    bool(_row_value(existing, "is_admin", 5, False)),
+                    bool(_row_value(existing, "is_developer", 6, False)),
+                    str(_row_value(existing, "organization_id", 7, "default")),
+                    str(_row_value(existing, "organization_name", 8, "")),
+                    str(_row_value(existing, "level_id", 9, "")),
+                    str(_row_value(existing, "parent_username", 10, "")),
+                )
+                if current == values and bool(
+                    _row_value(existing, "active", 11, True)
+                ):
+                    return
+                raise ValueError("username is already registered centrally")
+            connection.execute(
+                """
+                INSERT INTO control_users(
+                    username, alias, salt, password_hash, role,
+                    is_admin, is_developer, organization_id,
+                    organization_name, level_id, parent_username, active,
+                    updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                          TRUE, CURRENT_TIMESTAMP)
+                """,
+                values,
+            )
+
     @staticmethod
     def _device_value(row: object, *, fallback_username: str = "") -> dict[str, Any]:
         value = dict(row) if isinstance(row, Mapping) else {

@@ -8,6 +8,7 @@ This module composes the Manager state and canonical HTTP route modules.
 from __future__ import annotations
 
 import ipaddress
+import inspect
 import os
 import socket
 import subprocess
@@ -51,6 +52,7 @@ from server.manager.domain.accounts import (
     authenticate_user as _authenticate_user,
     manager_subordinate_users as _manager_subordinate_users,
 )
+from server.manager.domain.organization_scope import configured_managed_organizations
 from server.manager.storage.preferences import UserPreferenceStore
 from server.manager.storage.job_index import ManagerJobIndex
 from server.manager.storage.sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
@@ -164,6 +166,7 @@ class ManagerState(
         fixed_port: int | None = None,
         fixed_branch: str | None = None,
         features: tuple[str, ...] = (),
+        managed_organizations: tuple[str, ...] | None = None,
         state_root: Path | None = None,
         fixed_daemon_socket: str | Path | None = None,
     ) -> None:
@@ -224,6 +227,11 @@ class ManagerState(
         )
         self.public_server = _env_bool(
             "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
+        )
+        self.managed_organizations = configured_managed_organizations(
+            public_server=self.public_server,
+            server_role=self.server_role,
+            explicit=managed_organizations,
         )
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.visitor_entry_origins = configured_visitor_origins()
@@ -347,20 +355,31 @@ class ManagerState(
         )
         self.sqlite_web = ManagerSQLiteWeb(self)
 
-    @staticmethod
     def _authenticate_credentials(
+        self,
         username: str,
         password: str,
         *,
         control_store: object | None = None,
     ) -> tuple[str, str]:
         """Invoke the composition-root authentication seam."""
+        kwargs = {}
+        try:
+            if "managed_organizations" in inspect.signature(
+                _authenticate_user
+            ).parameters:
+                kwargs["managed_organizations"] = self.managed_organizations
+        except (TypeError, ValueError):
+            # Keep the small two-argument seam usable for injected test and
+            # compatibility authenticators.
+            pass
         if control_store is None:
-            return _authenticate_user(username, password)
+            return _authenticate_user(username, password, **kwargs)
         return _authenticate_user(
             username,
             password,
             control_store=control_store,
+            **kwargs,
         )
 
     @staticmethod

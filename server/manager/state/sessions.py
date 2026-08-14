@@ -16,7 +16,14 @@ from server.manager.config import (
     MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
     MANAGER_SESSION_TTL_SECONDS,
 )
+from server.manager.domain.organization_scope import (
+    default_managed_organization,
+    organization_descriptor,
+    validate_alias,
+)
 from server.manager.system import write_owner_only_once as _write_owner_only_once
+from server.manager.storage.control_db import ControlDatabaseError, ControlDatabaseUnavailable
+from server.manager.storage.local_accounts import LocalAccountStore
 
 
 DEVICE_SESSION_HANDOFF_TTL_SECONDS = 120
@@ -30,11 +37,28 @@ class SessionStateMixin:
             # tests that replace the SQLite authenticator.
             principal, role = self._authenticate_credentials(username, password)
         else:
-            principal, role = self._authenticate_credentials(
-                username,
-                password,
-                control_store=self.control_store,
-            )
+            local = LocalAccountStore()
+            try:
+                local.sync_pending(self.control_store)
+            except ControlDatabaseError:
+                # The normal authority attempt below will fail in the same
+                # way, after which the just-created local account can log in.
+                pass
+            try:
+                principal, role = self._authenticate_credentials(
+                    username,
+                    password,
+                    control_store=self.control_store,
+                )
+            except ControlDatabaseError:
+                # PostgreSQL is authoritative.  During an outage, use only
+                # the account rows already present in this Manager's existing
+                # SQLite database; no account/device cache is created here.
+                principal, role = self._authenticate_credentials(
+                    username,
+                    password,
+                    control_store=LocalAccountStore(),
+                )
         return self._issue_session(principal, role)
 
     def login_device(
@@ -44,7 +68,10 @@ class SessionStateMixin:
         origin: str = "",
     ) -> tuple[str, str, str]:
         """Issue an origin-bound session after a registered device proves its key."""
-        account = self.account_for_principal(username)
+        if self.control_store is None:
+            account = self.account_for_principal(username)
+        else:
+            account = self._account_for_principal_from(self.control_store, username)
         if account is None or not bool(account.get("active", True)):
             raise PermissionError("device account is not active")
         role = self._role_for_account(account)
@@ -60,7 +87,7 @@ class SessionStateMixin:
         if not principal:
             return None
         if self.control_store is not None:
-            accounts = self.control_store.load_accounts()
+            return self._account_for_principal_from(self.control_store, principal)
         else:
             from tools.data.account_manage import accounts_lock, load_accounts
             with accounts_lock:
@@ -68,6 +95,20 @@ class SessionStateMixin:
         return next(
             (dict(item) for item in accounts
              if str(item.get("username") or "") == principal),
+            None,
+        )
+
+    @staticmethod
+    def _account_for_principal_from(
+        store: object,
+        principal: str,
+    ) -> dict[str, object] | None:
+        accounts = store.load_accounts()
+        return next(
+            (
+                dict(item) for item in accounts
+                if str(item.get("username") or "") == principal
+            ),
             None,
         )
 
@@ -92,22 +133,26 @@ class SessionStateMixin:
         return token, principal, role
 
     def register(self, alias: str, password: str, organization_id: str = "") -> tuple[str, str, str, str]:
+        if self.control_store is not None:
+            return self._register_with_control_outbox(
+                alias, password, organization_id,
+            )
         from tools.data.account_manage import (
             DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
             ROLE_SUPER_ADMIN, ROLE_USER, accounts_lock, hash_password,
             list_organizations_with_default, load_accounts,
             next_account_username, root_level_id_for_org, save_accounts,
         )
-        alias = str(alias or "").strip()
+        alias = validate_alias(alias)
         password = str(password or "")
-        if not alias or not password:
+        if not password:
             raise ValueError("用户名和密码不能为空")
-        if not re.fullmatch(r"[A-Za-z0-9_\u4e00-\u9fff]{1,32}", alias):
-            raise ValueError("用户名只能包含字母、数字、下划线或汉字，且不超过32字符")
         if len(password) < 6:
             raise ValueError("密码至少6位")
-        organization_id = str(organization_id or DEFAULT_ORGANIZATION_ID).strip()
-        org = next((item for item in list_organizations_with_default() if item.get("id") == organization_id), None)
+        organization_id = self._registration_organization(organization_id)
+        organizations = list_organizations_with_default()
+        organizations = self._with_managed_organization_descriptors(organizations)
+        org = next((item for item in organizations if item.get("id") == organization_id), None)
         if not org:
             raise ValueError("机构不存在")
         with accounts_lock:
@@ -126,6 +171,106 @@ class SessionStateMixin:
             })
             save_accounts(accounts)
         return full_name, role, alias, organization_id
+
+    def _register_with_control_outbox(
+        self,
+        alias: str,
+        password: str,
+        organization_id: str = "",
+    ) -> tuple[str, str, str, str]:
+        """Register locally when PG is down and push it on a later request."""
+        from tools.data.account_manage import (
+            DEFAULT_ORGANIZATION_ID,
+            DEFAULT_ORGANIZATION_NAME,
+            ROLE_USER,
+            hash_password,
+            root_level_id_for_org,
+        )
+
+        alias = validate_alias(alias)
+        password = str(password or "")
+        if not password:
+            raise ValueError("用户名和密码不能为空")
+        if len(password) < 6:
+            raise ValueError("密码至少6位")
+
+        local = LocalAccountStore()
+        try:
+            local.sync_pending(self.control_store)
+        except ControlDatabaseError:
+            pass
+        accounts = local.load_accounts()
+        try:
+            organizations = [
+                dict(item) for item in self.control_store.load_organizations()
+            ]
+        except ControlDatabaseError:
+            organizations = local.organizations()
+        organizations = self._with_managed_organization_descriptors(organizations)
+        organization_id = self._registration_organization(organization_id)
+        org = next(
+            (item for item in organizations
+             if str(item.get("id") or "") == organization_id),
+            None,
+        )
+        if not org:
+            raise ValueError("机构不存在")
+        full_name = local.unique_registration_username(
+            organization_id, alias, accounts,
+        )
+        salt = secrets.token_hex(16)
+        # A disconnected Manager must never bootstrap a new super-admin from
+        # an unverified local registration.  The account can be promoted by
+        # the central administration path after synchronization.
+        role = ROLE_USER
+        account = {
+            "username": full_name,
+            "alias": alias,
+            "salt": salt,
+            "hash": hash_password(password, salt),
+            "role": role,
+            "is_admin": False,
+            "is_developer": False,
+            "organization_id": organization_id,
+            "organization_name": str(org.get("name") or DEFAULT_ORGANIZATION_NAME),
+            "level_id": root_level_id_for_org(organization_id),
+            "parent_username": "",
+            "active": True,
+        }
+        local.add_pending_account(account)
+        try:
+            self.control_store.create_account(account)
+        except ControlDatabaseError:
+            # Keep both the local account and its outbox row for a future
+            # request after the central database becomes reachable.
+            pass
+        except (TypeError, ValueError) as exc:
+            local.remove_account(full_name)
+            raise ValueError(str(exc)) from exc
+        else:
+            local.remove_pending(full_name)
+        return full_name, role, alias, organization_id
+
+    def _registration_organization(self, organization_id: str) -> str:
+        requested = str(organization_id or "").strip()
+        managed = tuple(getattr(self, "managed_organizations", ()) or ())
+        if not managed:
+            raise ValueError("Manager没有配置可管理的机构")
+        selected = requested or default_managed_organization(managed)
+        if selected not in managed:
+            raise ValueError("此 Manager 不管理该机构")
+        return selected
+
+    def _with_managed_organization_descriptors(
+        self,
+        organizations: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        result = [dict(item) for item in organizations]
+        known = {str(item.get("id") or "") for item in result}
+        for organization_id in tuple(getattr(self, "managed_organizations", ()) or ()):
+            if organization_id not in known:
+                result.append(organization_descriptor(organization_id))
+        return result
 
     def session(self, token: str) -> dict[str, object] | None:
         now = time.time()

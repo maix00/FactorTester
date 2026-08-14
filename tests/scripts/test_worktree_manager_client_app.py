@@ -20,7 +20,9 @@ from server.manager.services.test_authoring import (
     TestAuthoringResponse as _TestAuthoringResponse,
 )
 from server.manager.storage.control_db import ControlDatabaseUnavailable
+from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.preferences import UserPreferenceStore
+from tools.data.account_manage import hash_password
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +48,237 @@ def authenticated_state(tmp_path):
         "user@1", "user", float("inf"),
     )
     return state
+
+
+def _offline_account(password: str = "secret") -> dict[str, object]:
+    salt = "offline-test-salt"
+    return {
+        "username": "GTHT@alice@1",
+        "alias": "alice",
+        "salt": salt,
+        "hash": hash_password(password, salt),
+        "role": "user",
+        "is_admin": False,
+        "is_developer": False,
+        "organization_id": "GTHT",
+        "organization_name": "GTHT",
+        "level_id": "root",
+        "parent_username": "",
+        "active": True,
+    }
+
+
+class _UnavailableControlStore:
+    def load_accounts(self):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+    def list_devices(self, **_kwargs):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+    def load_organizations(self):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+    def load_levels(self):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+    def create_account(self, _account):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+
+class _RecoveringControlStore:
+    def __init__(self):
+        self.accounts = []
+
+    def load_accounts(self):
+        return [dict(item) for item in self.accounts]
+
+    def create_account(self, account):
+        self.accounts.append(dict(account))
+
+    def load_organizations(self):
+        return [{"id": "default", "name": "Default", "description": ""}]
+
+    def load_levels(self):
+        return []
+
+
+def _install_local_accounts(monkeypatch, tmp_path, accounts):
+    import settings
+    from tools.data.sqlite.account_manager.user import save_accounts
+
+    monkeypatch.setattr(settings, "CACHE_DB_PATH", tmp_path / "unifieddata.sqlite")
+    save_accounts(accounts)
+
+
+def test_internal_manager_login_uses_existing_local_sqlite_when_postgres_is_down(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [_offline_account()])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    token, principal, role = state.login("alice", "secret")
+
+    assert token
+    assert principal == "GTHT@alice@1"
+    assert role == "user"
+
+
+def test_internal_login_rejects_user_missing_from_local_sqlite(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    with pytest.raises(PermissionError):
+        state.login("alice", "secret")
+
+
+def test_http_login_rejects_missing_local_account_when_postgres_is_unavailable(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"alice","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as failed:
+            urlopen(request)
+
+    assert failed.value.code == 403
+    payload = json.loads(failed.value.read().decode("utf-8"))
+    assert payload["success"] is False
+
+
+def test_offline_registration_is_local_and_queued_for_central_sync(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    principal, role, alias, organization_id = state.register("new_user", "secret")
+
+    local = LocalAccountStore()
+    assert principal.startswith("GTHT@new_user@")
+    assert principal.rsplit("@", 1)[1].isdigit()
+    assert role == "user"
+    assert alias == "new_user"
+    assert organization_id == "GTHT"
+    assert local.load_accounts()[0]["username"] == principal
+    assert local.pending_accounts()[0]["username"] == principal
+
+
+def test_two_offline_managers_can_use_the_same_alias_without_username_collision(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    first, _role, _alias, _organization_id = state.register("same_alias", "secret")
+    second, _role, _alias, _organization_id = state.register("same_alias", "secret")
+
+    assert first != second
+    assert len(LocalAccountStore().load_accounts()) == 2
+    assert len(LocalAccountStore().pending_accounts()) == 2
+
+
+def test_duplicate_alias_requires_full_username_for_offline_login(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+    first, _role, _alias, _organization_id = state.register("same_alias", "secret")
+    second, _role, _alias, _organization_id = state.register("same_alias", "secret")
+
+    with pytest.raises(PermissionError):
+        state.login("same_alias", "secret")
+    _token, principal, _role = state.login(first, "secret")
+    assert principal == first
+    assert second != first
+
+
+def test_pending_offline_registration_syncs_on_next_online_login(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+    principal, _role, _alias, _organization_id = state.register(
+        "new_user", "secret",
+    )
+    recovering = _RecoveringControlStore()
+    state.control_store = recovering
+
+    _token, authenticated_principal, _authenticated_role = state.login(
+        "new_user", "secret",
+    )
+
+    assert authenticated_principal == principal
+    assert recovering.accounts[0]["username"] == principal
+    assert LocalAccountStore().pending_accounts() == []
+
+
+def test_manager_scope_supports_alias_and_organization_alias_login(
+    tmp_path, monkeypatch,
+):
+    gtht = _offline_account()
+    gtht["username"] = "GTHT@MaxJJW@1"
+    gtht["alias"] = "MaxJJW"
+    default = {
+        **gtht,
+        "username": "default@MaxJJW@2",
+        "organization_id": "default",
+        "organization_name": "Default",
+    }
+    _install_local_accounts(monkeypatch, tmp_path, [gtht, default])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    _token, principal, _role = state.login("MaxJJW", "secret")
+    assert principal == "GTHT@MaxJJW@1"
+    _token, principal, _role = state.login("GTHT@MaxJJW", "secret")
+    assert principal == "GTHT@MaxJJW@1"
+    with pytest.raises(PermissionError):
+        state.login("default@MaxJJW", "secret")
+    _token, principal, _role = state.login("default@MaxJJW@2", "secret")
+    assert principal == "default@MaxJJW@2"
+
+
+def test_alias_validation_is_case_sensitive_and_rejects_username_delimiters(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    first, _role, _alias, _org = state.register("MaxJJW", "secret")
+    second, _role, _alias, _org = state.register("maxjjw", "secret")
+    assert first != second
+    with pytest.raises(ValueError, match=r"\$|@"):
+        state.register("bad$name", "secret")
+    with pytest.raises(ValueError, match=r"\$|@"):
+        state.register("bad@name", "secret")
+
+
+def test_registration_rejects_an_organization_outside_manager_scope(
+    tmp_path, monkeypatch,
+):
+    _install_local_accounts(monkeypatch, tmp_path, [])
+    state = manager.ManagerState(tmp_path, "python")
+    state.control_store = _UnavailableControlStore()
+
+    with pytest.raises(ValueError, match="不管理"):
+        state.register("public_user", "secret", "default")
 
 
 def test_client_business_api_keeps_service_path_and_manager_selects_port(
