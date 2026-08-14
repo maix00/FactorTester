@@ -1611,6 +1611,21 @@ def test_public_compliance_page_bootstraps_device_login_with_visible_status() ->
     assert "handoff_url" in body
     assert "MAX_AUTHENTICATION_RUNS" in body
     assert "签名阶段失败" in body
+    assert 'redirect:"error"' in body
+    assert 'mode:"same-origin"' in body
+    assert "challengeNetworkFailed" in body
+    assert "verifyNetworkFailed" in body
+    assert "window.isSecureContext===false" in body
+
+
+def test_device_authorization_waits_for_indexed_db_transaction_completion() -> None:
+    from server.manager.http.pages import device_authorization_page
+
+    body = device_authorization_page("grant-token").decode("utf-8")
+
+    assert 'transaction.oncomplete=()=>finish()' in body
+    assert 'transaction.onabort=()=>finish' in body
+    assert "db.close()" in body
 
 
 def test_device_session_handoff_is_bound_to_target_and_single_use(
