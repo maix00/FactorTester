@@ -22,6 +22,7 @@ class Element {
 
 global.document = {createElement: tagName => new Element(tagName)};
 global.FTTestFactors = {panel: () => new Element("factor-panel")};
+global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => values};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
   for (const name of [
@@ -37,11 +38,17 @@ const manifest = {
   tab_lists: {"local-settings": [
     {key: "factor", label: "因子", section_key: "scope", content_adapter: "factor_selection"},
     {key: "time", label: "时间范围", section_key: "scope"},
+    {key: "advanced", label: "高级", section_key: "scope"},
   ]},
   defaults: {
     start_date: {
       tab_key: "time", label: "开始日期", chip_template: "开始日期: {value}",
       control_template: "date", value: "", serialization: {}, options: [],
+    },
+    hidden_default: {
+      tab_key: "advanced", label: "隐藏条件字段", chip_template: "隐藏条件字段: {value}",
+      control_template: "text", value: "default", serialization: {}, options: [],
+      visible_when: {mode: ["advanced"]},
     },
   },
   chip_fields: [{
@@ -61,20 +68,38 @@ function render(factorAlias, onChipOpen) {
   });
 }
 
+const initial = FTTestSettings.initialValues(manifest, {
+  start_date: "saved",
+  hidden_default: "stale",
+}, ["time"]);
+assert.equal(initial.start_date, "saved");
+assert.equal(initial.hidden_default, "default");
+
 let opened = "";
 const first = render("ROC 1m", tabKey => { opened = tabKey; });
 assert.deepEqual(first.children.map(item => item.className), [
   "test-settings-intro",
+  "backend-settings-tab-bar",
   "test-settings-current",
-  "test-settings-section",
-  "test-settings-section test-settings-manager-section",
+  "backend-settings-host",
 ]);
-assert.equal(first.children[2].children[0].children[0].children[0].textContent, "研究对象");
-const chipRow = first.children[1].children[1];
+assert.equal(first.children[1].children[0].children[0].textContent, "因子");
+const chipRow = first.children[2].children[1];
 assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");
 chipRow.children[0].listeners.click();
 assert.equal(opened, "factor");
 
+const host = first.children[3];
+const managePanel = host.children[host.children.length - 1];
+const manager = managePanel.children[0];
+const managerList = manager.children[1];
+const timeRow = managerList.children.find(item => item.className === "test-settings-manager-row"
+  && item.children[1].children[0].children[0].textContent === "时间范围");
+assert.ok(timeRow, "+ 设置 content should list every tab");
+assert.ok(timeRow.children[1].children[1].children.length >= 1,
+  "+ 设置 content should show default chips");
+assert.equal(timeRow.children[1].children[1].children[0].children[1].textContent, "未设置（默认）");
+
 const updated = render("SgCCS 5m", () => {});
-assert.equal(updated.children[1].children[1].children[0].children[1].textContent, "SgCCS 5m");
+assert.equal(updated.children[2].children[1].children[0].children[1].textContent, "SgCCS 5m");
 console.log("ok");

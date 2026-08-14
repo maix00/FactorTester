@@ -58,6 +58,14 @@ class FederatedPublicDataService:
             self._cache[key] = (time.monotonic(), value)
         return value
 
+    def invalidate_research_cache(self) -> None:
+        """Drop cached research listings after a local publication mutation."""
+        with self._lock:
+            for key in tuple(self._cache):
+                if key and key[0] == "research-list":
+                    self._cache.pop(key, None)
+            self._publication_sources.clear()
+
     def _peer_routes(self) -> list[ServiceRoute]:
         """Choose one live control route per peer; stale leases never block."""
         try:
@@ -248,12 +256,14 @@ class FederatedPublicDataService:
             route = self._publication_route(publication_id, viewer_ref)
             if route is None:
                 raise
+            peer_payload = dict(payload or {})
+            peer_payload["publication_id"] = publication_id
             return self._query_peer(
                 route,
                 kind="research",
                 operation=operation,
                 principal=viewer,
-                payload=payload,
+                payload=peer_payload,
             )
 
     def projection(self, publication_id: str, viewer_ref: str | None) -> dict[str, Any]:

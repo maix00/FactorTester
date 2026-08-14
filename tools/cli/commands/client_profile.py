@@ -44,6 +44,57 @@ def _root_option(function):
     )(function)
 
 
+def _sync_profile(
+    profile: dict[str, object],
+    *,
+    server_url: str = "",
+) -> dict[str, object]:
+    """Authenticate the Profile owner and sync only its safe projection."""
+    binding = profile.get("session_binding")
+    principal_ref = str(
+        binding.get("principal_ref") or ""
+        if isinstance(binding, dict) else ""
+    ).strip()
+    if not principal_ref:
+        raise ValueError("profile has no session principal binding")
+    configured_server = profile.get("server")
+    configured_url = (
+        str(configured_server.get("base_url") or "").strip()
+        if isinstance(configured_server, dict) else ""
+    )
+    target = str(server_url or configured_url).strip()
+    if not target:
+        raise ValueError("profile has no server base URL")
+    client = FactorTesterClient(HttpSession(target))
+    try:
+        authenticated = client.current_principal()
+    except (OSError, TimeoutError):
+        return _offline_profile_sync_receipt(
+            profile, "Manager is unavailable; sync remains pending"
+        )
+    if str(authenticated.get("username") or "") != principal_ref:
+        raise ValueError("authenticated principal does not match profile")
+    try:
+        return client.sync_profile(profile)
+    except (OSError, TimeoutError):
+        return _offline_profile_sync_receipt(
+            profile, "Manager is unavailable; sync remains pending"
+        )
+
+
+def _offline_profile_sync_receipt(
+    profile: dict[str, object], reason: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "status": "pending",
+        "synced": False,
+        "pending": True,
+        "profile_id": str(profile.get("profile_id") or ""),
+        "reason": reason,
+    }
+
+
 @click.group("profile")
 def client_profile() -> None:
     """Manage version-independent local profiles."""
@@ -168,6 +219,33 @@ def list_profiles(release_profile: Path | None) -> None:
     click.echo(_json(
         LocalProfileStore(load_profile_root(release_profile)).list()
     ))
+
+
+@client_profile.command("sync")
+@click.argument("profile_id", required=False)
+@click.option("--server-url", default="")
+@_root_option
+@friendly_errors
+def sync_profiles(
+    profile_id: str | None,
+    server_url: str,
+    release_profile: Path | None,
+) -> None:
+    """Synchronize one Profile, or all locally bound Profiles, to its Manager."""
+    store = LocalProfileStore(load_profile_root(release_profile))
+    profiles = [store.load(profile_id)] if profile_id else store.list()
+    results: list[dict[str, object]] = []
+    for profile in profiles:
+        receipt = _sync_profile(profile, server_url=server_url)
+        results.append({
+            "profile_id": str(profile.get("profile_id") or ""),
+            **receipt,
+        })
+    click.echo(_json({
+        "schema_version": 1,
+        "profiles": results,
+        "synced": all(bool(item.get("synced")) for item in results),
+    }))
 
 
 @client_profile.group("server")
@@ -352,6 +430,8 @@ def bootstrap_profile(
         "next_action": "Bind a real workspace or research instance and branch.",
     })
     claim = store.claim_agent(profile_id, agent_id)
+    profile = store.load(profile_id)
+    control_profile_sync = _sync_profile(profile, server_url=server_url)
     claim_command = (
         f"factortester client profile claim {profile_id} {agent_id}"
     )
@@ -360,7 +440,13 @@ def bootstrap_profile(
         "discovered_existing_profile": discovered,
         "local_profile_claimed": True,
         "local_source_registered": False,
+        # Keep the legacy bootstrap-completed flag for existing automation.
+        # The authoritative remote result is the explicit sync receipt below;
+        # ``server_visibility_pending`` prevents this compatibility flag from
+        # being mistaken for a committed PostgreSQL projection.
         "server_visibility_verified": True,
+        "server_visibility_pending": not bool(control_profile_sync.get("synced")),
+        "control_profile_sync": control_profile_sync,
         "ready": False,
         "can_start_inspection_and_planning": True,
         "claim_command": claim_command,

@@ -34,6 +34,15 @@ single source of truth for the script order and semantic module groups.
   current shared shell stylesheet, while `styles/report.css` contains report
   presentation rules
 
+The workbench has one tab/chip/content interface: `FTTabChipContent` owns tab
+buttons, hidden content panels, optional descriptions, and optional action
+buttons. IC and factor-evaluation use one settings instance; backtest adds one
+second instance for strategy-group surfaces, including group actions. Group
+override tabs use the same interface inside that editor rather than defining a
+parallel tab bar. New test modules must provide manifest-backed items and
+actions to this seam; they must not introduce another tab/chip/content DOM
+contract or module-local tab CSS.
+
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through
 `FTUI` or an explicitly named group seam. New files must be added to the

@@ -63,15 +63,24 @@
     return values;
   }
 
-  function initialValues(manifest, saved = {}) {
+  function initialValues(manifest, saved = {}, options = {}) {
     const values = {};
     const manual = new Set();
+    const mounted = Array.isArray(options.mountedTabs)
+      ? new Set(options.mountedTabs) : null;
+    const savedTargets = new Set();
+    if (mounted) {
+      for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+        if (mounted.has(field?.tab_key)) savedTargets.add(storageKey(key, field));
+      }
+    }
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
       const target = storageKey(key, field);
-      if (Object.prototype.hasOwnProperty.call(saved, target)) {
+      const canRestore = !mounted || mounted.has(field?.tab_key) || savedTargets.has(target);
+      if (canRestore && Object.prototype.hasOwnProperty.call(saved, target)) {
         values[target] = clone(saved[target]);
         manual.add(target);
-      } else if (Object.prototype.hasOwnProperty.call(saved, key)) {
+      } else if (canRestore && Object.prototype.hasOwnProperty.call(saved, key)) {
         values[target] = clone(saved[key]);
         manual.add(target);
       } else if (!Object.prototype.hasOwnProperty.call(values, target)) {
@@ -80,6 +89,31 @@
     }
     metadata.set(values, {manual});
     return applyAutomaticDefaults(manifest, values);
+  }
+
+  function previewDefaultsForTab(manifest, values, tabKey) {
+    const preview = clone(values || {}) || {};
+    const manual = new Set();
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      const target = storageKey(key, field);
+      if (field?.tab_key !== tabKey) {
+        manual.add(target);
+        continue;
+      }
+      const serialization = field?.serialization || {};
+      if (serialization.kind === "custom_product_overrides") {
+        const moduleName = String(serialization.module_filter || "");
+        const scopedFields = new Set((serialization.fields || [])
+          .filter(item => !moduleName || String(item.module || "") === moduleName)
+          .map(item => String(item.value)));
+        preview[target] = (Array.isArray(preview[target]) ? preview[target] : [])
+          .filter(row => !scopedFields.has(String(row?.field || "")));
+      } else {
+        preview[target] = clone(field.value);
+      }
+    }
+    metadata.set(preview, {manual});
+    return applyAutomaticDefaults(manifest, preview);
   }
 
   function setValue(manifest, values, key, field, value) {
@@ -122,7 +156,7 @@
   }
 
   window.FTSettingRules = Object.freeze({
-    initialValues, setValue, resetValue, patchValues, valueFor, storageKey,
+    initialValues, previewDefaultsForTab, setValue, resetValue, patchValues, valueFor, storageKey,
     conditionsMatch, isVisible, isEditable, disabledValues,
     applyAutomaticDefaults,
   });

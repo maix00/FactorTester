@@ -76,20 +76,20 @@
         empty.textContent = context.t("没有可按组覆盖的设置");
         root.append(empty); return;
       }
-      root.append(tabBar(tabs), settingRows(fieldsForTab(activeTab, manifest, values), values));
-    };
-
-    const tabBar = tabs => {
-      const bar = document.createElement("div");
-      bar.className = "backtest-group-override-tabs";
-      tabs.forEach(tab => {
-        const button = document.createElement("button");
-        button.type = "button"; button.textContent = context.t(tab.label || tab.key);
-        button.classList.toggle("active", tab.key === activeTab);
-        button.addEventListener("click", () => { activeTab = tab.key; redraw(); });
-        bar.append(button);
+      const tabset = FTTabChipContent.create({
+        items: tabs.map(tab => ({
+          key: tab.key,
+          label: context.t(tab.label || tab.key),
+          description: tab.help_text ? context.t(tab.help_text) : "",
+          panelClass: "backtest-group-override-panel",
+          render: () => settingRows(fieldsForTab(tab.key, manifest, values), values),
+        })),
+        activeKey: activeTab,
+        barClass: "backend-settings-tab-bar backtest-group-override-tab-bar",
+        hostClass: "backend-settings-host backtest-group-override-host",
+        onActivate: key => { activeTab = key; },
       });
-      return bar;
+      root.append(tabset.bar, tabset.host);
     };
 
     const settingRows = (fields, values) => {

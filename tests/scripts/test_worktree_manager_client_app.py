@@ -19,6 +19,7 @@ from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.test_authoring import (
     TestAuthoringResponse as _TestAuthoringResponse,
 )
+from server.manager.services.client_state import ClientStateService
 from server.manager.storage.control_db import ControlDatabaseUnavailable
 from server.manager.storage.preferences import UserPreferenceStore
 
@@ -688,6 +689,135 @@ def test_profiles_and_workspace_are_local_manager_projections(
     assert profiles["profiles"][0]["profile_id"] == "maxa"
     assert profiles["profiles"][0]["principal"] == "user@1"
     assert workspace["workspace"]["principal_ref"] == "user@1"
+
+
+def test_profile_projection_remains_available_when_postgres_is_offline(
+    tmp_path,
+) -> None:
+    class OfflineControlStore:
+        def list_profiles(self, _principal):
+            raise ControlDatabaseUnavailable("postgresql is offline")
+
+        def upsert_profile(self, *_args, **_kwargs):
+            raise ControlDatabaseUnavailable("postgresql is offline")
+
+    profile = {
+        "profile_id": "maxa",
+        "display_name": "Max A",
+        "workspace_root": "/private/workspace",
+        "session_ref": "private-session",
+        "session_binding": {"principal_ref": "attacker"},
+        "agents": [{"agent_id": "research-maxa", "role": "research"}],
+    }
+    service = ClientStateService(
+        tmp_path / "client",
+        control_store=OfflineControlStore(),
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+
+    receipt = service.sync_profile("user@1", profile)
+
+    assert receipt["status"] == "pending"
+    assert receipt["synced"] is False
+    assert receipt["pending"] is True
+    restored = ClientStateService(
+        tmp_path / "different-client-root",
+        control_store=OfflineControlStore(),
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+    profiles = restored.profiles("user@1", include_local_paths=False)
+    assert profiles[0]["profile_id"] == "maxa"
+    assert profiles[0]["session_binding"] == {"principal_ref": "user@1"}
+    assert "workspace_root" not in profiles[0]
+    assert "session_ref" not in profiles[0]
+
+
+def test_profile_projection_flushes_after_postgres_recovers(tmp_path) -> None:
+    class RecoveringControlStore:
+        def __init__(self):
+            self.online = False
+            self.rows = []
+
+        def list_profiles(self, _principal):
+            if not self.online:
+                raise ControlDatabaseUnavailable("postgresql is offline")
+            return list(self.rows)
+
+        def upsert_profile(self, principal, profile_id, display_name, payload):
+            if not self.online:
+                raise ControlDatabaseUnavailable("postgresql is offline")
+            self.rows.append({
+                "principal": principal,
+                "profile_id": profile_id,
+                "display_name": display_name,
+                "payload": payload,
+            })
+
+    control = RecoveringControlStore()
+    service = ClientStateService(
+        tmp_path / "client",
+        control_store=control,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+    service.sync_profile("user@1", {
+        "profile_id": "maxa",
+        "display_name": "Max A",
+        "agents": [{"agent_id": "research-maxa"}],
+    })
+    assert control.rows == []
+
+    control.online = True
+    profiles = service.profiles("user@1", include_local_paths=False)
+
+    assert [item["profile_id"] for item in profiles] == ["maxa"]
+    assert [item["profile_id"] for item in control.rows] == ["maxa"]
+    assert "workspace_root" not in control.rows[0]["payload"]
+    assert control.rows[0]["payload"]["session_binding"] == {
+        "principal_ref": "user@1",
+    }
+
+
+def test_profile_sync_endpoint_reports_local_pending_state_on_postgres_outage(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+
+    class OfflineControlStore:
+        def upsert_profile(self, *_args, **_kwargs):
+            raise ControlDatabaseUnavailable("postgresql is offline")
+
+        def list_profiles(self, _principal):
+            raise ControlDatabaseUnavailable("postgresql is offline")
+
+    state.client_state.control_store = OfflineControlStore()
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+    body = json.dumps({
+        "profile": {
+            "profile_id": "maxa",
+            "display_name": "Max A",
+            "workspace_root": "/private/workspace",
+        },
+    }).encode()
+
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/client/profiles/sync",
+            data=body,
+            method="POST",
+            headers=headers,
+        )) as response:
+            value = json.loads(response.read())
+
+    assert response.status == 200
+    assert value["success"] is True
+    assert value["status"] == "pending"
+    assert value["synced"] is False
+    assert value["reason"] == "control database is unavailable"
+    assert value["profile"]["session_binding"] == {"principal_ref": "user@1"}
+    assert "workspace_root" not in value["profile"]
 
 
 def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> None:
