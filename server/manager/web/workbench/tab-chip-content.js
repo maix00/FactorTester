@@ -16,7 +16,17 @@
     for (const item of items) {
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = item.label || item.key;
+      button.className = "tab-chip-button";
+      const label = document.createElement("span");
+      label.className = "tab-chip-label";
+      label.textContent = item.label || item.key;
+      button.append(label);
+      if (item.description) {
+        const description = document.createElement("small");
+        description.className = "tab-chip-description";
+        description.textContent = item.description;
+        button.append(description);
+      }
       if (item.buttonClass) button.classList.add(item.buttonClass);
 
       const panel = document.createElement("div");

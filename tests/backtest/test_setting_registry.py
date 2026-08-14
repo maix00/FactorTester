@@ -137,6 +137,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "include"
     )
     assert index["defaults"]["engine"]["tab_key"] == "engine"
+    assert [section["key"] for section in index["settings_sections"]] == [
+        "authoring", "scope", "portfolio", "execution", "risk", "inputs",
+    ]
+    assert {
+        tab["key"]: tab["section_key"]
+        for tab in index["tab_lists"]["local-settings"]
+    }["group_strategy"] == "portfolio"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
     assert index["defaults"]["engine_mode"]["scope_policy"] == "overridable"
@@ -403,6 +410,13 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert index["defaults"]["ic_lags"]["value"] == [0]
     assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
     assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
+    assert [section["key"] for section in index["settings_sections"]] == [
+        "authoring", "scope", "data", "core", "analysis",
+    ]
+    assert {
+        tab["key"]: tab["section_key"]
+        for tab in index["tab_lists"]["local-settings"]
+    }["delay"] == "core"
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_decay_lags"]["value"] == [5]
     assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"

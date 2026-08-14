@@ -169,6 +169,11 @@ class SettingTab:
     summary_keys: tuple[str, ...] = ()
     content_adapter: str = "settings"
     content_options: dict[str, Any] = field(default_factory=dict)
+    # UI grouping is declared by the application registry, not inferred by a
+    # client from setting names.  Keeping these optional preserves the
+    # positional constructor contract used by shared setting modules.
+    section_key: str = ""
+    help_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -177,6 +182,23 @@ class SettingTab:
             mount.value for mount in self.default_mount_points
         ]
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsSection:
+    """A readable, backend-owned group of local setting tabs."""
+
+    key: str
+    label: str
+    description: str = ""
+    order: int = 100
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label:
+            raise ValueError("settings section requires key and label")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)

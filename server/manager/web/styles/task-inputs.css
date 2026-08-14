@@ -1,28 +1,47 @@
 .content:has(> .test-workbench),
 .content:has(> .job-detail),
 .content:has(> .job-input-detail) { padding: 14px 18px 24px; }
-.test-workbench { display: grid; gap: 6px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
+.test-workbench { display: grid; gap: 14px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
 .test-workbench > section, .test-workbench > .test-settings-shell,
 .test-workbench > .test-run-options { min-width: 0; }
 .test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }
 .test-workbench .section-heading h2 { margin: 0; font-size: 15px; }
 .test-workbench .section-heading p { margin: 2px 0 0; font-size: 12px; }
-.test-workbench .test-setting-row { min-height: 39px; gap: 9px; padding: 2px 0; }
-.test-workbench .test-setting-row > span { gap: 1px; }
-.test-workbench .test-setting-row small { line-height: 1.2; }
+.test-workbench .test-setting-row { min-height: 52px; gap: 12px; padding: 6px 0; }
+.test-workbench .test-setting-row > span { gap: 3px; }
+.test-workbench .test-setting-row small { line-height: 1.35; }
 .test-workbench .test-setting-row input,
 .test-workbench .test-setting-row select,
 .test-workbench .test-setting-row textarea,
 .test-workbench .test-object-field select,
 .test-workbench .test-factor-parameters input,
 .test-workbench .test-factor-parameters select { min-height: 28px; padding: 4px 7px; }
-.test-workbench .backend-settings-host { padding: 0 10px; }
-.test-workbench .backend-settings-tab-bar { min-height: 34px; padding: 3px 7px; }
-.test-workbench .backend-settings-tab-bar button { min-height: 27px; }
-.test-workbench .backend-settings-chip-row { gap: 4px; padding: 4px 7px; }
-.test-workbench .backend-setting-chip { gap: 4px; padding: 2px 7px; }
-.test-workbench .test-settings-manager { gap: 6px; padding: 8px 0; }
-.test-workbench .test-settings-manager-list > label { min-height: 36px; padding: 3px 7px; }
+.test-workbench .backend-settings-host { padding: 0 14px; }
+.test-workbench .backend-settings-tab-bar { min-height: 40px; padding: 6px 10px; }
+.test-workbench .backend-settings-tab-bar button { min-height: 34px; }
+.test-workbench .backend-settings-chip-row { gap: 6px; padding: 6px 10px; }
+.test-workbench .backend-setting-chip { gap: 5px; padding: 4px 9px; }
+.test-workbench .test-settings-manager { gap: 8px; padding: 10px 0; }
+.test-workbench .test-settings-manager-list > label { min-height: 44px; padding: 5px 9px; }
+.test-workbench .test-settings-shell { display: grid; gap: 14px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.test-workbench .test-settings-intro { display: grid; gap: 3px; padding: 2px 3px 0; }
+.test-workbench .test-settings-intro strong { font-size: 15px; }
+.test-workbench .test-settings-intro span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.test-workbench .test-settings-current { display: grid; gap: 7px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
+.test-workbench .test-settings-current > strong { font-size: 12px; }
+.test-workbench .test-settings-current .backend-settings-chip-row { padding: 0; border: 0; background: transparent; }
+.test-workbench .test-settings-section { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: clip; }
+.test-workbench .test-settings-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; padding: 14px 16px 11px; background: color-mix(in srgb, var(--soft) 72%, var(--panel)); }
+.test-workbench .test-settings-section-heading > div { display: grid; gap: 3px; min-width: 0; }
+.test-workbench .test-settings-section-heading h2 { margin: 0; font-size: 15px; }
+.test-workbench .test-settings-section-heading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.test-workbench .test-settings-section-heading > small { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.test-workbench .test-settings-section .backend-settings-tab-bar { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--soft); }
+.test-workbench .test-settings-section .backend-settings-tab-bar button { display: grid; gap: 2px; min-width: 94px; min-height: 40px; padding: 6px 10px; text-align: left; white-space: normal; }
+.test-workbench .test-settings-section .tab-chip-label { overflow: hidden; text-overflow: ellipsis; }
+.test-workbench .test-settings-section .tab-chip-description { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-workbench .test-settings-manager-section .test-settings-section-heading { padding-bottom: 10px; }
+.test-workbench .test-settings-manager-section .backend-settings-host { border-top: 0; }
 .test-workbench .test-factor-builder,
 .test-workbench .test-factor-candidates,
 .test-workbench .test-product-manager { gap: 6px; }

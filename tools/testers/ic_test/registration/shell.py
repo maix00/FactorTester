@@ -31,6 +31,7 @@ from tools.testers.settings.contracts import (
     ChipDefinition,
     SettingModule,
     SettingTab,
+    SettingsSection,
     TabMountPoint,
 )
 from tools.testers.settings.registry import ApplicationSettings
@@ -40,6 +41,7 @@ def register_authoring_shell(app: ApplicationSettings) -> None:
     _register_global_keys(app)
     _register_modules(app)
     register_test_template_base(app)
+    _register_sections(app)
     _register_tabs(app)
     _register_chips(app)
     _register_shared_inputs(app)
@@ -78,6 +80,42 @@ def _register_modules(app: ApplicationSettings) -> None:
         ),
     ):
         app.register_module(module)
+
+
+def _register_sections(app: ApplicationSettings) -> None:
+    """Declare the authoring sequence without teaching the client IC fields."""
+    for section in (
+        SettingsSection(
+            "authoring", "配置与模板",
+            "先加载模板，再确认本次测试的研究对象与输出方式", 10,
+        ),
+        SettingsSection(
+            "scope", "研究对象",
+            "先选定因子、产品路径与分类；这些选择定义本次 IC 核心矩阵", 20,
+        ),
+        SettingsSection(
+            "data", "样本与数据",
+            "固定样本窗口、数据源和频率，避免把预热数据误当统计样本", 30,
+        ),
+        SettingsSection(
+            "core", "IC 核心矩阵",
+            "由前瞻收益期、入场延迟和 IC 类型组成，可一次选择多组核心组合", 40,
+        ),
+        SettingsSection(
+            "analysis", "附加分析",
+            "核心结果完成后再添加重采样、滚动和分组组合统计，不改变核心测试身份", 50,
+        ),
+    ):
+        app.register_settings_section(section)
+    for section, tabs in {
+        "authoring": ("test_template",),
+        "scope": ("factor", "category", "product_path_selection"),
+        "data": ("time", "data_source", "frequency"),
+        "core": ("return_frequency", "delay", "ic_method"),
+        "analysis": ("summary", "quantile_portfolio_statistics"),
+    }.items():
+        for tab in tabs:
+            app.set_tab_section(tab, section)
 
 
 def _register_tabs(app: ApplicationSettings) -> None:
