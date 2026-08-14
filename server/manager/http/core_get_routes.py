@@ -89,6 +89,9 @@ class CoreGetRoutesMixin:
             )[0]
             self._serve_compliance_page(str(requested or "/"))
             return True
+        if parsed.path == "/visitor":
+            self._serve_visitor_entry(parsed)
+            return True
         if parsed.path == "/login":
             self._serve_login_page(parsed)
             return True

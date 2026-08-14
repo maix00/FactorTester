@@ -54,7 +54,9 @@ def safe_login_next(value: str) -> str:
         or candidate.startswith("//")
         or parsed.scheme
         or parsed.netloc
-        or parsed.path in {"/login", "/compliance", "/device-authorize"}
+        or parsed.path in {
+            "/login", "/compliance", "/device-authorize", "/visitor",
+        }
     ):
         return "/"
     return candidate or "/"
@@ -87,6 +89,7 @@ def compliance_page(
     next_path: str = "/",
     *,
     accept_language: object = "",
+    visitor_entry_href: str = "",
 ) -> bytes:
     # The public compliance notice is a jurisdiction-specific Chinese notice,
     # so it deliberately does not vary with the requesting browser language.
@@ -121,10 +124,23 @@ def compliance_page(
             "设备自动登录失败。请确认设备仍在白名单中，或从内网设置页重新授权。"
         ),
         "success": "设备验证成功，正在进入 FactorTester……",
+        "visitorEntry": (
+            "以访客模式访问公网 IP（与内网未登录访问权限一致；仅显示本服务器最近 "
+            "20 条测试任务，不提供生成物下载）"
+        ),
     }
+    visitor_entry = ""
+    if visitor_entry_href:
+        visitor_entry = (
+            '<p class="visitor-entry"><a href="'
+            + html.escape(visitor_entry_href, quote=True)
+            + '">'
+            + html.escape(messages["visitorEntry"])
+            + "</a></p>"
+        )
     return f"""<!doctype html><html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>
-<body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7"><p>{_html(strings, PUBLIC_DEVICE_COMPLIANCE_NOTICE)}</p>
+<body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7"><p>{_html(strings, PUBLIC_DEVICE_COMPLIANCE_NOTICE)}</p>{visitor_entry}
 <p id="public-device-count">{html.escape(messages["loading"])}</p>
 <p id="device-auth-status" role="status" aria-live="polite">{html.escape(messages["checking"])}</p>
 <script>

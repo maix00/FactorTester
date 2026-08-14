@@ -206,6 +206,7 @@ class JobProxyRoutesMixin:
         ):
             return False
         session = self._session()
+        visitor = self._visitor_mode()
         suffix_value = suffix
         public = (
             session is None
@@ -218,7 +219,9 @@ class JobProxyRoutesMixin:
             )
             return True
         if public:
-            principal = "__public_jobs__"
+            principal = (
+                visitor.principal if visitor is not None else "__public_jobs__"
+            )
         else:
             principal = str(session["username"])
         job_id = quote(unquote(match.group(1)), safe="")
@@ -304,8 +307,14 @@ class JobProxyRoutesMixin:
         if match is None:
             return False
         session = self._session()
+        visitor = self._visitor_mode()
         public = session is None
-        principal = "__public_jobs__" if public else str(session["username"])
+        if visitor is not None:
+            principal = visitor.principal
+        elif public:
+            principal = "__public_jobs__"
+        else:
+            principal = str(session["username"])
         path = self._forwarded_service_path(parsed)
         job_id = unquote(match.group(1))
         last_error: HTTPError | None = None
