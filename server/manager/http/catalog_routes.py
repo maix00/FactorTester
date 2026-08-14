@@ -11,7 +11,6 @@ from server.manager.services.public_catalog import (
     VisitorCatalogAccessError,
     ensure_visitor_product_access,
     filter_product_rows,
-    public_factor_library,
     select_visitor_source_ids,
     visitor_local_source_ids,
     visitor_source_descriptors,
@@ -223,6 +222,9 @@ class CatalogRoutesMixin:
         principal = str(
             session["username"] if session is not None else visitor.principal
         )
+        factor_service = getattr(self.state, "federated_public_data", None)
+        if factor_service is None:
+            factor_service = self.state.client_state
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
             if parsed.path == "/api/catalog/factors":
@@ -230,12 +232,14 @@ class CatalogRoutesMixin:
                     json_response(self, {
                         "success": True,
                         "visitor": True,
-                        **public_factor_library(),
+                        **factor_service.factor_library(
+                            principal, visitor=True,
+                        ),
                     })
                     return True
                 json_response(self, {
                     "success": True,
-                    **self.state.client_state.factor_library(principal),
+                    **factor_service.factor_library(principal),
                 })
                 return True
             if parsed.path == "/api/catalog/factor-sets":
@@ -243,7 +247,7 @@ class CatalogRoutesMixin:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
                     )
-                items = self.state.client_state.factor_sets(
+                items = factor_service.factor_sets(
                     principal, str(query.get("query", [""])[0] or ""),
                 )
                 json_response(self, {

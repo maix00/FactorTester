@@ -12,10 +12,10 @@ rollback are a separate release operation and require explicit deployment
 authorization plus the remote administrator/Aliyun transport credential.
 
 Use the private
-[`server-maintenance` Skill](skills/server-maintenance/SKILL.md) for a concrete
+[`factortester-server-maintenance` Skill](skills/factortester-server-maintenance/SKILL.md) for a concrete
 authorized Maintenance Case. The Skill progressively loads the relevant
 backend, Graph-governance or database reference. Follow
-[server maintenance](../docs/agents/server-maintenance.md) as the domain
+[FactorTester server maintenance](../docs/agents/factortester-server-maintenance.md) as the domain
 contract. In particular:
 
 - trust a passing Backend Assurance Gate and do not start a verifier routinely;

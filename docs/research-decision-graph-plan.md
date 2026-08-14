@@ -152,7 +152,8 @@ Agent Invocations.
     obligation. It is not a factor rejection and may not be closed as
     permanently unsupported merely because the current backend lacks it.
 22. Mandatory completion does not bypass change control. The affected branch
-    enters `capability_gap`, unrelated jobs continue, a server-maintenance
+    enters `capability_gap`, unrelated jobs continue, a
+    `factortester-server-maintenance`
     Agent implements the bounded change, and the capability becomes available
     only after semantic, numerical, timing, SDK, execution, and release
     conformance evidence passes the existing audit path.
@@ -899,7 +900,7 @@ a missing general operator, the resolver must:
 2. pause only affected graph branches and create a mandatory backend-completion
    work item;
 3. reject silent fallback to a merely similar operator;
-4. route implementation to an authorized server-maintenance Agent;
+4. route implementation to an authorized `factortester-server-maintenance` Agent;
 5. publish the capability, Author SDK change, and bounded conformance
    reference after validation;
 6. resume the original branch from its immutable checkpoint.

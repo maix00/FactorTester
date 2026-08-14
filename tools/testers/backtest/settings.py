@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.settings.contracts import ChipDefinition, SettingModule
+from tools.testers.settings.contracts import ChipDefinition, SettingModule, SettingsSection
 from tools.testers.settings.applications import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTION_KEYS,
@@ -41,6 +41,7 @@ def register_group_test_settings(app: Any) -> None:
     )
     register_test_template_base(app)
     register_run_inputs_base(app)
+    _register_sections(app)
 
     # ── SettingModules ──────────────────────────────────────
     for module in (
@@ -120,3 +121,50 @@ def register_group_test_settings(app: Any) -> None:
                        source_adapter="primary_strategy_group"),
     ):
         app.register_chip_field(chip)
+
+
+def _register_sections(app: Any) -> None:
+    """Group the long backtest form while leaving field ownership in modules."""
+    for section in (
+        SettingsSection(
+            "authoring", "配置与模板",
+            "先加载或保存模板，再开始本次回测配置", 10,
+        ),
+        SettingsSection(
+            "scope", "研究对象与样本",
+            "选择因子、产品路径、数据源和样本时间，确定回测研究范围", 20,
+        ),
+        SettingsSection(
+            "portfolio", "组合与策略",
+            "定义目标权重、调仓、持仓、分组和期限结构策略", 30,
+        ),
+        SettingsSection(
+            "execution", "交易与执行",
+            "设置引擎、合约生命周期、费用、订单和成交量容量", 40,
+        ),
+        SettingsSection(
+            "risk", "资金与风险",
+            "设置资金、保证金、记账和风险边界", 50,
+        ),
+        SettingsSection(
+            "inputs", "运行输入",
+            "策略 Hook、附加源码和运行时输入会随 Job 一起冻结", 60,
+        ),
+    ):
+        app.register_settings_section(section)
+    for section, tabs in {
+        "authoring": ("test_template",),
+        "scope": ("factor", "product_path_selection", "data_source", "frequency", "time"),
+        "portfolio": (
+            "target_allocation", "rebalance_trigger", "position_policy",
+            "term_carry_strategy", "group_strategy", "strategy_book",
+        ),
+        "execution": (
+            "engine", "delivery_force_close", "rollover", "cost", "order",
+            "volume_capacity",
+        ),
+        "risk": ("capital", "margin", "accounting"),
+        "inputs": ("run_inputs", "calendar"),
+    }.items():
+        for tab in tabs:
+            app.set_tab_section(tab, section)

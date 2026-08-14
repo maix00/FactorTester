@@ -137,6 +137,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "include"
     )
     assert index["defaults"]["engine"]["tab_key"] == "engine"
+    assert [section["key"] for section in index["settings_sections"]] == [
+        "authoring", "scope", "portfolio", "execution", "risk", "inputs",
+    ]
+    assert {
+        tab["key"]: tab["section_key"]
+        for tab in index["tab_lists"]["local-settings"]
+    }["group_strategy"] == "portfolio"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
     assert index["defaults"]["engine_mode"]["scope_policy"] == "overridable"
@@ -341,7 +348,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "test_template", "factor", "category", "product_path_selection", "time", "data_source", "frequency",
-        "return_frequency", "delay", "ic_method", "cross_section", "summary",
+        "return_frequency", "delay", "ic_method", "summary",
         "quantile_portfolio_statistics",
     ]
     assert index["defaults"]["setting_template"]["serialization"] == {
@@ -403,6 +410,13 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert index["defaults"]["ic_lags"]["value"] == [0]
     assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
     assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
+    assert [section["key"] for section in index["settings_sections"]] == [
+        "authoring", "scope", "data", "core", "analysis",
+    ]
+    assert {
+        tab["key"]: tab["section_key"]
+        for tab in index["tab_lists"]["local-settings"]
+    }["delay"] == "core"
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_decay_lags"]["value"] == [5]
     assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
@@ -410,8 +424,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert "重采样" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert "自相关阶数" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
-    assert index["defaults"]["group_adjust"]["value"] == "off"
-    assert index["defaults"]["by_group"]["value"] == "off"
+    assert {
+        "group_adjust", "by_group", "min_cross_section_count",
+    }.isdisjoint(index["defaults"])
     assert index["defaults"]["start_time"]["visible_when"] == {
         "time_precision": ["exact"],
     }
@@ -426,6 +441,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
     assert index["result_tabs"][0]["default"] is True
     assert index["result_tabs"][0]["requires"] == {"ic_correlation": ["rank", "both"]}
+    assert {"by_group_ic", "coverage_missing"}.isdisjoint(
+        tab["key"] for tab in index["result_tabs"]
+    )
     assert [setting["key"] for setting in product_tab["settings"]] == [
         "product_path_candidates", "product_path_selections",
     ]

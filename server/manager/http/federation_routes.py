@@ -7,6 +7,9 @@ from server.manager.http.federation.capabilities import (
     FederationCapabilityRoutesMixin,
 )
 from server.manager.http.federation.jobs import FederationJobRoutesMixin
+from server.manager.http.federation.public_data import (
+    FederationPublicDataRoutesMixin,
+)
 from server.manager.http.federation.registration import (
     FederationRegistrationRoutesMixin,
 )
@@ -20,6 +23,7 @@ class FederationRoutesMixin(
     FederationRegistrationRoutesMixin,
     FederationSyncRoutesMixin,
     FederationJobRoutesMixin,
+    FederationPublicDataRoutesMixin,
     FederationServiceProxyRoutesMixin,
     FederationCapabilityRoutesMixin,
     FederationAdminRoutesMixin,

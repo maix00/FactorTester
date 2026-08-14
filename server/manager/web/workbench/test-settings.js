@@ -33,37 +33,119 @@
     if (!available.length) return root;
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
-    const managing = options.activeTab === "__manage__" || !visible.length;
-    const selected = visible.find(item => item.tab.key === options.activeTab) || visible[0];
-    const items = visible.map(item => ({
-      key: item.tab.key,
-      label: context.t(item.tab.label || item.tab.key),
-      render: () => tabPanel(item, manifest, values, context, options),
-    }));
-    items.push({
-      key: "__manage__", label: context.t("+ 设置"),
-      render: () => settingsManager(manifest, available, mounted, values, context, options),
-    });
-    const tabset = FTTabChipContent.create({
-      items, context, title: context.t("通用运行配置"),
-      activeKey: managing ? "__manage__" : selected?.tab.key,
-      onActivate: key => options.onTabChange?.(key),
-    });
+    const tabsets = new Map();
+    const sections = settingsSections(manifest, available);
+    const intro = document.createElement("div");
+    intro.className = "test-settings-intro";
+    const introTitle = document.createElement("strong");
+    introTitle.textContent = context.t("按顺序完成配置");
+    const introText = document.createElement("span");
+    introText.textContent = context.t(
+      "先确认研究对象，再固定样本与核心计算；附加分析不会改变核心测试身份",
+    );
+    intro.append(introTitle, introText);
+    root.append(intro);
     const chips = FTTestSettingChips.render({
       manifest, values, context,
       mountedTabs: [...mounted],
       sources: options.chipSources || {},
       extraDescriptors: options.extraChips || [],
       onOpen: tabKey => {
-        if (tabset.entries.has(tabKey)) tabset.activate(tabKey);
-        else options.onChipOpen?.(tabKey);
+        if (!activateTab(tabKey)) options.onChipOpen?.(tabKey);
       },
     });
-    root.append(tabset.bar);
-    if (chips.children.length) root.append(chips);
-    root.append(tabset.host);
-    root.activate = tabset.activate;
+    if (chips.children.length) {
+      const current = document.createElement("section");
+      current.className = "test-settings-current";
+      const heading = document.createElement("strong");
+      heading.textContent = context.t("当前选择");
+      current.append(heading, chips);
+      root.append(current);
+    }
+    sections.forEach(section => {
+      const items = section.items.map(item => ({
+        key: item.tab.key,
+        label: context.t(item.tab.label || item.tab.key),
+        description: item.tab.help_text ? context.t(item.tab.help_text) : "",
+        render: () => tabPanel(item, manifest, values, context, options),
+      }));
+      const selected = items.find(item => item.key === options.activeTab) || items[0];
+      const tabset = FTTabChipContent.create({
+        items, context,
+        activeKey: selected?.key,
+        onActivate: key => options.onTabChange?.(key),
+      });
+      tabsets.set(section.key, tabset);
+      const block = document.createElement("section");
+      block.className = "test-settings-section";
+      const heading = document.createElement("header");
+      heading.className = "test-settings-section-heading";
+      const copy = document.createElement("div");
+      const title = document.createElement("h2");
+      title.textContent = context.t(section.label);
+      const description = document.createElement("p");
+      description.textContent = context.t(section.description || "");
+      copy.append(title);
+      if (section.description) copy.append(description);
+      const count = document.createElement("small");
+      count.textContent = `${items.length} ${context.t("个设置组")}`;
+      heading.append(copy, count);
+      block.append(heading, tabset.bar, tabset.host);
+      root.append(block);
+    });
+    const manager = document.createElement("section");
+    manager.className = "test-settings-section test-settings-manager-section";
+    const managerHeading = document.createElement("header");
+    managerHeading.className = "test-settings-section-heading";
+    const managerTitle = document.createElement("h2");
+    managerTitle.textContent = context.t("设置组管理");
+    const managerDescription = document.createElement("p");
+    managerDescription.textContent = context.t("选择要显示在本页的设置组");
+    managerHeading.append(managerTitle, managerDescription);
+    manager.append(managerHeading);
+    const managerTabset = FTTabChipContent.create({
+      items: [{
+        key: "__manage__", label: context.t("管理设置组"),
+        description: context.t("未挂载项使用后端默认值"),
+        render: () => settingsManager(manifest, available, mounted, values, context, options),
+      }],
+      context, activeKey: "__manage__",
+    });
+    manager.append(managerTabset.bar, managerTabset.host);
+    root.append(manager);
+    function activateTab(tabKey) {
+      for (const tabset of tabsets.values()) {
+        if (tabset.entries.has(tabKey)) {
+          tabset.activate(tabKey);
+          return true;
+        }
+      }
+      return false;
+    }
+    root.activate = activateTab;
     return root;
+  }
+
+  function settingsSections(manifest, available) {
+    const declared = Array.isArray(manifest?.settings_sections)
+      ? [...manifest.settings_sections].sort((left, right) => (
+        Number(left.order || 0) - Number(right.order || 0)
+      )) : [];
+    const byKey = new Map(declared.map(section => [section.key, {
+      ...section, items: [],
+    }]));
+    const fallback = {
+      key: "general", label: "设置", description: "", order: 999, items: [],
+    };
+    available.forEach(item => {
+      const key = String(item.tab.section_key || "general");
+      const section = byKey.get(key) || fallback;
+      section.items.push(item);
+    });
+    if (fallback.items.length) byKey.set(fallback.key, fallback);
+    return [...byKey.values()]
+      .filter(section => section.items.length)
+      .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
   }
 
   function tabPanel(item, manifest, values, context, options) {

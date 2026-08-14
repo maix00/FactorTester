@@ -33,9 +33,10 @@ for (const path of process.argv.slice(2)) {
 }
 
 const manifest = {
+  settings_sections: [{key: "scope", label: "研究对象", description: "先选对象", order: 10}],
   tab_lists: {"local-settings": [
-    {key: "factor", label: "因子", content_adapter: "factor_selection"},
-    {key: "time", label: "时间范围"},
+    {key: "factor", label: "因子", section_key: "scope", content_adapter: "factor_selection"},
+    {key: "time", label: "时间范围", section_key: "scope"},
   ]},
   defaults: {
     start_date: {
@@ -63,15 +64,17 @@ function render(factorAlias, onChipOpen) {
 let opened = "";
 const first = render("ROC 1m", tabKey => { opened = tabKey; });
 assert.deepEqual(first.children.map(item => item.className), [
-  "backend-settings-tab-bar",
-  "backend-settings-chip-row",
-  "backend-settings-host",
+  "test-settings-intro",
+  "test-settings-current",
+  "test-settings-section",
+  "test-settings-section test-settings-manager-section",
 ]);
-const chipRow = first.children[1];
+assert.equal(first.children[2].children[0].children[0].children[0].textContent, "研究对象");
+const chipRow = first.children[1].children[1];
 assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");
 chipRow.children[0].listeners.click();
 assert.equal(opened, "factor");
 
 const updated = render("SgCCS 5m", () => {});
-assert.equal(updated.children[1].children[0].children[1].textContent, "SgCCS 5m");
+assert.equal(updated.children[1].children[1].children[0].children[1].textContent, "SgCCS 5m");
 console.log("ok");

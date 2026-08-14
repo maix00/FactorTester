@@ -13,34 +13,92 @@ from tools.cli.release.user_layout import (
     default_user_profile_root,
     default_user_root,
 )
+from server.manager.services.profile_projection import (
+    control_profile_projection,
+    safe_profile_value,
+)
 
 
 class ClientStateService:
     """Project and update principal-owned state without invoking a service port."""
 
-    def __init__(self, client_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        client_root: Path | None = None,
+        *,
+        control_store: object | None = None,
+    ) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
+        self.control_store = control_store
 
-    def profiles(self, principal: str) -> list[dict[str, Any]]:
+    def profiles(
+        self,
+        principal: str,
+        *,
+        include_local_paths: bool = True,
+    ) -> list[dict[str, Any]]:
         root = self.client_root / "profiles"
         result: list[dict[str, Any]] = []
-        if not root.is_dir():
-            return result
-        for path in sorted(root.glob("*.json"))[:512]:
-            try:
-                if path.stat().st_size > 4 * 1024 * 1024:
+        if root.is_dir():
+            for path in sorted(root.glob("*.json"))[:512]:
+                try:
+                    if path.stat().st_size > 4 * 1024 * 1024:
+                        continue
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, json.JSONDecodeError):
                     continue
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(value, dict):
-                continue
-            binding = value.get("session_binding")
-            owner = str(binding.get("principal_ref") or "") if isinstance(binding, dict) else ""
-            if owner != principal:
-                continue
-            result.append(value)
-        return result
+                if not isinstance(value, dict):
+                    continue
+                binding = value.get("session_binding")
+                owner = (
+                    str(binding.get("principal_ref") or "")
+                    if isinstance(binding, dict) else ""
+                )
+                if owner == principal:
+                    result.append(value)
+
+        # A deployed public Manager does not mount a user's device-local
+        # Client root.  PostgreSQL therefore supplies the safe Profile
+        # identity projection when it has been migrated.  Local files remain
+        # the fallback for development and for richer owner-side state.
+        if self.control_store is not None:
+            try:
+                rows = self.control_store.list_profiles(principal)
+            except (
+                AttributeError, ConnectionError, OSError,
+                RuntimeError, TypeError, ValueError,
+            ):
+                rows = []
+            indexed = {
+                str(item.get("profile_id") or ""): item
+                for item in result
+                if str(item.get("profile_id") or "")
+            }
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                profile_id = str(row.get("profile_id") or "").strip()
+                if not profile_id:
+                    continue
+                value = control_profile_projection(row, principal)
+                if profile_id in indexed:
+                    merged = dict(value)
+                    merged.update(indexed[profile_id])
+                    indexed[profile_id] = merged
+                else:
+                    indexed[profile_id] = value
+            result = list(indexed.values())
+
+        if not include_local_paths:
+            result = [
+                cleaned
+                for item in result
+                if isinstance(cleaned := safe_profile_value(item), dict)
+            ]
+        return sorted(
+            result,
+            key=lambda item: str(item.get("profile_id") or ""),
+        )
 
     def workspace(self, principal: str) -> dict[str, Any]:
         user_root = default_user_root(principal).resolve()

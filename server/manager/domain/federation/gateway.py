@@ -172,6 +172,64 @@ class FederatedGateway:
             )
         return value
 
+    def public_data(
+        self,
+        route: ServiceRoute,
+        *,
+        kind: str,
+        operation: str,
+        principal: str,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Read one bounded safe projection from a peer Manager.
+
+        This control-plane request is deliberately separate from the generic
+        service proxy.  The peer endpoint owns the allow-list for research,
+        Profile, and factor metadata operations and never accepts source-code
+        or device-local path requests.
+        """
+        if not route.remote or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        request_payload = {
+            "kind": str(kind or "").strip(),
+            "operation": str(operation or "").strip(),
+            "principal": str(principal or "").strip(),
+            "payload": dict(payload or {}),
+        }
+        if not request_payload["kind"] or not request_payload["operation"]:
+            raise ValueError("federated public-data request is incomplete")
+        raw = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            self._peer_url(route, "/api/federation/public-data"),
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with self.transport.open(request, timeout=self.timeout) as response:
+                response_body = response.read(MAX_ENVELOPE_BYTES)
+                status = response.status
+        except HTTPError as exc:
+            response_body = exc.read(MAX_ENVELOPE_BYTES)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated public data is unavailable") from exc
+        try:
+            value = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated public data response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated public data response is invalid")
+        if not 200 <= status < 300 or value.get("success") is False:
+            raise ConnectionError(
+                str(value.get("error") or f"federated public data returned HTTP {status}")
+            )
+        return value
+
     def capabilities(
         self,
         route: ServiceRoute,
@@ -355,4 +413,3 @@ class FederatedGateway:
             raise
         except (URLError, OSError) as exc:
             raise ConnectionError("federated service is unavailable") from exc
-

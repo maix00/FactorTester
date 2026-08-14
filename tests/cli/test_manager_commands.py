@@ -180,6 +180,6 @@ def test_manager_help_discloses_server_skill_and_restart_transaction() -> None:
 
     assert manager_help.exit_code == 0, manager_help.output
     assert restart_help.exit_code == 0, restart_help.output
-    assert "server-maintenance" in manager_help.output
+    assert "factortester-server-maintenance" in manager_help.output
     assert "source-mode" in restart_help.output
     assert "stop-mode" in restart_help.output

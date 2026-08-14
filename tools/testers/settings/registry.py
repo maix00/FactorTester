@@ -12,6 +12,7 @@ from .contracts import (
     ScopePolicy,
     SettingDefinition,
     SettingModule,
+    SettingsSection,
     SettingsSurface,
     SettingTab,
     SurfaceFlow,
@@ -30,7 +31,10 @@ class ApplicationSettings:
     run_fields: dict[str, RunFieldDefinition] = field(default_factory=dict)
     surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
     flows: list[SurfaceFlow] = field(default_factory=list)
+    manifest_extensions: dict[str, dict[str, Any]] = field(default_factory=dict)
     accepted_global_default_keys: tuple[str, ...] = ()
+    settings_sections: dict[str, SettingsSection] = field(default_factory=dict)
+    tab_sections: dict[str, str] = field(default_factory=dict)
 
     def register_module(self, module: SettingModule) -> None:
         if module.key in self.modules:
@@ -41,6 +45,18 @@ class ApplicationSettings:
         if tab.key in self.tabs:
             raise ValueError(f"duplicate setting tab: {tab.key}")
         self.tabs[tab.key] = tab
+
+    def register_settings_section(self, section: SettingsSection) -> None:
+        if section.key in self.settings_sections:
+            raise ValueError(f"duplicate settings section: {section.key}")
+        self.settings_sections[section.key] = section
+
+    def set_tab_section(self, tab_key: str, section_key: str) -> None:
+        if section_key not in self.settings_sections:
+            raise ValueError(
+                f"setting tab {tab_key} references unknown section {section_key}"
+            )
+        self.tab_sections[tab_key] = section_key
 
     def register_setting(self, setting: SettingDefinition) -> None:
         if setting.key in self.settings:
@@ -127,19 +143,41 @@ class ApplicationSettings:
                 ordered.append(key)
         self.accepted_global_default_keys = tuple(ordered)
 
+    def register_manifest_extension(self, key: str, manifest: dict[str, Any]) -> None:
+        """Attach one domain-owned manifest without teaching this registry its schema."""
+        if not key or key in self.manifest_extensions:
+            raise ValueError(f"duplicate or empty manifest extension: {key}")
+        if not isinstance(manifest, dict) or not manifest:
+            raise ValueError(f"manifest extension {key} must be a non-empty object")
+        self.manifest_extensions[key] = dict(manifest)
+
     def manifest(self) -> dict[str, Any]:
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
         ordered_modules = sorted(self.modules.values(), key=lambda item: item.order)
-        return {
+        def tab_manifest(tab: SettingTab) -> dict[str, Any]:
+            value = tab.to_dict()
+            section_key = self.tab_sections.get(tab.key) or value.get("section_key")
+            if section_key:
+                value["section_key"] = section_key
+            return value
+
+        manifest = {
             "schema_version": 1,
             "application": self.application,
             "modules": [module.to_dict() for module in ordered_modules],
             "tab_lists": {
                 mount.value: [
-                    tab.to_dict() for tab in ordered_tabs if mount in tab.mount_points
+                    tab_manifest(tab) for tab in ordered_tabs if mount in tab.mount_points
                 ]
                 for mount in TabMountPoint
             },
+            "settings_sections": [
+                section.to_dict()
+                for section in sorted(
+                    self.settings_sections.values(),
+                    key=lambda item: (item.order, item.key),
+                )
+            ],
             "default_mounted_tabs": {
                 mount.value: [
                     tab.key for tab in ordered_tabs
@@ -214,6 +252,11 @@ class ApplicationSettings:
             "accepted_global_default_keys": list(self.accepted_global_default_keys),
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }
+        collisions = set(manifest) & set(self.manifest_extensions)
+        if collisions:
+            raise ValueError(f"manifest extensions collide with built-in fields: {collisions}")
+        manifest.update(self.manifest_extensions)
+        return manifest
 
     def tab_manifest(self, tab_key: str) -> dict[str, Any]:
         try:
@@ -223,7 +266,10 @@ class ApplicationSettings:
         return {
             "schema_version": 1,
             "application": self.application,
-            "tab": tab.to_dict(),
+            "tab": {
+                **tab.to_dict(),
+                **({"section_key": self.tab_sections[tab_key]} if tab_key in self.tab_sections else {}),
+            },
             "settings": [
                 setting.to_dict()
                 for setting in self.settings.values()

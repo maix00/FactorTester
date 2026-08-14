@@ -40,46 +40,15 @@ Work Package 是一项研究，Branch 是其中一条决策路径。研究对象
 Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
 ADR-047。
 
-### Federated Node / Bootstrap / Overlay Address
+### IC 核心测试与附加分析
 
-`Federated Node` 是由稳定 `server_id` 标识的一台 FactorTester 服务器，不由 IP、分支、
-公网/内网角色或某个固定端口标识。节点可以提供任意数量的在线执行端口和数据源能力。
-`Overlay Address` 是该节点自己在 FactorTester WireGuard 接口上的地址；配置中的 bind/local
-address 永远指本节点，不得称为某一个远端 `peer_host`。`Peer` 只表示节点目录或 WireGuard
-配置中按 `server_id`/公钥索引的远端节点记录，天然是集合。
-
-非公网节点只配置一个当前 `Bootstrap Server`，用于首次登记、目录发现和心跳，不表示
-主从关系。登记响应可以返回多台无凭据的节点目录记录；发现不等于认证，只有选路、任务或
-传输实际需要某节点时才直接登记，之后才进入可调度路由并由单一后台调度器续租。bootstrap
-的 RTT 只能作为到该 bootstrap 的本地测量，不能把第三方测得的延迟当作本节点路由数据。
-WireGuard 本身不负责发现节点或分发
-公钥：每个部署在本地生成并持有私钥，受控部署模块只分发签名的公钥、地址和路由目录。
-公网节点可直接建立隧道 peer；NAT 后节点把一个公网节点作为当前 overlay gateway，必要时
-由部署模块切换到已授权备用节点。应用仍访问目标节点的 overlay 地址，网关只转发加密
-IP 包，不保存 Transfer 字节或成为文件镜像。完整决策见 ADR-070。
-
-### Federated Transfer / Transfer Attempt
-
-跨服务器生成物下载和提交物上传由 `Transfer` 表达。`Transfer` 是请求方 Manager
-本地 SQLite 中的持久权威事实；一次具体网络尝试属于不可变的 `Transfer Attempt`。
-文件的唯一持久副本由 `storage_server_id` 标识，请求方节点不创建中继镜像。
-
-客户端只使用公开的 7998 控制面和 7997 数据面：先在 7998 获得短期、角色受限的
-capability，再以不携带 Manager Cookie 的连接在 7997 上传或下载。服务器节点之间只走
-FactorTester 自己的 WireGuard 网络：17998 负责签名控制请求、服务转发和 Attempt 上下文，
-17997 负责字节流。四个端点均由节点显式发布，内部端点不得从公网 URL 推断；8000、8141
-等执行 worktree 端口始终留在所属 Manager 后面。节点公告 v2 对四个端点、节点身份、
-签发时间、nonce 与短期租约整体作 Ed25519 签名；接收方持久防重放状态，发送方持久单调
-签发时钟，节点重启或时钟回拨也不能让旧公告覆盖新路由。
-
-本地生成物由 7997 直接读取唯一副本；远端生成物经
-`客户端 ← 请求节点:7997 ← WireGuard ← 存储节点:17997` 流式返回，不在请求节点落盘。
-提交物按相反方向直达目标节点的私有 staging，完成长度与 SHA-256 校验后原子发布；中断
-重试只根据目标节点已验证的 offset 创建新 Attempt。WireGuard 不可用时明确返回
-`node_unreachable`，不得退回公网地址、SSH 反向隧道、NAT push/pull 或 SSE 命令模式。
-
-PostgreSQL 使用独立 WireGuard 身份，只保存用户、机构/层级、设备、配额与审计投影，
-不进入文件字节路径或已授权 Transfer 的关键路径。完整决策见 ADR-068。
+IC 的一个核心测试单元由产品范围、冻结因子、前瞻收益期、入场 Delay、IC
+方法和收益定义共同确定。批量选择会显式展开为核心测试矩阵并按内容地址去重；
+产品范围仍是 Job 边界，矩阵单元不是 Job。滚动统计、分期诊断、重采样、
+分组组合与持有期半衰期属于消费核心结果的附加分析，权威表示是后端注册的
+类型化无环图，界面树只负责展示。图像、表格和保留策略属于输出请求，不是分析
+节点。RunSpec 在界面统一显示为“运行配置”，冻结上述执行语义而不冻结界面
+排序、聚合和折叠状态。完整决策见 ADR-050、ADR-066。
 
 ### 因子 (Factor)
 

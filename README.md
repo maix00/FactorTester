@@ -21,8 +21,8 @@ local factor workspace / Agent
 ```
 
 The client never imports server execution code. A client may report a
-capability or backend-assurance gap, but only an authorized server-maintenance
-Agent can inspect or modify backend code.
+capability or backend-assurance gap, but only an authorized
+`factortester-server-maintenance` Agent can inspect or modify backend code.
 
 ## Client
 
@@ -42,7 +42,7 @@ See [Client installation and recovery](docs/client-release.md) and
 
 Server deployment and maintenance instructions are private operational
 material. Maintainers must follow
-[server-maintenance authority](docs/agents/server-maintenance.md), including
+[FactorTester server maintenance authority](docs/agents/factortester-server-maintenance.md), including
 authorization, bounded evidence, database backup, migration, and rollback
 requirements.
 

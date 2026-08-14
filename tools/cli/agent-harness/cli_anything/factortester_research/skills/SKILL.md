@@ -76,7 +76,11 @@ factortester manager --help
 factortester manager restart-fleet --help
 ```
 
-Then read the local `server-maintenance` Skill and run the native reusable
+Then use the registered `$factortester-server-maintenance` Skill; in a
+repository checkout its canonical source is
+`server/skills/factortester-server-maintenance/`. Read its
+`references/infrastructure.md` when Docker, WireGuard, SSH publication, or
+public/container release state is involved, then run the native reusable
 operation:
 
 ```bash
