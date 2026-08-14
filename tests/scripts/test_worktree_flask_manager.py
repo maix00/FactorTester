@@ -1601,6 +1601,8 @@ def test_public_compliance_page_bootstraps_device_login_with_visible_status() ->
     assert "检测到已登记设备，正在自动登录" in body
     assert "当前浏览器来源没有已登记的设备密钥" in body
     assert "设备自动登录失败" in body
+    assert 'text.split("{"+key+"}").join(String(value))' in body
+    assert 'text.split("{{"+key+"}}")' not in body
     assert 'window.addEventListener("online",authenticate)' in body
     assert 'document.addEventListener("visibilitychange"' in body
     assert "handoff_url" in body
