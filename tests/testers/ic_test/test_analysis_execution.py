@@ -79,3 +79,35 @@ def test_analysis_execution_rejects_a_missing_typed_core_output() -> None:
         match="requires output kind ic_series",
     ):
         execute_ic_analysis_nodes(graph, (node_id,), ICAnalysisResultStore())
+
+
+def test_autocorrelation_uses_the_registered_maximum_lag() -> None:
+    core = _graph()[1]
+    graph = ICAnalysisGraph((core,))
+    attachment = plan_analysis_attachment(
+        graph,
+        "ic_autocorrelation",
+        (core.core_test_ref,),
+        parameters={"maximum_lag": 2},
+    )
+    graph = apply_analysis_attachment(graph, attachment)
+    node_id = attachment.nodes[0].node_id
+    store = ICAnalysisResultStore()
+    store.publish(
+        core.core_test_ref,
+        "ic_series",
+        pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+    )
+
+    assert execute_ic_analysis_nodes(graph, (node_id,), store) == (node_id,)
+    assert store.require(node_id, "ic_autocorrelation").to_dict() == {
+        "schema_version": 1,
+        "estimator": "direct_numpy_adjusted_false",
+        "n": 6,
+        "maximum_lag_requested": 2,
+        "maximum_lag_resolved": 2,
+        "rows": [
+            {"lag": 1, "autocorrelation": 0.5},
+            {"lag": 2, "autocorrelation": 0.057143},
+        ],
+    }
