@@ -412,6 +412,21 @@ class RequestSecurityMixin:
                 return False
             return True
 
+        if path == "/device-handoff":
+            if not self.state.public_server:
+                json_response(self, {
+                    "success": False,
+                    "error": "device handoff is available only on a public Manager",
+                }, 404)
+                return False
+            if not self._has_secure_ui_transport():
+                json_response(self, {
+                    "success": False,
+                    "error": "device handoff requires HTTPS",
+                }, 400)
+                return False
+            return True
+
         if path == "/api/device/authorization/redeem":
             if not self.state.public_server:
                 json_response(self, {

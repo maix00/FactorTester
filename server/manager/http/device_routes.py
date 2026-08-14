@@ -8,7 +8,7 @@ import json
 import re
 import sys
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from server.manager.config import MANAGER_SESSION_TTL_SECONDS
 from server.manager.domain.device_clients import describe_client, observed_ip
@@ -54,6 +54,22 @@ def device_authorization_endpoint(value: object) -> str:
                 "public device authorization requires an HTTPS endpoint"
             )
     return endpoint
+
+
+def device_handoff_url(
+    target_origin: str,
+    *,
+    ticket: str,
+    next_path: str,
+) -> str:
+    """Build a canonical-origin URL for a one-use authenticated handoff."""
+    return (
+        f"{str(target_origin or '').rstrip('/')}/device-handoff?"
+        + urlencode({
+            "ticket": str(ticket or ""),
+            "next": str(next_path or "/"),
+        })
+    )
 
 
 class DeviceNetworkRoutesMixin:
@@ -295,6 +311,45 @@ class DeviceNetworkRoutesMixin:
             accept_language=language,
         ))
 
+    def _device_handoff(self, parsed: Any) -> None:
+        """Redeem a device session ticket on the canonical public origin."""
+        target_origin = str(
+            getattr(self.state, "manager_public_endpoint", "") or ""
+        ).strip().rstrip("/")
+        current_origin = self._request_origin()
+        next_path = safe_login_next(
+            str(parse_qs(parsed.query, keep_blank_values=True).get(
+                "next", ["/"]
+            )[0] or "/")
+        )
+        ticket = parse_qs(parsed.query, keep_blank_values=True).get(
+            "ticket", [""]
+        )[0]
+        if (
+            not self.state.public_server
+            or not target_origin
+            or current_origin != target_origin
+            or not self._has_secure_ui_transport()
+        ):
+            self._send_redirect(
+                "/compliance?next=" + quote(next_path, safe="/?=&%")
+            )
+            return
+        try:
+            token, _principal, _role = self.state.redeem_device_handoff(
+                ticket,
+                target_origin=target_origin,
+            )
+        except (PermissionError, TypeError, ValueError):
+            self._send_redirect(
+                "/compliance?next=" + quote(next_path, safe="/?=&%")
+            )
+            return
+        self._send_redirect(
+            next_path,
+            cookie=self._session_cookie(token),
+        )
+
     def _device_list(self) -> None:
         session = self._session()
         if session is None:
@@ -499,12 +554,35 @@ class DeviceNetworkRoutesMixin:
             TypeError,
             ValueError,
             KeyError,
-        ):
+        ) as exc:
+            sys.stderr.write(
+                f"[manager] device verification rejected: {type(exc).__name__}\n"
+            )
             json_response(self, {
                 "success": False,
                 "error": "device is not approved",
             }, 403)
             return
+        handoff_url = ""
+        target_origin = str(
+            getattr(self.state, "manager_public_endpoint", "") or ""
+        ).strip().rstrip("/")
+        if (
+            target_origin
+            and self._request_origin() != target_origin
+            and self._visitor_entry_origin_allowed()
+        ):
+            next_path = safe_login_next(str(payload.get("next") or "/"))
+            ticket = self.state.issue_device_handoff(
+                principal,
+                role,
+                target_origin=target_origin,
+            )
+            handoff_url = device_handoff_url(
+                target_origin,
+                ticket=ticket,
+                next_path=next_path,
+            )
         json_response(self, {
             "success": True,
             "username": principal,
@@ -516,4 +594,5 @@ class DeviceNetworkRoutesMixin:
             "token": token,
             "expires_in": MANAGER_SESSION_TTL_SECONDS,
             "device_id": record.get("device_id"),
+            "handoff_url": handoff_url,
         }, headers={"Set-Cookie": self._session_cookie(token)})
