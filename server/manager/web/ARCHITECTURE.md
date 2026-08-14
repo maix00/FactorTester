@@ -15,7 +15,10 @@ single source of truth for the script order and semantic module groups.
   `research/local.js` owns the client-download/local projection page and
   `research/shared.js` owns publication visibility and owned-report source
   resolution
-- `jobs/`: job lists, progress, detail fields, artifacts, and viewers
+- `jobs/`: job lists, progress, detail fields, artifacts, and viewers;
+  `jobs/list-format.js` is the pure list/detail formatting seam (status,
+  identity, artifact cells, and shared scalar helpers), while `jobs/jobs.js`
+  owns scope state, pagination, and navigation
 - `catalog/`: source catalog, products, factors, product groups, and catalog
   details; `catalog/source-list.js` owns the data-source page and receives the
   shared catalog loading seam from `catalog/products.js`
@@ -141,6 +144,15 @@ stylesheet limit. These are split points, not a reason to create shallow
 one-function files. When a module approaches its limit, extract a cohesive
 responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
+
+The workbench loading groups are also semantic boundaries: `workbench-core`
+contains the settings shell and compiler, `workbench-run` contains the
+run-spec/submit/result code, and factor, product, backtest, and template code
+remain separate. A route may load `workbench-core`, but the run group is
+requested only when the run surface is materialized; a tab-specific group is
+requested only when its registered adapter is opened. The same rule applies
+to jobs: the formatter is loaded before the list controller, so the detail
+page can reuse the stable helper seam without recreating formatting logic.
 
 ## Embedded Swift navigation
 

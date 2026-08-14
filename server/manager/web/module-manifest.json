@@ -111,6 +111,7 @@
     ],
     "jobs": [
       "core/market-data.js",
+      "jobs/list-format.js",
       "jobs/highcharts-viewers.js",
       "jobs/factor-series-model.js",
       "jobs/factor-series-chart.js",
@@ -222,6 +223,7 @@
     "core/icons.js",
     "core/price-chart.js",
     "core/market-data.js",
+    "jobs/list-format.js",
     "jobs/highcharts-viewers.js",
     "jobs/factor-series-model.js",
     "jobs/factor-series-chart.js",
