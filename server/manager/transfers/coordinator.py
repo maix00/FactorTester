@@ -23,8 +23,10 @@ from server.manager.transfers.models import (
     TransferStatus,
     TransferTicketRole,
 )
+from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import (
     NodeEndpoint,
+    NodeUnavailable,
     TransferPlanningRequest,
     plan_transfer,
 )
@@ -115,14 +117,35 @@ class TransferCoordinator:
             expected_sha256=request.expected_sha256,
             expires_at=request.expires_at,
         ), now=now)
-        attempt = self._attempt(
-            transfer, endpoints=endpoints, now=now,
-        )
-        transfer = self.requests.require(transfer.transfer_id)
-        if source_server_id != destination_server_id:
-            if self.peer_gateway is None:
-                raise ConnectionError("transfer peer gateway is unavailable")
-            self.peer_gateway.import_context(transfer, attempt)
+        attempt = None
+        try:
+            attempt = self._attempt(
+                transfer, endpoints=endpoints, now=now,
+            )
+            transfer = self.requests.require(transfer.transfer_id)
+            if source_server_id != destination_server_id:
+                if self.peer_gateway is None:
+                    raise NodeUnavailable(
+                        _storage_server_id(transfer),
+                        "transfer peer gateway is unavailable",
+                    )
+                self.peer_gateway.import_context(transfer, attempt)
+        except NodeUnavailable as exc:
+            self._mark_failed(transfer, attempt, now=now, error=exc)
+            raise
+        except PeerControlError as exc:
+            self._mark_failed(transfer, attempt, now=now, error=exc)
+            raise
+        except (PermissionError, ValueError) as exc:
+            self._mark_failed(transfer, attempt, now=now, error=exc)
+            raise
+        except (ConnectionError, OSError, TimeoutError) as exc:
+            unavailable = NodeUnavailable(
+                _storage_server_id(transfer),
+                f"WireGuard peer control endpoint is unavailable: {exc}",
+            )
+            self._mark_failed(transfer, attempt, now=now, error=exc)
+            raise unavailable from exc
         if transfer.status is TransferStatus.PLANNED:
             self.requests.transition(
                 transfer.transfer_id,
@@ -164,6 +187,38 @@ class TransferCoordinator:
             resume_offset=attempt.resume_offset,
             expected_size=attempt.expected_size,
         )
+
+    def _mark_failed(
+        self,
+        transfer,
+        attempt,
+        *,
+        now: float,
+        error: BaseException | None = None,
+    ) -> None:
+        selected_attempt = attempt or self.attempts.latest(transfer.transfer_id)
+        if (
+            selected_attempt is not None
+            and selected_attempt.status is not AttemptStatus.FAILED
+        ):
+            self.attempts.transition(
+                selected_attempt.attempt_id,
+                AttemptStatus.FAILED,
+                now=now,
+                error=str(error or "transfer node is unavailable"),
+            )
+        current = self.requests.require(transfer.transfer_id)
+        if current.status not in {
+            TransferStatus.COMPLETED,
+            TransferStatus.FAILED,
+            TransferStatus.EXPIRED,
+            TransferStatus.CANCELLED,
+        }:
+            self.requests.transition(
+                transfer.transfer_id,
+                TransferStatus.FAILED,
+                now=now,
+            )
 
     def _attempt(
         self,
@@ -265,3 +320,11 @@ class TransferCoordinator:
 __all__ = [
     "DownloadRequest", "TransferAccess", "TransferCoordinator", "UploadRequest",
 ]
+
+
+def _storage_server_id(transfer) -> str:
+    return (
+        transfer.source_server_id
+        if transfer.operation is TransferOperation.DOWNLOAD
+        else transfer.destination_server_id
+    )

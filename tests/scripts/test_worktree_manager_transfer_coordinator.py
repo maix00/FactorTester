@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferStore,
@@ -12,8 +14,13 @@ from server.manager.transfers.coordinator import (
     TransferCoordinator,
     UploadRequest,
 )
-from server.manager.transfers.models import TransferMode, TransferTicketRole
-from server.manager.transfers.planner import NodeEndpoint
+from server.manager.transfers.models import (
+    AttemptStatus,
+    TransferMode,
+    TransferStatus,
+    TransferTicketRole,
+)
+from server.manager.transfers.planner import NodeEndpoint, NodeUnavailable
 
 
 def _node(node_id: str, octet: int) -> NodeEndpoint:
@@ -27,9 +34,9 @@ def _node(node_id: str, octet: int) -> NodeEndpoint:
     )
 
 
-def _coordinator(tmp_path) -> TransferCoordinator:
+def _coordinator(tmp_path, *, peer=None) -> TransferCoordinator:
     path = tmp_path / "transfers.sqlite"
-    peer = _PeerGateway()
+    peer = _PeerGateway() if peer is None else peer
     return TransferCoordinator(
         manager_id="node-b",
         client_data_endpoint="https://factor.example:7997",
@@ -50,6 +57,16 @@ class _PeerGateway:
 
     def resume_offset(self, _transfer, _attempt) -> int:
         return self.resume_value
+
+
+class _OfflinePeerGateway(_PeerGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.transfer_id = ""
+
+    def import_context(self, _transfer, _attempt) -> None:
+        self.transfer_id = _transfer.transfer_id
+        raise ConnectionError("connection refused")
 
 
 def _download() -> DownloadRequest:
@@ -92,6 +109,27 @@ def test_download_freezes_private_route_but_returns_only_public_access(tmp_path)
         end_offset=6,
         now=101.0,
     )
+
+
+def test_peer_unavailable_fails_transfer_without_retry(tmp_path) -> None:
+    peer = _OfflinePeerGateway()
+    coordinator = _coordinator(tmp_path, peer=peer)
+
+    with pytest.raises(NodeUnavailable) as denied:
+        coordinator.prepare_download(
+            _download(),
+            endpoints={"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)},
+            now=100.0,
+        )
+
+    assert denied.value.code == "node_unreachable"
+    assert denied.value.server_id == "node-a"
+    transfer = coordinator.requests.require(peer.transfer_id)
+    attempt = coordinator.attempts.latest(transfer.transfer_id)
+    assert transfer.status is TransferStatus.FAILED
+    assert attempt is not None
+    assert attempt.status is AttemptStatus.FAILED
+    assert "connection refused" in attempt.last_error
 
 
 def test_upload_uses_direct_push_and_one_use_client_ticket(tmp_path) -> None:

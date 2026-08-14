@@ -7,6 +7,7 @@ import secrets
 from urllib.parse import quote, unquote
 
 from server.manager.http.responses import json_response
+from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
 
 
@@ -66,6 +67,13 @@ class JobTransferRoutesMixin:
                 idempotency_key=idempotency,
             )
         except NodeUnavailable as exc:
+            json_response(self, {
+                "success": False,
+                "code": exc.code,
+                "error": str(exc),
+            }, 503)
+            return True
+        except PeerControlError as exc:
             json_response(self, {
                 "success": False,
                 "code": exc.code,
@@ -170,6 +178,17 @@ class JobTransferRoutesMixin:
                 idempotency_key=idempotency,
             )
         except NodeUnavailable as exc:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "code": exc.code,
+                    "error": str(exc),
+                },
+                503,
+            )
+            return True
+        except PeerControlError as exc:
             json_response(
                 self,
                 {

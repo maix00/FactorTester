@@ -5,7 +5,7 @@ import threading
 from contextlib import contextmanager
 
 import pytest
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from server.manager import runtime as manager
 from server.manager.data_plane.staging import partial_path
@@ -18,7 +18,8 @@ from server.manager.transfers.coordinator import (
 )
 from server.manager.transfers.node_client import NodeControlClient
 from server.manager.transfers.node_keys import NodeKey
-from server.manager.transfers.planner import NodeEndpoint
+from server.manager.transfers.peer_gateway import TransferPeerGateway
+from server.manager.transfers.planner import NodeEndpoint, NodeUnavailable
 from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferStore,
@@ -31,6 +32,12 @@ class _NoopPeerGateway:
     @staticmethod
     def import_context(_transfer, _attempt) -> None:
         pass
+
+
+class _UnavailableTransport:
+    def open(self, _request, *, timeout: float):
+        del timeout
+        raise URLError("connection refused")
 
 
 @contextmanager
@@ -135,6 +142,23 @@ def test_signed_peer_imports_context_then_obtains_origin_ticket(tmp_path) -> Non
         source.transfer_database_path, server_id="storage-b1",
     ).require_context(attempt.attempt_id)
     assert restored == (transfer, attempt)
+
+
+def test_peer_gateway_reports_offline_node_for_control_transport_failure(
+    tmp_path,
+) -> None:
+    transfer, attempt = _context(tmp_path, operation="download")
+    gateway = TransferPeerGateway(
+        key=NodeKey.load_or_create(tmp_path / "requester.key", node_id="public-b2"),
+        transport=_UnavailableTransport(),
+    )
+
+    with pytest.raises(NodeUnavailable) as denied:
+        gateway.import_context(transfer, attempt)
+
+    assert denied.value.code == "node_unreachable"
+    assert denied.value.server_id == "storage-b1"
+    assert "offline or unreachable" in str(denied.value)
 
 
 def test_origin_ticket_uses_signed_identity_not_claimed_requester(tmp_path) -> None:
