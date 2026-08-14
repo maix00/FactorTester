@@ -22,6 +22,9 @@ authentication attempt.
 1. A compliance page keeps its visitor entry visible when the current origin
    has no local device key.  The page may show a link to the canonical public
    endpoint, but it must not redirect solely because the credential is absent.
+   A pre-existing password session does not substitute for the current
+   origin's device key when public device authentication is enabled; this
+   also covers a private/incognito window carrying an old session cookie.
 2. A device verification performed on an explicitly configured ingress may
    return a short-lived, single-use handoff URL to the canonical endpoint.
    The handoff stores only the already authenticated principal, role, target
@@ -47,3 +50,6 @@ authentication attempt.
 - The canonical public IP must be served with a certificate trusted by the
   browser.  A self-signed certificate can prevent the handoff navigation even
   though the application logic is correct.
+- A normal account session alone cannot bypass the public device gate, so an
+  authenticated user without the current origin's key sees the same
+  compliance policy as an anonymous browser.

@@ -1352,6 +1352,52 @@ def test_visitor_entry_is_only_advertised_by_configured_ingress(
     assert 'href="/visitor?next=/jobs' not in direct_login_body
 
 
+def test_public_session_without_current_origin_device_key_stays_on_compliance(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    session_token, _, _ = state._issue_session("alice@default", "user")
+
+    with _running_manager(state) as base_url:
+        ingress = Request(
+            f"{base_url}/jobs",
+            headers=_visitor_request_headers(
+                "eloquence-drizzly-fencing.ngrok-free.dev",
+                cookie=f"ft-manager-session={session_token}",
+            ),
+        )
+        with urlopen(ingress) as response:
+            ingress_body = response.read().decode("utf-8")
+            assert response.geturl().startswith(f"{base_url}/compliance?")
+
+        direct_ip = Request(
+            f"{base_url}/jobs",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998",
+                cookie=f"ft-manager-session={session_token}",
+            ),
+        )
+        with urlopen(direct_ip) as response:
+            direct_body = response.read().decode("utf-8")
+            assert response.geturl().startswith(f"{base_url}/compliance?")
+
+    assert 'class="visitor-entry"' in ingress_body
+    assert 'class="visitor-entry"' not in direct_body
+    assert "login-form" not in ingress_body
+    assert "app-shell" not in direct_body
+
+
 def test_visitor_entry_redirects_to_ip_and_limits_anonymous_capabilities(
     tmp_path, monkeypatch,
 ) -> None:
