@@ -508,7 +508,13 @@ class RequestSecurityMixin:
         if (
             session is not None
             and self._has_secure_ui_transport()
-            and not device_gate_required
+            and (
+                not device_gate_required
+                or self.state.session_allows_device_origin(
+                    self._bearer_token(),
+                    self._request_origin(),
+                )
+            )
         ):
             return True
 

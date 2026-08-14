@@ -37,13 +37,23 @@ class SessionStateMixin:
             )
         return self._issue_session(principal, role)
 
-    def login_device(self, username: str) -> tuple[str, str, str]:
-        """Issue a normal session after a registered device proves its key."""
+    def login_device(
+        self,
+        username: str,
+        *,
+        origin: str = "",
+    ) -> tuple[str, str, str]:
+        """Issue an origin-bound session after a registered device proves its key."""
         account = self.account_for_principal(username)
         if account is None or not bool(account.get("active", True)):
             raise PermissionError("device account is not active")
         role = self._role_for_account(account)
-        return self._issue_session(str(account["username"]), role)
+        return self._issue_session(
+            str(account["username"]),
+            role,
+            authentication="device",
+            origin=origin,
+        )
 
     def account_for_principal(self, username: str) -> dict[str, object] | None:
         principal = str(username or "").strip()
@@ -61,11 +71,22 @@ class SessionStateMixin:
             None,
         )
 
-    def _issue_session(self, principal: str, role: str) -> tuple[str, str, str]:
+    def _issue_session(
+        self,
+        principal: str,
+        role: str,
+        *,
+        authentication: str = "password",
+        origin: str = "",
+    ) -> tuple[str, str, str]:
         token = secrets.token_urlsafe(32)
         with self._session_lock:
             self._sessions[self._token_hash(token)] = (
-                principal, role, time.time() + MANAGER_SESSION_TTL_SECONDS,
+                principal,
+                role,
+                time.time() + MANAGER_SESSION_TTL_SECONDS,
+                str(authentication or "password"),
+                str(origin or "").strip().rstrip("/"),
             )
             self._save_sessions()
         return token, principal, role
@@ -113,14 +134,19 @@ class SessionStateMixin:
             session = self._sessions.get(token_hash)
             if session is None:
                 return None
-            principal, role, expires_at = session
+            principal, role, expires_at = session[:3]
             if expires_at <= now:
                 self._sessions.pop(token_hash, None)
                 self._save_sessions()
                 return None
             if expires_at - now <= MANAGER_SESSION_REFRESH_WINDOW_SECONDS:
                 expires_at = now + MANAGER_SESSION_TTL_SECONDS
-                self._sessions[token_hash] = (principal, role, expires_at)
+                self._sessions[token_hash] = (
+                    principal,
+                    role,
+                    expires_at,
+                    *session[3:],
+                )
                 self._save_sessions()
             return {
                 "username": principal,
@@ -130,6 +156,30 @@ class SessionStateMixin:
                     "research": True,
                 },
             }
+
+    def session_allows_device_origin(self, token: str, origin: str) -> bool:
+        """Allow only a device-authenticated session on its issuing origin.
+
+        Password sessions and legacy sessions created before origin metadata was
+        introduced intentionally fail closed on a public device-gated Manager.
+        The private key remains origin-local; this only binds the resulting
+        HttpOnly session cookie to the origin that completed the challenge.
+        """
+        if self.session(token) is None:
+            return False
+        expected_origin = str(origin or "").strip().rstrip("/")
+        if not expected_origin:
+            return False
+        with self._session_lock:
+            value = self._sessions.get(self._token_hash(token))
+            if value is None or len(value) < 5:
+                return False
+            authentication = str(value[3] or "")
+            session_origin = str(value[4] or "").strip().rstrip("/")
+        return (
+            authentication in {"device", "device-handoff"}
+            and session_origin == expected_origin
+        )
 
     def session_principal(self, token: str) -> str | None:
         session = self.session(token)
@@ -208,20 +258,25 @@ class SessionStateMixin:
             raise PermissionError("device handoff is expired or target is invalid")
         principal = str(value.get("principal") or "")
         role = str(value.get("role") or "")
-        token, principal, role = self._issue_session(principal, role)
+        token, principal, role = self._issue_session(
+            principal,
+            role,
+            authentication="device-handoff",
+            origin=target,
+        )
         return token, principal, role
 
     @staticmethod
     def _token_hash(token: str) -> str:
         return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
-    def _load_sessions(self) -> dict[str, tuple[str, str, float]]:
+    def _load_sessions(self) -> dict[str, tuple[object, ...]]:
         try:
             payload = json.loads(self.sessions_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
             return {}
         now = time.time()
-        sessions: dict[str, tuple[str, str, float]] = {}
+        sessions: dict[str, tuple[object, ...]] = {}
         for token_hash, value in (payload.get("sessions") or {}).items():
             if not isinstance(value, dict):
                 continue
@@ -231,17 +286,21 @@ class SessionStateMixin:
                     str(value.get("principal") or ""),
                     str(value.get("role") or ""),
                     expires_at,
+                    str(value.get("authentication") or "password"),
+                    str(value.get("origin") or "").strip().rstrip("/"),
                 )
         return sessions
 
     def _save_sessions(self) -> None:
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "sessions": {
                 token_hash: {
                     "principal": value[0],
                     "role": value[1],
                     "expires_at": value[2],
+                    "authentication": value[3] if len(value) >= 4 else "password",
+                    "origin": value[4] if len(value) >= 5 else "",
                 }
                 for token_hash, value in self._sessions.items()
             },
