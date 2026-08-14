@@ -43,6 +43,9 @@ from server.manager.http.write_routes import WriteRoutesMixin
 from server.manager.http.auth_routes import AuthenticationRoutesMixin
 from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
+from server.manager.services.federated_public_data import (
+    FederatedPublicDataService,
+)
 from server.manager.domain.accounts import (
     account_role as _account_role,
     authenticate_user as _authenticate_user,
@@ -314,7 +317,18 @@ class ManagerState(
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
         )
-        self.client_state = ClientStateService()
+        self.client_state = ClientStateService(control_store=self.control_store)
+        self.federated_public_data = FederatedPublicDataService(
+            server_id=self.server_id,
+            registry=self.federation_registry,
+            gateway=self.federation_gateway,
+            public_research=self.public_research,
+            client_state=self.client_state,
+        )
+        # Keep the route name explicit: public research is a read-through
+        # projection, while ``public_research`` remains the local authority
+        # used by publication writes.
+        self.federated_public_research = self.federated_public_data
         self.test_authoring = TestAuthoringService()
         # The Manager exposes several application projections from one Python
         # process.  Their first call imports overlapping FactorTester packages;

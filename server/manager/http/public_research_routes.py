@@ -13,12 +13,18 @@ from server.manager.http.responses import json_response
 class PublicResearchRoutesMixin:
     """Serve bounded public research views and owner publication settings."""
 
+    def _research_service(self):
+        """Return the local or federated read-through research service."""
+        service = getattr(self.state, "federated_public_research", None)
+        return service if service is not None else self.state.public_research
+
     def _get_public_research_routes(self, parsed) -> bool:
+        research = self._research_service()
         if parsed.path == "/api/public-research":
             session = self._session()
             viewer = str(session["username"]) if session else None
             json_response(self, {
-                "reports": self.state.public_research.list_visible(viewer),
+                "reports": research.list_visible(viewer),
             })
             return True
         public_component_match = re.fullmatch(
@@ -29,7 +35,7 @@ class PublicResearchRoutesMixin:
             session = self._session()
             viewer = str(session["username"]) if session else None
             try:
-                value = self.state.public_research.component(
+                value = research.component(
                     public_component_match.group(1),
                     unquote(public_component_match.group(2)),
                     unquote(public_component_match.group(3)),
@@ -40,6 +46,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             json_response(self, {"success": True, **value})
             return True
@@ -54,9 +63,9 @@ class PublicResearchRoutesMixin:
                 publication_id = public_chapter_match.group(1)
                 suffix = public_chapter_match.group(2)
                 if suffix == "index":
-                    value = self.state.public_research.index(publication_id, viewer)
+                    value = research.index(publication_id, viewer)
                 else:
-                    value = self.state.public_research.chapter(
+                    value = research.chapter(
                         publication_id, unquote(suffix.split("/", 1)[1]), viewer,
                         include_content=parse_qs(parsed.query).get("metadata") != ["1"],
                     )
@@ -65,6 +74,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             json_response(self, {"success": True, **value})
             return True
@@ -75,7 +87,7 @@ class PublicResearchRoutesMixin:
             session = self._session()
             viewer = str(session["username"]) if session else None
             try:
-                value = self.state.public_research.projection(
+                value = research.projection(
                     public_match.group(1), viewer,
                 )
             except PermissionError as exc:
@@ -83,6 +95,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             etag = '"' + str(value["projection_hash"]) + '"'
             if self.headers.get("If-None-Match") == etag:
@@ -107,7 +122,7 @@ class PublicResearchRoutesMixin:
             session = self._session()
             viewer = str(session["username"]) if session else None
             try:
-                raw, content_type, filename = self.state.public_research.asset(
+                raw, content_type, filename = research.asset(
                     asset_match.group(1), asset_match.group(2), viewer,
                 )
             except PermissionError as exc:
@@ -115,6 +130,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             self.send_response(200)
             self.send_header("Content-Type", content_type)
@@ -132,7 +150,7 @@ class PublicResearchRoutesMixin:
             session = self._session()
             viewer = str(session["username"]) if session else None
             try:
-                raw, content_type, filename = self.state.public_research.local_resource(
+                raw, content_type, filename = research.local_resource(
                     local_resource_match.group(1), local_resource_match.group(2), viewer,
                 )
             except PermissionError as exc:
@@ -140,6 +158,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             safe_filename = re.sub(r"[^A-Za-z0-9._-]", "_", Path(filename).name) or "resource"
             self.send_response(200)
@@ -159,7 +180,7 @@ class PublicResearchRoutesMixin:
             session = self._session()
             viewer = str(session["username"]) if session else None
             try:
-                raw, content_type, filename = self.state.public_research.attachment(
+                raw, content_type, filename = research.attachment(
                     attachment_match.group(1),
                     f"attachment:sha256:{attachment_match.group(2)}",
                     viewer,
@@ -169,6 +190,9 @@ class PublicResearchRoutesMixin:
                 return True
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             self.send_response(200)
             self.send_header("Content-Type", content_type)
@@ -184,7 +208,7 @@ class PublicResearchRoutesMixin:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
             json_response(self, {
-                "reports": self.state.public_research.list_owner(
+                "reports": research.list_owner(
                     str(session["username"]),
                 ),
             })
