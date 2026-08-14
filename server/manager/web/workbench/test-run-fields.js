@@ -55,11 +55,9 @@
     const label = document.createElement("b"); label.textContent = context.t(item.label);
     copy.append(label);
     if (item.help_text) {
-      const help = document.createElement("small");
-      help.className = "test-setting-help";
-      help.textContent = context.t(item.help_text);
-      help.title = help.textContent;
-      copy.append(help);
+      const hint = context.t(item.help_text);
+      root.title = hint;
+      root.setAttribute("aria-label", `${label.textContent}: ${hint}`);
     }
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};

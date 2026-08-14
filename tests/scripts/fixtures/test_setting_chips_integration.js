@@ -80,23 +80,22 @@ assert.equal(initial.hidden_default, "default");
 let opened = "";
 const first = render("ROC 1m", tabKey => { opened = tabKey; });
 assert.deepEqual(first.children.map(item => item.className), [
-  "test-settings-intro",
   "backend-settings-tab-bar",
   "test-settings-current",
   "backend-settings-host",
 ]);
-assert.ok(first.children[1].children.every(button => button.children.length === 1),
+assert.ok(first.children[0].children.every(button => button.children.length === 1),
   "test setting tabs should render only their title");
-assert.equal(first.children[1].children[0].children[0].textContent, "因子");
-const chipRow = first.children[2].children[1];
+assert.equal(first.children[0].children[0].children[0].textContent, "因子");
+const chipRow = first.children[1].children[1];
 assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");
 chipRow.children[0].listeners.click();
 assert.equal(opened, "factor");
 
-const host = first.children[3];
+const host = first.children[2];
 const managePanel = host.children[host.children.length - 1];
 const manager = managePanel.children[0];
-const managerList = manager.children[1];
+const managerList = manager.children[0];
 const timeRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "时间范围");
 assert.ok(timeRow, "+ 设置 content should list every tab");
@@ -105,5 +104,5 @@ assert.ok(timeRow.children[1].children[1].children.length >= 1,
 assert.equal(timeRow.children[1].children[1].children[0].children[1].textContent, "未设置（默认）");
 
 const updated = render("SgCCS 5m", () => {});
-assert.equal(updated.children[2].children[1].children[0].children[1].textContent, "SgCCS 5m");
+assert.equal(updated.children[1].children[1].children[0].children[1].textContent, "SgCCS 5m");
 console.log("ok");

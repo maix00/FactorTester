@@ -675,6 +675,9 @@ def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> No
 
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
+    run_fields = (WEB_ROOT / "workbench" / "test-run-fields.js").read_text(
+        encoding="utf-8"
+    )
     tab_content = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
         encoding="utf-8"
     )
@@ -708,6 +711,10 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "previewDefaultsForTab" in settings
     assert "includeRun: false" in settings
     assert "includeEmpty: true" in settings
+    assert "按顺序完成配置" not in settings
+    assert "选择要挂载到测试配置的设置" not in settings
+    assert "test-setting-help" not in settings
+    assert "test-setting-help" not in run_fields
     assert "tab-chip-description" not in tab_content
     assert "fieldValueSelector" in output_choices
     assert "FTOutputChoices.fieldValueSelector" in test_outputs

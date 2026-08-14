@@ -34,16 +34,6 @@
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
     let tabset = null;
-    const intro = document.createElement("div");
-    intro.className = "test-settings-intro";
-    const introTitle = document.createElement("strong");
-    introTitle.textContent = context.t("按顺序完成配置");
-    const introText = document.createElement("span");
-    introText.textContent = context.t(
-      "先确认研究对象，再固定样本与核心计算；附加分析不会改变核心测试身份",
-    );
-    intro.append(introTitle, introText);
-    root.append(intro);
     const items = [];
     const runTab = manifest?.run_settings;
     if (runTab?.key && options.state) {
@@ -150,9 +140,6 @@
   function settingsManager(manifest, available, mounted, values, context, options) {
     const root = document.createElement("div");
     root.className = "test-settings-manager";
-    const intro = document.createElement("p");
-    intro.textContent = context.t("选择要挂载到测试配置的设置，未挂载项使用后端默认值");
-    root.append(intro);
     const list = document.createElement("div");
     list.className = "test-settings-manager-list";
     settingsSections(manifest, available).forEach(section => {
@@ -245,19 +232,15 @@
     const label = document.createElement("b");
     label.textContent = field.label || key;
     copy.append(label);
-    if (field.help_text) {
-      const help = document.createElement("small");
-      help.className = "test-setting-help";
-      help.textContent = field.help_text;
-      help.title = field.help_text;
-      copy.append(help);
-    }
     const editable = FTSettingRules.isEditable(field, values);
+    const hints = [field.help_text];
     if (!editable && Object.keys(field.editable_when || {}).length) {
-      const mode = document.createElement("small");
-      mode.className = "test-setting-mode-note";
-      mode.textContent = context.t("当前模式使用自动值");
-      copy.append(mode);
+      hints.push(context.t("当前模式使用自动值"));
+    }
+    const hint = hints.filter(Boolean).join("\n");
+    if (hint) {
+      row.title = hint;
+      row.setAttribute("aria-label", `${label.textContent}: ${hint}`);
     }
     row.append(copy, inputFor(key, field, manifest, values, context, options, !editable));
     return row;
