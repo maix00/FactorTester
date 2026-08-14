@@ -10,7 +10,9 @@
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     const sections = sectionsFor(context);
-    const requested = new URLSearchParams(location.search).get("section") || "shared";
+    const params = new URLSearchParams(location.search);
+    const requested = params.get("section") || "shared";
+    const profileID = params.get("profile") || "";
     const allowedSections = new Set(sections.map(item => item[0]));
     const selected = allowedSections.has(requested)
       ? requested : (sections[0]?.[0] || "shared");
@@ -34,9 +36,12 @@
       // branch used to leave a blank research page during cold start.
       body.replaceChildren();
       if (selected === "profiles") {
-        await FTProfiles.list({...context, content: body}, {
-          nav: "research", heading: "研究身份",
-        });
+        const profilesContext = {...context, content: body};
+        if (profileID) {
+          await FTProfiles.detail(profilesContext, profileID, {embedded: true});
+        } else {
+          await FTProfiles.list(profilesContext, {embedded: true});
+        }
       } else if (selected === "local") {
         await FTResearchLocal.render(context, body, embedded);
       } else if (selected === "graph") {
@@ -81,6 +86,7 @@
       button.addEventListener("click", () => {
         const url = new URL(location.href);
         url.searchParams.set("section", id);
+        url.searchParams.delete("profile");
         history.pushState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
         // In the embedded client the Web page owns rendering, while Swift
         // owns the lightweight tab session.  Persist only the section key;

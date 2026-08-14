@@ -6,21 +6,29 @@
   }
 
   async function list(context, options = {}) {
+    const embedded = Boolean(options.embedded);
     const nav = options.nav || "research";
     const heading = options.heading || "研究身份";
-    context.activeNav(nav);
-    if (options.heading) {
-      context.setHeading(context.t(heading), context.t("本地研究身份"));
-    } else {
-      context.setHeading(context.t("研究身份"), context.t("本地研究身份"));
+    if (!embedded) {
+      context.activeNav(nav);
+      if (options.heading) {
+        context.setHeading(context.t(heading), context.t("本地研究身份"));
+      } else {
+        context.setHeading(context.t("研究身份"), context.t("本地研究身份"));
+      }
     }
     context.content.replaceChildren(FTUI.loading(context.t("正在读取本地 Profiles…")));
     const payload = await context.api("/api/client/profiles");
     if (!current(context)) return;
     cached = payload.profiles || [];
-    context.toolbar.append(context.button("↻", () => list(context, options), context.t("刷新")));
+    if (!embedded) {
+      context.toolbar.append(context.button("↻", () => list(context, options), context.t("刷新")));
+    }
     if (!cached.length) {
-      context.content.replaceChildren(FTUI.empty(context.t("尚无已注册 Profile"), context.t("请使用 CLI 注册研究 Agent Profile")));
+      context.content.replaceChildren(FTUI.empty(
+        context.t("尚无已注册研究身份"),
+        context.t("请使用 CLI 注册智能体研究身份"),
+      ));
       return;
     }
     const view = FTUI.table([context.t("研究身份"), context.t("标识"), "Agent", context.t("研究"), context.t("服务器")], cached.map(item => [
@@ -30,13 +38,21 @@
     ]));
     [...view.body.rows].forEach((row, index) => {
       row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(`/profiles/${encodeURIComponent(cached[index].profile_id)}`));
+      row.addEventListener("click", () => {
+        const profileID = encodeURIComponent(cached[index].profile_id);
+        context.navigate(
+          embedded
+            ? `/research?section=profiles&profile=${profileID}`
+            : `/profiles/${profileID}`,
+        );
+      });
     });
     context.content.replaceChildren(view.shell);
   }
 
-  async function detail(context, profileID) {
-    context.activeNav("research");
+  async function detail(context, profileID, options = {}) {
+    const embedded = Boolean(options.embedded);
+    if (!embedded) context.activeNav("research");
     if (!cached.length) {
       const payload = await context.api("/api/client/profiles");
       if (!current(context)) return;
@@ -44,12 +60,22 @@
     }
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
-    context.setHeading(profile.display_name || profile.profile_id, `${context.t("研究身份")} · ${profile.profile_id}`);
-    context.toolbar.append(context.button(
-      "‹", () => context.navigate("/research?section=profiles"),
-      context.t("返回 Profiles")
-    ));
     const root = document.createElement("div"); root.className = "detail-stack";
+    if (!embedded) {
+      context.setHeading(profile.display_name || profile.profile_id, `${context.t("研究身份")} · ${profile.profile_id}`);
+      context.toolbar.append(context.button(
+        "‹", () => context.navigate("/research?section=profiles"),
+        context.t("返回研究身份")
+      ));
+    } else {
+      const actions = document.createElement("div");
+      actions.className = "detail-actions";
+      actions.append(context.button(
+        "‹", () => context.navigate("/research?section=profiles"),
+        context.t("返回研究身份")
+      ));
+      root.append(actions);
+    }
     root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows({
       profile_id: profile.profile_id, display_name: profile.display_name,
       workspace_root: profile.workspace_root, server: profile.server?.base_url,
