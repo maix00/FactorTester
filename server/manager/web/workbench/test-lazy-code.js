@@ -10,6 +10,7 @@
       product_path_selection: "workbench-products",
       category_selection: "workbench-products",
       test_templates: "workbench-templates",
+      run_inputs: "workbench-source-inputs",
     }[String(tab?.content_adapter || "")];
   }
 

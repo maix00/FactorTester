@@ -55,7 +55,7 @@
     // state only after the settings implementation is available.
     const [manifest, workspaces] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
-      context.api("/api/workspaces"),
+      context.api("/api/workspace-summaries"),
       FTTestLazyCode.loadGroup("workbench-settings"),
     ]);
     const state = {
@@ -70,8 +70,15 @@
       lazy: FTTestState.lazyState(),
       runValues: initialRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
+      settingsFieldsCode: {status: "idle", error: "", promise: null},
     };
     FTTestState.restoreWorkspace(state);
+    if (state.workspace && !state.workspace.configuration) {
+      const workspaceID = encodeURIComponent(state.workspace.workspace_id);
+      const value = await context.api(`/api/workspaces/${workspaceID}/configuration`);
+      state.workspace.configuration = value.configuration || null;
+      FTTestState.applyWorkspaceConfiguration(state);
+    }
     if (options.factorRef) state.factorRef = options.factorRef;
     if (options.groupRef) {
       state.groupRef = options.groupRef;
@@ -120,6 +127,28 @@
     record.status = "loading";
     record.error = "";
     record.promise = FTTestLazyCode.loadGroup("workbench-run")
+      .then(() => {
+        record.status = "ready";
+        refresh?.();
+      })
+      .catch(error => {
+        record.status = "error";
+        record.error = error.message || String(error);
+        refresh?.();
+      });
+    return record.promise;
+  }
+
+  function ensureSettingsFieldsCode(context, state, refresh) {
+    if (window.FTTestSettingFields) return Promise.resolve();
+    const record = state.settingsFieldsCode || (state.settingsFieldsCode = {
+      status: "idle", error: "", promise: null,
+    });
+    if (record.status === "ready") return Promise.resolve();
+    if (record.status === "loading" && record.promise) return record.promise;
+    record.status = "loading";
+    record.error = "";
+    record.promise = FTTestLazyCode.loadGroup("workbench-settings-fields")
       .then(() => {
         record.status = "ready";
         refresh?.();
@@ -251,6 +280,9 @@
         context, state, field, () => render(context, state),
       ),
       ensureRunCode: () => ensureRunCode(context, state, () => render(context, state)),
+      ensureSettingsFieldsCode: () => ensureSettingsFieldsCode(
+        context, state, () => render(context, state),
+      ),
       ensureTab: tab => ensureTab(context, state, tab, () => render(context, state)),
       onChipOpen: tabKey => {
         const runTab = state.manifest.run_settings?.key;
@@ -292,6 +324,7 @@
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
+    ensureSettingsFieldsCode,
     ensureRunSubmitCode,
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)

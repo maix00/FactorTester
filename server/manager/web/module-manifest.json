@@ -21,14 +21,16 @@
     "catalog": ["catalog-core", "charts"],
     "workbench-core": ["output-choice"],
     "workbench-settings": ["workbench-core"],
+    "workbench-settings-fields": ["workbench-core"],
     "workbench-ic-controls": ["workbench-core"],
     "workbench-factor-controls": ["workbench-core"],
     "workbench-product-controls": ["workbench-core"],
-    "workbench-run": ["workbench-settings", "workbench-ic-controls"],
+    "workbench-source-inputs": ["workbench-core"],
+    "workbench-run": ["workbench-core"],
     "workbench-run-submit": ["workbench-run"],
-    "workbench-factors": ["workbench-core", "catalog-core"],
+    "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
     "workbench-products": ["workbench-core", "catalog-core"],
-    "workbench-backtest": ["workbench-settings"],
+    "workbench-backtest": ["workbench-settings", "workbench-settings-fields"],
     "workbench-templates": ["workbench-core"],
     "settings": ["core"]
   },
@@ -174,9 +176,11 @@
     "workbench-settings": [
       "workbench/test-setting-chips.js",
       "workbench/tab-chip-content.js",
-      "workbench/test-setting-fields.js",
       "workbench/test-settings.js",
       "workbench/test-content-adapters.js"
+    ],
+    "workbench-settings-fields": [
+      "workbench/test-setting-fields.js"
     ],
     "workbench-ic-controls": [
       "workbench/ic-configuration.js",
@@ -201,11 +205,13 @@
       "workbench/factor-selection.js",
       "workbench/factor-set-selection.js",
       "workbench/factor-family-picker.js",
-      "workbench/test-source-upload.js",
       "workbench/test-factor-catalog.js",
       "workbench/test-factor-editor.js",
       "workbench/test-factor-candidates.js",
       "workbench/test-factors.js"
+    ],
+    "workbench-source-inputs": [
+      "workbench/test-source-upload.js"
     ],
     "workbench-products": [
       "workbench/product-group-creator.js",

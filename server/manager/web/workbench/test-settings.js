@@ -1,10 +1,32 @@
 (() => {
   const fields = () => window.FTTestSettingFields;
+
+  // The settings shell is intentionally usable before the field-control
+  // module arrives.  This keeps the tab bar, chips and manager responsive;
+  // the active panel asks for the control implementation only when it needs
+  // to materialize an editable row.
+  function declaredFieldsForTab(tabKey, manifest) {
+    return Object.entries(manifest?.defaults || {})
+      .filter(([, field]) => field?.tab_key === tabKey)
+      .sort((left, right) => Number(left[1]?.order || 0) - Number(right[1]?.order || 0));
+  }
+
+  function fieldsForTab(tabKey, manifest) {
+    return fields()?.fieldsForTab(tabKey, manifest)
+      || declaredFieldsForTab(tabKey, manifest);
+  }
+
+  function visibleFields(tab, manifest, values) {
+    return fields()?.visibleFields(tab, manifest, values)
+      || fieldsForTab(tab.key, manifest).filter(([, field]) => (
+        !field.adapter_managed && FTSettingRules.isVisible(field, values)
+      ));
+  }
   function initialMountedTabs(manifest, saved) {
     const tabs = manifest?.tab_lists?.["local-settings"] || [];
     const available = new Set(tabs.filter(tab => (
       FTTestContentAdapters.hasContent(tab)
-      || fields().visibleFields(tab, manifest, {}).length
+      || visibleFields(tab, manifest, {}).length
     )).map(tab => tab.key));
     if (Array.isArray(saved)) return saved.filter(key => available.has(key));
     const mounted = new Set((manifest?.default_mounted_tabs?.["local-settings"] || [])
@@ -23,8 +45,8 @@
     root.className = "backend-settings-shell test-settings-shell";
     const tabs = manifest.tab_lists?.["local-settings"] || [];
     const available = tabs.map(tab => ({
-      tab, fields: fields().visibleFields(tab, manifest, values),
-      allFields: fields().fieldsForTab(tab.key, manifest)
+      tab, fields: visibleFields(tab, manifest, values),
+      allFields: fieldsForTab(tab.key, manifest)
         .filter(([, field]) => !field.adapter_managed),
     })).filter(item => item.allFields.length || FTTestContentAdapters.hasContent(item.tab));
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
@@ -121,6 +143,11 @@
   function tabPanel(item, manifest, values, context, options) {
     const panel = document.createElement("div");
     panel.className = "test-settings-tab-content";
+    if (!fields()) {
+      panel.append(FTUI.loading(context.t("正在读取设置控件…")));
+      options.ensureSettingsFieldsCode?.();
+      return panel;
+    }
     const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
     const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
     if (lazyKey && lazyState?.status !== "ready") {
@@ -209,7 +236,7 @@
   }
 
   function resetTabValues(manifest, values, tabKey) {
-    for (const [key, field] of fields().fieldsForTab(tabKey, manifest)) {
+    for (const [key, field] of fieldsForTab(tabKey, manifest)) {
       const serialization = field?.serialization || {};
       const target = serialization.storage_key || key;
       if (serialization.kind !== "custom_product_overrides") {
@@ -230,9 +257,14 @@
 
   window.FTTestSettings = Object.freeze({
     initialValues, render,
-    controlFor: (...args) => fields().inputFor(...args),
+    controlFor: (...args) => {
+      if (!fields()) throw new Error("设置控件代码尚未加载");
+      return fields().inputFor(...args);
+    },
     initialMountedTabs, resetTabValues,
-    supportedControlTemplates: fields().supportedControlTemplates,
-    supportsControl: control => fields().supportsControl(control),
+    get supportedControlTemplates() {
+      return fields()?.supportedControlTemplates || [];
+    },
+    supportsControl: control => Boolean(fields()?.supportsControl(control)),
   });
 })();

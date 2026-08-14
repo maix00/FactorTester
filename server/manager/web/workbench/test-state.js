@@ -2,6 +2,7 @@
   function lazyState() {
     return Object.fromEntries([
       "factors", "products", "categories", "templates", "outputs", "profiles",
+      "run_inputs",
     ].map(key => [key, {status: "idle", error: "", promise: null}]));
   }
 

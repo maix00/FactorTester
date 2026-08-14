@@ -106,7 +106,13 @@ the route group after authentication, and a tester then requests
 being fetched. This distinction is important: a tab or container being
 visible is not permission to download every implementation behind all other
 tabs. The manifest group, not a DOM `display:none`/collapse state, is the code
-loading boundary.
+loading boundary. Within a tester, `workbench-settings` is only the tab/chip
+shell; `workbench-settings-fields` is fetched when the active tab first needs
+editable rows. Hiding an unmounted tab therefore does not download its field
+control implementation merely because its metadata exists. The first authoring
+request uses `/api/workspace-summaries`, which returns workspace identity only;
+the selected workspace then loads one `/api/workspaces/<id>/configuration`
+payload. Do not put full configurations back into the list response.
 ```
 
 The manager renders `research.html` from this manifest. Do not change a script
@@ -170,7 +176,12 @@ contains only the route coordinator, compiler, state and generic lazy-code
 seams. `workbench-settings` contains the shared tab/chip settings renderer and
 is fetched when a tester route has authenticated and received its backend
 manifest; it is not part of the initial shell and does not include any catalog,
-strategy-list, chart, or run-submission implementation. `workbench-run`
+strategy-list, chart, run-submission, or field-control implementation.
+`workbench-settings-fields` owns the shared editable-row/control adapter and
+is requested by the active settings panel or another surface that explicitly
+needs a field control; `workbench-run` does not depend on it. `workbench-source-inputs` owns uploaded factor,
+strategy, and dependency inspection; a `run_inputs` tab loads that code only
+when opened, while the factor picker declares it as a dependency. `workbench-run`
 contains run-spec/submit/result code and is requested only when the run surface
 is materialized. The backtest `FTTabListChip` and strategy editors belong to
 `workbench-backtest`, which is loaded only after the strategy-list tab is

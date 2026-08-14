@@ -473,7 +473,6 @@ def test_test_settings_restore_user_mounted_tabs_and_scoped_reset() -> None:
     files = [
         WEB_ROOT / "workbench" / "setting-rules.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
-        WEB_ROOT / "workbench" / "test-setting-fields.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
@@ -530,6 +529,8 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
         assert endpoint not in first_load
+    assert "/api/workspace-summaries" in first_load
+    assert "/api/workspaces/${workspaceID}/configuration" in source
     assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
     assert "ensureProductsForExecution" in source
@@ -548,10 +549,18 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert set(manifest["groups"]["workbench-settings"]) == {
         "workbench/test-setting-chips.js",
         "workbench/tab-chip-content.js",
-        "workbench/test-setting-fields.js",
         "workbench/test-settings.js",
         "workbench/test-content-adapters.js",
     }
+    assert manifest["groups"]["workbench-settings-fields"] == [
+        "workbench/test-setting-fields.js",
+    ]
+    assert manifest["groups"]["workbench-source-inputs"] == [
+        "workbench/test-source-upload.js",
+    ]
+    assert manifest["group_dependencies"]["workbench-factors"] == [
+        "workbench-core", "catalog-core", "workbench-source-inputs",
+    ]
     assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-backtest"]
     assert "workbench/tab-list-chip.js" not in research_static._initial_scripts(manifest)
     assert not set(manifest["groups"]["workbench-run"]) & set(
@@ -563,7 +572,12 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
     assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
     assert manifest["group_dependencies"]["workbench-run"] == [
-        "workbench-settings", "workbench-ic-controls",
+        "workbench-core",
+    ]
+    assert "workbench-settings-fields" not in manifest["group_dependencies"]["workbench-run"]
+    assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
+    assert manifest["group_dependencies"]["workbench-backtest"] == [
+        "workbench-settings", "workbench-settings-fields",
     ]
     assert manifest["group_dependencies"]["workbench-run-submit"] == [
         "workbench-run",
@@ -575,6 +589,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "ensureRunCode" in source
     assert "ensureRunSubmitCode" in source
     assert "workbench-run-submit" in source
+    assert 'run_inputs: "workbench-source-inputs"' in (
+        WEB_ROOT / "workbench" / "test-lazy-code.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:

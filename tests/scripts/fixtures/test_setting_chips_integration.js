@@ -67,6 +67,27 @@ const manifest = {
   }],
 };
 
+// The settings shell must remain renderable while the shared field-control
+// implementation is still being fetched.  Only the active panel requests it;
+// chips and the tab bar do not pull the control code into the initial pass.
+const deferredFields = window.FTTestSettingFields;
+delete window.FTTestSettingFields;
+let requestedFieldCode = 0;
+const deferred = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
+  t: value => value,
+}, {
+  activeTab: "factor", mountedTabs: ["factor", "time"],
+  chipSources: {factorAlias: ["ROC 1m"]},
+  lazyState: () => ({status: "ready"}),
+  ensureSettingsFieldsCode: () => { requestedFieldCode += 1; },
+});
+assert.equal(requestedFieldCode, 1, "active settings panel should request field code");
+assert.equal(
+  deferred.children[2].children[0].children[0].children[0].tagName,
+  "loading",
+);
+window.FTTestSettingFields = deferredFields;
+
 function render(factorAlias, onChipOpen) {
   return FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
     t: value => value,

@@ -49,6 +49,7 @@ class TestAuthoringService:
             return bool(
                 path in {
                     "/api/workspaces",
+                    "/api/workspace-summaries",
                     "/api/configuration-templates",
                     "/api/data_source_categories",
                     "/api/jobs/artifact-capabilities",
@@ -114,6 +115,12 @@ class TestAuthoringService:
             return TestAuthoringResponse({
                 "success": True,
                 "workspaces": research_workspaces.list_workspaces(owner=owner),
+            })
+        if path == "/api/workspace-summaries":
+            from server.services import research_workspaces
+            return TestAuthoringResponse({
+                "success": True,
+                "workspaces": research_workspaces.list_workspace_summaries(owner=owner),
             })
         if path == "/api/configuration-templates":
             from server.services import research_configurations

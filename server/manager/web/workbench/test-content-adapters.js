@@ -30,6 +30,7 @@
       ),
     }),
     run_inputs: Object.freeze({
+      lazyKey: "run_inputs",
       render: options => FTTestSourceUpload.strategyPanel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
