@@ -15,8 +15,10 @@ class NodeUnavailable(ConnectionError):
 
     def __init__(self, server_id: str, reason: str) -> None:
         self.server_id = str(server_id or "").strip()
-        self.reason = str(reason or "unavailable").strip()
-        super().__init__(f"node {self.server_id} is unreachable: {self.reason}")
+        self.reason = str(reason or "offline or unreachable").strip()
+        super().__init__(
+            f"node {self.server_id} is offline or unreachable: {self.reason}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
