@@ -412,6 +412,21 @@ class RequestSecurityMixin:
                 return False
             return True
 
+        if path == "/device-handoff":
+            if not self.state.public_server:
+                json_response(self, {
+                    "success": False,
+                    "error": "device handoff is available only on a public Manager",
+                }, 404)
+                return False
+            if not self._has_secure_ui_transport():
+                json_response(self, {
+                    "success": False,
+                    "error": "device handoff requires HTTPS",
+                }, 400)
+                return False
+            return True
+
         if path == "/api/device/authorization/redeem":
             if not self.state.public_server:
                 json_response(self, {
@@ -486,7 +501,15 @@ class RequestSecurityMixin:
                 return True
 
         session = self._session()
-        if session is not None and self._has_secure_ui_transport():
+        device_gate_required = (
+            self.state.require_device_auth
+            and not self._is_loopback_client()
+        )
+        if (
+            session is not None
+            and self._has_secure_ui_transport()
+            and not device_gate_required
+        ):
             return True
 
         if path.startswith("/api/") or method != "GET":
