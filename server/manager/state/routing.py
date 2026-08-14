@@ -8,6 +8,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.domain.federation import (
     ServiceRoute,
