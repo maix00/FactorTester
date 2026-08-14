@@ -170,7 +170,7 @@
     }
     let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
     if (!groups.length) groups = [{
-      id: "group-1", name: "默认分组", shortAlias: "A1", factorAlias: alias,
+      id: "group-1", batchId: "batch:1", name: "batch:1/group-1", factorAlias: alias,
       splitCount: Number(settings.split_count || 5),
       groupIndex: Number(settings.group_index || 1),
       product_path_selection: FTTestProducts.projection(group),

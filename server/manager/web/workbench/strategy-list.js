@@ -42,7 +42,7 @@
       options.onToggleBatch?.(batch.key, !expanded)
     ));
     disclosure.className = "strategy-list-disclosure";
-    disclosure.title = tx(options, expanded ? "收起批次" : "展开批次");
+    disclosure.title = tx(options, expanded ? "收起添加批次" : "展开添加批次");
     const select = options.batchSelection === false
       ? document.createElement("span") : selection(options, batch, true);
     const copy = document.createElement("span");
@@ -106,7 +106,7 @@
     const input = document.createElement("input");
     input.type = options.selection === "single" ? "radio" : "checkbox";
     input.checked = Boolean(item.selected);
-    input.title = tx(options, batch ? "选择整个批次" : "选择策略");
+    input.title = tx(options, batch ? "选择整个添加批次" : "选择策略");
     input.addEventListener("change", () => {
       if (batch) options.onToggleBatchSelection?.(item, input.checked);
       else options.onToggle?.(item, input.checked);

@@ -147,6 +147,31 @@ def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
     }
 
 
+def test_snapshot_migration_drops_deprecated_display_metadata_and_keeps_identity():
+    deprecated_display_key = "short" + "Alias"
+    snapshot, changed = migrate_snapshot_backend_settings({
+        "group_settings": {
+            "groups": [{
+                "group_id": "strategy-1",
+                "key": "旧显示名",
+                deprecated_display_key: "A1",
+                "factorAlias": "FactorA",
+                "splitCount": 1,
+                "groupIndex": 1,
+                "unknown_ui_state": True,
+            }],
+        },
+    })
+
+    group = snapshot["group_settings"]["groups"][0]
+    assert changed is True
+    assert group["id"] == "strategy-1"
+    assert group["name"] == "旧显示名"
+    assert deprecated_display_key not in group
+    assert "key" not in group
+    assert "unknown_ui_state" not in group
+
+
 def test_snapshot_migration_moves_submissions_to_product_path_selections_with_group_id_by_paths():
     snapshot, changed = migrate_snapshot_backend_settings(
         {

@@ -49,8 +49,8 @@
   function groupEntries(summary) {
     return (Array.isArray(summary?.groups) ? summary.groups : []).map((item, index) => ({
       ...item,
-      key: String(item?.key || item?.group_id || item?.name || item?.metrics_key || index),
-      label: String(item?.name || item?.key || item?.group_id || item?.metrics_key || index),
+      key: String(item?.strategy_id || item?.group_id || item?.key || item?.name || item?.metrics_key || index),
+      label: String(item?.display_name || item?.name || item?.group_name || item?.strategy_id || item?.group_id || item?.key || item?.metrics_key || index),
     }));
   }
 
@@ -59,12 +59,12 @@
       return summary;
     }
     const retainedGroups = new Map(retainedResult.groups.map((item, index) => [
-      String(item?.group_id || item?.key || item?.name || index), item,
+      String(item?.strategy_id || item?.group_id || item?.key || item?.name || index), item,
     ]));
     const sourceGroups = Array.isArray(summary?.groups) && summary.groups.length
       ? summary.groups : retainedResult.groups;
     const groups = sourceGroups.map((item, index) => {
-      const key = String(item?.group_id || item?.key || item?.name || index);
+      const key = String(item?.strategy_id || item?.group_id || item?.key || item?.name || index);
       return {...(retainedGroups.get(key) || {}), ...item};
     });
     return {
@@ -91,7 +91,7 @@
     if (!productPathSelectionID || !Number.isInteger(groupIndex)) return null;
     return {
       product_path_selection_id: productPathSelectionID,
-      group_id: String(entry.group_id || entry.key || ""),
+      group_id: String(entry.strategy_id || entry.group_id || entry.key || ""),
       group_index: groupIndex,
     };
   }

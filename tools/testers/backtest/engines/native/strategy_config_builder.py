@@ -358,7 +358,7 @@ def build_strategy_configs(
     flow_settings_by_alias: Mapping[str, Mapping[str, Any]] | None = None,
     strategies_by_alias: Mapping[str, Strategy] | None = None,
 ) -> dict[Strategy, StrategyConfig]:
-    """`resolved_settings_by_alias`: {shortAlias: {setting_key: value, ...}}
+    """`resolved_settings_by_alias`: {strategy_id: {setting_key: value, ...}}
     -- one raw dict per strategy, taken directly from the frontend's
     flat_groups rows (NOT pre-defaulted by the old resolve_group_settings
     pipeline -- this function needs to tell "explicitly provided" apart from

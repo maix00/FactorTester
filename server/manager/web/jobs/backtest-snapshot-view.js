@@ -119,7 +119,10 @@
       const controls = document.createElement("div"); controls.className = "snapshot-order-controls";
       const select = document.createElement("select");
       (value.order_flow_groups || []).forEach(group => select.append(
-        new Option(group.group_name || group.group_id, group.group_id),
+            new Option(
+              group.display_name || group.group_name || group.strategy_id || group.group_id,
+              group.strategy_id || group.group_id,
+            ),
       ));
       const body = document.createElement("div");
       const load = async () => {
@@ -130,7 +133,9 @@
             group_id: select.value,
             timestamp_ms: value.timestamp_ms,
           });
-          const group = (payload.groups || []).find(item => item.group_id === select.value)
+          const group = (payload.groups || []).find(item => (
+            (item.strategy_id || item.group_id) === select.value
+          ))
             || payload.groups?.[0];
           body.replaceChildren(orderFlowTable(context, group?.records || []));
         } catch (error) {

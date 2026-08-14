@@ -20,9 +20,10 @@ def project_net_returns(
     if not isinstance(portfolios, dict) or not portfolios:
         raise ValueError("net return artifact requires portfolio equity")
     owners = {
-        str(item.get("group_id") or ""): item
+        str(item.get("strategy_id") or item.get("group_id") or ""): item
         for item in group_owner
-        if isinstance(item, dict) and str(item.get("group_id") or "")
+        if isinstance(item, dict)
+        and str(item.get("strategy_id") or item.get("group_id") or "")
     }
     series = [
         _strategy_returns(
@@ -84,7 +85,9 @@ def _strategy_returns(
         raise ValueError(f"strategy {strategy_id!r} returns are non-finite")
     return {
         "strategy_id": strategy_id,
-        "display_name": str(owner.get("group_name") or strategy_id),
+        "display_name": str(
+            owner.get("display_name") or owner.get("group_name") or strategy_id
+        ),
         "factor_alias": str(owner.get("factor_alias") or ""),
         "timestamps": [timestamp.isoformat() for timestamp in equity.index],
         "returns": [round(float(value), 12) for value in returns],

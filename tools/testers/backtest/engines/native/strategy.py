@@ -16,8 +16,9 @@ class Strategy(UniqueNameObject):
     scheduler keeps one instance alive for the run and invokes its callbacks
     in event order. The instance may keep private state between callbacks and
     returns typed intents/commands; the owning Flow validates and executes
-    those requests. ``name`` remains ``<shortAlias>:<32-hex-uuid>`` for
-    stable runtime identity while ``alias`` is the user-facing name.
+    those requests. ``name`` is the stable runtime identity while ``alias``
+    is the user-facing name. Grouped research strategies use the submitted
+    batch/id name instead of a second display alias.
     """
 
     # These methods deliberately do nothing.  The native scheduler invokes

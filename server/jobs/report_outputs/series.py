@@ -42,7 +42,13 @@ def extract_series(result: dict[str, Any], source: dict[str, Any]) -> list[dict[
         timestamps = group.get("timestamps")
         timestamps = timestamps if isinstance(timestamps, list) else list(range(len(values)))
         series.append({
-            "label": str(group.get("name") or group.get("key") or f"Group {index + 1}")[:80],
+            "label": str(
+                group.get("display_name")
+                or group.get("name")
+                or group.get("strategy_id")
+                or group.get("group_id")
+                or f"Group {index + 1}"
+            )[:80],
             "timestamps": timestamps[:len(values)], "values": values,
             "currency": str(group.get("base_currency") or "CNY").upper(),
         })

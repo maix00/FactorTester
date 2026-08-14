@@ -102,14 +102,10 @@
       chips: groupChips(context, state, batch.root),
       items: batch.items.map(item => ({
         key: item.group.id,
-        // Keep the generated/renamed strategy name as the primary label.  The
-        // short alias remains a secondary identity, matching the legacy list
-        // while making the batch's strategy names visible and editable.
+        // The strategy name is the only user-facing label; its id remains the
+        // stable machine identity used by selection and execution.
         label: item.group.name || FTBacktestGroupModel.groupLabel(item.group),
-        detail: [
-          item.group.shortAlias,
-          groupDetail(context, item.group),
-        ].filter(Boolean).join(" · "),
+        detail: groupDetail(context, item.group),
         depth: item.depth,
         selected: state.selectedBacktestGroupIDs.includes(item.group.id),
         chips: groupChips(context, state, item.group),
@@ -118,7 +114,7 @@
     }));
     return FTStrategyList.render({
       context, title: context.t("分组组合"),
-      count: `${state.analysis.groups.length} ${context.t("个组")} / ${batches.length} ${context.t("批")}`,
+      count: `${state.analysis.groups.length} ${context.t("个组")} / ${batches.length} ${context.t("个添加批次")}`,
       batches, selection: selectionType(surface) === "radio" ? "single" : "multi",
       showConfigOpen: state.backtestGroupConfigOpen === true,
       onToggleConfig: open => { state.backtestGroupConfigOpen = open; refresh(); },
@@ -152,7 +148,7 @@
       batchSelection: false,
       showConfig: false,
       items: values.map(item => ({
-        key: item.id, label: item.name || item.shortAlias,
+      key: item.id, label: item.name || item.id,
         detail: `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`,
         selected: state.selectedBacktestLongShortIDs.includes(item.id),
         actions: rowActions(context, state, surface, item, refresh),
@@ -224,11 +220,9 @@
   }
 
   function batchLabel(context, batch) {
-    const root = batch.root || {};
-    const descriptor = [root.factorAlias, FTTestProducts.groupLabel(root.product_path_selection || {})]
-      .filter(Boolean).join(" · ");
-    const ordinal = batch.order ? `${context.t("批次")} ${batch.order}` : context.t("策略批次");
-    return descriptor ? `${ordinal} · ${descriptor}` : ordinal;
+    const ordinal = batch.order
+      ? `${context.t("添加批次")} ${batch.order}` : context.t("策略添加批次");
+    return `${ordinal} · ${batch.key}`;
   }
 
   function groupDetail(context, group) {

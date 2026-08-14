@@ -89,7 +89,7 @@ from server.modules.shared.factor_tester_runtime import create_factor_tester_for
 _log = logging.getLogger(__name__)
 
 
-_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
+_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "_expanded"}
 # Silent default keys now come from the registry — no hardcoded constant list
 
 
@@ -1713,7 +1713,7 @@ def get_group_snapshot():
             elif change_ms > closest_ms and next_change_ms is None:
                 next_change_ms = change_ms
 
-        # ── 附加元信息供前端按 shortAlias 分层渲染 (refs #100) ──
+        # ── 附加元信息供前端按稳定 group_id 分层渲染 ──
         _raw_group_names = getattr(group_result, 'group_names', None) or {}
         snapshot_group_names = {}
         for k, v in _raw_group_names.items():
@@ -1772,6 +1772,21 @@ def get_group_order_flow():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
+def _owner_strategy_id(owner: dict[str, Any]) -> str:
+    """Return the canonical strategy identity at the group API boundary."""
+    return str(owner.get("strategy_id") or owner.get("group_id") or "")
+
+
+def _owner_display_name(owner: dict[str, Any]) -> str:
+    """Return the canonical display label, with historical read fallback."""
+    return str(
+        owner.get("display_name")
+        or owner.get("group_name")
+        or _owner_strategy_id(owner)
+        or ""
+    )
+
+
 def _event_group_snapshot(
     execution: dict,
     product_path_selection_id: str,
@@ -1786,7 +1801,7 @@ def _event_group_snapshot(
     ]
     if not owners:
         raise ValueError("当前页面最近一次事件回测不包含该 product_path_selection_id")
-    first = portfolios.get(str(owners[0].get("group_id") or "")) or {}
+    first = portfolios.get(_owner_strategy_id(owners[0])) or {}
     first_curve = first.get("position_curve") or {}
     if not first_curve:
         raise ValueError("所选回测框架没有返回逐事件持仓快照")
@@ -1798,13 +1813,13 @@ def _event_group_snapshot(
         range(len(timestamps)), key=lambda index: abs(timestamps[index] - target)
     )
     events = []
-    latest_targets = {str(owner.get("group_id") or ""): {} for owner in owners}
+    latest_targets = {_owner_strategy_id(owner): {} for owner in owners}
     previous_positions = None
     traces = engine_result.get("target_trace") or {}
     for timestamp in timestamps:
         timestamp_positions = {
-            str(owner.get("group_id") or ""): (
-                portfolios[str(owner.get("group_id") or "")]
+            _owner_strategy_id(owner): (
+                portfolios[_owner_strategy_id(owner)]
                 .get("position_curve", {})
                 .get(timestamp.isoformat(), {})
             )
@@ -1869,7 +1884,7 @@ def _event_group_snapshot(
     instruments = sorted({
         instrument
         for owner in owners
-        for positions in (portfolios.get(str(owner.get("group_id") or ""), {}).get("position_curve") or {}).values()
+        for positions in (portfolios.get(_owner_strategy_id(owner), {}).get("position_curve") or {}).values()
         for instrument in positions
     })
 
@@ -1961,7 +1976,7 @@ def _event_group_snapshot(
         cash_row = []
         changed_count = 0
         for owner in owners:
-            strategy_id = str(owner.get("group_id") or "")
+            strategy_id = _owner_strategy_id(owner)
             portfolio = portfolios[strategy_id]
             now = selected_event["positions"].get(strategy_id, {})
             before = (
@@ -2020,7 +2035,7 @@ def _event_group_snapshot(
             else:
                 column_events.append({"type": selected_event["event_type"], "label": "收盘持有"})
             matrix_columns.append({
-                "label": str(owner.get("group_name") or strategy_id),
+                "label": _owner_display_name(owner),
                 "count": active_count,
                 "events": column_events,
             })
@@ -2099,7 +2114,7 @@ def _event_group_snapshot(
         matrix_columns = []
         matrix_cells = [[] for _ in rows]
         for owner in owners:
-            strategy_id = str(owner.get("group_id") or "")
+            strategy_id = _owner_strategy_id(owner)
             weights = selected_event["targets"].get(strategy_id, {})
             if collapse_products:
                 weight_values: dict[str, float] = {}
@@ -2110,7 +2125,7 @@ def _event_group_snapshot(
                 weight_values = {name: float(weights.get(name, 0.0)) for name in rows}
             selected_count = sum(abs(float(value)) > 1e-12 for value in weight_values.values())
             matrix_columns.append({
-                "label": str(owner.get("group_name") or strategy_id),
+                "label": _owner_display_name(owner),
                 "count": selected_count,
             })
             for row, instrument in enumerate(rows):
@@ -2168,8 +2183,8 @@ def _event_group_snapshot(
         "event_cursors": [event["cursor"] for event in events],
         "order_flow_groups": [
             {
-                "group_id": str(owner.get("group_id") or ""),
-                "group_name": str(owner.get("group_name") or owner.get("group_id") or ""),
+                "group_id": _owner_strategy_id(owner),
+                "group_name": _owner_display_name(owner),
             }
             for owner in owners
         ],
@@ -2212,7 +2227,7 @@ def _event_order_flow_detail(
     target_timestamp = _timestamp_from_epoch_ms(timestamp_ms)
     groups = []
     for owner in owners:
-        strategy_id = str(owner.get("group_id") or "")
+        strategy_id = _owner_strategy_id(owner)
         portfolio = portfolios.get(strategy_id) or {}
         records = list(portfolio.get("execution_trace") or [])
         if order_id:
@@ -2232,7 +2247,7 @@ def _event_order_flow_detail(
         )
         groups.append({
             "group_id": strategy_id,
-            "group_name": str(owner.get("group_name") or strategy_id),
+            "group_name": _owner_display_name(owner),
             "records": records,
         })
     return {
@@ -2254,7 +2269,7 @@ def _event_order_flow_owners(
         if not owner.get("is_ls")
     ]
     if group_id:
-        owners = [owner for owner in owners if str(owner.get("group_id") or "") == group_id]
+        owners = [owner for owner in owners if _owner_strategy_id(owner) == group_id]
     elif product_path_selection_id:
         owners = [
             owner for owner in owners
@@ -2304,7 +2319,7 @@ def _event_group_detail(
     if group_id:
         owners = [
             owner for owner in execution.get("group_owner") or []
-            if str(owner.get("group_id") or "") == group_id
+            if _owner_strategy_id(owner) == group_id
             and not owner.get("is_ls")
         ]
     else:
@@ -2321,7 +2336,7 @@ def _event_group_detail(
             f"group_index={group_index}, matches={len(owners)}"
         )
     owner = owners[0]
-    strategy_id = str(owner.get("group_id") or "")
+    strategy_id = _owner_strategy_id(owner)
     engine_result = execution.get("engine_result") or {}
     portfolio = (engine_result.get("portfolios") or {}).get(strategy_id) or {}
     curve = portfolio.get("equity_curve") or {}
@@ -2347,7 +2362,7 @@ def _event_group_detail(
         or detail_context.get("settings_by_strategy")
         or {}
     ).get(strategy_id) or {}
-    display_name = str(owner.get("group_name") or strategy_id)
+    display_name = _owner_display_name(owner)
     serialized_group = next(
         (
             group for group in serialized.get("groups") or ()
@@ -2389,7 +2404,7 @@ def _event_group_ranking_detail(execution: dict, product_path_selection_id: str)
     portfolios = (execution.get("engine_result") or {}).get("portfolios") or {}
     series = []
     for owner in owners:
-        strategy_id = str(owner.get("group_id") or "")
+        strategy_id = _owner_strategy_id(owner)
         portfolio = portfolios.get(strategy_id) or {}
         curve = portfolio.get("display_equity_curve") or portfolio.get("equity_curve") or {}
         if not curve:

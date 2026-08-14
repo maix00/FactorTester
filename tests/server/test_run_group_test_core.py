@@ -241,16 +241,18 @@ def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):
 
 def test_build_group_owner_rows_shape():
     groups = [
-        {"id": "g1", "shortAlias": "A1", "groupIndex": 1,
+        {"id": "g1", "name": "batch:1/g1", "groupIndex": 1,
          "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
         {"id": "g2", "name": "G2", "groupIndex": 3,
          "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
     ]
     rows = group_module._build_group_owner_rows(groups, is_ls=False)
     assert rows == [
-        {"group_id": "g1", "group_name": "A1", "group_index": 0,
+        {"strategy_id": "g1", "display_name": "batch:1/g1",
+         "group_id": "g1", "group_name": "batch:1/g1", "group_index": 0,
          "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
-        {"group_id": "g2", "group_name": "G2", "group_index": 2,
+        {"strategy_id": "g2", "display_name": "G2",
+         "group_id": "g2", "group_name": "G2", "group_index": 2,
          "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
     ]
 
@@ -313,7 +315,11 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     assert strategy["execution_trace_points"] == 2
     assert strategy["execution_trace_checksum"]
     assert set(serialized["metrics"]) == {"A1"}
+    assert serialized["groups"][0]["strategy_id"] == "g1"
+    assert serialized["groups"][0]["display_name"] == "A1"
     assert serialized["groups"][0]["metrics_key"] == "A1"
+    assert "key" not in serialized["groups"][0]
+    assert "name" not in serialized["groups"][0]
 
 
 def test_serialize_event_execution_reports_event_notional_turnover():
