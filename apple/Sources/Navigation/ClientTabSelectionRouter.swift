@@ -9,6 +9,21 @@ struct ClientTabSelectionRouter {
     let tabs: () -> [ClientTab]
     let setTabs: ([ClientTab]) -> Void
     let setSelection: (String) -> Void
+    let launcher: (String) -> ClientTab?
+
+    init(
+        tabs: @escaping () -> [ClientTab],
+        setTabs: @escaping ([ClientTab]) -> Void,
+        setSelection: @escaping (String) -> Void,
+        launcher: @escaping (String) -> ClientTab? = {
+            ClientTab.pinnedLauncher(id: $0)
+        }
+    ) {
+        self.tabs = tabs
+        self.setTabs = setTabs
+        self.setSelection = setSelection
+        self.launcher = launcher
+    }
 
     func select(_ id: String) {
         var mounted = tabs()
@@ -18,10 +33,12 @@ struct ClientTabSelectionRouter {
             setSelection(destination.id)
             return
         }
-        if let launcher = ClientTab.pinnedLauncher(id: id),
-           !mounted.contains(where: { $0.id == id }) {
-            mounted.append(launcher)
+        if let destination = launcher(id),
+           !mounted.contains(where: { $0.id == destination.id }) {
+            mounted.append(destination)
             setTabs(mounted)
+            setSelection(destination.id)
+            return
         }
         setSelection(id)
     }

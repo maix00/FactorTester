@@ -5,6 +5,7 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
     case local
     case shared
     case graph
+    case profiles
 
     var id: String { rawValue }
 

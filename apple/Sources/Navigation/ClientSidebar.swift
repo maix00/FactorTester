@@ -1,15 +1,11 @@
 import SwiftUI
 
 struct ClientSidebar: View {
-    static let featureLaunchers: [ClientTab] = [
-        .home, .research, .icTestLauncher, .backtestLauncher, .jobs,
-        .factorLibrary, .products, .profiles,
-    ]
-
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var releaseController: ClientReleaseController
     @EnvironmentObject private var languageStore: LanguageStore
     @Binding var selection: String
+    let launchers: [ClientTab]
     let openTabs: [ClientTab]
     let open: (ClientTab) -> Void
     let close: (ClientTab) -> Void
@@ -18,7 +14,7 @@ struct ClientSidebar: View {
     var body: some View {
         List(selection: $selection) {
             Section("功能入口") {
-                ForEach(Self.featureLaunchers) { tab in
+                ForEach(launchers) { tab in
                     launcher(tab)
                 }
             }

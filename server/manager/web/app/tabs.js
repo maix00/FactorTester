@@ -81,7 +81,7 @@
 
     function openModule(module) {
       const path = modulePath(module);
-      if (["ic-test", "backtest", "docs", "sqlite_web", "manager", "server_operations"].includes(module.id)) {
+      if (module.tab_behavior === "new") {
         return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
       }
       return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: false});
@@ -203,7 +203,10 @@
 
     function initializeTabs() {
       state.tabs = state.modules
-        .filter(item => ["home", "research", "jobs", "factors", "products", "profiles"].includes(item.id))
+        // Settings remains the fixed account control at the bottom of the
+        // shell. It is part of the backend registry for metadata, but must
+        // not be mounted twice as an opened tab.
+        .filter(item => item.pinned && item.id !== "settings")
         .map(item => ({id: item.id, path: modulePath(item), title: t(item.title_key || item.title), icon: FTIcons.module(item), closable: false}));
       state.tabs.push({id: "settings", path: "/settings", title: t("设置"), icon: FTIcons.module("settings"), closable: false});
       state.activeTabID = "home"; renderOpenedTabs();

@@ -175,7 +175,7 @@
     network.append(homeNetworkRow("服务器网络信息", t("正在读取")));
     void loadHomeNetwork(network, routeToken);
     const cards = document.querySelector("#home-cards");
-    for (const module of state.modules.filter(item => !["home", "settings"].includes(item.id))) {
+    for (const module of state.modules.filter(item => item.homeVisible)) {
       const card = document.createElement("button");
       card.className = "card";
       card.innerHTML = '<span class="symbol"></span><b></b><small></small>';
@@ -188,7 +188,10 @@
   }
 
   async function research(routeToken = activeRouteToken) {
-    return FTResearch.list(appContext(routeToken));
+    return FTResearch.list({
+      ...appContext(routeToken),
+      modules: state.modules,
+    });
   }
 
   function reportContext(routeToken = activeRouteToken) {
