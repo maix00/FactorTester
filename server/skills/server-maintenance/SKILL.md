@@ -1,6 +1,6 @@
 ---
 name: server-maintenance
-description: Diagnose and resolve authorized private FactorTester server maintenance cases, including backend anomalies, missing platform capabilities, database migrations, Graph version publication or activation, and research-branch continuation. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
+description: Diagnose and resolve authorized private FactorTester server maintenance cases, including backend anomalies, missing platform capabilities, database migrations, Graph publication, Docker/WireGuard/SSH deployment, and research-branch continuation. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
 ---
 
 # Server Maintenance
@@ -35,6 +35,9 @@ return control to research without inspecting source or starting a verifier.
   [graph-governance.md](references/graph-governance.md).
 - For a database schema, ownership, cleanup, or migration case, also read
   [database-change.md](references/database-change.md).
+- For Docker, WireGuard, SSH publication, peer-key governance, public release,
+  rollback, or container lifecycle, read
+  [infrastructure.md](references/infrastructure.md).
 
 Do not load an unrelated reference.
 
