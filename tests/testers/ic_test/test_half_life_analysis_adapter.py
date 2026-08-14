@@ -38,7 +38,11 @@ def test_half_life_combines_same_axes_horizon_statistics() -> None:
         store.publish(
             core.core_test_ref,
             "ic_statistics",
-            {"horizon_seconds": seconds, "horizon": core.horizon, "mean_ic": mean},
+            pd.Series({
+                "horizon_seconds": seconds,
+                "horizon": core.horizon,
+                "mean_ic": mean,
+            }),
         )
 
     assert execute_ic_analysis_nodes(graph, (node_id,), store) == (node_id,)

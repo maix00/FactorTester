@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Mapping
 
+import pandas as pd
+
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
     fit_forward_ic_half_life,
 )
@@ -34,6 +36,8 @@ class ICForwardHorizonHalfLifeAdapter:
         points: list[tuple[float, str, float]] = []
         for item in inputs:
             stats = item.get("ic_statistics")
+            if isinstance(stats, pd.Series):
+                stats = stats.to_dict()
             if not isinstance(stats, Mapping):
                 raise ValueError("half-life input must expose ic_statistics")
             seconds = stats.get("horizon_seconds")
