@@ -51,13 +51,16 @@ def test_group_test_flows_declared_with_selection_gating() -> None:
     flows = _flows("group_test")
     assert set(flows) == {
         "add_group", "create_derived", "create_ls", "clone", "edit", "delete",
-        "delete_long_short",
+        "rename", "rename_long_short", "swap_long_short", "delete_long_short",
     }
     # kinds
     assert flows["add_group"]["kind"] == "create"
     assert flows["create_derived"]["kind"] == "derive"
     assert flows["create_ls"]["kind"] == "compose"
     assert flows["clone"]["kind"] == "clone"
+    assert flows["rename"]["kind"] == "rename"
+    assert flows["rename_long_short"]["kind"] == "rename"
+    assert flows["swap_long_short"]["kind"] == "swap"
     # availability (min/max selected)
     assert flows["add_group"]["min_selected"] is None
     assert (flows["create_derived"]["min_selected"], flows["create_derived"]["max_selected"]) == (1, 1)

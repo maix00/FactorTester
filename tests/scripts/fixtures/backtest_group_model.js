@@ -8,6 +8,11 @@ global.FTTestProducts = {
   groupLabel: value => value?.name || value?.id || "",
   projection: value => ({id: value.id, name: value.name}),
 };
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "backtest-group-batches.js"),
+  "utf8",
+), {filename: "backtest-group-batches.js"});
+global.FTBacktestGroupBatches = window.FTBacktestGroupBatches;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-group-model.js",
 });
@@ -29,5 +34,25 @@ assert.deepEqual(created.map(item => item.shortAlias), [
   "A1", "A2", "A3", "B1", "B2", "B3",
 ]);
 assert.equal(new Set(created.map(item => item.id)).size, 6);
-assert.deepEqual(state.selectedBacktestGroupIDs, created.map(item => item.id));
+assert.equal(new Set(created.map(item => item.batchId)).size, 1);
+const repeated = window.FTBacktestGroupModel.addBaseBatch(state, {
+  product_path_selection: {id: "metals", name: "金属"},
+  factorAlias: "ROC", splitCount: 3, groupIndex: 1, allGroups: true,
+});
+assert.equal(new Set(repeated.map(item => item.batchId)).size, 1);
+assert.notEqual(repeated[0].batchId, created[0].batchId);
+assert.notEqual(repeated[0].name, created[0].name);
+const derived = window.FTBacktestGroupModel.addDerived(state, created[0].id);
+assert.equal(derived.batchId, created[0].batchId);
+const batches = window.FTBacktestGroupModel.groupBatches(state);
+assert.equal(batches.length, 2);
+assert.deepEqual(batches.map(item => item.order), [1, 2]);
+const legacy = {analysis: {groups: [
+  {id: "old-a", factorAlias: "ROC", product_path_selection_id: "metals", splitCount: 3},
+  {id: "old-b", factorAlias: "ROC", product_path_selection_id: "metals", splitCount: 3},
+]}};
+assert.equal(window.FTBacktestGroupModel.groupBatches(legacy).length, 2);
+assert.throws(() => window.FTBacktestGroupModel.renameGroup(state, created[0].id, repeated[0].name), /策略名称已存在/);
+window.FTBacktestGroupModel.renameGroup(state, created[0].id, "重命名策略");
+assert.deepEqual(state.selectedBacktestGroupIDs, [derived.id]);
 console.log("ok");

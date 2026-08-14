@@ -11,7 +11,7 @@ from tools.testers.settings import backtest_setting_registry
 STRUCTURAL_GROUP_KEYS = {
     "id", "name", "parentId", "testerId", "factorAlias", "splitCount", "groupIndex",
     "isAllGroups", "addBatch", "needsRegenerate", "startDate", "endDate", "shortAlias",
-    "overrides", "_expanded", "productMask", "product_names", "productNames",
+    "overrides", "_expanded", "productMask", "product_names", "productNames", "batchId",
 }
 STRUCTURAL_LS_KEYS = {"id", "name", "shortAlias", "longGroupId", "shortGroupId", "needsRegenerate", "metadata"}
 LEGACY_LOCAL_KEYS = {"dates", "initialCapital", "calendarFreq", "backendBacktestSettings"}

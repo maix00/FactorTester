@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import re
 import secrets
 import sys
-import tempfile
 import threading
 import time
 
 from server.manager.config import (
+    MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS,
+    MANAGER_SESSION_IDLE_TTL_SECONDS,
     MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
+    MANAGER_SESSION_TOUCH_INTERVAL_SECONDS,
     MANAGER_SESSION_TTL_SECONDS,
 )
 from server.manager.domain.organization_scope import (
@@ -24,6 +23,7 @@ from server.manager.domain.organization_scope import (
 from server.manager.system import write_owner_only_once as _write_owner_only_once
 from server.manager.storage.control_db import ControlDatabaseError, ControlDatabaseUnavailable
 from server.manager.storage.local_accounts import LocalAccountStore
+from server.manager.storage.session_store import ManagerSessionStore
 
 
 DEVICE_SESSION_HANDOFF_TTL_SECONDS = 120
@@ -157,16 +157,21 @@ class SessionStateMixin:
         origin: str = "",
     ) -> tuple[str, str, str]:
         token = secrets.token_urlsafe(32)
+        now = time.time()
         with self._session_lock:
-            self._sessions[self._token_hash(token)] = (
+            token_hash = self._token_hash(token)
+            session = (
                 principal,
                 role,
-                time.time() + MANAGER_SESSION_TTL_SECONDS,
+                now + MANAGER_SESSION_TTL_SECONDS,
                 str(authentication or "password"),
                 str(origin or "").strip().rstrip("/"),
                 str(alias or principal).strip() or str(principal),
+                now,
+                now,
             )
-            self._save_sessions()
+            self._sessions[token_hash] = session
+            self._session_store().upsert(token_hash, session, now=now)
         return token, principal, role
 
     def register(self, alias: str, password: str, organization_id: str = "") -> tuple[str, str, str, str]:
@@ -312,6 +317,7 @@ class SessionStateMixin:
     def session(self, token: str) -> dict[str, object] | None:
         now = time.time()
         with self._session_lock:
+            self._cleanup_sessions_locked(now)
             token_hash = self._token_hash(token)
             session = self._sessions.get(token_hash)
             if session is None:
@@ -319,17 +325,28 @@ class SessionStateMixin:
             principal, role, expires_at = session[:3]
             if expires_at <= now:
                 self._sessions.pop(token_hash, None)
-                self._save_sessions()
+                self._session_store().delete(token_hash)
                 return None
-            if expires_at - now <= MANAGER_SESSION_REFRESH_WINDOW_SECONDS:
+            created_at = self._session_timestamp(session, 6, now)
+            last_seen_at = self._session_timestamp(session, 7, now)
+            refreshed = expires_at - now <= MANAGER_SESSION_REFRESH_WINDOW_SECONDS
+            touched = now - last_seen_at >= MANAGER_SESSION_TOUCH_INTERVAL_SECONDS
+            if refreshed or touched or len(session) < 8:
                 expires_at = now + MANAGER_SESSION_TTL_SECONDS
-                self._sessions[token_hash] = (
+                if not refreshed:
+                    expires_at = float(session[2])
+                session = (
                     principal,
                     role,
                     expires_at,
-                    *session[3:],
+                    str(session[3] if len(session) >= 4 else "password"),
+                    str(session[4] if len(session) >= 5 else "").strip().rstrip("/"),
+                    str(session[5] if len(session) >= 6 else "").strip(),
+                    created_at,
+                    now,
                 )
-                self._save_sessions()
+                self._sessions[token_hash] = session
+                self._session_store().upsert(token_hash, session, now=now)
         return {
             "username": principal,
             "alias": (
@@ -373,8 +390,9 @@ class SessionStateMixin:
 
     def logout(self, token: str) -> None:
         with self._session_lock:
-            self._sessions.pop(self._token_hash(token), None)
-            self._save_sessions()
+            token_hash = self._token_hash(token)
+            self._sessions.pop(token_hash, None)
+            self._session_store().delete(token_hash)
 
     def issue_device_handoff(
         self,
@@ -459,60 +477,49 @@ class SessionStateMixin:
     def _token_hash(token: str) -> str:
         return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
-    def _load_sessions(self) -> dict[str, tuple[object, ...]]:
+    @staticmethod
+    def _session_timestamp(
+        session: tuple[object, ...],
+        index: int,
+        fallback: float,
+    ) -> float:
         try:
-            payload = json.loads(self.sessions_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
-            return {}
-        now = time.time()
-        sessions: dict[str, tuple[object, ...]] = {}
-        for token_hash, value in (payload.get("sessions") or {}).items():
-            if not isinstance(value, dict):
-                continue
-            expires_at = float(value.get("expires_at") or 0)
-            if re.fullmatch(r"[0-9a-f]{64}", str(token_hash)) and expires_at > now:
-                sessions[str(token_hash)] = (
-                    str(value.get("principal") or ""),
-                    str(value.get("role") or ""),
-                    expires_at,
-                    str(value.get("authentication") or "password"),
-                    str(value.get("origin") or "").strip().rstrip("/"),
-                    str(value.get("alias") or "").strip(),
-                )
-        return sessions
+            return float(session[index])
+        except (IndexError, TypeError, ValueError, OverflowError):
+            return fallback
+
+    def _session_store(self) -> ManagerSessionStore:
+        """Return the Manager-owned store without creating a central dependency."""
+        return self.session_store
+
+    def _cleanup_sessions_locked(self, now: float) -> None:
+        next_cleanup = float(getattr(self, "_session_cleanup_at", 0) or 0)
+        if now < next_cleanup:
+            return
+        self._session_cleanup_at = now + MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS
+        self._session_store().cleanup(
+            now=now,
+            idle_ttl=MANAGER_SESSION_IDLE_TTL_SECONDS,
+        )
+        # The in-memory cache mirrors the durable rows loaded at startup.  A
+        # cleanup may remove a row that was not touched by this process since
+        # startup, so drop expired/idle entries from the cache as well.
+        self._sessions = {
+            token_hash: value
+            for token_hash, value in self._sessions.items()
+            if self._session_timestamp(value, 2, 0) > now
+            and now - self._session_timestamp(value, 7, now)
+            <= MANAGER_SESSION_IDLE_TTL_SECONDS
+        }
+
+    def _load_sessions(self) -> dict[str, tuple[object, ...]]:
+        return self._session_store().load(
+            now=time.time(),
+            idle_ttl=MANAGER_SESSION_IDLE_TTL_SECONDS,
+        )
 
     def _save_sessions(self) -> None:
-        payload = {
-            "schema_version": 3,
-            "sessions": {
-                token_hash: {
-                    "principal": value[0],
-                    "role": value[1],
-                    "expires_at": value[2],
-                    "authentication": value[3] if len(value) >= 4 else "password",
-                    "origin": value[4] if len(value) >= 5 else "",
-                    "alias": value[5] if len(value) >= 6 else "",
-                }
-                for token_hash, value in self._sessions.items()
-            },
-        }
-        self.sessions_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(
-            prefix=".sessions-", suffix=".json", dir=self.sessions_path.parent,
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, self.sessions_path)
-        finally:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
+        self._session_store().replace(self._sessions)
 
     def submit_action(self, operation, label: str) -> None:
         """Run one already-authorized operation after its HTTP receipt."""

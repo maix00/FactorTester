@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import sqlite3
 import signal
 import socket
 import sys
@@ -822,7 +823,10 @@ def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
         visibility="public", auto_sync=True, relay_local_files=False,
         authorized_users=[],
     )
-    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    state = manager.ManagerState(
+        tmp_path, "python", data_root=tmp_path,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
     with _running_manager(state) as base_url:
         for suffix in (
             digest,
@@ -885,7 +889,10 @@ def test_public_research_local_resource_route_requires_no_login_for_public_repor
         owner_ref="owner", report_id="report-local-route", projection=None,
         visibility="public", auto_sync=True, relay_local_files=False, authorized_users=[],
     )
-    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    state = manager.ManagerState(
+        tmp_path, "python", data_root=tmp_path,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
     with _running_manager(state) as base_url:
         with urlopen(
             f"{base_url}/api/public-research/{result['publication_id']}"
@@ -898,7 +905,10 @@ def test_public_research_local_resource_route_requires_no_login_for_public_repor
 def test_local_research_resource_route_is_owner_scoped_and_preserves_filename(
     tmp_path, monkeypatch,
 ):
-    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    state = manager.ManagerState(
+        tmp_path, "python", data_root=tmp_path,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
     monkeypatch.setattr(
         manager, "_authenticate_user", lambda _username, _password: ("owner@1", "user"),
     )
@@ -927,7 +937,9 @@ def test_local_research_resource_route_is_owner_scoped_and_preserves_filename(
 def test_local_research_asset_route_is_owner_scoped_and_inline(
     tmp_path, monkeypatch,
 ):
-    state = manager.ManagerState(tmp_path, "python")
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
     monkeypatch.setattr(
         manager, "_authenticate_user", lambda _username, _password: ("owner@1", "user"),
     )
@@ -1060,7 +1072,7 @@ def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
             assert json.loads(response.read())["reports"] == []
 
 
-def test_manager_session_survives_restart_without_storing_raw_token(
+def test_manager_session_survives_restart_in_sqlite_without_storing_raw_token(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -1068,23 +1080,62 @@ def test_manager_session_survives_restart_without_storing_raw_token(
             "admin@1", "super_admin",
         ),
     )
-    first = manager.ManagerState(tmp_path, "python")
+    session_db_path = tmp_path / "manager.sqlite"
+    first = manager.ManagerState(
+        tmp_path, "python", session_db_path=session_db_path,
+    )
     token, _, _ = first.login("admin@1", "password")
 
-    payload = first.sessions_path.read_text(encoding="utf-8")
-    assert token not in payload
-    assert first.sessions_path.stat().st_mode & 0o777 == 0o600
+    assert not first.sessions_path.exists()
+    assert first.sessions_db_path.stat().st_mode & 0o777 == 0o600
+    with sqlite3.connect(first.sessions_db_path) as database:
+        row = database.execute(
+            "SELECT created_at, last_seen_at, expires_at FROM manager_sessions"
+        ).fetchone()
+    assert row is not None
+    assert token.encode() not in first.sessions_db_path.read_bytes()
 
-    restarted = manager.ManagerState(tmp_path, "python")
+    restarted = manager.ManagerState(
+        tmp_path, "python", session_db_path=session_db_path,
+    )
     assert restarted.session(token) == {
         "username": "admin@1",
         "alias": "admin@1",
         "role": "super_admin",
         "capabilities": {"manager": True, "research": True},
     }
-    payload = json.loads(restarted.sessions_path.read_text(encoding="utf-8"))
-    expires_at = next(iter(payload["sessions"].values()))["expires_at"]
+    with sqlite3.connect(restarted.sessions_db_path) as database:
+        expires_at = database.execute(
+            "SELECT expires_at FROM manager_sessions"
+        ).fetchone()[0]
     assert expires_at - manager.time.time() > 29 * 24 * 60 * 60
+
+
+def test_manager_does_not_import_legacy_sessions_json(tmp_path) -> None:
+    state_root = tmp_path / "manager-state"
+    state_root.mkdir()
+    legacy_path = state_root / "sessions.json"
+    legacy_path.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "sessions": {
+                "a" * 64: {
+                    "principal": "GTHT@legacy@1",
+                    "role": "user",
+                    "expires_at": manager.time.time() + 3600,
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    state = manager.ManagerState(
+        tmp_path, "python", state_root=state_root,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
+
+    assert state._sessions == {}
+    assert legacy_path.exists()
 
 
 def test_active_manager_session_renews_its_idle_expiry(
@@ -1097,7 +1148,9 @@ def test_active_manager_session_renews_its_idle_expiry(
             "admin@1", "super_admin",
         ),
     )
-    state = manager.ManagerState(tmp_path, "python")
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
     token, _, _ = state.login("admin@1", "password")
     original_expiry = next(iter(state._sessions.values()))[2]
 
@@ -1611,6 +1664,21 @@ def test_public_compliance_page_bootstraps_device_login_with_visible_status() ->
     assert "handoff_url" in body
     assert "MAX_AUTHENTICATION_RUNS" in body
     assert "签名阶段失败" in body
+    assert 'redirect:"error"' in body
+    assert 'mode:"same-origin"' in body
+    assert "challengeNetworkFailed" in body
+    assert "verifyNetworkFailed" in body
+    assert "window.isSecureContext===false" in body
+
+
+def test_device_authorization_waits_for_indexed_db_transaction_completion() -> None:
+    from server.manager.http.pages import device_authorization_page
+
+    body = device_authorization_page("grant-token").decode("utf-8")
+
+    assert 'transaction.oncomplete=()=>finish()' in body
+    assert 'transaction.onabort=()=>finish' in body
+    assert "db.close()" in body
 
 
 def test_device_session_handoff_is_bound_to_target_and_single_use(

@@ -15,7 +15,7 @@
       .map(([key, field]) => settingChip(
       key, field, options.values || {}, context, options,
       )).filter(Boolean);
-    const run = runDescriptors(options);
+    const run = options.includeRun === false ? [] : runDescriptors(options);
     return deduplicate([...identity, ...settings, ...run, ...(options.extraDescriptors || [])])
       .map((item, index) => ({...item, _descriptorOrder: index}))
       .sort((left, right) => (

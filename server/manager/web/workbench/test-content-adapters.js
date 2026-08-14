@@ -51,27 +51,30 @@
     return typeof adapter.render === "function" ? adapter.render(options) : null;
   }
 
-  function chipSources(state) {
+  function chipSources(state, item = null) {
     const values = {};
     for (const chip of state.manifest?.chip_fields || []) {
-      const source = sourceValues(chip.source_adapter, state);
+      const source = sourceValues(chip.source_adapter, state, item);
       for (const key of chip.source_keys || []) values[key] = source[key];
     }
     return values;
   }
 
-  function sourceValues(adapter, state) {
+  function sourceValues(adapter, state, item = null) {
     if (adapter === "selected_factors") {
-      const factors = state.kind === "ic"
+      const factors = item?.factorAlias || item?.factor_alias
+        ? [item.factorAlias || item.factor_alias]
+        : state.kind === "ic"
         ? FTTestFactorSelection.selectedFactors(state)
         : [FTTestFactors.selectedFactor(state)].filter(Boolean);
       return {factorAlias: factors.map(FTTestFactorSelection.factorAlias).filter(Boolean)};
     }
     if (adapter === "selected_product_paths") {
-      return {product_path_selection: FTTestProducts.selectedProjections(state)};
+      return {product_path_selection: item?.product_path_selection
+        ? [item.product_path_selection] : FTTestProducts.selectedProjections(state)};
     }
     if (adapter === "primary_strategy_group") {
-      const group = state.analysis?.groups?.[0] || {};
+      const group = item || state.analysis?.groups?.[0] || {};
       return {
         n_groups: group.splitCount,
         group_index: group.groupIndex,
