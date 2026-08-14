@@ -82,6 +82,18 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
 
 
+def test_federation_settings_separate_client_and_wireguard_surfaces() -> None:
+    source = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
+
+    assert "http://10.77.0.2:17998/api/federation/register" in source
+    assert "https://client-visible-host:7998" in source
+    assert "WireGuard 17998/17997" in source
+    assert "bootstrap_url" in source
+    assert "register_url" not in source
+    assert "引导服务器地址" in source
+    assert "remote-host:7998/api/federation/register" not in source
+
+
 def _write_test_web_root(root: Path, scripts: list[str]) -> None:
     (root / "research.html").write_text(
         '<html><head><meta name="robots" content="noindex,nofollow">'
@@ -650,6 +662,15 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
     assert "FTJobArtifacts.lazyArtifactPreview" not in configuration_page
 
 
+def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> None:
+    artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'credentials: "omit"' in artifacts
+    assert 'redirect: "error"' in artifacts
+
+
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
     tab_content = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
@@ -682,6 +703,18 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "if (routeToken !== activeRouteToken) return;" in coordinator
     assert 'api("/api/client-assets/revision")' in coordinator
     assert "location.reload();" in coordinator
+
+
+def test_web_shell_restores_an_http_only_manager_cookie_without_a_saved_token() -> None:
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "state.token = savedToken();" in coordinator
+    assert 'state.session = await api("/api/session")' in coordinator
+    assert "if (!state.token) return;" not in coordinator
+    assert "const hadSavedToken = Boolean(state.token);" in coordinator
+    assert "if (hadSavedToken)" in coordinator
 
 
 def test_home_prefers_the_discovered_public_server_over_the_peer_callback() -> None:

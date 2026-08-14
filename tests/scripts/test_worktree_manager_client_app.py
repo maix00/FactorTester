@@ -19,6 +19,8 @@ from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.test_authoring import (
     TestAuthoringResponse as _TestAuthoringResponse,
 )
+from server.manager.storage.control_db import ControlDatabaseUnavailable
+from server.manager.storage.preferences import UserPreferenceStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -341,6 +343,19 @@ def test_run_submission_skips_route_without_data_capability(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.test_authoring,
+        "prepare_run_context",
+        lambda payload, owner: {
+            "schema_version": 1,
+            "owner": owner,
+            "run_spec_hash": "a" * 64,
+            "prepared": {
+                "workspace_id": payload["workspace_id"],
+                "analyses": payload["analyses"],
+            },
+        },
+    )
     routes = [
         manager.ServiceRoute(
             server_id="near-no-data", role="feat", branch="feat",
@@ -394,6 +409,100 @@ def test_run_submission_skips_route_without_data_capability(
         ("far-with-data", "/api/runs/capability-preview"),
         ("far-with-data", "/api/runs"),
     ]
+
+
+def test_remote_run_submission_uses_manager_frozen_authoring_context(
+    tmp_path, monkeypatch,
+) -> None:
+    """A remote executor must not need the origin Manager's workspace DB."""
+    state = authenticated_state(tmp_path)
+    route = manager.ServiceRoute(
+        server_id="remote-main", role="main", branch="main",
+        revision="remote-revision", port=8000, latency_ms=5,
+        online=True, remote=True,
+        endpoint="http://10.77.0.1:7998",
+        peer_control_endpoint="https://10.77.0.1:17998",
+        proxy_token="peer-token",
+    )
+    monkeypatch.setattr(
+        state, "service_routes", lambda include_offline=True: [route],
+    )
+    prepared_calls = []
+
+    def prepare_run_context(payload, *, owner):
+        prepared_calls.append((payload, owner))
+        return {
+            "schema_version": 1,
+            "owner": owner,
+            "run_spec_hash": "a" * 64,
+            "prepared": {
+                "workspace_id": payload["workspace_id"],
+                "analyses": payload["analyses"],
+            },
+        }
+
+    monkeypatch.setattr(
+        state.test_authoring, "prepare_run_context", prepare_run_context,
+        raising=False,
+    )
+    forwarded = []
+
+    def route_request(selected, **values):
+        payload = json.loads(values["body"])
+        forwarded.append((values["path"], payload))
+        context = payload.get("_manager_run_context")
+        if not isinstance(context, dict):
+            return manager.GatewayResponse(
+                status=404,
+                body=b'{"success":false,"error":"workspace configuration not found"}',
+                content_type="application/json",
+            )
+        if values["path"] == "/api/runs/capability-preview":
+            return manager.GatewayResponse(
+                status=200,
+                body=b'{"success":true,"capability":true}',
+                content_type="application/json",
+            )
+        return manager.GatewayResponse(
+            status=202,
+            body=b'{"success":true,"run_id":"remote-run"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    body = json.dumps({
+        "workspace_id": "origin-workspace",
+        "configuration_revision": 7,
+        "analyses": ["ic"],
+        # A client-provided reserved value must never reach the executor.
+        "_manager_run_context": {"owner": "attacker"},
+    }).encode()
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/runs?server_id=remote-main&port=8000",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert response.status == 202
+    assert value["run_id"] == "remote-run"
+    assert prepared_calls == [({
+        "workspace_id": "origin-workspace",
+        "configuration_revision": 7,
+        "analyses": ["ic"],
+    }, "user@1")]
+    assert [path for path, _payload in forwarded] == [
+        "/api/runs/capability-preview", "/api/runs",
+    ]
+    assert all(
+        payload["_manager_run_context"]["owner"] == "user@1"
+        for _path, payload in forwarded
+    )
 
 
 def test_job_output_generation_uses_job_port_and_forwards_body(
@@ -602,8 +711,180 @@ def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> No
             restored = json.loads(response.read())
 
     assert updated["preferences"]["language"] == "en"
+    assert updated["preferences"]["configured"] is True
     assert restored["preferences"]["language"] == "en"
+    assert restored["preferences"]["configured"] is True
     assert state.user_preferences.read("other-user")["language"] == "system"
+    assert state.user_preferences.read("other-user")["configured"] is False
+
+
+def test_language_preference_uses_postgres_once_then_local_cache(tmp_path) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return {"language": "en", "updated_at": "2026-08-13T12:00:00Z"}
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language, "updated_at": "2026-08-13T12:01:00Z"}
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences",
+        control_store=control,
+        cache_ttl_seconds=300,
+    )
+
+    assert preferences.read("alice")["language"] == "en"
+    assert preferences.read("alice")["configured"] is True
+    assert preferences.read("alice")["language"] == "en"
+    assert control.loads == ["alice"]
+
+    assert preferences.update("alice", {"language": "zh-Hans"})["language"] == "zh-Hans"
+    assert control.updates == [("alice", "zh-Hans")]
+
+
+def test_language_preference_migrates_legacy_local_value_once(tmp_path) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language}
+
+    root = tmp_path / "preferences"
+    local = UserPreferenceStore(root)
+    local._atomic_write(local._path("alice"), {
+        "schema_version": 1,
+        "language": "en",
+    })
+    control = ControlStore()
+    shared = UserPreferenceStore(root, control_store=control)
+
+    assert shared.read("alice")["language"] == "en"
+    assert shared.read("alice")["configured"] is True
+    assert shared.read("alice")["language"] == "en"
+    assert control.loads == ["alice"]
+    assert control.updates == [("alice", "en")]
+
+
+def test_language_preference_caches_missing_postgres_default(tmp_path) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences", control_store=control,
+    )
+
+    first = preferences.read("alice")
+    restored = preferences.read("alice")
+
+    assert first == {
+        "schema_version": 1,
+        "language": "system",
+        "configured": False,
+    }
+    assert restored == first
+    assert control.loads == ["alice"]
+
+
+def test_cached_default_is_not_migrated_as_explicit_system(tmp_path) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language}
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences", control_store=control,
+    )
+    assert preferences.read("alice")["configured"] is False
+    cached = preferences._read_local("alice")
+    cached["cached_at"] = 0
+    preferences._atomic_write(preferences._path("alice"), cached)
+
+    assert preferences.read("alice")["configured"] is False
+    assert control.loads == ["alice", "alice"]
+    assert control.updates == []
+
+
+def test_legacy_cached_default_is_refreshed_without_becoming_explicit(
+    tmp_path,
+) -> None:
+    class ControlStore:
+        def __init__(self):
+            self.loads = []
+            self.updates = []
+
+        def load_user_preference(self, principal):
+            self.loads.append(principal)
+            return None
+
+        def upsert_user_preference(self, principal, *, language):
+            self.updates.append((principal, language))
+            return {"language": language}
+
+    control = ControlStore()
+    preferences = UserPreferenceStore(
+        tmp_path / "preferences", control_store=control,
+    )
+    preferences._atomic_write(preferences._path("alice"), {
+        "schema_version": 1,
+        "language": "system",
+        "cached_at": 10**20,
+    })
+
+    assert preferences.read("alice")["configured"] is False
+    assert control.loads == ["alice"]
+    assert control.updates == []
+
+
+def test_language_preference_write_reports_control_database_outage(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+
+    def unavailable(_principal, _payload):
+        raise ControlDatabaseUnavailable("control database is unavailable")
+
+    state.user_preferences.update = unavailable
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/client/preferences",
+            data=b'{"language":"en"}',
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as failed:
+            urlopen(request)
+
+    assert failed.value.code == 503
+    assert "temporarily unavailable" in failed.value.read().decode()
 
 
 def test_web_language_precedence_keeps_explicit_and_cached_user_preferences() -> None:
@@ -697,7 +978,8 @@ def test_web_shell_allows_authenticated_blob_image_previews(tmp_path) -> None:
         with urlopen(base_url) as response:
             assert response.headers["Content-Security-Policy"] == (
                 "default-src 'self'; img-src 'self' blob: data: https:; "
-                "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "connect-src 'self' http: https:"
             )
             assert response.headers["Cache-Control"] == "no-store"
 
@@ -1030,6 +1312,43 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'Generation ${value.generation}' not in research
 
 
+def test_web_site_icon_is_shared_by_flask_and_manager(tmp_path) -> None:
+    from flask import Flask
+
+    from server.core import core_bp
+
+    icon = (ROOT / "static" / "favicon.svg").read_bytes()
+    home = (ROOT / "templates" / "home.html").read_text(encoding="utf-8")
+    shell = (ROOT / "server" / "manager" / "web" / "research.html").read_text(
+        encoding="utf-8",
+    )
+    assert '<link rel="icon" type="image/svg+xml" href="{{ url_for(\'core.favicon\') }}">' in home
+    assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in shell
+    assert "modules.json" not in icon.decode("utf-8")
+    assert "SF Symbols" not in icon.decode("utf-8")
+
+    flask_app = Flask(
+        __name__,
+        template_folder=str(ROOT / "templates"),
+        static_folder=str(ROOT / "static"),
+    )
+    flask_app.register_blueprint(core_bp)
+    flask_client = flask_app.test_client()
+    for path in ("/favicon.svg", "/favicon.ico"):
+        response = flask_client.get(path)
+        assert response.status_code == 200
+        assert response.content_type.startswith("image/svg+xml")
+        assert response.data == icon
+
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        for path in ("/favicon.svg", "/favicon.ico"):
+            with urlopen(f"{base_url}{path}") as response:
+                assert response.status == 200
+                assert response.headers["Content-Type"] == "image/svg+xml"
+                assert response.read() == icon
+
+
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
@@ -1043,6 +1362,47 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
     assert modules["backtest"]["sfSymbol"] == "chart.line.uptrend.xyaxis"
     assert modules["jobs"]["sfSymbol"] == "checklist"
     assert "single_factor_test" not in modules
+
+
+def test_every_home_module_has_bilingual_title_and_description(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "super_admin", float("inf"),
+    )
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/modules", headers=headers,
+        )) as response:
+            modules = json.loads(response.read())["modules"]
+        localizations = {}
+        for locale in ("zh-Hans", "en"):
+            with urlopen(Request(
+                f"{base_url}/api/localizations/{locale}", headers=headers,
+            )) as response:
+                localizations[locale] = json.loads(response.read())["strings"]
+
+    cards = [
+        item for item in modules
+        if item["id"] not in {"home", "settings"}
+    ]
+    assert cards
+    assert next(item for item in cards if item["id"] == "profiles")[
+        "title_key"
+    ] == "研究身份"
+    for module in cards:
+        assert module.get("description_key"), module["id"]
+        for locale, strings in localizations.items():
+            assert module["title_key"] in strings, (locale, module["id"], "title")
+            assert module["description_key"] in strings, (
+                locale, module["id"], "description",
+            )
+
+    coordinator = (
+        ROOT / "server" / "manager" / "web" / "app" / "coordinator.js"
+    ).read_text(encoding="utf-8")
+    assert "module.description_key" in coordinator
+    assert "function moduleDescription" not in coordinator
 
 
 def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_path) -> None:
@@ -1217,7 +1577,9 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "FTReportTables.render" in viewers
     assert "artifact-image" in viewers
     assert "media_type" in viewers
-    assert "/preview" in viewers
+    assert "FTJobArtifacts.fetch" in viewers
+    assert "/artifacts/${encodeURIComponent(artifact.name)}" in viewers
+    assert "/preview" not in viewers
     assert "/api/jobs/artifact-capabilities" in generation
     assert "/artifacts/generate" in generation
     assert "output_requests" in generation

@@ -14,7 +14,9 @@ from server.manager.domain.federation import (
 )
 from server.manager.http.gateway import GatewayResponse
 from server.manager.http.responses import json_response
+from server.manager.services.test_authoring import TestAuthoringError
 from server.manager.storage.sqlite import ManagerSQLiteResponse
+from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
 
 _SERVICE_GET_PREFIXES = (
@@ -39,6 +41,7 @@ _SERVICE_GET_PREFIXES = (
 _PUBLIC_GRAPH_READ_RE = re.compile(
     r"/api/research-graphs/[^/]+/(?:versions|active)$"
 )
+_MAX_PREPARED_RUN_BODY_BYTES = 11 * 1024 * 1024
 
 
 class ServiceSelectionRoutesMixin:
@@ -377,6 +380,56 @@ class ServiceSelectionRoutesMixin:
         return json.dumps(
             value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
+
+    def _prepare_manager_run_context(
+        self,
+        body: bytes,
+        *,
+        principal: str,
+    ) -> bytes | None:
+        """Replace any client-reserved value with origin-owned frozen state."""
+        try:
+            value = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be valid JSON"},
+                400,
+            )
+            return None
+        if not isinstance(value, dict):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be a JSON object"},
+                400,
+            )
+            return None
+        value.pop(MANAGER_RUN_CONTEXT_KEY, None)
+        try:
+            context = self.state.test_authoring.prepare_run_context(
+                dict(value), owner=principal,
+            )
+        except TestAuthoringError as exc:
+            json_response(
+                self,
+                {"success": False, "error": str(exc), **exc.details},
+                exc.status,
+            )
+            return None
+        value[MANAGER_RUN_CONTEXT_KEY] = context
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        # The peer proxy Base64-encodes this body inside a 16 MiB JSON
+        # envelope.  Eleven MiB leaves room for expansion and metadata.
+        if len(encoded) > _MAX_PREPARED_RUN_BODY_BYTES:
+            json_response(
+                self,
+                {"success": False, "error": "prepared run context is too large"},
+                413,
+            )
+            return None
+        return encoded
 
     def _capable_service_route(
         self,

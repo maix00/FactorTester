@@ -1,11 +1,13 @@
 (() => {
   function artifactPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}/preview${portQuery}`;
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
   }
 
   async function mount(context, target, options) {
     target.replaceChildren(message(context.t("正在读取生成物…")));
-    const response = await context.raw(artifactPath(options.jobID, options.artifact, options.portQuery));
+    const response = await FTJobArtifacts.fetch(
+      context, artifactPath(options.jobID, options.artifact, options.portQuery),
+    );
     const type = String(options.artifact.content_type || options.artifact.media_type
       || response.headers.get("Content-Type") || "").toLowerCase();
     const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();

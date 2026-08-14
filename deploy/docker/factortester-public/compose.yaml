@@ -1,0 +1,191 @@
+name: ${FACTORTESTER_PUBLIC_PROJECT:-factortester-public}
+
+services:
+  factortester-public:
+    image: ${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:${FACTORTESTER_REVISION:?set FACTORTESTER_REVISION}
+    build:
+      context: ../../..
+      dockerfile: deploy/docker/factortester-public/FactorTester.Dockerfile
+      args:
+        DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}
+        FACTORTESTER_REVISION: ${FACTORTESTER_REVISION:?set FACTORTESTER_REVISION}
+        FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
+        FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
+        PIP_INDEX_URL: ${FACTORTESTER_PIP_INDEX_URL:-https://pypi.org/simple}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      FACTORTESTER_ALLOW_PUBLIC_REGISTRATION: "0"
+      FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT: ${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:?set FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT}
+      FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
+      FACTORTESTER_HOT_RELOAD: "0"
+      FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_PUBLIC_ADDRESS:?set FACTORTESTER_PUBLIC_ADDRESS}
+      FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}
+      FACTORTESTER_MANAGER_TLS_CERT: /run/secrets/manager-tls/manager.crt
+      FACTORTESTER_MANAGER_TLS_KEY: /run/secrets/manager-tls/manager.key
+      FACTORTESTER_ARTIFACT_TLS_CERT: /run/secrets/manager-tls/manager.crt
+      FACTORTESTER_ARTIFACT_TLS_KEY: /run/secrets/manager-tls/manager.key
+      FACTORTESTER_FEDERATION_LOCAL_ADDRESS: ${FACTORTESTER_FEDERATION_LOCAL_ADDRESS:?set FACTORTESTER_FEDERATION_LOCAL_ADDRESS}
+      FACTORTESTER_PUBLIC_SERVER: "1"
+      FACTORTESTER_REQUIRE_DEVICE_AUTH: "1"
+      FACTORTESTER_REQUIRE_LOGIN_FOR_UI: "1"
+      FACTORTESTER_REQUIRE_PEER_LISTENERS: ${FACTORTESTER_REQUIRE_PEER_LISTENERS:-1}
+      FACTORTESTER_SERVER_ID: ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
+      FACTORTESTER_SERVICE_DEBUG: "0"
+      FACTORTESTER_STARTUP_TIMEOUT: ${FACTORTESTER_STARTUP_TIMEOUT:-180}
+      # Host ingress reaches this fixed transport bridge through its gateway.
+      # No other private subnet or container is allowed to assert client IPs.
+      FACTORTESTER_TRUSTED_PROXY_CIDRS: ${FACTORTESTER_TRUSTED_PROXY_CIDRS:-172.30.186.1/32}
+      FACTORTESTER_WIREGUARD_INTERFACE: ftwg0
+      GTHT_JOB_ARTIFACT_ROOT: /data/job-results
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wg show ftwg0 >/dev/null 2>&1 &&
+          curl --fail --silent --show-error --insecure
+          https://127.0.0.1:7998/ >/dev/null &&
+          curl --fail --silent --show-error --insecure
+          https://127.0.0.1:7997/healthz >/dev/null &&
+          curl --fail --silent --show-error
+          http://$${FACTORTESTER_FEDERATION_LOCAL_ADDRESS}:17998/healthz >/dev/null &&
+          curl --fail --silent --show-error
+          http://$${FACTORTESTER_FEDERATION_LOCAL_ADDRESS}:17997/healthz >/dev/null &&
+          curl --fail --silent --show-error
+          http://127.0.0.1:8000/api/me >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 120s
+    networks:
+      private:
+        ipv4_address: 172.30.185.2
+      transport:
+        ipv4_address: 172.30.186.2
+    ports:
+      - ${FACTORTESTER_PUBLIC_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-7998}:7998
+      - ${FACTORTESTER_PUBLIC_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-7997}:7997
+      - ${FACTORTESTER_FEDERATION_UDP_HOST_PORT:-51820}:51820/udp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    volumes:
+      - type: bind
+        source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
+        target: /data
+      - type: bind
+        source: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}
+        target: /state
+      - type: bind
+        source: ${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}
+        target: /opt/factortester/.settings
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_FEDERATION_WIREGUARD_DIR:?set FACTORTESTER_FEDERATION_WIREGUARD_DIR}
+        target: /run/secrets/federation-wireguard
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_CONTROL_DB_ENV_FILE:?set FACTORTESTER_CONTROL_DB_ENV_FILE}
+        target: /run/secrets/control-db.env
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_MANAGER_TLS_DIR:?set FACTORTESTER_MANAGER_TLS_DIR}
+        target: /run/secrets/manager-tls
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_MANAGER_STATE_SECRETS_DIR:?set FACTORTESTER_MANAGER_STATE_SECRETS_DIR}
+        target: /run/secrets/manager-state
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_FEDERATION_CA_SOURCE:?set FACTORTESTER_FEDERATION_CA_SOURCE}
+        target: /run/trust/federation-ca.crt
+        read_only: true
+
+  postgresql-control:
+    image: ${FACTORTESTER_POSTGRES_IMAGE:-factortester-postgresql-control}:15.18
+    build:
+      context: ../../..
+      dockerfile: deploy/docker/factortester-public/PostgreSQL.Dockerfile
+      args:
+        DEBIAN_BOOTSTRAP_MIRROR: ${FACTORTESTER_DEBIAN_BOOTSTRAP_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_BOOTSTRAP_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_BOOTSTRAP_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
+        DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      FACTORTESTER_CONTROL_DB_PASSWORD_FILE: /run/secrets/control-db-password
+      FACTORTESTER_DB_ALLOWED_WIREGUARD_CIDRS: ${FACTORTESTER_DB_ALLOWED_WIREGUARD_CIDRS:-}
+      FACTORTESTER_DATABASE_LOCAL_ADDRESS: ${FACTORTESTER_DATABASE_LOCAL_ADDRESS:?set FACTORTESTER_DATABASE_LOCAL_ADDRESS}
+      FACTORTESTER_DB_WIREGUARD_INTERFACE: dbwg0
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=trust --encoding=UTF8
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-superuser-password
+      POSTGRES_USER: postgres
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wg show dbwg0 >/dev/null 2>&1 &&
+          pg_isready -U postgres -d factortester_control
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      private:
+        ipv4_address: 172.30.185.3
+      transport:
+        ipv4_address: 172.30.186.3
+    ports:
+      - ${FACTORTESTER_DB_WIREGUARD_UDP_HOST_PORT:-51821}:51821/udp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ${FACTORTESTER_DB_WIREGUARD_DIR:?set FACTORTESTER_DB_WIREGUARD_DIR}
+        target: /run/secrets/database-wireguard
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_POSTGRES_TLS_DIR:?set FACTORTESTER_POSTGRES_TLS_DIR}
+        target: /run/secrets/postgres-tls
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_CONTROL_DB_PASSWORD_FILE:?set FACTORTESTER_CONTROL_DB_PASSWORD_FILE}
+        target: /run/secrets/control-db-password
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_POSTGRES_SUPERUSER_PASSWORD_FILE:?set FACTORTESTER_POSTGRES_SUPERUSER_PASSWORD_FILE}
+        target: /run/secrets/postgres-superuser-password
+        read_only: true
+      - type: bind
+        source: ${FACTORTESTER_POSTGRES_MIGRATION_DIR:?set FACTORTESTER_POSTGRES_MIGRATION_DIR}
+        target: /run/migration
+        read_only: true
+
+networks:
+  private:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.185.0/29
+  transport:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.186.0/29
+
+volumes:
+  postgres-data:
+    name: ${FACTORTESTER_POSTGRES_VOLUME:-factortester-postgres-control}

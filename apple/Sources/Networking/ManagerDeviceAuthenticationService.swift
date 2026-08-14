@@ -120,13 +120,28 @@ final class ManagerDeviceAuthenticationService {
         }
     }
 
-    func authenticate(endpoint: URL? = nil) async throws -> ManagerDeviceAuthenticationResult {
+    func authenticate(
+        endpoint: URL? = nil,
+        expectedUsername: String? = nil
+    ) async throws -> ManagerDeviceAuthenticationResult {
         guard let configuredEndpoint = endpoint ?? ManagerConfig.shared.baseURL else {
             throw APIError.notConfigured
         }
         let endpoint = try Self.normalizedEndpoint(configuredEndpoint)
         guard let credential = ManagerDeviceKeyStore.load() else {
             throw ManagerDeviceKeyStoreError.keyUnavailable
+        }
+        let expected = expectedUsername?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if let expected, !expected.isEmpty,
+           !credential.username.isEmpty,
+           credential.username != expected {
+            throw APIError.unauthorized(
+                L10n.text(
+                    "当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。"
+                )
+            )
         }
         let challenge: ChallengeResponse = try await request(
             endpoint: endpoint,
@@ -149,6 +164,14 @@ final class ManagerDeviceAuthenticationService {
                 "signature": Self.base64URL(signature),
             ]
         )
+        if let expected, !expected.isEmpty, response.username != expected {
+            ManagerSessionTokenStore.remove(for: endpoint)
+            throw APIError.unauthorized(
+                L10n.text(
+                    "当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。"
+                )
+            )
+        }
         try ManagerDeviceKeyStore.updateUsername(response.username)
         ManagerSessionTokenStore.save(response.token, for: endpoint)
         return response.result(deviceID: credential.deviceID, endpoint: endpoint)

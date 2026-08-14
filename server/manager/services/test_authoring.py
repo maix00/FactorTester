@@ -70,6 +70,25 @@ class TestAuthoringService:
             )
         return bool(method == "DELETE" and cls._TEMPLATE_RE.fullmatch(path))
 
+    @staticmethod
+    def prepare_run_context(
+        payload: dict[str, Any],
+        *,
+        owner: str,
+    ) -> dict[str, Any]:
+        """Freeze local authoring state into a portable execution context."""
+        from server.modules.single_factor_test.research_jobs import (
+            prepare_manager_run_context,
+        )
+        from server.services.research_run_context import RunRequestError
+
+        try:
+            return prepare_manager_run_context(payload, owner=owner)
+        except RunRequestError as exc:
+            raise TestAuthoringError(
+                str(exc), exc.status_code, **exc.details,
+            ) from exc
+
     def get(self, path: str, *, owner: str) -> TestAuthoringResponse:
         if match := self._SETTINGS_RE.fullmatch(path):
             return TestAuthoringResponse(self._settings_manifest(

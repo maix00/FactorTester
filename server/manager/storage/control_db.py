@@ -32,7 +32,7 @@ CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 4
+CONTROL_DATABASE_SCHEMA_VERSION = 5
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -321,18 +321,28 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
+    CREATE TABLE IF NOT EXISTS control_user_preferences (
+        principal TEXT PRIMARY KEY,
+        preferred_language TEXT NOT NULL DEFAULT 'system',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (preferred_language IN ('system', 'zh-Hans', 'en'))
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS control_device_authorizations (
         token_hash TEXT PRIMARY KEY,
         username TEXT NOT NULL,
         target_server_id TEXT NOT NULL,
         target_endpoint TEXT NOT NULL,
         device_name TEXT NOT NULL DEFAULT '',
+        preferred_language TEXT NOT NULL DEFAULT 'system',
         source_server_id TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMPTZ NOT NULL,
         used_at TIMESTAMPTZ
     )
     """,
+    "ALTER TABLE control_device_authorizations ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT 'system'",
     "CREATE INDEX IF NOT EXISTS control_device_authorizations_target ON control_device_authorizations(target_server_id, expires_at)",
     "CREATE INDEX IF NOT EXISTS control_device_authorizations_user ON control_device_authorizations(username, created_at DESC)",
     """
@@ -803,6 +813,59 @@ class PostgresControlStore:
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
 
+    def load_user_preference(self, principal: str) -> dict[str, Any] | None:
+        """Load one small global preference row for Manager cache refresh."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT preferred_language AS language, updated_at
+                FROM control_user_preferences
+                WHERE principal=%s
+                """,
+                (str(principal),),
+            ).fetchone()
+        if row is None:
+            return None
+        value = dict(row) if isinstance(row, Mapping) else {
+            "language": _row_value(row, "language", 0, "system"),
+            "updated_at": _row_value(row, "updated_at", 1, None),
+        }
+        if hasattr(value.get("updated_at"), "isoformat"):
+            value["updated_at"] = value["updated_at"].isoformat()
+        return value
+
+    def upsert_user_preference(
+        self,
+        principal: str,
+        *,
+        language: str,
+    ) -> dict[str, Any]:
+        """Write through one user preference and return its canonical row."""
+        if str(language) not in {"system", "zh-Hans", "en"}:
+            raise ValueError("language preference is invalid")
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO control_user_preferences(
+                    principal, preferred_language, updated_at
+                ) VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT(principal) DO UPDATE SET
+                    preferred_language=excluded.preferred_language,
+                    updated_at=CURRENT_TIMESTAMP
+                RETURNING preferred_language AS language, updated_at
+                """,
+                (str(principal), str(language)),
+            ).fetchone()
+        value = dict(row) if isinstance(row, Mapping) else {
+            "language": _row_value(row, "language", 0, "system"),
+            "updated_at": _row_value(row, "updated_at", 1, None),
+        }
+        if hasattr(value.get("updated_at"), "isoformat"):
+            value["updated_at"] = value["updated_at"].isoformat()
+        return value
+
     @staticmethod
     def _device_authorization_value(row: object) -> dict[str, Any]:
         value = dict(row) if isinstance(row, Mapping) else {
@@ -810,10 +873,13 @@ class PostgresControlStore:
             "target_server_id": _row_value(row, "target_server_id", 1, ""),
             "target_endpoint": _row_value(row, "target_endpoint", 2, ""),
             "device_name": _row_value(row, "device_name", 3, ""),
-            "source_server_id": _row_value(row, "source_server_id", 4, ""),
-            "created_at": _row_value(row, "created_at", 5, None),
-            "expires_at": _row_value(row, "expires_at", 6, None),
-            "used_at": _row_value(row, "used_at", 7, None),
+            "preferred_language": _row_value(
+                row, "preferred_language", 4, "system"
+            ),
+            "source_server_id": _row_value(row, "source_server_id", 5, ""),
+            "created_at": _row_value(row, "created_at", 6, None),
+            "expires_at": _row_value(row, "expires_at", 7, None),
+            "used_at": _row_value(row, "used_at", 8, None),
         }
         for key in ("created_at", "expires_at", "used_at"):
             timestamp = value.get(key)
@@ -829,6 +895,7 @@ class PostgresControlStore:
         target_server_id: str,
         target_endpoint: str,
         device_name: str = "",
+        preferred_language: str = "system",
         expires_at: float,
         source_server_id: str,
     ) -> None:
@@ -840,15 +907,37 @@ class PostgresControlStore:
                 """
                 INSERT INTO control_device_authorizations(
                     token_hash, username, target_server_id, target_endpoint,
-                    device_name, source_server_id, expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    device_name, preferred_language, source_server_id, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     str(token_hash), str(username), str(target_server_id),
                     str(target_endpoint), str(device_name or "")[:128],
-                    str(source_server_id), expiration,
+                    str(preferred_language), str(source_server_id), expiration,
                 ),
             )
+
+    def preview_device_authorization(
+        self,
+        *,
+        token_hash: str,
+        target_server_id: str,
+    ) -> dict[str, Any] | None:
+        """Read one unconsumed live grant for localized page rendering."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT username, target_server_id, target_endpoint, device_name,
+                       preferred_language, source_server_id, created_at,
+                       expires_at, used_at
+                FROM control_device_authorizations
+                WHERE token_hash=%s AND target_server_id=%s
+                  AND used_at IS NULL AND expires_at>CURRENT_TIMESTAMP
+                """,
+                (str(token_hash), str(target_server_id)),
+            ).fetchone()
+        return self._device_authorization_value(row) if row is not None else None
 
     def consume_device_authorization(
         self,
@@ -862,7 +951,8 @@ class PostgresControlStore:
             row = connection.execute(
                 """
                 SELECT username, target_server_id, target_endpoint, device_name,
-                       source_server_id, created_at, expires_at, used_at
+                       preferred_language, source_server_id, created_at,
+                       expires_at, used_at
                 FROM control_device_authorizations
                 WHERE token_hash=%s
                 FOR UPDATE
@@ -886,8 +976,8 @@ class PostgresControlStore:
                 WHERE token_hash=%s AND used_at IS NULL
                   AND target_server_id=%s AND expires_at>CURRENT_TIMESTAMP
                 RETURNING username, target_server_id, target_endpoint,
-                          device_name, source_server_id, created_at,
-                          expires_at, used_at
+                          device_name, preferred_language, source_server_id,
+                          created_at, expires_at, used_at
                 """,
                 (str(token_hash), str(target_server_id)),
             ).fetchone()

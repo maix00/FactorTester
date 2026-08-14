@@ -51,13 +51,31 @@ class RequestSecurityMixin:
                     pass
         super().setup()
 
+    def _peer_ip(self) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+        return ipaddress.ip_address(self.client_address[0])
+
+    def _is_trusted_proxy_peer(self) -> bool:
+        peer = self._peer_ip()
+        if peer.is_loopback:
+            return True
+        networks = getattr(
+            getattr(self, "state", None), "trusted_proxy_networks", (),
+        )
+        return any(peer in network for network in networks)
+
+    def _single_forwarded_value(self, name: str) -> str:
+        value = str(self.headers.get(name, "") or "").strip()
+        # This Manager supports one explicitly trusted proxy hop.  Reject a
+        # chain rather than selecting a caller-controlled first/last value.
+        if not value or "," in value:
+            return ""
+        return value
+
     def _client_ip(self) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-        peer = ipaddress.ip_address(self.client_address[0])
-        if not peer.is_loopback:
+        peer = self._peer_ip()
+        if not self._is_trusted_proxy_peer():
             return peer
-        forwarded = self.headers.get(
-            "X-Forwarded-For", ""
-        ).split(",", 1)[0].strip()
+        forwarded = self._single_forwarded_value("X-Forwarded-For")
         if not forwarded:
             return peer
         try:
@@ -74,13 +92,13 @@ class RequestSecurityMixin:
 
     def _is_https_proxy_request(self) -> bool:
         try:
-            peer = ipaddress.ip_address(self.client_address[0])
+            trusted = self._is_trusted_proxy_peer()
         except ValueError:
             return False
-        forwarded_proto = self.headers.get(
-            "X-Forwarded-Proto", ""
-        ).split(",", 1)[0].strip().lower()
-        return peer.is_loopback and forwarded_proto == "https"
+        forwarded_proto = self._single_forwarded_value(
+            "X-Forwarded-Proto",
+        ).lower()
+        return trusted and forwarded_proto == "https"
 
     def _is_direct_https_request(self) -> bool:
         """Whether this Manager socket itself is serving authenticated TLS."""

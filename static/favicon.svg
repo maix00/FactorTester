@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">FactorTester</title>
+  <defs>
+    <linearGradient id="background" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071a4a"/>
+      <stop offset="1" stop-color="#020a24"/>
+    </linearGradient>
+    <linearGradient id="bars" x1="18" y1="52" x2="50" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12366d"/>
+      <stop offset="1" stop-color="#28588e"/>
+    </linearGradient>
+    <linearGradient id="trend" x1="9" y1="48" x2="54" y2="14" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18a9ee"/>
+      <stop offset="1" stop-color="#28e2d7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#background)"/>
+  <path d="M17 51h8V39h-8v12Zm11 0h8V33h-8v18Zm11 0h8V25h-8v26Z" fill="url(#bars)"/>
+  <path d="m10 46 13-8 11-7 12-10 9-8" fill="none" stroke="url(#trend)" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5"/>
+  <circle cx="10" cy="46" r="4" fill="#1ac3ed"/>
+  <circle cx="34" cy="31" r="4.5" fill="#ffc53d"/>
+  <circle cx="55" cy="13" r="4.5" fill="#2be1d8"/>
+</svg>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import subprocess
 from pathlib import Path
 
@@ -18,7 +19,15 @@ from server.manager.system import extract_issue_number as _extract_issue_number,
 
 class WorktreeStateMixin:
     """Own executable worktree identity without starting or stopping services."""
+    @staticmethod
+    def _immutable_source() -> bool:
+        return str(
+            os.environ.get("FACTORTESTER_IMMUTABLE_SOURCE") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
     def _worktree_entries(self) -> list[dict[str, str]]:
+        if self._immutable_source():
+            return []
         out = subprocess.check_output(
             ["git", "worktree", "list", "--porcelain"],
             cwd=self.repo,
@@ -39,11 +48,16 @@ class WorktreeStateMixin:
         return entries
 
     def cleanup_detached_worktrees(self) -> list[Path]:
-        """Remove disposable detached worktrees and prune stale metadata."""
+        """Remove stale Manager source snapshots without crossing ownership."""
+        if self._immutable_source():
+            return []
         try:
             entries = self._worktree_entries()
         except (OSError, subprocess.CalledProcessError):
             return []
+        managed_source_root = (
+            self.repo / ".workspace" / "manager-sources"
+        ).resolve()
         removed: list[Path] = []
         for entry in entries:
             # ``git worktree list --porcelain`` includes the bare repository
@@ -55,7 +69,14 @@ class WorktreeStateMixin:
             if not raw_path:
                 continue
             worktree_path = Path(raw_path).resolve()
-            if worktree_path == self.repo:
+            try:
+                worktree_path.relative_to(managed_source_root)
+            except ValueError:
+                # A shared Git object store can also own deployment releases,
+                # issue worktrees, and checkouts managed by other tools.  A
+                # Manager only owns its immutable source cache and must not
+                # remove an unrelated detached checkout merely because it has
+                # no branch.
                 continue
             # A Manager launched from an immutable commit checkout is itself
             # a detached worktree.  Removing its live source tree at startup
@@ -91,7 +112,12 @@ class WorktreeStateMixin:
         return removed
 
     def worktrees(self) -> list[Worktree]:
-        entries = self._worktree_entries()
+        try:
+            entries = self._worktree_entries()
+        except (OSError, subprocess.CalledProcessError):
+            if not self._immutable_source():
+                raise
+            entries = []
 
         result: list[Worktree] = []
         for entry in entries:

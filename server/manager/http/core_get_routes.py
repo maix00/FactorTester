@@ -12,10 +12,77 @@ from server.manager.http.responses import json_response
 from server.manager.web.assets import asset_revision, shell_bytes, static_file
 
 
+_CLIENT_MODULES = (
+    {
+        "id": "home", "title": "主页", "title_key": "主页",
+        "icon": "grid", "sfSymbol": "square.grid.2x2",
+    },
+    {
+        "id": "research", "title": "研究", "title_key": "研究",
+        "description_key": "查看各 Profile 的实时步骤、义务与报告",
+        "icon": "chart", "sfSymbol": "chart.xyaxis.line",
+    },
+    {
+        "id": "ic-test", "title": "IC 测试", "title_key": "IC 测试",
+        "description_key": "配置并运行因子 IC 测试",
+        "icon": "correlation", "sfSymbol": "chart.xyaxis.line",
+    },
+    {
+        "id": "backtest", "title": "回测", "title_key": "回测",
+        "description_key": "配置并运行分组回测",
+        "icon": "backtest", "sfSymbol": "chart.line.uptrend.xyaxis",
+    },
+    {
+        "id": "jobs", "title": "测试任务", "title_key": "测试任务",
+        "description_key": "跨端口查看配置、进度、结果与生成物",
+        "icon": "checklist", "sfSymbol": "checklist",
+    },
+    {
+        "id": "factors", "title": "因子库", "title_key": "因子库",
+        "description_key": "浏览 canonical 与自定义因子",
+        "icon": "function", "sfSymbol": "function",
+    },
+    {
+        "id": "products", "title": "产品", "title_key": "产品",
+        "description_key": "查询产品、合约与市场资料",
+        "icon": "box", "sfSymbol": "shippingbox",
+    },
+    {
+        "id": "profiles", "title": "Profiles", "title_key": "研究身份",
+        "description_key": "查看研究身份、工作区与初始化来源",
+        "icon": "profiles", "sfSymbol": "person.2.crop.square.stack",
+    },
+    {
+        "id": "sqlite_web", "title": "数据库", "title_key": "数据库",
+        "description_key": "浏览统一 SQLite 数据库",
+        "icon": "SQL", "sfSymbol": "cylinder.split.1x2",
+        "path": "/sqlite-web/", "requiresAuth": True, "homeOnly": True,
+    },
+    {
+        "id": "docs", "title": "技术文档", "title_key": "技术文档",
+        "description_key": "阅读 FactorTester 技术文档",
+        "icon": "book", "sfSymbol": "book", "path": "/docs",
+        "requiresAuth": False, "homeOnly": True,
+    },
+    {
+        "id": "settings", "title": "设置", "title_key": "设置",
+        "icon": "settings", "sfSymbol": "person.crop.circle",
+    },
+)
+
+_MANAGER_MODULE = {
+    "id": "manager", "title": "服务器管理", "title_key": "服务器管理",
+    "description_key": "查看端口状态并控制本机服务",
+    "icon": "server", "sfSymbol": "server.rack", "homeOnly": True,
+}
+
+
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
     def _get_entry_routes(self, parsed) -> bool:
+        if parsed.path in {"/favicon.svg", "/favicon.ico"}:
+            return self._serve_site_icon()
         if parsed.path == "/compliance":
             requested = parse_qs(parsed.query, keep_blank_values=True).get(
                 "next", ["/"]
@@ -122,26 +189,29 @@ class CoreGetRoutesMixin:
             manager = bool(
                 session and session["capabilities"]["manager"]
             )
-            modules = [
-                {"id": "home", "title": "主页", "title_key": "主页", "icon": "grid", "sfSymbol": "square.grid.2x2"},
-                {"id": "research", "title": "研究", "title_key": "研究", "icon": "chart", "sfSymbol": "chart.xyaxis.line"},
-                {"id": "ic-test", "title": "IC 测试", "title_key": "IC 测试", "icon": "correlation", "sfSymbol": "chart.xyaxis.line"},
-                {"id": "backtest", "title": "回测", "title_key": "回测", "icon": "backtest", "sfSymbol": "chart.line.uptrend.xyaxis"},
-                {"id": "jobs", "title": "测试任务", "title_key": "测试任务", "icon": "checklist", "sfSymbol": "checklist"},
-                {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function", "sfSymbol": "function"},
-                {"id": "products", "title": "产品", "title_key": "产品", "icon": "box", "sfSymbol": "shippingbox"},
-                {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles", "sfSymbol": "person.2.crop.square.stack"},
-                {"id": "sqlite_web", "title": "数据库", "title_key": "数据库", "icon": "SQL", "sfSymbol": "cylinder.split.1x2", "path": "/sqlite-web/", "requiresAuth": True, "homeOnly": True},
-                {"id": "docs", "title": "技术文档", "title_key": "技术文档", "icon": "book", "sfSymbol": "book", "path": "/docs", "requiresAuth": False, "homeOnly": True},
-                {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings", "sfSymbol": "person.crop.circle"},
-            ]
+            modules = [dict(item) for item in _CLIENT_MODULES]
             if manager:
-                modules.append({
-                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server", "sfSymbol": "server.rack", "homeOnly": True,
-                })
+                modules.append(dict(_MANAGER_MODULE))
             json_response(self, {"modules": modules})
             return True
         return False
+
+    def _serve_site_icon(self) -> bool:
+        try:
+            body = (
+                self.state.runtime_source_root / "static/favicon.svg"
+            ).read_bytes()
+        except OSError:
+            self.send_error(404)
+            return True
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     def _get_session_and_shell_routes(self, parsed) -> bool:
         if parsed.path == "/api/session":
@@ -212,7 +282,12 @@ class CoreGetRoutesMixin:
             # explicitly permitting those object URLs; without this WebKit
             # silently reports the preview as unreadable even though /preview
             # returned a valid image.
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; img-src 'self' blob: data: https:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "connect-src 'self' http: https:",
+            )
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Cache-Control", "no-store")
@@ -229,6 +304,7 @@ class CoreGetRoutesMixin:
         parsed = urlparse(self.path)
         handlers = (
             self._get_entry_routes,
+            self._get_transfer_access_status,
             self._get_job_list_routes,
             self._get_client_research_routes,
             self._get_public_research_routes,

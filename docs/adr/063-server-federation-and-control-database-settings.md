@@ -10,7 +10,8 @@ The settings title “peer attachment” mixed two independent concerns. Manager
 federation exchanges server endpoints, online execution ports, load, and data
 source capabilities over port 7998. PostgreSQL on port 5432 is instead the
 authoritative store for users, organizations, hierarchy, quotas, and public
-device authorizations. A remote server's loopback database URL
+device authorizations, including the small cross-Manager user-language
+preference. A remote server's loopback database URL
 (`127.0.0.1:5432`) cannot be copied unchanged to another Manager.
 
 The old federation page also rendered stopped worktree ports as selectable,
@@ -44,6 +45,18 @@ to a peer. That UI suggested an offline service could be offered remotely.
    in the UI. This keeps the public systemd node under server configuration
    management while allowing a local LaunchAgent node to be configured by an
    authenticated super administrator.
+7. Explicit user-language preferences are write-through PostgreSQL records.
+   Managers cache them locally for five minutes, so normal page/API reads do
+   not put PostgreSQL on every-request paths. A one-time device grant stores a
+   concrete language snapshot so rendering at another origin remains stable.
+   The preference projection exposes whether a PostgreSQL row is configured;
+   an absent row is not equivalent to an explicit `system` selection. On
+   first authenticated synchronization, a native client may bootstrap the
+   missing row only from a language value already scoped to that same
+   principal. A process-wide or last-used language must never be assigned to
+   a different account. Older Managers that omit the additive configured flag
+   remain authoritative to newer clients, preventing an unsafe upload during
+   a mixed-version rollout.
 
 ## Consequences
 

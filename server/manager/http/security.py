@@ -1,10 +1,50 @@
-"""Small helpers for optional TLS on the Manager and artifact data planes."""
+"""Small helpers for optional TLS on Manager and client transfer surfaces."""
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import ssl
 from pathlib import Path
+
+
+TRUSTED_PROXY_CIDRS_ENV = "FACTORTESTER_TRUSTED_PROXY_CIDRS"
+
+
+def configured_trusted_proxy_networks(
+    value: str | None = None,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Parse the exact reverse-proxy networks allowed to supply forwarding headers.
+
+    Loopback peers are trusted separately by the request handler.  Any
+    deployment-provided value is validated once while Manager state starts so
+    a typo cannot silently widen or disable the public access boundary.
+    """
+    raw = str(
+        os.environ.get(TRUSTED_PROXY_CIDRS_ENV, "")
+        if value is None
+        else value
+    ).strip()
+    if not raw:
+        return ()
+
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for item in raw.split(","):
+        candidate = item.strip()
+        if not candidate:
+            raise ValueError(
+                f"{TRUSTED_PROXY_CIDRS_ENV} contains an empty CIDR"
+            )
+        try:
+            network = ipaddress.ip_network(candidate, strict=True)
+        except ValueError as exc:
+            raise ValueError(
+                f"{TRUSTED_PROXY_CIDRS_ENV} contains an invalid CIDR: "
+                f"{candidate!r}"
+            ) from exc
+        if network not in networks:
+            networks.append(network)
+    return tuple(networks)
 
 
 def configured_tls_paths(

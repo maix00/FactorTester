@@ -11,7 +11,7 @@ import base64
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -84,7 +84,7 @@ def _running_dual_loopback_manager(state):
 
 
 def test_manager_binds_all_interfaces_for_lan_web_by_default(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ) -> None:
     observed = {"events": []}
 
@@ -106,7 +106,12 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     monkeypatch.setattr(manager.ManagerState, "cleanup_detached_worktrees", lambda self: [])
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "local_internal_addresses",
+        lambda self: ["192.168.50.10"],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "start_data_plane",
         lambda self: observed["events"].append("artifact") or "artifact",
     )
     monkeypatch.setattr(manager_app.webbrowser, "open", lambda _url: None)
@@ -119,6 +124,10 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     assert manager_app.main(runtime_module=manager) == 0
     assert observed["address"] == ("0.0.0.0", 7998)
     assert observed["events"] == ["bind", "artifact", "serve"]
+    output = capsys.readouterr().out
+    assert "局域网访问: http://192.168.50.10:7998/" in output
+    assert "172.18." not in output
+    assert "127.0.0.1" not in output
 
 
 def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> None:
@@ -159,7 +168,7 @@ def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> No
     )
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "start_data_plane",
         lambda self: "artifact",
     )
     monkeypatch.setattr(manager_app.signal, "signal", set_signal)
@@ -203,6 +212,106 @@ def test_loopback_reverse_proxy_can_forward_original_client_address() -> None:
     handler.headers = {"X-Forwarded-For": "10.98.184.25"}
 
     assert not handler._is_loopback_client()
+
+
+def test_configured_docker_gateway_forwards_one_canonical_client_address(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS", "172.30.186.1/32",
+    )
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "2001:b030:8150:ff07::5",
+        "X-Forwarded-Proto": "https",
+        "User-Agent": "FactorTester-Swift/1.2",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address(
+        "2001:b030:8150:ff07::5"
+    )
+    assert not handler._is_private_lan_client()
+    assert handler._is_https_proxy_request()
+    assert handler._device_request_metadata() == {
+        "client_type": "swift",
+        "client_name": "FactorTester Swift 1.2",
+        "enrollment_ip": "2001:b030:8150:ff07::5",
+    }
+
+
+def test_untrusted_docker_gateway_cannot_spoof_forwarded_metadata(
+    tmp_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "8.8.8.8",
+        "X-Forwarded-Proto": "https",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address("172.30.186.1")
+    assert handler._is_private_lan_client()
+    assert not handler._is_https_proxy_request()
+
+
+def test_trusted_proxy_rejects_ambiguous_forwarded_address_chain(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS", "172.30.186.1/32",
+    )
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "127.0.0.1, 8.8.8.8",
+        "X-Forwarded-Proto": "https, http",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address("172.30.186.1")
+    assert not handler._is_https_proxy_request()
+
+
+def test_invalid_trusted_proxy_configuration_fails_closed(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS",
+        "172.30.186.1/32,not-a-network",
+    )
+
+    with pytest.raises(
+        ValueError, match="FACTORTESTER_TRUSTED_PROXY_CIDRS",
+    ):
+        manager.ManagerState(tmp_path, "python")
+
+
+def test_public_network_info_stays_private_behind_loopback_proxy(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/server/network-info",
+            headers={
+                "X-Forwarded-For": "2001:b030:8150:ff07::5",
+                "X-Forwarded-Proto": "https",
+            },
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
+
+    assert denied.value.code == 401
 
 
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:
@@ -299,7 +408,7 @@ def test_manager_login_returns_json_when_authentication_crashes(
     }
 
 
-def test_job_detail_and_artifacts_share_manager_gateway_paths(
+def test_job_detail_and_artifact_metadata_share_manager_gateway_paths(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -311,13 +420,6 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
 
     def request(**values):
         calls.append(values)
-        if values["path"].endswith("/artifacts/archive"):
-            return manager.GatewayResponse(
-                status=200,
-                body=b"PK\x03\x04test",
-                content_type="application/zip",
-                content_disposition='attachment; filename="job-test.zip"',
-            )
         return manager.GatewayResponse(
             status=200,
             body=b'{"success":true,"job_id":"job-1"}',
@@ -332,17 +434,17 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
         )) as response:
             detail = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/jobs/job-1/artifacts/archive?port=8141",
+            f"{base_url}/api/jobs/job-1/artifacts?port=8141",
             headers=headers,
         )) as response:
-            archive = response.read()
+            artifacts = json.loads(response.read())
 
     assert detail["job_id"] == "job-1"
     assert detail["port"] == 8141
-    assert archive.startswith(b"PK")
+    assert artifacts["job_id"] == "job-1"
     assert [item["path"] for item in calls] == [
         "/api/jobs/job-1",
-        "/api/jobs/job-1/artifacts/archive",
+        "/api/jobs/job-1/artifacts",
     ]
     assert all(item["principal"] == "user@1" for item in calls)
 
@@ -397,48 +499,25 @@ def test_job_analysis_routes_use_the_job_origin_and_freeze_job_id(
     }
 
 
-def test_anonymous_manager_gateway_allows_preview_but_not_artifact_download(
+def test_manager_rejects_obsolete_artifact_byte_routes(
     tmp_path, monkeypatch,
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
     monkeypatch.setattr(state, "service_ports", lambda: [8141])
-    calls = []
-
-    def request(**values):
-        calls.append(values)
-        if values["path"].endswith("/preview"):
-            return manager.GatewayResponse(
-                status=200,
-                body=b"<svg/>",
-                content_type="image/svg+xml",
-                content_disposition='inline; filename="equity_curve_report.svg"',
-            )
-        return manager.GatewayResponse(
-            status=200,
-            body=b"download",
-            content_type="image/svg+xml",
-            content_disposition='attachment; filename="equity_curve_report.svg"',
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail("obsolete byte route reached service port"),
+    )
     with _running_manager(state) as base_url:
-        with urlopen(
-            f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report/preview",
-        ) as response:
-            assert response.read() == b"<svg/>"
-            assert response.headers["Content-Disposition"].startswith("inline;")
-        with pytest.raises(HTTPError) as denied:
-            urlopen(
-                f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report",
-            )
-        assert denied.value.code == 401
-
-    assert calls == [{
-        "port": 8141,
-        "path": "/api/jobs/job-1/artifacts/equity_curve_report/preview",
-        "principal": "__public_jobs__",
-        "method": "GET",
-    }]
+        for suffix in (
+            "equity_curve_report",
+            "equity_curve_report/preview",
+            "archive",
+        ):
+            with pytest.raises(HTTPError) as denied:
+                urlopen(f"{base_url}/api/jobs/job-1/artifacts/{suffix}")
+            assert denied.value.code == 404
 
 
 def test_job_detail_tries_cached_origin_before_running_ports(tmp_path, monkeypatch) -> None:
@@ -1209,6 +1288,93 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in english_body
 
 
+def test_public_compliance_page_bootstraps_device_login_with_visible_status() -> None:
+    from server.manager.http.pages import compliance_page
+
+    body = compliance_page("/jobs").decode("utf-8")
+
+    assert 'id="device-auth-status"' in body
+    assert 'role="status"' in body
+    assert "正在检查本浏览器的设备凭证" in body
+    assert "检测到已登记设备，正在自动登录" in body
+    assert "当前浏览器来源没有已登记的设备密钥" in body
+    assert "设备自动登录失败" in body
+    assert 'window.addEventListener("online",authenticate)' in body
+    assert 'document.addEventListener("visibilitychange"' in body
+
+
+def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    monkeypatch.setattr(manager.Handler, "_has_secure_ui_transport", lambda _self: True)
+    monkeypatch.setattr(manager.Handler, "_is_loopback_client", lambda _self: False)
+    monkeypatch.setattr(
+        state,
+        "login",
+        lambda *_values: pytest.fail(
+            "password login must not run on a device-gated public Manager"
+        ),
+    )
+    monkeypatch.setattr(
+        state.device_registry,
+        "verify",
+        lambda **_values: {
+            "device_id": "device-bound-to-alice",
+            "username": "alice@default",
+        },
+    )
+    bound_users = []
+
+    def login_device(username):
+        bound_users.append(username)
+        return "device-session", username, "user"
+
+    monkeypatch.setattr(state, "login_device", login_device)
+
+    with _running_manager(state) as base_url:
+        password_login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"bob@default","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(password_login)
+        assert denied.value.code == 403
+        assert "device authentication required" in denied.value.read().decode()
+
+        challenge_request = Request(
+            f"{base_url}/api/device/challenge",
+            data=b'{"device_id":"device-bound-to-alice"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(challenge_request) as response:
+            challenge = json.loads(response.read())
+        verify_request = Request(
+            f"{base_url}/api/device/verify",
+            data=json.dumps({
+                "challenge_id": challenge["challenge_id"],
+                "device_id": "device-bound-to-alice",
+                "public_key": {},
+                "signature": "ignored-by-test-seam",
+                "username": "bob@default",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(verify_request) as response:
+            authenticated = json.loads(response.read())
+
+    assert authenticated["username"] == "alice@default"
+    assert authenticated["token"] == "device-session"
+    assert bound_users == ["alice@default"]
+
+
 def test_public_device_authorization_page_uses_shared_localization() -> None:
     from server.manager.http.pages import device_authorization_page, login_page
 
@@ -1231,6 +1397,32 @@ def test_public_device_authorization_page_uses_shared_localization() -> None:
     assert '<html lang="en">' in login
     assert "Public access requires an account created by an administrator." in login
     assert "Username" in login and "Password" in login
+
+
+def test_public_device_authorization_page_uses_grant_language_snapshot(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    grant = state.device_authorizations.issue(
+        username="alice@default",
+        target_server_id="public-main",
+        target_endpoint="https://203.0.113.10:7998",
+        preferred_language="en",
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/device-authorize?token={grant['token']}",
+            headers={"Accept-Language": "zh-CN,zh;q=0.9"},
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+    assert '<html lang="en">' in body
+    assert "Authorize public device" in body
 
 
 def test_public_device_authorization_link_requires_secure_transport(
@@ -1260,6 +1452,7 @@ def test_internal_manager_can_create_one_time_public_device_authorization(
     monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "0")
     state = manager.ManagerState(tmp_path, "python", server_id="feat-local")
     session_token, _, _ = state._issue_session("alice@default", "user")
+    state.user_preferences.update("alice@default", {"language": "en"})
 
     with _running_manager(state) as base_url:
         request = Request(
@@ -1284,6 +1477,11 @@ def test_internal_manager_can_create_one_time_public_device_authorization(
         "https://203.0.113.10:7998/device-authorize?"
     )
     assert payload["expires_in"] == 600
+    token = parse_qs(urlparse(payload["authorization_url"]).query)["token"][0]
+    authorization = state.device_authorizations.preview(
+        token, target_server_id="public-main",
+    )
+    assert authorization["preferred_language"] == "en"
 
 
 def test_direct_https_manager_accepts_public_ui_login_and_marks_cookie_secure(
@@ -1663,6 +1861,18 @@ def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> N
     assert result[0].port == 8000
 
 
+def test_service_load_projects_live_daemon_health() -> None:
+    assert manager.ManagerState._load_from_health({
+        "active_executors": 2,
+        "active_planners": 1,
+        "queue_depth": 4,
+    }) == {
+        "load": 10.0,
+        "active_jobs": 3,
+        "queue_depth": 4,
+    }
+
+
 def test_detached_manager_exposes_configured_fixed_service_instance(
     tmp_path, monkeypatch,
 ) -> None:
@@ -1697,7 +1907,7 @@ def test_detached_manager_exposes_configured_fixed_service_instance(
     assert state.worktree_for_instance(state.instance_id(result[0])) == result[0]
 
 
-def test_peer_registration_advertises_online_issue_worktree_ports(
+def test_federation_registration_advertises_online_issue_worktree_ports(
     tmp_path, monkeypatch,
 ) -> None:
     state = manager.ManagerState(
@@ -1726,14 +1936,13 @@ def test_peer_registration_advertises_online_issue_worktree_ports(
         lambda include_offline=True: routes if include_offline else routes[:2],
     )
 
-    payload = state.peer_registration_payload(
+    payload = state.federation_registration_payload(
         "http://local.example:7998",
-        artifact_endpoint="http://peer-loopback.example:17997",
     )
 
     assert state.advertised_federation_ports() == (8141, 8152)
     assert [item["port"] for item in payload["ports"]] == [8141, 8152]
-    assert payload["artifact_endpoint"] == "http://peer-loopback.example:17997"
+    assert "artifact_endpoint" not in payload
 
 
 def test_federation_attachment_allows_automatic_port_discovery(
@@ -1754,21 +1963,23 @@ def test_federation_attachment_allows_automatic_port_discovery(
 
     result = state.update_federation_config({
         "enabled": True,
-        "register_url": "https://remote.example:7998/api/federation/register",
+        "bootstrap_url": "http://10.77.0.2:17998/api/federation/register",
         "public_endpoint": "https://local.example:7998",
-        "artifact_endpoint": "https://local.example:17997",
         "registration_token": "registration-token",
         "ports": [],
     })
 
     assert result["config"]["ports"] == []
+    assert started[0]["bootstrap_url"] == (
+        "http://10.77.0.2:17998/api/federation/register"
+    )
     assert started[0]["ports"] == ()
-    assert started[0]["artifact_endpoint"] == "https://local.example:17997"
+    assert "artifact_endpoint" not in started[0]
 
 
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
-    detached = tmp_path / "detached"
-    detached.mkdir()
+    detached = tmp_path / ".workspace" / "manager-sources" / "detached"
+    detached.mkdir(parents=True)
     porcelain = (
         f"worktree {tmp_path}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1798,8 +2009,8 @@ def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monke
 
 
 def test_cleanup_detached_worktrees_skips_bare_repository_marker(tmp_path, monkeypatch) -> None:
-    detached = tmp_path / "detached"
-    detached.mkdir()
+    detached = tmp_path / ".workspace" / "manager-sources" / "detached"
+    detached.mkdir(parents=True)
     bare = tmp_path / "repo.git"
     porcelain = (
         f"worktree {tmp_path}\n"
@@ -1830,7 +2041,7 @@ def test_cleanup_detached_worktrees_skips_bare_repository_marker(tmp_path, monke
 
 
 def test_cleanup_detached_worktrees_leaves_missing_paths_to_prune(tmp_path, monkeypatch) -> None:
-    missing = tmp_path / "missing-detached"
+    missing = tmp_path / ".workspace" / "manager-sources" / "missing-detached"
     porcelain = (
         f"worktree {tmp_path}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1861,8 +2072,8 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
 ) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
-    active_source = tmp_path / "manager-source"
-    active_source.mkdir()
+    active_source = repository / ".workspace" / "manager-sources" / ("a" * 40)
+    active_source.mkdir(parents=True)
     porcelain = (
         f"worktree {repository}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
@@ -1886,6 +2097,39 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
     state = manager.ManagerState(repository, "python")
 
     assert state.cleanup_detached_worktrees() == []
+    assert commands == [["git", "worktree", "prune", "--expire", "now"]]
+
+
+def test_cleanup_detached_worktrees_preserves_external_release(
+    tmp_path, monkeypatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    release = tmp_path / "deploy" / "releases" / ("b" * 40)
+    release.mkdir(parents=True)
+    porcelain = (
+        f"worktree {repository}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {release}\n"
+        f"HEAD {'b' * 40}\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(repository, "python")
+
+    assert state.cleanup_detached_worktrees() == []
+    assert release.exists()
     assert commands == [["git", "worktree", "prune", "--expire", "now"]]
 
 
@@ -2008,6 +2252,112 @@ def test_manager_reclaims_services_after_control_process_restart(tmp_path, monke
     bundle = state.processes[state.key(path)]
     assert bundle.api.pid == 41001
     assert bundle.daemon.pid == 41002
+
+
+def test_manager_restores_desired_services_after_graceful_restart(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "issue-141-service"
+    path.mkdir()
+    (path / "start_server.py").write_text("", encoding="ascii")
+    (path / "scripts").mkdir()
+    (path / "scripts" / "research_job_daemon.py").write_text(
+        "", encoding="ascii",
+    )
+    worktree = manager.Worktree(
+        path=path,
+        branch="fix/issue-141-service",
+        head="abc12345",
+        label="fix/issue-141-service",
+        port=8141,
+    )
+    created = []
+
+    def fake_popen(command, **kwargs):
+        process = _Process(command)
+        created.append((process, kwargs))
+        return process
+
+    monkeypatch.setattr(manager.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n",
+    )
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
+    monkeypatch.setattr(
+        manager.ManagerState, "worktrees", lambda _self: [worktree],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+
+    first = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    first.start(path, 8141)
+    first.stop_all()
+
+    restarted = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    restored = restarted.restore_desired_services()
+
+    assert restored == [{
+        "path": str(path.resolve()),
+        "port": 8141,
+        "status": "started",
+    }]
+    assert restarted.is_running(path)
+    assert restarted.daemon_running(path)
+    assert len(created) == 4
+
+
+def test_explicit_service_stop_clears_restart_intent(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "issue-141-service"
+    path.mkdir()
+    (path / "start_server.py").write_text("", encoding="ascii")
+    (path / "scripts").mkdir()
+    (path / "scripts" / "research_job_daemon.py").write_text(
+        "", encoding="ascii",
+    )
+    worktree = manager.Worktree(
+        path=path,
+        branch="fix/issue-141-service",
+        head="abc12345",
+        label="fix/issue-141-service",
+        port=8141,
+    )
+
+    monkeypatch.setattr(
+        manager.subprocess,
+        "Popen",
+        lambda command, **_kwargs: _Process(command),
+    )
+    monkeypatch.setattr(
+        manager.subprocess, "check_output", lambda *args, **kwargs: "abc123\n",
+    )
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
+    monkeypatch.setattr(
+        manager.ManagerState, "worktrees", lambda _self: [worktree],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+
+    state = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    state.start(path, 8141)
+    state.stop(path, force=True)
+
+    restarted = manager.ManagerState(
+        path, "python", state_root=tmp_path / "manager-state",
+    )
+    assert restarted.restore_desired_services() == []
+    assert not restarted.is_running(path)
 
 
 def test_service_env_adds_repo_harness_without_losing_pythonpath(
