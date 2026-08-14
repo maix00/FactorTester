@@ -13,6 +13,13 @@ from server.manager.storage.control_db import ControlDatabaseError
 
 class WriteRoutesMixin:
     """Dispatch state-changing routes after the public-entry gate."""
+
+    def _invalidate_federated_public_research(self) -> None:
+        service = getattr(self.state, "federated_public_research", None)
+        invalidate = getattr(service, "invalidate_research_cache", None)
+        if callable(invalidate):
+            invalidate()
+
     def do_POST(self) -> None:
         if self._redirect_plain_http_to_https():
             return
@@ -77,6 +84,7 @@ class WriteRoutesMixin:
                 return
             try:
                 value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
+                self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
                 return
@@ -133,6 +141,7 @@ class WriteRoutesMixin:
                     relay_local_files=False,
                     authorized_users=[],
                 )
+                self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
                 return
@@ -158,6 +167,7 @@ class WriteRoutesMixin:
                 value = self.state.public_research.revoke_publication(
                     str(payload.get("publication_id") or ""),
                 )
+                self._invalidate_federated_public_research()
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return
@@ -179,6 +189,7 @@ class WriteRoutesMixin:
                     relay_local_files=bool(payload.get("relay_local_files", False)),
                     authorized_users=list(payload.get("authorized_users") or []),
                 )
+                self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
                 return
