@@ -96,6 +96,12 @@ factorChip.listeners.click();
 assert.equal(opened, "factor");
 
 const host = first.children[2];
+assert.equal(host.children[1].children.length, 0,
+  "inactive settings tabs should not render their content on first load");
+assert.equal(host.children[2].children.length, 0,
+  "the settings manager should be lazy until its tab is opened");
+const manageButton = first.children[0].children[first.children[0].children.length - 1];
+manageButton.listeners.click();
 const managePanel = host.children[host.children.length - 1];
 const manager = managePanel.children[0];
 const managerList = manager.children[0];
