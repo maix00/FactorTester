@@ -1365,6 +1365,19 @@ def test_web_shell_exposes_public_asset_revision(tmp_path) -> None:
     assert f"?v={revision}" in shell
 
 
+def test_versioned_web_code_is_cached_but_shell_and_manifest_revalidate(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            assert response.headers["Cache-Control"] == "no-store"
+        with urlopen(f"{base_url}/research-static/module-manifest.json") as response:
+            assert response.headers["Cache-Control"] == "no-store"
+        with urlopen(f"{base_url}/research-static/core/icons.js?v=revision") as response:
+            assert response.headers["Cache-Control"] == (
+                "public, max-age=31536000, immutable"
+            )
+
+
 def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

@@ -93,7 +93,14 @@
       };
     }
     if (adapter === "run_inputs") {
-      const counts = FTTestInputState.counts(state);
+      // The source-state module is intentionally deferred until the input
+      // tab or a submission path is used.  Chips can still render a cheap
+      // count from the lightweight state shape during route bootstrap.
+      const counts = window.FTTestInputState?.counts?.(state) || {
+        factors: (state.transientFactorSources || []).length,
+        strategies: (state.transientStrategySources || []).length,
+        dependencies: (state.runInputDependencies || []).length,
+      };
       const total = counts.factors + counts.strategies + counts.dependencies;
       return total ? {run_input_count: total} : {};
     }

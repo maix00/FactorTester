@@ -569,18 +569,37 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         assert endpoint not in first_load
     assert "/api/workspace-summaries" in first_load
     assert "workbench-settings" not in first_load
+    assert "FTTestInputState.initialize" not in first_load
+    assert "FTTestState.initializeInputState(state)" in source
     assert "/api/workspaces/${workspaceID}/configuration" in source
     assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
     assert "ensureProductsForExecution" in source
     assert "ensureOutputCapabilities" in source
+    assert 'loadGroup("output-choice")' in source
     assert "ensureProfiles" in source
     assert "workbench-run" in manifest["groups"]
     assert manifest["group_dependencies"]["workbench-run"] == [
-        "workbench-core", "workbench-settings-fields",
+        "workbench-core", "workbench-settings-controls",
     ]
+    assert manifest["group_dependencies"]["workbench-settings-fields"] == [
+        "workbench-settings-controls",
+    ]
+    assert manifest["group_dependencies"]["workbench-settings-controls"] == [
+        "workbench-core",
+    ]
+    assert manifest["group_dependencies"]["workbench-settings-chips"] == [
+        "workbench-settings",
+    ]
+    assert manifest["group_dependencies"]["workbench-input-state"] == [
+        "workbench-core",
+    ]
+    assert manifest["group_dependencies"]["workbench-core"] == []
+    assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
+    assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
+    assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
     assert manifest["group_dependencies"]["workbench-run-batch"] == [
-        "workbench-run", "workbench-products",
+        "workbench-run", "workbench-products", "workbench-input-state",
     ]
     assert manifest["group_dependencies"]["workbench-run-results"] == [
         "workbench-run",
@@ -588,9 +607,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert set(manifest["groups"]["workbench-run"]) == {
         "workbench/test-run-fields.js",
         "workbench/test-outputs.js",
-        "workbench/test-run-summary.js",
     }
     assert manifest["groups"]["workbench-run-batch"] == [
+        "workbench/test-run-summary.js",
         "workbench/test-run-batch.js",
     ]
     assert manifest["groups"]["workbench-run-results"] == [
@@ -600,20 +619,31 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench/test-configuration.js",
     ]
     assert set(manifest["groups"]["workbench-settings"]) == {
-        "workbench/test-setting-chips.js",
         "workbench/tab-chip-content.js",
         "workbench/test-settings.js",
         "workbench/test-content-adapters.js",
-        "workbench/test-settings-schema.js",
     }
+    assert manifest["groups"]["workbench-settings-chips"] == [
+        "workbench/test-setting-chips.js",
+    ]
     assert manifest["groups"]["workbench-settings-fields"] == [
+        "workbench/test-control-loader.js",
+        "workbench/test-settings-schema.js",
+    ]
+    assert manifest["groups"]["workbench-settings-controls"] == [
         "workbench/test-setting-fields.js",
+    ]
+    assert manifest["groups"]["workbench-input-state"] == [
+        "workbench/test-input-state.js",
     ]
     assert manifest["groups"]["workbench-source-inputs"] == [
         "workbench/test-source-upload.js",
     ]
     assert manifest["group_dependencies"]["workbench-factors"] == [
         "workbench-core", "catalog-core", "workbench-source-inputs",
+    ]
+    assert manifest["group_dependencies"]["workbench-source-inputs"] == [
+        "workbench-input-state",
     ]
     assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-backtest"]
     assert "workbench/tab-list-chip.js" not in research_static._initial_scripts(manifest)
@@ -629,15 +659,24 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert manifest["control_groups"]["factor_role_bindings"]["group"] == "workbench-factor-controls"
     assert manifest["control_groups"]["custom_product_overrides"]["group"] == "workbench-product-controls"
     assert manifest["group_dependencies"]["workbench-run"] == [
-        "workbench-core", "workbench-settings-fields",
+        "workbench-core", "workbench-settings-controls",
     ]
     assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
     assert manifest["group_dependencies"]["workbench-backtest"] == [
-        "workbench-settings", "workbench-settings-fields",
+        "workbench-settings", "workbench-settings-controls",
     ]
     assert manifest["group_dependencies"]["workbench-run-submit"] == [
-        "workbench-run",
+        "workbench-run", "workbench-compiler",
     ]
+    assert manifest["group_dependencies"]["workbench-ic-controls"] == [
+        "workbench-core", "workbench-compiler",
+    ]
+    assert manifest["groups"]["workbench-compiler"] == [
+        "workbench/test-configuration-compiler.js",
+    ]
+    assert "workbench/test-configuration-compiler.js" not in manifest[
+        "groups"]["workbench-core"]
+    assert "workbench/test-input-state.js" not in manifest["groups"]["workbench-core"]
     assert manifest["group_dependencies"]["settings"] == ["core"]
     assert not set(manifest["groups"]["workbench-settings"]) & set(
         research_static._initial_scripts(manifest)
@@ -645,8 +684,18 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "ensureRunCode" in source
     assert "ensureRunBatchCode" in source
     assert "ensureSettingsCode" in source
+    assert "ensureSettingsChipsCode" in source
     assert "ensureRunSubmitCode" in source
     assert "workbench-run-submit" in source
+    settings_source = (WEB_ROOT / "workbench" / "test-settings.js").read_text(
+        encoding="utf-8",
+    )
+    assert "if (window.FTTestSettingChips)" in settings_source
+    assert "ensureSettingsChipsCode" in source
+    output_source = (WEB_ROOT / "workbench" / "test-outputs.js").read_text(
+        encoding="utf-8",
+    )
+    assert "if (!window.FTOutputChoices)" in output_source
     lazy_code = (WEB_ROOT / "workbench" / "test-lazy-code.js").read_text(
         encoding="utf-8",
     )

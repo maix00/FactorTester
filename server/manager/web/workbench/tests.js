@@ -74,6 +74,7 @@
       settingsCode: {status: "idle", error: "", promise: null},
       settingsInitialized: false,
       settingsFieldsCode: {status: "idle", error: "", promise: null},
+      settingsChipsCode: {status: "idle", error: "", promise: null},
       settingsTabLoads: Object.create(null),
       settingsLoadedTabs: new Set(),
     };
@@ -95,7 +96,7 @@
       state.groupRef = options.groupRef;
       state.groupRefs = [options.groupRef];
     }
-    FTTestInputState.initialize(state);
+    FTTestState.initializeInputState(state);
     if (kind === "factor_evaluation" && state.runValues.retention_mode === "summary") {
       state.runValues.retention_mode = "full";
     }
@@ -303,7 +304,11 @@
       ensureSettingsFieldsCode: () => ensureSettingsFieldsCode(
         context, state, () => render(context, state),
       ),
-      ensureSettingsTab: tabKey => FTTestSettingsSchema.ensureTab(
+      ensureSettingsChipsCode: () => FTTestLazyCode.ensureGroupCode(
+        state, "settingsChipsCode", "workbench-settings-chips", null,
+        () => render(context, state),
+      ),
+      ensureSettingsTab: tabKey => ensureSettingsTab(
         context, state, tabKey, () => render(context, state),
       ),
       settingsTabReady: tabKey => state.settingsLoadedTabs.has(tabKey),
@@ -324,6 +329,15 @@
       },
       refresh: () => render(context, state),
     }));
+    if (!window.FTTestSettingChips && !state.settingsChipsCode?.error) {
+      // Keep the first paint independent from the value-to-chip formatter.
+      // The settings shell remains interactive while this small presentation
+      // module is fetched and then the shell is repainted once.
+      FTTestLazyCode.ensureGroupCode(
+        state, "settingsChipsCode", "workbench-settings-chips", null,
+        () => render(context, state),
+      );
+    }
     if (state.kind === "backtest") {
       root.append(window.FTBacktestGroups?.render
         ? FTBacktestGroups.render(context, state, () => render(context, state))
@@ -352,20 +366,26 @@
     context.content.replaceChildren(root);
   }
 
+  function ensureSettingsTab(context, state, tabKey, refresh) {
+    // The schema loader belongs to the same deferred group as editable field
+    // controls. A direct request must cross that code boundary first.
+    return ensureSettingsFieldsCode(context, state, refresh)
+      .then(() => FTTestSettingsSchema.ensureTab(context, state, tabKey, refresh));
+  }
+
   window.FTTests = {
     applyBacktestDerivedPrefill,
-    ensureOutputCapabilities: (context, state, refresh) => (
-      ensureLazyKey(context, state, "outputs", refresh)
-    ),
+    ensureOutputCapabilities: async (context, state, refresh) => {
+      await FTTestLazyCode.loadGroup("output-choice");
+      return ensureLazyKey(context, state, "outputs", refresh);
+    },
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
     ensureRunBatchCode,
     ensureSettingsCode,
     ensureSettingsFieldsCode,
-    ensureSettingsTab: (context, state, tabKey, refresh) => (
-      FTTestSettingsSchema.ensureTab(context, state, tabKey, refresh)
-    ),
+    ensureSettingsTab,
     ensureRunSubmitCode,
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)

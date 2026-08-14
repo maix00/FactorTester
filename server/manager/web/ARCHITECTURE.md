@@ -185,23 +185,31 @@ responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
 
 The workbench loading groups are also semantic boundaries: `workbench-core`
-contains only the route coordinator, compiler, state and generic lazy-code
-seams. `workbench-settings` contains the shared tab/chip settings renderer and
-is fetched when a tester route has authenticated and received its backend
+contains only the route coordinator, state and generic lazy-code seams. The
+`workbench-compiler` group owns the configuration compiler and is requested
+only by the run-submit seam or IC controls that actually compile an execution
+request. `workbench-settings` contains the shared tab/content shell and is
+fetched when a tester route has authenticated and received its backend
 manifest; it is not part of the initial shell and does not include any catalog,
-strategy-list, chart, run-submission, or field-control implementation.
-`workbench-settings-fields` owns the shared editable-row/control adapter and
-is requested by the active settings panel or another surface that explicitly
-needs a field control. The default run tab depends on this small adapter so it
-can render its registered fields without pulling in any catalog or strategy
-code. `workbench-source-inputs` owns uploaded factor,
+strategy-list, chart, run-submission, or field-control implementation. The
+value-to-chip formatter is a separate `workbench-settings-chips` group. The
+shell paints without it, then requests that group and adds the current/default
+chips; a collapsed panel never becomes a reason to download chip code.
+`workbench-settings-controls` owns only the shared editable-row/control
+adapter. The default run tab depends on this small adapter so it can render
+its registered fields without pulling in tab-schema or control-loader code.
+`workbench-settings-fields` adds the tab-schema and control-loader seam and is
+requested only when a field-bearing settings tab is activated. `workbench-input-state`
+owns the source text state and is not part of `workbench-core`; it is pulled in
+by source upload, factor-set, and run-batch/submit paths that actually need to
+read or serialize source code. `workbench-source-inputs` owns uploaded factor,
 strategy, and dependency inspection; a `run_inputs` tab loads that code only
 when opened, while the factor picker declares it as a dependency. `workbench-run`
-contains only run-spec fields, output choices and the lightweight run summary;
-it is requested when the run surface is materialized. The separate
-`workbench-run-batch` group depends on it and on the product adapter, and is
-requested only when a saved or newly selected product path creates an actual
-task batch. `workbench-run-results` depends on `workbench-run` and contains only
+contains only run-spec fields and output choices; it is requested when the run
+surface is materialized. The separate `workbench-run-batch` group owns the run
+matrix summary and batch actions, depends on it and on the product adapter,
+and is requested only when a saved or newly selected product path creates an
+actual task batch. `workbench-run-results` depends on `workbench-run` and contains only
 the submitted-Job result bridge, loaded after a Job exists rather than while the
 empty run panel is first painted. The backtest `FTTabListChip`
 and strategy editors belong to

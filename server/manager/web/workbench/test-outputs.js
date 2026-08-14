@@ -30,6 +30,17 @@
       }
       return section;
     }
+    if (!window.FTOutputChoices) {
+      const hint = document.createElement("p");
+      hint.className = "test-output-default-hint";
+      hint.textContent = context.t("打开配置生成物后读取选择器代码");
+      const configure = context.button(context.t("配置生成物"), () => {
+        window.FTTests?.ensureOutputCapabilities?.(context, state, refresh);
+        refresh?.();
+      });
+      section.append(hint, configure);
+      return section;
+    }
     const definitions = FTOutputChoices.available(
       state.outputCapabilities, state.kind,
     );

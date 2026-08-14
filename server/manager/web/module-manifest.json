@@ -20,6 +20,10 @@
     "charts": ["core"],
     "catalog-core": ["core"],
     "output-choice": ["core"],
+    "workbench-compiler": ["core"],
+    "workbench-input-state": ["workbench-core"],
+    "workbench-settings-controls": ["workbench-core"],
+    "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core"],
     "research": ["report"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
@@ -29,20 +33,20 @@
     "job-detail-ic": ["job-detail-core", "report"],
     "job-detail-backtest": ["job-detail-core", "report", "charts"],
     "catalog": ["catalog-core", "charts"],
-    "workbench-core": ["output-choice"],
+    "workbench-core": [],
     "workbench-settings": ["workbench-core"],
-    "workbench-settings-fields": ["workbench-core"],
-    "workbench-ic-controls": ["workbench-core"],
+    "workbench-settings-fields": ["workbench-settings-controls"],
+    "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
     "workbench-factor-controls": ["workbench-core"],
     "workbench-product-controls": ["workbench-core"],
-    "workbench-source-inputs": ["workbench-core"],
-    "workbench-run": ["workbench-core", "workbench-settings-fields"],
-    "workbench-run-batch": ["workbench-run", "workbench-products"],
+    "workbench-source-inputs": ["workbench-input-state"],
+    "workbench-run": ["workbench-core", "workbench-settings-controls"],
+    "workbench-run-batch": ["workbench-run", "workbench-products", "workbench-input-state"],
     "workbench-run-results": ["workbench-run"],
-    "workbench-run-submit": ["workbench-run"],
+    "workbench-run-submit": ["workbench-run", "workbench-compiler"],
     "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
     "workbench-products": ["workbench-core", "catalog-core"],
-    "workbench-backtest": ["workbench-settings", "workbench-settings-fields"],
+    "workbench-backtest": ["workbench-settings", "workbench-settings-controls"],
     "workbench-templates": ["workbench-core"],
     "settings": ["core"]
   },
@@ -191,21 +195,29 @@
     ],
     "workbench-core": [
       "workbench/setting-rules.js",
-      "workbench/test-input-state.js",
-      "workbench/test-configuration-compiler.js",
       "workbench/test-lazy-code.js",
-      "workbench/test-control-loader.js",
       "workbench/test-state.js",
       "workbench/tests.js"
     ],
+    "workbench-input-state": [
+      "workbench/test-input-state.js"
+    ],
+    "workbench-compiler": [
+      "workbench/test-configuration-compiler.js"
+    ],
     "workbench-settings": [
-      "workbench/test-setting-chips.js",
       "workbench/tab-chip-content.js",
       "workbench/test-settings.js",
-      "workbench/test-content-adapters.js",
-      "workbench/test-settings-schema.js"
+      "workbench/test-content-adapters.js"
+    ],
+    "workbench-settings-chips": [
+      "workbench/test-setting-chips.js"
     ],
     "workbench-settings-fields": [
+      "workbench/test-control-loader.js",
+      "workbench/test-settings-schema.js"
+    ],
+    "workbench-settings-controls": [
       "workbench/test-setting-fields.js"
     ],
     "workbench-ic-controls": [
@@ -220,10 +232,10 @@
     ],
     "workbench-run": [
       "workbench/test-run-fields.js",
-      "workbench/test-outputs.js",
-      "workbench/test-run-summary.js"
+      "workbench/test-outputs.js"
     ],
     "workbench-run-batch": [
+      "workbench/test-run-summary.js",
       "workbench/test-run-batch.js"
     ],
     "workbench-run-results": [

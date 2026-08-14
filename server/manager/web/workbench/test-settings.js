@@ -86,28 +86,30 @@
       onActivate: key => options.onTabChange?.(key),
     });
     root.append(tabset.bar);
-    const chips = FTTestSettingChips.render({
-      manifest, values, context,
-      mountedTabs: [...mounted],
-      sources: options.chipSources || {},
-      runValues: options.state?.runValues || {},
-      outputRequests: options.state?.outputRequests || [],
-      outputCapabilities: options.state?.outputCapabilities || [],
-      profiles: options.state?.profiles || [],
-      extraDescriptors: options.extraChips || [],
-      groupBy: "tab",
-      onOpen: tabKey => {
-        if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
-        else options.onChipOpen?.(tabKey);
-      },
-    });
-    if (chips.children.length) {
-      const current = document.createElement("section");
-      current.className = "test-settings-current";
-      const heading = document.createElement("strong");
-      heading.textContent = context.t("当前选择");
-      current.append(heading, chips);
-      root.append(current);
+    if (window.FTTestSettingChips) {
+      const chips = FTTestSettingChips.render({
+        manifest, values, context,
+        mountedTabs: [...mounted],
+        sources: options.chipSources || {},
+        runValues: options.state?.runValues || {},
+        outputRequests: options.state?.outputRequests || [],
+        outputCapabilities: options.state?.outputCapabilities || [],
+        profiles: options.state?.profiles || [],
+        extraDescriptors: options.extraChips || [],
+        groupBy: "tab",
+        onOpen: tabKey => {
+          if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
+          else options.onChipOpen?.(tabKey);
+        },
+      });
+      if (chips.children.length) {
+        const current = document.createElement("section");
+        current.className = "test-settings-current";
+        const heading = document.createElement("strong");
+        heading.textContent = context.t("当前选择");
+        current.append(heading, chips);
+        root.append(current);
+      }
     }
     root.append(tabset.host);
     root.activate = tabKey => {
@@ -226,20 +228,23 @@
         label.textContent = context.t(item.tab.label || item.tab.key);
         copy.append(label);
         if (item.tab.help_text) row.title = context.t(item.tab.help_text);
-        const defaults = FTTestSettingChips.render({
-          manifest,
-          values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
-          context,
-          mountedTabs: [item.tab.key],
-          includeRun: false,
-          includeEmpty: true,
-          includeUnregistered: true,
-          includeHidden: true,
-          groupBy: "tab",
-          sources: {},
-        });
-        defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
-        body.append(copy, defaults);
+        body.append(copy);
+        if (window.FTTestSettingChips) {
+          const defaults = FTTestSettingChips.render({
+            manifest,
+            values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
+            context,
+            mountedTabs: [item.tab.key],
+            includeRun: false,
+            includeEmpty: true,
+            includeUnregistered: true,
+            includeHidden: true,
+            groupBy: "tab",
+            sources: {},
+          });
+          defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
+          body.append(defaults);
+        }
         row.append(toggle, body);
         list.append(row);
       });

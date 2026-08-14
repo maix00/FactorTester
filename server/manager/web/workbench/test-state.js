@@ -6,6 +6,17 @@
     ].map(key => [key, {status: "idle", error: "", promise: null}]));
   }
 
+  function initializeInputState(state) {
+    if (!Array.isArray(state.transientFactorSources)) state.transientFactorSources = [];
+    if (!Array.isArray(state.transientFactorFamilies)) state.transientFactorFamilies = [];
+    if (!Array.isArray(state.transientStrategySources)) state.transientStrategySources = [];
+    if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
+    if (!Array.isArray(state.strategyInspections)) state.strategyInspections = [];
+    if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
+    state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
+    return state;
+  }
+
   function mergeByID(existing, incoming) {
     const result = new Map();
     for (const item of [...(existing || []), ...(incoming || [])]) {
@@ -77,7 +88,7 @@
   }
 
   window.FTTestState = Object.freeze({
-    applyWorkspaceConfiguration, lazyState,
+    applyWorkspaceConfiguration, initializeInputState, lazyState,
     mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
     seedSavedCatalogs,
   });
