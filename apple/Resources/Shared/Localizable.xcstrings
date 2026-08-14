@@ -255,7 +255,7 @@
     "本机" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本机"}}}},
     "正在读取端口状态…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading port status…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取端口状态…"}}}},
     "确认执行“%@”？" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run “%@”?"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"确认执行“%@”？"}}}},
-    "Profile 不存在或不属于当前账户" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The Profile does not exist or does not belong to this account"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Profile 不存在或不属于当前账户"}}}},
+    "Profile 不存在或不属于当前账户" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The Profile does not exist or does not belong to this account"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究身份不存在或不属于当前账户"}}}},
     "下一步" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Next step"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"下一步"}}}},
     "等待确认" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Awaiting confirmation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"等待确认"}}}},
     "确认任务" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Approve job"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"确认任务"}}}},
@@ -266,13 +266,13 @@
     "分支" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Branch"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"分支"}}}},
     "暂无 %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"暂无 %@"}}}},
     "服务端引用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server reference"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务端引用"}}}},
-    "本地研究身份" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local research identities"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地研究身份"}}}},
+    "本地研究身份" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local Profiles"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地研究身份"}}}},
     "标识" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Identifier"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"标识"}}}},
-    "正在读取本地 Profiles…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading local Profiles…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取本地 Profiles…"}}}},
+    "正在读取本地 Profiles…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading local Profiles…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取本地研究身份…"}}}},
     "节点" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Node"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"节点"}}}},
     "访问模式" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Access mode"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"访问模式"}}}},
-    "请使用 CLI 注册研究 Agent Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Use the CLI to register a research agent Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请使用 CLI 注册研究 Agent Profile"}}}},
-    "返回 Profiles" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Back to Profiles"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"返回 Profiles"}}}},
+    "请使用 CLI 注册研究 Agent Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Use the CLI to register an Agent Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请使用 CLI 注册智能体研究身份"}}}},
+    "返回 Profiles" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Back to Profiles"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"返回研究身份"}}}},
     "未命名小节" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Untitled section"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未命名小节"}}}},
     "章节" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Chapter"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"章节"}}}},
     "章节导航" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Chapter navigation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"章节导航"}}}},
@@ -347,7 +347,7 @@
     "跨端口查看配置、进度、结果与生成物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View configurations, progress, results, and artifacts across ports"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"跨端口查看配置、进度、结果与生成物"}}}},
     "浏览 canonical 与自定义因子" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Browse canonical and custom factors"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"浏览 canonical 与自定义因子"}}}},
     "查询产品、合约与市场资料" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search products, contracts, and market data"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查询产品、合约与市场资料"}}}},
-    "查看研究身份、工作区与初始化来源" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View research identities, workspaces, and initialization sources"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看研究身份、工作区与初始化来源"}}}},
+    "查看研究身份、工作区与初始化来源" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View Profiles, workspaces, and initialization sources"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看研究身份、工作区与初始化来源"}}}},
     "部分运行" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Partially running"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"部分运行"}}}},
     "无端口" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No port"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无端口"}}}},
     "打开" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开"}}}},
@@ -489,13 +489,13 @@
     "完整表格为空" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The complete table is empty"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"完整表格为空"}}}},
     "完整表格来源无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The complete table source is invalid"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"完整表格来源无效"}}}},
     "对象说明" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Object description"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"对象说明"}}}},
-    "尚无已注册 Profile。请使用 CLI 创建并注册研究 Agent Profile。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No Profile is registered. Use the CLI to create and register a research Agent Profile."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"尚无已注册 Profile。请使用 CLI 创建并注册研究 Agent Profile。"}}}},
+    "尚无已注册 Profile。请使用 CLI 创建并注册研究 Agent Profile。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No Profile is registered. Use the CLI to create and register an Agent Profile."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"尚无已注册研究身份。请使用 CLI 创建并注册智能体研究身份。"}}}},
     "当前分支尚无报告" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The current branch has no report"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前分支尚无报告"}}}},
     "当前分支尚无报告树" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The current branch has no report tree"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前分支尚无报告树"}}}},
     "当前节点" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Current node"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前节点"}}}},
     "待处理" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Pending"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"待处理"}}}},
     "恢复完整覆盖门闸" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore full coverage gate"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复完整覆盖门闸"}}}},
-    "打开 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开 Profile"}}}},
+    "打开 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开研究身份"}}}},
     "打开文件" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open file"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开文件"}}}},
     "打开测试任务" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open test job"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开测试任务"}}}},
     "打开网页" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open web page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开网页"}}}},
@@ -524,13 +524,13 @@
     "生成物不是可识别的表格数据" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The artifact does not contain recognizable table data"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"生成物不是可识别的表格数据"}}}},
     "适用因子" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Applicable factors"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适用因子"}}}},
     "正文" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Body"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正文"}}}},
-    "每个 Profile 保持独立的研究 Agent 身份、工作区与研究记录。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Each Profile keeps an independent research Agent identity, workspace, and research record."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每个 Profile 保持独立的研究 Agent 身份、工作区与研究记录。"}}}},
+    "每个 Profile 保持独立的研究 Agent 身份、工作区与研究记录。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Each Profile keeps an independent agent identity, workspace, and research record."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每个 Profile 保持独立的智能体研究身份、工作区与研究记录。"}}}},
     "登录会话未能持久化：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The sign-in session could not be persisted: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"登录会话未能持久化：%@"}}}},
     "登录状态未能持久化：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The sign-in state could not be persisted: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"登录状态未能持久化：%@"}}}},
     "研究员" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Researcher"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究员"}}}},
     "研究图分支" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research graph branch"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究图分支"}}}},
     "研究报告没有可信的本地图片目录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research report has no trusted local image directory"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告没有可信的本地图片目录"}}}},
-    "研究报告缺少可导出的 Profile、研究或分支标识" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research report lacks an exportable Profile, research, or branch identifier"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告缺少可导出的 Profile、研究或分支标识"}}}},
+    "研究报告缺少可导出的 Profile、研究或分支标识" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research report lacks an exportable Profile, research, or branch identifier"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告缺少可导出的研究身份、研究或分支标识"}}}},
     "确认" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"确认"}}}},
     "结构化片段" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Structured fragment"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"结构化片段"}}}},
     "证据引用格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The evidence reference format is invalid"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"证据引用格式无效"}}}},
@@ -579,7 +579,7 @@
     "节点：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Node: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"节点：%@"}}}},
     "该节点没有声明义务小类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"This node declares no obligation classes"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"该节点没有声明义务小类"}}}},
     "该边没有声明义务小类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"This edge declares no obligation classes"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"该边没有声明义务小类"}}}},
-    "请先注册一个绑定服务器的研究 Profile。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Register a research Profile bound to a server first."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先注册一个绑定服务器的研究 Profile。"}}}},
+    "请先注册一个绑定服务器的研究 Profile。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Register a Profile bound to a server first."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先注册一个绑定服务器的研究身份。"}}}},
     "边义务小类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Edge obligation classes"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"边义务小类"}}}},
     "边：%@ 到 %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Edge: %@ to %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"边：%@ 到 %@"}}}},
     "适用时机" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"When it applies"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适用时机"}}}},
@@ -652,7 +652,7 @@
     "关联因子" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Associated factor"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"关联因子"}}}},
     "正在解析产品引用…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Resolving product reference…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在解析产品引用…"}}}},
     "产品详情" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Product details"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"产品详情"}}}},
-    "Profile 版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Profile revision"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Profile 版本"}}}},
+    "Profile 版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Profile revision"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究身份版本"}}}},
     "合约" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Contract"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"合约"}}}},
     "连续合约" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Continuous contract"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"连续合约"}}}},
     "研究文件" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research file"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究文件"}}}},
@@ -670,7 +670,7 @@
     "无法读取该检查点的审计对象：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to read the audit object for this checkpoint: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法读取该检查点的审计对象：%@"}}}},
     "研究投影读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to read research projection"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究投影读取失败"}}}},
     "研究投影读取失败（%@）" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to read research projection (%@)"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究投影读取失败（%@）"}}}},
-    "未知 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unknown Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未知 Profile"}}}},
+    "未知 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unknown Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未知研究身份"}}}},
     "较早研究分支" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Earlier research branch"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"较早研究分支"}}}},
     "证据描述缺失" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Evidence description missing"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"证据描述缺失"}}}},
     "义务描述缺失" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Obligation description missing"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"义务描述缺失"}}}},
@@ -755,7 +755,7 @@
     "任务 ID" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job ID"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务 ID"}}}},
     "任务类型" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job type"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务类型"}}}},
     "任务状态" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job status"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务状态"}}}},
-    "研究 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究 Profile"}}}},
+    "研究 Profile" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Profile"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究身份"}}}},
     "提交用户" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Submitted by"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"提交用户"}}}},
     "提交时间" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Submitted at"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"提交时间"}}}},
     "开始时间" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Started at"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"开始时间"}}}},
@@ -1754,7 +1754,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Profile"
+            "value" : "研究身份"
           }
         }
       }
@@ -1770,7 +1770,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Profile 不可用"
+            "value" : "研究身份不可用"
           }
         }
       }
@@ -1847,13 +1847,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Profiles"
+            "value" : "Profile"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Profiles"
+            "value" : "研究身份"
           }
         }
       }
@@ -4957,7 +4957,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "尚无已注册 Profile"
+            "value" : "尚无已注册研究身份"
           }
         }
       }
@@ -4974,7 +4974,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "尚无已注册 Profile。可在下方创建，注册完成后会立即显示。"
+            "value" : "尚无已注册研究身份。可在下方创建，注册完成后会立即显示。"
           }
         }
       }
@@ -6020,7 +6020,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开 Profiles"
+            "value" : "打开研究身份"
           }
         }
       }
@@ -6732,13 +6732,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Update the client and manage human and agent profiles"
+            "value" : "Update the client and manage human and Agent Profiles"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更新客户端，并管理所有人类与 Agent Profiles"
+            "value" : "更新客户端，并管理所有人类与智能体研究身份"
           }
         }
       }
@@ -8747,13 +8747,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Research Profile Unavailable"
+            "value" : "Profile Unavailable"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "研究 Profile 不可用"
+            "value" : "研究身份不可用"
           }
         }
       }
@@ -9032,7 +9032,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Research Identities"
+            "value" : "Profile"
           }
         },
         "zh-Hans" : {
@@ -9049,7 +9049,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Research identity: %@"
+            "value" : "Profile: %@"
           }
         },
         "zh-Hans" : {
@@ -9387,7 +9387,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Manage research identities, workspaces, and initialization sources"
+            "value" : "Manage Profiles, workspaces, and initialization sources"
           }
         },
         "zh-Hans" : {
@@ -11135,13 +11135,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "profile (research Profile)"
+            "value" : "profile (Profile)"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "profile（研究 Profile）"
+            "value" : "profile（研究身份）"
           }
         }
       }

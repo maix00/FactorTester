@@ -94,10 +94,10 @@
           context(routeToken), {nav: "products", title: "产品"}, pages.products,
         );
         case "profile": return guarded(
-          context(routeToken), {nav: "profiles", title: "Profiles"}, pages.profile, route.id,
+          context(routeToken), {nav: "profiles", title: "研究身份"}, pages.profile, route.id,
         );
         case "profiles": return guarded(
-          context(routeToken), {nav: "profiles", title: "Profiles"}, pages.profiles,
+          context(routeToken), {nav: "profiles", title: "研究身份"}, pages.profiles,
         );
         case "settings": return pages.settings?.(context(routeToken), route.section);
         case "manager": return guarded(

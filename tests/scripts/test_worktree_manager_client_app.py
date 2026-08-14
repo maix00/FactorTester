@@ -1301,18 +1301,40 @@ def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/api/localizations/en") as response:
-            value = json.loads(response.read())
+            english = json.loads(response.read())
+        with urlopen(f"{base_url}/api/localizations/zh-Hans") as response:
+            chinese = json.loads(response.read())
 
-    assert value["locale"] == "en"
-    assert value["strings"]["本地研究"] == "Local research"
-    assert value["strings"]["需要登录"] == "Sign in required"
-    assert value["strings"]["登录后才能登记或撤销设备"] == (
+    assert english["locale"] == "en"
+    assert chinese["locale"] == "zh-Hans"
+    assert english["strings"]["本地研究"] == "Local research"
+    assert english["strings"]["需要登录"] == "Sign in required"
+    assert english["strings"]["登录后才能登记或撤销设备"] == (
         "Sign in to enroll or revoke devices"
     )
-    assert value["strings"]["内网只生成一次性授权；公网来源重新生成并保存自己的私钥"] == (
+    assert english["strings"]["内网只生成一次性授权；公网来源重新生成并保存自己的私钥"] == (
         "The internal Manager only issues a one-time authorization; "
         "the public origin generates and stores its own private key"
     )
+    assert english["strings"]["研究身份"] == "Profile"
+    assert english["strings"]["研究身份：%@"] == "Profile: %@"
+    assert english["strings"]["Profiles"] == "Profile"
+    assert chinese["strings"]["研究身份"] == "研究身份"
+    assert chinese["strings"]["Profile"] == "研究身份"
+    assert chinese["strings"]["Profiles"] == "研究身份"
+    assert chinese["strings"]["请使用 CLI 注册研究 Agent Profile"] == (
+        "请使用 CLI 注册智能体研究身份"
+    )
+    assert english["strings"]["请使用 CLI 注册研究 Agent Profile"] == (
+        "Use the CLI to register an Agent Profile"
+    )
+    assert "Research Identities" not in english["strings"].values()
+
+    profile_page = (
+        ROOT / "server" / "manager" / "web" / "profile" / "profiles.js"
+    ).read_text(encoding="utf-8")
+    assert 'context.setHeading(context.t("研究身份")' in profile_page
+    assert 'FTUI.table([context.t("研究身份")' in profile_page
 
 
 def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> None:

@@ -48,7 +48,7 @@ _CLIENT_MODULES = (
         "icon": "box", "sfSymbol": "shippingbox",
     },
     {
-        "id": "profiles", "title": "Profiles", "title_key": "研究身份",
+        "id": "profiles", "title": "研究身份", "title_key": "研究身份",
         "description_key": "查看研究身份、工作区与初始化来源",
         "icon": "profiles", "sfSymbol": "person.2.crop.square.stack",
     },

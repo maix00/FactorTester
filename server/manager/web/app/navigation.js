@@ -41,7 +41,7 @@
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {
       research: "研究报告", jobs: "测试任务", factors: "因子详情",
-      products: "产品详情", profiles: "Profile", "test-templates": "测试模板",
+      products: "产品详情", profiles: "研究身份", "test-templates": "测试模板",
     };
     return t(labels[parts[0]] || module.title || parts[0]);
   }
