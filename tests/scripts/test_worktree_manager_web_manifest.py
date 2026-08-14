@@ -522,6 +522,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "ensureProfiles" in source
     assert "workbench-run" in manifest["groups"]
     assert set(manifest["groups"]["workbench-run"]) == {
+        "workbench/test-configuration.js",
         "workbench/test-run-fields.js",
         "workbench/test-outputs.js",
         "workbench/test-run-results.js",

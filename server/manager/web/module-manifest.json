@@ -158,12 +158,12 @@
       "workbench/tab-chip-content.js",
       "workbench/tab-list-chip.js",
       "workbench/test-settings.js",
-      "workbench/test-configuration.js",
       "workbench/test-content-adapters.js",
       "workbench/test-state.js",
       "workbench/tests.js"
     ],
     "workbench-run": [
+      "workbench/test-configuration.js",
       "workbench/test-run-fields.js",
       "workbench/test-outputs.js",
       "workbench/test-run-results.js",
