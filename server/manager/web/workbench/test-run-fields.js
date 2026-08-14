@@ -37,14 +37,6 @@
       }
       if (value !== undefined) result[item.key] = structuredClone(value);
     });
-    // Submission identity and task labels describe this JobAttempt, not the
-    // reusable test configuration, so they are kept outside the backend
-    // setting registry and never enter saved templates.
-    for (const key of ["task_name", "acting_profile_ref", "acting_profile_name"]) {
-      if (Object.prototype.hasOwnProperty.call(state.runValues || {}, key)) {
-        result[key] = structuredClone(state.runValues[key]);
-      }
-    }
     return result;
   }
 
@@ -65,14 +57,16 @@
     copy.append(label, help);
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
-    const control = FTTestSettings.controlFor(
-      item.key, fieldValue, manifest, state.runValues, context,
-      {
-        onCommit: ({key, value}) => { state.runValues[key] = value; },
-        refresh,
-      },
-      false,
-    );
+    const control = item.control_template === "profile"
+      ? profileControl(context, state, refresh, item)
+      : FTTestSettings.controlFor(
+        item.key, fieldValue, manifest, state.runValues, context,
+        {
+          onCommit: ({key, value}) => { state.runValues[key] = value; },
+          refresh,
+        },
+        false,
+      );
     root.append(copy, control);
     return root;
   }
@@ -83,7 +77,7 @@
     return root;
   }
 
-  function profileControl(context, state, refresh) {
+  function profileControl(context, state, refresh, item) {
     const control = document.createElement("select");
     const user = document.createElement("option");
     user.value = "";
@@ -98,75 +92,44 @@
       option.textContent = `${displayName}（${profileID}）`;
       control.append(option);
     });
-    control.value = String(state.runValues.acting_profile_ref || "");
+    control.value = String(state.runValues[item.key] || item.default || "");
     control.addEventListener("change", () => {
-      state.runValues.acting_profile_ref = control.value;
-      const selected = (state.profiles || []).find(profile => (
-        `profile:${String(profile.profile_id || "").trim()}` === control.value
-      ));
-      state.runValues.acting_profile_name = selected
-        ? String(selected.display_name || selected.profile_id || "")
-        : "";
+      state.runValues[item.key] = control.value;
       refresh?.();
     });
     return control;
   }
 
-  function identityRows(context, state, refresh) {
-    const root = rows(context, state, [{
-      key: "task_name",
-      label: "任务名称",
-      help_text: "留空时列表使用运行配置 hash",
-      control_template: "text",
-      default: "",
-    }], refresh);
-    const profile = document.createElement("div");
-    profile.className = "test-setting-row";
-    const copy = document.createElement("span");
-    const label = document.createElement("b"); label.textContent = context.t("提交身份");
-    const help = document.createElement("small");
-    help.textContent = context.t("任务列表显示为用户名（Profile）；不选时使用用户本人");
-    copy.append(label, help);
-    profile.append(copy, profileControl(context, state, refresh));
-    root.append(profile);
-    root.classList.add("test-run-identity-rows");
+  function panel(context, state, refresh) {
+    const root = document.createElement("div");
+    root.className = "test-run-settings-content";
+    const note = document.createElement("p");
+    note.className = "test-run-settings-note";
+    note.textContent = context.t(
+      "这些字段只作用于本次提交；提交后会冻结到 Job 和 RunSpec，不写入可复用测试模板",
+    );
+    root.append(note);
+    const identity = forPlacement(state.manifest, "run_identity");
+    if (identity.length) root.append(rows(context, state, identity, refresh));
+    const regular = forPlacement(state.manifest, "run_options");
+    if (regular.length) root.append(rows(context, state, regular, refresh));
+    const advanced = forPlacement(state.manifest, "advanced_run_options");
+    if (advanced.length) {
+      const details = document.createElement("details");
+      details.className = "test-run-advanced";
+      const summary = document.createElement("summary");
+      summary.textContent = context.t("诊断选项");
+      details.append(summary, rows(context, state, advanced, refresh));
+      root.append(details);
+    }
+    const output = forPlacement(state.manifest, "outputs")[0];
+    if (output && typeof window.FTTestOutputs?.content === "function") {
+      root.append(window.FTTestOutputs.content(context, state, refresh));
+    }
     return root;
   }
 
-  function render(context, state, refresh) {
-    const identity = document.createElement("section");
-    identity.className = "test-run-identity";
-    const identityHeading = document.createElement("div");
-    identityHeading.className = "section-heading";
-    const identityTitle = document.createElement("h2");
-    identityTitle.textContent = context.t("任务名称与提交身份");
-    const identityNote = document.createElement("p");
-    identityNote.textContent = context.t("只作用于本次提交，不写入可复用测试模板");
-    identityHeading.append(identityTitle, identityNote);
-    identity.append(identityHeading, identityRows(context, state, refresh));
-
-    const regular = forPlacement(state.manifest, "run_options");
-    const advanced = forPlacement(state.manifest, "advanced_run_options");
-    if (!regular.length && !advanced.length) return identity;
-    const section = document.createElement("section"); section.className = "test-run-options";
-    const heading = document.createElement("div"); heading.className = "section-heading";
-    const copy = document.createElement("div");
-    const title = document.createElement("h2"); title.textContent = context.t("运行选项");
-    const note = document.createElement("p");
-    note.textContent = context.t("这些选项只作用于本次运行，不写入可复用测试模板");
-    copy.append(title, note); heading.append(copy); section.append(heading);
-    if (regular.length) section.append(rows(context, state, regular, refresh));
-    if (advanced.length) {
-      const details = document.createElement("details"); details.className = "test-run-advanced";
-      const summary = document.createElement("summary"); summary.textContent = context.t("诊断选项");
-      details.append(summary, rows(context, state, advanced, refresh));
-      section.append(details);
-    }
-    identity.append(section);
-    return identity;
-  }
-
   window.FTTestRunFields = Object.freeze({
-    definitions, field, forPlacement, initialValues, render, requestBody,
+    definitions, field, forPlacement, initialValues, panel, render: panel, requestBody,
   });
 })();
