@@ -31,7 +31,6 @@
       tab, fields: visibleFields(tab, manifest, values),
       allFields: fieldsForTab(tab.key, manifest).filter(([, field]) => !field.adapter_managed),
     })).filter(item => item.allFields.length || FTTestContentAdapters.hasContent(item.tab));
-    if (!available.length) return root;
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
     let tabset = null;
@@ -45,16 +44,27 @@
     );
     intro.append(introTitle, introText);
     root.append(intro);
-    const items = visible.map(item => ({
+    const items = [];
+    const runTab = manifest?.run_settings;
+    if (runTab?.key && options.state) {
+      items.push({
+        key: runTab.key,
+        label: context.t(runTab.label || runTab.key),
+        panelClass: "run-settings-tab-panel",
+        render: () => FTTestRunFields.panel(
+          context, options.state, options.refresh,
+        ),
+      });
+    }
+    items.push(...visible.map(item => ({
       key: item.tab.key,
       label: context.t(item.tab.label || item.tab.key),
-      description: item.tab.help_text ? context.t(item.tab.help_text) : "",
       render: () => tabPanel(item, manifest, values, context, options),
-    }));
+    })));
+    if (!items.length) return root;
     items.push({
       key: "__manage__",
       label: context.t("+ 设置"),
-      description: context.t("挂载设置组；未挂载项使用默认值"),
       render: () => settingsManager(manifest, available, mounted, values, context, options),
     });
     const activeKey = items.some(item => item.key === options.activeTab)
@@ -68,6 +78,10 @@
       manifest, values, context,
       mountedTabs: [...mounted],
       sources: options.chipSources || {},
+      runValues: options.state?.runValues || {},
+      outputRequests: options.state?.outputRequests || [],
+      outputCapabilities: options.state?.outputCapabilities || [],
+      profiles: options.state?.profiles || [],
       extraDescriptors: options.extraChips || [],
       onOpen: tabKey => {
         if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
@@ -168,9 +182,12 @@
         const copy = document.createElement("span");
         const label = document.createElement("b");
         label.textContent = context.t(item.tab.label || item.tab.key);
-        const help = document.createElement("small");
-        help.textContent = context.t(mounted.has(item.tab.key) ? "已挂载" : "未挂载，使用默认值");
-        copy.append(label, help);
+        copy.append(label);
+        if (item.tab.help_text) {
+          const help = document.createElement("small");
+          help.textContent = context.t(item.tab.help_text);
+          copy.append(help);
+        }
         const defaults = FTTestSettingChips.render({
           manifest,
           values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),

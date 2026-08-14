@@ -1,7 +1,7 @@
 (() => {
-  function render(context, state) {
-    const section = document.createElement("section");
-    section.className = "test-output-panel";
+  function content(context, state, refresh) {
+    const section = document.createElement("div");
+    section.className = "test-output-content";
     const heading = document.createElement("div");
     heading.className = "section-heading";
     const copy = document.createElement("div");
@@ -23,8 +23,16 @@
     section.append(FTOutputChoices.choices(
       context, definitions, state.outputRequests, value => {
         state.outputRequests = value;
+        refresh?.();
       },
     ));
+    return section;
+  }
+
+  function render(context, state, refresh) {
+    const section = document.createElement("section");
+    section.className = "test-output-panel";
+    section.append(content(context, state, refresh));
     return section;
   }
 
@@ -32,5 +40,5 @@
     return Array.isArray(state.outputRequests) ? [...state.outputRequests] : [];
   }
 
-  window.FTTestOutputs = Object.freeze({render, selection});
+  window.FTTestOutputs = Object.freeze({content, render, selection});
 })();

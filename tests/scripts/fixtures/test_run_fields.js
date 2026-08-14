@@ -6,6 +6,14 @@ eval(fs.readFileSync(process.argv[2], "utf8"));
 
 const manifest = {run_fields: [
   {
+    key: "task_name", default: "", request_location: "body",
+    placement: "run_identity", control_template: "text",
+  },
+  {
+    key: "acting_profile_ref", default: "", request_location: "body",
+    placement: "run_identity", control_template: "profile",
+  },
+  {
     key: "service_port", default: "", request_location: "query",
     placement: "global_settings", freeze_target: "job.server_context.port",
   },
@@ -25,10 +33,13 @@ const state = {
   runValues: FTTestRunFields.initialValues(manifest),
 };
 assert.deepEqual(state.runValues, {
-  service_port: "", retention_mode: "summary", step_mode: false,
+  task_name: "", acting_profile_ref: "", service_port: "",
+  retention_mode: "summary", step_mode: false,
   performance_profile: false,
 });
 assert.deepEqual(FTTestRunFields.requestBody(state), {
+  task_name: "",
+  acting_profile_ref: "",
   retention_mode: "summary",
   step_mode: false,
   output_requests: ["ic_series", "ic_statistics"],
@@ -37,6 +48,8 @@ assert.deepEqual(FTTestRunFields.requestBody(state), {
 state.runValues.retention_mode = "full";
 state.runValues.performance_profile = true;
 assert.deepEqual(FTTestRunFields.requestBody(state), {
+  task_name: "",
+  acting_profile_ref: "",
   retention_mode: "full",
   step_mode: false,
   output_requests: ["ic_series", "ic_statistics"],

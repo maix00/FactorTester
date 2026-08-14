@@ -32,16 +32,40 @@ single source of truth for the script order and semantic module groups.
   final application coordinator (`app/coordinator.js`)
 - `styles/`: global shell and domain stylesheets; `styles/app.css` is the
   current shared shell stylesheet, while `styles/report.css` contains report
-  presentation rules
+  presentation rules. Output viewers are split under `styles/outputs/`:
+  `artifacts.css` owns generic/IC artifact presentation and
+  `backtest-results.css` owns backtest, snapshot, and factor-series results.
 
-The workbench has one tab/chip/content interface: `FTTabChipContent` owns tab
-buttons, hidden content panels, optional descriptions, and optional action
-buttons. IC and factor-evaluation use one settings instance; backtest adds one
-second instance for strategy-group surfaces, including group actions. Group
-override tabs use the same interface inside that editor rather than defining a
-parallel tab bar. New test modules must provide manifest-backed items and
-actions to this seam; they must not introduce another tab/chip/content DOM
+The workbench has four user-visible container contracts, and no additional
+domain-specific top-level container is needed:
+
+- `FTTabChipContent` is the scalar settings container. It owns tab buttons,
+  hidden content panels, optional descriptions, and optional action buttons.
+- `FTTabListChip` is optional and is used only when a surface contains a
+  selectable/repeated list. Group strategies, Long-Short strategies, and a
+  future custom-strategy list all reuse this shell; the rows and actions come
+  from backend surface declarations.
+- `runspec-run` is the common first settings tab for task identity, submitter,
+  retention, output requests, and run diagnostics. It is a content adapter
+  mounted inside `FTTabChipContent`, not another tab bar.
+- `result` is the result/output container for summaries, tables, charts, and
+  artifacts after a run. It is not a settings surface.
+
+IC and factor-evaluation use one settings instance; backtest adds one optional
+`FTTabListChip` instance for strategy surfaces. Group override tabs use the
+same `FTTabChipContent` interface inside that editor rather than defining a
+parallel tab bar. Field rows, overlays, tables, code blocks, and source
+previews are internal adapters/primitives, not additional user-visible
+container contracts. New test modules must provide manifest-backed items and
+actions to these seams; they must not introduce another tab/chip/content DOM
 contract or module-local tab CSS.
+
+Backtest custom strategies remain Job inputs rather than group records:
+`run_inputs` owns the registered source/spec/dependency upload controls, while
+the inspection response supplies the entrypoint, callbacks, and requirements
+shown in the preview and retained in Job detail. A future strategy-list view
+must reuse this input adapter and state; it must not create a second source
+store or silently turn uploaded code into a group.
 
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through

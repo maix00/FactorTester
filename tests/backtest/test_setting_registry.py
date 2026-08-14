@@ -29,12 +29,27 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
     }
 
     assert list(ic_fields) == [
-        "service_port", "retention_mode", "output_requests",
+        "task_name", "acting_profile_ref", "service_port", "retention_mode",
+        "output_requests",
     ]
     assert list(backtest_fields) == [
-        "service_port", "retention_mode", "step_mode", "output_requests",
+        "task_name", "acting_profile_ref", "service_port", "retention_mode",
+        "step_mode", "output_requests",
         "performance_profile", "margin_execution_profile",
     ]
+    for fields in (ic_fields, backtest_fields):
+        assert fields["task_name"]["default"] == ""
+        assert fields["task_name"]["placement"] == "run_identity"
+        assert fields["acting_profile_ref"]["default"] == ""
+        assert fields["acting_profile_ref"]["control_template"] == "profile"
+        assert fields["acting_profile_ref"]["placement"] == "run_identity"
+    assert backtest_setting_registry.get("ic_test").manifest()["run_settings"] == {
+        "key": "run_context",
+        "label": "任务提交",
+        "description": "本次任务的名称、提交身份、结果保留和生成物选择",
+        "order": 0,
+        "default_mounted": True,
+    }
     assert ic_fields["service_port"] == {
         "key": "service_port",
         "label": "服务端口",
@@ -48,6 +63,7 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "options": [],
         "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
         "enabled_payload": None,
+        "chip_group": "连接",
     }
     assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"

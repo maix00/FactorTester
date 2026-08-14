@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from server.manager.domain.organization_scope import resolve_login_account
+
 
 def account_role(account: dict[str, object]) -> str:
     from tools.data.account_manage import is_super_admin_account
@@ -17,6 +21,7 @@ def authenticate_user(
     password: str,
     *,
     control_store: object | None = None,
+    managed_organizations: Iterable[str] = (),
 ) -> tuple[str, str]:
     from tools.data.account_manage import accounts_lock, verify_password
 
@@ -31,17 +36,11 @@ def authenticate_user(
 
         with accounts_lock:
             accounts = load_accounts()
-    account = next(
-        (item for item in accounts if item.get("username") == username),
-        None,
+    account = resolve_login_account(
+        username,
+        accounts,
+        managed_organizations=managed_organizations,
     )
-    if account is None:
-        matches = [
-            item for item in accounts
-            if item.get("alias", item.get("username")) == username
-        ]
-        if len(matches) == 1:
-            account = matches[0]
     if (
         account is None
         or not verify_password(

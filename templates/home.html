@@ -115,7 +115,7 @@
         async function init() {
             const data = await fetch('/api/me').then(r => r.json());
             await Promise.all([loadOrganizations(), loadModules()]);
-            _currentUser = data.username || null;
+            _currentUser = data.alias || data.username || null;
             _isAdmin     = data.is_admin || false;
             _currentRole  = data.role || null;
             renderUserArea();
@@ -217,7 +217,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                _currentUser = data.username;
+                _currentUser = data.alias || data.username;
                 _isAdmin     = data.is_admin || false;
                 _currentRole  = data.role || null;
                 renderUserArea();
@@ -242,7 +242,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                _currentUser = data.username;
+                _currentUser = data.alias || data.username;
                 _isAdmin     = data.is_admin || false;
                 _currentRole  = data.role || null;
                 renderUserArea();

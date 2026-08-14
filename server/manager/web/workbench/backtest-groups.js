@@ -28,68 +28,60 @@
 
   function render(context, state, refresh) {
     initialize(state);
-    const root = document.createElement("details");
-    root.className = "backtest-groups";
-    root.open = state.backtestGroupsOpen !== false;
-    root.addEventListener("toggle", () => { state.backtestGroupsOpen = root.open; });
-    const heading = document.createElement("summary");
-    heading.className = "backtest-group-summary";
-    const headingCopy = document.createElement("span");
-    const title = document.createElement("b");
-    title.textContent = context.t("策略组设置");
-    const note = document.createElement("small");
-    note.textContent = context.t("下方策略与组合会冻结在同一次回测任务中");
-    headingCopy.append(title, note);
-    const count = document.createElement("span");
-    count.className = "backtest-group-count";
-    count.textContent = `${strategyCount(state)} ${context.t("项策略")}`;
-    heading.append(headingCopy, count);
-    const shell = document.createElement("div");
-    shell.className = "backtest-group-shell";
     const available = surfaces(state);
     if (!available.length) {
-      shell.append(FTUI.empty(
+      return FTUI.empty(
         context.t("暂无策略组设置"), context.t("后端没有为该测试注册策略组 surface"),
-      ));
-      root.append(heading, shell);
-      return root;
+      );
     }
     const active = available.find(item => item.key === state.backtestGroupSurfaceKey)
       || available[0];
     state.backtestGroupSurfaceKey = active.key;
-    const adapter = adapterFor(active);
-    const selected = adapter.selected(state);
-    const tabset = FTTabChipContent.create({
-      items: available.map(surface => ({
-        key: surface.key,
-        label: context.t(surface.label || surface.key),
-        description: surface.help_text ? context.t(surface.help_text) : "",
-        panelClass: "backtest-group-panel",
-        render: () => adapterFor(surface).render(context, state, surface, refresh),
-      })),
-      activeKey: active.key,
+    const items = available.map(surface => ({
+      key: surface.key,
+      label: context.t(surface.label || surface.key),
+      description: surface.help_text ? context.t(surface.help_text) : "",
+      panelClass: "backtest-group-panel",
+      render: () => adapterFor(surface).render(context, state, surface, refresh),
+    }));
+    const list = FTTabListChip.create({
+      className: "backtest-groups",
+      summaryClass: "backtest-group-summary",
+      countClass: "backtest-group-count",
+      summaryCopyClass: "backtest-group-summary-copy",
+      shellClass: "backtest-group-shell",
       barClass: "backend-settings-tab-bar backtest-group-tab-bar",
       hostClass: "backend-settings-host backtest-group-host",
-      actions: flows(state, active.key).map(flow => ({
-        label: context.t(flow.label),
-        buttonClass: flow.button_class,
-        disabled: !enabled(flow, selected.length),
-        onClick: () => runFlow(context, state, active, flow, selected, refresh),
-      })),
+      title: context.t("策略组设置"),
+      description: context.t("下方策略与组合会冻结在同一次回测任务中"),
+      count: `${strategyCount(state)} ${context.t("项策略")}`,
+      open: state.backtestGroupsOpen !== false,
+      onToggle: open => { state.backtestGroupsOpen = open; },
+      items,
+      activeKey: active.key,
+      actionsFor: surfaceKey => {
+        const surface = available.find(item => item.key === surfaceKey) || active;
+        const selected = adapterFor(surface).selected(state);
+        return flows(state, surface.key).map(flow => ({
+          label: context.t(flow.label),
+          buttonClass: flow.button_class,
+          disabled: !enabled(flow, selected.length),
+          onClick: () => runFlow(context, state, surface, flow, selected, refresh),
+        }));
+      },
       onActivate: key => {
         state.backtestGroupSurfaceKey = key;
         refresh();
       },
     });
-    shell.append(tabset.bar, tabset.host);
     if (state.backtestGroupEditor) {
-      shell.append(FTBacktestGroupForm.render(
+      const form = FTBacktestGroupForm.render(
         context, state, state.backtestGroupEditor,
         () => { state.backtestGroupEditor = null; refresh(); },
-      ));
+      );
+      list.shell.append(form);
     }
-    root.append(heading, shell);
-    return root;
+    return list.root;
   }
 
   function groupList(context, state, surface, refresh) {

@@ -114,4 +114,47 @@ assert.equal(row.children[0].children[0].textContent, "因子");
 assert.equal(row.children[0].children[1].textContent, "ROC 1m、SgCCS 5m");
 row.children[1].listeners.click();
 assert.equal(opened, "time");
+
+const runManifest = {
+  run_settings: {key: "run_context"},
+  run_fields: [
+    {
+      key: "task_name", label: "任务名称", default: "", control_template: "text",
+      placement: "run_identity", order: 1,
+    },
+    {
+      key: "acting_profile_ref", label: "提交身份", default: "", control_template: "profile",
+      placement: "run_identity", order: 2,
+    },
+    {
+      key: "retention_mode", label: "结果保留范围", default: "summary",
+      control_template: "select", placement: "run_options", order: 20,
+      chip_group: "保留策略", options: [{value: "summary", label: "摘要结果"}],
+    },
+    {
+      key: "output_requests", label: "结果与生成物", default: [],
+      control_template: "artifact_output_picker", placement: "outputs", order: 40,
+      chip_group: "生成物",
+    },
+  ],
+};
+const runDescriptors = FTTestSettingChips.descriptors({
+  manifest: runManifest,
+  runValues: {task_name: "", acting_profile_ref: "", retention_mode: "summary"},
+  outputRequests: [], outputCapabilities: [], profiles: [], context: {t: value => value},
+});
+assert.deepEqual(runDescriptors.map(item => [item.label, item.value, item.group]), [
+  ["任务名称", "未命名（可选）", "运行选项"],
+  ["提交身份", "用户本人", "运行选项"],
+  ["结果保留范围", "摘要结果", "保留策略"],
+  ["结果与生成物", "未选择（使用默认输出）", "生成物"],
+]);
+const grouped = FTTestSettingChips.render({
+  manifest: runManifest,
+  runValues: {task_name: "", acting_profile_ref: "", retention_mode: "summary"},
+  outputRequests: [], outputCapabilities: [], profiles: [], context: {t: value => value},
+});
+assert.equal(grouped.children.length, 3);
+assert.ok(grouped.children.every(item => item.className === "backend-settings-chip-group"));
+assert.equal(grouped.children[0].children[0].textContent, "运行选项");
 console.log("ok");

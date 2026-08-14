@@ -38,10 +38,33 @@ MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
 def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
     """Register per-run controls separately from reusable configuration fields."""
+    app.register_manifest_extension(
+        "run_settings",
+        {
+            "key": "run_context",
+            "label": "任务提交",
+            "description": "本次任务的名称、提交身份、结果保留和生成物选择",
+            "order": 0,
+            "default_mounted": True,
+        },
+    )
+    app.register_run_field(RunFieldDefinition(
+        "task_name", "任务名称", "text", "", "body",
+        "job.task_name", "run_identity", order=1,
+        help_text="可留空；留空时任务列表使用运行配置标识",
+        chip_group="任务",
+    ))
+    app.register_run_field(RunFieldDefinition(
+        "acting_profile_ref", "提交身份", "profile", "", "body",
+        "job.acting_profile_ref", "run_identity", order=2,
+        help_text="选择本次任务使用的 Profile；留空时使用当前用户",
+        chip_group="任务",
+    ))
     app.register_run_field(RunFieldDefinition(
         "service_port", "服务端口", "service_port", "", "query",
         "job.server_context.port", "global_settings", order=10,
         help_text="可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+        chip_group="连接",
     ))
     app.register_run_field(RunFieldDefinition(
         "retention_mode", "结果保留范围", "select", "summary", "body",
@@ -51,17 +74,20 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
             SettingOption("full", "完整运行结果"),
         ),
         help_text="摘要模式按已选生成物保留必要结果；完整模式保留可供后续诊断的运行明细",
+        chip_group="保留策略",
     ))
     if backtest:
         app.register_run_field(RunFieldDefinition(
             "step_mode", "逐步运行", "boolean", False, "body",
             "run_spec.step_mode", "run_options", order=30,
             help_text="逐个 flow 暂停并输出审计字段；仅支持单个回测分析",
+            chip_group="运行选项",
         ))
     app.register_run_field(RunFieldDefinition(
         "output_requests", "结果与生成物", "artifact_output_picker", [], "body",
         "run_spec.output_requests", "outputs", template_policy="include", order=40,
         help_text="提交前选择的输出会冻结进 RunSpec，也可在任务完成后继续生成",
+        chip_group="生成物",
     ))
     if not backtest:
         return
@@ -70,12 +96,14 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "job.job_spec.performance_profile", "advanced_run_options", order=50,
         help_text="按 flow 累计耗时并在运行结束时输出热点；默认关闭",
         enabled_payload={"kind": "cumulative_flow", "min_total_ms": 1000.0},
+        chip_group="诊断",
     ))
     app.register_run_field(RunFieldDefinition(
         "margin_execution_profile", "保证金执行剖析", "boolean", False, "body",
         "job.job_spec.margin_execution_profile", "advanced_run_options", order=60,
         help_text="累计保证金预算检查、订单与组合投影耗时；默认关闭",
         enabled_payload={"kind": "cumulative", "min_total_ms": 0.0},
+        chip_group="诊断",
     ))
 
 
@@ -472,6 +500,7 @@ def factor_evaluation_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_evaluation")
     from tools.testers.factor_evaluation.settings import register_factor_evaluation_settings
     register_factor_evaluation_settings(app)
+    register_run_fields(app, backtest=False)
 
     return app
 
@@ -481,6 +510,7 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_type_analysis")
     from tools.testers.factor_type_analysis.settings import register_factor_type_analysis_settings
     register_factor_type_analysis_settings(app)
+    register_run_fields(app, backtest=False)
 
     return app
 

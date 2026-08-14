@@ -47,9 +47,6 @@
       profiles: Array.isArray(profiles.profiles) ? profiles.profiles : [],
       runValues: {
         ...FTTestRunFields.initialValues(manifest),
-        task_name: "",
-        acting_profile_ref: "",
-        acting_profile_name: "",
       },
     };
     restoreWorkspace(state);
@@ -152,6 +149,12 @@
         delete: template => deleteTemplate(context, state, template),
       }},
       onChipOpen: tabKey => {
+        const runTab = state.manifest.run_settings?.key;
+        if (tabKey === runTab) {
+          state.settingsTabKey = tabKey;
+          render(context, state);
+          return;
+        }
         if (!state.settingsMountedTabs.includes(tabKey)) {
           state.settingsMountedTabs = [...state.settingsMountedTabs, tabKey];
         }
@@ -162,13 +165,6 @@
     }));
     if (state.kind === "backtest") {
       root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
-    }
-    const runOptions = FTTestRunFields.render(
-      context, state, () => render(context, state),
-    );
-    if (runOptions) root.append(runOptions);
-    if (FTOutputChoices.available(state.outputCapabilities, state.kind).length) {
-      root.append(FTTestOutputs.render(context, state));
     }
     root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     context.content.replaceChildren(root);

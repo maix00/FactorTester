@@ -83,6 +83,8 @@ assert.deepEqual(first.children.map(item => item.className), [
   "test-settings-current",
   "backend-settings-host",
 ]);
+assert.ok(first.children[1].children.every(button => button.children.length === 1),
+  "test setting tabs should render only their title");
 assert.equal(first.children[1].children[0].children[0].textContent, "因子");
 const chipRow = first.children[2].children[1];
 assert.equal(chipRow.children[0].children[1].textContent, "ROC 1m");

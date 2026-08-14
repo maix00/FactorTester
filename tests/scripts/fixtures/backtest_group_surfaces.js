@@ -45,6 +45,11 @@ vm.runInThisContext(fs.readFileSync(
   "utf8",
 ), {filename: "tab-chip-content.js"});
 global.FTTabChipContent = window.FTTabChipContent;
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "tab-list-chip.js"),
+  "utf8",
+), {filename: "tab-list-chip.js"});
+global.FTTabListChip = window.FTTabListChip;
 
 let removed = false;
 global.FTBacktestGroupModel = {

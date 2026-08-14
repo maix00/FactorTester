@@ -198,9 +198,12 @@
         context, state, file, descriptor, purpose?.value || "",
       ),
     ));
-    actions.append(
-      context.button(context.t(descriptor.label), () => picker.click()), picker,
-    );
+    const button = context.button(context.t(descriptor.label), () => picker.click());
+    if (descriptor.description) {
+      button.title = context.t(descriptor.description);
+      button.setAttribute("aria-label", context.t(descriptor.description));
+    }
+    actions.append(button, picker);
   }
 
   function inputOperation(context, state, file, descriptor, purpose) {
@@ -238,6 +241,17 @@
         value.source === `profile:${source.path}`
       ));
       const blocks = [{label: "Python", content: source.source_code}];
+      const inspection = FTTestInputState.strategyInspection?.(state, source.path) || null;
+      if (inspection) {
+        blocks.unshift({
+          label: "已识别的策略 Hook",
+          content: JSON.stringify({
+            entrypoint: inspection.entrypoint || spec?.entrypoint || "",
+            callbacks: inspection.callbacks || [],
+            requirements: inspection.requirements || {},
+          }, null, 2),
+        });
+      }
       if (spec) blocks.push({label: "StrategySpec JSON", content: JSON.stringify(spec, null, 2)});
       return {
         title: spec?.strategy_id || source.path,

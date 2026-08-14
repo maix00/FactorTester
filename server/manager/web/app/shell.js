@@ -12,7 +12,8 @@
       document.querySelectorAll("[data-i18n-placeholder]").forEach(item => {
         item.placeholder = t(item.dataset.i18nPlaceholder);
       });
-      document.querySelector("#account-title").textContent = state.session?.username || t("设置");
+      document.querySelector("#account-title").textContent =
+        state.session?.alias || state.session?.username || t("设置");
     }
 
     function hydrateIcons() {
@@ -122,7 +123,8 @@
         row.addEventListener("click", () => tabs.openModule(item));
         return row;
       }));
-      document.querySelector("#account-title").textContent = state.session?.username || t("设置");
+      document.querySelector("#account-title").textContent =
+        state.session?.alias || state.session?.username || t("设置");
       tabs.renderOpenedTabs();
     }
 
