@@ -8,6 +8,12 @@ containers:
 - `manager` shares that network namespace and owns Manager 7998, artifact data
   plane 7997, and the loopback-only test services that Manager starts.
 
+By default this local/intranet deployment also starts the checked-out `feat`
+service on port `7999` after Manager readiness. The fixed service is managed
+through the 7998 control plane and is not a separately published host port.
+The public deployment has a different fixed contract: its immutable `main`
+service runs on internal port `8000`, also behind Manager 7998.
+
 The native Swift client must use a different key and tunnel address. Dynamic
 test ports are deliberately not published by Compose; cross-host requests go
 through Manager 7998.

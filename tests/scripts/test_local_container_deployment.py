@@ -39,6 +39,23 @@ def test_local_manager_enables_wireguard_only_peer_surfaces() -> None:
     assert "${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}" in command
 
 
+def test_local_manager_defaults_to_fixed_feat_service_7999() -> None:
+    compose = _compose()
+    manager = compose["services"]["manager"]
+    command = manager["command"]
+
+    assert "--fixed-port" in command
+    assert "${FACTORTESTER_FIXED_PORT:-7999}" in command
+    assert "--fixed-branch" in command
+    assert "${FACTORTESTER_FIXED_BRANCH:-feat}" in command
+    assert manager["environment"]["FACTORTESTER_START_FIXED_SERVICE"] == (
+        "${FACTORTESTER_START_FIXED_SERVICE:-1}"
+    )
+
+    published = " ".join(compose["services"]["wireguard"]["ports"])
+    assert ":7999" not in published
+
+
 def test_local_manager_mounts_existing_runtime_data_root() -> None:
     manager = _compose()["services"]["manager"]
     mounts = {
