@@ -11,8 +11,10 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
+from server.manager.domain.federation import ServiceRoute
 from server.manager.services.network_info import server_network_info
 from server.manager.services.public_catalog import public_factor_library
+from server.manager.state.routing import RoutingStateMixin
 
 
 @contextmanager
@@ -93,6 +95,23 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
     assert value["principal"] == "__public_jobs__"
     assert value["factors"][0]["factor_alias"] == "Momentum"
     assert "source_code" not in value["factors"][0]
+
+
+def test_source_provider_extracts_endpoint_host():
+    route = ServiceRoute(
+        server_id="public-1",
+        role="main",
+        branch="main",
+        revision="r1",
+        port=7998,
+        endpoint="https://198.51.100.1:7998",
+        public_server=True,
+    )
+
+    value = RoutingStateMixin._source_provider(route)
+
+    assert value["server_host"] == "198.51.100.1"
+    assert value["public_server"] is True
 
 
 def test_compliance_alias_can_fall_back_to_canonical_public_ip():
