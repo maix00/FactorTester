@@ -100,6 +100,11 @@ class CoreGetRoutesMixin:
                 return True
             self._device_authorization_page(parsed)
             return True
+        if parsed.path == "/device-handoff":
+            if not self._public_login_gate(parsed, method="GET"):
+                return True
+            self._device_handoff(parsed)
+            return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
         if parsed.path == "/api/devices":

@@ -1352,6 +1352,52 @@ def test_visitor_entry_is_only_advertised_by_configured_ingress(
     assert 'href="/visitor?next=/jobs' not in direct_login_body
 
 
+def test_public_session_without_current_origin_device_key_stays_on_compliance(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    session_token, _, _ = state._issue_session("alice@default", "user")
+
+    with _running_manager(state) as base_url:
+        ingress = Request(
+            f"{base_url}/jobs",
+            headers=_visitor_request_headers(
+                "eloquence-drizzly-fencing.ngrok-free.dev",
+                cookie=f"ft-manager-session={session_token}",
+            ),
+        )
+        with urlopen(ingress) as response:
+            ingress_body = response.read().decode("utf-8")
+            assert response.geturl().startswith(f"{base_url}/compliance?")
+
+        direct_ip = Request(
+            f"{base_url}/jobs",
+            headers=_visitor_request_headers(
+                "101.133.144.27:7998",
+                cookie=f"ft-manager-session={session_token}",
+            ),
+        )
+        with urlopen(direct_ip) as response:
+            direct_body = response.read().decode("utf-8")
+            assert response.geturl().startswith(f"{base_url}/compliance?")
+
+    assert 'class="visitor-entry"' in ingress_body
+    assert 'class="visitor-entry"' not in direct_body
+    assert "login-form" not in ingress_body
+    assert "app-shell" not in direct_body
+
+
 def test_visitor_entry_redirects_to_ip_and_limits_anonymous_capabilities(
     tmp_path, monkeypatch,
 ) -> None:
@@ -1501,6 +1547,137 @@ def test_public_compliance_page_bootstraps_device_login_with_visible_status() ->
     assert "设备自动登录失败" in body
     assert 'window.addEventListener("online",authenticate)' in body
     assert 'document.addEventListener("visibilitychange"' in body
+    assert "handoff_url" in body
+    assert "MAX_AUTHENTICATION_RUNS" in body
+    assert "签名阶段失败" in body
+
+
+def test_device_session_handoff_is_bound_to_target_and_single_use(
+    tmp_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    ticket = state.issue_device_handoff(
+        "alice@default",
+        "user",
+        target_origin="https://101.133.144.27:7998",
+    )
+
+    with pytest.raises(PermissionError, match="target"):
+        state.redeem_device_handoff(
+            ticket,
+            target_origin="https://another.example",
+        )
+
+    session_token, principal, role = state.redeem_device_handoff(
+        ticket,
+        target_origin="https://101.133.144.27:7998",
+    )
+    assert principal == "alice@default"
+    assert role == "user"
+    assert state.session(session_token)["username"] == "alice@default"
+
+    with pytest.raises(PermissionError, match="expired"):
+        state.redeem_device_handoff(
+            ticket,
+            target_origin="https://101.133.144.27:7998",
+        )
+
+
+def test_public_device_verify_offers_canonical_origin_handoff(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    monkeypatch.setattr(
+        manager.Handler,
+        "_has_secure_ui_transport",
+        lambda _self: True,
+    )
+    monkeypatch.setattr(
+        state.device_registry,
+        "verify",
+        lambda **_values: {
+            "device_id": "device-bound-to-alice",
+            "username": "alice@default",
+        },
+    )
+    monkeypatch.setattr(
+        state,
+        "login_device",
+        lambda username: ("ingress-session", username, "user"),
+    )
+
+    ingress_headers = _visitor_request_headers(
+        "eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    opener = build_opener(_NoRedirect())
+    with _running_manager(state) as base_url:
+        challenge_request = Request(
+            f"{base_url}/api/device/challenge",
+            data=b'{"device_id":"device-bound-to-alice"}',
+            headers={
+                **ingress_headers,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(challenge_request) as response:
+            challenge = json.loads(response.read())
+
+        verify_request = Request(
+            f"{base_url}/api/device/verify",
+            data=json.dumps({
+                "challenge_id": challenge["challenge_id"],
+                "device_id": "device-bound-to-alice",
+                "public_key": {},
+                "signature": "ignored-by-test-seam",
+                "next": "/jobs",
+            }).encode(),
+            headers={
+                **ingress_headers,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(verify_request) as response:
+            authenticated = json.loads(response.read())
+
+        handoff_url = authenticated["handoff_url"]
+        assert handoff_url.startswith(
+            "https://101.133.144.27:7998/device-handoff?"
+        )
+        handoff_query = parse_qs(urlparse(handoff_url).query)
+        ticket = handoff_query["ticket"][0]
+
+        handoff_request = Request(
+            f"{base_url}/device-handoff?ticket={ticket}&next=%2Fjobs",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with pytest.raises(HTTPError) as redirected:
+            opener.open(handoff_request)
+        assert redirected.value.code == 303
+        assert redirected.value.headers["Location"] == "/jobs"
+        session_cookie = redirected.value.headers["Set-Cookie"].split(";", 1)[0]
+        assert session_cookie.startswith("ft-manager-session=")
+
+        replay_request = Request(
+            f"{base_url}/device-handoff?ticket={ticket}&next=%2Fjobs",
+            headers=_visitor_request_headers("101.133.144.27:7998"),
+        )
+        with pytest.raises(HTTPError) as replayed:
+            opener.open(replay_request)
+        assert replayed.value.code == 303
+        assert replayed.value.headers.get("Set-Cookie") is None
 
 
 def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(

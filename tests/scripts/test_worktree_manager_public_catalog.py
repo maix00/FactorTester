@@ -123,8 +123,10 @@ def test_compliance_alias_can_fall_back_to_canonical_public_ip():
     ).decode("utf-8")
 
     assert 'const deviceAuthTarget="https://198.51.100.10:7998/compliance?next=/jobs"' in body
-    assert "当前入口没有设备密钥，正在切换到服务器公网 IP" in body
-    assert "window.location.replace(deviceAuthTarget)" in body
+    assert "当前浏览器来源没有已登记的设备密钥" in body
+    assert "切换到服务器公网 IP进行设备登录" in body
+    assert 'id="device-auth-target"' in body
+    assert "window.location.replace(deviceAuthTarget)" not in body
 
 
 def test_visitor_entry_is_marked_for_testing_only():
@@ -166,7 +168,8 @@ def test_compliance_request_from_configured_alias_points_to_public_ip(
             body = response.read().decode("utf-8")
 
     assert 'const deviceAuthTarget="https://198.51.100.10:7998/compliance?next=/jobs"' in body
-    assert "window.location.replace(deviceAuthTarget)" in body
+    assert 'id="device-auth-target"' in body
+    assert "切换到服务器公网 IP进行设备登录" in body
 
 
 def test_visitor_catalog_shows_internal_sources_but_rejects_their_data(
