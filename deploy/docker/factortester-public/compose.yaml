@@ -24,6 +24,9 @@ services:
       FACTORTESTER_HOT_RELOAD: "0"
       FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_PUBLIC_ADDRESS:?set FACTORTESTER_PUBLIC_ADDRESS}
       FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}
+      # Only explicitly configured browser ingress origins may display the
+      # visitor entry. The Manager public IP is intentionally not included.
+      FACTORTESTER_PUBLIC_VISITOR_ORIGINS: ${FACTORTESTER_PUBLIC_VISITOR_ORIGINS:-}
       FACTORTESTER_MANAGER_TLS_CERT: /run/secrets/manager-tls/manager.crt
       FACTORTESTER_MANAGER_TLS_KEY: /run/secrets/manager-tls/manager.key
       FACTORTESTER_ARTIFACT_TLS_CERT: /run/secrets/manager-tls/manager.crt

@@ -7,12 +7,19 @@
 
   async function load(context, refresh = false) {
     if (cache && !refresh) return cache;
-    const [library, sets, groups, localSets] = await Promise.all([
-      context.api("/api/catalog/factors"),
-      context.api("/api/catalog/factor-sets"),
-      context.api("/api/catalog/product-groups"),
-      nativeRequest("catalog").catch(() => ({items: []})),
-    ]);
+    const [libraryResult, setsResult, groupsResult, localSetsResult] =
+      await Promise.allSettled([
+        context.api("/api/catalog/factors"),
+        context.api("/api/catalog/factor-sets"),
+        context.api("/api/catalog/product-groups"),
+        nativeRequest("catalog").catch(() => ({items: []})),
+      ]);
+    if (libraryResult.status !== "fulfilled") throw libraryResult.reason;
+    const library = libraryResult.value || {};
+    const sets = setsResult.status === "fulfilled" ? setsResult.value : {};
+    const groups = groupsResult.status === "fulfilled" ? groupsResult.value : {};
+    const localSets = localSetsResult.status === "fulfilled"
+      ? localSetsResult.value : {items: []};
     cache = {
       factors: Array.isArray(library.factors) ? library.factors : [],
       families: Array.isArray(library.families) ? library.families : [],

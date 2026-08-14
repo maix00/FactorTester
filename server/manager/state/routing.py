@@ -8,6 +8,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.domain.federation import (
     ServiceRoute,
@@ -126,6 +127,7 @@ class RoutingStateMixin:
                 or "http://127.0.0.1:7998"
             ).strip().rstrip("/"),
             features=tuple(sorted({*self.server_features, *features})),
+            public_server=bool(self.public_server),
             online=self._port_is_in_use(int(port)) if online is None else bool(online),
             load=float(metrics.get("load") or 0.0),
             active_jobs=int(metrics.get("active_jobs") or 0),
@@ -255,7 +257,9 @@ class RoutingStateMixin:
                 source.get("available_product_count") or 0
             ),
             "capability_revision": str(source.get("revision") or ""),
+            "public_server": bool(route.public_server),
         }
+        return payload
 
     def federated_source_descriptors(
         self, *, refresh: bool = False,
@@ -296,6 +300,7 @@ class RoutingStateMixin:
             port=7998,
             endpoint=local_reference,
             online=True,
+            public_server=bool(self.public_server),
             latency_ms=0.0,
         )
         local_ports_values = [route.port for route in local_ports]

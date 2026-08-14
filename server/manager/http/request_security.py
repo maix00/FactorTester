@@ -15,6 +15,14 @@ from server.manager.http.pages import (
     safe_login_next as manager_safe_login_next,
 )
 from server.manager.http.responses import json_response
+from server.manager.http.visitor_access import (
+    VISITOR_COOKIE,
+    VISITOR_MODE,
+    VisitorMode,
+    request_origin,
+    target_visitor_url,
+    visitor_cookie,
+)
 
 
 MANAGER_ACTION_PATHS = frozenset({
@@ -188,6 +196,109 @@ class RequestSecurityMixin:
                 return value.strip()
         return ""
 
+    def _cookie_value(self, name: str) -> str:
+        for item in self.headers.get("Cookie", "").split(";"):
+            key, separator, value = item.strip().partition("=")
+            if separator and key == name:
+                return value.strip()
+        return ""
+
+    def _request_origin(self) -> str:
+        scheme = (
+            "https"
+            if self._is_https_proxy_request() or self._is_direct_https_request()
+            else "http"
+        )
+        return request_origin(
+            scheme=scheme,
+            host=self.headers.get("Host", ""),
+        )
+
+    def _visitor_mode(self) -> VisitorMode | None:
+        """Return the public anonymous capability set for this origin."""
+        if not (
+            getattr(self.state, "require_login_for_ui", False)
+            and getattr(self.state, "public_server", False)
+        ):
+            return None
+        origin = self._request_origin()
+        token = self._cookie_value(VISITOR_COOKIE)
+        store = getattr(self.state, "visitor_access", None)
+        if not origin or not token or store is None:
+            return None
+        if not store.valid_session(token, target_origin=origin):
+            return None
+        return VISITOR_MODE
+
+    def _anonymous_ui_allowed(self) -> bool:
+        return (
+            not self.state.require_login_for_ui
+            or self._visitor_mode() is not None
+        )
+
+    def _visitor_entry_origin_allowed(self) -> bool:
+        return self._request_origin() in tuple(
+            getattr(self.state, "visitor_entry_origins", ())
+        )
+
+    def _visitor_redirect_target(self) -> str:
+        target = str(
+            getattr(self.state, "manager_public_endpoint", "") or ""
+        ).strip()
+        return target if target.startswith("https://") else ""
+
+    def _send_redirect(self, location: str, *, cookie: str = "") -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _serve_visitor_entry(self, parsed) -> None:
+        requested = parse_qs(parsed.query, keep_blank_values=True).get(
+            "next", ["/"]
+        )[0]
+        next_path = manager_safe_login_next(str(requested or "/"))
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        store = getattr(self.state, "visitor_access", None)
+
+        if (
+            store is not None
+            and target_origin
+            and current_origin in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+        ):
+            grant = store.issue_grant(target_origin)
+            self._send_redirect(
+                target_visitor_url(
+                    target_origin,
+                    grant=grant,
+                    next_path=next_path,
+                )
+            )
+            return
+
+        if store is not None and current_origin == target_origin:
+            grant = parse_qs(parsed.query, keep_blank_values=True).get(
+                "grant", [""]
+            )[0]
+            token = store.redeem_grant(grant, target_origin=target_origin)
+            if token:
+                self._send_redirect(
+                    next_path,
+                    cookie=visitor_cookie(token, secure=True),
+                )
+                return
+
+        self._send_redirect(
+            "/compliance?next=" + quote(next_path, safe="/?=&%")
+        )
+
     def _session(self) -> dict[str, object] | None:
         return self.state.session(self._bearer_token())
 
@@ -196,7 +307,13 @@ class RequestSecurityMixin:
             "next", ["/"]
         )[0]
         if self.state.require_device_auth and not self._is_loopback_client():
-            self._serve_compliance_page(str(requested or "/"))
+            self._serve_compliance_page(
+                str(requested or "/"),
+                show_visitor_entry=(
+                    self._visitor_mode() is None
+                    and self._visitor_entry_origin_allowed()
+                ),
+            )
             return
         body = manager_login_page(
             str(requested or "/"),
@@ -220,10 +337,44 @@ class RequestSecurityMixin:
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_compliance_page(self, next_path: str = "/") -> None:
+    def _serve_compliance_page(
+        self,
+        next_path: str = "/",
+        *,
+        show_visitor_entry: bool | None = None,
+    ) -> None:
+        if show_visitor_entry is None:
+            show_visitor_entry = (
+                self._visitor_mode() is None
+                and self._visitor_entry_origin_allowed()
+            )
+        visitor_entry_href = ""
+        if show_visitor_entry:
+            visitor_entry_href = (
+                "/visitor?next="
+                + quote(manager_safe_login_next(next_path), safe="/?=&%")
+            )
+        device_auth_target = ""
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        if (
+            current_origin
+            and target_origin
+            and current_origin != target_origin
+            and current_origin in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+        ):
+            device_auth_target = (
+                target_origin
+                + "/compliance?next="
+                + quote(manager_safe_login_next(next_path), safe="/?=&%")
+            )
         body = manager_compliance_page(
             next_path,
             accept_language=self.headers.get("Accept-Language", ""),
+            visitor_entry_href=visitor_entry_href,
+            device_auth_target=device_auth_target,
         )
         self._send_html(body)
 
@@ -233,6 +384,13 @@ class RequestSecurityMixin:
             # The local Manager deliberately keeps its existing unauthenticated
             # panel behavior.  Route-specific APIs still enforce their own
             # user or capability checks below.
+            return True
+
+        if self._visitor_mode() is not None:
+            # The visitor capability intentionally reuses the local
+            # unauthenticated route behavior.  Route handlers still enforce
+            # their own session/capability checks for private and mutating
+            # operations.
             return True
 
         path = parsed.path
@@ -276,9 +434,9 @@ class RequestSecurityMixin:
 
         if method == "GET" and path == "/api/server/network-info":
             # The local home page may display the Manager-provided LAN
-            # address before login.  A public endpoint still needs a session;
-            # the route itself repeats this distinction as defence in depth.
-            if self._is_private_lan_client():
+            # and public-node summary in visitor mode as well as on a LAN.
+            # The route itself repeats this distinction as defence in depth.
+            if self._is_private_lan_client() or self._visitor_mode() is not None:
                 return True
 
         if path in {"/api/device/challenge", "/api/device/verify"}:

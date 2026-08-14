@@ -30,6 +30,7 @@ class JobListRoutesMixin:
             return True
         if parsed.path == "/api/jobs":
             session = self._session()
+            visitor = self._visitor_mode()
             query = parse_qs(parsed.query, keep_blank_values=True)
             scope = str(query.get("scope", [""])[0] or "").strip().lower()
             if not scope:
@@ -62,8 +63,11 @@ class JobListRoutesMixin:
                 }, 400)
                 return True
             if session is None:
-                limit = min(limit, 20)
-                principal = "__public_jobs__"
+                limit = min(limit, visitor.max_server_jobs if visitor else 20)
+                principal = (
+                    visitor.principal if visitor is not None
+                    else "__public_jobs__"
+                )
             else:
                 principal = str(session["username"])
             if scope == "cross-server":
@@ -129,7 +133,9 @@ class JobListRoutesMixin:
                 # Server history is a public projection backed by the shared
                 # job repository.  Keep its cache fallback so a stale
                 # service process cannot turn the whole task page into 502.
-                cursor = str(query.get("cursor", [""])[0] or "")
+                cursor = "" if visitor is not None else str(
+                    query.get("cursor", [""])[0] or ""
+                )
                 try:
                     if session is not None and str(session.get("role") or "") == "super_admin":
                         payload = self.state.aggregate_server_jobs(
@@ -154,6 +160,20 @@ class JobListRoutesMixin:
                             if fallback_port is None:
                                 fallback_port = self.state.preferred_service_port() or 0
                             item["port"] = fallback_port
+                if visitor is not None:
+                    # A visitor sees one bounded snapshot, never a cursor
+                    # that can be used to walk beyond the newest 20 jobs.
+                    payload = dict(payload)
+                    payload["jobs"] = list(
+                        payload.get("jobs") or ()
+                    )[:visitor.max_server_jobs]
+                    payload.update({
+                        "page": 1,
+                        "total": len(payload["jobs"]),
+                        "total_pages": 1,
+                        "has_more": False,
+                        "next_cursor": None,
+                    })
                 json_response(self, payload)
                 return True
             try:

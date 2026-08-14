@@ -82,6 +82,9 @@ class FederationSyncWorker:
             proxy_token=str(peer.get("proxy_token") or ""),
             remote=True,
             online=bool(peer.get("online", True)),
+            public_server=bool(
+                peer.get("public_server", peer.get("role") == "main")
+            ),
         )
 
     def sync_once(self) -> list[dict[str, object]]:
@@ -155,4 +158,3 @@ class FederationSyncWorker:
             except Exception as exc:  # pragma: no cover - defensive daemon guard
                 print(f"[federation] control sync failed: {exc}", flush=True)
             self._stop.wait(self.interval)
-

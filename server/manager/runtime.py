@@ -81,6 +81,11 @@ from server.manager.http.security import (
     enable_server_tls,
     server_tls_context,
 )
+from server.manager.http.visitor_access import (
+    VisitorAccessStore,
+    configured_manager_endpoint,
+    configured_visitor_origins,
+)
 from server.manager.state.models import (
     ServiceBundle,
     Worktree,
@@ -218,6 +223,9 @@ class ManagerState(
             "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
         )
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
+        self.visitor_entry_origins = configured_visitor_origins()
+        self.manager_public_endpoint = configured_manager_endpoint()
+        self.visitor_access = VisitorAccessStore()
         self.federation_registration_token = os.environ.get(
             "FACTORTESTER_FEDERATION_REGISTRATION_TOKEN", ""
         ).strip()

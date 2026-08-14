@@ -43,6 +43,8 @@
       if (!response.ok) {
         const error = new Error(value.error || `HTTP ${response.status}`);
         error.status = response.status;
+        error.code = value.code || "";
+        error.redirect = value.redirect || "";
         error.path = path;
         throw error;
       }

@@ -43,7 +43,7 @@
     root.append(sourceSummary(context, current));
     const table = FTUI.table(
       [context.t("数据源名称"), context.t("Bundle"), context.t("服务器提供"),
-        context.t("提供服务器"),
+        context.t("提供服务器"), context.t("访客访问"),
         context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
         context.t("可用性"), context.t("数据频率")],
       rows.map(([, descriptor]) => [
@@ -55,6 +55,7 @@
         ], "catalog-source-lines catalog-source-bundle"),
         descriptor.server_provided ? context.t("是") : context.t("否"),
         providersCell(context, descriptor),
+        visitorAccessCell(context, descriptor),
         multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
         multilineCell((descriptor.categories || []).map(category =>
           category.title_zh || category.title || category.id || "").filter(Boolean)),
@@ -66,6 +67,11 @@
     rows.forEach(([origin, descriptor], index) => {
       const row = table.body.rows[index];
       row.dataset.href = "true";
+      if (descriptor.visitor_data_accessible === false) {
+        row.classList.add("is-unavailable");
+        row.title = context.t("访客只能查看该数据源信息，不能获取数据");
+        return;
+      }
       row.addEventListener("click", () => context.navigate(pathFor(
         "/products", origin.id, descriptor.id && descriptor.id !== "—"
           ? [descriptor.id] : [],
@@ -97,6 +103,16 @@
       showProvidersOverlay(context, descriptor);
     });
     return button;
+  }
+
+  function visitorAccessCell(context, descriptor) {
+    if (descriptor.visitor_data_accessible === true) {
+      return context.t("可获取");
+    }
+    if (descriptor.visitor_data_accessible === false) {
+      return context.t("仅显示，访客不可获取");
+    }
+    return "—";
   }
 
   function showProvidersOverlay(context, descriptor) {

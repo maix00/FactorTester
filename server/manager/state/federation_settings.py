@@ -69,6 +69,9 @@ class FederationSettingsStateMixin:
             server_role=self.server_role,
             public_server=self.public_server,
             request_endpoint=request_endpoint,
+            manager_public_endpoint=str(
+                getattr(self, "manager_public_endpoint", "") or ""
+            ),
         )
 
     def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
@@ -118,4 +121,3 @@ class FederationSettingsStateMixin:
             self.update_federation_config({})
         except (OSError, TypeError, ValueError) as exc:
             print(f"[federation] configured bootstrap is unavailable: {exc}", flush=True)
-

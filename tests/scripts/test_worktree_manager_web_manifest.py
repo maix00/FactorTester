@@ -717,14 +717,16 @@ def test_web_shell_restores_an_http_only_manager_cookie_without_a_saved_token() 
     assert "if (hadSavedToken)" in coordinator
 
 
-def test_home_prefers_the_discovered_public_server_over_the_peer_callback() -> None:
+def test_home_renders_server_provided_network_addresses() -> None:
     coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
 
-    assert (
-        'const publicEndpoint = inferred?.endpoint\n'
-        '        || (value.public_server ? value.advertised_public_endpoint : "")'
-    ) in coordinator
-    assert '|| (value.public_server ? value.server_id : "")' in coordinator
+    assert "value.internal_server_addresses" in coordinator
+    assert "value.public_server_addresses" in coordinator
+    assert '"内网服务器 IP 地址"' in coordinator
+    assert '"公网服务器 IP 地址"' in coordinator
+    assert 't("无在线内网服务器")' in coordinator
+    assert 't("无在线公网服务器")' in coordinator
+    assert "content.append(line)" in coordinator
 
 
 def test_embedded_authentication_uses_the_native_session_store() -> None:
