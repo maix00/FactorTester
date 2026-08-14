@@ -1408,11 +1408,18 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/test-templates.js", "workbench/test-content-adapters.js",
             "workbench/templates/actions.js",
             "workbench/test-run-results.js",
+            "workbench/run-batch/model.js",
             "workbench/test-run-batch.js",
+            "workbench/run-batch/actions.js",
             "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
-                scripts[relative.rsplit("/", 1)[-1]] = response.read().decode("utf-8")
+                key = (
+                    "run-batch-actions.js"
+                    if relative == "workbench/run-batch/actions.js"
+                    else relative.rsplit("/", 1)[-1]
+                )
+                scripts[key] = response.read().decode("utf-8")
             if relative in initial_scripts:
                 assert f'/research-static/{relative}' in shell
             else:
@@ -1422,13 +1429,13 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
     assert "/api/workspaces" in scripts["tests.js"]
     assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
-    assert "/api/runs/preview" in scripts["test-run-batch.js"]
-    assert "ensureRunSubmitCode" in scripts["test-run-batch.js"]
+    assert "/api/runs/preview" in scripts["run-batch-actions.js"]
+    assert "ensureRunSubmitCode" in scripts["run-batch-actions.js"]
     assert "workbench-run-submit" in scripts["tests.js"]
-    assert 'analyses: [state.kind]' in scripts["test-run-batch.js"]
-    assert "/api/runs" in scripts["test-run-batch.js"]
-    assert 'servicePath("/api/runs/preview")' in scripts["test-run-batch.js"]
-    assert 'servicePath("/api/runs")' in scripts["test-run-batch.js"]
+    assert 'analyses: [state.kind]' in scripts["run-batch-actions.js"]
+    assert "/api/runs" in scripts["run-batch-actions.js"]
+    assert 'servicePath("/api/runs/preview")' in scripts["run-batch-actions.js"]
+    assert 'servicePath("/api/runs")' in scripts["run-batch-actions.js"]
     assert "FTICResults?.section" in scripts["test-run-results.js"]
     assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
     assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]

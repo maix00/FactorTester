@@ -3,11 +3,27 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 global.window = {};
+let actionLoaded = false;
+const lazyGroups = [];
+global.window.FTStaticLoader = {
+  async loadGroups(names) {
+    lazyGroups.push(...names);
+    if (names.includes("workbench-run-batch-actions") && !actionLoaded) {
+      vm.runInThisContext(fs.readFileSync(
+        "server/manager/web/workbench/run-batch/actions.js", "utf8",
+      ), {filename: "run-batch/actions.js"});
+      actionLoaded = true;
+    }
+  },
+};
 global.FTTestProducts = {
   selectedGroups: state => state.groups,
   groupID: group => group.id,
   groupLabel: group => group.label,
 };
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/workbench/test-lazy-code.js", "utf8",
+), {filename: "test-lazy-code.js"});
 let revision = 0;
 global.FTTestConfiguration = {
   async save(_context, state, group) {
@@ -30,6 +46,10 @@ vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/test-run-fields.js", "utf8",
 ), {filename: "test-run-fields.js"});
 global.FTTestRunFields = window.FTTestRunFields;
+
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/workbench/run-batch/model.js", "utf8",
+), {filename: "run-batch/model.js"});
 
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/test-run-batch.js", "utf8",
@@ -101,6 +121,7 @@ const backtest = {
 
 (async () => {
   const batch = window.FTTestRunBatch;
+  assert.equal(actionLoaded, false, "submission code must not load with the batch view");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");
   await batch.previewAll(context, state, () => {});
@@ -128,6 +149,8 @@ const backtest = {
     "UploadedMomentum");
   assert.equal(navigated, false, "submission must keep the test page visible");
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 3);
+  assert.equal(actionLoaded, true, "the first explicit action loads submission code");
+  assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
   assert.ok(requests.slice(0, 4).every(item => item.body.retention_mode === "full"));
   assert.ok(requests.slice(0, 4).every(item => (
     JSON.stringify(item.body.output_requests) === JSON.stringify(["ic_series", "ic_statistics"])

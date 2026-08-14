@@ -39,6 +39,15 @@
     return ensureGroupCode(state, "runBatchCode", "workbench-run-batch", null, refresh);
   }
 
+  function ensureRunBatchActionsCode(state, refresh) {
+    if (window.FTTestRunBatchActions) return Promise.resolve();
+    return ensureGroupCode(
+      state, "runBatchActionsCode", "workbench-run-batch-actions", null, refresh,
+    ).then(() => {
+      if (!window.FTTestRunBatchActions) throw new Error("任务提交动作不可用");
+    });
+  }
+
   function codeGroupForTab(tab) {
     return {
       factor_selection: "workbench-factors",
@@ -87,7 +96,8 @@
   }
 
   window.FTTestLazyCode = Object.freeze({
-    codeGroupForTab, deferredPanel, ensureGroupCode, ensureRunBatchCode,
+    codeGroupForTab, deferredPanel, ensureGroupCode, ensureRunBatchActionsCode,
+    ensureRunBatchCode,
     fallbackGroupReferences, groupID, hasSelectedProductPaths, loadGroup,
   });
 })();

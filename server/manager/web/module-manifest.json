@@ -41,7 +41,8 @@
     "workbench-product-controls": ["workbench-core"],
     "workbench-source-inputs": ["workbench-input-state"],
     "workbench-run": ["workbench-core", "workbench-settings-controls"],
-    "workbench-run-batch": ["workbench-run", "workbench-products", "workbench-input-state"],
+    "workbench-run-batch": ["workbench-run", "workbench-products"],
+    "workbench-run-batch-actions": ["workbench-run-batch", "workbench-input-state"],
     "workbench-run-results": ["workbench-run"],
     "workbench-run-submit": ["workbench-run", "workbench-compiler"],
     "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
@@ -235,8 +236,12 @@
       "workbench/test-outputs.js"
     ],
     "workbench-run-batch": [
+      "workbench/run-batch/model.js",
       "workbench/test-run-summary.js",
       "workbench/test-run-batch.js"
+    ],
+    "workbench-run-batch-actions": [
+      "workbench/run-batch/actions.js"
     ],
     "workbench-run-results": [
       "workbench/test-run-results.js"
@@ -399,9 +404,11 @@
     "workbench/test-content-adapters.js",
     "workbench/test-run-fields.js",
     "workbench/test-outputs.js",
+    "workbench/run-batch/model.js",
     "workbench/test-run-summary.js",
     "workbench/test-run-results.js",
     "workbench/test-run-batch.js",
+    "workbench/run-batch/actions.js",
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",

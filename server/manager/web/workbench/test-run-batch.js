@@ -1,22 +1,17 @@
 (() => {
-  const PHASE_LABELS = {
-    idle: "尚未提交",
-    freezing: "正在冻结配置",
-    frozen: "配置已冻结",
-    submitting: "正在提交",
-    submitted: "已提交",
-    planning: "规划中",
-    awaiting_confirmation: "等待确认",
-    queued: "排队中",
-    running: "运行中",
-    paused: "已暂停",
-    succeeded: "成功",
-    cancelled: "已取消",
-    failed: "失败",
-  };
+  const model = () => window.FTTestRunBatchModel;
 
-  function groupIdentity(group) {
-    return String(FTTestProducts.groupID(group) || "");
+  function ensureActions(state, refresh) {
+    if (window.FTTestRunBatchActions) {
+      return Promise.resolve(window.FTTestRunBatchActions);
+    }
+    const load = window.FTTestLazyCode?.ensureRunBatchActionsCode;
+    if (!load) return Promise.reject(new Error("任务提交动作加载器不可用"));
+    return load(state, refresh).then(() => window.FTTestRunBatchActions);
+  }
+
+  function invokeAction(name, args) {
+    return ensureActions(args[1], args[3]).then(actions => actions[name](...args));
   }
 
   function ensureResultCode(state, item, refresh) {
@@ -56,165 +51,18 @@
     return FTTestRunResults.render(context, state, item, refresh);
   }
 
-  function synchronize(state) {
-    const prior = new Map((state.testRunBatch || []).map(item => [item.groupID, item]));
-    state.testRunBatch = FTTestProducts.selectedGroups(state).map(group => {
-      const groupID = groupIdentity(group);
-      return {
-        phase: "idle", runSpecHash: "", runID: "", jobID: "", port: 0,
-        error: "", ...prior.get(groupID), groupID,
-        groupLabel: FTTestProducts.groupLabel(group),
-      };
-    });
-    if (!state.testRunBatch.some(item => item.groupID === state.activeRunGroupID)) {
-      state.activeRunGroupID = state.testRunBatch[0]?.groupID || "";
-    }
-    return state.testRunBatch;
-  }
-
-  function itemFor(state, group) {
-    const groupID = groupIdentity(group);
-    return synchronize(state).find(item => item.groupID === groupID);
-  }
-
-  async function runRequest(context, state) {
-    // The workbench can render and edit a frozen request without the report
-    // reference runtime.  Load it only when a preview/run actually needs to
-    // build a report/run-spec link or submit the request.
-    await window.FTStaticLoader?.loadGroups?.(["research"]);
-    await window.FTTests?.ensureFactorsForExecution?.(context, state);
-    await window.FTTests?.ensureProductsForExecution?.(context, state);
-    const factorSets = window.FTTestFactorSets;
-    const descriptors = factorSets?.selections?.(state)?.length
-      ? await factorSets.descriptors(
-        context, state, FTTestConfiguration.executionFactors(state),
-      )
-      : [];
-    return {
-      workspace_id: state.workspace.workspace_id,
-      configuration_revision: state.workspace.configuration?.revision,
-      analyses: [state.kind],
-      ...FTTestRunFields.requestBody(state),
-      ...FTTestInputState.requestBody(state),
-      ...(descriptors.length ? {factor_subject_descriptors: descriptors} : {}),
-    };
-  }
-
-  function recordPreview(item, value) {
-    item.phase = "frozen";
-    item.runSpecHash = String(value.run_spec_hash || "").replace(/^sha256:/, "");
-    item.error = "";
-    return item;
-  }
-
-  function recordSubmission(item, value) {
-    const job = value.jobs?.[0];
-    if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
-    item.phase = "submitted";
-    item.jobID = String(job.job_id);
-    item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
-    item.runSpecHash = String(
-      value.run?.run_spec_hash || job.run_spec_hash || item.runSpecHash || "",
-    ).replace(/^sha256:/, "");
-    item.port = Number(value.port || job.server_context?.port || job.port || 0);
-    item.detailPayload = null;
-    item.taskDetail = null;
-    item.job = null;
-    item.portQuery = "";
-    item.resultError = "";
-    item.error = "";
-    return item;
-  }
-
-  function runSpecPath(item) {
-    if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
-    const target = `runspec:sha256:${item.runSpecHash}`;
-    if (window.FTReferencePage?.routeFor) {
-      return FTReferencePage.routeFor("run-spec", target, "运行配置");
-    }
-    const query = new URLSearchParams({kind: "run-spec", target, label: "运行配置"});
-    return `/reference?${query}`;
-  }
-
-  function jobPath(item) {
-    if (!item?.jobID) return "";
-    return item.port
-      ? `/jobs/${item.port}/${encodeURIComponent(item.jobID)}`
-      : `/jobs/${encodeURIComponent(item.jobID)}`;
-  }
-
-  function update(item, phase, refresh) {
-    item.phase = phase;
-    item.error = "";
-    refresh?.();
-  }
-
-  async function previewOne(context, state, group, refresh) {
-    const item = itemFor(state, group);
-    update(item, "freezing", refresh);
-    try {
-      await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
-      await window.FTTests?.ensureProductsForExecution?.(context, state);
-      await window.FTTests?.ensureRunSubmitCode?.(context, state);
-      const configuration = await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(context.servicePath("/api/runs/preview"), {
-        method: "POST",
-        body: JSON.stringify({
-          ...await runRequest(context, state),
-          configuration_revision: configuration.revision,
-        }),
-      });
-      recordPreview(item, value);
-      refresh?.();
-      return true;
-    } catch (error) {
-      item.phase = "failed";
-      item.error = error.message || String(error);
-      refresh?.();
-      return false;
-    }
-  }
-
-  async function runOne(context, state, group, refresh) {
-    const item = itemFor(state, group);
-    state.activeRunGroupID = item.groupID;
-    update(item, "submitting", refresh);
-    try {
-      await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
-      await window.FTTests?.ensureProductsForExecution?.(context, state);
-      await window.FTTests?.ensureRunSubmitCode?.(context, state);
-      const configuration = await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(context.servicePath("/api/runs"), {
-        method: "POST",
-        body: JSON.stringify({
-          ...await runRequest(context, state),
-          configuration_revision: configuration.revision,
-        }),
-      });
-      recordSubmission(item, value);
-      refresh?.();
-      return true;
-    } catch (error) {
-      item.phase = "failed";
-      item.error = error.message || String(error);
-      refresh?.();
-      return false;
-    }
-  }
-
-  async function previewAll(context, state, refresh) {
-    for (const group of FTTestProducts.selectedGroups(state)) {
-      await previewOne(context, state, group, refresh);
-    }
-    return synchronize(state);
-  }
-
-  async function runAll(context, state, refresh) {
-    for (const group of FTTestProducts.selectedGroups(state)) {
-      await runOne(context, state, group, refresh);
-    }
-    return synchronize(state);
-  }
+  // Keep the public batch interface stable while deferring the execution
+  // implementation.  Loading the view never loads compiler, source, or
+  // submission code; these wrappers are the only action seam.
+  function previewOne(...args) { return invokeAction("previewOne", args); }
+  function previewAll(...args) { return invokeAction("previewAll", args); }
+  function runOne(...args) { return invokeAction("runOne", args); }
+  function runAll(...args) { return invokeAction("runAll", args); }
+  function synchronize(...args) { return model().synchronize(...args); }
+  function recordPreview(...args) { return model().recordPreview(...args); }
+  function recordSubmission(...args) { return model().recordSubmission(...args); }
+  function runSpecPath(...args) { return model().runSpecPath(...args); }
+  function jobPath(...args) { return model().jobPath(...args); }
 
   function link(context, label, path) {
     if (!path) return document.createTextNode("—");
@@ -238,7 +86,7 @@
     title.append(name, identity);
     const status = document.createElement("span");
     status.className = `test-run-status ${item.phase}`;
-    status.textContent = context.t(PHASE_LABELS[item.phase] || item.phase);
+    status.textContent = context.t(model().PHASE_LABELS[item.phase] || item.phase);
     heading.append(title, status);
 
     const details = document.createElement("dl");
@@ -255,10 +103,10 @@
 
     const actions = document.createElement("div"); actions.className = "test-run-card-actions";
     const preview = context.button(context.t("预览冻结配置"), () => (
-      previewOne(context, state, group, refresh)
+      invokeAction("previewOne", [context, state, group, refresh])
     ));
     const submit = context.button(context.t("运行测试"), () => (
-      runOne(context, state, group, refresh)
+      invokeAction("runOne", [context, state, group, refresh])
     ));
     const busy = ["freezing", "submitting"].includes(item.phase);
     preview.disabled = busy; submit.disabled = busy;
@@ -282,7 +130,7 @@
       button.classList.toggle("active", item.groupID === state.activeRunGroupID);
       const name = document.createElement("span"); name.textContent = item.groupLabel;
       const status = document.createElement("small");
-      status.textContent = context.t(PHASE_LABELS[item.phase] || item.phase);
+      status.textContent = context.t(model().PHASE_LABELS[item.phase] || item.phase);
       button.append(name, status);
       button.addEventListener("click", () => {
         state.activeRunGroupID = item.groupID;
@@ -306,7 +154,7 @@
       return root;
     }
     const groups = products.selectedGroups(state);
-    const items = synchronize(state);
+    const items = model().synchronize(state);
     const root = document.createElement("section"); root.className = "test-run-batch";
     const heading = document.createElement("div"); heading.className = "section-heading";
     const copy = document.createElement("div");
@@ -317,7 +165,9 @@
     const actions = document.createElement("div"); actions.className = "test-run-batch-actions";
     actions.append(
       context.button(context.t("全部预览"), () => previewAll(context, state, refresh)),
-      context.button(context.t("全部运行"), () => runAll(context, state, refresh)),
+      context.button(context.t("全部运行"), () => invokeAction(
+        "runAll", [context, state, refresh],
+      )),
     );
     heading.append(copy, actions); root.append(heading);
     const matrix = FTTestRunSummary?.planSummary?.(context, state);

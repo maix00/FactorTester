@@ -599,7 +599,10 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
     assert manifest["group_dependencies"]["workbench-run-batch"] == [
-        "workbench-run", "workbench-products", "workbench-input-state",
+        "workbench-run", "workbench-products",
+    ]
+    assert manifest["group_dependencies"]["workbench-run-batch-actions"] == [
+        "workbench-run-batch", "workbench-input-state",
     ]
     assert manifest["group_dependencies"]["workbench-run-results"] == [
         "workbench-run",
@@ -609,8 +612,12 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench/test-outputs.js",
     }
     assert manifest["groups"]["workbench-run-batch"] == [
+        "workbench/run-batch/model.js",
         "workbench/test-run-summary.js",
         "workbench/test-run-batch.js",
+    ]
+    assert manifest["groups"]["workbench-run-batch-actions"] == [
+        "workbench/run-batch/actions.js",
     ]
     assert manifest["groups"]["workbench-run-results"] == [
         "workbench/test-run-results.js",
@@ -651,6 +658,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         research_static._initial_scripts(manifest)
     )
     assert not set(manifest["groups"]["workbench-run-batch"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert not set(manifest["groups"]["workbench-run-batch-actions"]) & set(
         research_static._initial_scripts(manifest)
     )
     assert "workbench/factor-roles.js" not in manifest["groups"]["workbench-core"]
@@ -700,10 +710,22 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         encoding="utf-8",
     )
     assert '"workbench-run-batch"' in lazy_code
+    assert '"workbench-run-batch-actions"' in lazy_code
+    assert "ensureRunBatchActionsCode" in lazy_code
     assert "ensureGroupCode" in lazy_code
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
+    run_actions = (WEB_ROOT / "workbench" / "run-batch" / "actions.js").read_text(
+        encoding="utf-8",
+    )
     assert 'loadGroups?.(["workbench-run-results"])' in run_batch
     assert "FTTestRunSummary?.planSummary" in run_batch
+    assert "ensureRunBatchActionsCode" in run_batch
+    assert "context.api(" not in run_batch
+    assert "FTTestInputState.requestBody" not in run_batch
+    assert "FTTestConfiguration.save" not in run_batch
+    assert "context.api(" in run_actions
+    assert "FTTestInputState.requestBody" in run_actions
+    assert "FTTestConfiguration.save" in run_actions
     assert 'run_inputs: "workbench-source-inputs"' in (
         WEB_ROOT / "workbench" / "test-lazy-code.js"
     ).read_text(encoding="utf-8")
@@ -958,8 +980,11 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
-    assert "function jobPath(item)" in run_batch
-    assert "function runSpecPath(item)" in run_batch
+    run_batch_model = (WEB_ROOT / "workbench" / "run-batch" / "model.js").read_text(
+        encoding="utf-8",
+    )
+    assert "function jobPath(item)" in run_batch_model
+    assert "function runSpecPath(item)" in run_batch_model
     assert '"查看运行配置", runSpecPath(item)' in run_batch
 
 

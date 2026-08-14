@@ -38,9 +38,15 @@ single source of truth for the script order and semantic module groups.
   the factor-library page and the local side supplied only by the embedded
   client's frozen Git-revision bridge; `workbench/test-run-fields.js` and
   `workbench/test-run-summary.js` are the lightweight run-surface seam;
-  `workbench/test-run-batch.js` is loaded separately only after a product path
-  is selected, and owns IC/backtest submission plus each frozen RunSpec and Job
-  link; `workbench/test-run-results.js` is another result-code group loaded only
+  `workbench/run-batch/model.js` owns batch identity, state transitions, and
+  frozen RunSpec/Job links. `workbench/test-run-batch.js` is loaded separately
+  only after a product path is selected and owns the batch view and result
+  bridge. `workbench/run-batch/actions.js` is a second, action-only group: it
+  contains source serialization, compiler loading, preview, and submission
+  network code and is loaded only when the user explicitly previews or runs a
+  batch. This keeps the common matrix view cheap without weakening the public
+  `FTTestRunBatch` seam; its action methods are deferred adapters.
+  `workbench/test-run-results.js` is another result-code group loaded only
   after a submitted Job has a result to inspect;
   `workbench/tab-list-chip.js` is loaded only with the backtest strategy-list
   group, not with the shared settings shell; template presentation and
@@ -207,9 +213,11 @@ strategy, and dependency inspection; a `run_inputs` tab loads that code only
 when opened, while the factor picker declares it as a dependency. `workbench-run`
 contains only run-spec fields and output choices; it is requested when the run
 surface is materialized. The separate `workbench-run-batch` group owns the run
-matrix summary and batch actions, depends on it and on the product adapter,
+matrix summary, batch model, and view, depends on it and on the product adapter,
 and is requested only when a saved or newly selected product path creates an
-actual task batch. `workbench-run-results` depends on `workbench-run` and contains only
+actual task batch. `workbench-run-batch-actions` depends on that view and on
+`workbench-input-state`; it is requested only by the explicit preview/run
+action seam. `workbench-run-results` depends on `workbench-run` and contains only
 the submitted-Job result bridge, loaded after a Job exists rather than while the
 empty run panel is first painted. The backtest `FTTabListChip`
 and strategy editors belong to
