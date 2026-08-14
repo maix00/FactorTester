@@ -23,7 +23,15 @@ class Element {
 }
 
 global.document = {createElement: tagName => new Element(tagName)};
-global.FTTestFactors = {panel: () => new Element("factor-panel")};
+global.FTUI = {
+  loading: () => new Element("loading"),
+  empty: () => new Element("empty"),
+};
+let factorPanelCalls = 0;
+global.FTTestFactors = {panel: () => {
+  factorPanelCalls += 1;
+  return new Element("factor-panel");
+}};
 global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => values};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
@@ -66,6 +74,7 @@ function render(factorAlias, onChipOpen) {
     activeTab: "factor",
     mountedTabs: ["factor", "time"],
     chipSources: {factorAlias: [factorAlias]},
+    lazyState: () => ({status: "ready"}),
     onTabChange: onChipOpen,
   });
 }
@@ -79,6 +88,7 @@ assert.equal(initial.hidden_default, "default");
 
 let opened = "";
 const first = render("ROC 1m", tabKey => { opened = tabKey; });
+assert.equal(factorPanelCalls, 1, "the active ready tab should load its adapter");
 assert.deepEqual(first.children.map(item => item.className), [
   "backend-settings-tab-bar",
   "test-settings-current",
@@ -120,4 +130,12 @@ const updatedGroup = updated.children[1].children[1].children.find(
 );
 const updatedChip = updatedGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(updatedChip.children[1].textContent, "SgCCS 5m");
+
+const callsBeforeLazyRender = factorPanelCalls;
+FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {t: value => value}, {
+  activeTab: "factor", mountedTabs: ["factor"],
+  lazyState: () => ({status: "idle"}), ensureTab: () => {},
+});
+assert.equal(factorPanelCalls, callsBeforeLazyRender,
+  "an idle tab must not execute its adapter code");
 console.log("ok");

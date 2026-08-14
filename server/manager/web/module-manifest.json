@@ -5,6 +5,59 @@
     "max_script_lines": 400,
     "max_style_lines": 500
   },
+  "initial_groups": ["core", "app"],
+  "initial_external_scripts": [],
+  "group_external_scripts": {
+    "report": ["katex/katex.min.js"],
+    "jobs": ["vendor/highcharts/highstock.min.js"],
+    "catalog": ["vendor/highcharts/highstock.min.js"]
+  },
+  "group_dependencies": {
+    "charts": ["core"],
+    "catalog-core": ["core"],
+    "output-choice": ["core"],
+    "research": ["report"],
+    "jobs": ["report", "charts", "output-choice"],
+    "catalog": ["catalog-core", "charts"],
+    "workbench-core": ["output-choice"],
+    "workbench-run": ["workbench-core"],
+    "workbench-factors": ["workbench-core", "catalog-core"],
+    "workbench-products": ["workbench-core", "catalog-core"],
+    "workbench-backtest": ["workbench-core"],
+    "workbench-templates": ["workbench-core"],
+    "settings": ["workbench-core"]
+  },
+  "route_groups": {
+    "report": ["report", "research"],
+    "public-reference": ["report", "research"],
+    "reference": ["report", "research"],
+    "research": ["research"],
+    "jobs": ["jobs"],
+    "job": ["jobs"],
+    "job-configuration": ["jobs", "research"],
+    "job-input": ["jobs"],
+    "ic-test": ["workbench-core"],
+    "backtest": ["workbench-core"],
+    "factor-evaluation": ["workbench-core"],
+    "factor-series": ["jobs"],
+    "test-template": ["workbench-templates"],
+    "factor-families": ["catalog"],
+    "factor-sets": ["catalog"],
+    "factor-family": ["catalog"],
+    "factor": ["catalog"],
+    "factor-set": ["catalog"],
+    "factors": ["catalog"],
+    "product-group": ["catalog"],
+    "product": ["catalog"],
+    "product-reference": ["catalog"],
+    "product-sources": ["catalog"],
+    "product-groups": ["catalog"],
+    "products": ["catalog"],
+    "profile": ["profile"],
+    "profiles": ["profile"],
+    "settings": ["settings"],
+    "manager": ["settings"]
+  },
   "external_styles": [
     "katex/katex.min.css"
   ],
@@ -19,11 +72,20 @@
   ],
   "groups": {
     "core": [
+      "core/module-loader.js",
       "core/i18n.js",
       "core/icons.js",
-      "core/shared-ui.js",
-      "core/price-chart.js",
-      "core/market-data.js",
+      "core/shared-ui.js"
+    ],
+    "charts": [
+      "core/price-chart.js"
+    ],
+    "catalog-core": [
+      "catalog/factor-model.js",
+      "catalog/product-category-model.js",
+      "catalog/product-tree.js"
+    ],
+    "output-choice": [
       "core/output-choices.js"
     ],
     "report": [
@@ -48,6 +110,7 @@
       "research/workspaces.js"
     ],
     "jobs": [
+      "core/market-data.js",
       "jobs/highcharts-viewers.js",
       "jobs/factor-series-model.js",
       "jobs/factor-series-chart.js",
@@ -74,52 +137,61 @@
       "jobs/detail.js"
     ],
     "catalog": [
-      "catalog/factor-model.js",
       "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
       "catalog/factor-details.js",
       "catalog/factors.js",
-      "catalog/product-category-model.js",
       "catalog/product-category-overlay.js",
-      "catalog/product-tree.js",
       "catalog/source-list.js",
       "catalog/products.js",
       "catalog/details.js"
     ],
-    "workbench": [
+    "workbench-core": [
       "workbench/setting-rules.js",
       "workbench/test-input-state.js",
       "workbench/test-configuration-compiler.js",
-      "workbench/ic-configuration.js",
-      "workbench/ic-horizon-settings.js",
+      "workbench/test-lazy-code.js",
       "workbench/factor-roles.js",
       "workbench/custom-product-overrides.js",
       "workbench/test-setting-chips.js",
       "workbench/tab-chip-content.js",
       "workbench/tab-list-chip.js",
       "workbench/test-settings.js",
-      "workbench/backtest-group-overrides.js",
+      "workbench/test-configuration.js",
+      "workbench/test-content-adapters.js",
+      "workbench/test-state.js",
+      "workbench/tests.js"
+    ],
+    "workbench-run": [
+      "workbench/test-run-fields.js",
+      "workbench/test-outputs.js",
+      "workbench/test-run-results.js",
+      "workbench/test-run-batch.js"
+    ],
+    "workbench-factors": [
+      "workbench/ic-configuration.js",
+      "workbench/ic-horizon-settings.js",
       "workbench/factor-selection.js",
       "workbench/factor-set-selection.js",
       "workbench/factor-family-picker.js",
       "workbench/test-source-upload.js",
-      "workbench/test-factors.js",
+      "workbench/test-factors.js"
+    ],
+    "workbench-products": [
       "workbench/product-group-creator.js",
       "workbench/test-products.js",
-      "workbench/test-categories.js",
+      "workbench/test-categories.js"
+    ],
+    "workbench-backtest": [
+      "workbench/backtest-group-overrides.js",
       "workbench/backtest-group-batches.js",
       "workbench/backtest-group-model.js",
       "workbench/strategy-list.js",
       "workbench/backtest-group-form.js",
-      "workbench/backtest-groups.js",
-      "workbench/test-configuration.js",
-      "workbench/test-templates.js",
-      "workbench/test-content-adapters.js",
-      "workbench/test-run-fields.js",
-      "workbench/test-outputs.js",
-      "workbench/test-run-results.js",
-      "workbench/test-run-batch.js",
-      "workbench/tests.js"
+      "workbench/backtest-groups.js"
+    ],
+    "workbench-templates": [
+      "workbench/test-templates.js"
     ],
     "profile": [
       "profile/profiles.js"
@@ -145,6 +217,7 @@
     "vendor/highcharts/highstock.min.js"
   ],
   "scripts": [
+    "core/module-loader.js",
     "core/i18n.js",
     "core/icons.js",
     "core/price-chart.js",
@@ -206,6 +279,8 @@
     "workbench/setting-rules.js",
     "workbench/test-input-state.js",
     "workbench/test-configuration-compiler.js",
+    "workbench/test-lazy-code.js",
+    "workbench/test-state.js",
     "workbench/ic-configuration.js",
     "workbench/ic-horizon-settings.js",
     "workbench/factor-roles.js",

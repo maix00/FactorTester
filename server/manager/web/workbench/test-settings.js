@@ -18,9 +18,9 @@
   }
 
   function initialValues(manifest, saved = {}, mountedTabs) {
-    return FTICHorizonSettings.normalizeSettingValues(
-      manifest, FTSettingRules.initialValues(manifest, saved, {mountedTabs}),
-    );
+    const values = FTSettingRules.initialValues(manifest, saved, {mountedTabs});
+    return window.FTICHorizonSettings?.normalizeSettingValues
+      ? FTICHorizonSettings.normalizeSettingValues(manifest, values) : values;
   }
 
   function render(manifest, values, context, options = {}) {
@@ -41,9 +41,13 @@
         key: runTab.key,
         label: context.t(runTab.label || runTab.key),
         panelClass: "run-settings-tab-panel",
-        render: () => FTTestRunFields.panel(
-          context, options.state, options.refresh,
-        ),
+        render: () => {
+          if (!window.FTTestRunFields) {
+            options.ensureRunCode?.();
+            return FTUI.loading(context.t("正在读取运行配置…"));
+          }
+          return FTTestRunFields.panel(context, options.state, options.refresh);
+        },
       });
     }
     items.push(...visible.map(item => ({
@@ -121,12 +125,25 @@
   function tabPanel(item, manifest, values, context, options) {
     const panel = document.createElement("div");
     panel.className = "test-settings-tab-content";
-    const adapted = FTTestContentAdapters.render(item.tab, {
-      context, state: options.state, refresh: options.refresh,
-      tab: item.tab,
-      actions: options.actions || {},
-    });
-    if (adapted) panel.append(adapted);
+    const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
+    const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
+    if (lazyKey && lazyState?.status !== "ready") {
+      if (lazyState?.status === "error") {
+        panel.append(FTUI.empty(
+          context.t("读取失败"), lazyState.error || context.t("请重试"),
+        ));
+      } else {
+        panel.append(FTUI.loading(context.t("正在读取此设置…")));
+      }
+      options.ensureTab?.(item.tab);
+    } else {
+      const adapted = FTTestContentAdapters.render(item.tab, {
+        context, state: options.state, refresh: options.refresh,
+        tab: item.tab,
+        actions: options.actions || {},
+      });
+      if (adapted) panel.append(adapted);
+    }
     if (item.fields.length) {
       const rows = document.createElement("div");
       rows.className = "test-setting-rows";

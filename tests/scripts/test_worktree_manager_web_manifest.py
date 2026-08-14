@@ -51,7 +51,12 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for line in html.splitlines()
         if 'href="/research-static/' in line and 'stylesheet' in line
     ]
-    assert script_paths == [*manifest["external_scripts"], *manifest["scripts"]]
+    initial_scripts = [
+        *manifest.get("initial_external_scripts", manifest["external_scripts"]),
+        *research_static._initial_scripts(manifest),
+    ]
+    assert script_paths == initial_scripts
+    assert set(initial_scripts).issubset(set(manifest["scripts"]))
     assert style_paths == [*manifest["external_styles"], *manifest["styles"]]
 
     discovered_scripts = {
@@ -340,10 +345,30 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     assert result.stdout.strip() == "ok"
 
 
-def test_research_shell_loads_the_owned_highstock_runtime() -> None:
+def test_research_shell_defers_heavy_chart_runtime() -> None:
     shell = research_static.shell_bytes().decode("utf-8")
+    loader = (WEB_ROOT / "core" / "module-loader.js").read_text(encoding="utf-8")
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
+    tests_module = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
-    assert '/research-static/vendor/highcharts/highstock.min.js?v=' in shell
+    assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
+    assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["jobs"]
+    assert "group_external_scripts" in loader
+    assert manifest["initial_groups"] == ["core", "app"]
+    initial = set(research_static._initial_scripts(manifest))
+    assert not any(path.startswith("workbench/") for path in initial)
+    assert not any(path.startswith("catalog/") for path in initial)
+    assert "preload" in loader
+    assert "protectedRouteKinds" in coordinator
+    state_loader = tests_module.split("async function loadState", 1)[1].split(
+        "function lazyReady", 1
+    )[0]
+    assert 'loadGroup("workbench-factors")' not in state_loader
+    assert "FTTestRunFields.initialValues" not in state_loader
+    # A login-only deep link must not trigger feature code loading before the
+    # existing route guard has rendered its login view.
+    assert "if (!state.session && protectedRouteKinds.has(route.kind))" in coordinator
 
 
 def test_product_price_chart_is_interactive_ohlcv() -> None:
@@ -478,6 +503,34 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
+    source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    first_load = source.split("const [manifest, workspaces]", 1)[1].split("]);", 1)[0]
+    for endpoint in (
+        "/api/catalog/factors", "/api/catalog/product-groups",
+        "/api/data_source_categories", "/api/configuration-templates",
+        "/api/jobs/artifact-capabilities", "/api/client/profiles",
+    ):
+        assert endpoint not in first_load
+    assert "FTTestFactors.prepare(state)" in source
+    assert "function ensureLazyKey" in source
+    assert "ensureProductsForExecution" in source
+    assert "ensureOutputCapabilities" in source
+    assert "ensureProfiles" in source
+    assert "workbench-run" in manifest["groups"]
+    assert set(manifest["groups"]["workbench-run"]) == {
+        "workbench/test-run-fields.js",
+        "workbench/test-outputs.js",
+        "workbench/test-run-results.js",
+        "workbench/test-run-batch.js",
+    }
+    assert not set(manifest["groups"]["workbench-run"]) & set(
+        research_static._initial_scripts(manifest)
+    )
+    assert "ensureRunCode" in source
 
 
 def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:

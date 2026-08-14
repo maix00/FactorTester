@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
+from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.test_authoring import (
@@ -1370,6 +1371,11 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         with urlopen(base_url) as response:
             shell = response.read().decode("utf-8")
         scripts = {}
+        manifest = json.loads((research_static.WEB_ROOT / "module-manifest.json").read_text())
+        initial_scripts = set(
+            research_static._initial_scripts(manifest)
+            + manifest.get("initial_external_scripts", [])
+        )
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
             "workbench/factor-family-picker.js",
@@ -1390,7 +1396,10 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
                 scripts[relative.rsplit("/", 1)[-1]] = response.read().decode("utf-8")
-            assert f'/research-static/{relative}' in shell
+            if relative in initial_scripts:
+                assert f'/research-static/{relative}' in shell
+            else:
+                assert f'/research-static/{relative}' not in shell
 
     assert "/api/backtest/settings/" in scripts["tests.js"]
     assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]

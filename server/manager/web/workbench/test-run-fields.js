@@ -87,6 +87,17 @@
     user.value = "";
     user.textContent = context.t("用户本人（不绑定 Profile）");
     control.append(user);
+    if (!state.profilesLoaded) {
+      const deferred = document.createElement("option");
+      deferred.value = "";
+      deferred.textContent = context.t("点击后读取其他提交身份…");
+      deferred.disabled = true;
+      control.append(deferred);
+      control.addEventListener("focus", () => {
+        window.FTTests?.ensureProfiles?.(context, state, refresh);
+        refresh?.();
+      }, {once: true});
+    }
     (Array.isArray(state.profiles) ? state.profiles : []).forEach(profile => {
       const profileID = String(profile.profile_id || "").trim();
       if (!profileID) return;

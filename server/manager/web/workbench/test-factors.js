@@ -5,15 +5,22 @@
     restoreFrozenSelections,
     selectedFactor, selectedFamily,
   } = FTTestFactorSelection;
-  async function initialize(context, state) {
+  function prepare(state) {
+    if (state.factorCatalog?.prepared) return;
     state.factorCatalog = {
       native: Boolean(nativeHandler()), owners: [], revisions: [], families: [],
       selectedFamily: null, selectedFamilyEntry: null, selectedFamilyName: "",
-      busy: false, error: "",
+      busy: false, error: "", prepared: true, initialized: false,
     };
     state.values.factor_candidates = candidates(state);
     restoreFrozenSelections(state);
     syncSelection(state);
+    FTTestFactorSets.prepare(state);
+  }
+  async function initialize(context, state) {
+    prepare(state);
+    if (state.factorCatalog.initialized) return;
+    state.factorCatalog.initialized = true;
     if (!state.factorCatalog.native) {
       restoreFamilyEntry(state);
       await FTTestFactorSets.initialize(context, state);
@@ -21,9 +28,7 @@
     }
     try {
       state.factorCatalog.owners = await nativeList("owners");
-      if (!state.values.factor_owner_ref && state.factorCatalog.owners.length) {
-        state.values.factor_owner_ref = state.factorCatalog.owners[0].owner_ref;
-      }
+      if (!state.values.factor_owner_ref && state.factorCatalog.owners.length) state.values.factor_owner_ref = state.factorCatalog.owners[0].owner_ref;
       await loadRevisions(state);
     } catch (error) {
       state.factorCatalog.error = error.message;
@@ -155,8 +160,7 @@
   function registeredFactorPanel(context, state, family, refresh) {
     const root = document.createElement("div");
     root.className = "test-registered-factor-list";
-    const title = document.createElement("b");
-    title.textContent = context.t("公共因子家族中的已登记因子");
+    const title = document.createElement("b"); title.textContent = context.t("公共因子家族中的已登记因子");
     root.append(title);
     const factors = FTFactorFamilyPicker.familyFactors(family, state.factors);
     if (!factors.length) {
@@ -167,8 +171,7 @@
       const row = document.createElement("div");
       const copy = document.createElement("span");
       const name = document.createElement("b"); name.textContent = factorAlias(factor);
-      const note = document.createElement("small");
-      note.textContent = factor.chinese_name || factor.description || factor.owner_alias || "";
+      const note = document.createElement("small"); note.textContent = factor.chinese_name || factor.description || factor.owner_alias || "";
       copy.append(name, note);
       const exists = candidates(state).some(item => factorID(item) === factorID(factor));
       const add = context.button(context.t(exists ? "已加入" : "加入候选"), () => {
@@ -217,8 +220,7 @@
   function candidateList(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidates";
-    const title = document.createElement("b");
-    title.textContent = context.t("因子候选");
+    const title = document.createElement("b"); title.textContent = context.t("因子候选");
     root.append(title);
     const rows = candidates(state);
     if (!rows.length) {
@@ -238,8 +240,7 @@
         refresh();
       });
       const copy = document.createElement("span");
-      const name = document.createElement("b");
-      name.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
+      const name = document.createElement("b"); name.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
       const detail = document.createElement("small");
       const revision = factor.source_kind === "transient"
         ? context.t("任务临时输入")
@@ -395,5 +396,5 @@
     const node = document.createElement("p"); node.className = "form-error";
     node.textContent = message; return node;
   }
-  window.FTTestFactors = {initialize, panel, selectedFactor, selectedFamily};
+  window.FTTestFactors = {initialize, panel, prepare, selectedFactor, selectedFamily};
 })();

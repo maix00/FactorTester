@@ -237,6 +237,18 @@
 
   let routeDispatch;
 
+  // Route protection is checked before loading the route's code group.  This
+  // keeps an unauthenticated deep link on the small login view instead of
+  // downloading the complete IC/backtest/catalog implementation just to
+  // discover that the handler will return "登录后继续".
+  const protectedRouteKinds = new Set([
+    "ic-test", "backtest", "factor-series", "test-template",
+    "factor-families", "factor-sets", "factor-family", "factor",
+    "factor-set", "factors", "product-group", "product",
+    "product-reference", "product-sources", "product-groups", "products",
+    "profile", "profiles", "manager",
+  ]);
+
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
     if (await clientAssetsChanged()) {
@@ -249,6 +261,16 @@
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const route = FTNavigation.matchRoute(location.pathname, location.search);
     try {
+      if (!state.session && protectedRouteKinds.has(route.kind)) {
+        // routeDispatch applies the same existing auth guard and updates the
+        // heading/content.  No feature module is needed for this branch.
+        return await routeDispatch.render(route, routeToken);
+      }
+      if (window.FTStaticLoader?.ensureRoute) {
+        content.replaceChildren(FTUI.loading(t("正在加载模块…")));
+        await window.FTStaticLoader.ensureRoute(route.kind);
+        if (routeToken !== activeRouteToken) return;
+      }
       return await routeDispatch.render(route, routeToken);
     } catch (error) {
       if (routeToken !== activeRouteToken) return;

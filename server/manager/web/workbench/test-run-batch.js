@@ -41,6 +41,12 @@
   }
 
   async function runRequest(context, state) {
+    // The workbench can render and edit a frozen request without the report
+    // reference runtime.  Load it only when a preview/run actually needs to
+    // build a report/run-spec link or submit the request.
+    await window.FTStaticLoader?.loadGroups?.(["research"]);
+    await window.FTTests?.ensureFactorsForExecution?.(context, state);
+    await window.FTTests?.ensureProductsForExecution?.(context, state);
     const factorSets = window.FTTestFactorSets;
     const descriptors = factorSets?.selections?.(state)?.length
       ? await factorSets.descriptors(
@@ -85,9 +91,12 @@
 
   function runSpecPath(item) {
     if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
-    return FTReferencePage.routeFor(
-      "run-spec", `runspec:sha256:${item.runSpecHash}`, "运行配置",
-    );
+    const target = `runspec:sha256:${item.runSpecHash}`;
+    if (window.FTReferencePage?.routeFor) {
+      return FTReferencePage.routeFor("run-spec", target, "运行配置");
+    }
+    const query = new URLSearchParams({kind: "run-spec", target, label: "运行配置"});
+    return `/reference?${query}`;
   }
 
   function jobPath(item) {
@@ -107,6 +116,8 @@
     const item = itemFor(state, group);
     update(item, "freezing", refresh);
     try {
+      await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
+      await window.FTTests?.ensureProductsForExecution?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs/preview"), {
         method: "POST",
@@ -131,6 +142,8 @@
     state.activeRunGroupID = item.groupID;
     update(item, "submitting", refresh);
     try {
+      await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
+      await window.FTTests?.ensureProductsForExecution?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs"), {
         method: "POST",
@@ -242,7 +255,18 @@
   }
 
   function render(context, state, refresh) {
-    const groups = FTTestProducts.selectedGroups(state);
+    const products = window.FTTestProducts;
+    if (!products) {
+      const root = document.createElement("section");
+      root.className = "test-run-batch test-code-deferred-panel";
+      const title = document.createElement("strong");
+      title.textContent = context.t("产品路径任务");
+      const note = document.createElement("small");
+      note.textContent = context.t("选择产品路径后加载任务代码");
+      root.append(title, note);
+      return root;
+    }
+    const groups = products.selectedGroups(state);
     const items = synchronize(state);
     const root = document.createElement("section"); root.className = "test-run-batch";
     const heading = document.createElement("div"); heading.className = "section-heading";
