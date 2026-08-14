@@ -98,9 +98,40 @@ def request_origin(*, scheme: str, host: str) -> str:
 
 def target_visitor_url(target_origin: str, *, grant: str, next_path: str) -> str:
     """Build the IP-origin redemption URL without accepting a caller host."""
+    return _target_url(
+        target_origin,
+        path="/visitor",
+        grant=grant,
+        next_path=next_path,
+    )
+
+
+def target_compliance_url(
+    target_origin: str,
+    *,
+    grant: str,
+    next_path: str,
+) -> str:
+    """Build an IP-origin compliance URL carrying an ingress grant."""
+    return _target_url(
+        target_origin,
+        path="/compliance",
+        grant=grant,
+        next_path=next_path,
+    )
+
+
+def _target_url(
+    target_origin: str,
+    *,
+    path: str,
+    grant: str,
+    next_path: str,
+) -> str:
+    """Build a target-origin URL without accepting a caller host."""
     parsed = urlsplit(target_origin)
     query = f"grant={_quote(grant)}&next={_quote(next_path)}"
-    return urlunsplit((parsed.scheme, parsed.netloc, "/visitor", query, ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, path, query, ""))
 
 
 def _quote(value: str) -> str:
@@ -175,6 +206,20 @@ class VisitorAccessStore:
             target_origin=target_origin,
             ttl=VISITOR_SESSION_TTL_SECONDS,
         )
+
+    def valid_grant(self, token: str, *, target_origin: str) -> bool:
+        """Check an unconsumed ingress grant without enabling visitor mode."""
+        now = time.time()
+        with self._lock:
+            self._purge(now)
+            digest = self._digest(token)
+            record = self._records.get(digest)
+            return bool(
+                record
+                and record.kind == "grant"
+                and record.target_origin == target_origin
+                and record.expires_at > now
+            )
 
     def valid_session(self, token: str, *, target_origin: str) -> bool:
         now = time.time()
