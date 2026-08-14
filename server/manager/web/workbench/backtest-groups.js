@@ -46,10 +46,6 @@
     heading.append(headingCopy, count);
     const shell = document.createElement("div");
     shell.className = "backtest-group-shell";
-    const bar = document.createElement("div");
-    bar.className = "backtest-group-tab-bar";
-    const tabs = document.createElement("div");
-    tabs.className = "backtest-group-tabs";
     const available = surfaces(state);
     if (!available.length) {
       shell.append(FTUI.empty(
@@ -61,31 +57,31 @@
     const active = available.find(item => item.key === state.backtestGroupSurfaceKey)
       || available[0];
     state.backtestGroupSurfaceKey = active.key;
-    available.forEach(surface => {
-      const button = context.button(context.t(surface.label || surface.key), () => {
-        state.backtestGroupSurfaceKey = surface.key;
-        refresh();
-      });
-      button.classList.toggle("active", active.key === surface.key);
-      tabs.append(button);
-    });
-    const toolbar = document.createElement("div");
-    toolbar.className = "backtest-group-toolbar";
     const adapter = adapterFor(active);
     const selected = adapter.selected(state);
-    for (const flow of flows(state, active.key)) {
-      const button = context.button(context.t(flow.label), () => runFlow(
-        context, state, active, flow, selected, refresh,
-      ));
-      button.disabled = !enabled(flow, selected.length);
-      if (flow.button_class) button.classList.add(flow.button_class);
-      toolbar.append(button);
-    }
-    bar.append(tabs, toolbar);
-    const panel = document.createElement("div");
-    panel.className = "backtest-group-panel";
-    panel.append(adapter.render(context, state, active, refresh));
-    shell.append(bar, panel);
+    const tabset = FTTabChipContent.create({
+      items: available.map(surface => ({
+        key: surface.key,
+        label: context.t(surface.label || surface.key),
+        description: surface.help_text ? context.t(surface.help_text) : "",
+        panelClass: "backtest-group-panel",
+        render: () => adapterFor(surface).render(context, state, surface, refresh),
+      })),
+      activeKey: active.key,
+      barClass: "backend-settings-tab-bar backtest-group-tab-bar",
+      hostClass: "backend-settings-host backtest-group-host",
+      actions: flows(state, active.key).map(flow => ({
+        label: context.t(flow.label),
+        buttonClass: flow.button_class,
+        disabled: !enabled(flow, selected.length),
+        onClick: () => runFlow(context, state, active, flow, selected, refresh),
+      })),
+      onActivate: key => {
+        state.backtestGroupSurfaceKey = key;
+        refresh();
+      },
+    });
+    shell.append(tabset.bar, tabset.host);
     if (state.backtestGroupEditor) {
       shell.append(FTBacktestGroupForm.render(
         context, state, state.backtestGroupEditor,

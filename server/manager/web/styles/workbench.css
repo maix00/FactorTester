@@ -4,15 +4,8 @@
 .backtest-group-summary small { color: var(--muted); }
 .backtest-group-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .backtest-group-shell { display: grid; min-width: 0; border-top: 1px solid var(--line); }
-.backtest-group-tab-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-.backtest-group-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-.backtest-group-tabs button { border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--muted); background: var(--panel); }
-.backtest-group-tabs button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
+.backtest-group-host { padding: 0; }
 .backtest-group-panel { min-width: 0; padding: 12px; }
-.backtest-group-toolbar { display: flex; flex-wrap: wrap; gap: 7px; }
-.backtest-group-toolbar button { border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: var(--panel); color: inherit; }
-.backtest-group-toolbar button:disabled { opacity: .42; }
-.backtest-group-toolbar .btn-outline-danger { color: var(--danger); }
 .backtest-group-name { display: grid; gap: 2px; padding-left: calc(var(--group-depth, 0) * 18px); min-width: 0; }
 .backtest-group-name small { color: var(--muted); }
 .backtest-long-short { display: grid; gap: 7px; }
@@ -48,9 +41,8 @@
 .backtest-factor-checklist-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .backtest-factor-checklist-actions button { border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; }
 .backtest-group-overrides { display: grid; gap: 9px; min-width: 0; padding-top: 8px; }
-.backtest-group-override-tabs { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; }
-.backtest-group-override-tabs button { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; color: var(--muted); background: var(--panel); }
-.backtest-group-override-tabs button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.backtest-group-override-host { padding: 0; }
+.backtest-group-override-panel { min-width: 0; padding: 8px 0 0; }
 .backtest-group-override-rows { display: grid; gap: 2px; }
 .backtest-group-override-row { display: grid; grid-template-columns: auto minmax(150px, .8fr) minmax(180px, 1.2fr); gap: 9px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--line); }
 .backtest-group-override-row:last-child { border-bottom: 0; }

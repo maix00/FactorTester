@@ -83,9 +83,9 @@
 .test-input-preview-body pre { max-height: 240px; margin: 0; overflow: auto; border-radius: 7px; padding: 8px; background: var(--panel); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .test-workbench .test-run-actions { gap: 7px; padding: 8px 10px; }
 .test-workbench .backtest-group-summary { min-height: 40px; padding: 5px 9px; }
-.test-workbench .backtest-group-tab-bar { gap: 5px; padding: 5px 8px; }
-.test-workbench .backtest-group-tabs { gap: 4px; }
-.test-workbench .backtest-group-tabs button { padding: 4px 8px; }
+.test-workbench .backtest-group-tab-bar { gap: 5px; padding: 6px 10px; }
+.test-workbench .backtest-group-tab-bar button { min-height: 34px; }
+.test-workbench .backtest-group-host { padding: 0; }
 .test-workbench .backtest-group-panel { padding: 8px; }
 .test-workbench .backtest-group-form { gap: 7px; padding: 9px; border-radius: 10px; }
 .test-workbench .backtest-group-form-grid { gap: 7px; }
@@ -93,6 +93,10 @@
 .test-workbench .backtest-group-form select,
 .test-workbench .backtest-group-form textarea { padding: 5px 8px; }
 .test-workbench .backtest-long-short > div > div { padding: 5px 8px; }
+.test-workbench .backtest-group-override-tab-bar { gap: 5px; padding: 6px 10px; }
+.test-workbench .backtest-group-override-tab-bar button { min-height: 32px; }
+.test-workbench .backtest-group-override-host { padding: 0 10px; }
+.test-workbench .backtest-group-override-panel { padding: 7px 0 0; }
 .test-workbench .test-run-matrix { gap: 4px; padding: 5px 8px; }
 .test-workbench .test-run-tabs button { min-width: 112px; padding: 5px 8px; }
 .test-workbench .test-run-panel { gap: 7px; padding: 9px; }

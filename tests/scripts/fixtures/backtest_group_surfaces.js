@@ -11,6 +11,7 @@ class Element {
     this.checked = false;
     this.disabled = false;
     this.open = false;
+    this.hidden = false;
     this.textContent = "";
     this.style = {setProperty: () => {}};
     this.classList = {
@@ -38,6 +39,12 @@ global.FTUI = {
 };
 global.FTTestProducts = {groupLabel: () => "", groupID: () => ""};
 global.FTBacktestGroupForm = {render: () => new Element("form")};
+
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "tab-chip-content.js"),
+  "utf8",
+), {filename: "tab-chip-content.js"});
+global.FTTabChipContent = window.FTTabChipContent;
 
 let removed = false;
 global.FTBacktestGroupModel = {
@@ -87,13 +94,12 @@ const state = {
     }],
   },
 };
-const buttons = [];
 let refreshCount = 0;
 const context = {
   t: value => value,
   button: (label, action) => {
     const button = new Element("button");
-    button.textContent = label; button.listeners.click = action; buttons.push(button); return button;
+    button.textContent = label; button.listeners.click = action; return button;
   },
 };
 
@@ -104,9 +110,8 @@ selection.checked = true;
 selection.listeners.change();
 assert.deepEqual(state.selectedBacktestLongShortIDs, ["ls1"]);
 
-buttons.length = 0;
 root = window.FTBacktestGroups.render(context, state, () => { refreshCount += 1; });
-const remove = buttons.find(button => button.textContent === "移除");
+const remove = find(root, node => node.tagName === "button" && node.textContent === "移除");
 assert.ok(remove, "a flow with an arbitrary key is rendered from its surface declaration");
 assert.equal(remove.disabled, false);
 remove.listeners.click();

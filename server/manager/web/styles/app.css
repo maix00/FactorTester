@@ -434,6 +434,9 @@ button.reference-item { cursor: pointer; }
 .backend-settings-panel-title { flex: 1 1 150px; min-width: 130px; font-size: 14px; }
 .backend-settings-tab-bar button { min-height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; color: var(--muted); background: var(--panel); cursor: pointer; white-space: nowrap; }
 .backend-settings-tab-bar button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
+.backend-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+.backend-settings-action { min-height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 9px; color: inherit; background: var(--panel); cursor: pointer; white-space: nowrap; }
+.backend-settings-action:disabled { cursor: default; opacity: .42; } .backend-settings-action.btn-outline-danger { color: var(--danger); }
 .backend-settings-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--soft) 55%, var(--panel)); }
 .backend-setting-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; color: inherit; background: var(--panel); font: inherit; font-size: 12px; white-space: normal; }
 button.backend-setting-chip { cursor: pointer; }

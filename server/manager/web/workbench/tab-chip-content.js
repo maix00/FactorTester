@@ -1,6 +1,7 @@
 (() => {
   function create(options) {
     const items = (options.items || []).filter(item => item?.key);
+    const actions = (options.actions || []).filter(action => action?.label);
     const bar = document.createElement("div");
     bar.className = options.barClass || "backend-settings-tab-bar";
     if (options.title) {
@@ -38,6 +39,24 @@
       button.addEventListener("click", () => activate(item.key));
       bar.append(button); host.append(panel);
       entries.set(item.key, {button, panel});
+    }
+
+    if (actions.length) {
+      const actionHost = document.createElement("div");
+      actionHost.className = options.actionsClass || "backend-settings-actions";
+      for (const action of actions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = ["backend-settings-action", action.buttonClass || ""]
+          .filter(Boolean).join(" ");
+        button.textContent = action.label;
+        button.disabled = typeof action.disabled === "function"
+          ? Boolean(action.disabled()) : Boolean(action.disabled);
+        if (action.title) button.title = action.title;
+        button.addEventListener("click", event => action.onClick?.(event));
+        actionHost.append(button);
+      }
+      bar.append(actionHost);
     }
 
     function activate(requestedKey, notify = true) {

@@ -17,17 +17,26 @@ class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.listeners = {};
     this.className = ""; this.checked = false; this.textContent = "";
-    this.classList = {toggle: (name, enabled) => {
-      const names = new Set(this.className.split(/\s+/).filter(Boolean));
-      if (enabled) names.add(name); else names.delete(name);
-      this.className = [...names].join(" ");
-    }};
+    this.hidden = false;
+    this.classList = {
+      add: (...names) => { this.className = `${this.className} ${names.join(" ")}`.trim(); },
+      toggle: (name, enabled) => {
+        const names = new Set(this.className.split(/\s+/).filter(Boolean));
+        if (enabled) names.add(name); else names.delete(name);
+        this.className = [...names].join(" ");
+      },
+    };
   }
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
 }
 global.document = {createElement: tag => new Element(tag)};
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "tab-chip-content.js"),
+  "utf8",
+), {filename: "tab-chip-content.js"});
+global.FTTabChipContent = window.FTTabChipContent;
 global.FTTestSettings = {controlFor: (_key, _field, _manifest, _values, _context, _options, disabled) => {
   const control = new Element("control"); control.disabled = disabled; return control;
 }};
@@ -98,7 +107,7 @@ const view = api.render({
   overrides: {},
 });
 assert.deepEqual(view.value(), {});
-const firstRow = view.children[1].children[0];
+const firstRow = view.children[1].children[0].children[0].children[0];
 const firstToggle = firstRow.children[0];
 assert.equal(firstToggle.checked, false);
 firstToggle.checked = true;

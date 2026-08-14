@@ -684,6 +684,16 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
     assert "options.onActivate?.(key)" in tab_content
     assert "FTTabChipContent.create" in settings
+    groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
+    overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
+        encoding="utf-8"
+    )
+    assert "FTTabChipContent.create" in groups
+    assert "actions: flows" in groups
+    assert "FTTabChipContent.create" in overrides
+    assert "backtest-group-tabs" not in groups
+    assert "backtest-group-toolbar" not in groups
+    assert "backtest-group-override-tabs" not in overrides
     assert 'key: "__manage__"' in settings
     assert 'label: context.t("+ 设置")' in settings
     assert "previewDefaultsForTab" in settings
