@@ -1,6 +1,7 @@
 """Shared typed-analysis graph contracts for tester applications."""
 
 from .contracts import (
+    AnalysisChipDefinition,
     AnalysisGraphDefinition,
     AnalysisInputContract,
     AnalysisMapping,
@@ -15,6 +16,7 @@ from .contracts import (
 
 __all__ = [
     "AnalysisGraphDefinition",
+    "AnalysisChipDefinition",
     "AnalysisInputContract",
     "AnalysisMapping",
     "AnalysisOptionDefinition",

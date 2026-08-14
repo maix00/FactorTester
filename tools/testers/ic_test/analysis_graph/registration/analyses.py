@@ -1,6 +1,7 @@
 """Built-in IC auxiliary-analysis definitions."""
 
 from tools.testers.analysis_graph import (
+    AnalysisChipDefinition,
     AnalysisInputContract,
     AnalysisMapping,
     AnalysisParameterDefinition,
@@ -25,6 +26,8 @@ def builtin_ic_analyses() -> tuple[AnalysisTypeDefinition, ...]:
             "positive_integer_list", [5], "ic_statistics",
             "按固定观测间隔重采样同一条 IC 序列并比较均值、波动、IR 与 t 统计",
             "单位为有效 IC 观测数，不是入场延迟或自相关阶数",
+            chip_label="重采样",
+            chip_template="重采样: {sampling_intervals}",
         ),
         _single_series_analysis(
             "rolling_ic_stability", "滚动 IC 稳定性", 20,
@@ -32,12 +35,16 @@ def builtin_ic_analyses() -> tuple[AnalysisTypeDefinition, ...]:
             "signal_count_list", [20], "ic_rolling_stability",
             "在同一条 IC 序列上按信号数计算滚动统计",
             "窗口单位固定为有效信号数",
+            chip_label="滚动窗口",
+            chip_template="滚动: {rolling_windows}",
         ),
         _single_series_analysis(
             "period_diagnostics", "分期诊断", 30,
             "ic_period_diagnostics", "periods", "分期规则",
             "ic_period_grid", [], "ic_period_diagnostics",
             "按日历分期检查 IC 的可估计性、方向与稳定性",
+            chip_label="分期诊断",
+            chip_template="分期: {periods}",
         ),
         AnalysisTypeDefinition(
             key="ic_autocorrelation",
@@ -55,6 +62,13 @@ def builtin_ic_analyses() -> tuple[AnalysisTypeDefinition, ...]:
                 step=1,
             ),),
             result_capabilities=("ic_statistics",),
+            chip=AnalysisChipDefinition(
+                key="ic_autocorrelation",
+                label="自相关",
+                template="自相关: {maximum_lag}",
+                parameter_keys=("maximum_lag",),
+                order=40,
+            ),
         ),
         _quantile_portfolio_analysis(),
         _forward_horizon_half_life(),
@@ -73,6 +87,9 @@ def _single_series_analysis(
     result_capability: str,
     help_text: str,
     parameter_help: str = "",
+    *,
+    chip_label: str,
+    chip_template: str,
 ) -> AnalysisTypeDefinition:
     return AnalysisTypeDefinition(
         key=key,
@@ -89,6 +106,13 @@ def _single_series_analysis(
             help_text=parameter_help,
         ),),
         result_capabilities=(result_capability,),
+        chip=AnalysisChipDefinition(
+            key=key,
+            label=chip_label,
+            template=chip_template,
+            parameter_keys=(parameter_key,),
+            order=order,
+        ),
     )
 
 
@@ -119,6 +143,13 @@ def _quantile_portfolio_analysis() -> AnalysisTypeDefinition:
             "factor_values", "forward_returns", "eligibility",
         ),
         result_capabilities=("ic_quantile_portfolio_statistics",),
+        chip=AnalysisChipDefinition(
+            key="quantile_portfolio_statistics",
+            label="分组组合",
+            template="分组组合: {portfolio}",
+            parameter_keys=("portfolio",),
+            order=50,
+        ),
     )
 
 
@@ -146,6 +177,12 @@ def _forward_horizon_half_life() -> AnalysisTypeDefinition:
         ),
         output_kind="forward_horizon_half_life",
         result_capabilities=("ic_holding_half_life",),
+        chip=AnalysisChipDefinition(
+            key="forward_horizon_half_life",
+            label="半衰期",
+            template="前瞻收益半衰期",
+            order=60,
+        ),
     )
 
 

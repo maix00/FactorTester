@@ -1,6 +1,7 @@
 """Public building blocks for backend-owned analysis graph contracts."""
 
 from .analysis import (
+    AnalysisChipDefinition,
     AnalysisInputContract,
     AnalysisMapping,
     AnalysisParameterDefinition,
@@ -14,6 +15,7 @@ from .options import AnalysisOptionDefinition
 
 __all__ = [
     "AnalysisGraphDefinition",
+    "AnalysisChipDefinition",
     "AnalysisInputContract",
     "AnalysisMapping",
     "AnalysisOptionDefinition",

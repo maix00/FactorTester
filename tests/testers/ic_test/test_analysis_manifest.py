@@ -96,6 +96,21 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "same_axes": [],
         "varying_axes": [],
     }
+    # Analysis chips are part of the backend-owned graph contract.  The web
+    # client may render these descriptors generically, but must not maintain a
+    # second list of analysis names, labels, or parameter formatting rules.
+    for analysis in analyses.values():
+        chip = analysis["chip"]
+        assert chip["key"] == analysis["key"]
+        assert chip["category"] == "analysis"
+        assert chip["source"] == "analysis_parameters"
+        assert chip["target"] == "analysis_overlay"
+        assert chip["clickable"] is True
+        assert chip["label"]
+        assert chip["template"]
+        assert set(chip["parameter_keys"]).issubset(
+            {parameter["key"] for parameter in analysis["parameters"]}
+        )
     quantile = analyses["quantile_portfolio_statistics"]
     assert quantile["input_contract"]["target_origins"] == ["core"]
     assert quantile["required_core_inputs"] == [

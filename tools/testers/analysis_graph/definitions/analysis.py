@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -55,6 +56,52 @@ class AnalysisParameterDefinition:
             "step": self.step,
             "help_text": self.help_text,
             "serialization": dict(self.serialization),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisChipDefinition:
+    """Backend-owned compact descriptor for an attached-analysis chip.
+
+    This is deliberately a semantic descriptor rather than a web component
+    contract.  A client may choose its visual treatment, but it must obtain
+    the label, value template, source parameters and destination from the
+    analysis manifest instead of keeping an analysis-name switch in code.
+    """
+
+    key: str
+    label: str
+    template: str
+    parameter_keys: tuple[str, ...] = ()
+    category: str = "analysis"
+    source: str = "analysis_parameters"
+    target: str = "analysis_overlay"
+    clickable: bool = True
+    order: int = 100
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.template:
+            raise ValueError("analysis chip requires key, label, and template")
+        if self.category != "analysis":
+            raise ValueError("analysis chip category must be analysis")
+        if self.source != "analysis_parameters":
+            raise ValueError("analysis chip source must be analysis_parameters")
+        if self.target != "analysis_overlay":
+            raise ValueError("analysis chip target must be analysis_overlay")
+        if self.order < 0:
+            raise ValueError("analysis chip order must be non-negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "category": self.category,
+            "template": self.template,
+            "parameter_keys": list(self.parameter_keys),
+            "source": self.source,
+            "target": self.target,
+            "clickable": self.clickable,
+            "order": self.order,
         }
 
 
@@ -119,6 +166,7 @@ class AnalysisTypeDefinition:
     required_core_inputs: tuple[str, ...] = ()
     result_capabilities: tuple[str, ...] = ()
     batch_supported: bool = True
+    chip: AnalysisChipDefinition | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.output_kind:
@@ -126,6 +174,24 @@ class AnalysisTypeDefinition:
         keys = [item.key for item in self.parameters]
         if len(keys) != len(set(keys)):
             raise ValueError(f"analysis type {self.key} has duplicate parameters")
+        if self.chip is not None:
+            if self.chip.key != self.key:
+                raise ValueError(
+                    f"analysis type {self.key} chip key must match analysis key"
+                )
+            parameter_keys = set(keys)
+            unknown = set(self.chip.parameter_keys) - parameter_keys
+            if unknown:
+                raise ValueError(
+                    f"analysis type {self.key} chip references unknown parameters: "
+                    f"{sorted(unknown)}"
+                )
+            placeholders = set(re.findall(r"\{([^{}]+)\}", self.chip.template))
+            if placeholders - parameter_keys:
+                raise ValueError(
+                    f"analysis type {self.key} chip template references unknown "
+                    f"parameters: {sorted(placeholders - parameter_keys)}"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,11 +205,13 @@ class AnalysisTypeDefinition:
             "required_core_inputs": list(self.required_core_inputs),
             "result_capabilities": list(self.result_capabilities),
             "batch_supported": self.batch_supported,
+            "chip": self.chip.to_dict() if self.chip is not None else None,
         }
 
 
 __all__ = [
     "AnalysisInputContract",
+    "AnalysisChipDefinition",
     "AnalysisMapping",
     "AnalysisParameterDefinition",
     "AnalysisTargetCardinality",
