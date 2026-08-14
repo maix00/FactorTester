@@ -2,6 +2,7 @@
 
 from ..contracts import ICAnalysisRuntimeAdapter
 from .autocorrelation import ICAutocorrelationAdapter
+from .periods import ICPeriodDiagnosticsAdapter
 from .resample import ICResampleStabilityAdapter
 from .rolling import ICRollingStabilityAdapter
 
@@ -9,6 +10,7 @@ from .rolling import ICRollingStabilityAdapter
 def builtin_runtime_adapters() -> dict[str, ICAnalysisRuntimeAdapter]:
     adapters: tuple[ICAnalysisRuntimeAdapter, ...] = (
         ICAutocorrelationAdapter(),
+        ICPeriodDiagnosticsAdapter(),
         ICResampleStabilityAdapter(),
         ICRollingStabilityAdapter(),
     )
