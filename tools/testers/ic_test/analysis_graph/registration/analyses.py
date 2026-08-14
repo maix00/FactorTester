@@ -98,7 +98,10 @@ def _quantile_portfolio_analysis() -> AnalysisTypeDefinition:
         label="分组组合统计",
         order=50,
         help_text="使用核心测试保留的因子值、前瞻收益和可投资性面板做向量化筛选",
-        input_contract=_single_core_input("ic_series"),
+        input_contract=AnalysisInputContract(
+            accepted_kinds=("factor_values", "forward_returns", "eligibility"),
+            target_origins=(AnalysisTargetOrigin.CORE,),
+        ),
         output_kind="quantile_portfolio_statistics",
         parameters=(AnalysisParameterDefinition(
             key="portfolio",
