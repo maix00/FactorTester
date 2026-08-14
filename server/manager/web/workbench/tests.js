@@ -58,11 +58,13 @@
       state.groupRef = options.groupRef;
       state.groupRefs = [options.groupRef];
     }
-    state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
-    FTTestInputState.initialize(state);
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       manifest, savedMountedTabs(state),
     );
+    state.values = FTTestSettings.initialValues(
+      manifest, savedSettings(state), state.settingsMountedTabs,
+    );
+    FTTestInputState.initialize(state);
     if (kind === "factor_evaluation" && state.runValues.retention_mode === "summary") {
       state.runValues.retention_mode = "full";
     }
@@ -204,9 +206,11 @@
     const listed = state.workspaces.findIndex(item => item.workspace_id === state.workspace.workspace_id);
     if (listed >= 0) state.workspaces[listed] = state.workspace;
     applyWorkspaceConfiguration(state);
-    state.values = FTTestSettings.initialValues(state.manifest, savedSettings(state));
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       state.manifest, savedMountedTabs(state),
+    );
+    state.values = FTTestSettings.initialValues(
+      state.manifest, savedSettings(state), state.settingsMountedTabs,
     );
     state.settingsTabKey = "";
     FTTestProducts.synchronize(state);

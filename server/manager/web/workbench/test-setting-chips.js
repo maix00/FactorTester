@@ -8,11 +8,12 @@
       chip, options.sources || {}, tabs, context,
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
-      .filter(([, field]) => mounted.has(field.tab_key) && field.chip_template)
+      .filter(([, field]) => mounted.has(field.tab_key)
+        && (options.includeUnregistered || field.chip_template))
       .filter(([, field]) => field.show_chip !== false)
-      .filter(([, field]) => FTSettingRules.isVisible(field, options.values || {}))
+      .filter(([, field]) => options.includeHidden || FTSettingRules.isVisible(field, options.values || {}))
       .map(([key, field]) => settingChip(
-        key, field, options.values || {}, context,
+        key, field, options.values || {}, context, options,
       )).filter(Boolean);
     return deduplicate([...identity, ...settings, ...(options.extraDescriptors || [])]);
   }
@@ -40,11 +41,15 @@
     };
   }
 
-  function settingChip(key, field, values, context) {
+  function settingChip(key, field, values, context, options = {}) {
     const raw = FTSettingRules.valueFor(key, field, values);
-    if (!hasValue(raw)) return null;
-    const value = optionLabel(field, raw, context);
-    const rendered = interpolate(field.chip_template, {value}, context);
+    const empty = !hasValue(raw);
+    if (empty && !options.includeEmpty) return null;
+    const value = empty
+      ? context.t(options.emptyValueLabel || "未设置（默认）")
+      : optionLabel(field, raw, context);
+    const template = field.chip_template || `${field.label || key}: {value}`;
+    const rendered = interpolate(template, {value}, context);
     const parts = splitRendered(rendered, context.t(field.label || key));
     return {
       key: `setting:${key}`,
@@ -60,9 +65,10 @@
     const root = document.createElement("div");
     root.className = "backend-settings-chip-row";
     for (const descriptor of descriptors(options)) {
-      const chip = document.createElement(descriptor.tabKey ? "button" : "span");
+      const interactive = descriptor.tabKey && typeof options.onOpen === "function";
+      const chip = document.createElement(interactive ? "button" : "span");
       chip.className = `backend-setting-chip ${descriptor.category}`;
-      if (descriptor.tabKey) {
+      if (interactive) {
         chip.type = "button";
         chip.addEventListener("click", () => options.onOpen?.(descriptor.tabKey));
       }

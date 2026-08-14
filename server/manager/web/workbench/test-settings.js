@@ -17,9 +17,9 @@
     return tabs.map(tab => tab.key).filter(key => mounted.has(key));
   }
 
-  function initialValues(manifest, saved = {}) {
+  function initialValues(manifest, saved = {}, mountedTabs) {
     return FTICHorizonSettings.normalizeSettingValues(
-      manifest, FTSettingRules.initialValues(manifest, saved),
+      manifest, FTSettingRules.initialValues(manifest, saved, {mountedTabs}),
     );
   }
 
@@ -29,12 +29,12 @@
     const tabs = manifest.tab_lists?.["local-settings"] || [];
     const available = tabs.map(tab => ({
       tab, fields: visibleFields(tab, manifest, values),
-    })).filter(item => item.fields.length || FTTestContentAdapters.hasContent(item.tab));
+      allFields: fieldsForTab(tab.key, manifest).filter(([, field]) => !field.adapter_managed),
+    })).filter(item => item.allFields.length || FTTestContentAdapters.hasContent(item.tab));
     if (!available.length) return root;
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
-    const tabsets = new Map();
-    const sections = settingsSections(manifest, available);
+    let tabset = null;
     const intro = document.createElement("div");
     intro.className = "test-settings-intro";
     const introTitle = document.createElement("strong");
@@ -45,13 +45,33 @@
     );
     intro.append(introTitle, introText);
     root.append(intro);
+    const items = visible.map(item => ({
+      key: item.tab.key,
+      label: context.t(item.tab.label || item.tab.key),
+      description: item.tab.help_text ? context.t(item.tab.help_text) : "",
+      render: () => tabPanel(item, manifest, values, context, options),
+    }));
+    items.push({
+      key: "__manage__",
+      label: context.t("+ 设置"),
+      description: context.t("挂载设置组；未挂载项使用默认值"),
+      render: () => settingsManager(manifest, available, mounted, values, context, options),
+    });
+    const activeKey = items.some(item => item.key === options.activeTab)
+      ? options.activeTab : items[0]?.key;
+    tabset = FTTabChipContent.create({
+      items, context, activeKey,
+      onActivate: key => options.onTabChange?.(key),
+    });
+    root.append(tabset.bar);
     const chips = FTTestSettingChips.render({
       manifest, values, context,
       mountedTabs: [...mounted],
       sources: options.chipSources || {},
       extraDescriptors: options.extraChips || [],
       onOpen: tabKey => {
-        if (!activateTab(tabKey)) options.onChipOpen?.(tabKey);
+        if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
+        else options.onChipOpen?.(tabKey);
       },
     });
     if (chips.children.length) {
@@ -62,67 +82,12 @@
       current.append(heading, chips);
       root.append(current);
     }
-    sections.forEach(section => {
-      const items = section.items.map(item => ({
-        key: item.tab.key,
-        label: context.t(item.tab.label || item.tab.key),
-        description: item.tab.help_text ? context.t(item.tab.help_text) : "",
-        render: () => tabPanel(item, manifest, values, context, options),
-      }));
-      const selected = items.find(item => item.key === options.activeTab) || items[0];
-      const tabset = FTTabChipContent.create({
-        items, context,
-        activeKey: selected?.key,
-        onActivate: key => options.onTabChange?.(key),
-      });
-      tabsets.set(section.key, tabset);
-      const block = document.createElement("section");
-      block.className = "test-settings-section";
-      const heading = document.createElement("header");
-      heading.className = "test-settings-section-heading";
-      const copy = document.createElement("div");
-      const title = document.createElement("h2");
-      title.textContent = context.t(section.label);
-      const description = document.createElement("p");
-      description.textContent = context.t(section.description || "");
-      copy.append(title);
-      if (section.description) copy.append(description);
-      const count = document.createElement("small");
-      count.textContent = `${items.length} ${context.t("个设置组")}`;
-      heading.append(copy, count);
-      block.append(heading, tabset.bar, tabset.host);
-      root.append(block);
-    });
-    const manager = document.createElement("section");
-    manager.className = "test-settings-section test-settings-manager-section";
-    const managerHeading = document.createElement("header");
-    managerHeading.className = "test-settings-section-heading";
-    const managerTitle = document.createElement("h2");
-    managerTitle.textContent = context.t("设置组管理");
-    const managerDescription = document.createElement("p");
-    managerDescription.textContent = context.t("选择要显示在本页的设置组");
-    managerHeading.append(managerTitle, managerDescription);
-    manager.append(managerHeading);
-    const managerTabset = FTTabChipContent.create({
-      items: [{
-        key: "__manage__", label: context.t("管理设置组"),
-        description: context.t("未挂载项使用后端默认值"),
-        render: () => settingsManager(manifest, available, mounted, values, context, options),
-      }],
-      context, activeKey: "__manage__",
-    });
-    manager.append(managerTabset.bar, managerTabset.host);
-    root.append(manager);
-    function activateTab(tabKey) {
-      for (const tabset of tabsets.values()) {
-        if (tabset.entries.has(tabKey)) {
-          tabset.activate(tabKey);
-          return true;
-        }
-      }
-      return false;
-    }
-    root.activate = activateTab;
+    root.append(tabset.host);
+    root.activate = tabKey => {
+      if (!tabset.entries.has(tabKey)) return false;
+      tabset.activate(tabKey);
+      return true;
+    };
     return root;
   }
 
@@ -176,25 +141,51 @@
     root.append(intro);
     const list = document.createElement("div");
     list.className = "test-settings-manager-list";
-    available.forEach(item => {
-      const row = document.createElement("label");
-      const copy = document.createElement("span");
-      const label = document.createElement("b");
-      label.textContent = context.t(item.tab.label || item.tab.key);
-      const help = document.createElement("small");
-      help.textContent = context.t(mounted.has(item.tab.key) ? "已挂载" : "未挂载");
-      copy.append(label, help);
-      const toggle = document.createElement("input");
-      toggle.type = "checkbox";
-      toggle.checked = mounted.has(item.tab.key);
-      toggle.addEventListener("change", () => {
-        if (!toggle.checked) resetTabValues(manifest, values, item.tab.key);
-        const next = available.map(value => value.tab.key).filter(key => (
-          key === item.tab.key ? toggle.checked : mounted.has(key)
-        ));
-        options.onMountedTabsChange?.(next, item.tab.key, toggle.checked);
+    settingsSections(manifest, available).forEach(section => {
+      const sectionHeader = document.createElement("header");
+      sectionHeader.className = "test-settings-manager-section-heading";
+      const title = document.createElement("b");
+      title.textContent = context.t(section.label);
+      const description = document.createElement("small");
+      description.textContent = context.t(section.description || "");
+      sectionHeader.append(title, description);
+      list.append(sectionHeader);
+      section.items.forEach(item => {
+        const row = document.createElement("label");
+        row.className = "test-settings-manager-row";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = mounted.has(item.tab.key);
+        toggle.addEventListener("change", () => {
+          if (!toggle.checked) resetTabValues(manifest, values, item.tab.key);
+          const next = available.map(value => value.tab.key).filter(key => (
+            key === item.tab.key ? toggle.checked : mounted.has(key)
+          ));
+          options.onMountedTabsChange?.(next, item.tab.key, toggle.checked);
+        });
+        const body = document.createElement("span");
+        body.className = "test-settings-manager-row-body";
+        const copy = document.createElement("span");
+        const label = document.createElement("b");
+        label.textContent = context.t(item.tab.label || item.tab.key);
+        const help = document.createElement("small");
+        help.textContent = context.t(mounted.has(item.tab.key) ? "已挂载" : "未挂载，使用默认值");
+        copy.append(label, help);
+        const defaults = FTTestSettingChips.render({
+          manifest,
+          values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
+          context,
+          mountedTabs: [item.tab.key],
+          includeEmpty: true,
+          includeUnregistered: true,
+          includeHidden: true,
+          sources: {},
+        });
+        defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
+        body.append(copy, defaults);
+        row.append(toggle, body);
+        list.append(row);
       });
-      row.append(copy, toggle); list.append(row);
     });
     root.append(list);
     return root;

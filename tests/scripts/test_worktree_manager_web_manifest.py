@@ -684,6 +684,10 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
     assert "options.onActivate?.(key)" in tab_content
     assert "FTTabChipContent.create" in settings
+    assert 'key: "__manage__"' in settings
+    assert 'label: context.t("+ 设置")' in settings
+    assert "previewDefaultsForTab" in settings
+    assert "includeEmpty: true" in settings
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
     assert "function jobPath(item)" in run_batch
