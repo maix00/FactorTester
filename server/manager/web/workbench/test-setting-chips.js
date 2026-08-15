@@ -144,7 +144,11 @@
   }
 
   function render(options) {
-    const root = document.createElement("div");
+    // The settings manager embeds this row inside a label.  Use phrasing
+    // elements there so Safari does not repair a span/div tree while laying
+    // out wrapped chips; the normal chip surface keeps its block elements.
+    const inline = options.inline === true;
+    const root = document.createElement(inline ? "span" : "div");
     root.className = "backend-settings-chip-row";
     const all = descriptors(options);
     const groupBy = options.groupBy || "tab";
@@ -160,7 +164,7 @@
       return root;
     }
     groups.forEach(([group, items]) => {
-      const host = document.createElement("div");
+      const host = document.createElement(inline ? "span" : "div");
       host.className = group ? "backend-settings-chip-group" : "backend-settings-chip-group ungrouped";
       const label = groupLabel(group, items, options, groupBy);
       if (label && (groupBy === "tab" || groups.length > 1)) {
