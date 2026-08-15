@@ -455,9 +455,23 @@ class CatalogRoutesMixin:
         with self.state.application_request_lock:
             if method == "GET":
                 return bool(
+                    self._get_research_graph_catalog(parsed)
+                    or
                     self._serve_test_authoring(parsed, method=method)
                     or self._serve_product_catalog(parsed)
                     or self._serve_factor_catalog(parsed)
+                )
+            if method == "POST":
+                return bool(
+                    self._post_research_graph_catalog(parsed)
+                    or self._serve_product_catalog_write(parsed)
+                    or self._serve_test_authoring(parsed, method=method)
+                )
+            if method == "DELETE":
+                return bool(
+                    self._delete_research_graph_catalog(parsed)
+                    or self._serve_product_catalog_write(parsed)
+                    or self._serve_test_authoring(parsed, method=method)
                 )
             return bool(
                 self._serve_product_catalog_write(parsed)

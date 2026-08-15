@@ -6,16 +6,13 @@
     const locale = graphLocale();
     const embeddedSwift = isEmbeddedSwift();
     const localeQuery = `?locale=${encodeURIComponent(locale)}`;
+    const catalogPath = path => `/api/catalog/research-graphs${path}`;
     const userLibraryRequest = embeddedSwift
       ? Promise.resolve({files: [], default: null})
-      : context.api(context.servicePath("/api/research-graphs/user-library"));
+      : context.api(catalogPath("/user-library"));
     const [versionsResult, activeResult, userLibraryResult] = await Promise.allSettled([
-      context.api(context.servicePath(
-        `/api/research-graphs/${graphID}/versions${localeQuery}`,
-      )),
-      context.api(context.servicePath(
-        `/api/research-graphs/${graphID}/active${localeQuery}`,
-      )),
+      context.api(catalogPath(`/${graphID}/versions${localeQuery}`)),
+      context.api(catalogPath(`/${graphID}/active${localeQuery}`)),
       userLibraryRequest,
     ]);
     if (!isCurrent()) return;
@@ -50,8 +47,8 @@
     actions.append(versionPicker(context, versions, graph));
     const download = document.createElement("a");
     download.className = "button secondary";
-    download.href = context.servicePath(
-      `/api/research-graphs/${encodeURIComponent(graphID)}/versions/${graph.version}/yaml${localeQuery}`,
+    download.href = catalogPath(
+      `/${encodeURIComponent(graphID)}/versions/${graph.version}/yaml${localeQuery}`,
     );
     download.download = "";
     download.textContent = context.t("下载 YAML");
@@ -163,9 +160,7 @@
     );
     const download = document.createElement("a");
     download.className = "button secondary";
-    download.href = context.servicePath(
-      `/api/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?download=1`,
-    );
+    download.href = `/api/catalog/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?download=1`;
     download.textContent = context.t("下载");
     download.download = file.filename || "research-graph.yaml";
     const select = context.button(
@@ -186,9 +181,9 @@
 
   async function viewUserGraph(context, file, panel) {
     try {
-      const result = await context.api(context.servicePath(
-        `/api/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?view=1`,
-      ));
+      const result = await context.api(
+        `/api/catalog/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?view=1`,
+      );
       const graph = result?.file?.graph;
       if (!graph) throw new Error(context.t("个人研究图内容不可用"));
       panel.querySelector(".research-graph-user-network")?.remove();
@@ -246,12 +241,14 @@
 
   async function uploadUserGraph(context, file, mount) {
     try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      const response = await context.raw(
-        context.servicePath("/api/research-graphs/user-library"),
-        {method: "POST", body: form},
-      );
+      const response = await file.text().then(yaml => context.raw(
+        "/api/catalog/research-graphs/user-library",
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({filename: file.name, yaml}),
+        },
+      ));
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       context.showNotice(context.t("研究图已上传"));
       mount.replaceChildren();
@@ -273,7 +270,7 @@
 
   async function updateDefault(context, payload, mount) {
     try {
-      await context.api(context.servicePath("/api/research-graphs/user-library/default"), {
+      await context.api("/api/catalog/research-graphs/user-library/default", {
         method: "POST", body: JSON.stringify(payload),
       });
       mount.replaceChildren();
@@ -286,9 +283,10 @@
   async function deleteUserGraph(context, graphFileID, mount) {
     if (!window.confirm(context.t("确定删除这个个人研究图吗？"))) return;
     try {
-      await context.api(context.servicePath(
-        `/api/research-graphs/user-library/${encodeURIComponent(graphFileID)}`,
-      ), {method: "DELETE"});
+      await context.api(
+        `/api/catalog/research-graphs/user-library/${encodeURIComponent(graphFileID)}`,
+        {method: "DELETE"},
+      );
       mount.replaceChildren();
       await render(context, mount);
     } catch (error) {
