@@ -78,7 +78,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .shared-field-value-selector { min-width: 0; }
 .test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
 .test-settings-manager-list { display: grid; overflow: hidden; }
-.test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 6px 0; border-top: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 12px; }
+.test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 3px 0; border: 0; color: var(--text); cursor: pointer; font-size: 12px; line-height: 1.25; }
 .test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
 .test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; }
 .test-settings-manager-row-body > span:first-child { display: block; min-width: 0; }
