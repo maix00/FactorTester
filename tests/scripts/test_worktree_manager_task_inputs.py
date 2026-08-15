@@ -48,6 +48,7 @@ def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
         ".test-workbench .test-settings-manager-defaults.backend-settings-chip-row",
     )
     assert "padding: 3px 0" in row
+    assert "align-items: start" in row
     assert "border-top" not in row
     assert "min-height: 0" in defaults
     assert "padding: 0" in defaults
