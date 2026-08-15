@@ -43,15 +43,36 @@ def test_task_density_overrides_load_last_and_cover_every_task_surface() -> None
 def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
     css = (WEB_ROOT / "styles" / "task-inputs.css").read_text()
     row = _rule(css, ".test-workbench .test-settings-manager-row")
+    row_list = _rule(css, ".test-workbench .test-settings-manager-list")
+    row_body = _rule(css, ".test-workbench .test-settings-manager-row-body")
     defaults = _rule(
         css,
         ".test-workbench .test-settings-manager-defaults.backend-settings-chip-row",
     )
+    defaults_shell = _rule(css, ".test-workbench .test-settings-manager-defaults")
+    chip_group = _rule(
+        css,
+        ".test-workbench .test-settings-manager-defaults .backend-settings-chip-group",
+    )
+    chip = _rule(
+        css,
+        ".test-workbench .test-settings-manager-defaults .backend-setting-chip",
+    )
+    chip_label = _rule(
+        css,
+        ".test-workbench .test-settings-manager-defaults .backend-setting-chip-label",
+    )
     assert "padding: 3px 0" in row
     assert "align-items: start" in row
     assert "border-top" not in row
+    assert "width: 100%" in row_list and "min-width: 0" in row_list
+    assert "width: 100%" in row_body and "min-width: 0" in row_body
     assert "min-height: 0" in defaults
     assert "padding: 0" in defaults
+    assert "width: 100%" in defaults_shell and "max-width: 100%" in defaults_shell
+    assert "flex-wrap: wrap" in chip_group and "width: 100%" in chip_group
+    assert "max-width: 100%" in chip and "box-sizing: border-box" in chip
+    assert "flex: 0 1 auto" in chip_label
 
 
 def test_backtest_source_panel_covers_executable_and_retained_inputs() -> None:

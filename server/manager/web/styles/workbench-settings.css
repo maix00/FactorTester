@@ -77,18 +77,19 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .backend-settings-host { min-width: 0; padding: 8px 12px 10px; }
 .shared-field-value-selector { min-width: 0; }
 .test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
-.test-settings-manager-list { display: grid; overflow: hidden; }
-.test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: start; gap: 7px; min-width: 0; padding: 3px 0; border: 0; color: var(--text); cursor: pointer; font-size: 12px; line-height: 1.25; }
+.test-settings-manager-list { display: grid; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
+.test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: start; gap: 7px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 3px 0; border: 0; color: var(--text); cursor: pointer; font-size: 12px; line-height: 1.25; }
 .test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
-.test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: start; gap: 7px; min-width: 0; }
+.test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: start; gap: 7px; width: 100%; max-width: 100%; min-width: 0; }
 .test-settings-manager-row-body > span:first-child { display: block; min-width: 0; }
 .test-settings-manager-row-body small { color: var(--muted); line-height: 1.25; }
-.test-settings-manager-defaults { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
-.test-settings-manager-defaults.backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
-.test-settings-manager-defaults .backend-settings-chip-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
+.test-settings-manager-defaults { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; overflow: visible; padding: 0; border: 0; background: transparent; }
+.test-settings-manager-defaults.backend-settings-chip-row { display: block; min-height: 0; padding: 0; background: transparent; }
+.test-settings-manager-defaults .backend-settings-chip-group { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: baseline; width: 100%; max-width: 100%; min-width: 0; }
 .test-settings-manager-defaults .backend-settings-chip-group-label { display: none; }
-.test-settings-manager-defaults .backend-setting-chip { min-width: 0; padding-top: 3px; padding-bottom: 3px; white-space: nowrap; }
-.test-settings-manager-defaults .backend-setting-chip-label, .test-settings-manager-defaults .backend-setting-chip-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-settings-manager-defaults .backend-setting-chip { min-width: 0; max-width: 100%; box-sizing: border-box; padding-top: 3px; padding-bottom: 3px; white-space: nowrap; }
+.test-settings-manager-defaults .backend-setting-chip-label, .test-settings-manager-defaults .backend-setting-chip-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-settings-manager-defaults .backend-setting-chip-label { flex: 0 1 auto; }
 .test-settings-manager-defaults .backend-setting-chip-value { max-width: 22rem; }
 .test-setting-rows { min-width: 0; }
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
