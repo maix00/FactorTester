@@ -1,0 +1,34 @@
+{
+  "data_dir": "/data",
+  "sqlite_db_path": "/data/sqlite/unifieddata.sqlite",
+  "source_data_dirs": {
+    "LocalCNFutures": "/data/sources/LocalCNFutures"
+  },
+  "management_access": {
+    "methods": [
+      {
+        "id": "local-docker-context",
+        "kind": "docker-context",
+        "label": "本机 Docker Desktop",
+        "profile": "ft-local-1",
+        "endpoint": "docker://ft-local-1",
+        "capabilities": ["inspect", "restart"],
+        "notes": "仅用于本机服务器容器状态与显式重启；CLI 下载脚本后需人工审阅并确认。",
+        "auth": {
+          "provider": "docker",
+          "source": "docker-context",
+          "profile": "ft-local-1",
+          "setup_hint": "先在本机启动 Docker Desktop 并确认 ft-local-1 Docker Context 可用",
+          "required": true
+        },
+        "script": {
+          "id": "factortester-docker-v1",
+          "filename": "factortester-docker.sh",
+          "content_type": "text/x-shellscript",
+          "sha256": "9d84e51859401b0b6bc7e553516e6b605afe9e99aa6229852d54fbbce48cc0b9",
+          "requires_auth": true
+        }
+      }
+    ]
+  }
+}

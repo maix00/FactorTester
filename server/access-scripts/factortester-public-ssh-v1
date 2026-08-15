@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+host="${FACTORTESTER_SSH_HOST:-}"
+port="${FACTORTESTER_SSH_PORT:-22}"
+user="${FACTORTESTER_SSH_USER:-ecs-user}"
+action="${1:-status}"
+
+usage() {
+  cat <<'EOF'
+Usage: factortester-public-ssh-v1 [status|revision]
+
+Set FACTORTESTER_SSH_HOST, FACTORTESTER_SSH_PORT, and FACTORTESTER_SSH_USER
+from the server's management_access declaration. This helper never accepts
+an arbitrary remote command.
+EOF
+}
+
+[[ -n "$host" ]] || {
+  echo "FACTORTESTER_SSH_HOST is required" >&2
+  usage >&2
+  exit 64
+}
+[[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || {
+  echo "FACTORTESTER_SSH_PORT is invalid" >&2
+  exit 64
+}
+
+case "$action" in
+  status)
+    ssh -p "$port" "$user@$host" \
+      'sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"'
+    ;;
+  revision)
+    ssh -p "$port" "$user@$host" \
+      'sudo docker exec factortester-public-factortester-public-1 \
+       sh -c "cat /opt/factortester/app/.deployment-revision"'
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 64
+    ;;
+esac

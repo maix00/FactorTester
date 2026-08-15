@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+context="${FACTORTESTER_DOCKER_CONTEXT:-}"
+project="${FACTORTESTER_DOCKER_PROJECT:-}"
+action="${1:-status}"
+
+usage() {
+  cat <<'EOF'
+Usage: factortester-docker-v1 [status|restart --confirm]
+
+Set FACTORTESTER_DOCKER_CONTEXT and FACTORTESTER_DOCKER_PROJECT from the
+server's management_access declaration before running this helper.
+EOF
+}
+
+if [[ -z "$context" ]]; then
+  context="$(docker context show)"
+fi
+[[ -n "$project" ]] || {
+  echo "FACTORTESTER_DOCKER_PROJECT is required" >&2
+  usage >&2
+  exit 64
+}
+
+case "$action" in
+  status)
+    docker --context "$context" ps --all \
+      --filter "label=com.docker.compose.project=$project" \
+      --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+    ;;
+  restart)
+    [[ "${2:-}" == "--confirm" ]] || {
+      echo "restart requires the explicit --confirm flag" >&2
+      usage >&2
+      exit 64
+    }
+    mapfile -t containers < <(
+      docker --context "$context" ps -q \
+        --filter "label=com.docker.compose.project=$project"
+    )
+    ((${#containers[@]} > 0)) || {
+      echo "no running containers found for Docker project: $project" >&2
+      exit 69
+    }
+    docker --context "$context" restart "${containers[@]}"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 64
+    ;;
+esac

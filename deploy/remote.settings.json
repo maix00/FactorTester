@@ -5,6 +5,80 @@
     "LocalCNFutures": "/data/sources/LocalCNFutures"
   },
   "management_access": {
-    "methods": []
+    "methods": [
+      {
+        "id": "public-docker-context",
+        "kind": "docker-context",
+        "label": "公网 Docker Context",
+        "profile": "ft-public-1",
+        "endpoint": "docker://ft-public-1",
+        "capabilities": ["inspect", "restart"],
+        "notes": "仅用于公网服务器容器状态与显式重启；先在本机配置该 Docker Context。",
+        "auth": {
+          "provider": "docker",
+          "source": "docker-context",
+          "profile": "ft-public-1",
+          "setup_hint": "先在本机配置并验证 ft-public-1 Docker Context",
+          "required": true
+        },
+        "script": {
+          "id": "factortester-docker-v1",
+          "filename": "factortester-docker.sh",
+          "content_type": "text/x-shellscript",
+          "sha256": "9d84e51859401b0b6bc7e553516e6b605afe9e99aa6229852d54fbbce48cc0b9",
+          "requires_auth": true
+        }
+      },
+      {
+        "id": "public-ssh",
+        "kind": "ssh",
+        "label": "公网 SSH 运维",
+        "profile": "launch-advisor",
+        "endpoint": "ssh://101.133.144.27:22",
+        "host": "101.133.144.27",
+        "port": 22,
+        "capabilities": ["inspect", "restart"],
+        "notes": "只使用本机已有的 SSH 配置与密钥；服务器不返回私钥。",
+        "auth": {
+          "provider": "ssh",
+          "source": "local-ssh-config",
+          "profile": "launch-advisor",
+          "setup_hint": "先在本机配置服务器声明的 SSH profile 与凭证",
+          "required": true
+        },
+        "script": {
+          "id": "factortester-public-ssh-v1",
+          "filename": "factortester-public-ssh.sh",
+          "content_type": "text/x-shellscript",
+          "sha256": "0e5ac663d97b3e2e83fc7da9bf8c40ca8c4d38c29312c95854c1f018a706b097",
+          "requires_auth": true
+        }
+      },
+      {
+        "id": "public-release",
+        "kind": "ssh-release",
+        "label": "公网发布事务",
+        "profile": "launch-advisor",
+        "endpoint": "ssh://101.133.144.27:22",
+        "host": "101.133.144.27",
+        "port": 22,
+        "capabilities": ["release", "rollback", "restart"],
+        "notes": "只激活目标机已接收的完整 Git SHA；源代码传输、备份、健康检查与回滚由发布事务负责。",
+        "auth": {
+          "provider": "ssh",
+          "source": "local-ssh-config",
+          "profile": "launch-advisor",
+          "setup_hint": "先在本机配置服务器声明的 SSH profile 与凭证",
+          "required": true
+        },
+        "script": {
+          "id": "factortester-public-release-v1",
+          "filename": "factortester-public-release.sh",
+          "content_type": "text/x-shellscript",
+          "sha256": "e5dd0ab9ae3786ea3c2b3936d877ae65324fd1654b2c9378613c0528d1bfaccf",
+          "requires_auth": true
+        }
+      }
+    ]
   }
 }
