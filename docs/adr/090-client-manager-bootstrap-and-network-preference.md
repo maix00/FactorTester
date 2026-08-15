@@ -1,4 +1,4 @@
-# ADR 087：Swift 客户端 Manager 引导、测速与机构内网优先
+# ADR 090：Swift 客户端 Manager 引导、测速与机构内网优先
 
 ## 状态
 

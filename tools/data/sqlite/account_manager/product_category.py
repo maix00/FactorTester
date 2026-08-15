@@ -25,7 +25,6 @@ def ensure_product_category_schema(conn: sqlite3.Connection) -> None:
         """
     )
 
-
 def load_product_categories(username: str) -> list[dict[str, Any]]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_product_category_schema(conn)
@@ -79,4 +78,3 @@ def save_product_categories(
                     now,
                 ),
             )
-
