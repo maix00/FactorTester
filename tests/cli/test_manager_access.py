@@ -6,6 +6,7 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.http import HttpClientError
+from tools.cli.manager import access as access_module
 from tools.cli.manager.client import ManagerClient
 from tools.cli.manager.config import ManagerConfig
 from tools.cli.manager_app import manager_cli
@@ -138,6 +139,39 @@ def test_script_download_can_be_explicitly_delegated_after_credential_override(
     assert downloaded[0][0] == "operator-route"
     assert downloaded[0][2]["expected_sha256"]
     assert json.loads(result.output)["executed"] is False
+
+
+def test_docker_context_credential_readiness_uses_declared_profile(monkeypatch) -> None:
+    calls = []
+
+    class Completed:
+        returncode = 0
+
+    monkeypatch.setattr(
+        access_module,
+        "_command_exists",
+        lambda command: command == "docker",
+    )
+    monkeypatch.setattr(
+        access_module.subprocess,
+        "run",
+        lambda args, **_kwargs: calls.append(args) or Completed(),
+    )
+
+    value = access_module.access_method_status({
+        "id": "local-docker-context",
+        "kind": "docker-context",
+        "auth": {
+            "provider": "docker",
+            "source": "docker-context",
+            "profile": "ft-local-1",
+            "required": True,
+        },
+    })
+
+    assert value["ready"] is True
+    assert value["credential"]["state"] == "ready"
+    assert calls == [["docker", "context", "inspect", "ft-local-1"]]
 
 
 def test_factor_tester_job_actions_require_explicit_confirmation(monkeypatch) -> None:

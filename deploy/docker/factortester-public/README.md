@@ -73,6 +73,14 @@ retention do not require an operator or Agent. If the maintenance transport
 fails, the currently verified release remains untouched and the same command
 can be retried.
 
+The public `.settings` also declares the non-secret operator access projection:
+the `ft-public-1` Docker Context, the current SSH endpoint/profile, and the
+bounded release-activation script. `factortester-manager server access` is the
+only supported way for a client to discover that metadata. The CLI may download
+the digest-checked scripts, but never executes them and never receives the SSH
+key or Alibaba credentials. Keep the declaration synchronized with the current
+public endpoint when the public address changes.
+
 Before replacing a native PostgreSQL instance, create a custom-format dump and
 retain a checksum outside the container volume. Restore it into a new named
 volume, run `backup` and `restore-check`, then switch the host ports. Keep the

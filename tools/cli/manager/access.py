@@ -75,6 +75,8 @@ def _credential_status(auth: Mapping[str, Any]) -> dict[str, Any]:
         return result
     if source in {"local-keychain", "macos-keychain"}:
         return _keychain_status(auth, result)
+    if source == "docker-context":
+        return _docker_context_status(auth, result)
     if source == "aliyun-cli":
         result["state"] = "unknown" if _command_exists(
             str(auth.get("executable") or "aliyun")
@@ -86,6 +88,34 @@ def _credential_status(auth: Mapping[str, Any]) -> dict[str, Any]:
         )
         return result
     result["message"] = "服务器声明了未知的本机凭证来源"
+    return result
+
+
+def _docker_context_status(
+    auth: Mapping[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    context = str(auth.get("profile") or "").strip()
+    if not context:
+        result["state"] = "missing"
+        result["message"] = "服务器声明缺少 Docker Context profile"
+        return result
+    if not _command_exists("docker"):
+        result["state"] = "missing"
+        result["message"] = "本机未找到 Docker CLI"
+        return result
+    completed = subprocess.run(
+        ["docker", "context", "inspect", context],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    result["state"] = "ready" if completed.returncode == 0 else "missing"
+    result["message"] = (
+        "本机 Docker Context 已登记"
+        if result["state"] == "ready"
+        else "本机没有服务器声明的 Docker Context"
+    )
     return result
 
 
