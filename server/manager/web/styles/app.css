@@ -341,6 +341,12 @@ button.reference-item { cursor: pointer; }
   tab-size: 2;
 }
 .research-graph-view { display: grid; gap: 10px; min-width: 0; }
+.research-graph-user-library { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.research-graph-user-library h3 { margin: 0; }
+.research-graph-user-library > p { margin: 0; }
+.research-graph-user-files { display: grid; gap: 8px; }
+.research-graph-user-file { display: grid; grid-template-columns: minmax(140px, .8fr) minmax(180px, 1.2fr) auto; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 9px; }
+.research-graph-user-file small { color: var(--muted); overflow-wrap: anywhere; }
 .research-graph-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .research-graph-meta { margin: 0; overflow-wrap: anywhere; }
 .research-graph-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, .32fr); gap: 14px; min-width: 0; }
@@ -445,6 +451,7 @@ button.reference-item { cursor: pointer; }
   .research-graph-canvas { height: 520px; min-height: 420px; }
   .research-graph-surface { min-height: 420px; }
   .research-graph-details { max-height: none; }
+  .research-graph-user-file { grid-template-columns: 1fr; align-items: start; }
   .test-inline-creator, .test-factor-source-grid,
   .test-factor-parameters { grid-template-columns: 1fr; }
   .custom-product-row { grid-template-columns: 1fr 1fr; }

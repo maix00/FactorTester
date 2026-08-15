@@ -4,31 +4,42 @@
     if (!isCurrent()) return;
     const graphID = "factor-research";
     const locale = graphLocale();
+    const embeddedSwift = isEmbeddedSwift();
     const localeQuery = `?locale=${encodeURIComponent(locale)}`;
-    const [versionsResult, activeResult] = await Promise.allSettled([
+    const userLibraryRequest = embeddedSwift
+      ? Promise.resolve({files: [], default: null})
+      : context.api(context.servicePath("/api/research-graphs/user-library"));
+    const [versionsResult, activeResult, userLibraryResult] = await Promise.allSettled([
       context.api(context.servicePath(
         `/api/research-graphs/${graphID}/versions${localeQuery}`,
       )),
       context.api(context.servicePath(
         `/api/research-graphs/${graphID}/active${localeQuery}`,
       )),
+      userLibraryRequest,
     ]);
     if (!isCurrent()) return;
     if (versionsResult.status !== "fulfilled") throw versionsResult.reason;
     const versions = versionsResult.value.versions || [];
     const active = activeResult.status === "fulfilled" ? activeResult.value.graph : null;
+    const userLibrary = userLibraryResult.status === "fulfilled"
+      ? userLibraryResult.value : {files: [], default: null};
     const requested = Number(new URLSearchParams(location.search).get("version"));
     const graph = versions.find(item => item.version === requested) || active || versions.at(-1);
-    if (!graph) {
-      mount.append(FTUI.empty(
-        context.t("尚无研究图版本"),
-        context.t("没有可读取的研究图服务器"),
-      ));
-      return;
-    }
 
     const section = document.createElement("section");
     section.className = "research-graph-view";
+    if (!embeddedSwift) {
+      section.append(userLibraryPanel(context, userLibrary, mount));
+    }
+    if (!graph) {
+      section.append(FTUI.empty(
+        context.t("尚无研究图版本"),
+        context.t("没有可读取的研究图服务器"),
+      ));
+      mount.append(section);
+      return;
+    }
     const toolbar = document.createElement("div");
     toolbar.className = "research-graph-toolbar";
     const title = document.createElement("h2");
@@ -50,6 +61,9 @@
       void downloadGraph(context, download.href, graph, graphID);
     });
     actions.append(download);
+    if (!embeddedSwift) {
+      actions.append(serverDefaultButton(context, graph, userLibrary.default, mount));
+    }
     toolbar.append(actions);
     section.append(toolbar);
 
@@ -59,7 +73,6 @@
       `${context.t("当前激活版本")}: v${active?.version || "—"}`,
       formatCount(context, "%lld 个节点", (graph.nodes || []).length),
       formatCount(context, "%lld 条边", (graph.edges || []).length),
-      `${context.t("内容哈希", "Content hash")}: ${graph.content_hash || "—"}`,
       graph.presentation_status === "available"
         ? `${context.t("语言版本")}: ${graph.presentation_locale}`
         : context.t("当前语言版本尚未发布"),
@@ -87,6 +100,147 @@
     section.append(layout);
     mount.append(section);
     renderNetwork(context, graph, canvas, details, surface);
+  }
+
+  function userLibraryPanel(context, library, mount) {
+    const panel = document.createElement("section");
+    panel.className = "research-graph-user-library";
+    const heading = document.createElement("h3");
+    heading.textContent = context.t("我的研究图");
+    const note = document.createElement("p");
+    note.className = "secondary";
+    note.textContent = context.t("Web 上传保存到当前服务器；Swift 本地导入不会上传");
+    const actions = document.createElement("div");
+    actions.className = "research-graph-actions";
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".yaml,.yml,application/yaml,text/yaml";
+    input.hidden = true;
+    const upload = context.button(
+      context.t("上传 YAML"),
+      () => input.click(),
+      context.t("上传个人研究图 YAML 到当前服务器"),
+    );
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) void uploadUserGraph(context, file, mount);
+      input.value = "";
+    });
+    actions.append(upload, input);
+    panel.append(heading, note, actions);
+    const files = Array.isArray(library.files) ? library.files : [];
+    if (!files.length) {
+      panel.append(FTUI.empty(
+        context.t("尚无个人研究图"),
+        context.t("上传 YAML 后会显示在这里；用户文件不记录语言版本"),
+      ));
+      return panel;
+    }
+    const list = document.createElement("div");
+    list.className = "research-graph-user-files";
+    files.forEach(file => list.append(userGraphRow(context, file, mount)));
+    panel.append(list);
+    return panel;
+  }
+
+  function userGraphRow(context, file, mount) {
+    const row = document.createElement("article");
+    row.className = "research-graph-user-file";
+    const heading = document.createElement("strong");
+    heading.textContent = file.name || file.filename || context.t("未命名研究图");
+    const metadata = document.createElement("small");
+    metadata.textContent = [
+      file.filename,
+      `${file.graph_id}@v${file.version}`,
+      `${context.t("来源服务器")}: ${file.source_server_id || "local"}`,
+    ].filter(Boolean).join(" · ");
+    const controls = document.createElement("div");
+    controls.className = "research-graph-actions";
+    const download = document.createElement("a");
+    download.className = "button secondary";
+    download.href = context.servicePath(
+      `/api/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?download=1`,
+    );
+    download.textContent = context.t("下载");
+    download.download = file.filename || "research-graph.yaml";
+    const select = context.button(
+      file.is_default ? context.t("默认研究图") : context.t("设为默认"),
+      () => setUserDefault(context, file.graph_file_id, mount),
+      context.t("供研究 Agent 使用的默认研究图"),
+    );
+    select.disabled = Boolean(file.is_default);
+    const remove = context.button(
+      context.t("删除"),
+      () => deleteUserGraph(context, file.graph_file_id, mount),
+      context.t("删除这个个人研究图"),
+    );
+    controls.append(download, select, remove);
+    row.append(heading, metadata, controls);
+    return row;
+  }
+
+  function serverDefaultButton(context, graph, currentDefault, mount) {
+    const isDefault = currentDefault?.kind === "server"
+      && currentDefault?.ref === `${graph.graph_id}@v${graph.version}`;
+    const button = context.button(
+      isDefault ? context.t("默认研究图") : context.t("设为默认"),
+      () => setServerDefault(context, graph, mount),
+      context.t("供研究 Agent 使用的默认研究图"),
+    );
+    button.disabled = isDefault;
+    return button;
+  }
+
+  async function uploadUserGraph(context, file, mount) {
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const response = await context.raw(
+        context.servicePath("/api/research-graphs/user-library"),
+        {method: "POST", body: form},
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      context.showNotice(context.t("研究图已上传"));
+      mount.replaceChildren();
+      await render(context, mount);
+    } catch (error) {
+      context.showNotice(error.message || String(error), true);
+    }
+  }
+
+  async function setUserDefault(context, graphFileID, mount) {
+    await updateDefault(context, {kind: "user", graph_file_id: graphFileID}, mount);
+  }
+
+  async function setServerDefault(context, graph, mount) {
+    await updateDefault(context, {
+      kind: "server", graph_id: graph.graph_id, version: graph.version,
+    }, mount);
+  }
+
+  async function updateDefault(context, payload, mount) {
+    try {
+      await context.api(context.servicePath("/api/research-graphs/user-library/default"), {
+        method: "POST", body: JSON.stringify(payload),
+      });
+      mount.replaceChildren();
+      await render(context, mount);
+    } catch (error) {
+      context.showNotice(error.message || String(error), true);
+    }
+  }
+
+  async function deleteUserGraph(context, graphFileID, mount) {
+    if (!window.confirm(context.t("确定删除这个个人研究图吗？"))) return;
+    try {
+      await context.api(context.servicePath(
+        `/api/research-graphs/user-library/${encodeURIComponent(graphFileID)}`,
+      ), {method: "DELETE"});
+      mount.replaceChildren();
+      await render(context, mount);
+    } catch (error) {
+      context.showNotice(error.message || String(error), true);
+    }
   }
 
   function versionPicker(context, versions, graph) {
@@ -118,10 +272,8 @@
         /[^A-Za-z0-9._-]+/g, "-",
       ) || "research-graph";
       const localeSuffix = graph.presentation
-        ? `-${graph.presentation.locale}-${String(
-          graph.presentation.translation_hash || "",
-        ).slice(0, 16)}`
-        : `-${String(graph.content_hash || "").slice(0, 16)}`;
+        ? `-${graph.presentation.locale}`
+        : "";
       const filename = `${graphName}-v${graph.version}${localeSuffix}.yaml`;
       const objectURL = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -362,6 +514,10 @@
   function graphLocale() {
     return String(document.documentElement.lang || "zh-Hans")
       .toLowerCase().startsWith("en") ? "en" : "zh-Hans";
+  }
+
+  function isEmbeddedSwift() {
+    return Boolean(window.webkit?.messageHandlers);
   }
 
   window.FTResearchGraph = Object.freeze({render});

@@ -74,7 +74,6 @@ from server.services.research_graph.presentation_contract import (
     DEFAULT_GRAPH_LOCALE,
     SUPPORTED_GRAPH_LOCALES,
     normalize_graph_locale,
-    presentation_content_hash,
     validate_presentation,
 )
 from server.services.research_graph.presentations import (
@@ -82,6 +81,16 @@ from server.services.research_graph.presentations import (
     list_presentations,
     load_presentation,
     register_presentation,
+)
+from server.services.research_graph.user_graphs import (
+    delete_graph as delete_user_graph,
+    list_graphs as list_user_graphs,
+    load_graph_file as load_user_graph,
+    upload_graph as upload_user_graph,
+)
+from server.services.research_graph.user_graph_preferences import (
+    get_default as get_default_user_graph,
+    set_default as set_default_user_graph,
 )
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db as _clear_graph_cache_for_current_db,
@@ -143,6 +152,11 @@ __all__ = [
     "rollback_active_graph",
     "attach_presentation",
     "normalize_graph_locale",
-    "presentation_content_hash",
     "validate_presentation",
+    "delete_user_graph",
+    "get_default_user_graph",
+    "list_user_graphs",
+    "load_user_graph",
+    "set_default_user_graph",
+    "upload_user_graph",
 ]

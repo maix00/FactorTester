@@ -205,10 +205,17 @@ def download_research_graph_yaml(graph_id: str, version: int):
             "error": "research graph YAML export failed",
         }), 500
 
-    etag_identity = str(graph["content_hash"])
-    if presentation is not None:
-        etag_identity += ":" + str(presentation["translation_hash"])
-    etag = f'"{etag_identity}"'
+    if presentation is None:
+        etag = f'"{graph["content_hash"]}"'
+        cache_control = "public, max-age=31536000, immutable"
+    else:
+        # Display text is mutable per locale.  Use its update timestamp for a
+        # small conditional-read token, not a second content identity hash.
+        etag = (
+            f'"{graph["graph_id"]}-v{int(graph["version"])}-'
+            f'{presentation["locale"]}-{int(float(presentation["created_at"]) * 1000)}"'
+        )
+        cache_control = "no-cache"
     if request.headers.get("If-None-Match") == etag:
         return Response(status=304, headers={"ETag": etag})
     response = Response(body, status=200, mimetype="application/yaml")
@@ -217,7 +224,7 @@ def download_research_graph_yaml(graph_id: str, version: int):
     )
     response.headers["Content-Length"] = str(len(body))
     response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["Cache-Control"] = cache_control
     response.headers["X-FactorTester-Graph-Version"] = str(version)
     response.headers["X-FactorTester-Graph-Content-Hash"] = (
         str(graph["content_hash"])
@@ -225,9 +232,6 @@ def download_research_graph_yaml(graph_id: str, version: int):
     if locale is not None and presentation is not None:
         response.headers["Content-Language"] = locale
         response.headers["X-FactorTester-Graph-Locale"] = locale
-        response.headers["X-FactorTester-Graph-Translation-Hash"] = str(
-            presentation["translation_hash"]
-        )
     return response
 
 

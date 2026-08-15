@@ -71,17 +71,15 @@ def graph_yaml_filename(
     *,
     presentation: dict[str, Any] | None = None,
 ) -> str:
-    """Build a safe, content-identifying filename for a graph download."""
+    """Build a stable, readable filename for a graph download."""
     definition = graph_definition(graph)
     graph_id = _SAFE_FILENAME.sub("-", str(definition["graph_id"])).strip(".-")
     graph_id = graph_id or "research-graph"
-    content_hash = str(definition["content_hash"])
     version = int(definition["version"])
     if presentation is None:
-        return f"{graph_id}-v{version}-{content_hash[:16]}.yaml"
+        return f"{graph_id}-v{version}.yaml"
     locale = str(presentation.get("locale") or "locale")
-    translation_hash = str(presentation.get("translation_hash") or "")
-    return f"{graph_id}-v{version}-{locale}-{translation_hash[:16]}.yaml"
+    return f"{graph_id}-v{version}-{locale}.yaml"
 
 
 __all__ = [

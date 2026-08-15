@@ -62,7 +62,7 @@ def test_yaml_download_is_validated_and_content_addressed(client) -> None:
     assert response.headers["X-FactorTester-Graph-Content-Hash"] == stored["content_hash"]
     assert response.headers["ETag"] == f'"{stored["content_hash"]}"'
     assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
-    assert "factor-research-v1-" in response.headers["Content-Disposition"]
+    assert 'factor-research-v1.yaml"' in response.headers["Content-Disposition"]
     assert response.headers["Content-Disposition"].endswith(".yaml\"")
 
     payload = yaml.safe_load(response.data.decode("utf-8"))

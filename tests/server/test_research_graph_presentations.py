@@ -10,6 +10,8 @@ import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
 from server.services.research_graph.protocol import graph_content_hash
+from server.services.research_graph.presentations import create_schema
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _graph() -> dict:
@@ -63,7 +65,6 @@ def _presentation(graph: dict, *, locale: str, title: str = "Research graph") ->
         "schema_version": 1,
         "graph_id": graph["graph_id"],
         "version": graph["version"],
-        "content_hash": graph["content_hash"],
         "locale": locale,
         "title": title,
         "description": "Server-managed graph presentation",
@@ -102,7 +103,7 @@ def client(tmp_path, monkeypatch):
     return client
 
 
-def test_presentation_is_a_separate_immutable_revision(tmp_path, monkeypatch):
+def test_presentation_is_the_current_locale_overlay(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
     research_graphs.ensure_schema()
     graph = research_graphs.register_graph(_graph(), actor="curator-agent")
@@ -123,11 +124,14 @@ def test_presentation_is_a_separate_immutable_revision(tmp_path, monkeypatch):
         actor="curator-agent",
     )
 
-    assert first["translation_revision"] == 1
-    assert same["translation_revision"] == 1
-    assert same["created_by"] == "curator-agent"
-    assert second["translation_revision"] == 2
-    assert second["translation_hash"] != first["translation_hash"]
+    assert "translation_revision" not in first
+    assert "translation_hash" not in first
+    assert same["created_by"] == "another-curator"
+    assert second["created_by"] == "curator-agent"
+    assert second["title"] == "Research graph v2"
+    assert research_graphs.load_presentation(
+        graph_id="factor-research", version=1, locale="en"
+    )["title"] == "Research graph v2"
     assert graph["content_hash"] == _graph()["content_hash"]
 
 
@@ -157,7 +161,7 @@ def test_locale_projection_does_not_change_graph_hash(tmp_path, monkeypatch):
 
 def test_locale_yaml_is_a_bundle_and_missing_locale_is_explicit(client):
     graph = research_graphs.register_graph(_graph(), actor="curator-agent")
-    presentation = research_graphs.register_presentation(
+    research_graphs.register_presentation(
         graph,
         _presentation(graph, locale="en"),
         actor="curator-agent",
@@ -180,12 +184,8 @@ def test_locale_yaml_is_a_bundle_and_missing_locale_is_explicit(client):
     assert response.status_code == 200
     assert response.headers["Content-Language"] == "en"
     assert response.headers["X-FactorTester-Graph-Locale"] == "en"
-    assert response.headers["X-FactorTester-Graph-Translation-Hash"] == (
-        presentation["translation_hash"]
-    )
-    assert f"-en-{presentation['translation_hash'][:16]}.yaml" in response.headers[
-        "Content-Disposition"
-    ]
+    assert "X-FactorTester-Graph-Translation-Hash" not in response.headers
+    assert '-en.yaml"' in response.headers["Content-Disposition"]
     payload = yaml.safe_load(response.data.decode())
     assert payload["format"] == "factor-tester.research-graph-presentation.v1"
     assert payload["graph"]["content_hash"] == graph["content_hash"]
@@ -200,16 +200,91 @@ def test_locale_yaml_is_a_bundle_and_missing_locale_is_explicit(client):
     assert missing.json["locale"] == "zh-Hans"
 
 
-def test_presentation_validation_requires_exact_graph_identity(tmp_path, monkeypatch):
+def test_presentation_validation_allows_partial_overlay_and_rejects_unknown_fields(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
     research_graphs.ensure_schema()
     graph = research_graphs.register_graph(_graph(), actor="curator-agent")
-    invalid = _presentation(graph, locale="en")
-    invalid["nodes"].pop("decision")
+    partial = _presentation(graph, locale="en")
+    partial["nodes"].pop("decision")
+    stored = research_graphs.register_presentation(
+        graph,
+        partial,
+        actor="curator-agent",
+    )
+    assert "decision" not in stored["nodes"]
 
-    with pytest.raises(ValueError, match="missing decision"):
+    invalid = _presentation(graph, locale="en")
+    invalid["nodes"]["decision"]["unexpected"] = "not allowed"
+    # The unknown-field check is intentionally independent from Graph node
+    # coverage; partial overlays are valid, malformed entries are not.
+    with pytest.raises(ValueError, match="unknown fields"):
         research_graphs.register_presentation(
             graph,
             invalid,
             actor="curator-agent",
         )
+
+
+def test_old_translation_history_is_collapsed_without_hash_metadata(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", db_path)
+    with connect_sqlite(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE research_graph_presentations (
+                graph_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                locale TEXT NOT NULL,
+                translation_revision INTEGER NOT NULL,
+                translation_hash TEXT NOT NULL,
+                presentation_json TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (graph_id, version, locale, translation_revision)
+            )
+            """
+        )
+        for revision, title in ((1, "old"), (2, "current")):
+            conn.execute(
+                """
+                INSERT INTO research_graph_presentations VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "factor-research", 1, "en", revision,
+                    f"hash-{revision}",
+                    json.dumps({
+                        "schema_version": 1,
+                        "graph_id": "factor-research",
+                        "version": 1,
+                        "content_hash": "legacy-graph-hash",
+                        "locale": "en",
+                        "title": title,
+                        "nodes": {},
+                        "edges": {},
+                        "capability_descriptions": {},
+                    }),
+                    "curator",
+                    float(revision),
+                ),
+            )
+        create_schema(conn)
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(research_graph_presentations)"
+            ).fetchall()
+        }
+        stored = conn.execute(
+            "SELECT * FROM research_graph_presentations"
+        ).fetchone()
+
+    assert "translation_revision" not in columns
+    assert "translation_hash" not in columns
+    assert stored["locale"] == "en"
+    assert json.loads(stored["presentation_json"])["title"] == "current"
+    assert "content_hash" not in json.loads(stored["presentation_json"])

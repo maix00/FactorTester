@@ -1,16 +1,14 @@
-"""Validation and content addressing for Research Graph presentations.
+"""Small contract for localized Research Graph display text.
 
-The presentation is deliberately separate from the semantic Graph document.
-Changing a translated label must never change the Graph ``content_hash`` or
-create a new execution version.
+Presentation text is a display overlay.  It identifies the Graph version and
+locale, but it is not a second semantic Graph and therefore has no content
+hash or revision chain.  Missing node/edge labels simply fall back to the
+canonical Graph text in the clients.
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any, Mapping
-
-from server.services.research_graph.protocol import json_hash
 
 
 PRESENTATION_SCHEMA_VERSION = 1
@@ -26,36 +24,23 @@ _LOCALE_ALIASES = {
     "en": "en",
 }
 _PRESENTATION_KEYS = frozenset({
-    "schema_version",
-    "graph_id",
-    "version",
-    "content_hash",
-    "locale",
-    "title",
-    "description",
-    "nodes",
-    "edges",
-    "capability_descriptions",
-    "wildcard",
+    "schema_version", "graph_id", "version", "locale", "title",
+    "description", "nodes", "edges", "capability_descriptions", "wildcard",
 })
-_NODE_KEYS = frozenset({
-    "label",
-    "purpose",
-    "entry_evidence",
-    "exit_evidence",
-})
+_NODE_KEYS = frozenset({"label", "purpose", "entry_evidence", "exit_evidence"})
 _EDGE_KEYS = frozenset({"label", "description"})
 
 
 def normalize_graph_locale(value: Any) -> str:
-    """Return the one supported locale identifier or reject it."""
     if value is None or not str(value).strip():
         return DEFAULT_GRAPH_LOCALE
     raw = str(value).strip()
     normalized = _LOCALE_ALIASES.get(raw.lower())
     if normalized is None:
         supported = ", ".join(SUPPORTED_GRAPH_LOCALES)
-        raise ValueError(f"unsupported research graph locale: {raw} ({supported})")
+        raise ValueError(
+            f"unsupported research graph locale: {raw} ({supported})"
+        )
     return normalized
 
 
@@ -63,7 +48,7 @@ def validate_presentation(
     graph: Mapping[str, Any],
     presentation: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate one complete display overlay for one immutable Graph version."""
+    """Validate one display overlay without creating another Graph identity."""
     if not isinstance(graph, Mapping):
         raise TypeError("research graph must be an object")
     if not isinstance(presentation, Mapping):
@@ -74,68 +59,70 @@ def validate_presentation(
             "research graph presentation has unknown fields: "
             + ", ".join(str(item) for item in unknown)
         )
-
-    schema_version = presentation.get("schema_version", PRESENTATION_SCHEMA_VERSION)
+    schema_version = presentation.get(
+        "schema_version", PRESENTATION_SCHEMA_VERSION
+    )
     if schema_version != PRESENTATION_SCHEMA_VERSION:
         raise ValueError("unsupported research graph presentation schema")
-    if str(presentation.get("graph_id") or "") != str(graph.get("graph_id") or ""):
-        raise ValueError("presentation graph_id does not match Graph version")
-    if int(presentation.get("version") or 0) != int(graph.get("version") or 0):
-        raise ValueError("presentation version does not match Graph version")
-    if str(presentation.get("content_hash") or "") != str(
-        graph.get("content_hash") or ""
+    if str(presentation.get("graph_id") or "") != str(
+        graph.get("graph_id") or ""
     ):
-        raise ValueError("presentation content_hash does not match Graph version")
-
-    locale = normalize_graph_locale(presentation.get("locale"))
-    title = _required_text(presentation.get("title"), "presentation title")
-    description = _optional_text(presentation.get("description"))
-    nodes = _validate_nodes(graph.get("nodes"), presentation.get("nodes"))
-    edges = _validate_edges(graph.get("edges"), presentation.get("edges"))
-    capability_descriptions = _validate_capabilities(
-        graph.get("capability_descriptors"),
-        presentation.get("capability_descriptions", {}),
-    )
-    wildcard = _validate_wildcard(presentation.get("wildcard"))
+        raise ValueError("presentation graph_id does not match Graph version")
+    if int(presentation.get("version") or 0) != int(
+        graph.get("version") or 0
+    ):
+        raise ValueError("presentation version does not match Graph version")
 
     value: dict[str, Any] = {
         "schema_version": PRESENTATION_SCHEMA_VERSION,
         "graph_id": str(graph["graph_id"]),
         "version": int(graph["version"]),
-        "content_hash": str(graph["content_hash"]),
-        "locale": locale,
-        "title": title,
-        "nodes": nodes,
-        "edges": edges,
-        "capability_descriptions": capability_descriptions,
+        "locale": normalize_graph_locale(presentation.get("locale")),
+        "title": _required_text(presentation.get("title"), "presentation title"),
+        "nodes": _validate_nodes(
+            presentation.get("nodes", {}),
+            _graph_ids(graph.get("nodes"), "node_id", "Graph nodes"),
+        ),
+        "edges": _validate_edges(
+            presentation.get("edges", {}),
+            _graph_ids(graph.get("edges"), "edge_id", "Graph edges"),
+        ),
+        "capability_descriptions": _validate_text_map(
+            presentation.get("capability_descriptions", {}),
+            "capability_descriptions",
+        ),
     }
+    description = presentation.get("description")
     if description is not None:
-        value["description"] = description
-    if wildcard:
-        value["wildcard"] = wildcard
+        value["description"] = _required_text(
+            description, "presentation description"
+        )
+    wildcard = presentation.get("wildcard")
+    if wildcard is not None:
+        if not isinstance(wildcard, Mapping):
+            raise ValueError("presentation wildcard must be an object")
+        value["wildcard"] = {
+            "label": _required_text(wildcard.get("label"), "wildcard label"),
+            "purpose": _required_text(
+                wildcard.get("purpose"), "wildcard purpose"
+            ),
+        }
     return value
 
 
-def presentation_content_hash(presentation: Mapping[str, Any]) -> str:
-    """Hash only translated display content, excluding row metadata."""
-    value = deepcopy(dict(presentation))
-    value.pop("translation_hash", None)
-    value.pop("translation_revision", None)
-    value.pop("created_by", None)
-    value.pop("created_at", None)
-    return json_hash(value)
-
-
 def _validate_nodes(
-    graph_nodes: Any,
-    presentation_nodes: Any,
+    value: Any,
+    graph_ids: set[str],
 ) -> dict[str, dict[str, Any]]:
-    canonical = _objects_by_id(graph_nodes, "node_id", "Graph nodes")
-    if not isinstance(presentation_nodes, Mapping):
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
         raise ValueError("presentation nodes must be an object")
-    _require_exact_keys(canonical, presentation_nodes, "node")
     result: dict[str, dict[str, Any]] = {}
-    for node_id, item in presentation_nodes.items():
+    for node_id, item in value.items():
+        node_id = str(node_id)
+        if node_id not in graph_ids:
+            raise ValueError(f"presentation node {node_id} is not in Graph")
         if not isinstance(item, Mapping):
             raise ValueError(f"presentation node {node_id} must be an object")
         unknown = sorted(set(item) - _NODE_KEYS)
@@ -144,33 +131,36 @@ def _validate_nodes(
                 f"presentation node {node_id} has unknown fields: "
                 + ", ".join(str(field) for field in unknown)
             )
-        node = canonical[str(node_id)]
-        value = {"label": _required_text(item.get("label"), f"node {node_id} label")}
-        if "purpose" in node:
-            value["purpose"] = _required_text(
-                item.get("purpose"), f"node {node_id} purpose"
-            )
-        elif "purpose" in item:
-            value["purpose"] = _required_text(
-                item.get("purpose"), f"node {node_id} purpose"
-            )
+        translated = {"label": _required_text(
+            item.get("label"), f"node {node_id} label"
+        )}
+        for field in ("purpose",):
+            if field in item:
+                translated[field] = _required_text(
+                    item[field], f"node {node_id} {field}"
+                )
         for field in ("entry_evidence", "exit_evidence"):
             if field in item:
-                value[field] = _string_list(item[field], f"node {node_id} {field}")
-        result[str(node_id)] = value
+                translated[field] = _string_list(
+                    item[field], f"node {node_id} {field}"
+                )
+        result[node_id] = translated
     return result
 
 
 def _validate_edges(
-    graph_edges: Any,
-    presentation_edges: Any,
+    value: Any,
+    graph_ids: set[str],
 ) -> dict[str, dict[str, Any]]:
-    canonical = _objects_by_id(graph_edges, "edge_id", "Graph edges")
-    if not isinstance(presentation_edges, Mapping):
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
         raise ValueError("presentation edges must be an object")
-    _require_exact_keys(canonical, presentation_edges, "edge")
     result: dict[str, dict[str, Any]] = {}
-    for edge_id, item in presentation_edges.items():
+    for edge_id, item in value.items():
+        edge_id = str(edge_id)
+        if edge_id not in graph_ids:
+            raise ValueError(f"presentation edge {edge_id} is not in Graph")
         if not isinstance(item, Mapping):
             raise ValueError(f"presentation edge {edge_id} must be an object")
         unknown = sorted(set(item) - _EDGE_KEYS)
@@ -179,97 +169,43 @@ def _validate_edges(
                 f"presentation edge {edge_id} has unknown fields: "
                 + ", ".join(str(field) for field in unknown)
             )
-        value = {"label": _required_text(item.get("label"), f"edge {edge_id} label")}
+        translated = {"label": _required_text(
+            item.get("label"), f"edge {edge_id} label"
+        )}
         if "description" in item:
-            value["description"] = _required_text(
-                item.get("description"), f"edge {edge_id} description"
+            translated["description"] = _required_text(
+                item["description"], f"edge {edge_id} description"
             )
-        result[str(edge_id)] = value
+        result[edge_id] = translated
     return result
 
 
-def _validate_capabilities(graph_capabilities: Any, value: Any) -> dict[str, str]:
-    if value is None:
-        value = {}
-    if not isinstance(value, Mapping):
-        raise ValueError("capability_descriptions must be an object")
-    canonical_ids = set()
-    if isinstance(graph_capabilities, Mapping):
-        canonical_ids = {str(item) for item in graph_capabilities}
-    unknown = sorted(set(value) - canonical_ids) if canonical_ids else []
-    if unknown:
-        raise ValueError(
-            "presentation has unknown capability descriptions: "
-            + ", ".join(str(item) for item in unknown)
-        )
-    return {
-        str(capability): _required_text(
-            description, f"capability {capability} description"
-        )
-        for capability, description in value.items()
-    }
-
-
-def _validate_wildcard(value: Any) -> dict[str, str] | None:
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise ValueError("presentation wildcard must be an object")
-    unknown = sorted(set(value) - {"label", "purpose"})
-    if unknown:
-        raise ValueError(
-            "presentation wildcard has unknown fields: "
-            + ", ".join(str(item) for item in unknown)
-        )
-    return {
-        "label": _required_text(value.get("label"), "wildcard label"),
-        "purpose": _required_text(value.get("purpose"), "wildcard purpose"),
-    }
-
-
-def _objects_by_id(value: Any, key: str, label: str) -> dict[str, Mapping[str, Any]]:
+def _graph_ids(value: Any, key: str, field: str) -> set[str]:
     if not isinstance(value, list):
-        raise ValueError(f"{label} must be an array")
-    result: dict[str, Mapping[str, Any]] = {}
+        raise ValueError(f"{field} must be an array")
+    result: set[str] = set()
     for item in value:
         if not isinstance(item, Mapping) or not str(item.get(key) or ""):
-            raise ValueError(f"{label} contain an invalid {key}")
-        identifier = str(item[key])
-        if identifier in result:
-            raise ValueError(f"duplicate {key}: {identifier}")
-        result[identifier] = item
+            raise ValueError(f"{field} contain an invalid {key}")
+        result.add(str(item[key]))
     return result
 
 
-def _require_exact_keys(
-    canonical: Mapping[str, Any], value: Mapping[str, Any], label: str
-) -> None:
-    actual = {str(item) for item in value}
-    expected = set(canonical)
-    missing = sorted(expected - actual)
-    unknown = sorted(actual - expected)
-    if missing or unknown:
-        detail = []
-        if missing:
-            detail.append("missing " + ", ".join(missing))
-        if unknown:
-            detail.append("unknown " + ", ".join(unknown))
-        raise ValueError(
-            f"presentation {label} ids do not match Graph: "
-            + "; ".join(detail)
-        )
+def _validate_text_map(value: Any, field: str) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must be an object")
+    return {
+        str(key): _required_text(item, f"{field} {key}")
+        for key, item in value.items()
+    }
 
 
 def _required_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    return _required_text(value, "presentation description")
 
 
 def _string_list(value: Any, field: str) -> list[str]:
@@ -283,6 +219,5 @@ __all__ = [
     "PRESENTATION_SCHEMA_VERSION",
     "SUPPORTED_GRAPH_LOCALES",
     "normalize_graph_locale",
-    "presentation_content_hash",
     "validate_presentation",
 ]
