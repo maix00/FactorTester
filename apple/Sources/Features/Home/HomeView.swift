@@ -148,6 +148,7 @@ struct HomeView: View {
             isAuthenticated: session.isLoggedIn
         )
             .filter(\.sidebarVisible)
+            .filter { $0.id != "home" }
             .compactMap(ClientTab.sidebarLauncher)
         return [.home] + modules
     }

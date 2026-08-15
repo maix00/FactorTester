@@ -91,6 +91,13 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
+    func testHomeIsAvailableInTheFallbackFeatureEntry() {
+        let home = Module.fallbackModules.first { $0.id == "home" }
+        XCTAssertEqual(home?.title, "主页")
+        XCTAssertEqual(home?.path, "/")
+        XCTAssertTrue(home?.sidebarVisible == true)
+    }
+
     func testDashboardTestModulesUseFreshWebDestinations() throws {
         for (id, path) in [
             ("ic-test", "/ic-test"),
