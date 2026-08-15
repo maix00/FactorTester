@@ -14,7 +14,8 @@
     "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
     "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
     "job-detail-input": ["katex/katex.min.js"],
-    "catalog": ["vendor/highcharts/highstock.min.js"]
+    "catalog": ["vendor/highcharts/highstock.min.js"],
+    "research": ["vendor/cytoscape/cytoscape.min.js"]
   },
   "group_dependencies": {
     "charts": ["core"],
@@ -145,6 +146,8 @@
     "jobs": [
       "jobs/list-format.js",
       "jobs/progress.js",
+      "jobs/page-tabs.js",
+      "jobs/test-types.js",
       "jobs/jobs.js"
     ],
     "job-detail-core": [
@@ -300,7 +303,8 @@
   },
   "external_scripts": [
     "katex/katex.min.js",
-    "vendor/highcharts/highstock.min.js"
+    "vendor/highcharts/highstock.min.js",
+    "vendor/cytoscape/cytoscape.min.js"
   ],
   "scripts": [
     "core/module-loader.js",
@@ -309,6 +313,8 @@
     "core/price-chart.js",
     "core/market-data.js",
     "jobs/list-format.js",
+    "jobs/page-tabs.js",
+    "jobs/test-types.js",
     "jobs/highcharts-viewers.js",
     "jobs/factor-series-model.js",
     "jobs/factor-series-chart.js",

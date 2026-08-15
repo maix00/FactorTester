@@ -138,8 +138,8 @@ struct ClientTab: Identifiable {
 
     static let jobs = ClientTab(
         id: "jobs",
-        title: "测试任务",
-        titleKey: "测试任务",
+        title: "测试",
+        titleKey: "测试",
         systemImage: "checklist",
         content: .jobs
     )
@@ -350,6 +350,12 @@ struct ClientTab: Identifiable {
                 systemImage: "doc.text.magnifyingglass",
                 path: path
             )
+        }
+        if pathname == "/ic-test" {
+            return .icTest()
+        }
+        if pathname == "/backtest" {
+            return .backtest()
         }
         if pathname == "/reference" {
             let kind = ResearchDocumentReferenceCatalog.canonicalKind(

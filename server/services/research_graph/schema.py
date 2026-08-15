@@ -16,6 +16,12 @@ from server.services.research_graph.branch.schema import (
 from server.services.research_graph.graph_objects import (
     create_graph_object_schema,
 )
+from server.services.research_graph.presentations import (
+    create_schema as create_presentation_schema,
+)
+from server.services.research_graph.user_graphs import (
+    create_schema as create_user_graph_schema,
+)
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db,
 )
@@ -36,6 +42,9 @@ GRAPH_SUPPORT_TABLES = frozenset({
     "research_graph_capability_detours",
     "research_human_gate_overrides",
     "research_graph_objects",
+    "research_graph_presentations",
+    "user_research_graphs",
+    "user_research_graph_preferences",
     "research_report_item_checkpoints",
 })
 
@@ -101,6 +110,13 @@ def ensure_schema() -> None:
                 create_instance_branch_schema(conn)
             if "research_graph_objects" not in tables:
                 create_graph_object_schema(conn)
+            if "research_graph_presentations" not in tables:
+                create_presentation_schema(conn)
+            if (
+                "user_research_graphs" not in tables
+                or "user_research_graph_preferences" not in tables
+            ):
+                create_user_graph_schema(conn)
             definitions = _table_definitions(conn)
             tables = set(definitions)
         # Branch projection and Profile ownership columns were introduced in
@@ -170,6 +186,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
     create_instance_branch_schema(conn)
     create_maintenance_schema(conn)
     create_graph_object_schema(conn)
+    create_presentation_schema(conn)
+    create_user_graph_schema(conn)
 
 
 def final_schema_report(conn: sqlite3.Connection) -> dict[str, object]:

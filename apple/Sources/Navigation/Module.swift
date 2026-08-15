@@ -86,7 +86,7 @@ struct Module: Codable, Identifiable, Hashable {
     static let fallbackModules: [Module] = [
         Module(
             id: "home", title: "主页", path: "/",
-            requiresAuth: false, sidebarVisible: false, homeVisible: false
+            requiresAuth: false, sidebarVisible: false, homeVisible: true
         ),
         Module(
             id: "research", title: "研究",
@@ -100,9 +100,46 @@ struct Module: Codable, Identifiable, Hashable {
                 Module(id: "research.profiles", title: "研究身份", path: "/research?section=profiles"),
             ]
         ),
-        Module(id: "ic-test", title: "IC 测试", path: "/ic-test", tabBehavior: "new"),
-        Module(id: "backtest", title: "回测", path: "/backtest", tabBehavior: "new"),
-        Module(id: "jobs", title: "测试任务", path: "/jobs", requiresAuth: false),
+        Module(
+            id: "ic-test", title: "IC 测试", path: "/ic-test",
+            sidebarVisible: false, homeVisible: false, tabBehavior: "new"
+        ),
+        Module(
+            id: "backtest", title: "回测", path: "/backtest",
+            sidebarVisible: false, homeVisible: false, tabBehavior: "new"
+        ),
+        Module(
+            id: "jobs", title: "测试", desc: "选择测试类型或查看测试任务",
+            path: "/jobs?section=types", requiresAuth: false,
+            children: [
+                Module(
+                    id: "jobs.types", title: "测试类型",
+                    desc: "选择要运行的测试类型",
+                    path: "/jobs?section=types", requiresAuth: false,
+                    children: [
+                        Module(
+                            id: "ic-test", title: "IC 测试",
+                            desc: "配置并运行因子 IC 测试",
+                            sfSymbol: "chart.xyaxis.line", path: "/ic-test",
+                            tabBehavior: "new"
+                        ),
+                        Module(
+                            id: "backtest", title: "回测",
+                            desc: "配置并运行分组回测",
+                            sfSymbol: "chart.line.uptrend.xyaxis",
+                            path: "/backtest", tabBehavior: "new"
+                        ),
+                    ],
+                    sidebarVisible: false, homeVisible: false, pinned: false
+                ),
+                Module(
+                    id: "jobs.list", title: "测试任务",
+                    desc: "查看测试任务、进度、结果与生成物",
+                    path: "/jobs?section=tasks", requiresAuth: false,
+                    sidebarVisible: false, homeVisible: false, pinned: false
+                ),
+            ]
+        ),
         Module(id: "factors", title: "因子库", path: "/factors", requiresAuth: false),
         Module(id: "products", title: "产品", path: "/products", requiresAuth: false),
         Module(

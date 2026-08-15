@@ -1777,7 +1777,7 @@ def test_web_site_icon_is_shared_by_flask_and_manager(tmp_path) -> None:
                 assert response.read() == icon
 
 
-def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
+def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(Request(
@@ -1787,11 +1787,24 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
             value = json.loads(response.read())
 
     modules = {item["id"]: item for item in value["modules"]}
+    assert modules["home"]["title_key"] == "主页"
+    assert modules["home"]["homeVisible"] is True
     assert modules["ic-test"]["title_key"] == "IC 测试"
     assert modules["backtest"]["title_key"] == "回测"
     assert modules["ic-test"]["sfSymbol"] == "chart.xyaxis.line"
     assert modules["backtest"]["sfSymbol"] == "chart.line.uptrend.xyaxis"
+    for module_id, path in (("ic-test", "/ic-test"), ("backtest", "/backtest")):
+        assert modules[module_id]["sidebarVisible"] is False
+        assert modules[module_id]["homeVisible"] is False
+        assert modules[module_id]["path"] == path
     assert modules["jobs"]["sfSymbol"] == "checklist"
+    assert modules["jobs"]["title_key"] == "测试"
+    assert modules["jobs"]["path"] == "/jobs?section=types"
+    test_tabs = modules["jobs"]["children"]
+    assert [item["id"] for item in test_tabs] == ["jobs.types", "jobs.list"]
+    assert [item["id"] for item in test_tabs[0]["children"]] == [
+        "ic-test", "backtest",
+    ]
     assert "single_factor_test" not in modules
 
 
@@ -1889,6 +1902,11 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
             manifest = json.loads(response.read())
 
     modules = {item["id"]: item for item in manifest["modules"]}
+    assert modules["home"]["title"] == "主页"
+    assert modules["jobs"]["title"] == "测试"
+    assert modules["jobs"]["path"] == "/jobs?section=types"
+    assert "ic-test" not in modules
+    assert "backtest" not in modules
     assert modules["sqlite_web"]["title"] == "数据库"
     assert modules["sqlite_web"]["managerOnly"] is True
     assert modules["sqlite_web"]["homeOnly"] is True

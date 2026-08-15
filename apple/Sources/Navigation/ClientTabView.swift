@@ -77,7 +77,7 @@ struct ClientTabView: View {
             )
         case .jobs:
             WebPageView(
-                path: "/jobs",
+                path: "/jobs?section=types",
                 webSession: tabSession.ensureWebPageSession(),
                 onReference: openReference,
                 onNavigation: openEmbeddedNavigation,

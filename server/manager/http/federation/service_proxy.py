@@ -20,7 +20,10 @@ class FederationServiceProxyRoutesMixin:
             or path == "/api/runs"
             or path.startswith("/api/runs/")
             or path.startswith("/api/agent-flow/")
-            or path.startswith("/api/research-graphs/")
+            or (
+                path.startswith("/api/research-graphs/")
+                and not path.startswith("/api/research-graphs/user-library")
+            )
             or path.startswith("/api/research-evidence/")
             or path.startswith("/api/trial-plans/")
             or path.startswith("/api/run-specs/")

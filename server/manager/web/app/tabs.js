@@ -162,7 +162,7 @@
     function navigate(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       if (pathname === "/jobs") {
-        return openTab(path, {id: "jobs", title: t("测试任务"), closable: false});
+        return openTab(path, {id: "jobs", title: t("测试"), closable: false});
       }
       if (pathname === "/settings" || pathname.startsWith("/settings/")) {
         return openTab(path, {id: "settings", title: t("设置"), closable: false});
@@ -181,7 +181,8 @@
       const nativeDetail = Boolean(detailTabID);
       const nativeReference = pathname === "/reference";
       if (embeddedPresentation
-          && (path.startsWith("/research/") || path.startsWith("/jobs/")
+        && (path.startsWith("/research/") || path.startsWith("/jobs/")
+            || path.startsWith("/ic-test") || path.startsWith("/backtest")
             || path.startsWith("/factor-series") || nativeDetail || nativeReference)
           && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
