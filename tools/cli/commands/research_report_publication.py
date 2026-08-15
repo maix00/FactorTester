@@ -16,7 +16,19 @@ from .research_report_common import output, scope_options
 
 @click.group("publication")
 def publication() -> None:
-    """Manage explicit public visibility; local report updates stay live."""
+    """Manage explicit sharing; authoring remains local-first."""
+
+
+@publication.command("sync")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+def sync_publications(release_profile: Path | None, as_json: bool) -> None:
+    """Flush shared-report changes accumulated while offline."""
+    library = PublicResearchClient(load_profile_root(release_profile))
+    output({"operations": library.sync_pending()}, as_json)
 
 
 @publication.command("list")
@@ -61,7 +73,7 @@ def publish_report(
     confirm_public: bool,
     as_json: bool,
 ) -> None:
-    """Make one local branch report continuously visible on Manager 7998."""
+    """Share one local branch report, or queue it until Manager is reachable."""
     if not confirm_public:
         raise click.ClickException(
             "public confirmation is required; preview the report, then pass "
@@ -90,6 +102,6 @@ def unpublish_report(
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
-    """Immediately revoke one public report URL and list entry."""
+    """Revoke a shared report now or queue the revocation while offline."""
     library = PublicResearchClient(load_profile_root(release_profile))
     output(library.unpublish(publication_id), as_json)

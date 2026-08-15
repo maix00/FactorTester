@@ -24,8 +24,6 @@ SQLITE_USER_REFERENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("factor_source_roots", ("username",)),
     ("factor_source_workspace_settings", ("username",)),
     ("levels", ("manager_username",)),
-    ("agent_budget_periods", ("owner_user_id",)),
-    ("agent_invocations", ("owner_user_id",)),
     ("active_research_graphs", ("activated_by",)),
     ("research_graph_versions", ("created_by",)),
     ("research_graph_trace", ("actor",)),

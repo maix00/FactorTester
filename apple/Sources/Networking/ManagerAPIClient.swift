@@ -39,11 +39,11 @@ enum ManagerAction: String {
 final class ManagerCLIClient: ManagerSessionAPI {
     static let shared = ManagerCLIClient()
 
-    private var executable: String { ClientCLIResolution.executable() }
+    private var executable: String { ClientCLIResolution.managerExecutable() }
 
     func configure(scheme: String, host: String, port: String) async throws {
         _ = try await ReleaseCommand.runObject([
-            "manager", "configure",
+            "configure",
             "--scheme", scheme,
             "--host", host,
             "--port", port,
@@ -53,7 +53,7 @@ final class ManagerCLIClient: ManagerSessionAPI {
 
     func login(username: String, password: String) async throws {
         _ = try await ReleaseCommand.runObject([
-            "manager", "login",
+            "login",
             "--username", username,
             "--credentials-stdin",
             "--json",
@@ -65,20 +65,20 @@ final class ManagerCLIClient: ManagerSessionAPI {
 
     func restoreSession() async throws -> Bool {
         _ = try await ReleaseCommand.runObject([
-            "manager", "status", "--json",
+            "status", "--json",
         ], executable: executable)
         return true
     }
 
     func logout() async {
         _ = try? await ReleaseCommand.runObject([
-            "manager", "logout", "--json",
+            "logout", "--json",
         ], executable: executable)
     }
 
     func worktrees() async throws -> [ManagerWorktree] {
         let value = try await ReleaseCommand.runObject([
-            "manager", "list", "--json",
+            "list", "--json",
         ], executable: executable)
         return (value["worktrees"] as? [[String: Any]] ?? []).map(
             ManagerWorktree.init(json:)
@@ -111,7 +111,7 @@ final class ManagerCLIClient: ManagerSessionAPI {
             throw ManagerClientError.invalidPort(port)
         }
         var arguments = [
-            "manager", action.rawValue, String(port), "--json",
+            action.rawValue, String(port), "--json",
         ]
         if action == .forceStop {
             arguments.append("--yes")

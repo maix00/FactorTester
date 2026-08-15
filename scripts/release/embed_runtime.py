@@ -26,6 +26,7 @@ def ensure_client_runtime(
     resources = app / "Contents" / "Resources" / "FactorTester"
     receipt_path = resources / "bundle-receipt.json"
     cli_path = resources / "bin" / "factortester"
+    manager_cli_path = resources / "bin" / "factortester-manager"
     research_cli_path = resources / "bin" / "cli-anything-factortester-research"
     report_renderer_path = (
         resources / "bin" / "factortester-report-renderer"
@@ -38,6 +39,7 @@ def ensure_client_runtime(
         receipt.get("source_revision") == source_revision
         and receipt.get("version") == version
         and cli_path.is_file()
+        and manager_cli_path.is_file()
         and research_cli_path.is_file()
         and report_renderer_path.is_file()
     ):

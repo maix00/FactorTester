@@ -191,6 +191,8 @@ class CoreGetRoutesMixin:
         return True
 
     def _get_session_and_shell_routes(self, parsed) -> bool:
+        if self._get_manager_identity_route(parsed):
+            return True
         if parsed.path == "/api/session":
             session = self.state.session(self._bearer_token())
             if session is None:

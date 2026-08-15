@@ -19,7 +19,7 @@ Swift 客户端还需要默认连接公网 Manager。公网地址可能变化，
 
 1. `scripts/build_and_run.sh` 只停止/构建/启动 FTClient；它不执行 Docker
    Compose、Manager restart、测试端口关闭/恢复或 WireGuard 操作。
-2. `scripts/release/publish.py` 与 `factortester client release` 只负责客户端
+2. `scripts/release/publish.py` 与 `factortester-manager client release` 只负责客户端
    构建、签名、发布和回读，不再要求 `--service-port`，也不调用
    `restart_release_service`。服务器源代码、镜像和服务重载由独立的 Docker/部署
    入口负责。

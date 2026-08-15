@@ -41,4 +41,5 @@ def test_cli_entrypoint_uses_safe_bootstrap() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'factortester = "factortester_cli_bootstrap:main"' in pyproject
+    assert 'factortester-manager = "factortester_cli_bootstrap:manager_main"' in pyproject
     assert 'factortester = "tools.cli.app:cli"' not in pyproject

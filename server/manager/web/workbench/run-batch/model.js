@@ -66,6 +66,21 @@
     return item;
   }
 
+  function recordLocalSubmission(item, value) {
+    const runID = String(value.run_id || value.run?.run_id || "");
+    if (!runID) throw new Error("本地运行响应缺少运行 ID");
+    item.phase = String(value.phase || "submitted");
+    item.runID = runID;
+    item.jobID = "";
+    item.port = 0;
+    item.runSpecHash = String(
+      value.run_spec_hash || value.run?.run_spec_hash || item.runSpecHash || "",
+    ).replace(/^sha256:/, "");
+    item.local = true;
+    item.error = "";
+    return item;
+  }
+
   function runSpecPath(item) {
     if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
     const target = `runspec:sha256:${item.runSpecHash}`;
@@ -91,6 +106,6 @@
 
   window.FTTestRunBatchModel = Object.freeze({
     PHASE_LABELS, groupIdentity, itemFor, jobPath, recordPreview,
-    recordSubmission, runSpecPath, synchronize, update,
+    recordSubmission, recordLocalSubmission, runSpecPath, synchronize, update,
   });
 })();

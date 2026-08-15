@@ -30,7 +30,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 7
+RUNTIME_CACHE_SCHEMA = 8
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -290,6 +290,8 @@ def embed_client_runtime(
             "entry = os.environ.get(\"FACTORTESTER_ENTRYPOINT\", Path(sys.argv[0]).name)\n"
             "if entry == 'cli-anything-factortester-research':\n"
             "    from cli_anything.factortester_research.factortester_research_cli import cli\n"
+            "elif entry == 'factortester-manager':\n"
+            "    from tools.cli.manager_app import manager_cli as cli\n"
             "else:\n"
             "    from tools.cli.app import cli\n"
             "cli()\n",
@@ -337,6 +339,15 @@ def embed_client_runtime(
             encoding="utf-8",
         )
         research_launcher.chmod(0o755)
+        manager_launcher = bin_dir / "factortester-manager"
+        manager_launcher.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "script_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
+            "FACTORTESTER_ENTRYPOINT=factortester-manager \\\nexec \"$script_dir/factortester\" \"$@\"\n",
+            encoding="utf-8",
+        )
+        manager_launcher.chmod(0o755)
         if client_adapters_root is not None:
             adapter_dir = resources / "adapters"
             adapter_dir.mkdir()
@@ -384,6 +395,9 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
         "cli-anything-factortester-research"
     )
     _run_frozen_help(binary, env=research_env)
+    manager_env = os.environ.copy()
+    manager_env["FACTORTESTER_ENTRYPOINT"] = "factortester-manager"
+    _run_frozen_help(binary, env=manager_env)
 
 
 def _run_frozen_help(
@@ -531,6 +545,7 @@ def _valid_runtime_cache(
 ) -> bool:
     required = [
         resources / "bin/factortester",
+        resources / "bin/factortester-manager",
         resources / "bin/cli-anything-factortester-research",
         resources / "bin/factortester-report-renderer",
         resources / "skills/factortester-research-skill/SKILL.md",
@@ -571,6 +586,7 @@ def _valid_runtime_cache(
     return all(
         path.stat().st_mode & 0o111 != 0
         for path in (
+            resources / "bin/factortester-manager",
             resources / "bin/cli-anything-factortester-research",
             resources / "bin/factortester-report-renderer",
         )

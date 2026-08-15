@@ -12,10 +12,9 @@ from server.services.maintenance_cases.queue import load_agent_case_queue
 from server.services.research_configuration_summary import (
     load_workspace_factor_summary,
 )
-from server.services.research_graph.branch.next_packet import (
-    build_graph_branch_next,
+from server.services.research_graph.branch.context import (
+    build_graph_branch_context,
 )
-from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 
 
 _ROLES = {"planning", "research", "server_maintenance"}
@@ -26,7 +25,6 @@ def build_agent_resume_packet(
     owner: str,
     agent_id: str,
     role: str,
-    budget_period: dict[str, Any] | None,
     instance_id: str = "",
     branch_id: str = "",
     workspace_id: str = "",
@@ -40,22 +38,14 @@ def build_agent_resume_packet(
         "agent": {
             "agent_id": agent_id,
             "role": role,
-            "budget": _budget_summary(budget_period),
         },
     }
-    packet_ceiling_bytes = MAX_AGENT_PACKET_BYTES
     if role == "research":
         packet["research"] = _research_packet(
             owner=owner,
             instance_id=instance_id,
             branch_id=branch_id,
         )
-        budget_profile = packet["research"].get("budget_profile")
-        if isinstance(budget_profile, dict):
-            packet_ceiling_bytes = int(
-                budget_profile.get("ceiling_bytes")
-                or MAX_AGENT_PACKET_BYTES
-            )
     elif role == "planning":
         packet["planning"] = _planning_packet(
             owner=owner,
@@ -69,37 +59,7 @@ def build_agent_resume_packet(
     packet["resume_ref"] = "sha256:" + hashlib.sha256(
         orjson.dumps(packet, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
-    packet["packet_bytes"] = 0
-    for _ in range(3):
-        packet["packet_bytes"] = len(orjson.dumps(packet))
-    if len(orjson.dumps(packet)) > packet_ceiling_bytes:
-        raise ValueError(
-            "Agent resume packet exceeds "
-            f"{packet_ceiling_bytes} bytes"
-        )
     return packet
-
-
-def _budget_summary(period: dict[str, Any] | None) -> dict[str, Any]:
-    if period is None:
-        return {
-            "configured": False,
-            "token_limit": None,
-            "used_tokens": 0,
-            "reserved_tokens": 0,
-            "available_tokens": None,
-            "exhausted": False,
-        }
-    limit = period.get("token_limit")
-    available = period.get("available_tokens")
-    return {
-        "configured": limit is not None,
-        "token_limit": limit,
-        "used_tokens": int(period.get("used_tokens") or 0),
-        "reserved_tokens": int(period.get("reserved_tokens") or 0),
-        "available_tokens": available,
-        "exhausted": limit is not None and int(available or 0) <= 0,
-    }
 
 
 def _research_packet(
@@ -112,88 +72,33 @@ def _research_packet(
         raise ValueError(
             "research resume requires instance_id and branch_id"
         )
-    source = build_graph_branch_next(
+    source = build_graph_branch_context(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
     )
-    value = _compact_research_next(source)
-    obligations = value.get("current_obligations") or []
-    entry_requirements = value.get("entry_requirements") or []
-    recommended = value.get("recommended_edge_ids") or []
-    value["next_action"] = (
-        "load_requirement_details_and_assess_entry"
-        if entry_requirements
-        else "address_current_obligations_and_candidate_edges"
-        if obligations
-        else f"advance:{recommended[0]}"
-        if len(recommended) == 1
-        else "review_candidate_edges"
-    )
-    return value
-
-
-def _compact_research_next(source: dict[str, Any]) -> dict[str, Any]:
-    """Project one bootstrap packet; full current-state detail stays lazy."""
-    value = {
-        key: source[key]
-        for key in (
-            "graph",
-            "branch",
-            "node",
-            "context_ref",
-            "capabilities",
-            "unresolved_capability_conditions",
-            "current_obligations",
-            "candidate_trial_frontier",
-            "recommended_edge_ids",
-            "requires_agent_judgment",
-            "running_backend_jobs_action",
-            "budget_profile",
-        )
-        if key in source
-    }
-    value["candidate_edges"] = [
-        {
-            key: edge.get(key)
-            for key in ("edge_id", "to_node", "readiness", "blockers")
-        }
-        for edge in source.get("candidate_edges") or []
-        if isinstance(edge, dict)
-    ]
-    if "entry_requirements" not in source:
-        return value
-    value["entry_requirements"] = [
-        _compact_resume_requirement(item)
-        for item in source.get("entry_requirements") or []
-        if isinstance(item, dict)
-    ]
-    resolution = source.get("entry_resolution")
-    if isinstance(resolution, dict):
-        value["entry_resolution"] = {
-            key: resolution.get(key)
-            for key in ("reason", "status", "resume_node")
-            if key in resolution
-        }
-        value["entry_resolution"]["unresolved_requirement_count"] = len(
-            resolution.get("unresolved_requirement_ids") or []
-        )
-    policy = source.get("entry_requirement_policy")
-    if isinstance(policy, dict) and policy.get("detail_command"):
-        value["requirement_detail_command"] = policy["detail_command"]
-    return value
-
-
-def _compact_resume_requirement(item: dict[str, Any]) -> dict[str, Any]:
-    mapped = bool(item.get("mapped_obligation_refs"))
+    graph_ref = str(source.get("graph") or "")
+    branch = dict(source.get("branch") or {})
+    node = dict(source.get("node") or {})
     return {
-        "requirement_id": str(item.get("requirement_id") or ""),
-        "title_zh": str(item.get("title_zh") or ""),
-        "status": "unresolved",
-        "required_action": (
-            "review_mapping_and_assess"
-            if mapped else "load_detail_and_assess"
-        ),
+        "graph": graph_ref,
+        "branch": branch,
+        "node": node,
+        "current_node": str(node.get("node_id") or ""),
+        "next_action": "download_graph_and_evaluate_locally",
+        "graph_fetch": {
+            "command": (
+                "factortester research-graph fetch "
+                f"{graph_ref.split('@v', 1)[0] if '@v' in graph_ref else graph_ref}"
+            ),
+            "transport": "7998_control_then_7997_data",
+            "server_decides_next": False,
+        },
+        "local_cli": {
+            "command": "factortester research-graph next-local",
+            "requires": ["graph_file", "current_node"],
+        },
+        "running_backend_jobs_action": "continue",
     }
 
 

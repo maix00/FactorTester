@@ -21,6 +21,7 @@ from server.manager.http.responses import json_response
 _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/agent-flow/agents/[A-Za-z0-9._-]{1,256}/resume",
+        r"/api/research-agent-executions",
         r"/api/product-groups",
         r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",

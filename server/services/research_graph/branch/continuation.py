@@ -46,7 +46,6 @@ from server.services.research_graph.branch.entry_resolution.stack import (
 from server.services.research_graph.branch.capability_detour import (
     load_or_reconstruct as load_capability_detour,
 )
-from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
@@ -64,7 +63,7 @@ def preview_graph_continuation(
     target_graph_version: int,
     job_id: str,
 ) -> dict[str, Any]:
-    """Return the exact, content-addressed effect an approval Gate must bind."""
+    """Return the exact continuation effect before it is written."""
     prepared = _prepare(
         source_instance_id=source_instance_id,
         source_branch_id=source_branch_id,
@@ -77,24 +76,6 @@ def preview_graph_continuation(
         "target_hash": prepared["target_hash"],
         "descriptor": deepcopy(prepared["descriptor"]),
     }
-
-
-def prepare_graph_upgrade_validation(
-    *,
-    source_instance_id: str,
-    source_branch_id: str,
-    owner: str,
-    target_graph_version: int,
-) -> dict[str, Any]:
-    """Prepare the exact continuation used by transactional activation tests."""
-    return _prepare(
-        source_instance_id=source_instance_id,
-        source_branch_id=source_branch_id,
-        owner=owner,
-        target_graph_version=target_graph_version,
-        job_id="",
-        validation_only=True,
-    )
 
 
 def continue_graph_branch(
@@ -137,7 +118,6 @@ def continue_graph_branch(
             conn,
             graph_id=prepared["graph_id"],
             target_graph_version=target_graph_version,
-            allow_unactivated=False,
         )
         instance_id = uuid.uuid4().hex
         branch_id = uuid.uuid4().hex
@@ -186,9 +166,8 @@ def _prepare(
     owner: str,
     target_graph_version: int,
     job_id: str,
-    validation_only: bool = False,
 ) -> dict[str, Any]:
-    execution_mode = "shadow" if validation_only else "live"
+    execution_mode = "live"
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = load_instance_branch_with_latest_trace(
             conn,
@@ -222,7 +201,6 @@ def _prepare(
             conn,
             graph_id=str(source["graph_id"]),
             target_graph_version=target_graph_version,
-            allow_unactivated=validation_only,
         )
         if source_graph is None or target_graph is None:
             raise KeyError("source or target Graph version not found")
@@ -298,7 +276,6 @@ def _prepare(
         raise ValueError(
             f"target Graph lacks capability-free {target_node} node"
         )
-    budget_profile = graph_packet_budget(target_graph)
     descriptor = {
         "schema_version": 2,
         "continuation_mode": continuation_mode,
@@ -315,14 +292,6 @@ def _prepare(
         "target_graph_lifecycle": str(target_graph["lifecycle"]),
         **lineage_projection,
         "execution_mode": execution_mode,
-        "budget_profile_ref": str(
-            budget_profile.get("profile_ref")
-            or budget_profile.get("policy_ref")
-            or ""
-        ),
-        "budget_profile_hash": str(
-            budget_profile.get("profile_hash") or ""
-        ),
         "target_node": target_node,
         "workspace_id": str(source["workspace_id"]),
         "work_package_id": str(
@@ -338,10 +307,6 @@ def _prepare(
             source["current_owner_profile_ref"] or ""
         ),
     }
-    if validation_only:
-        descriptor.update({
-            "validation_kind": "activation_upgrade",
-        })
     if continuation_mode == JOB_EVIDENCE_MODE:
         assert envelope is not None
         descriptor.update({
@@ -461,10 +426,7 @@ def _require_execution_target(
     *,
     graph_id: str,
     target_graph_version: int,
-    allow_unactivated: bool,
 ) -> None:
-    if allow_unactivated:
-        return
     active = conn.execute(
         "SELECT version FROM active_research_graphs WHERE graph_id=?",
         (graph_id,),

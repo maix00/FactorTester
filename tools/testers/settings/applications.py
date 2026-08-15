@@ -16,6 +16,7 @@ from .contracts import (
     TabMountPoint,
 )
 from .registry import ApplicationSettings, BacktestSettingRegistry
+from tools.testers.field_spec import ValueDescriptor
 
 RUN_WINDOW_KEYS = (
     "start_date",
@@ -62,6 +63,48 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "service_port", "服务端口", "service_port", "", "query",
         "job.server_context.port", "global_settings", order=10,
         help_text="可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+    ))
+    # These controls are intentionally Swift-only.  The Swift client may
+    # choose to execute inside its isolated local runtime; the ordinary web
+    # submission surface must remain a server-run form and never receive
+    # local code/package references.
+    app.register_run_field(RunFieldDefinition(
+        "execution_target", "运行位置", "select", "server", "body",
+        "run_spec.execution_target", "run_options", order=15,
+        options=(
+            SettingOption("server", "服务器运行"),
+            SettingOption("local", "Swift 客户端本地运行"),
+        ),
+        client_targets=("swift",),
+        value_descriptor=ValueDescriptor(
+            "enum", editor="select", option_source="manifest.options",
+        ),
+        help_text=(
+            "仅 Swift 客户端可选；本地运行不会把任务提交到 Manager，"
+            "而是在客户端隔离运行时内执行。"
+        ),
+    ))
+    app.register_run_field(RunFieldDefinition(
+        "local_runtime_server_ref", "本地运行服务器", "text", "", "body",
+        "run_spec.local_runtime.server_ref", "run_options", order=16,
+        client_targets=("swift",),
+        visible_when={"execution_target": ("local",)},
+        value_descriptor=ValueDescriptor(
+            "reference", editor="server_picker", ref_kind="manager_server",
+            option_source="server.federation",
+        ),
+        help_text="选择提供研究图与运行代码的 Manager；代码按需从该服务器 7997 获取。",
+    ))
+    app.register_run_field(RunFieldDefinition(
+        "local_runtime_bundle_ref", "本地运行代码包", "text", "", "body",
+        "run_spec.local_runtime.bundle_ref", "run_options", order=17,
+        client_targets=("swift",),
+        visible_when={"execution_target": ("local",)},
+        value_descriptor=ValueDescriptor(
+            "source_file", editor="runtime_bundle_picker",
+            ref_kind="factor_test_runtime", option_source="server.7997",
+        ),
+        help_text="选择按需下载的 FactorTester 运行代码包；不会随 Swift 应用预置。",
     ))
     app.register_run_field(RunFieldDefinition(
         "retention_mode", "结果保留范围", "select", "summary", "body",

@@ -84,9 +84,11 @@ def _json(value: Any) -> str:
 
 
 def _with_next_action(value: dict[str, Any]) -> dict[str, Any]:
-    actions = value.get("next_actions") or []
-    if actions:
-        value["next_action"] = actions[0]
+    # Server responses contain state and validation contracts only.  The local
+    # ``research-graph next-local`` command is the sole source of navigation
+    # advice; never re-promote a legacy server action into the CLI response.
+    value.pop("next_actions", None)
+    value.pop("next_action", None)
     return value
 
 
@@ -255,7 +257,7 @@ def register_navigation_commands(parent: click.Group) -> None:
     @click.argument("instance_id")
     @click.argument("branch_id")
     def node_info(instance_id: str, branch_id: str) -> None:
-        """显示当前节点、报告要求和下一步动作。"""
+        """显示当前节点、报告要求和候选边约束。"""
         value = client_from_config().get_research_graph_node_info(
             instance_id, branch_id,
         )
@@ -817,7 +819,7 @@ def register_navigation_commands(parent: click.Group) -> None:
     @click.argument("branch_id")
     @click.argument("edge_id")
     def edge_info(instance_id: str, branch_id: str, edge_id: str) -> None:
-        """显示一条候选边及其报告要求和下一步动作。"""
+        """显示一条候选边及其报告要求。"""
         value = client_from_config().get_research_graph_edge_info(
             instance_id, branch_id, edge_id,
         )
@@ -907,7 +909,6 @@ def register_navigation_commands(parent: click.Group) -> None:
             ),
             "edge": value.get("edge") or {},
             "report_requirements": value.get("report_requirements") or [],
-            "next_actions": value.get("next_actions") or [],
         })
         _with_next_action(selected)
         if output is not None:

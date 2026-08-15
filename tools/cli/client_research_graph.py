@@ -8,67 +8,6 @@ from .client_base import ClientMixinBase
 
 
 class ResearchGraphClientMixin(ClientMixinBase):
-    def get_active_research_runtime_budget_profile(
-        self,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.get(
-            "/api/research-runtime-budget-profiles/active"
-        ))
-        return dict(data.get("profile") or {})
-
-    def get_research_graph_activation_preflight(
-        self,
-        graph_id: str,
-        version: int,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.get(
-            f"/api/research-graphs/{graph_id}/versions/{version}/activation"
-        ))
-        return dict(data.get("activation") or {})
-
-    def get_research_graph_proposal(
-        self,
-        proposal_id: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.get(
-            f"/api/research-graph-proposals/{proposal_id}"
-        ))
-        return dict(data.get("proposal_review") or {})
-
-    def activate_reviewed_research_graph(
-        self,
-        graph_id: str,
-        version: int,
-        *,
-        approval_ref: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/versions/{version}/activation",
-            {"approval_ref": approval_ref},
-        ))
-        return dict(data.get("activation") or {})
-
-    def configure_research_runtime_budget_profile(
-        self,
-        *,
-        ceiling_bytes: int,
-        provider_id: str = "",
-        model_id: str = "",
-        tokenizer_id: str = "",
-        tokenizer_revision: str = "",
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            "/api/research-runtime-budget-profiles",
-            {
-                "ceiling_bytes": ceiling_bytes,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "tokenizer_id": tokenizer_id,
-                "tokenizer_revision": tokenizer_revision,
-            },
-        ))
-        return dict(data.get("profile") or {})
-
     def list_profile_research(
         self,
         *,
@@ -177,18 +116,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("graph") or {})
 
-    def revise_unused_research_graph_draft(
-        self,
-        graph: dict[str, Any],
-    ) -> dict[str, Any]:
-        graph_id = str(graph.get("graph_id") or "")
-        version = int(graph.get("version") or 0)
-        data = self._expect_success(self.session.put(
-            f"/api/research-graphs/{graph_id}/versions/{version}/unused-draft",
-            {"graph": graph},
-        ))
-        return dict(data.get("graph") or {})
-
     def list_research_graph_versions(
         self,
         graph_id: str,
@@ -204,141 +131,38 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("graph") or {})
 
-    def propose_research_graph(
+    def download_research_graph_yaml(
         self,
         graph_id: str,
         version: int,
         *,
-        risk_level: str,
-        change_diff: dict[str, Any],
-        evidence_refs: list[str],
-        token_estimate: int,
-        agent_execution_id: str,
-        conversation_ref: str,
-        pointer_action: str = "activate_graph",
-        pointer_from_version: int = 0,
-        pointer_reason: str = "",
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/versions/{version}/proposals",
-            {
-                "risk_level": risk_level,
-                "change_diff": change_diff,
-                "evidence_refs": evidence_refs,
-                "token_estimate": token_estimate,
-                "agent_execution_id": agent_execution_id,
-                "conversation_ref": conversation_ref,
-                "pointer_action": pointer_action,
-                "pointer_from_version": pointer_from_version,
-                "pointer_reason": pointer_reason,
-            },
-        ))
-        return dict(data.get("proposal") or {})
+        locale: str = "",
+    ) -> bytes:
+        """Download one server graph version over the normal 7998 API.
 
-    def review_research_graph_proposal(
-        self,
-        proposal_id: str,
-        *,
-        disposition: str,
-        scope_drift: bool,
-        semantic_uncertainty: bool,
-        evidence_refs: list[str],
-        agent_execution_id: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graph-proposals/{proposal_id}/reviews",
-            {
-                "disposition": disposition,
-                "scope_drift": scope_drift,
-                "semantic_uncertainty": semantic_uncertainty,
-                "evidence_refs": evidence_refs,
-                "agent_execution_id": agent_execution_id,
-            },
-        ))
-        return dict(data.get("review") or {})
-
-    def audit_research_graph(
-        self,
-        graph_id: str,
-        version: int,
-        *,
-        proposal_id: str,
-        disposition: str,
-        grill_evidence: list[dict[str, Any]],
-        grill_ref: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/versions/{version}/audit",
-            {
-                "proposal_id": proposal_id,
-                "disposition": disposition,
-                "grill_evidence": grill_evidence,
-                "grill_ref": grill_ref,
-            },
-        ))
-        return dict(data.get("audit") or {})
+        The graph is a small declarative input.  Factor/test source packages
+        use the separate 7997 capability data plane and are never bundled by
+        this method.
+        """
+        path = (
+            f"/api/research-graphs/{graph_id}/versions/{int(version)}/yaml"
+            + (f"?locale={locale}" if locale else "")
+        )
+        return self.session.download(
+            path,
+            maximum_bytes=8 * 1024 * 1024,
+        ).content
 
     def activate_research_graph(
         self,
         graph_id: str,
         version: int,
-        *,
-        human_authorization_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/activate",
-            {"human_authorization_id": human_authorization_id},
+            {},
         ))
         return dict(data.get("graph") or {})
-
-    def authorize_research_graph_activation(
-        self,
-        *,
-        graph_id: str,
-        graph_version: int,
-        proposal_id: str,
-        graph_hash: str,
-        diff_hash: str,
-        conversation_ref: str,
-        approval_ref: str,
-        pointer_action: str = "activate_graph",
-        pointer_from_version: int = 0,
-        pointer_reason: str = "",
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            "/api/research-human-activation-authorizations",
-            {
-                "graph_id": graph_id,
-                "graph_version": graph_version,
-                "proposal_id": proposal_id,
-                "graph_hash": graph_hash,
-                "diff_hash": diff_hash,
-                "conversation_ref": conversation_ref,
-                "approval_ref": approval_ref,
-                "pointer_action": pointer_action,
-                "pointer_from_version": pointer_from_version,
-                "pointer_reason": pointer_reason,
-            },
-        ))
-        return dict(data.get("authorization") or {})
-
-    def rollback_research_graph(
-        self,
-        graph_id: str,
-        *,
-        target_version: int,
-        reason: str,
-        human_authorization_id: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/rollback",
-            {
-                "target_version": target_version,
-                "reason": reason,
-                "human_authorization_id": human_authorization_id,
-            },
-        ))
-        return dict(data.get("rollback") or {})
 
     def create_research_graph_instance(
         self,
@@ -460,7 +284,12 @@ class ResearchGraphClientMixin(ClientMixinBase):
         instance_id: str,
         branch_id: str,
     ) -> dict[str, Any]:
-        """Read the current Node contract and its ordered next actions."""
+        """Read compatibility state and candidate constraints for a Node.
+
+        New local-first clients should load the graph YAML and decide the
+        next edge locally; this method remains only for legacy projections
+        and shared-report imports.
+        """
         data = self._expect_success(self.session.get(
             f"/api/research-graph-instances/{instance_id}"
             f"/branches/{branch_id}/node"

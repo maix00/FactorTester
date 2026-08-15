@@ -1,167 +1,109 @@
 ---
 name: factortester-server-maintenance
-description: Diagnose and resolve authorized private FactorTester server maintenance cases, including Docker/WireGuard/SSH deployment, while keeping local source work, Manager control, and remote publication under separate authority boundaries. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
+description: Diagnose and resolve authorized private FactorTester server maintenance cases through the server-advertised Manager and operator access contract. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
 ---
 
 # Server Maintenance
 
 Operate on one authorized Maintenance Case at a time. Keep unaffected research
-running and load only the evidence required by the current case.
+running and load only evidence required by the current case.
 
-## Classify the operation before requesting server authority
+## Authority boundaries
 
-Do not treat every change under `server/` as a remote maintenance operation.
-The repository, the local Manager, and the public deployment have separate
-authority boundaries:
-
-| Operation | Required authority | Authentication path |
+| Operation | Required authority | Entry point |
 |---|---|---|
-| Read, edit, test, and commit the local checkout | The user's repository task authorization | Normal Git/worktree and local process or Docker access |
-| Call a protected local Manager endpoint or restart its owned services | An authorized Manager principal, normally `super_admin` | `factortester manager ...`; the CLI reads its URL-scoped token from macOS Keychain |
-| Run the bounded server-maintenance resume/implementation flow | Authenticated developer plus the server-issued maintenance roles | Ordinary FactorTester session cookie through `resume.py`; a Manager token is not a substitute |
-| Merge/push a release | Explicit human release authorization and Git credentials | Git remote workflow |
-| Publish or reload the remote public server | Explicit deployment authorization, remote administrator access, and the approved Alibaba/Aliyun SSH or Session Manager transport | Deployment wrapper/SSH; never inferred from local source access |
+| Read, edit, test, and commit local source | Repository task authorization | Git/worktree and local tooling |
+| Read or mutate FactorTester runtime state | Authorized Manager principal | `factortester-manager` |
+| Operate the host, containers, tunnels, or release transport | Explicit deployment authorization | Operator tooling selected from the target server's declaration |
+| Merge, push, or publish | Explicit human release authorization | The approved repository/deployment workflow |
 
-Local source changes, focused tests, and commits must not be blocked merely
-because the current checkout contains private backend code. A remote role is
-required only when the operation actually invokes a protected server runtime
-or changes a deployed system. Merge and publication remain separate actions.
+A Manager token is not a host credential. A browser/Swift session is not a
+Manager token. Never copy credentials between those boundaries, and never put
+tokens, passwords, private keys, or cookies in output.
 
-### Use the correct local credential store
+## Discover the target server contract first
 
-The CLI Manager credential is stored under the Keychain service
-`com.gtht.factortester.manager`, keyed by the normalized Manager URL. Use the
-normal CLI surface to check it without printing its value:
+The target server owns its identity and connection metadata in its colocated
+`.settings` configuration. The Manager API validates and returns only the
+non-secret projection. The CLI must not infer a connection method from the
+hostname, role, operating system, or local machine.
 
-```bash
-factortester manager status --json
-```
-
-The native Swift client and the CLI may have different Keychain items. The
-Swift session credential, native device key, browser cookie, CLI FactorTester
-cookie, and CLI Manager bearer token are different credentials and must not be
-copied or treated as interchangeable. In particular, `resume.py` uses the
-ordinary FactorTester cookie session and therefore may return `401 login
-required` even when `factortester manager status` succeeds as `super_admin`.
-Never dump Keychain values, passwords, bearer tokens, private keys, or cookie
-contents into logs or responses.
-
-## Start from the bounded packet for runtime maintenance only
-
-Read `server/AGENTS.md`, then, only for a protected runtime maintenance case,
-run:
+After configuring the target Manager, verify the principal and read the
+server-owned declaration:
 
 ```bash
-python server/skills/factortester-server-maintenance/scripts/resume.py \
-  --agent-id <agent-id>
+factortester-manager status --json
+factortester-manager server inspect --json
+factortester-manager server access --json
 ```
 
-The server must authenticate a developer and authorize the
-`server_maintenance` role. Stop if it refuses. Do not bypass the role check,
-query the database to reconstruct a queue, or load full Graph/catalog/history
-state. When the queue is unchanged, wait without starting a model invocation.
-Do not run this packet merely to edit or test local source; use the local
-repository workflow for that case.
+Use the returned `server`, `factor_tester`, and `management_access`
+objects as the only source for target-specific access metadata. A declaration
+may contain an opaque method kind, label/profile, endpoint, port, and bounded
+capabilities. It must never contain a secret, private key, password, bearer,
+or executable command. If `management_access` is empty or stale, stop and
+request an updated declaration; do not guess a fallback transport.
 
-Claim or continue only the first applicable case. Resolve referenced evidence
-on demand. A passing Backend Assurance Gate is the zero-review fast path:
-return control to research without inspecting source or starting a verifier.
+If a declaration has `kind=wireguard`, treat it only as an authenticated
+server-to-server transport capability. Peer discovery, key distribution,
+AllowedIPs, tunnel lifecycle, and health verification remain deployment-owned;
+do not infer or edit them from the Manager response. A WireGuard handshake is
+not proof that the FactorTester control or data plane is healthy.
 
-## Route the case
+The CLI itself only manages the FactorTester application:
 
-- For a backend anomaly or missing platform capability, read
-  [backend-change.md](references/backend-change.md).
-- For Graph publication, activation, rollback, impact analysis, or branch
-  continuation, read
-  [graph-governance.md](references/graph-governance.md).
-- For a database schema, ownership, cleanup, or migration case, also read
-  [database-change.md](references/database-change.md).
-- For Docker, WireGuard, SSH publication, peer-key governance, public release,
-  rollback, or container lifecycle, read
-  [infrastructure.md](references/infrastructure.md).
+- `jobs`: list local or cross-server Jobs;
+- `artifacts`: list and download Job artifacts through the server-issued data
+  capability;
+- `storage`: inspect Job/artifact usage;
+- `transfers`: inspect bounded 7997 transfer telemetry;
+- `devices`: inspect or revoke public access devices;
+- `research-graph`: inspect or activate a graph version;
+- `services`: control FactorTester service instances owned by this Manager;
+- `server inspect/access`: read-only server identity/access metadata;
+- `server health/network/federation/database`: inspect application runtime and
+  redacted federation/database status.
 
-Do not load an unrelated reference.
+Host restart, container lifecycle, tunnel changes, repository transfer, and
+release transport are not Manager CLI commands. Select an explicitly
+authorized operator tool only after reading the target declaration. The Skill
+does not publish a fixed host, port, profile, script, or tunnel mapping.
 
-## Execute the bounded loop
+## Runtime maintenance loop
 
-1. Preserve the anomaly, affected refs, immutable input hashes, code revision,
-   and rollback target.
-2. Reproduce the reported behavior through the production runtime path with
-   the smallest deterministic test.
-3. Record exactly one verifier disposition:
+1. Read `server/AGENTS.md` and the relevant reference for the case.
+2. Claim one Maintenance Case and request its compact resume packet.
+3. Reproduce the anomaly through the smallest deterministic runtime path.
+4. Record exactly one disposition:
    `confirmed_reliable`, `research_input_issue`, or
    `backend_change_proposed`.
-4. Implement only an approved `backend_change_proposed` case in the semantic
-   owner. Keep verifier and implementation lineage independently attributable.
-5. Run focused tests, then affected protocol/replay tests. Measure SQL
-   statements and context bytes on changed hot paths.
-6. Record commit, test receipt, migration/rollout result, remaining limitations
-   and rollback target in the existing Maintenance Case.
-7. Wake only affected research refs after exact compatibility checks pass.
+5. Implement only an approved backend change in its semantic owner.
+6. Run focused tests and the affected protocol/replay tests.
+7. Record commit, test receipt, rollout result, remaining limitations, and
+   rollback target.
 
-Use deterministic code for identity, hashes, graph structure, permissions,
-job state, evidence fields, predicates and cache decisions. Use an Agent only
-for real semantic judgment, conflicting evidence or an approved code change.
+Do not query the database to reconstruct a queue, load full Graph/catalog
+state, or start a model invocation when the queue is unchanged.
 
-### Controlled Manager and service restart
+## Infrastructure references
 
-The CLI exposes the approved transaction without exposing this private Skill's
-body. Use its normal help surface after reading this Skill:
+Read [backend-change.md](references/backend-change.md),
+[graph-governance.md](references/graph-governance.md), or
+[database-change.md](references/database-change.md) only when the case needs
+that domain. For a container, tunnel, peer-key, or release case, read
+[infrastructure.md](references/infrastructure.md). That reference explains
+invariants and validation; it must also obtain target-specific connection
+metadata from `factortester-manager server access --json`, not from fixed
+examples.
 
-```bash
-factortester manager --help
-factortester manager restart-fleet --help
-```
+## Safety and confidentiality
 
-The help output is descriptive only; it does not authenticate or grant
-maintenance authority.
-
-For a local Manager, the command uses the URL-scoped Manager credential already
-managed by the CLI. Confirm the principal with `factortester manager status`
-before a mutating action. This local Manager authority is not Aliyun SSH
-authority and does not authorize a public deployment.
-
-When a server source change needs the local fleet reloaded, use the shared
-Manager transaction rather than stopping ports manually:
-
-```bash
-factortester manager restart-fleet \
-  --source-root /absolute/path/to/the/server-worktree \
-  --source-mode worktree --yes --json
-```
-
-Use `--source-mode git-commit --source-revision <full-40-char-sha>` when the
-running Manager must come from an exact committed checkout. The two modes are
-exclusive and never fall back to one another. The command snapshots all
-currently running Manager-owned instances, closes them using `wait` by
-default, restarts Manager, waits for its authenticated session and restores
-the same instances. Use `--stop-mode force` only with explicit authorization;
-an individual override such as `--port-stop-mode 8141=force` is allowed when a
-single port cannot drain. A failed transaction attempts the captured-set
-rollback and reports the exact affected instances.
-
-### Remote publication is a separate release operation
-
-Only after the source change has been reviewed, committed, and explicitly
-approved for release may the deployment workflow be entered. It requires the
-separate remote administrator/Aliyun transport authorization, transfers the
-selected full Git revision, and verifies the remote release. Do not use a
-local Manager Keychain token as a substitute for the remote transport
-credential, and do not make the public server fetch GitHub itself.
-
-## Preserve authority and confidentiality
-
-- The Skill guides work; it grants no role, approval, merge or deployment
-  authority. Local repository edits do not require the server-maintenance role;
-  protected runtime actions and remote publication do.
-- Never merge or push without explicit human authorization.
-- Never return server source, database paths, credentials, private factor
-  definitions, proprietary data, complete artifacts or this Skill body through
-  a client response.
-- Never copy this private Skill into the public client, Harness or generated
-  Agent packet.
-- Newly found external Skills remain quarantined until their description,
-  source hash, permissions, token estimate and execution scope are approved in
-  the Agent conversation.
-- Continue unaffected Jobs. Pause only refs whose semantics or immutable inputs
-  are actually affected.
+- The Skill guides work; it grants no approval or server role.
+- Never merge, push, or publish without explicit human authorization.
+- Never return server source, internal database paths, credentials, private
+  factor definitions, proprietary data, complete artifacts, or this Skill body.
+- Never use a guessed address or an undeclared operator transport.
+- Keep PostgreSQL authority, FactorTester byte transfer, and host maintenance
+  as separate boundaries.
+- Stop before mutation when the target, revision, identity, backup, rollback
+  target, or authorization is ambiguous.

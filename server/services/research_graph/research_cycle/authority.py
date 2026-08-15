@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.services import agent_flow
+from server.services import agent_execution
 
 from .adjudication import (
     validate_adjudication_decision,
@@ -102,10 +102,10 @@ def validate_live_event_authorities(
             "research cycle Agent invocations are missing from "
             "agent_invocation_ids: " + ", ".join(missing_current)
         )
-    invocation_store = store or agent_flow.get_store()
-    rows = invocation_store.load_invocations(
+    execution_store = store or agent_execution.get_store()
+    rows = execution_store.load_executions(
         owner_user_id=owner_user_id,
-        invocation_ids=sorted(required_ids),
+        execution_ids=sorted(required_ids),
     )
     missing = sorted(required_ids - set(rows))
     if missing:
@@ -144,22 +144,18 @@ def _proposer_id(proposal: dict[str, Any]) -> str:
 
 
 def _require_proposer(row: dict[str, Any]) -> None:
-    if row["status"] != "settled":
-        raise ValueError("research cycle proposer invocation must be settled")
     if row["actor_role"] not in _PROPOSER_ROLES:
-        raise ValueError("research cycle proposer invocation has invalid role")
+        raise ValueError("research cycle proposer execution has invalid role")
     if row["authority_scope"] != _RESEARCH_SCOPE:
         raise ValueError("research cycle proposer has invalid authority scope")
 
 
 def _require_reviewer(row: dict[str, Any], *, task_ref: str) -> None:
-    if row["status"] != "settled":
-        raise ValueError("independent reviewer invocation must be settled")
     if row["actor_role"] != _REVIEWER_ROLE:
-        raise ValueError("independent reviewer invocation has invalid role")
+        raise ValueError("independent reviewer execution has invalid role")
     if row["authority_scope"] != _RESEARCH_SCOPE:
         raise ValueError("independent reviewer has invalid authority scope")
     if row["task_ref"] != task_ref:
         raise ValueError(
-            "independent reviewer invocation is not bound to the proposal"
+            "independent reviewer execution is not bound to the proposal"
         )

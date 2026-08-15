@@ -43,6 +43,17 @@ def main() -> object:
     return cli()
 
 
+def manager_main() -> object:
+    """Load the installed Manager/operator CLI from its safe bootstrap."""
+    trusted = _trusted_import_root()
+    sys.path[:] = sanitized_import_path(
+        sys.path, cwd=Path.cwd(), trusted_root=trusted,
+    )
+    from tools.cli.manager_app import manager_cli
+
+    return manager_cli()
+
+
 def _trusted_import_root() -> Path | None:
     source = Path(__file__).resolve()
     for parent in source.parents:

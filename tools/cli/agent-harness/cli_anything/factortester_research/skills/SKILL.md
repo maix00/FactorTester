@@ -13,6 +13,24 @@ Always invoke the installed `factortester` executable for native operations.
 Never run `python -m tools.cli.app`: that bypasses the installed launcher and
 can import stale code from the current source worktree.
 
+## Current local-first boundary
+
+The Manager has no resident research Agent. Research Graph sessions, edge
+selection, evidence judgments, obligations, report authoring, and locally
+selected test execution therefore belong to the Swift/CLI client and must
+continue when the Manager is offline. Download a graph YAML/version from the
+Manager when available, then use the local graph store and
+`factortester research-graph next-local` to evaluate candidate edges. Do not
+wait for a server packet to decide the next action.
+
+The server-side Graph instance/branch commands documented below are retained
+only as compatibility imports for existing shared progress and remote Jobs;
+they are not the source of truth for a new offline research session. A shared
+report is still edited locally. `factortester report publication publish`
+persists a source-free projection and its 7997 objects in the local outbox;
+`factortester report publication sync` flushes it when a connection returns.
+Unshared local facts and session state never enter that outbox.
+
 ## Start and discover the current action
 
 Use an explicit local session and JSON output:
@@ -20,39 +38,33 @@ Use an explicit local session and JSON output:
 ```bash
 cli-anything-factortester-research \
   --session /path/to/research-session.json doctor --json
-factortester agent-flow resume <agent-id> --role research \
-  --instance-id <instance-id> --branch-id <branch-id>
-factortester research-graph node info <instance-id> <branch-id>
+factortester research-graph next-local \
+  --graph-file /path/to/graph.yaml --current-node entry --json
 ```
 
-Treat the returned packet as authoritative for the current node, candidate
-edges, blockers, obligations, report tasks, and whether agent judgment is
-needed. Do not load the full graph, catalog, trace history, or unrelated
-evidence. Do not call `research step inspect` to discover the current action or
-to read a TrialPlan. It applies only after the packet exposes a current
-TrialPlan Evidence Action and explicitly directs the Agent to fetch that
-action's missing input contract. In that case, read only its compact contract:
+The downloaded graph and local session are authoritative for the current node,
+candidate edges, blockers, obligations, report tasks, and whether Agent
+judgment is needed. Do not ask a Manager to calculate the next step. Load only
+the local graph document and the evidence/facts needed by the current node.
+`research step inspect` is retained only as a legacy compatibility read for
+older remote Jobs; it is not part of offline research navigation.
 
 ```bash
-factortester research step inspect <instance-id> <branch-id> \
-  --output current-action.json
+factortester research-graph next-local \
+  --graph-file graph.yaml --current-node validation_design --json
 ```
 
-The inspect response intentionally does not return the TrialPlan body. It owns
-only the current Evidence Action identity, comparison roles, RunSpec hashes,
-and operation payload contracts. Do not memorize edge-specific request JSON,
-capability identifiers, products, or Graph version names in this Skill.
-
-When a candidate Edge returns `action_contract.mode=automatic`, run the
-ordinary `node advance` command without inventing an action request or calling
-`research step inspect`. The server performs the declared binding itself.
+The local evaluator returns candidate edges and deterministic blockers; the
+Agent chooses an edge when the result is ambiguous and records that choice in
+the local session. A remote Job submission may still be validated by the
+selected server, but the server does not own the research transition.
 
 ## Command map
 
 - `plan`, `workspace`, `run-step`: prepare a bounded research configuration and
   delegate to the real client
-- `factortester research-graph`: read the current packet, inspect one declared
-  object, validate and advance the bounded Research Cycle
+- `factortester research-graph`: download a graph and evaluate the next local
+  edge from the local session and facts
 - `factortester trial-plan`: validate, freeze, and read a direct TrialPlan
   without entering Research Graph
 - `report`: create, add, batch, bind, validate, inspect, render, and export the
@@ -63,52 +75,21 @@ ordinary `node advance` command without inventing an action request or calling
 - `skill-usage`: record actual, approved skill use locally
 - `gap`, `operator`, `service`: route platform gaps and source-owner work
 
-### Restarting the server fleet after a source fix
+### Server and release boundary
 
-The stop/restart/restore transaction is shared with the release gate.  A
-source-owner Agent must not stop individual ports and then restart Manager by
-hand, because that can leave the previously running set and the Manager source
-out of sync.  After validating the checkout and committing the server fix,
-discover the approved maintenance command through the normal help surface:
-
-```bash
-factortester manager --help
-factortester manager restart-fleet --help
-```
-
-Then use the registered `$factortester-server-maintenance` Skill; in a
-repository checkout its canonical source is
-`server/skills/factortester-server-maintenance/`. Read its
+The research Skill does not own server maintenance, Manager authentication,
+or client publication. If a research run exposes a platform gap or a source
+fix is required, record the gap and route it to the registered `$factortester-server-maintenance` Skill. Its canonical repository source is
+`server/skills/factortester-server-maintenance/`; read
 `references/infrastructure.md` when Docker, WireGuard, SSH publication, or
-public/container release state is involved, then run the native reusable
-operation:
+public/container release state is involved.
 
-```bash
-factortester manager restart-fleet \
-  --source-root /absolute/path/to/the/server-worktree \
-  --source-mode worktree --yes --json
-```
-
-The command uses the Keychain-backed Manager session, snapshots all currently
-running Manager-owned services, stops only that set, restarts Manager from the
-explicit worktree, waits for the Manager session to return, and restores the
-same opaque instances.  `--target-port` is optional and only adds a release
-target check; it does not narrow the restored set.  To restore from an exact
-committed checkout, replace the mode and provide the full SHA:
-
-```bash
-factortester manager restart-fleet \
-  --source-root /absolute/path/to/the/server-worktree \
-  --source-mode git-commit --source-revision <full-40-char-sha> \
-  --yes --json
-```
-
-The modes never fall back to each other.  `--stop-mode wait` is the default;
-use `--stop-mode force` or a targeted `--port-stop-mode 8141=force` only with
-explicit authorization.  A failed restart attempts the same rollback and
-returns the captured instance list.  Do not use this operation in
-`client_only` mode, and do not start a previously stopped service as part of
-recovery.
+The separate `factortester-manager` executable is reserved for that
+maintenance/operator boundary. Do not invoke it from a research workflow,
+and do not treat the research CLI's session as Manager authority. A
+maintenance operator obtains target-specific access metadata with
+`factortester-manager server access --json`; do not infer a host transport or
+copy connection details into this research Skill.
 
 Use `--help` or `<group> --help` for stable command syntax. Use `--json` for
 machine consumption; parse structured output, never CLI prose.
@@ -118,8 +99,8 @@ machine consumption; parse structured output, never CLI prose.
 - Workspace is editable configuration; `ResearchRun` owns an immutable RunSpec;
   `Job` owns lifecycle, result, and artifact state. Observe, cancel, and retry
   by `job_id`, never `page_uuid`
-- Call `run preview` before `run submit`; the server freezes the same resolved
-  configuration and rejects changed executable factor semantics
+- Call `run preview` before `run submit`; the local client freezes the resolved
+  configuration. A remote server validates only the submitted Job contract.
 - Before submitting a Job, inspect the server-owned output catalog instead of
   memorizing output names:
   ```bash
@@ -133,9 +114,9 @@ machine consumption; parse structured output, never CLI prose.
   Read and download the resulting Job artifacts through the Job commands; do
   not replace Job artifacts with terminal summaries or Agent-authored tables.
 - A Trial Job that belongs in the active report must submit with `--profile`,
-  `--work-package-id`, and `--branch-id`. The CLI freezes the local report
-  HEAD together with either the server-owned Graph execution node or an
-  explicit direct-report parent, waits by default, and creates one
+  `--work-package-id`, and `--branch-id`. The local client freezes the local
+  report HEAD together with the local Graph node or an explicit direct-report
+  parent, waits by default, and creates one
   `test_result` special section. Read
   `report_collections[].report_follow_up.parent_id` and put the subsequent
   analysis under that exact parent. Use `--without-report` only when the Trial
@@ -404,10 +385,11 @@ Do not fall back to an older commit when the selected revision lacks that
 factor. Factor-family references are navigation objects only and cannot replace
 the concrete `factor_ref` in a Trial, EvidenceUse, or Graph transition.
 
-Do not memorize the mutable command schema in this Skill. Ask the native CLI
-for the current contract and execute its returned `next_actions`:
+Do not memorize the mutable graph schema in this Skill. Ask the local CLI for
+the current graph contract and let it evaluate the local YAML:
 
 ```bash
+factortester research-graph next-local --graph-file <graph.yaml> --current-node <node>
 factortester research-evidence guide --json
 factortester research-evidence guide search --json
 ```
@@ -492,8 +474,8 @@ Work Package and Git-tracked before publishing the report link.
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning
-2. Read `factortester research-graph node info`; let its packet select the
-   required local decision or detailed contract
+2. Read the downloaded Graph with `factortester research-graph next-local`; let
+   the local result select the required decision or detailed contract
 3. Add only the report components and bindings required by that node, scoped to
    its Profile, Work Package and branch; never create a loose report file
 4. Validate locally, submit only the declared immutable run or transition, then
@@ -503,27 +485,22 @@ Work Package and Git-tracked before publishing the report link.
 6. Compare the then-current Edge candidates, record the path rationale, satisfy
    the selected Edge's additional obligation categories, and advance
 
-Use only `factortester research-graph node advance` for Graph mutation. It rebuilds
-the current node/edge contract immediately before submission, validates local
-Research Cycle proposals, checks report coverage, and automatically binds
-declared target-node capabilities. If the current node has unresolved Entry
-Requirements, pass a not-yet-existing `--entry-assessment-file` path and
-`--factor-family`; the first call writes the editable document and returns
-`state_changed: false`. Complete every requested judgment and rerun the same
-command. `node advance` validates and projects it before mutation. Pass
-Profile/Agent, narrative, and release-Profile options when the packet requires
-them. Do not call a second prepare, validate, or Harness advance wrapper.
+Persist Graph mutation through the local session store. The local CLI validates
+the selected edge, evidence and report bindings before recording the transition.
+If a remote Job is needed, submit it separately and keep only its immutable Job
+reference in the local session. Do not call a server endpoint to advance the
+research graph.
 
-Copy the current command only from `next_actions`; do not reconstruct it from a
-previous attempt or from this Skill. The Agent supplies only genuine choices:
+Do not copy a command from a server `next_actions` field. Use the local graph
+evaluation and current evidence to decide the next operation. The Agent supplies only genuine choices:
 an ambiguous Edge and its reason, unresolved Entry assessments, an Evidence or
 Job choice and its rationale, a `no_material_issue` judgment, or an ambiguous
 capability binding. The Agent never writes `expected_base_hash`, a complete
 `obligation_coverage_submission`, `coverage_hash`,
 `data_availability_request`, a frozen availability-profile hash, or another
-checkpoint-derived field. The CLI and server own those values. If a returned
-action asks the Agent to copy one, stop and report a platform-contract defect
-instead of satisfying it manually.
+checkpoint-derived field. The local CLI owns those values. If a remote server
+asks the Agent to copy a server-generated next action, stop and report a
+platform-contract defect instead of satisfying it manually.
 
 ### Entry Requirement, obligation, and report invariants
 
@@ -615,9 +592,9 @@ may be supported by several obligations. Always submit the complete
 `from_requirement_refs` and
 `to_requirement_refs` for each changed obligation; never collapse the relation
 to one obligation or one subclass.
-An Edge never reuses a previous coverage decision by status alone.  At every
-advance, the CLI and server revalidate each mapped EvidenceUse against the
-current non-superseded Claim scope and the server-owned branch admission.  A
+An Edge never reuses a previous coverage decision by status alone. At every
+local advance, the CLI revalidates each mapped EvidenceUse against the current
+non-superseded Claim scope and local branch admission. A
 factor- or product-specific EvidenceUse cannot support an obligation that did
 not explicitly bind that typed subject through its own scope or linked Claims.
 When the research subject changes, supersede or rescope the old Claim and
@@ -642,50 +619,14 @@ The referenced category may come from the node Entry Requirements, the selected
 Edge requirements, or both. Keep its explicit `parent_id`; never infer the
 container from the previously written report item.
 
-## Graph continuation with an open capability detour
+## Graph version changes and local continuation
 
-Use the existing continuation path; do not invent a direct migration or edit
-the research record:
-
-```bash
-factortester research-graph continuation-preview \
-  <instance-id> <branch-id> --target-version <version>
-factortester research-graph continue \
-  <instance-id> <branch-id> --target-version <version> --yes
-```
-
-Graph activation validates upgrade mechanics transactionally and leaves no
-persistent validation Work Package. Do not create a research fork or temporary
-Profile binding to validate an upgrade. After activation, continue the existing
-logical Work Package and Hypothesis Branch with the commands above.
-
-Read `agent_plan` from the preview or continuation result. For an open
-capability detour, assess the current node's added or revised entry requirements
-first. Retain the same capability-detour episode and its `resume_node`; this
-current-node reentry is not a second detour. Complete the declared
-capability-repair route, enter `capability_resolution`, and use only the
-explicit resume edge returned by `factortester research-graph node info`.
-
-After the original node is restored, assess each remaining Graph-upgrade
-requirement only when its owning node is entered. Never nest a second capability
-detour inside the open episode. If a later node-local requirement needs another
-gap, open it only after the earlier episode has closed.
-
-Use the new physical branch IDs returned by continuation:
-
-```bash
-factortester research-graph node info \
-  <target-instance-id> <target-branch-id>
-```
-
-The packet owns the exact assessment, report, and transition contracts. Do not
-infer them from Graph version numbers or this Skill.
-
-Do not create Graph-stage chapters yourself. `research-graph node advance`
-creates or reuses the target substantive chapter and returns its
-`local_report_publish.chapter_sync.component_id`. During a capability detour it
-instead returns the single server-owned special nested under the resume-node
-chapter; add subsequent node content only under the returned container.
+When a newer Graph version is available, download it explicitly and inspect its
+local topology before changing the local session. The client records the graph
+reference and a local continuation event; there is no server-side continuation
+preview, approval, Agent plan, or persistent branch migration. Keep unresolved
+capability detours in the local session and do not ask a Manager to manufacture
+the next edge or report parent.
 
 ## Direction metadata and sign-transform audit
 

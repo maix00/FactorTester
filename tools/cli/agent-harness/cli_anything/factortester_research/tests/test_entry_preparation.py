@@ -155,7 +155,6 @@ def _next_packet() -> dict:
             },
         ],
         "candidate_edges": [],
-        "next_bytes": 1000,
     }
 
 

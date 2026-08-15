@@ -5,7 +5,6 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
-from tools.cli.commands.admin import admin
 from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.client_release import client
@@ -24,7 +23,6 @@ from tools.cli.commands.research_report import report
 from tools.cli.commands.research_evidence import research_evidence
 from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
-from tools.cli.manager.commands import manager
 
 
 @click.group()
@@ -53,7 +51,6 @@ def cli(ports: tuple[int, ...]) -> None:
 
 
 cli.add_command(configure)
-cli.add_command(admin)
 cli.add_command(client)
 cli.add_command(login)
 cli.add_command(logout)
@@ -78,7 +75,6 @@ cli.add_command(research_graph)
 cli.add_command(report)
 cli.add_command(research_evidence)
 cli.add_command(trial_plan)
-cli.add_command(manager)
 register_cli_modules(cli)
 
 

@@ -12,7 +12,7 @@ No server source checkout, database driver, or local backtest engine is needed.
 
 Release operations intentionally have two authorities:
 
-- Publisher: `factortester client release --channel stable|beta ...` performs
+- Publisher: `factortester-manager client release --channel stable|beta ...` performs
   the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
   Sparkle appcast, compatibility manifest, publication, remote read-back, and
   receipt pipeline. It never logs into, stops, restarts, or restores a
