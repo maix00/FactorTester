@@ -2397,6 +2397,10 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
     for script in scripts.values():
         assert "context.isRouteCurrent?.() !== false" in script
     assert "const payload = await context.api(\"/api/client/profiles\")" in scripts["profiles"]
+    assert 'const embedded = Boolean(options.embedded)' in scripts["profiles"]
+    assert '尚无已注册研究身份' in scripts["profiles"]
+    assert '请使用 CLI 注册智能体研究身份' in scripts["profiles"]
+    assert '/research?section=profiles&profile=${profileID}' in scripts["profiles"]
     assert "const payload = await context.api(\"/api/client/workspace\")" in scripts["settings"]
     assert "if (!current(context)) return;" in scripts["catalog_details"]
 
@@ -2439,6 +2443,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'path: `/research?section=${encodeURIComponent(id)}`' in workspaces
     assert 'body.append(FTUI.loading(context.t("正在读取研究…")))' in workspaces
     assert 'context.content.replaceChildren(body)' in workspaces
+    assert 'FTProfiles.detail(profilesContext, profileID, {embedded: true})' in workspaces
+    assert 'FTProfiles.list(profilesContext, {embedded: true})' in workspaces
+    assert 'url.searchParams.delete("profile")' in workspaces
     assert 'context.isRouteCurrent?.() === false' in local_page
     assert 'context.isRouteCurrent?.() === false' in shared_page
     assert 'context.isRouteCurrent?.() !== false' in graph
