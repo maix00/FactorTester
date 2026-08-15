@@ -22,10 +22,11 @@ VISIBILITIES = {"private", "authorized", "public"}
 class PublicResearchLibrary:
     """Persist uploaded projections without resolving the owner's local files."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, storage_server_id: str = "") -> None:
         self.root = root.resolve()
         self.registry_path = self.root / "publications.json"
         self.mirror_root = self.root / "mirrors"
+        self.storage_server_id = str(storage_server_id or "").strip()
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         report_id = _required(payload, "report_id")
@@ -46,12 +47,15 @@ class PublicResearchLibrary:
                     "relay_local_files": False,
                     "authorized_users": [],
                     "published_at": now,
+                    "storage_server_id": self.storage_server_id,
                 }
                 registry["publications"].append(record)
             if record["owner_ref"] != owner_ref:
                 raise PermissionError("report owner does not match")
             if profile_ref:
                 record["profile_ref"] = profile_ref
+            if self.storage_server_id:
+                record["storage_server_id"] = self.storage_server_id
             if not record.get("auto_sync", True):
                 return {"status": "disabled", "report_id": report_id}
             current_generation = int(record.get("generation") or -1)
@@ -118,6 +122,7 @@ class PublicResearchLibrary:
                     "report_id": report_id,
                     "owner_ref": owner_ref,
                     "published_at": now,
+                    "storage_server_id": self.storage_server_id,
                 }
                 registry["publications"].append(record)
             record.update(
@@ -131,6 +136,8 @@ class PublicResearchLibrary:
                 synced_at=now,
                 client_online_at=now,
             )
+            if self.storage_server_id:
+                record["storage_server_id"] = self.storage_server_id
             publication_id = record["publication_id"]
             self._store_projection(publication_id, value)
         return self.owner_settings(publication_id, owner_ref)
@@ -141,11 +148,22 @@ class PublicResearchLibrary:
             raise PermissionError("report settings require the owner")
         return _owner_record(record)
 
+    def publication_metadata(self, publication_id: str) -> dict[str, Any]:
+        """Return sync-safe publication metadata without report bytes."""
+        return _owner_record(self._record(publication_id))
+
     def list_owner(self, owner_ref: str) -> list[dict[str, Any]]:
         return [
             _owner_record(record)
             for record in self._registry()["publications"]
             if record["owner_ref"] == owner_ref
+        ]
+
+    def list_metadata(self) -> list[dict[str, Any]]:
+        """Return all publication metadata for a local sync reconciliation."""
+        return [
+            _owner_record(record)
+            for record in self._registry()["publications"]
         ]
 
     def list_visible(self, viewer_ref: str | None) -> list[dict[str, Any]]:
@@ -175,6 +193,8 @@ class PublicResearchLibrary:
                 "updated_at": record.get("synced_at") or 0,
                 "visibility": record["visibility"],
                 "is_owned": viewer_ref == record["owner_ref"],
+                "projection_hash": record.get("projection_hash") or "",
+                "storage_server_id": record.get("storage_server_id") or self.storage_server_id,
                 "href": f"/research/{record['publication_id']}",
             })
         return sorted(values, key=lambda item: item["updated_at"], reverse=True)
@@ -613,6 +633,9 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
             "publication_id", "report_id", "owner_ref", "profile_ref", "visibility",
             "auto_sync", "relay_local_files", "authorized_users",
             "generation", "synced_at",
-            "title",
+            "title", "projection_hash", "published_at", "storage_server_id",
         )
-    } | {"owner_client_online": _client_online(record)}
+    } | {
+        "owner_client_online": _client_online(record),
+        "updated_at": record.get("synced_at") or 0,
+    }

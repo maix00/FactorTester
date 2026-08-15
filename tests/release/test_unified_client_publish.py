@@ -13,7 +13,6 @@ import pytest
 from scripts.release import publish
 from tools.cli.commands.client_release import client
 from tools.cli.release import app_update_control
-from tools.cli.release.service_activation import ServiceRestartReceipt
 
 
 def test_release_rejects_a_drifted_cli_anything_skill_copy(
@@ -620,14 +619,16 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert "--from-clean-commit" in result.output
 
 
-def test_direct_publisher_requires_manager_service_port() -> None:
+def test_direct_publisher_does_not_expose_server_restart_options() -> None:
     result = CliRunner().invoke(
         client,
         ["release", "--help"],
     )
 
     assert result.exit_code == 0
-    assert "--service-port INTEGER RANGE" in result.output
+    assert "--service-port" not in result.output
+    assert "--manager-source-mode" not in result.output
+    assert "--manager-stop-mode" not in result.output
 
 
 def test_script_publisher_entrypoint_bootstraps_repository() -> None:
@@ -644,112 +645,27 @@ def test_script_publisher_entrypoint_bootstraps_repository() -> None:
     )
 
     assert result.returncode == 0
-    assert "--service-port SERVICE_PORT" in result.stdout
+    assert "--service-port" not in result.stdout
 
 
-def test_module_publisher_stops_before_build_when_manager_is_unavailable(
-    tmp_path: Path,
+def test_module_publisher_does_not_restart_manager_before_build(
     monkeypatch,
 ) -> None:
-    called = False
-
-    def fail_manager(**_options):
-        raise RuntimeError("Manager login required")
-
-    def unexpected_release(**_options):
-        nonlocal called
-        called = True
-
+    sentinel = object()
     monkeypatch.setattr(
-        "tools.cli.release.service_activation.restart_release_service",
-        fail_manager,
+        publish,
+        "release_client",
+        lambda **_options: sentinel,
     )
-    monkeypatch.setattr(publish, "release_client", unexpected_release)
     monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "publish",
-            "--channel", "beta",
-            "--version", "1.2.3",
-            "--build", "42",
-            "--source-revision", "a" * 40,
-            "--service-port", "8141",
-            "--output", str(tmp_path / "release"),
-            "--sparkle-public-key", "public",
-            "--sparkle-generate-appcast", str(tmp_path / "appcast-tool"),
-            "--legacy-private-key", str(tmp_path / "private.pem"),
-            "--legacy-public-key", str(tmp_path / "public.pem"),
-        ],
+    result = publish.publish_release(
+        channel="stable",
+        version="1.2.3",
+        build=42,
+        source_revision="a" * 40,
     )
 
-    with pytest.raises(RuntimeError, match="Manager login required"):
-        publish.main()
-    assert called is False
-
-
-def test_module_publisher_restarts_manager_before_build(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    order: list[str] = []
-    service_restart = ServiceRestartReceipt(
-        manager_url="http://127.0.0.1:7998",
-        port=8141,
-        instance_id="worktree-141",
-        action="restart-bundle",
-        message="restarted",
-        release_root=str(tmp_path / "manager-releases"),
-    )
-
-    def restart(*, port: int, source_root: Path, source_revision: str):
-        assert source_root == publish.REPO
-        assert source_revision == "a" * 40
-        order.append(f"restart:{port}")
-        return service_restart
-
-    def release(**_options):
-        order.append("release")
-        return publish.PublishedRelease(
-            channel="beta",
-            version="1.2.3",
-            build=42,
-            source_revision="a" * 40,
-            dmg_sha256="a" * 64,
-            signing_certificate_sha1=publish.SHARED_SIGNING_CERTIFICATE_SHA1,
-            asset_url="http://127.0.0.1:8141/dmg",
-            appcast_url="http://127.0.0.1:8141/appcast",
-            legacy_manifest_url="http://127.0.0.1:8141/manifest",
-        )
-
-    monkeypatch.setattr(
-        "tools.cli.release.service_activation.restart_release_service",
-        restart,
-    )
-    monkeypatch.setattr(publish, "release_client", release)
-    monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "publish",
-            "--channel", "beta",
-            "--version", "1.2.3",
-            "--build", "42",
-            "--source-revision", "a" * 40,
-            "--service-port", "8141",
-            "--output", str(tmp_path / "release"),
-            "--sparkle-public-key", "public",
-            "--sparkle-generate-appcast", str(tmp_path / "appcast-tool"),
-            "--legacy-private-key", str(tmp_path / "private.pem"),
-            "--legacy-public-key", str(tmp_path / "public.pem"),
-        ],
-    )
-
-    publish.main()
-
-    assert order == ["restart:8141", "release"]
+    assert result is sentinel
 
 
 def test_public_cli_exposes_explicit_app_update_state_machine() -> None:

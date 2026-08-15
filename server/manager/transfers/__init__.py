@@ -13,6 +13,7 @@ from server.manager.transfers.models import (
     TransferTicketGrant,
     TransferTicketRole,
 )
+from server.manager.objects.models import ObjectReference, TransferObjectKind
 
 __all__ = [
     "AttemptStatus",
@@ -26,4 +27,6 @@ __all__ = [
     "TransferStatus",
     "TransferTicketGrant",
     "TransferTicketRole",
+    "ObjectReference",
+    "TransferObjectKind",
 ]

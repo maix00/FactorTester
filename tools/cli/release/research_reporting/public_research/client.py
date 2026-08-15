@@ -20,6 +20,10 @@ from tools.cli.release.research_reporting.authoring.tree_paths import report_tre
 from tools.cli.release.research_reporting.public_research.projection import (
     build_upload_projection,
 )
+from tools.cli.release.research_reporting.public_research.object_uploads import (
+    ResearchObjectUpload,
+    detach_object_bytes,
+)
 from tools.cli.commands.research_report_scope_identity import (
     resolve_branch_report_scope,
 )
@@ -104,7 +108,9 @@ class PublicResearchClient:
         paths = report_tree_paths(scope.package_root, branch_id)
         head = load_head(paths)
         snapshot = project_snapshot(paths, head)
-        projection = build_upload_projection(snapshot)
+        projection, object_uploads = detach_object_bytes(
+            build_upload_projection(snapshot),
+        )
         owner_ref = str(
             (scope.profile.get("session_binding") or {}).get("principal_ref")
             or ""
@@ -123,6 +129,19 @@ class PublicResearchClient:
                 "show_profile": bool(show_profile),
             },
         )
+        publication_id = str(value.get("publication_id") or "").strip()
+        if not publication_id:
+            raise RuntimeError("Manager did not return a publication id")
+        storage_server_id = str(
+            value.get("storage_server_id") or ""
+        ).strip()
+        for upload in object_uploads:
+            self._upload_object(
+                publication_id=publication_id,
+                owner_ref=owner_ref,
+                storage_server_id=storage_server_id,
+                upload=upload,
+            )
         return {
             **value,
             "profile_id": profile_id,
@@ -130,8 +149,64 @@ class PublicResearchClient:
             "branch_id": branch_id,
             "generation": projection["generation"],
             "projection_hash": value.get("projection_hash", projection["projection_hash"]),
-            "href": urljoin(self.manager_url + "/", f"research/{value['publication_id']}"),
+            "uploaded_objects": len(object_uploads),
+            "href": urljoin(self.manager_url + "/", f"research/{publication_id}"),
         }
+
+    def _upload_object(
+        self,
+        *,
+        publication_id: str,
+        owner_ref: str,
+        storage_server_id: str,
+        upload: ResearchObjectUpload,
+    ) -> None:
+        access_value = self._request(
+            "POST",
+            "/api/transfers/objects/access",
+            payload={
+                "owner_ref": owner_ref,
+                "publication_id": publication_id,
+                "object_kind": upload.object_kind,
+                "object_id": upload.object_id,
+                "storage_server_id": storage_server_id,
+                "filename": upload.filename,
+                "content_type": upload.content_type,
+                "size_bytes": upload.size_bytes,
+                "sha256": upload.content_hash,
+            },
+            extra_headers={
+                "Idempotency-Key": (
+                    f"research-upload:{publication_id}:"
+                    f"{upload.object_kind}:{upload.object_id}:"
+                    f"{upload.content_hash}"
+                ),
+            },
+        )
+        access = access_value.get("access")
+        if not isinstance(access, dict):
+            raise RuntimeError("Manager returned no research object upload access")
+        request = Request(
+            str(access.get("url") or ""),
+            data=upload.content,
+            headers={
+                "Authorization": f"Bearer {access.get('bearer') or ''}",
+                "Content-Length": str(upload.size_bytes),
+                "Content-Type": upload.content_type,
+                "X-FactorTester-Client": "cli",
+            },
+            method="PUT",
+        )
+        try:
+            with urlopen(request, timeout=120.0) as response:
+                response.read()
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"research object upload failed ({exc.code}): {raw[:500]}"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError("research object data plane is unavailable") from exc
 
     def unpublish(self, publication_id: str) -> dict[str, Any]:
         value = self._request(
@@ -148,6 +223,7 @@ class PublicResearchClient:
         *,
         payload: dict[str, Any] | None = None,
         allow_anonymous: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         body = None
         headers = {
@@ -157,6 +233,8 @@ class PublicResearchClient:
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        if extra_headers:
+            headers.update(extra_headers)
         request = Request(
             urljoin(self.manager_url + "/", path.lstrip("/")),
             data=body,

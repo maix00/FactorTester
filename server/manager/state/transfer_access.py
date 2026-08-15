@@ -40,6 +40,37 @@ class TransferAccessStateMixin:
         now: float | None = None,
         ttl: float = 15 * 60,
     ) -> dict[str, object]:
+        return self.prepare_object_download(
+            principal=principal,
+            storage_server_id=storage_server_id,
+            object_kind="job_artifact",
+            object_id=f"{job_id}:{str(artifact.get('name') or '').strip()}",
+            expected_size=int(artifact.get("size_bytes") or 0),
+            expected_sha256=str(
+                artifact.get("content_hash") or ""
+            ).strip().lower(),
+            idempotency_key=idempotency_key,
+            job_id=job_id,
+            artifact_name=str(artifact.get("name") or "").strip(),
+            now=now,
+            ttl=ttl,
+        )
+
+    def prepare_object_download(
+        self,
+        *,
+        principal: str,
+        storage_server_id: str,
+        object_kind: str,
+        object_id: str,
+        expected_size: int,
+        expected_sha256: str,
+        idempotency_key: str,
+        job_id: str = "",
+        artifact_name: str = "",
+        now: float | None = None,
+        ttl: float = 15 * 60,
+    ) -> dict[str, object]:
         coordinator = self.transfer_coordinator
         if coordinator is None:
             raise RuntimeError("transfer access is not configured")
@@ -51,12 +82,12 @@ class TransferAccessStateMixin:
                 principal=str(principal or "").strip(),
                 storage_server_id=str(storage_server_id or "").strip(),
                 job_id=str(job_id or "").strip(),
-                artifact_name=str(artifact.get("name") or "").strip(),
-                expected_size=int(artifact.get("size_bytes") or 0),
-                expected_sha256=str(
-                    artifact.get("content_hash") or ""
-                ).strip().lower(),
+                artifact_name=str(artifact_name or "").strip(),
+                expected_size=int(expected_size),
+                expected_sha256=str(expected_sha256 or "").strip().lower(),
                 expires_at=expiry,
+                object_kind=str(object_kind or "").strip(),
+                object_id=str(object_id or "").strip(),
             ),
             endpoints=self.transfer_endpoints.snapshot(now=current),
             now=current,
@@ -103,6 +134,8 @@ class TransferAccessStateMixin:
                 expected_size=int(expected_size),
                 expected_sha256=str(expected_sha256 or "").strip().lower(),
                 expires_at=expiry,
+                object_kind="job_submission",
+                object_id=f"{job_id}:{str(name or '').strip()}",
             ),
             endpoints=self.transfer_endpoints.snapshot(now=current),
             now=current,
@@ -119,6 +152,60 @@ class TransferAccessStateMixin:
             "expires_at": access.expires_at,
             "resume_offset": access.resume_offset,
             "expected_size": access.expected_size,
+        }
+
+    def prepare_object_upload(
+        self,
+        *,
+        principal: str,
+        storage_server_id: str,
+        object_kind: str,
+        object_id: str,
+        filename: str,
+        expected_size: int,
+        expected_sha256: str,
+        idempotency_key: str,
+        content_type: str = "application/octet-stream",
+        now: float | None = None,
+        ttl: float = 15 * 60,
+    ) -> dict[str, object]:
+        """Prepare a generic object upload while retaining Job compatibility."""
+        coordinator = self.transfer_coordinator
+        if coordinator is None:
+            raise RuntimeError("transfer access is not configured")
+        current = time.time() if now is None else float(now)
+        expiry = current + max(30.0, min(3600.0, float(ttl)))
+        safe_name = str(filename or "").strip()
+        access = coordinator.prepare_upload(
+            UploadRequest(
+                idempotency_key=str(idempotency_key or "").strip(),
+                principal=str(principal or "").strip(),
+                storage_server_id=str(storage_server_id or "").strip(),
+                job_id="",
+                artifact_name=safe_name,
+                expected_size=int(expected_size),
+                expected_sha256=str(expected_sha256 or "").strip().lower(),
+                expires_at=expiry,
+                object_kind=str(object_kind or "").strip(),
+                object_id=str(object_id or "").strip(),
+            ),
+            endpoints=self.transfer_endpoints.snapshot(now=current),
+            now=current,
+            ticket_ttl=ttl,
+        )
+        return {
+            "transfer_id": access.transfer_id,
+            "attempt_id": access.attempt_id,
+            "mode": access.mode.value,
+            "data_endpoint": access.data_endpoint,
+            "path": access.path,
+            "url": access.data_endpoint.rstrip("/") + access.path,
+            "bearer": access.bearer,
+            "expires_at": access.expires_at,
+            "resume_offset": access.resume_offset,
+            "expected_size": access.expected_size,
+            "filename": safe_name,
+            "content_type": str(content_type or "application/octet-stream"),
         }
 
     def transfer_access_status(

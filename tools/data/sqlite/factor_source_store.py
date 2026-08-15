@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import os
 import sqlite3
 import time
 from typing import Any
@@ -197,6 +199,10 @@ def upsert_factor_source(
                 time.time(),
             ),
         )
+    _enqueue_source_metadata(
+        source_kind, owner_username, factor_id, factor_name,
+        normalized_source_code,
+    )
     return str(Settings.CACHE_DB_PATH)
 
 
@@ -210,6 +216,9 @@ def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) 
             """,
             (source_kind, owner_username or "", factor_id),
         )
+    _enqueue_source_metadata(
+        source_kind, owner_username, factor_id, "", "", deleted=True,
+    )
     return str(Settings.CACHE_DB_PATH)
 
 
@@ -258,7 +267,51 @@ def rename_factor_source(
                 time.time(),
             ),
         )
+        _enqueue_source_metadata(
+            source_kind, owner_username, old_factor_id, "", "", deleted=True,
+        )
+        _enqueue_source_metadata(
+            source_kind, owner_username, new_factor_id, new_factor_name,
+            normalize_factor_source_code(str(row["source_code"] or "")),
+        )
     return str(Settings.CACHE_DB_PATH)
+
+
+def _enqueue_source_metadata(
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+    factor_name: str,
+    source_code: str,
+    *,
+    deleted: bool = False,
+) -> None:
+    """Sync a source manifest, never the source code itself."""
+    try:
+        from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
+
+        principal = str(owner_username or "").strip() or "__public__"
+        enqueue_entity(
+            principal,
+            "factor_source",
+            f"{source_kind}:{factor_id}",
+            {
+                "source_kind": source_kind,
+                "owner_username": owner_username or "",
+                "factor_id": factor_id,
+                "factor_name": factor_name or factor_id,
+                "source_sha256": hashlib.sha256(source_code.encode("utf-8")).hexdigest()
+                if source_code else "",
+                "source_bytes": len(source_code.encode("utf-8")),
+                "storage_server_id": str(
+                    os.environ.get("FACTORTESTER_SERVER_ID") or ""
+                ).strip(),
+                "visibility": "public" if source_kind == "public" else "private",
+            },
+            deleted=deleted,
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return
 
 
 def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:

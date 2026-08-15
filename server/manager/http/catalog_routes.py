@@ -71,7 +71,7 @@ class CatalogRoutesMixin:
                     "success": True,
                     "origin": "server",
                     "default_category_id": None,
-                    "categories": self.state.client_state.product_categories(),
+                    "categories": self.state.client_state.product_categories(principal),
                 }
             elif parsed.path == "/api/catalog/products":
                 if visitor is not None:
@@ -132,7 +132,7 @@ class CatalogRoutesMixin:
                     "category_id": category_id,
                     "source_ids": list(source_ids),
                     "tree": self.state.client_state.product_tree(
-                        category_id, source_ids,
+                        category_id, source_ids, principal,
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
@@ -151,6 +151,7 @@ class CatalogRoutesMixin:
                     "source_ids": list(source_ids),
                     "nodes": self.state.client_state.contract_tree(
                         query.get("path", [""])[0], category_id, source_ids,
+                        principal,
                     ),
                 }
             elif parsed.path == "/api/catalog/contracts":
@@ -312,28 +313,81 @@ class CatalogRoutesMixin:
 
     def _serve_product_catalog_write(self, parsed) -> bool:
         """Serve Manager-owned catalog writes without a service port."""
+        category_delete = re.fullmatch(
+            r"/api/catalog/categories/([^/]+)", parsed.path,
+        )
         if parsed.path not in {
             "/api/catalog/prices",
             "/api/catalog/product-groups",
-        }:
+            "/api/catalog/categories",
+            "/api/catalog/categories/composite",
+        } and category_delete is None:
             return False
         session = self._session()
         if session is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
         try:
-            payload = self._json_body(256 * 1024)
-            if parsed.path == "/api/catalog/product-groups":
+            method = str(getattr(self, "command", "POST") or "POST").upper()
+            payload = {} if category_delete is not None and method == "DELETE" else self._json_body(256 * 1024)
+            if parsed.path == "/api/catalog/categories":
+                from server.modules.products.product_category_store import (
+                    create_product_category,
+                )
+
+                category = create_product_category(
+                    str(session["username"]),
+                    payload.get("name"),
+                    payload.get("items"),
+                )
+                value = {"success": True, "origin": "server", "category": category}
+            elif parsed.path == "/api/catalog/categories/composite":
+                from server.modules.products.product_category_store import (
+                    create_product_category_composition,
+                )
+
+                category = create_product_category_composition(
+                    str(session["username"]), payload.get("category_ids"),
+                )
+                value = {"success": True, "origin": "server", "category": category}
+            elif category_delete is not None and method == "DELETE":
+                from urllib.parse import unquote
+                from server.modules.products.product_category_store import (
+                    delete_product_category,
+                )
+
+                ok = delete_product_category(
+                    str(session["username"]),
+                    unquote(category_delete.group(1)),
+                )
+                if not ok:
+                    json_response(self, {
+                        "success": False, "error": "用户产品分类不存在",
+                    }, 404)
+                    return True
+                value = {"success": True, "origin": "server"}
+            elif category_delete is not None:
+                json_response(self, {
+                    "success": False, "error": "产品分类写入方法不支持",
+                }, 405)
+                return True
+            elif parsed.path == "/api/catalog/product-groups":
                 name = str(payload.get("name") or "").strip()
                 paths = payload.get("paths")
+                category_ids = payload.get("category_ids") or []
                 if not name:
                     raise ValueError("产品组名称不能为空")
                 if not isinstance(paths, list) or not paths:
                     raise ValueError("请选择至少一个品种路径")
                 if not all(isinstance(path, str) and path.strip() for path in paths):
                     raise ValueError("产品路径必须是非空字符串")
+                if not isinstance(category_ids, list) or not all(
+                    isinstance(category_id, str) and category_id.strip()
+                    for category_id in category_ids
+                ):
+                    raise ValueError("category_ids 必须是字符串数组")
                 group = self.state.client_state.create_product_group(
-                    str(session["username"]), name, paths,
+                    str(session["username"]), name, paths, category_ids,
                 )
                 if group is None:
                     json_response(self, {

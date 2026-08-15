@@ -3,6 +3,7 @@ import SwiftUI
 struct ServerSettingsView: View {
     @EnvironmentObject var config: ServerConfig
     @EnvironmentObject var managerConfig: ManagerConfig
+    @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
     var isInitialSetup = false
 
@@ -257,39 +258,36 @@ struct ServerSettingsView: View {
         testResult = nil
         defer { testing = false }
         do {
-            let result = try await ManagerDeviceAuthenticationService.shared
-                .switchToNearestPublicEndpoint(
-                    deviceName: deviceName,
-                    sourceEndpoint: originManagerEndpoint
-                )
-            let target = result.target
-            managerScheme = target.endpoint.scheme ?? "https"
-            managerHost = target.endpoint.host ?? ""
-            managerPort = String(target.endpoint.port ?? 443)
-            managerServerID = target.serverID
-            managerConfig.save(
-                scheme: managerScheme,
-                host: managerHost,
-                port: managerPort,
-                serverID: managerServerID
-            )
+            guard await ManagerEndpointDiscoveryService.shared.selectBestManager(
+                organizationID: session.user?.organizationId,
+                force: true
+            ) != nil else {
+                throw APIError.server(L10n.text("没有可访问的公网 Manager。"))
+            }
+            managerScheme = managerConfig.scheme
+            managerHost = managerConfig.host
+            managerPort = managerConfig.port
+            managerServerID = managerConfig.serverID
             config.host = managerHost
             await discoverPorts()
             let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
                 ? availablePorts.first.map(String.init) ?? config.port
                 : port
-            config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
+            config.save(
+                scheme: managerScheme,
+                host: managerHost,
+                port: effectivePort
+            )
             try await ManagerCLIClient.shared.configure(
                 scheme: managerScheme,
                 host: managerHost,
                 port: managerPort
             )
-            originManagerEndpoint = target.endpoint
+            originManagerEndpoint = managerConfig.baseURL
             await refreshDeviceAudit()
             testResult = "✓ " + L10n.format(
-                "已切换到服务器 %@（%@）",
-                target.serverID,
-                result.authentication.username
+                "已自动选择服务器 %@",
+                managerServerID
             )
             if isInitialSetup { dismiss() }
         } catch {

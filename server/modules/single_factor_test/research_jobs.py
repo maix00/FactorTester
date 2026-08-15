@@ -56,7 +56,9 @@ from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
 from server.services.federated_factor_sources import (
     freeze_sources as freeze_federated_factor_sources,
+    source_free_context as source_free_federated_context,
     source_free_manifest as federated_source_manifest,
+    source_transfer_manifest as federated_source_transfer_manifest,
 )
 from server.services.factor_registry import transient_factor_source_scope
 from server.services.transient_factor_sources import (
@@ -463,7 +465,14 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     }
 
 
-def prepare_manager_run_context(data: dict, *, owner: str) -> dict:
+def prepare_manager_run_context(
+    data: dict,
+    *,
+    owner: str,
+    source_free: bool = False,
+    storage_server_id: str = "",
+    source_collector=None,
+) -> dict:
     """Freeze origin-owned authoring state before selecting an executor."""
     local_request = deepcopy(data)
     local_request.pop(MANAGER_RUN_CONTEXT_KEY, None)
@@ -480,11 +489,31 @@ def prepare_manager_run_context(data: dict, *, owner: str) -> dict:
         {
             "mode": "transient_run_source",
             "transport": "manager_frozen",
-            "files": federated_source_manifest(all_sources),
+            "files": federated_source_manifest(
+                all_sources,
+                owner=owner,
+                storage_server_id=storage_server_id,
+            ),
         }
         if all_sources else {"mode": "metadata_only"}
     )
-    return create_manager_run_context(prepared, owner=owner)
+    if callable(source_collector):
+        source_collector(
+            federated_source_transfer_manifest(
+                all_sources,
+                owner=owner,
+                storage_server_id=storage_server_id,
+            )
+        )
+    context = create_manager_run_context(prepared, owner=owner)
+    return (
+        source_free_federated_context(
+            context,
+            owner=owner,
+            storage_server_id=storage_server_id,
+        )
+        if source_free else context
+    )
 
 
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:

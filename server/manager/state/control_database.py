@@ -23,6 +23,8 @@ class ControlDatabaseStateMixin:
         candidate.load_accounts()
         self.control_database_settings.save(config)
         self.control_store = candidate
+        if hasattr(self, "account_domain_sync"):
+            self.account_domain_sync.control_store = candidate
         self.device_registry.control_store = candidate
         self.device_authorizations.control_store = candidate
         self.user_preferences.control_store = candidate

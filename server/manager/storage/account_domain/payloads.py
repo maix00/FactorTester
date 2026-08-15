@@ -1,0 +1,56 @@
+"""Stable, bounded metadata payloads for the account-domain sync seam."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from typing import Any
+
+from .local import ENTITY_TYPES
+
+
+_PRIVATE_KEY_PARTS = (
+    "password", "password_hash", "salt", "token", "secret", "private_key",
+    "workspace_root", "worktree_path", "research_root", "source_code",
+    "content_base64", "raw_b64", "absolute_path", "local_path",
+    "report_path", "artifact_path", "file_path",
+)
+MAX_PAYLOAD_BYTES = 512 * 1024
+
+
+def validate_entity(entity_type: str, entity_id: str) -> tuple[str, str]:
+    kind = str(entity_type or "").strip()
+    identifier = str(entity_id or "").strip()
+    if kind not in ENTITY_TYPES:
+        raise ValueError("unsupported account-domain entity type")
+    if not identifier or len(identifier) > 512:
+        raise ValueError("account-domain entity id is invalid")
+    return kind, identifier
+
+
+def public_payload(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Drop credentials, local paths, and raw bytes before persistence."""
+    result = _clean(dict(value or {}), depth=0)
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        raise ValueError("account-domain metadata payload is too large")
+    return result
+
+
+def _clean(value: Any, *, depth: int) -> Any:
+    if depth > 8:
+        return "[truncated]"
+    if isinstance(value, Mapping):
+        output: dict[str, Any] = {}
+        for key, item in value.items():
+            name = str(key)
+            lowered = name.lower()
+            if any(part in lowered for part in _PRIVATE_KEY_PARTS):
+                continue
+            output[name] = _clean(item, depth=depth + 1)
+        return output
+    if isinstance(value, (list, tuple)):
+        return [_clean(item, depth=depth + 1) for item in list(value)[:4096]]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)

@@ -1,7 +1,6 @@
 import Foundation
 
 enum ClientTabContent {
-    case home
     case module(Module)
     case adapter(ClientAdapterModel)
     case web(path: String)
@@ -42,18 +41,10 @@ struct ClientTab: Identifiable {
         }
     }
 
-    static let home = ClientTab(
-        id: "home",
-        title: "主页",
-        titleKey: "主页",
-        systemImage: "square.grid.2x2",
-        content: .home
-    )
-
     static func module(_ module: Module) -> ClientTab {
-        // Test workbenches own navigation through the Swift tab stack. Route
-        // dashboard cards through the same fresh `.web` destinations as the
-        // sidebar launchers so their WebPageView always receives tab callbacks.
+        // Keep this mapping for native capability sheets and compatibility
+        // links.  The main client shell no longer maps the backend module
+        // catalog into a Swift sidebar; Web owns that navigation.
         switch module.id {
         case "research": return .research
         case "jobs": return .jobs
@@ -74,21 +65,6 @@ struct ClientTab: Identifiable {
             systemImage: module.sfSymbol ?? "square.stack.3d.up",
             content: .module(module)
         )
-    }
-
-    /// Convert an already-authorized backend module into a stable launcher.
-    /// This is only a native renderer mapping; visibility and ordering come
-    /// from the Manager navigation response.
-    static func sidebarLauncher(_ module: Module) -> ClientTab? {
-        switch module.id {
-        case "research": return .research
-        case "ic-test": return .icTestLauncher
-        case "backtest": return .backtestLauncher
-        case "jobs": return .jobs
-        case "factors": return .factorLibrary
-        case "products": return .products
-        default: return .module(module)
-        }
     }
 
     static func adapter(_ adapter: ClientAdapterModel) -> ClientTab {
@@ -142,22 +118,6 @@ struct ClientTab: Identifiable {
         titleKey: "测试",
         systemImage: "checklist",
         content: .jobs
-    )
-
-    static let icTestLauncher = ClientTab(
-        id: "ic-test-launcher",
-        title: "IC 测试",
-        titleKey: "IC 测试",
-        systemImage: "chart.xyaxis.line",
-        content: .web(path: "/ic-test")
-    )
-
-    static let backtestLauncher = ClientTab(
-        id: "backtest-launcher",
-        title: "回测",
-        titleKey: "回测",
-        systemImage: "chart.line.uptrend.xyaxis",
-        content: .web(path: "/backtest")
     )
 
     static func icTest() -> ClientTab {
@@ -683,11 +643,9 @@ struct ClientTab: Identifiable {
         return encoded.removingPercentEncoding ?? encoded
     }
 
-    var isHome: Bool { id == Self.home.id }
-
     var isPinnedLauncher: Bool {
         [
-            "home", "research", "jobs", "web:factor-library", "web:products",
+            "research", "jobs", "web:factor-library", "web:products",
             "profiles", "account-settings",
         ].contains(id)
     }

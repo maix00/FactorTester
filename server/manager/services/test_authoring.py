@@ -84,6 +84,9 @@ class TestAuthoringService:
         payload: dict[str, Any],
         *,
         owner: str,
+        source_free: bool = False,
+        storage_server_id: str = "",
+        source_collector=None,
     ) -> dict[str, Any]:
         """Freeze local authoring state into a portable execution context."""
         from server.modules.single_factor_test.research_jobs import (
@@ -92,7 +95,13 @@ class TestAuthoringService:
         from server.services.research_run_context import RunRequestError
 
         try:
-            return prepare_manager_run_context(payload, owner=owner)
+            return prepare_manager_run_context(
+                payload,
+                owner=owner,
+                source_free=source_free,
+                storage_server_id=storage_server_id,
+                source_collector=source_collector,
+            )
         except RunRequestError as exc:
             raise TestAuthoringError(
                 str(exc), exc.status_code, **exc.details,

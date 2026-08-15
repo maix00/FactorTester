@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
+from server.services.factor_source_objects import (
+    hydrate_source_free_entries,
+    portable_source_path,
+    source_free_context,
+    source_free_manifest,
+    source_transfer_manifest,
+)
 
 
 MAX_FILES = 200
@@ -55,9 +62,7 @@ def _revision_contracts(
     return contracts
 
 
-def _portable_path(canonical_ref: str) -> str:
-    digest = hashlib.sha256(canonical_ref.encode("utf-8")).hexdigest()
-    return f"manager_factor_sources/{digest}.py"
+_portable_path = portable_source_path
 
 
 def validate_entries(raw: Any) -> list[dict[str, Any]]:
@@ -126,13 +131,6 @@ def validate_entries(raw: Any) -> list[dict[str, Any]]:
             "source_bytes": len(encoded),
         })
     return sorted(entries, key=lambda item: item["canonical_family_ref"])
-
-
-def source_free_manifest(entries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {key: value for key, value in item.items() if key != "source_code"}
-        for item in entries
-    ]
 
 
 def freeze_sources(prepared: dict[str, Any], *, owner: str) -> list[dict[str, Any]]:
@@ -215,7 +213,10 @@ def validate_context_sources(prepared: dict[str, Any], *, owner: str) -> None:
         for canonical_ref, contract in contracts.items()
     }
     transient = validate_transient_entries(prepared.get("transient_sources"))
-    portable = validate_entries(prepared.get("portable_factor_sources"))
+    portable = validate_entries(hydrate_source_free_entries(
+        prepared.get("portable_factor_sources") or [],
+        owner=owner,
+    ))
     if len(transient) + len(portable) > MAX_FILES:
         raise ValueError("combined factor source bundle has too many files")
     if sum(
@@ -263,7 +264,11 @@ def validate_context_sources(prepared: dict[str, Any], *, owner: str) -> None:
 
 __all__ = [
     "freeze_sources",
+    "hydrate_source_free_entries",
+    "portable_source_path",
+    "source_free_context",
     "source_free_manifest",
+    "source_transfer_manifest",
     "validate_context_sources",
     "validate_entries",
 ]

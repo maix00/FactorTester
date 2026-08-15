@@ -52,6 +52,7 @@ _BASE_PRODUCT_CATEGORY_DEFINITIONS = (
         "id": "day_night",
         "alias": "日夜盘",
         "title_zh": "日夜盘",
+        "source_ids": ("Local",),
         "dimensions": ("day_night",),
         "composable": True,
         "is_composite": False,
@@ -60,6 +61,7 @@ _BASE_PRODUCT_CATEGORY_DEFINITIONS = (
         "id": "sector",
         "alias": "行业",
         "title_zh": "行业",
+        "source_ids": ("Local",),
         "dimensions": ("sector",),
         "composable": True,
         "is_composite": False,
@@ -73,14 +75,13 @@ _BASE_PRODUCT_CATEGORY_TYPES = {
 
 
 def available_product_categories() -> list[dict[str, Any]]:
-    """Return the base dimensions that the product UI may compose.
-
-    The composite entry describes an already valid request shape but is not
-    advertised as a user default; the UI only adds it after the user selects
-    both base dimensions and saves the composition.
-    """
+    """Return provider-defined base dimensions that the product UI may compose."""
     return [
-        dict(item, dimensions=list(item["dimensions"]))
+        dict(
+            item,
+            dimensions=list(item["dimensions"]),
+            source_ids=list(item.get("source_ids") or []),
+        )
         for item in _BASE_PRODUCT_CATEGORY_DEFINITIONS
     ]
 

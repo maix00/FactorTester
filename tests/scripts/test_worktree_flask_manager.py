@@ -20,7 +20,16 @@ import pytest
 
 from server.manager import app as manager_app
 from server.manager import runtime as manager
+from server.manager.data_plane.context import DataPlaneRuntime
+from server.manager.data_plane.server import ClientDataPlaneHTTPServer
+from server.manager.objects.adapters.public_research import (
+    PublicResearchOriginAdapter,
+)
+from server.manager.objects.origin import ObjectOriginRegistry
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+from tools.cli.release.research_reporting.public_research.object_store import (
+    PublicResearchObjectStore,
+)
 
 
 class _Process:
@@ -48,6 +57,42 @@ def _running_manager(state):
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@contextmanager
+def _running_research_data_plane(state):
+    store = PublicResearchObjectStore(state.public_research)
+    runtime = DataPlaneRuntime(
+        server_id=state.server_id,
+        transfer_database=state.transfer_database_path,
+        staging_root=state.transfer_submission_root,
+        origin_resolver=ObjectOriginRegistry(
+            adapters={
+                "research_asset": PublicResearchOriginAdapter(store),
+                "research_attachment": PublicResearchOriginAdapter(store),
+                "research_local_resource": PublicResearchOriginAdapter(store),
+            },
+            fallback=lambda _transfer: (_ for _ in ()).throw(
+                FileNotFoundError("research object only")
+            ),
+        ),
+    )
+    server = ClientDataPlaneHTTPServer(("127.0.0.1", 0), runtime=runtime)
+    endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+    state.configure_data_plane(
+        client_host="127.0.0.1",
+        client_port=server.server_address[1],
+        client_control_endpoint="http://127.0.0.1:7998",
+        client_data_endpoint=endpoint,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield endpoint
     finally:
         server.shutdown()
         server.server_close()
@@ -312,7 +357,19 @@ def test_public_network_info_stays_private_behind_loopback_proxy(
         with pytest.raises(HTTPError) as denied:
             urlopen(request)
 
+        swift_request = Request(
+            f"{base_url}/api/server/network-info",
+            headers={
+                "X-Forwarded-For": "2001:b030:8150:ff07::5",
+                "X-Forwarded-Proto": "https",
+                "X-FactorTester-Client": "swift",
+            },
+        )
+        with urlopen(swift_request) as response:
+            payload = json.loads(response.read())
+
     assert denied.value.code == 401
+    assert payload["success"] is True
 
 
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:
@@ -827,7 +884,7 @@ def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
         tmp_path, "python", data_root=tmp_path,
         session_db_path=tmp_path / "manager.sqlite",
     )
-    with _running_manager(state) as base_url:
+    with _running_research_data_plane(state), _running_manager(state) as base_url:
         for suffix in (
             digest,
             "attachment%3Asha256%3A" + digest,
@@ -893,7 +950,7 @@ def test_public_research_local_resource_route_requires_no_login_for_public_repor
         tmp_path, "python", data_root=tmp_path,
         session_db_path=tmp_path / "manager.sqlite",
     )
-    with _running_manager(state) as base_url:
+    with _running_research_data_plane(state), _running_manager(state) as base_url:
         with urlopen(
             f"{base_url}/api/public-research/{result['publication_id']}"
             f"/local-resources/{resource_id}"

@@ -25,7 +25,7 @@
         return true;
       }
     }
-    if (parts[0] === "products" && ["sources", "groups"].includes(parts[1])) {
+    if (parts[0] === "products" && ["sources", "categories", "groups"].includes(parts[1])) {
       return parts.length === 2;
     }
     if (parts[0] === "factors" && ["families", "sets"].includes(parts[1])) {
@@ -236,6 +236,7 @@
     }
     if (parts[0] === "products" && parts[1] === "sources") return {kind: "product-sources"};
     if (parts[0] === "products" && parts[1] === "groups") return {kind: "product-groups"};
+    if (parts[0] === "products" && parts[1] === "categories") return {kind: "product-categories"};
     if (parts[0] === "products") return {kind: "products"};
     if (parts[0] === "profiles" && parts[1]) {
       return {kind: "profile", id: decodeURIComponent(parts.slice(1).join("/"))};

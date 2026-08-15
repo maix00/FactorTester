@@ -13,6 +13,10 @@ import socket
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from server.manager.domain.organization_scope import (
+    configured_managed_organizations,
+)
+
 
 LAN_ADDRESSES_ENV = "FACTORTESTER_LAN_ADDRESSES"
 MAX_PUBLIC_SERVER_TARGETS = 3
@@ -99,6 +103,27 @@ def _public_server_flag(item: dict[str, object]) -> bool:
     return bool(item.get("public_server", item.get("role") == "main"))
 
 
+def _managed_organizations(item: dict[str, object]) -> list[str]:
+    values = item.get("managed_organizations") or []
+    if isinstance(values, str):
+        values = values.split(",")
+    if isinstance(values, (list, tuple, set)):
+        result = sorted({
+            str(value).strip()
+            for value in values
+            if str(value).strip()
+        })
+        if result:
+            return result
+    # Registrations written before organization scope was added are still
+    # valid online peers.  Their role is enough to apply the deployment
+    # default without making the client guess an institution.
+    return list(configured_managed_organizations(
+        public_server=_public_server_flag(item),
+        server_role=str(item.get("role") or "feat"),
+    ))
+
+
 def _target_from_registration(
     item: dict[str, object],
     *,
@@ -183,8 +208,9 @@ def _public_server_targets(
     source_server_id: str,
     public_server: bool,
     current_endpoint: str,
+    limit: int | None = MAX_PUBLIC_SERVER_TARGETS,
 ) -> list[dict[str, object]]:
-    """Include this Manager when public, then cap the display at three."""
+    """Include this Manager when public and optionally cap the result."""
     targets = public_manager_targets(
         registry, source_server_id=source_server_id,
     )
@@ -196,7 +222,8 @@ def _public_server_targets(
         )
         if current is not None:
             targets.append(current)
-    return sorted(targets, key=_sort_target)[:MAX_PUBLIC_SERVER_TARGETS]
+    ordered = sorted(targets, key=_sort_target)
+    return ordered if limit is None else ordered[:limit]
 
 
 def _internal_server_addresses(
@@ -228,6 +255,73 @@ def _internal_server_addresses(
     return sorted(values)
 
 
+def _internal_server_targets(
+    registry: Any,
+    *,
+    source_server_id: str,
+    server_role: str,
+    public_server: bool,
+    managed_organizations: Iterable[str],
+) -> list[dict[str, object]]:
+    """Return online internal nodes with their organization scope."""
+    targets: list[dict[str, object]] = []
+
+    def append_target(
+        *,
+        server_id: str,
+        role: str,
+        addresses: object,
+        organizations: Iterable[str],
+    ) -> None:
+        if isinstance(addresses, str):
+            addresses = addresses.split(",")
+        if not isinstance(addresses, (list, tuple, set)):
+            return
+        values = sorted({
+            address
+            for value in addresses
+            if (address := _usable_lan_address(value)) is not None
+            and ipaddress.ip_address(address).is_private
+        })
+        if not values:
+            return
+        targets.append({
+            "server_id": server_id,
+            "role": role,
+            "addresses": values,
+            "manager_port": 7998,
+            "managed_organizations": sorted({
+                str(value).strip()
+                for value in organizations
+                if str(value).strip()
+            }),
+            "online": True,
+        })
+
+    if not public_server:
+        append_target(
+            server_id=source_server_id,
+            role=server_role,
+            addresses=local_internal_addresses(),
+            organizations=managed_organizations,
+        )
+    for item in registry.servers(include_offline=False):
+        server_id = str(item.get("server_id") or "").strip()
+        if (
+            not server_id
+            or server_id == source_server_id
+            or _public_server_flag(item)
+        ):
+            continue
+        append_target(
+            server_id=server_id,
+            role=str(item.get("role") or ""),
+            addresses=item.get("internal_addresses") or [],
+            organizations=_managed_organizations(item),
+        )
+    return sorted(targets, key=lambda item: str(item.get("server_id") or ""))
+
+
 def server_network_info(
     *,
     registry: Any,
@@ -237,8 +331,13 @@ def server_network_info(
     public_server: bool,
     request_endpoint: str = "",
     manager_public_endpoint: str = "",
+    managed_organizations: Iterable[str] = (),
 ) -> dict[str, object]:
     """Build the server-provided network information shown by clients."""
+    local_scope = tuple(managed_organizations) or configured_managed_organizations(
+        public_server=public_server,
+        server_role=server_role,
+    )
     configured_endpoint = str(
         manager_public_endpoint
         or federation_config.get("public_endpoint")
@@ -252,16 +351,25 @@ def server_network_info(
     peer_targets = public_manager_targets(
         registry, source_server_id=source_server_id,
     )
-    public_targets = _public_server_targets(
+    online_public_targets = _public_server_targets(
         registry,
         source_server_id=source_server_id,
         public_server=public_server,
         current_endpoint=advertised_endpoint,
+        limit=None,
     )
+    public_targets = online_public_targets[:MAX_PUBLIC_SERVER_TARGETS]
     internal_addresses = _internal_server_addresses(
         registry,
         source_server_id=source_server_id,
         public_server=public_server,
+    )
+    internal_targets = _internal_server_targets(
+        registry,
+        source_server_id=source_server_id,
+        server_role=server_role,
+        public_server=public_server,
+        managed_organizations=local_scope,
     )
     public_addresses = list(dict.fromkeys(
         str(item.get("public_address") or "")
@@ -281,5 +389,12 @@ def server_network_info(
         "public_targets": peer_targets,
         "public_server_targets": public_targets,
         "public_server_addresses": public_addresses,
+        "online_public_server_targets": online_public_targets,
+        "online_public_server_addresses": list(dict.fromkeys(
+            str(item.get("public_address") or "")
+            for item in online_public_targets
+            if str(item.get("public_address") or "")
+        )),
+        "internal_server_targets": internal_targets,
         "source": "manager",
     }

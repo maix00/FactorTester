@@ -30,9 +30,11 @@ class ClientStateService:
         *,
         control_store: object | None = None,
         profile_cache_root: Path | None = None,
+        account_domain_sync: object | None = None,
     ) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
         self.control_store = control_store
+        self.account_domain_sync = account_domain_sync
         self.profile_cache = (
             ProfileProjectionCache(profile_cache_root)
             if profile_cache_root is not None else None
@@ -81,6 +83,39 @@ class ClientStateService:
                     indexed[profile_id] = merged
                 else:
                     indexed[profile_id] = item
+            result = list(indexed.values())
+
+        # The generic local mirror is the recovery path for a Profile created
+        # on another Manager while PostgreSQL was unavailable. Keep the
+        # dedicated control_profiles table below for compatibility with older
+        # deployments and merge the two projections by stable profile_id.
+        if self.account_domain_sync is not None:
+            try:
+                rows = self.account_domain_sync.entities(
+                    principal,
+                    entity_type="profile",
+                    include_shared=False,
+                )
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                rows = []
+            indexed = {
+                str(item.get("profile_id") or ""): item
+                for item in result
+                if str(item.get("profile_id") or "")
+            }
+            for row in rows:
+                payload = row.get("payload") if isinstance(row, dict) else None
+                if not isinstance(payload, dict):
+                    continue
+                profile_id = str(payload.get("profile_id") or row.get("entity_id") or "").strip()
+                if not profile_id:
+                    continue
+                if profile_id in indexed:
+                    merged = dict(payload)
+                    merged.update(indexed[profile_id])
+                    indexed[profile_id] = merged
+                else:
+                    indexed[profile_id] = dict(payload)
             result = list(indexed.values())
 
         # A deployed public Manager does not mount a user's device-local
@@ -157,6 +192,14 @@ class ClientStateService:
 
         if self.profile_cache is not None:
             self.profile_cache.upsert(owner, projected)
+
+        if self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.upsert(
+                    owner, "profile", profile_id, projected,
+                )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                pass
 
         if self.control_store is None:
             return self._profile_sync_receipt(
@@ -445,16 +488,55 @@ class ClientStateService:
             project_account_product_groups,
         )
 
+        if self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_principal(principal)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                pass
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        return project_account_product_groups(
-            groups=load_product_groups(principal),
+        groups = load_product_groups(principal)
+        if self.account_domain_sync is not None:
+            try:
+                remote_groups = self.account_domain_sync.entities(
+                    principal,
+                    entity_type="product_group",
+                    include_shared=False,
+                )
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                remote_groups = []
+            known = {
+                str(item.get("id") or item.get("name") or "")
+                for item in groups
+                if isinstance(item, dict)
+            }
+            for row in remote_groups:
+                payload = row.get("payload") if isinstance(row, dict) else None
+                if not isinstance(payload, dict) or row.get("deleted"):
+                    continue
+                key = str(payload.get("id") or payload.get("name") or "")
+                if key and key not in known:
+                    groups.append(dict(payload))
+                    known.add(key)
+        projected = project_account_product_groups(
+            groups=groups,
             principal=principal,
             profiles=profiles,
             research_records=research,
             product_records=[dict(item) for item in catalog_product_records()],
             origin="server",
         )
+        categories = {
+            str(item.get("id") or ""): item
+            for item in self.product_categories(principal)
+        }
+        for group in projected:
+            group["category_bindings"] = [
+                categories[category_id]
+                for category_id in group.get("category_ids") or []
+                if category_id in categories
+            ]
+        return projected
 
     def product_group(
         self, principal: str, group_ref: str,
@@ -472,20 +554,25 @@ class ClientStateService:
         )
 
     def create_product_group(
-        self, principal: str, name: str, paths: list[str],
+        self,
+        principal: str,
+        name: str,
+        paths: list[str],
+        category_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Create an account product group and return its catalog projection."""
         from server.modules.products.product_group_store import create_product_group
 
-        created = create_product_group(principal, name, paths)
+        created = create_product_group(
+            principal, name, paths, category_ids=category_ids,
+        )
         if created is None:
             return None
         return self.product_group(
             principal, f"product-group:{created['id']}",
         )
 
-    @staticmethod
-    def factor_library(principal: str) -> dict[str, Any]:
+    def factor_library(self, principal: str) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""
         from server.modules.custom_factors.client_library import (
             build_client_library_projection,
@@ -493,54 +580,186 @@ class ClientStateService:
         from server.modules.custom_factors.factor_library_service import (
             build_factor_library_overview,
         )
+        from server.manager.services.account_domain_projection import (
+            factor_rows_from_sync,
+        )
 
+        if self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_principal(principal)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                pass
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
         )
+        if self.account_domain_sync is not None:
+            payload["factors"] = list(payload.get("factors") or []) + factor_rows_from_sync(
+                self.account_domain_sync, principal,
+            )
         return build_client_library_projection(payload, principal=principal)
 
-    @staticmethod
-    def factor_sets(principal: str, query: str = "") -> list[dict[str, Any]]:
+    def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
         """Return explicitly synchronized immutable factor sets."""
         from server.modules.custom_factors.factor_set_registry import (
             factor_set_catalog,
         )
 
-        return factor_set_catalog(principal, query)
+        if self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_principal(principal)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                pass
+        values = factor_set_catalog(principal, query)
+        if self.account_domain_sync is None:
+            return values
+        try:
+            rows = self.account_domain_sync.entities(
+                principal, entity_type="factor_set", include_shared=False,
+            )
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            rows = []
+        known = {str(item.get("target_ref") or "") for item in values}
+        for row in rows:
+            payload = row.get("payload") if isinstance(row, dict) else None
+            if not isinstance(payload, dict) or row.get("deleted"):
+                continue
+            target_ref = str(payload.get("target_ref") or "")
+            if target_ref and target_ref not in known:
+                values.append({
+                    key: payload.get(key)
+                    for key in (
+                        "schema_version", "target_ref", "set_ref", "set_id",
+                        "title_zh", "description_zh", "member_hash",
+                        "member_count", "authority", "owner_username", "updated_at",
+                    )
+                })
+                known.add(target_ref)
+        return values
 
-    @staticmethod
     def factor_set_detail(
+        self,
         principal: str,
         target_ref: str,
         *,
         offset: int = 0,
         limit: int = 100,
     ) -> dict[str, Any] | None:
-        from server.modules.custom_factors.factor_set_registry import (
-            factor_set_detail,
-        )
+        from server.modules.custom_factors.factor_set_registry import factor_set_detail
 
-        return factor_set_detail(
+        value = factor_set_detail(
             principal, target_ref, offset=offset, limit=limit,
         )
+        if value is not None or self.account_domain_sync is None:
+            return value
+        rows = self.account_domain_sync.entities(
+            principal, entity_type="factor_set", include_shared=False,
+        )
+        payload = next(
+            (
+                row.get("payload") for row in rows
+                if isinstance(row, dict)
+                and not row.get("deleted")
+                and str(row.get("entity_id") or "") == str(target_ref)
+                and isinstance(row.get("payload"), dict)
+            ),
+            None,
+        )
+        if not isinstance(payload, dict):
+            return None
+        members = list(payload.get("member_refs") or [])
+        page = members[offset:offset + limit]
+        return {
+            **{key: payload.get(key) for key in (
+                "schema_version", "target_ref", "set_ref", "set_id",
+                "title_zh", "description_zh", "member_hash", "member_count",
+                "authority", "owner_username", "updated_at",
+            )},
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < len(members),
+            "next_offset": offset + len(page),
+            "related_references": [
+                {"relation": "集合成员", "kind": "factor", "target_ref": item,
+                 "label": item}
+                for item in page
+            ],
+        }
 
-    @staticmethod
     def factor_set_descriptor(
+        self,
         principal: str, target_ref: str,
     ) -> dict[str, Any] | None:
         """Return one server-registered immutable Factor Set descriptor."""
-        from server.modules.custom_factors.factor_set_registry import (
-            factor_set_descriptor,
+        from server.modules.custom_factors.factor_set_registry import factor_set_descriptor
+
+        value = factor_set_descriptor(principal, target_ref)
+        if value is not None or self.account_domain_sync is None:
+            return value
+        rows = self.account_domain_sync.entities(
+            principal, entity_type="factor_set", include_shared=False,
         )
+        payload = next(
+            (
+                row.get("payload") for row in rows
+                if isinstance(row, dict)
+                and not row.get("deleted")
+                and str(row.get("entity_id") or "") == str(target_ref)
+                and isinstance(row.get("payload"), dict)
+            ),
+            None,
+        )
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "target_ref": payload.get("target_ref"),
+            "manifest": {
+                "schema_version": 1,
+                "set_id": payload.get("set_id"),
+                "set_ref": payload.get("set_ref"),
+                "title_zh": payload.get("title_zh"),
+                "description_zh": payload.get("description_zh") or "",
+                "member_refs": list(payload.get("member_refs") or []),
+                "member_hash": payload.get("member_hash"),
+            },
+        }
 
-        return factor_set_descriptor(principal, target_ref)
-
-    @staticmethod
-    def product_categories() -> list[dict[str, Any]]:
-        """Return the same explicit category contract used by service ports."""
+    def product_categories(self, principal: str = "") -> list[dict[str, Any]]:
+        """Return source and account-owned product category definitions."""
+        from server.modules.products.product_category_store import (
+            list_product_categories,
+        )
         from server.modules.shared.price_services import available_product_categories
 
-        return available_product_categories()
+        # Keep the old no-principal service contract for callers that only
+        # need the built-in source dimensions.  An authenticated Manager
+        # request gets the source definitions plus that account's categories.
+        if principal and self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_principal(principal)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                pass
+        values = list_product_categories(principal) if principal else available_product_categories()
+        if not principal or self.account_domain_sync is None:
+            return values
+        try:
+            rows = self.account_domain_sync.entities(
+                principal, entity_type="product_category", include_shared=False,
+            )
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            rows = []
+        known = {str(item.get("id") or "") for item in values}
+        for row in rows:
+            payload = row.get("payload") if isinstance(row, dict) else None
+            category_id = str(payload.get("id") or "") if isinstance(payload, dict) else ""
+            if category_id and category_id not in known and not row.get("deleted"):
+                value = dict(payload)
+                value.update({
+                    "owner_ref": f"user:{principal}",
+                    "source_managed": False,
+                })
+                values.append(value)
+                known.add(category_id)
+        return values
 
     @staticmethod
     def product_sources() -> list[dict[str, Any]]:
@@ -610,21 +829,21 @@ class ClientStateService:
     def product_tree(
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render a Manager-owned product tree without a service port."""
-        from server.modules.shared.price_services import (
-            cached_product_tree,
-            cached_product_tree_for_category,
-            normalize_product_category_id,
-        )
+        from server.modules.products.product_category_paths import category_tree
+        from server.modules.shared.price_services import cached_product_tree
         from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import convert_to_fancytree
 
-        tree = cached_product_tree() if not str(category_id or "").strip() else cached_product_tree_for_category(
-            normalize_product_category_id(category_id)
+        tree = (
+            cached_product_tree().tree
+            if not str(category_id or "").strip()
+            else category_tree(str(category_id), principal)
         )
         return convert_to_fancytree(
-            filter_product_tree(tree.tree, source_ids),
+            filter_product_tree(tree, source_ids),
             checkbox_default=False,
         )
 
@@ -633,15 +852,15 @@ class ClientStateService:
         path: str | None = None,
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
+        from server.modules.products.product_category_paths import category_tree
         from server.modules.shared.price_services import (
             available_sources_for_product,
             cached_contracts,
             cached_product_tree,
-            cached_product_tree_for_category,
             contract_has_data,
-            normalize_product_category_id,
         )
         from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import find_node_by_path
@@ -649,10 +868,10 @@ class ClientStateService:
         from tools.products.classifier_paths import classifier_object_path
 
         tree = (
-            cached_product_tree()
+            cached_product_tree().tree
             if not str(category_id or "").strip()
-            else cached_product_tree_for_category(normalize_product_category_id(category_id))
-        ).tree
+            else category_tree(str(category_id), principal)
+        )
         tree = filter_product_tree(tree, source_ids)
         node_path = str(path or "")
         if node_path.endswith("/_products"):

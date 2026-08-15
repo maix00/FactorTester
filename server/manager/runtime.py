@@ -37,6 +37,7 @@ from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
 from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
+from server.manager.http.object_transfer_routes import ObjectTransferRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -77,6 +78,7 @@ from server.manager.domain.devices import (
     DeviceRegistry,
 )
 from server.manager.storage.control_db import control_store_from_env
+from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.control_database_settings import (
     ControlDatabaseSettingsStore,
 )
@@ -339,12 +341,19 @@ class ManagerState(
         self._session_cleanup_at = time.time()
         self._sessions = self._load_sessions()
         self._session_cleanup_at += MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS
+        self.account_domain_sync = AccountDomainSyncService(
+            sqlite_path=self.sessions_db_path,
+            control_store=self.control_store,
+            manager_id=self.server_id,
+        )
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
+            storage_server_id=self.server_id,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,
             profile_cache_root=self.state_root / "profile-cache",
+            account_domain_sync=self.account_domain_sync,
         )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,
@@ -352,6 +361,10 @@ class ManagerState(
             gateway=self.federation_gateway,
             public_research=self.public_research,
             client_state=self.client_state,
+            account_domain_sync=self.account_domain_sync,
+            object_transfer_provider=lambda **kwargs: self.prepare_object_download(
+                **kwargs,
+            ),
         )
         # Keep the route name explicit: public research is a read-through
         # projection, while ``public_research`` remains the local authority
@@ -420,6 +433,7 @@ class Handler(
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
     JobTransferRoutesMixin,
+    ObjectTransferRoutesMixin,
     JobListRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

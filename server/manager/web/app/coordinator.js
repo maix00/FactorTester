@@ -248,7 +248,7 @@
     "ic-test", "backtest", "factor-series", "test-template",
     "factor-families", "factor-sets", "factor-family", "factor",
     "factor-set", "factors", "product-group", "product",
-    "product-reference", "product-sources", "product-groups", "products",
+    "product-reference", "product-sources", "product-groups", "product-categories", "products",
     "profile", "profiles", "manager",
   ]);
 
@@ -359,6 +359,7 @@
         FTProducts.referenceDetail(pageContext, kind, id),
       productSources: pageContext => FTProducts.sourceList(pageContext),
       productGroups: pageContext => FTProducts.list(pageContext, "groups"),
+      productCategories: pageContext => FTProducts.list(pageContext, "categories"),
       products: pageContext => FTProducts.list(pageContext, "products"),
       profile: (pageContext, id) => FTProfiles.detail(pageContext, id),
       profiles: pageContext => FTProfiles.list(pageContext),
