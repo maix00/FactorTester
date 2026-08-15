@@ -64,6 +64,21 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         "options": [],
         "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
         "enabled_payload": None,
+        "value_descriptor": {
+            "value_type": "reference",
+            "cardinality": "one",
+            "editor": "service_port",
+            "format": "",
+            "unit": "",
+            "option_source": "",
+            "resolver": "",
+            "item_type": "",
+            "ref_kind": "service_port",
+            "schema": {},
+            "minimum": None,
+            "maximum": None,
+            "step": None,
+        },
     }
     assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"

@@ -145,6 +145,7 @@ class ApplicationSettings:
                 {"value": option.value, "label": option.label}
                 for option in setting.options
             ],
+            "value_descriptor": setting.value_descriptor.to_dict(),
         }
 
     def register_chip_field(self, chip: ChipDefinition) -> None:
@@ -234,6 +235,20 @@ class ApplicationSettings:
             "defaults": {
                 key: self._default_manifest_value(index, key, setting)
                 for index, (key, setting) in enumerate(self.settings.items(), start=1)
+            },
+            # The three lifecycle projections share this canonical contract.
+            # Keeping it separate from defaults prevents run-only metadata from
+            # entering reusable setting hashes while allowing clients to inspect
+            # the role boundary without reverse engineering control_template.
+            "field_contracts": {
+                "settings": {
+                    key: setting.field_spec().to_dict()
+                    for key, setting in self.settings.items()
+                },
+                "run": {
+                    field.key: field.field_spec().to_dict()
+                    for field in self.run_fields.values()
+                },
             },
             "chip_fields": [
                 chip.to_dict()
