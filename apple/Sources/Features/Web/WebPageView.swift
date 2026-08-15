@@ -47,6 +47,21 @@ final class WebPageSession {
     }
 }
 
+/// The presentation owner for a Manager-backed Web page.
+///
+/// Embedded pages are hosted by a native Swift tab and therefore hide the Web
+/// shell.  Standalone pages own the complete Web shell, including its sidebar
+/// and opened-tab list.  Keeping this distinction explicit prevents a client
+/// from accidentally rendering two navigation systems at once.
+enum WebPresentationMode: Equatable {
+    case embedded
+    case standalone
+
+    var usesEmbeddedShell: Bool {
+        self == .embedded
+    }
+}
+
 /// 「转发到 web 版本换页」的承载控件。
 ///
 /// 尚未做原生实现的模块，直接在 App 内用 WKWebView 加载服务器对应路由，
@@ -57,9 +72,10 @@ final class WebPageSession {
 /// cookie store，避免进 web 页后又要登录一次。
 struct WebPageView: View {
     let path: String
+    var presentation: WebPresentationMode = .embedded
     /// A report reference may lead to a real external URL.  It is kept
     /// separate from `path` so external pages never receive Manager auth
-    /// state or the embedded presentation query.
+    /// state or a Manager presentation query.
     var externalURL: URL? = nil
     var webSession: WebPageSession? = nil
     var onReference: ((ResearchDocumentTypedLink) -> Void)? = nil
@@ -100,7 +116,8 @@ struct WebPageView: View {
                 WebViewRepresentable(
                     url: url,
                     syncServerCookies: externalURL == nil,
-                    enforceEmbeddedPresentation: externalURL == nil,
+                    enforceEmbeddedPresentation: externalURL == nil
+                        && presentation.usesEmbeddedShell,
                     serverOrigin: externalURL == nil
                         ? ManagerConfig.shared.baseURL : nil,
                     sessionToken: externalURL == nil
@@ -109,9 +126,10 @@ struct WebPageView: View {
                         ? ServerConfig.shared.port : "",
                     webSession: activeWebSession,
                     allowsLocalCatalog: externalURL == nil
-                        && ClientLocalCatalogBridgeContract.allowsEmbeddedPage(
-                            path: path
-                        ),
+                        && (presentation == .standalone
+                            || ClientLocalCatalogBridgeContract.allowsEmbeddedPage(
+                                path: path
+                            )),
                     onReference: onReference,
                     onNavigation: onNavigation,
                     onExternalURL: onExternalURL,
@@ -138,6 +156,12 @@ struct WebPageView: View {
         if let externalURL { return externalURL }
         guard let rawURL = ManagerConfig.shared.url(forPath: path) else {
             return nil
+        }
+        if presentation == .standalone {
+            return EmbeddedPresentationURL.standalone(
+                to: rawURL,
+                language: languageStore.selection
+            )
         }
         // The database module is itself a Manager-owned tab.  Load the
         // Manager shell first; it then creates the authenticated sqlite-web
@@ -337,14 +361,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 )
             }
             #endif
-            existing.configuration.userContentController.add(
-                context.coordinator,
-                name: ResearchDocumentWebReferenceMessage.handlerName
-            )
-            existing.configuration.userContentController.add(
-                context.coordinator,
-                name: ResearchDocumentWebNavigationMessage.handlerName
-            )
+            if enforceEmbeddedPresentation {
+                existing.configuration.userContentController.add(
+                    context.coordinator,
+                    name: ResearchDocumentWebReferenceMessage.handlerName
+                )
+                existing.configuration.userContentController.add(
+                    context.coordinator,
+                    name: ResearchDocumentWebNavigationMessage.handlerName
+                )
+            }
             existing.configuration.userContentController.add(
                 context.coordinator,
                 name: ClientWebAuthenticationMessage.handlerName
@@ -367,14 +393,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             )
         }
         #endif
-        configuration.userContentController.add(
-            context.coordinator,
-            name: ResearchDocumentWebReferenceMessage.handlerName
-        )
-        configuration.userContentController.add(
-            context.coordinator,
-            name: ResearchDocumentWebNavigationMessage.handlerName
-        )
+        if enforceEmbeddedPresentation {
+            configuration.userContentController.add(
+                context.coordinator,
+                name: ResearchDocumentWebReferenceMessage.handlerName
+            )
+            configuration.userContentController.add(
+                context.coordinator,
+                name: ResearchDocumentWebNavigationMessage.handlerName
+            )
+        }
         configuration.userContentController.add(
             context.coordinator,
             name: ClientWebAuthenticationMessage.handlerName

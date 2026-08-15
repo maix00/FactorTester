@@ -1,12 +1,15 @@
 # GTHT 原生客户端（macOS + iOS）
 
 一套 SwiftUI 代码同时构建 macOS 与 iOS App，连接你自托管的 GTHT 服务器。
-对应 issue #122「单一实现、多端复用」的原生落地：
+对应 issue #122「单一实现、多端复用」的客户端壳层：
 
-- **首页已原生迁移**（`home.html` → `HomeView`），其余模块自动「转发到 web 版本换页」
-  （App 内 WKWebView 加载服务器对应路由，复用现有 web 前端）。
-- **跨客户端模块注册表**：首页模块来自服务器的 `static/config/modules.json`，
-  web 与原生 home 读同一份。新增模块只改这一处，所有端同步出现。
+- **完整 Web shell**：已配置服务器后，App 用 WKWebView 加载 Manager `/`，主页、
+  功能入口、模块侧栏和打开的标签页全部由 Web 端提供，不再维护一套 Swift 主侧栏。
+- **原生能力层**：Swift 继续负责服务器初始配置、Keychain/设备认证、自签名证书信任、
+  本地 CLI/Adapter、文件选择器与客户端更新。原生更新按钮位于 Web shell 外层 toolbar，
+  不依赖 Web 侧栏是否显示。
+- **跨客户端模块注册表**：Web shell 与原生 fallback 都使用 Manager 的 `/api/modules`；
+  Manager API 暂时不可用时，原生仅使用最小公共回退目录。
 - **用户自填服务器地址**：首次启动进入「配置服务器」，填协议 / 主机 / 端口，
   持久化保存，之后可在右上角菜单「服务器设置」随时修改。
 - **自签名证书**：对已配置的那台主机放行自签名 https（URLSession + WKWebView 双通道），
@@ -29,11 +32,10 @@ apple/
     Navigation/               Module 模型、ModuleRegistry（共享注册表）、页面解析
     DesignSystem/Theme.swift  统一视觉令牌
     Features/
-      Home/                   首页原生迁移
+      Web/                    完整 Manager Web shell 与 WKWebView 桥接
       Auth/                   登录 / 注册、SessionStore
       Settings/               服务器、版本、profile 与 Keychain 设置
       Adapters/               本地 adapter 生命周期与内嵌 Web UI
-      Web/                    WebPageView（转发到 web 的 WKWebView + cookie 桥接）
   Resources/                  Assets（图标 / 强调色）、entitlements
 ```
 
