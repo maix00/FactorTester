@@ -17,9 +17,12 @@ from server.manager.storage.transfers.schema_endpoints import ensure_endpoint_sc
 from server.manager.storage.transfers.schema_nodes import ensure_node_schema
 from server.manager.storage.transfers.schema_requests import ensure_request_schema
 from server.manager.storage.transfers.schema_tickets import ensure_ticket_schema
+from server.manager.storage.transfers.schema_telemetry import (
+    ensure_telemetry_schema,
+)
 
 
-TRANSFER_SCHEMA_VERSION = 8
+TRANSFER_SCHEMA_VERSION = 9
 
 
 def _ensure_current_tables(connection: sqlite3.Connection) -> None:
@@ -28,6 +31,7 @@ def _ensure_current_tables(connection: sqlite3.Connection) -> None:
     ensure_ticket_schema(connection)
     ensure_node_schema(connection)
     ensure_endpoint_schema(connection)
+    ensure_telemetry_schema(connection)
 
 
 def ensure_transfer_schema(connection: sqlite3.Connection) -> None:

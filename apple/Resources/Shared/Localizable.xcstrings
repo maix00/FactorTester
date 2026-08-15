@@ -12908,6 +12908,16 @@
     "放大" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom in"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"放大"}}}},
     "缩小" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom out"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"缩小"}}}},
     "适应窗口" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Fit graph"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适应窗口"}}}},
+    "正在寻找 FactorTester 服务器…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Looking for a FactorTester server…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在寻找 FactorTester 服务器…"}}}},
+    "Manager 地址无效；公网必须使用 HTTPS。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The Manager address is invalid; public endpoints must use HTTPS."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Manager 地址无效；公网必须使用 HTTPS。"}}}},
+    "已连接；请在主页按需登录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Connected; sign in from the home page when needed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已连接；请在主页按需登录"}}}},
+    "服务器返回的附件上传授权无效。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The server returned an invalid attachment upload capability."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器返回的附件上传授权无效。"}}}},
+    "服务器返回的附件下载授权无效。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The server returned an invalid attachment download capability."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器返回的附件下载授权无效。"}}}},
+    "研究附件上传失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment upload failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件上传失败"}}}},
+    "研究附件下载失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment download failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件下载失败"}}}},
+    "研究附件大小校验失败。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment size verification failed."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件大小校验失败。"}}}},
+    "研究附件完整性校验失败。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment integrity verification failed."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件完整性校验失败。"}}}},
+    "附件传输授权失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Attachment transfer authorization failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"附件传输授权失败"}}}},
     "重新布局" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Re-layout"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"重新布局"}}}}
   },
   "version" : "1.0"

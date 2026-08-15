@@ -83,3 +83,8 @@ def test_client_consumer_route_streams_local_origin(tmp_path) -> None:
         with urlopen(request) as response:
             assert response.status == 200
             assert response.read() == raw
+
+    summary = runtime.telemetry.summary(now=time.time(), since=now - 10)
+    assert summary["totals"]["transferred_bytes"] == len(raw)
+    assert summary["dimensions"][0]["surface"] == "client"
+    assert summary["dimensions"][0]["action"] == "download"

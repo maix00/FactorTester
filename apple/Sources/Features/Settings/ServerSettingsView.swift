@@ -6,6 +6,7 @@ struct ServerSettingsView: View {
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
     var isInitialSetup = false
+    var onConfigured: (() -> Void)? = nil
 
     @State private var port = ""
     @State private var managerScheme = "http"
@@ -210,6 +211,10 @@ struct ServerSettingsView: View {
         let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
             ? availablePorts.first.map(String.init) ?? ""
             : port
+        if isInitialSetup {
+            await connectInitialManager(effectivePort: effectivePort)
+            return
+        }
         if !managerTargetIsPrivateNetwork {
             guard let target = managerConfig.baseURL else {
                 testResult = "✗ " + L10n.text("设备认证地址无效。")
@@ -231,7 +236,7 @@ struct ServerSettingsView: View {
                     "已通过原生设备密钥认证：%@",
                     result.username
                 )
-                if isInitialSetup { dismiss() }
+                if isInitialSetup, onConfigured == nil { dismiss() }
             } catch {
                 testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
             }
@@ -246,7 +251,52 @@ struct ServerSettingsView: View {
             )
             _ = try await APIClient.shared.me()
             testResult = "✓ " + L10n.text("已连接")
-            if isInitialSetup { dismiss() }
+            if isInitialSetup, onConfigured == nil { dismiss() }
+        } catch {
+            testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    /// Initial setup only proves that the selected Manager is reachable. A
+    /// public Manager may require a device key for ordinary authenticated
+    /// operations, but that key must not be a prerequisite for opening the
+    /// client and showing its normal login page.
+    @MainActor
+    private func connectInitialManager(effectivePort: String) async {
+        managerConfig.save(
+            scheme: managerScheme,
+            host: managerHost,
+            port: managerPort,
+            serverID: "",
+            source: .manual
+        )
+        guard managerConfig.isValid, let endpoint = managerConfig.baseURL else {
+            testResult = "✗ " + L10n.text("Manager 地址无效；公网必须使用 HTTPS。")
+            return
+        }
+        do {
+            let info = try await ManagerNetworkInfoService.shared.fetch(
+                endpoint: endpoint
+            )
+            managerConfig.save(
+                scheme: managerScheme,
+                host: managerHost,
+                port: managerPort,
+                serverID: info.serverID,
+                source: .manual
+            )
+            config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
+            try? await ManagerCLIClient.shared.configure(
+                scheme: managerScheme,
+                host: managerHost,
+                port: managerPort
+            )
+            originManagerEndpoint = endpoint
+            managerServerID = info.serverID
+            await discoverPorts()
+            testResult = "✓ " + L10n.text("已连接；请在主页按需登录")
+            onConfigured?()
+            if isInitialSetup, onConfigured == nil { dismiss() }
         } catch {
             testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
         }
@@ -289,7 +339,8 @@ struct ServerSettingsView: View {
                 "已自动选择服务器 %@",
                 managerServerID
             )
-            if isInitialSetup { dismiss() }
+            onConfigured?()
+            if isInitialSetup, onConfigured == nil { dismiss() }
         } catch {
             testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
         }

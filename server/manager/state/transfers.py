@@ -12,6 +12,7 @@ from server.manager.storage.transfers import (
     TransferReplicaStore,
     TransferStore,
     TransferTicketStore,
+    TransferTelemetryStore,
 )
 from server.manager.network_endpoints import (
     ServerEndpoints,
@@ -41,6 +42,7 @@ class TransferStateMixin:
         self.transfer_store = TransferStore(**common)
         self.transfer_attempts = TransferAttemptStore(**common)
         self.transfer_tickets = TransferTicketStore(**common)
+        self.transfer_telemetry = TransferTelemetryStore(**common)
         self.transfer_replicas = TransferReplicaStore(**common)
         self.transfer_endpoints = NodeEndpointStore(**common)
         self.node_identities = NodeIdentityRegistry(**common)

@@ -35,6 +35,7 @@ def _write_verified(handler, runtime, context) -> None:
                 f"destination expected {expected_remaining} request bytes, "
                 f"received {remaining}"
             )
+        runtime.set_transfer_expected_bytes(handler, remaining)
         target = runtime.destination_path(context.transfer, context.attempt)
         writer = VerifiedStagingWriter(
             target,
@@ -47,6 +48,7 @@ def _write_verified(handler, runtime, context) -> None:
             if not chunk:
                 raise ValueError("destination request ended before Content-Length")
             writer.write(chunk)
+            runtime.record_transfer_bytes(handler, len(chunk))
             remaining -= len(chunk)
         runtime.lifecycle.verify(context.attempt.attempt_id)
         promoted = writer.finish()

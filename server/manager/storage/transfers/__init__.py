@@ -6,6 +6,7 @@ from server.manager.storage.transfers.node_identities import NodeIdentityRegistr
 from server.manager.storage.transfers.repository import TransferStore
 from server.manager.storage.transfers.replicas import TransferReplicaStore
 from server.manager.storage.transfers.tickets import TransferTicketStore
+from server.manager.storage.transfers.telemetry import TransferTelemetryStore
 
 __all__ = [
     "TransferAttemptStore",
@@ -14,4 +15,5 @@ __all__ = [
     "TransferStore",
     "TransferReplicaStore",
     "TransferTicketStore",
+    "TransferTelemetryStore",
 ]

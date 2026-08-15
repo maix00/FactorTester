@@ -24,7 +24,7 @@ def authorize(
     consume: bool = False,
 ) -> TransferTicketGrant:
     node_id = str(handler.headers.get("X-FactorTester-Node-ID") or "").strip()
-    return runtime.tickets.verify(
+    grant = runtime.tickets.verify(
         bearer_token(handler),
         required_role=role,
         attempt_id=context.attempt.attempt_id,
@@ -33,3 +33,5 @@ def authorize(
         end_offset=context.attempt.expected_size,
         consume=consume,
     )
+    runtime.authorize_transfer_telemetry(handler)
+    return grant

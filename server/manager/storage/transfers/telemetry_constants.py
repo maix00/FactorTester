@@ -1,0 +1,19 @@
+"""Retention and write-throttling policy for local transfer telemetry."""
+
+from __future__ import annotations
+
+
+TELEMETRY_RETENTION_SECONDS = 30 * 24 * 60 * 60
+ACTIVE_STREAM_STALE_SECONDS = 30.0
+MAX_FAILURE_REASON_LENGTH = 1_000
+ACTIVE_UPDATE_BYTES = 1 * 1024 * 1024
+ACTIVE_UPDATE_SECONDS = 0.5
+
+
+__all__ = [
+    "ACTIVE_STREAM_STALE_SECONDS",
+    "ACTIVE_UPDATE_BYTES",
+    "ACTIVE_UPDATE_SECONDS",
+    "MAX_FAILURE_REASON_LENGTH",
+    "TELEMETRY_RETENTION_SECONDS",
+]

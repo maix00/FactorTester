@@ -44,7 +44,13 @@ def serve_direct_push(
                 )
         request = Request(
             endpoint + f"/v1/transfers/{context.attempt.attempt_id}/destination",
-            data=BoundedRequestBody(handler.rfile, length=remaining),
+            data=BoundedRequestBody(
+                handler.rfile,
+                length=remaining,
+                on_read=lambda count: runtime.record_transfer_bytes(
+                    handler, count,
+                ),
+            ),
             headers={
                 "Authorization": f"Bearer {bearer}",
                 "Content-Length": str(remaining),

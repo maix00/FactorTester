@@ -133,8 +133,12 @@
     }
 
     function reportAssetPath(assetRef) {
-      const assetID = assetIDs.get(assetRef) || assetRef;
+      const assetID = assetIDFor(assetRef);
       return `${source.path}/assets/${encodeURIComponent(assetID)}`;
+    }
+
+    function assetIDFor(assetRef) {
+      return assetIDs.get(assetRef) || assetRef;
     }
 
     return Object.freeze({
@@ -145,6 +149,7 @@
       setChapterMetadata,
       localResourcePath,
       reportAssetPath,
+      assetID: assetIDFor,
       get value() { return value; },
       get chapterLazy() { return chapterLazy; },
       get componentLazy() { return componentLazy; },
