@@ -6,6 +6,15 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
+from tools.testers.field_spec import (
+    FieldSpec,
+    RunRole,
+    RuntimeRole,
+    SettingRole,
+    ValueDescriptor,
+    infer_value_descriptor,
+)
+
 
 class SettingScope(str, Enum):
     LOCAL = "local"
@@ -90,6 +99,8 @@ class SettingDefinition:
     adapter_managed: bool = False
     show_chip: bool = True
     execution_policy: str = "include"
+    value_descriptor: ValueDescriptor | None = None
+    runtime_role: RuntimeRole | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
@@ -100,6 +111,36 @@ class SettingDefinition:
             raise ValueError(
                 f"setting execution policy is invalid: {self.execution_policy}"
             )
+        if self.value_descriptor is None:
+            object.__setattr__(
+                self,
+                "value_descriptor",
+                infer_value_descriptor(
+                    self.control_template,
+                    self.default,
+                    field_key=self.key,
+                    options=tuple(option.value for option in self.options),
+                    serialization=self.serialization,
+                    minimum=self.minimum,
+                    maximum=self.maximum,
+                    step=self.step,
+                    instance_class=self.instance_class,
+                ),
+            )
+
+    def field_spec(self) -> FieldSpec:
+        """Return the lifecycle-neutral contract for this reusable setting."""
+        assert self.value_descriptor is not None
+        roles = {"setting"}
+        if self.runtime_role is not None:
+            roles.add("runtime")
+        return FieldSpec(
+            key=self.key,
+            value=self.value_descriptor,
+            roles=frozenset(roles),
+            setting=SettingRole(scope_policy=self.scope_policy.value),
+            runtime=self.runtime_role,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -122,6 +163,7 @@ class SettingDefinition:
         # instance_class 是 Python 类，不能进 JSON manifest；只暴露"是否有实例信息"。
         value.pop("instance_class", None)
         value["has_instance"] = self.instance_class is not None
+        value["value_descriptor"] = self.value_descriptor.to_dict()
         return value
 
 
@@ -251,6 +293,7 @@ class RunFieldDefinition:
         "run_options",
     )
     _TEMPLATE_POLICIES = ("exclude", "include")
+    value_descriptor: ValueDescriptor | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.control_template:
@@ -263,12 +306,39 @@ class RunFieldDefinition:
             raise ValueError(f"run field placement is invalid: {self.placement}")
         if self.template_policy not in self._TEMPLATE_POLICIES:
             raise ValueError(f"run field template policy is invalid: {self.template_policy}")
+        if self.value_descriptor is None:
+            object.__setattr__(
+                self,
+                "value_descriptor",
+                infer_value_descriptor(
+                    self.control_template,
+                    self.default,
+                    field_key=self.key,
+                    options=tuple(option.value for option in self.options),
+                ),
+            )
+
+    def field_spec(self) -> FieldSpec:
+        """Return the lifecycle-neutral contract for this per-run field."""
+        assert self.value_descriptor is not None
+        return FieldSpec(
+            key=self.key,
+            value=self.value_descriptor,
+            roles=frozenset({"run"}),
+            run=RunRole(
+                request_location=self.request_location,
+                freeze_target=self.freeze_target,
+                placement=self.placement,
+                template_policy=self.template_policy,
+            ),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         for key in ("_REQUEST_LOCATIONS", "_PLACEMENTS", "_TEMPLATE_POLICIES"):
             value.pop(key, None)
         value["options"] = [asdict(option) for option in self.options]
+        value["value_descriptor"] = self.value_descriptor.to_dict()
         return value
 
 

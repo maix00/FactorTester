@@ -52,11 +52,15 @@
   }
 
   function inputFor(key, field, manifest, values, context, options, disabled) {
-    if (!supportedControlSet.has(field.control_template)) {
+    const descriptor = field.value_descriptor || null;
+    // New manifests identify the value contract independently from the legacy
+    // control template.  Keep the template check only for old manifests and
+    // domain adapters that still need a named renderer.
+    if (!supportedControlSet.has(field.control_template) && !descriptor) {
       throw new Error(`未实现的测试设置控件: ${field.control_template}`);
     }
-    const descriptor = window.FTStaticLoader?.controlDescriptor?.(field.control_template);
-    if (descriptor?.group && descriptor.global && !window[descriptor.global]) {
+    const loaderDescriptor = window.FTStaticLoader?.controlDescriptor?.(field.control_template);
+    if (loaderDescriptor?.group && loaderDescriptor.global && !window[loaderDescriptor.global]) {
       options.ensureControl?.(field);
       const deferred = document.createElement("span");
       deferred.className = "test-control-deferred";
@@ -95,7 +99,7 @@
       });
     }
     let control;
-    if (field.control_template === "boolean") {
+    if (descriptor?.value_type === "boolean" || field.control_template === "boolean") {
       control = document.createElement("input");
       control.type = "checkbox";
       control.checked = Boolean(value);
@@ -105,7 +109,8 @@
       });
       return control;
     }
-    if (field.control_template === "select" && field.options?.length) {
+    if ((descriptor?.value_type === "enum" || field.control_template === "select")
+      && field.options?.length) {
       control = document.createElement("select");
       const disabledValues = FTSettingRules.disabledValues(field, values);
       for (const option of field.options) {
@@ -116,7 +121,12 @@
         control.append(item);
       }
       control.value = String(value ?? "");
-    } else if (field.control_template === "custom") {
+    } else if (
+      descriptor?.editor === "json"
+      || descriptor?.value_type === "object"
+      || descriptor?.value_type === "array"
+      || field.control_template === "custom"
+    ) {
       control = document.createElement("textarea");
       control.className = "json-code json-editor";
       control.rows = 3;
@@ -135,12 +145,19 @@
       return control;
     } else {
       control = document.createElement("input");
-      control.type = ["date", "time", "number"].includes(field.control_template)
-        ? field.control_template : "text";
+      const valueType = descriptor?.value_type || field.control_template;
+      control.type = ["date", "time", "number"].includes(valueType)
+        ? valueType : (valueType === "integer" ? "number" : "text");
       control.value = value ?? "";
-      if (field.minimum != null) control.min = field.minimum;
-      if (field.maximum != null) control.max = field.maximum;
-      if (field.step != null) control.step = field.step;
+      if (descriptor?.minimum != null || field.minimum != null) {
+        control.min = descriptor?.minimum ?? field.minimum;
+      }
+      if (descriptor?.maximum != null || field.maximum != null) {
+        control.max = descriptor?.maximum ?? field.maximum;
+      }
+      if (descriptor?.step != null || field.step != null) {
+        control.step = descriptor?.step ?? field.step;
+      }
     }
     control.disabled = disabled;
     control.addEventListener("change", () => {

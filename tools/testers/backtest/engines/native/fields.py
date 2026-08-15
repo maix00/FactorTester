@@ -19,6 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
+from tools.testers.field_spec import (
+    FieldSpec,
+    RuntimeRole,
+    ValueDescriptor,
+    infer_value_descriptor,
+)
+
 if TYPE_CHECKING:
     from tools.testers.registry import Module
 
@@ -95,6 +102,37 @@ class FieldDefinition:
     options: tuple[tuple[str, str], ...] = ()  # (value, label) pairs for select controls
     display_offset: int = 0  # presentation-only numeric offset declared by the field owner
     display_value_kind: str | None = None  # Field-value display renderer hint owned by the field definition
+    value_descriptor: ValueDescriptor | None = None
+
+    def descriptor_for(self, key: str) -> ValueDescriptor:
+        """Resolve the shared value contract with the field's registry key.
+
+        Native fields do not carry their dictionary key in the declaration, so
+        dynamic catalog fields are resolved when the application registry
+        projects them into a reusable setting.
+        """
+        if self.value_descriptor is not None:
+            return self.value_descriptor
+        return infer_value_descriptor(
+            self.control_template,
+            self.default,
+            field_key=key,
+            options=tuple(value for value, _ in self.options),
+            serialization=self.serialization or {},
+            minimum=self.minimum,
+            maximum=self.maximum,
+            step=self.step,
+            instance_class=self.instance_class,
+        )
+
+    def field_spec(self, key: str, *, owner: str = "") -> FieldSpec:
+        """Return the runtime-role projection for this engine field."""
+        return FieldSpec(
+            key=key,
+            value=self.descriptor_for(key),
+            roles=frozenset({"runtime"}),
+            runtime=RuntimeRole(owner=owner),
+        )
 
 
 class ExecutableModule:
