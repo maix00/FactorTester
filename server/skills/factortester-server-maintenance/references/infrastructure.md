@@ -70,6 +70,14 @@ Job, data source, artifact, submission, or execution capability selects the
 peer. Do not create one listener or one permanent request channel for every
 known server.
 
+When `management_access` declares `kind=wireguard`, it discloses an already
+authorized server-to-server transport capability to the operator workflow. It
+does not disclose private keys or authorize peer changes. The operator must
+use the deployment's signed public inventory and verify the WireGuard
+handshake, the FactorTester 7998 control plane, and the 7997 data plane as
+separate checks. The Manager CLI and this Skill must not manufacture peers,
+routes, endpoints, or tunnel configuration from a generic WireGuard label.
+
 ## Host and container lifecycle
 
 Use only the operator tool selected from the target server's

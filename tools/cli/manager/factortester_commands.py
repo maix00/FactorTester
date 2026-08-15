@@ -86,6 +86,39 @@ def list_job_ports(as_json: bool) -> None:
         click.echo("\n".join(str(port) for port in value.get("ports") or ()))
 
 
+@jobs.command("show")
+@click.argument("job_id")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def show_job(job_id: str, as_json: bool) -> None:
+    """Read one Job's backend projection."""
+    client, _ = _authenticated_client()
+    _echo(client.job(job_id), as_json)
+
+
+def _job_action(name: str, help_text: str):
+    @jobs.command(name, help=help_text)
+    @click.argument("job_id")
+    @click.option("--yes", is_flag=True, help="Confirm the state-changing action.")
+    @click.option("--json", "as_json", is_flag=True)
+    @friendly_errors
+    def command(job_id: str, yes: bool, as_json: bool) -> None:
+        if not yes:
+            raise click.ClickException(
+                f"{name} 会改变 Job 状态；请显式提供 --yes"
+            )
+        client, _ = _authenticated_client()
+        _echo(client.job_action(job_id, name), as_json)
+
+    return command
+
+
+_job_action("cancel", "Cancel one submitted or running Job.")
+_job_action("retry", "Retry one failed Job.")
+_job_action("continue", "Continue one paused Job.")
+_job_action("approve", "Approve one pending Job.")
+
+
 @manager.group("artifacts")
 def artifacts() -> None:
     """Inspect and download retained Job artifacts through the 7997 data plane."""
@@ -131,6 +164,21 @@ def download_artifact(
     client, _ = _authenticated_client()
     value = client.artifact_download_to_path(job_id, name, destination)
     _echo(value, as_json)
+
+
+@artifacts.command("delete")
+@click.argument("job_id")
+@click.option("--yes", is_flag=True, help="Confirm deletion of retained Job artifacts.")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def delete_artifacts(job_id: str, yes: bool, as_json: bool) -> None:
+    """Delete retained artifacts for one Job after explicit confirmation."""
+    if not yes:
+        raise click.ClickException(
+            "删除 Job 生成物和提交物不可逆；请显式提供 --yes"
+        )
+    client, _ = _authenticated_client()
+    _echo(client.delete_job_artifacts(job_id), as_json)
 
 
 @manager.group("storage")
@@ -240,6 +288,9 @@ _service_action("force-stop", "Force-stop one FactorTester service.")
 
 def register_factor_tester_commands() -> None:
     """Import-time Click registration seam for the Manager entrypoint."""
+    # Keep server/application operations in a separate semantic module while
+    # registering them on the same independent Manager command tree.
+    from tools.cli.manager import operations_commands  # noqa: F401
 
 
 __all__ = ["register_factor_tester_commands"]

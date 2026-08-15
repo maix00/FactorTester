@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import click
 
 from tools.cli.core.errors import friendly_errors
+from tools.cli.manager.access import select_access_methods
 from tools.cli.manager.client import ManagerClient
 from tools.cli.manager.config import (
     ManagerConfig,
@@ -133,18 +135,114 @@ def inspect_server(as_json: bool) -> None:
     _echo(client.identity(), as_json)
 
 
-@server_info.command("access")
+@server_info.group("access", invoke_without_command=True)
 @click.option("--json", "as_json", is_flag=True)
+@click.pass_context
 @friendly_errors
-def inspect_server_access(as_json: bool) -> None:
-    """Display only the server's non-secret connection declarations."""
+def inspect_server_access(ctx: click.Context, as_json: bool) -> None:
+    """Display the server's non-secret connection declarations."""
+    if ctx.invoked_subcommand is not None:
+        return
     client, _ = _authenticated_client()
     value = client.identity()
     payload = {
         "server": value.get("server") or {},
+        "factor_tester": value.get("factor_tester") or {},
         "management_access": value.get("management_access") or [],
     }
     if as_json:
         _echo(payload, True)
         return
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@inspect_server_access.command("check")
+@click.option("--method", "method_id", default="")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def check_server_access(method_id: str, as_json: bool) -> None:
+    """Check declared local credential readiness without reading secrets."""
+    client, _ = _authenticated_client()
+    value = client.identity()
+    methods = select_access_methods(
+        value.get("management_access") or (),
+        method_id=method_id,
+    )
+    payload = {
+        "server": value.get("server") or {},
+        "factor_tester": value.get("factor_tester") or {},
+        "methods": methods,
+    }
+    if as_json:
+        _echo(payload, True)
+        return
+    for item in methods:
+        credential = item.get("credential") or {}
+        click.echo(
+            f"{item.get('method_id') or '-'} "
+            f"ready={'yes' if item.get('ready') else 'no'} "
+            f"credential={credential.get('state') or 'unknown'} "
+            f"{credential.get('message') or ''}".rstrip()
+        )
+
+
+@inspect_server_access.group("script")
+def server_access_script() -> None:
+    """Download a server-declared connection script without executing it."""
+
+
+@server_access_script.command("download")
+@click.option("--method", "method_id", required=True)
+@click.option(
+    "--output",
+    "destination",
+    type=click.Path(path_type=Path),
+    required=True,
+)
+@click.option("--force", is_flag=True)
+@click.option(
+    "--skip-credential-check",
+    is_flag=True,
+    help="Download after an explicit override when local credential detection is unavailable.",
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def download_server_access_script(
+    method_id: str,
+    destination: Path,
+    force: bool,
+    skip_credential_check: bool,
+    as_json: bool,
+) -> None:
+    """Download and digest-check one declared script; never execute it."""
+    client, _ = _authenticated_client()
+    value = client.identity()
+    methods = value.get("management_access") or ()
+    selected = [
+        item for item in methods
+        if isinstance(item, dict) and str(item.get("id") or "") == method_id
+    ]
+    if len(selected) != 1:
+        raise click.ClickException(f"服务器没有声明连接方式: {method_id}")
+    method = selected[0]
+    script = method.get("script")
+    if not isinstance(script, dict):
+        raise click.ClickException(f"连接方式 {method_id} 没有可下载脚本")
+    status = select_access_methods((method,))[0]
+    if not skip_credential_check and not status.get("ready"):
+        credential = status.get("credential") or {}
+        auth = method.get("auth")
+        hint = str(auth.get("setup_hint") or "").strip() if isinstance(auth, dict) else ""
+        message = str(credential.get("message") or "本机凭证未就绪")
+        if hint:
+            message += f"；下一步：{hint}"
+        raise click.ClickException(
+            f"{message}。如确认凭证由外部工具管理，请使用 --skip-credential-check"
+        )
+    result = client.download_access_script_to_path(
+        method_id,
+        destination,
+        expected_sha256=str(script.get("sha256") or ""),
+        force=force,
+    )
+    _echo({**result, "executed": False}, as_json)

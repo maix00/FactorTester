@@ -44,15 +44,25 @@ capabilities. It must never contain a secret, private key, password, bearer,
 or executable command. If `management_access` is empty or stale, stop and
 request an updated declaration; do not guess a fallback transport.
 
+If a declaration has `kind=wireguard`, treat it only as an authenticated
+server-to-server transport capability. Peer discovery, key distribution,
+AllowedIPs, tunnel lifecycle, and health verification remain deployment-owned;
+do not infer or edit them from the Manager response. A WireGuard handshake is
+not proof that the FactorTester control or data plane is healthy.
+
 The CLI itself only manages the FactorTester application:
 
 - `jobs`: list local or cross-server Jobs;
 - `artifacts`: list and download Job artifacts through the server-issued data
   capability;
 - `storage`: inspect Job/artifact usage;
+- `transfers`: inspect bounded 7997 transfer telemetry;
+- `devices`: inspect or revoke public access devices;
 - `research-graph`: inspect or activate a graph version;
 - `services`: control FactorTester service instances owned by this Manager;
-- `server inspect/access`: read-only server identity/access metadata.
+- `server inspect/access`: read-only server identity/access metadata;
+- `server health/network/federation/database`: inspect application runtime and
+  redacted federation/database status.
 
 Host restart, container lifecycle, tunnel changes, repository transfer, and
 release transport are not Manager CLI commands. Select an explicitly

@@ -27,15 +27,24 @@ factortester-manager server access --json
 
 Use the returned `server`, `factor_tester`, and `management_access`
 objects as the only target-specific source. A declaration may contain an
-opaque method kind, label/profile, endpoint, port, and bounded capabilities.
-It must not contain a password, token, private key, or executable command. If
-the declaration is empty, missing, or stale, stop and request an update.
+opaque method kind, label/profile, endpoint, port, and bounded capabilities. It
+may also identify a local credential source and an owner-only, digest-checked
+connection script; it must not contain a password, token, private key, or
+executable command. The Manager CLI may check only whether the declared local
+credential appears to exist and may download the script without executing it.
+If the declaration is empty, missing, or stale, stop and request an update.
+
+`kind=wireguard` is only an authenticated server-to-server transport
+capability. Peer discovery, key distribution, routes, tunnel lifecycle, and
+handshake verification remain deployment-owned and are not inferred by the
+Manager CLI or this contract.
 
 The Manager CLI is intentionally limited to FactorTester application actions:
-`jobs`, `artifacts`, `storage`, `research-graph`, and Manager-owned
-`services`. It does not expose host restart, container lifecycle, tunnel
-changes, source transfer, or deployment commands. Those actions use a
-separately authorized operator tool selected from the server declaration.
+`jobs`, `artifacts`, `storage`, `transfers`, `devices`, `research-graph`,
+server health/federation status, and Manager-owned `services`. It does not
+expose host restart, container lifecycle, tunnel changes, source transfer, or
+deployment commands. Those actions use a separately authorized operator tool
+selected from the server declaration.
 
 ## Runtime maintenance
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urljoin
@@ -51,7 +54,143 @@ class ManagerClient:
 
     def identity(self) -> dict[str, Any]:
         """Read server-owned identity and management access metadata."""
-        return self._request("GET", "/api/manager/identity")
+        return self._manager_contract_request("GET", "/api/manager/identity")
+
+    def health(self) -> dict[str, Any]:
+        """Read the safe Manager, data-plane, database, and federation checks."""
+        return self._manager_contract_request("GET", "/api/manager/health")
+
+    def _manager_contract_request(
+        self,
+        method: str,
+        path: str,
+    ) -> dict[str, Any]:
+        """Give an actionable error when a target is on the old Manager API."""
+        try:
+            return self._request(method, path)
+        except HttpClientError as exc:
+            if exc.status == 404:
+                raise RuntimeError(
+                    "目标 Manager 未提供服务器访问契约；请先发布包含 "
+                    "Manager server identity/access API 的版本"
+                ) from None
+            raise
+
+    def federation_servers(self) -> dict[str, Any]:
+        return self._request("GET", "/api/federation/servers")
+
+    def federation_config(self) -> dict[str, Any]:
+        return self._request("GET", "/api/federation/config")
+
+    def transfer_metrics(
+        self,
+        *,
+        window_seconds: int = 24 * 60 * 60,
+        object_kind: str = "",
+        operation: str = "",
+    ) -> dict[str, Any]:
+        query: dict[str, Any] = {"window_seconds": window_seconds}
+        if object_kind:
+            query["object_kind"] = object_kind
+        if operation:
+            query["operation"] = operation
+        return self._request("GET", "/api/transfers/metrics", query=query)
+
+    def control_database_status(self) -> dict[str, Any]:
+        return self._request("GET", "/api/control-database/config")
+
+    def network_info(self) -> dict[str, Any]:
+        return self._request("GET", "/api/server/network-info")
+
+    def devices(self) -> dict[str, Any]:
+        return self._request("GET", "/api/devices")
+
+    def device_summary(self) -> dict[str, Any]:
+        return self._request("GET", "/api/device/summary")
+
+    def revoke_device(self, device_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/devices/revoke",
+            payload={"device_id": str(device_id or "").strip()},
+        )
+
+    def download_access_script_to_path(
+        self,
+        method_id: str,
+        destination: str | Path,
+        *,
+        expected_sha256: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Download a declared script without executing or exposing secrets."""
+        target = Path(destination).expanduser()
+        if target.exists() and not force:
+            raise FileExistsError(
+                f"refusing to overwrite existing connection script: {target}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        url = urljoin(
+            f"{self.config.base_url}/",
+            "api/manager/access/"
+            f"{quote(str(method_id), safe='')}/script",
+        )
+        request = Request(
+            url,
+            headers={
+                "Accept": "text/x-shellscript, text/plain, application/octet-stream",
+                "Authorization": f"Bearer {self.token}",
+            },
+            method="GET",
+        )
+        expected = str(expected_sha256 or "").strip().lower()
+        if len(expected) != 64 or any(
+            character not in "0123456789abcdef" for character in expected
+        ):
+            raise ValueError("declared connection script digest is invalid")
+        temporary_name = ""
+        installed = False
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=f".{target.name}.",
+                    suffix=".download",
+                    dir=str(target.parent),
+                )
+                try:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        while chunk := response.read(64 * 1024):
+                            size += len(chunk)
+                            if size > 4 * 1024 * 1024:
+                                raise ValueError("connection script is too large")
+                            hasher.update(chunk)
+                            stream.write(chunk)
+                except BaseException:
+                    Path(temporary_name).unlink(missing_ok=True)
+                    temporary_name = ""
+                    raise
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise HttpClientError(exc.code, url, raw) from exc
+        try:
+            digest = hasher.hexdigest()
+            if digest != expected:
+                raise ValueError("downloaded connection script digest mismatch")
+            os.chmod(temporary_name, 0o700)
+            os.replace(temporary_name, target)
+            installed = True
+        finally:
+            if temporary_name and not installed:
+                Path(temporary_name).unlink(missing_ok=True)
+        return {
+            "method_id": str(method_id),
+            "path": str(target),
+            "size_bytes": size,
+            "sha256": digest,
+            "executed": False,
+        }
 
     def sync_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
         """Write one authenticated, source-free Profile projection."""
@@ -84,12 +223,31 @@ class ManagerClient:
             query["source_scope"] = source_scope
         return self._request("GET", "/api/jobs", query=query)
 
+    def job(self, job_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/api/jobs/{quote(str(job_id), safe='')}"
+        )
+
+    def job_action(self, job_id: str, action: str) -> dict[str, Any]:
+        if action not in {"cancel", "retry", "continue", "approve"}:
+            raise ValueError("unsupported Job action")
+        return self._request(
+            "POST",
+            f"/api/jobs/{quote(str(job_id), safe='')}/{action}",
+            payload={},
+        )
+
     def job_ports(self) -> dict[str, Any]:
         return self._request("GET", "/api/jobs/ports")
 
     def job_artifacts(self, job_id: str) -> dict[str, Any]:
         return self._request(
             "GET", f"/api/jobs/{quote(str(job_id), safe='')}/artifacts"
+        )
+
+    def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
+        return self._request(
+            "DELETE", f"/api/jobs/{quote(str(job_id), safe='')}/artifacts"
         )
 
     def job_storage(self) -> dict[str, Any]:

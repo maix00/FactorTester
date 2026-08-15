@@ -9,6 +9,7 @@ or executable commands into an API response.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -27,6 +28,25 @@ _ALLOWED_KEYS = frozenset({
     "port",
     "capabilities",
     "notes",
+    "auth",
+    "script",
+})
+_AUTH_ALLOWED_KEYS = frozenset({
+    "provider",
+    "source",
+    "profile",
+    "service",
+    "account",
+    "environment",
+    "setup_hint",
+    "required",
+})
+_SCRIPT_ALLOWED_KEYS = frozenset({
+    "id",
+    "filename",
+    "content_type",
+    "sha256",
+    "requires_auth",
 })
 _SECRET_KEY_MARKERS = (
     "password",
@@ -36,8 +56,11 @@ _SECRET_KEY_MARKERS = (
     "private-key",
     "credential",
     "command",
-    "script",
 )
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SAFE_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+_ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 def configured_management_access(repo: Path) -> tuple[dict[str, Any], ...]:
@@ -142,7 +165,116 @@ def _normalize_method(value: object, *, index: int) -> dict[str, Any]:
             _text(item, field="capabilities", index=index, required=True)
             for item in capabilities
         ]
+    if "auth" in value and value.get("auth") is not None:
+        result["auth"] = _normalize_auth(value.get("auth"), index=index)
+    if "script" in value and value.get("script") is not None:
+        result["script"] = _normalize_script(value.get("script"), index=index)
     return result
+
+
+def _normalize_auth(value: object, *, index: int) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f".settings management_access[{index}].auth must be an object")
+    unexpected = set(value) - _AUTH_ALLOWED_KEYS
+    if unexpected:
+        raise ValueError(
+            f".settings management_access[{index}].auth contains unsupported fields: "
+            + ", ".join(sorted(str(key) for key in unexpected))
+        )
+    result: dict[str, Any] = {}
+    for field in ("provider", "source", "profile", "service", "account", "setup_hint"):
+        selected = _text(
+            value.get(field),
+            field=f"auth.{field}",
+            index=index,
+        )
+        if selected:
+            result[field] = selected
+    if "required" in value:
+        required = value.get("required")
+        if not isinstance(required, bool):
+            raise ValueError(
+                f".settings management_access[{index}].auth.required must be boolean"
+            )
+        result["required"] = required
+    if "environment" in value:
+        names = value.get("environment")
+        if not isinstance(names, list):
+            raise ValueError(
+                f".settings management_access[{index}].auth.environment must be a list"
+            )
+        normalized = []
+        for name in names:
+            selected = _text(
+                name,
+                field="auth.environment",
+                index=index,
+                required=True,
+            )
+            if not _ENVIRONMENT_NAME.fullmatch(selected):
+                raise ValueError(
+                    f".settings management_access[{index}].auth.environment contains "
+                    "an invalid variable name"
+                )
+            normalized.append(selected)
+        result["environment"] = normalized
+    return result
+
+
+def _normalize_script(value: object, *, index: int) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            f".settings management_access[{index}].script must be an object"
+        )
+    unexpected = set(value) - _SCRIPT_ALLOWED_KEYS
+    if unexpected:
+        raise ValueError(
+            f".settings management_access[{index}].script contains unsupported fields: "
+            + ", ".join(sorted(str(key) for key in unexpected))
+        )
+    script_id = _text(
+        value.get("id"), field="script.id", index=index, required=True,
+    )
+    filename = _text(
+        value.get("filename"), field="script.filename", index=index, required=True,
+    )
+    if not _SAFE_ID.fullmatch(script_id):
+        raise ValueError(
+            f".settings management_access[{index}].script.id is invalid"
+        )
+    if not _SAFE_FILENAME.fullmatch(filename):
+        raise ValueError(
+            f".settings management_access[{index}].script.filename is invalid"
+        )
+    digest = _text(
+        value.get("sha256"), field="script.sha256", index=index, required=True,
+    ).lower()
+    if not _SHA256.fullmatch(digest):
+        raise ValueError(
+            f".settings management_access[{index}].script.sha256 is invalid"
+        )
+    content_type = _text(
+        value.get("content_type") or "text/x-shellscript",
+        field="script.content_type",
+        index=index,
+        required=True,
+    )
+    if "\n" in content_type or "\r" in content_type:
+        raise ValueError(
+            f".settings management_access[{index}].script.content_type is invalid"
+        )
+    requires_auth = value.get("requires_auth", True)
+    if not isinstance(requires_auth, bool):
+        raise ValueError(
+            f".settings management_access[{index}].script.requires_auth must be boolean"
+        )
+    return {
+        "id": script_id,
+        "filename": filename,
+        "content_type": content_type,
+        "sha256": digest,
+        "requires_auth": requires_auth,
+    }
 
 
 def _text(
@@ -161,6 +293,10 @@ def _text(
         raise ValueError(
             f".settings management_access[{index}].{field} is required"
         )
+    if "\n" in result or "\r" in result:
+        raise ValueError(
+            f".settings management_access[{index}].{field} cannot contain newlines"
+        )
     if field == "endpoint" and result:
         try:
             parsed = urlsplit(result)
@@ -175,4 +311,16 @@ def _text(
     return result
 
 
-__all__ = ["configured_management_access"]
+def management_access_script_path(repo: Path, script_id: str) -> Path:
+    """Resolve a declared script ID inside the server-owned asset directory."""
+    selected = str(script_id or "").strip()
+    if not _SAFE_ID.fullmatch(selected):
+        raise ValueError("management access script id is invalid")
+    root = (Path(repo).expanduser().resolve() / "server" / "access-scripts").resolve()
+    path = (root / selected).resolve()
+    if path.parent != root:
+        raise ValueError("management access script escapes its asset directory")
+    return path
+
+
+__all__ = ["configured_management_access", "management_access_script_path"]

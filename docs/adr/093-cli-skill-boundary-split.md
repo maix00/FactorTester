@@ -16,11 +16,15 @@
 1. `factortester` 是研究/客户端入口，只注册研究、因子/产品目录、Profile、
    报告、Evidence、Job、Run 和本地客户端运行时命令。
 2. `factortester-manager` 是独立的 FactorTester application/operator 入口，
-   提供 `configure`、`login`、`status`、`server inspect/access`、`jobs`、
-   `artifacts`、`storage`、`research-graph` 和 Manager-owned `services`。
+   提供 `configure`、`login`、`status`、`server inspect/access`、`server
+   health/network/federation/database`、`jobs`、`artifacts`、`storage`、
+   `transfers`、`devices`、`research-graph` 和 Manager-owned `services`。
    它不提供 host restart、Docker、WireGuard、SSH、发布传输或其他服务器
    管理命令；服务器可以通过自身 `.settings` 声明只读的
-   `management_access` 元数据，CLI 负责展示，不负责执行或推断。
+   `management_access` 元数据，CLI 负责展示、检查本机凭证是否存在、并
+   下载服务器声明且经过摘要校验的连接脚本，但不负责执行或推断。脚本
+   仍不包含凭证；`kind=wireguard` 只表示服务器间通信能力，不授予 CLI
+   管理 peer、密钥、路由或隧道生命周期的权限。
 3. `client activate-bundle` 保留为客户端入口中的隐藏命令，因为 Swift 首次
    启动需要用它激活内置运行时；它不出现在普通帮助中，也不授予服务器权限。
 4. 两个入口共用同一个发布 wheel 和同一个冻结 Python runtime，但使用两个
