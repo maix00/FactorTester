@@ -244,6 +244,7 @@
             fallbackTabs: [item.tab.key],
             groupBy: "tab",
             sources: {},
+            inline: true,
           });
           defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
           body.append(defaults);
