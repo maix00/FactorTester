@@ -186,9 +186,10 @@ def restart_fleet(
     Read the private ``factortester-server-maintenance`` Skill before using
     this command.
 
-    This is the same transaction used by ``client release``.  It deliberately
-    requires an explicit source worktree and ``--yes`` so a maintenance agent
-    cannot accidentally restart a different checkout or an active fleet.
+    This is a server-maintenance transaction, separate from ``client release``.
+    It deliberately requires an explicit source worktree and ``--yes`` so a
+    maintenance agent cannot accidentally restart a different checkout or an
+    active fleet.
     """
     if not yes:
         raise click.UsageError("整组重启会短暂停止所有运行服务，请显式追加 --yes")

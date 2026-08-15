@@ -8,6 +8,9 @@ struct ManagerNetworkInfo: Decodable, Equatable {
     let publicServer: Bool?
     let advertisedPublicEndpoint: String
     let currentPublicTarget: ManagerPublicTarget?
+    /// Server order is authoritative: the first online public target is the
+    /// target selected by the client when the Manager is only a bootstrap.
+    let publicServerTargets: [ManagerPublicTarget]?
 
     enum CodingKeys: String, CodingKey {
         case role
@@ -17,6 +20,7 @@ struct ManagerNetworkInfo: Decodable, Equatable {
         case publicServer = "public_server"
         case advertisedPublicEndpoint = "advertised_public_endpoint"
         case currentPublicTarget = "current_public_target"
+        case publicServerTargets = "public_server_targets"
     }
 
     var internalEndpointSummary: String {
@@ -33,6 +37,10 @@ struct ManagerNetworkInfo: Decodable, Equatable {
             return ""
         }
         return "\(advertisedPublicEndpoint) (\(serverID))"
+    }
+
+    var nearestPublicTarget: ManagerPublicTarget? {
+        publicServerTargets?.first ?? currentPublicTarget
     }
 }
 

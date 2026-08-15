@@ -6,7 +6,7 @@
 
 ## 背景
 
-FTClient 同时维护 Swift `NavigationSplitView`/`ClientSidebar` 和 Manager Web
+FTClient 曾同时维护 Swift `NavigationSplitView`/`ClientSidebar` 和 Manager Web
 shell。Swift 页面加载 Web 路由时还使用 `presentation=embedded` 隐藏 Web 侧栏，
 造成两套主页、模块目录、标签页和刷新行为。客户端更新按钮原本位于 Swift 侧栏，
 移除原生导航后也必须保留。

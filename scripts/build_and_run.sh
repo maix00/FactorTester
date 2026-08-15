@@ -16,6 +16,10 @@ INSTALLED_APP="/Applications/$APP_NAME.app"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
+# This script owns only the FTClient process.  FactorTester Manager, Docker
+# Compose, WireGuard, and test-service ports are server deployment concerns;
+# building or launching the client must never restart them.
+
 STAGING_PATH=""
 cleanup_staging() {
   if test -n "${STAGING_PATH:-}"; then

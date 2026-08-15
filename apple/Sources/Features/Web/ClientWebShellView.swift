@@ -8,6 +8,7 @@ struct ClientWebShellView: View {
     @EnvironmentObject private var releaseController: ClientReleaseController
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var languageStore: LanguageStore
+    @EnvironmentObject private var managerConfig: ManagerConfig
     @Environment(\.openURL) private var openURL
 
     @State private var webSession = WebPageSession()
@@ -24,6 +25,7 @@ struct ClientWebShellView: View {
             webSession: webSession,
             onExternalURL: openExternalURL
         )
+        .id(managerConfig.baseURL?.absoluteString ?? "manager-unconfigured")
         .toolbar {
             ClientWebShellToolbar(
                 controller: releaseController,
@@ -58,6 +60,8 @@ struct ClientWebShellView: View {
             .environmentObject(languageStore)
         }
         .task {
+            _ = await ManagerEndpointDiscoveryService.shared
+                .selectNearestPublicManagerIfNeeded()
             await releaseController.refresh(force: false)
         }
     }
