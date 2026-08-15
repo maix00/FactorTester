@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+host="${FACTORTESTER_SSH_HOST:-}"
+port="${FACTORTESTER_SSH_PORT:-22}"
+user="${FACTORTESTER_SSH_USER:-ecs-user}"
+revision="${FACTORTESTER_REVISION:-}"
+confirmed=0
+
+usage() {
+  cat <<'EOF'
+Usage: factortester-public-release-v1 --revision FULL_GIT_SHA --confirm
+
+This activates a release already present on the target host. Source transfer,
+database backup, health verification, and rollback remain owned by the
+server's release transaction. The helper does not accept an arbitrary command.
+EOF
+}
+
+[[ -n "$host" ]] || { echo "FACTORTESTER_SSH_HOST is required" >&2; exit 64; }
+[[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || {
+  echo "FACTORTESTER_SSH_PORT is invalid" >&2
+  exit 64
+}
+while (($# > 0)); do
+  case "$1" in
+    --revision)
+      [[ -n "${2:-}" ]] || { echo "--revision requires a value" >&2; exit 64; }
+      revision="$2"
+      shift 2
+      ;;
+    --confirm)
+      confirmed=1
+      shift
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 64
+      ;;
+  esac
+done
+[[ "$revision" =~ ^[0-9a-fA-F]{40}$ ]] || {
+  echo "FACTORTESTER_REVISION must be a full Git SHA" >&2
+  usage >&2
+  exit 64
+}
+((confirmed == 1)) || {
+  echo "release activation requires the explicit --confirm flag" >&2
+  usage >&2
+  exit 64
+}
+revision="${revision,,}"
+
+remote_script="/opt/factortester-container/releases/$revision/scripts/server/activate_public_revision.sh"
+ssh -p "$port" "$user@$host" \
+  "sudo test -x '$remote_script' && sudo bash '$remote_script' '$revision'"

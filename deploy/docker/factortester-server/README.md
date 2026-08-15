@@ -58,6 +58,13 @@ loopback addresses that another LAN device cannot use.
 after changing the Dockerfile or dependency lock file. Ordinary source edits
 use the mounted worktree and, when enabled, hot reload without image activity.
 
+The local `.settings` should include the server-owned `management_access`
+declaration from `deploy/local.settings.json`. It publishes the `ft-local-1`
+Docker Context and the digest-checked `factortester-docker-v1` helper. A new
+administrator device can discover this through `factortester-manager server
+access`; it must provide its own Docker Desktop authentication and explicitly
+review any downloaded helper before running it.
+
 The staging deployment uses its own `FACTORTESTER_SERVER_ID` and state root.
 Do not point two running Managers at the same state directory or advertise the
 same server identity. At cutover, stop the host-native Manager first, then set
