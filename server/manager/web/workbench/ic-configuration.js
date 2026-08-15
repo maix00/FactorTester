@@ -46,7 +46,7 @@
     return [value === "pearson" ? "pearson" : "rank"];
   }
 
-  function normalizeSettings(values) {
+  function normalizeSettings(manifest, values) {
     const result = clone(values || {});
     result.forward_return_horizons = normalizeHorizon(
       result.forward_return_horizons,
@@ -55,7 +55,11 @@
     result.ic_decay_lags = normalizeDecayLags(result.ic_decay_lags);
     result.ic_correlation = correlationMethods(result.ic_correlation).length === 2
       ? "both" : correlationMethods(result.ic_correlation)[0];
-    return result;
+    const compiler = typeof FTTestConfigurationCompiler !== "undefined"
+      ? FTTestConfigurationCompiler : window.FTTestConfigurationCompiler;
+    return compiler?.sanitizeExecutionPayload
+      ? compiler.sanitizeExecutionPayload(manifest || {defaults: {}}, result, values)
+      : result;
   }
 
   function normalizeRegisteredSettings(manifest, values) {
@@ -100,6 +104,7 @@
       prior, manifest, values, factors, productSelection, fallbackFamilyAlias,
     } = options;
     const settings = normalizeSettings(
+      manifest,
       FTTestConfigurationCompiler.executionSettings(manifest, values),
     );
     const selection = productScope(productSelection);
@@ -121,7 +126,9 @@
   }
 
   function evaluationPlan(options) {
-    const values = normalizeSettings(options.values || {});
+    const values = normalizeSettings(
+      options.manifest || {defaults: {}}, options.values || {},
+    );
     const horizon = values.forward_return_horizons;
     const factors = Number(options.factorCount || 0);
     const products = Number(options.productCount || 0);

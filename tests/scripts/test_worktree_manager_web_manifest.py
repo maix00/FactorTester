@@ -684,6 +684,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     )
     assert "ensureRunCode" in source
     assert "ensureRunBatchCode" in source
+    assert "ensureBacktestCode" in source
+    assert 'state, "backtestCode", "workbench-backtest"' in source
+    assert 'deferredPanel(context, state, "分组策略"' not in source
     assert "ensureSettingsCode" in source
     assert "ensureSettingsChipsCode" in source
     assert "ensureRunSubmitCode" in source
