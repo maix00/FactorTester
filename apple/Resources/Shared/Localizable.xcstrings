@@ -1,6 +1,10 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "客户端设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Client settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"客户端设置"}}}},
+    "本地适配器" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local adapters"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地适配器"}}}},
+    "启动并打开安装在本机的 FactorTester 组件" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Start and open FactorTester components installed on this device"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"启动并打开安装在本机的 FactorTester 组件"}}}},
+    "管理本机研究图与本地研究页面" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Manage local research graphs and pages"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"管理本机研究图与本地研究页面"}}}},
     "服务器互联" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联"}}}},
     "服务器互联设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联设置"}}}},
     "服务器互联设置已保存" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server federation settings saved"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器互联设置已保存"}}}},

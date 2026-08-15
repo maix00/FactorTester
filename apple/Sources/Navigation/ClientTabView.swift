@@ -20,8 +20,6 @@ struct ClientTabView: View {
     @ViewBuilder
     private var content: some View {
         switch tab.content {
-        case .home:
-            EmptyView()
         case .module(let module):
             ModuleDestinationView(
                 module: module,
