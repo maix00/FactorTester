@@ -60,32 +60,33 @@
 .backend-settings-action:disabled { cursor: default; opacity: .42; }
 .backend-settings-action.btn-outline-danger { color: var(--danger); }
 .backend-settings-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
   min-height: 36px;
   box-sizing: border-box;
   padding: 7px 12px;
   background: color-mix(in srgb, var(--soft) 55%, var(--panel));
 }
 .backend-settings-chip-row:empty { display: none; }
-.backend-setting-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; color: inherit; background: var(--panel); font: inherit; font-size: 11px; line-height: 1.2; white-space: normal; }
+.backend-setting-chip { max-width: 100%; display: inline-flex; align-items: baseline; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; color: inherit; background: var(--panel); font: inherit; font-size: 11px; line-height: 1.55; white-space: nowrap; }
 button.backend-setting-chip { cursor: pointer; }
 button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .backend-setting-chip-label { flex: 0 0 auto; color: var(--muted); }
-.backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+.backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
 .backend-settings-host { min-width: 0; padding: 8px 12px 10px; }
 .shared-field-value-selector { min-width: 0; }
 .test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
 .test-settings-manager-list { display: grid; overflow: hidden; }
-.test-settings-manager-row { display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding: 6px 0; border-top: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 12px; }
-.test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 2px 0 0; flex: 0 0 auto; }
-.test-settings-manager-row-body { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
+.test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 6px 0; border-top: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 12px; }
+.test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
+.test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; }
 .test-settings-manager-row-body > span:first-child { display: block; min-width: 0; }
 .test-settings-manager-row-body small { color: var(--muted); line-height: 1.25; }
-.test-settings-manager-defaults { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; }
+.test-settings-manager-defaults { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
 .test-settings-manager-defaults .backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
+.test-settings-manager-defaults .backend-settings-chip-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
+.test-settings-manager-defaults .backend-settings-chip-group-label { display: none; }
 .test-settings-manager-defaults .backend-setting-chip { min-width: 0; padding-top: 3px; padding-bottom: 3px; white-space: nowrap; }
 .test-settings-manager-defaults .backend-setting-chip-label, .test-settings-manager-defaults .backend-setting-chip-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-settings-manager-defaults .backend-setting-chip-value { max-width: 22rem; }

@@ -47,6 +47,7 @@ const manifest = {
   settings_sections: [{key: "scope", label: "研究对象", description: "先选对象", order: 10}],
   tab_lists: {"local-settings": [
     {key: "factor", label: "因子", section_key: "scope", content_adapter: "factor_selection"},
+    {key: "products", label: "产品路径", section_key: "scope", content_adapter: "product_path_selection"},
     {key: "time", label: "时间范围", section_key: "scope"},
     {key: "advanced", label: "高级", section_key: "scope"},
   ]},
@@ -144,6 +145,15 @@ assert.ok(timeRow.children[1].children[1].children.length >= 1,
 const defaultGroup = timeRow.children[1].children[1].children[0];
 const defaultChip = defaultGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(defaultChip.children[1].textContent, "未设置（默认）");
+const productRow = managerList.children.find(item => item.className === "test-settings-manager-row"
+  && item.children[1].children[0].children[0].textContent === "产品路径");
+assert.ok(productRow, "content-only tabs should still have an aligned default row");
+const productDefaultGroup = productRow.children[1].children[1];
+const productChip = productDefaultGroup.children
+  .flatMap(group => group.children)
+  .find(item => item.className.includes("backend-setting-chip"));
+assert.ok(productChip, "content-only tabs should render a default chip");
+assert.equal(productChip.children[1].textContent, "未设置（默认）");
 
 const updated = render("SgCCS 5m", () => {});
 const updatedGroup = updated.children[1].children[1].children.find(

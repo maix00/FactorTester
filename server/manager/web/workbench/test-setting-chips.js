@@ -2,7 +2,8 @@
   function descriptors(options) {
     const manifest = options.manifest || {};
     const context = options.context || {t: value => value};
-    const tabs = new Set((manifest.tab_lists?.["local-settings"] || []).map(item => item.key));
+    const declaredTabs = manifest.tab_lists?.["local-settings"] || [];
+    const tabs = new Set(declaredTabs.map(item => item.key));
     const mounted = new Set(options.mountedTabs || []);
     const identity = (manifest.chip_fields || []).map(chip => identityChip(
       chip, options.sources || {}, tabs, context,
@@ -15,6 +16,15 @@
       .map(([key, field]) => settingChip(
       key, field, options.values || {}, context, options,
       )).filter(Boolean);
+    const fallbackTabs = options.includeTabFallbacks
+      ? (options.fallbackTabs || [...mounted]).filter(tabKey => tabs.has(tabKey))
+      : [];
+    for (const tabKey of fallbackTabs) {
+      if (identity.some(item => item.tabKey === tabKey)
+        || settings.some(item => item.tabKey === tabKey)) continue;
+      const tab = declaredTabs.find(item => item.key === tabKey);
+      settings.push(tabFallback(tabKey, tab, context, options));
+    }
     const run = options.includeRun === false ? [] : runDescriptors(options);
     return deduplicate([...identity, ...settings, ...run, ...(options.extraDescriptors || [])])
       .map((item, index) => ({...item, _descriptorOrder: index}))
@@ -24,6 +34,19 @@
         || left._descriptorOrder - right._descriptorOrder
       ))
       .map(({_descriptorOrder, ...item}) => item);
+  }
+
+  function tabFallback(tabKey, tab, context, options) {
+    const value = context.t(options.emptyValueLabel || "未设置（默认）");
+    return {
+      key: `tab-default:${tabKey}`,
+      label: context.t(options.fallbackLabel || "默认"),
+      value,
+      fullValue: `${context.t(tab?.label || tabKey)}: ${value}`,
+      tabKey,
+      category: "setting-default",
+      sortOrder: 0,
+    };
   }
 
   function runDescriptors(options) {
