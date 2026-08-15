@@ -71,7 +71,7 @@
   // stable public entries and the research child tabs, but never replaces the
   // server-side filtering performed by /api/modules when that endpoint works.
   const fallbackModuleDefinitions = [
-    {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: true, homeVisible: false, pinned: true},
     {
       id: "research", title: "研究", title_key: "研究",
       description_key: "查看各 Profile 的实时步骤、义务与报告",

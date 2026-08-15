@@ -123,7 +123,7 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
         "requiresAuth": False,
         "roles": [],
         "sidebarVisible": True,
-        "homeVisible": True,
+        "homeVisible": False,
         "pinned": True,
     },
     {

@@ -1791,7 +1791,7 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
     modules = {item["id"]: item for item in value["modules"]}
     assert modules["home"]["title_key"] == "主页"
     assert modules["home"]["sidebarVisible"] is True
-    assert modules["home"]["homeVisible"] is True
+    assert modules["home"]["homeVisible"] is False
     assert modules["ic-test"]["title_key"] == "IC 测试"
     assert modules["backtest"]["title_key"] == "回测"
     assert modules["ic-test"]["sfSymbol"] == "chart.xyaxis.line"
@@ -1907,6 +1907,7 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
     modules = {item["id"]: item for item in manifest["modules"]}
     assert modules["home"]["title"] == "主页"
     assert modules["home"]["sidebarVisible"] is True
+    assert modules["home"]["homeVisible"] is False
     assert modules["jobs"]["title"] == "测试"
     assert modules["jobs"]["path"] == "/jobs?section=types"
     assert "ic-test" not in modules
