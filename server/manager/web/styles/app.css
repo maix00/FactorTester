@@ -16,7 +16,8 @@ button { cursor: pointer; }
 .embedded-presentation .sidebar { display: none; }
 .sidebar { position: sticky; top: 0; z-index: 20; height: 100vh; min-width: 0; display: flex; flex-direction: column; padding: 12px 9px 8px; overflow: hidden; background: var(--sidebar); border-right: 1px solid var(--line); isolation: isolate; }
 .sidebar-header { min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 2px 6px 8px; }
-.sidebar-title { min-width: 0; flex: 1; font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-title { min-width: 0; flex: 1; border: 0; padding: 0; background: transparent; color: inherit; font-size: 17px; font-weight: 700; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-title:hover { color: var(--accent); }
 .sidebar-toggle { width: 28px; height: 28px; flex: 0 0 28px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
 .sidebar-toggle:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); }
 .sidebar-toggle .symbol, .sidebar-toggle .ft-icon { width: 17px; height: 17px; flex-basis: 17px; }

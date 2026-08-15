@@ -10,6 +10,9 @@
       "sfSymbol": "square.grid.2x2",
       "path": "/",
       "requiresAuth": false,
+      "sidebarVisible": true,
+      "homeVisible": true,
+      "pinned": true,
       "roles": []
     },
     {
