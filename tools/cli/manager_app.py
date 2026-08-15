@@ -4,27 +4,20 @@ from __future__ import annotations
 
 import click
 
-from tools.cli.commands.admin import admin
 from tools.cli.commands.client_release import operator_client
 from tools.cli.manager.commands import register_manager_commands
+from tools.cli.manager.factortester_commands import (
+    register_factor_tester_commands,
+)
 
 
 @click.group()
-@click.option(
-    "--port", "ports", multiple=True, type=click.IntRange(1, 65535),
-    help="Admin 命令要查询的 FactorTester 端口；可重复指定。",
-)
-def manager_cli(ports: tuple[int, ...]) -> None:
-    """FactorTester Manager and authorized operator commands.
-
-    This executable is intentionally separate from the research CLI. Its
-    authentication, server-control, agent-accounting, and release commands
-    are not part of the ordinary research command surface.
-    """
+def manager_cli() -> None:
+    """Authenticated FactorTester application Manager/operator commands."""
 
 
+register_factor_tester_commands()
 register_manager_commands(manager_cli)
-manager_cli.add_command(admin)
 manager_cli.add_command(operator_client)
 
 

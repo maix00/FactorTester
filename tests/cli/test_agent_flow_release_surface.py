@@ -12,19 +12,12 @@ def test_public_cli_does_not_offer_backend_maintenance_authority() -> None:
         cli,
         ["agent-flow", "invocation", "reserve", "--help"],
     )
-    reserve = runner.invoke(
-        manager_cli,
-        ["agent-flow", "invocation", "reserve", "--help"],
-    )
-
     assert resume.exit_code == 0
     assert research_reserve.exit_code != 0
-    assert reserve.exit_code == 0
-    combined = resume.output + reserve.output
-    assert "server_maintenance" not in combined
-    assert "server_backend_code" not in combined
-    assert "implementation_agent" not in combined
-    assert "backend_verifier" not in combined
+    assert "server_maintenance" not in resume.output
+    assert "server_backend_code" not in resume.output
+    assert "implementation_agent" not in resume.output
+    assert "backend_verifier" not in resume.output
 
 
 def test_research_and_manager_command_surfaces_are_separate() -> None:
@@ -46,8 +39,8 @@ def test_research_and_manager_command_surfaces_are_separate() -> None:
         line.lstrip().startswith("release ")
         for line in research_client_help.output.splitlines()
     )
-    assert "admin" in manager_help.output
-    assert "restart-fleet" in manager_help.output
+    assert "\n  admin " not in manager_help.output
+    assert "restart-fleet" not in manager_help.output
     assert any(
         line.lstrip().startswith("release ")
         for line in manager_client_help.output.splitlines()

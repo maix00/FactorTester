@@ -74,7 +74,10 @@ public/container release state is involved.
 
 The separate `factortester-manager` executable is reserved for that
 maintenance/operator boundary. Do not invoke it from a research workflow,
-and do not treat the research CLI's session as Manager authority.
+and do not treat the research CLI's session as Manager authority. A
+maintenance operator obtains target-specific access metadata with
+`factortester-manager server access --json`; do not infer a host transport or
+copy connection details into this research Skill.
 
 Use `--help` or `<group> --help` for stable command syntax. Use `--json` for
 machine consumption; parse structured output, never CLI prose.

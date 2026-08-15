@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urlencode, urljoin
+from urllib.parse import quote, urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from tools.cli.http import HttpClientError
@@ -38,6 +39,20 @@ class ManagerClient:
     def session(self) -> dict[str, Any]:
         return self._request("GET", "/api/session")
 
+    def require_manager(self) -> dict[str, Any]:
+        """Return the session only when the principal has Manager authority."""
+        value = self.session()
+        capabilities = value.get("capabilities")
+        if not isinstance(capabilities, dict) or not capabilities.get("manager"):
+            raise PermissionError(
+                "当前账号没有 Manager 管理权限（需要 super_admin）"
+            )
+        return value
+
+    def identity(self) -> dict[str, Any]:
+        """Read server-owned identity and management access metadata."""
+        return self._request("GET", "/api/manager/identity")
+
     def sync_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
         """Write one authenticated, source-free Profile projection."""
         return self._request(
@@ -49,10 +64,100 @@ class ManagerClient:
     def instances(self) -> dict[str, Any]:
         return self._request("GET", "/api/worktrees")
 
+    def jobs(
+        self,
+        *,
+        scope: str = "server",
+        limit: int = 20,
+        cursor: str = "",
+        page: int = 1,
+        source_scope: str = "",
+    ) -> dict[str, Any]:
+        query: dict[str, Any] = {
+            "scope": scope,
+            "limit": limit,
+            "page": page,
+        }
+        if cursor:
+            query["cursor"] = cursor
+        if source_scope:
+            query["source_scope"] = source_scope
+        return self._request("GET", "/api/jobs", query=query)
+
+    def job_ports(self) -> dict[str, Any]:
+        return self._request("GET", "/api/jobs/ports")
+
+    def job_artifacts(self, job_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/api/jobs/{quote(str(job_id), safe='')}/artifacts"
+        )
+
+    def job_storage(self) -> dict[str, Any]:
+        return self._request("GET", "/api/jobs/storage")
+
+    def artifact_download_to_path(
+        self,
+        job_id: str,
+        name: str,
+        destination: str | Path,
+    ) -> dict[str, Any]:
+        """Issue a short-lived access capability, then stream through 7997."""
+        issued = self._request(
+            "POST",
+            f"/api/jobs/{quote(str(job_id), safe='')}/artifacts/"
+            f"{quote(str(name), safe='')}/access",
+            payload={},
+        )
+        access = issued.get("access")
+        artifact = issued.get("artifact")
+        if not isinstance(access, dict) or not isinstance(artifact, dict):
+            raise ValueError("artifact transfer authorization is incomplete")
+        from tools.cli.capability_download import download_capability_to_path
+
+        return {
+            "job_id": str(job_id),
+            "name": str(name),
+            **download_capability_to_path(
+                access,
+                destination,
+                timeout=self.timeout,
+                expected_sha256=str(artifact.get("content_hash") or ""),
+                content_type=str(
+                    artifact.get("content_type") or "application/octet-stream"
+                ),
+            ),
+        }
+
+    def research_graph_versions(self, graph_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/research-graphs/{quote(str(graph_id), safe='')}/versions",
+        )
+
+    def active_research_graph(self, graph_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/research-graphs/{quote(str(graph_id), safe='')}/active",
+        )
+
+    def activate_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/research-graphs/{quote(str(graph_id), safe='')}/versions/"
+            f"{int(version)}/activate",
+            payload={},
+        )
+
     def action(self, instance_id: str, action: str) -> dict[str, Any]:
         routes = {
             "start": "/start",
             "stop": "/stop",
+            "restart-api": "/restart-api",
+            "restart-bundle": "/restart-bundle",
             "restart-web": "/restart-api",
             "restart-all": "/restart-bundle",
             "force-stop": "/force-stop",
@@ -73,9 +178,17 @@ class ManagerClient:
         *,
         payload: dict[str, Any] | None = None,
         form: dict[str, str] | None = None,
+        query: dict[str, Any] | None = None,
         authenticated: bool = True,
     ) -> dict[str, Any]:
         url = urljoin(f"{self.config.base_url}/", path.lstrip("/"))
+        if query:
+            encoded = urlencode([
+                (key, value) for key, value in query.items()
+                if value is not None and value != ""
+            ])
+            if encoded:
+                url = f"{url}?{encoded}"
         headers = {"Accept": "application/json"}
         body = None
         if payload is not None:

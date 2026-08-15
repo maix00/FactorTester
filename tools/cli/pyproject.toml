@@ -70,6 +70,9 @@ packages = [
 "tools.cli.release.research_reporting.public_research" = "release/research_reporting/public_research"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 [tool.setuptools.package-data]
+"tools.cli.manager" = [
+  "skills/*.md",
+]
 "tools.cli.release" = [
   "trusted-release-public.pem",
   "trusted-beta-release-public.pem",

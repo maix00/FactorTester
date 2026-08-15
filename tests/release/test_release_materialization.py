@@ -53,7 +53,9 @@ def test_real_client_and_harness_wheels_materialize_together(
         text=True,
     )
     assert "protocol" in client_help
-    assert "restart-fleet" in manager_help
+    assert "server" in manager_help
+    assert "jobs" in manager_help
+    assert "restart-fleet" not in manager_help
     assert "graph" in harness_help
     assert "\n  cycle " not in harness_help
 
