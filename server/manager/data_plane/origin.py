@@ -83,6 +83,7 @@ def serve_local_file(
     handler.end_headers()
     if handler.command == "HEAD":
         return
+    runtime.set_transfer_expected_bytes(handler, selected.length)
     with path.open("rb") as stream:
         stream.seek(selected.start)
         remaining = selected.length
@@ -91,4 +92,5 @@ def serve_local_file(
             if not chunk:
                 raise RuntimeError("transfer origin ended unexpectedly")
             handler.wfile.write(chunk)
+            runtime.record_transfer_bytes(handler, len(chunk))
             remaining -= len(chunk)

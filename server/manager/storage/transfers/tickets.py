@@ -134,3 +134,18 @@ class TransferTicketStore(TransferDatabase):
         if result.rowcount == 0:
             raise KeyError("transfer ticket not found")
 
+    def cleanup_expired(
+        self,
+        *,
+        now: float | None = None,
+        grace_seconds: float = 60 * 60,
+    ) -> int:
+        """Bound local ticket growth without touching live capabilities."""
+        current = time.time() if now is None else float(now)
+        cutoff = current - max(0.0, float(grace_seconds))
+        with self._connect() as connection:
+            result = connection.execute(
+                "DELETE FROM transfer_tickets WHERE expires_at < ?",
+                (cutoff,),
+            )
+        return int(result.rowcount or 0)
