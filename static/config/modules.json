@@ -11,7 +11,7 @@
       "path": "/",
       "requiresAuth": false,
       "sidebarVisible": true,
-      "homeVisible": true,
+      "homeVisible": false,
       "pinned": true,
       "roles": []
     },

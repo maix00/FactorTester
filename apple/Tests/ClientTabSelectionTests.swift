@@ -96,6 +96,7 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(home?.title, "主页")
         XCTAssertEqual(home?.path, "/")
         XCTAssertTrue(home?.sidebarVisible == true)
+        XCTAssertFalse(home?.homeVisible == true)
     }
 
     func testDashboardTestModulesUseFreshWebDestinations() throws {
