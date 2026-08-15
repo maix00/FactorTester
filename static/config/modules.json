@@ -3,13 +3,13 @@
   "_comment": "首页模块的唯一注册表 —— 跨客户端共享。web (templates/home.html) 与原生 App (apple/) 的 home 都从这里渲染。新增/调整模块只改这一处，所有端同步生效。字段：id 唯一标识；title 标题；desc 描述；icon 网页用 emoji 文本；sfSymbol 苹果原生用 SF Symbol 名；path 服务器路由；requiresAuth 是否需登录才能进入；roles 非空时仅这些角色可见（角色取自 /api/me 的 role）；managerOnly 表示由 Manager 7998 提供、业务服务端口首页不显示。",
   "modules": [
     {
-      "id": "ic-test",
-      "title": "IC 测试",
-      "desc": "选择因子与产品组，配置并运行 IC 测试",
-      "icon": "IC",
-      "sfSymbol": "chart.xyaxis.line",
-      "path": "/ic-test",
-      "requiresAuth": true,
+      "id": "home",
+      "title": "主页",
+      "desc": "选择研究模块",
+      "icon": "grid",
+      "sfSymbol": "square.grid.2x2",
+      "path": "/",
+      "requiresAuth": false,
       "roles": []
     },
     {
@@ -19,16 +19,6 @@
       "icon": "任务",
       "sfSymbol": "list.bullet.rectangle",
       "path": "/jobs",
-      "requiresAuth": true,
-      "roles": []
-    },
-    {
-      "id": "backtest",
-      "title": "回测",
-      "desc": "从因子库与产品组库选择输入，配置并运行回测",
-      "icon": "BT",
-      "sfSymbol": "chart.line.uptrend.xyaxis.circle",
-      "path": "/backtest",
       "requiresAuth": true,
       "roles": []
     },
