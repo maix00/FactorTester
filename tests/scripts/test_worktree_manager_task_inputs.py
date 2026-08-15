@@ -75,6 +75,14 @@ def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
     assert "flex: 0 1 auto" in chip_label
 
 
+def test_settings_manager_uses_inline_chip_nodes_inside_label_rows() -> None:
+    chips = (WEB_ROOT / "workbench" / "test-setting-chips.js").read_text()
+    settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text()
+    assert 'options.inline === true' in chips
+    assert 'document.createElement(inline ? "span" : "div")' in chips
+    assert 'inline: true' in settings
+
+
 def test_backtest_source_panel_covers_executable_and_retained_inputs() -> None:
     source = (WEB_ROOT / "workbench" / "test-source-upload.js").read_text()
     contracts = (ROOT / "tools" / "testers" / "run_input_contracts.py").read_text()
