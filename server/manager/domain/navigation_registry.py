@@ -45,6 +45,69 @@ _RESEARCH_TABS = (
     },
 )
 
+_TEST_TYPE_MODULES = (
+    {
+        "id": "ic-test",
+        "title": "IC 测试",
+        "title_key": "IC 测试",
+        "desc": "配置并运行因子 IC 测试",
+        "description_key": "配置并运行因子 IC 测试",
+        "icon": "IC",
+        "sfSymbol": "chart.xyaxis.line",
+        "path": "/ic-test",
+        "requiresAuth": True,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": False,
+        "tab_behavior": "new",
+    },
+    {
+        "id": "backtest",
+        "title": "回测",
+        "title_key": "回测",
+        "desc": "配置并运行分组回测",
+        "description_key": "配置并运行分组回测",
+        "icon": "BT",
+        "sfSymbol": "chart.line.uptrend.xyaxis",
+        "path": "/backtest",
+        "requiresAuth": True,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": False,
+        "tab_behavior": "new",
+    },
+)
+
+_TEST_TABS = (
+    {
+        "id": "jobs.types",
+        "title": "测试类型",
+        "title_key": "测试类型",
+        "description_key": "选择要运行的测试类型",
+        "path": "/jobs?section=types",
+        "requiresAuth": False,
+        "roles": [],
+        "children": list(_TEST_TYPE_MODULES),
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": False,
+    },
+    {
+        "id": "jobs.list",
+        "title": "测试任务",
+        "title_key": "测试任务",
+        "description_key": "查看测试任务、进度、结果与生成物",
+        "path": "/jobs?section=tasks",
+        "requiresAuth": False,
+        "roles": [],
+        "sidebarVisible": False,
+        "homeVisible": False,
+        "pinned": False,
+    },
+)
+
 
 # This is the only top-level client navigation list.  Server-side access
 # filtering below runs before this value is returned to Web or Swift.
@@ -113,15 +176,16 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "jobs",
-        "title": "测试任务",
-        "title_key": "测试任务",
-        "desc": "查看测试任务、进度、结果与生成物",
-        "description_key": "跨端口查看配置、进度、结果与生成物",
+        "title": "测试",
+        "title_key": "测试",
+        "desc": "选择测试类型或查看测试任务",
+        "description_key": "选择测试类型或查看测试任务",
         "icon": "任务",
         "sfSymbol": "checklist",
-        "path": "/jobs",
+        "path": "/jobs?section=types",
         "requiresAuth": False,
         "roles": [],
+        "children": list(_TEST_TABS),
         "sidebarVisible": True,
         "homeVisible": True,
         "pinned": True,

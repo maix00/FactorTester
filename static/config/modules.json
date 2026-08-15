@@ -14,12 +14,12 @@
     },
     {
       "id": "jobs",
-      "title": "测试任务",
-      "desc": "查看 Web 与 CLI 测试任务、配置、进度和生成物",
+      "title": "测试",
+      "desc": "选择测试类型或查看测试任务",
       "icon": "任务",
       "sfSymbol": "list.bullet.rectangle",
-      "path": "/jobs",
-      "requiresAuth": true,
+      "path": "/jobs?section=types",
+      "requiresAuth": false,
       "roles": []
     },
     {

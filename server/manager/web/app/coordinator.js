@@ -67,7 +67,7 @@
   const jobsContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar, t,
     openLogin, showNotice, servicePath,
-    loginRequiredView, updateActiveTab, session: state.session,
+    loginRequiredView, updateActiveTab, session: state.session, modules: state.modules,
     isRouteCurrent: () => routeToken === activeRouteToken,
     ...currentTabContext(),
   });
@@ -331,7 +331,7 @@
       report,
       research,
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
-      jobs: pageContext => FTJobs.list(pageContext),
+      jobs: (pageContext, section) => section === "types" ? FTTestTypes.render(pageContext) : FTJobs.list(pageContext),
       job: (pageContext, port, id, serverID) => FTJobs.detail(
         pageContext, port, id, serverID,
       ),

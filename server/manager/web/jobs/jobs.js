@@ -74,8 +74,8 @@
       button.title = button.textContent;
       button.addEventListener("click", () => {
         // Keep the selected scope in the URL.  This preserves an intentional
-        // private scope through the login round-trip, while reopening the
-        // pinned /jobs feature always returns to the public server feed.
+        // private scope through the login round-trip; reopening the pinned
+        // 测试 feature itself defaults to the separate 测试类型 tab.
         context.navigate(`/jobs?scope=${encodeURIComponent(definition.id)}`);
       });
       root.append(button);
@@ -85,6 +85,7 @@
 
   function installScopeToolbar(context, state, scope) {
     context.toolbar.replaceChildren(
+      FTTestPageTabs.render(context, "tasks"),
       scopeTabs(context, state),
       context.button("↻", () => list(context, null, scope), context.t("刷新任务列表")),
     );
@@ -200,7 +201,7 @@
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
-    context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
+    context.activeNav("jobs"); context.setHeading(context.t("测试"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
     const state = scopeState(context);
     const urlScope = new URLSearchParams(location.search).get("scope");

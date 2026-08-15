@@ -33,7 +33,9 @@
         // the API decide which rows/details are visible.  Guarding it here
         // prevented that scope from ever rendering and left the previous
         // page header in place because the list handler never ran.
-        case "jobs": return pages.jobs?.(jobsContext(routeToken));
+        case "jobs": return pages.jobs?.(
+          jobsContext(routeToken), route.section || "types",
+        );
         case "job": return pages.job?.(
           jobsContext(routeToken), route.port, route.id, route.serverID,
         );

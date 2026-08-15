@@ -16,6 +16,10 @@ const modules = [
 ];
 assert.deepStrictEqual(match("/", ""), {kind: "home"});
 assert.deepStrictEqual(match("/research", "?section=graph"), {kind: "research"});
+assert.deepStrictEqual(match("/jobs", ""), {kind: "jobs", section: "types"});
+assert.deepStrictEqual(match("/jobs", "?scope=mine"), {kind: "jobs", section: "tasks"});
+assert.deepStrictEqual(match("/jobs", "?section=tasks"), {kind: "jobs", section: "tasks"});
+assert.deepStrictEqual(match("/jobs", "?section=unknown"), {kind: "jobs", section: "types"});
 assert.deepStrictEqual(match("/research/local%3Aid", ""), {
   kind: "report", id: "local%3Aid",
 });

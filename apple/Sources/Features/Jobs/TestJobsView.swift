@@ -56,7 +56,7 @@ struct TestJobsView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("测试任务").font(.title2.weight(.semibold))
+                Text("测试").font(.title2.weight(.semibold))
                 Text(verbatim: L10n.format("共 %lld 个任务，每页 %lld 个", controller.jobs.count, pageSize))
                     .font(.callout).foregroundStyle(.secondary)
             }

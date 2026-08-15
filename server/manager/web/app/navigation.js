@@ -40,7 +40,7 @@
     const module = moduleForPath(path, modules);
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {
-      research: "研究报告", jobs: "测试任务", factors: "因子详情",
+      research: "研究报告", jobs: "测试", factors: "因子详情",
       products: "产品详情", profiles: "研究身份", "test-templates": "测试模板",
     };
     return t(labels[parts[0]] || module.title || parts[0]);
@@ -87,7 +87,30 @@
     },
     {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
-    {id: "jobs", title: "测试任务", title_key: "测试任务", description_key: "跨端口查看配置、进度、结果与生成物", sfSymbol: "checklist", path: "/jobs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {
+      id: "jobs", title: "测试", title_key: "测试",
+      description_key: "选择测试类型或查看测试任务", sfSymbol: "checklist",
+      path: "/jobs?section=types", requiresAuth: false,
+      sidebarVisible: true, homeVisible: true, pinned: true,
+      children: [
+        {
+          id: "jobs.types", title: "测试类型", title_key: "测试类型",
+          description_key: "选择要运行的测试类型", path: "/jobs?section=types",
+          requiresAuth: false, sidebarVisible: false, homeVisible: false,
+          pinned: false,
+          children: [
+            {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
+            {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
+          ],
+        },
+        {
+          id: "jobs.list", title: "测试任务", title_key: "测试任务",
+          description_key: "查看测试任务、进度、结果与生成物",
+          path: "/jobs?section=tasks", requiresAuth: false,
+          sidebarVisible: false, homeVisible: false, pinned: false,
+        },
+      ],
+    },
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品", title_key: "产品", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
@@ -166,7 +189,15 @@
         ...serverSelector(search),
       };
     }
-    if (parts[0] === "jobs") return {kind: "jobs"};
+    if (parts[0] === "jobs") {
+      const params = new URLSearchParams(search);
+      const requestedSection = params.get("section");
+      return {
+        kind: "jobs",
+        section: requestedSection === "tasks" || params.has("scope")
+          ? "tasks" : "types",
+      };
+    }
     if (parts[0] === "docs") return {kind: "remote-module", module: "docs"};
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
     if (parts[0] === "ic-test") return {kind: "ic-test"};
