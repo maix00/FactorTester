@@ -10,6 +10,10 @@ import threading
 import time
 from pathlib import Path
 
+from server.manager.domain.organization_scope import (
+    configured_managed_organizations,
+)
+
 from .models import ServiceRoute, TargetNotFound, TargetUnavailable
 
 REGISTRY_SCHEMA_VERSION = 1
@@ -116,6 +120,12 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
     role = _string(payload.get("role"), field="role")
     if role not in {"main", "feat"}:
         raise ValueError("role must be main or feat")
+    public_server = bool(payload.get("public_server", role == "main"))
+    managed_organizations = configured_managed_organizations(
+        public_server=public_server,
+        server_role=role,
+        explicit=payload.get("managed_organizations"),
+    )
     endpoint = _string(payload.get("endpoint"), field="endpoint").rstrip("/")
     proxy_token = _string(payload.get("proxy_token"), field="proxy_token")
     ports = _port_descriptors(payload.get("ports"))
@@ -137,7 +147,8 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
         # ``role`` was historically the only public/private hint. Preserve
         # that default for old registry files while allowing future nodes to
         # declare their network scope explicitly.
-        "public_server": bool(payload.get("public_server", role == "main")),
+        "public_server": public_server,
+        "managed_organizations": list(managed_organizations),
         "internal_addresses": _internal_addresses(
             payload.get("internal_addresses")
         ),

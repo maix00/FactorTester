@@ -22,7 +22,7 @@ final class APIClient: NSObject {
 
     static let shared = APIClient()
 
-    private let config = ServerConfig.shared
+    private let config = ManagerConfig.shared
     private lazy var session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.httpCookieStorage = HTTPCookieStorage.shared
@@ -42,6 +42,12 @@ final class APIClient: NSObject {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         req.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
+        if path != "/login", path != "/register" {
+            let token = ManagerSessionTokenStore.read(for: url)
+            if !token.isEmpty {
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+        }
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
@@ -141,6 +147,10 @@ final class APIClient: NSObject {
         req.httpMethod = "GET"
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        let token = ManagerSessionTokenStore.read(for: url)
+        if !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.transport(L10n.text("服务器没有返回有效的 HTTP 响应"))

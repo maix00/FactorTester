@@ -170,6 +170,21 @@ class RequestSecurityMixin:
             or self._is_private_lan_client()
             or self._is_https_proxy_request()
         )
+
+    def _is_swift_network_discovery_request(self) -> bool:
+        """Allow only the native client to read pre-login node addresses.
+
+        The endpoint contains no account, device, or task data, but it is
+        needed before Swift can choose the first public Manager.  Keep the
+        exception narrow: a browser (or an arbitrary API caller) must still
+        pass the normal public login/visitor gate.
+        """
+        return (
+            self.headers.get("X-FactorTester-Client", "").strip().lower()
+            == "swift"
+            and self._has_secure_ui_transport()
+        )
+
     def _is_same_origin_browser_action(self) -> bool:
         if not self._is_loopback_client():
             return False
@@ -504,7 +519,11 @@ class RequestSecurityMixin:
             # The local home page may display the Manager-provided LAN
             # and public-node summary in visitor mode as well as on a LAN.
             # The route itself repeats this distinction as defence in depth.
-            if self._is_private_lan_client() or self._visitor_mode() is not None:
+            if (
+                self._is_private_lan_client()
+                or self._visitor_mode() is not None
+                or self._is_swift_network_discovery_request()
+            ):
                 return True
 
         if path in {"/api/device/challenge", "/api/device/verify"}:

@@ -166,7 +166,7 @@ final class SessionStore: ObservableObject {
         if let bridgeOverride {
             return await bridgeOverride(principalRef)
         }
-        guard let serverURL = ServerConfig.shared.baseURL?.absoluteString else {
+        guard let serverURL = ManagerConfig.shared.baseURL?.absoluteString else {
             lastError = L10n.text("尚未配置服务器地址，请先在设置中填写。")
             return false
         }
@@ -438,7 +438,7 @@ final class SessionStore: ObservableObject {
         isManagerLoggedIn = false
         let api = api
         let managerAPI = managerAPI
-        let serverURL = ServerConfig.shared.baseURL?.absoluteString
+        let serverURL = ManagerConfig.shared.baseURL?.absoluteString
         let executable = ClientCLIResolution.executable()
         try? await api.logout()
         await managerAPI.logout()

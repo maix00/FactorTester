@@ -40,6 +40,7 @@ class FederationMembershipStateMixin:
             "server_id": self.server_id,
             "role": self.server_role,
             "public_server": bool(self.public_server),
+            "managed_organizations": list(self.managed_organizations),
             "internal_addresses": (
                 [] if self.public_server else local_internal_addresses()
             ),

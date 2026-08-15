@@ -4,6 +4,14 @@ import Combine
 final class ManagerConfig: ObservableObject {
     static let shared = ManagerConfig()
 
+    /// The only endpoint embedded in a released Swift client.  It is used
+    /// solely as a discovery seed; the active Manager is selected from the
+    /// server-provided online candidates at launch.  Update this value before
+    /// building a release when the bootstrap public IP changes.
+    static let bakedPublicBootstrapEndpoint = URL(
+        string: "https://101.133.144.27:7998"
+    )!
+
     enum SelectionSource: String {
         case automatic
         case manual
@@ -33,20 +41,28 @@ final class ManagerConfig: ObservableObject {
 
     private init() {
         let defaults = UserDefaults.standard
-        scheme = defaults.string(forKey: Keys.scheme) ?? "http"
-        let storedHost = defaults.string(forKey: Keys.host) ?? "127.0.0.1"
-        host = storedHost
-        port = defaults.string(forKey: Keys.port) ?? "7998"
         serverID = defaults.string(forKey: Keys.serverID) ?? ""
-        if let raw = defaults.string(forKey: Keys.selectionSource),
-           let source = SelectionSource(rawValue: raw) {
-            selectionSource = source
+        let storedHost = defaults.string(forKey: Keys.host) ?? ""
+        let storedSource = defaults.string(forKey: Keys.selectionSource)
+            .flatMap(SelectionSource.init(rawValue:))
+        let source = storedSource ?? (
+            storedHost.isEmpty || ManagerEndpointPolicy.isLoopback(storedHost)
+                ? .automatic
+                : .manual
+        )
+        selectionSource = source
+
+        if source == .automatic {
+            // Automatic mode always starts from the baked public seed. This
+            // lets a rebuilt client discover a changed public IP instead of
+            // becoming stuck on a previously selected internal/remote host.
+            scheme = Self.bakedPublicBootstrapEndpoint.scheme ?? "https"
+            host = Self.bakedPublicBootstrapEndpoint.host ?? ""
+            port = String(Self.bakedPublicBootstrapEndpoint.port ?? 7998)
         } else {
-            // Older clients used loopback as a bootstrap endpoint. Treat an
-            // unannotated loopback setting as automatic so Docker's local
-            // Manager can provide the nearest public Manager on first launch.
-            selectionSource = ManagerEndpointPolicy.isLoopback(storedHost)
-                ? .automatic : .manual
+            scheme = defaults.string(forKey: Keys.scheme) ?? "http"
+            host = storedHost
+            port = defaults.string(forKey: Keys.port) ?? "7998"
         }
     }
 
@@ -72,11 +88,10 @@ final class ManagerConfig: ObservableObject {
         baseURL != nil && (isPrivateNetwork || scheme == "https")
     }
 
-    /// The loopback Manager is only a discovery bootstrap. Once a server has
-    /// supplied a public target, the target remains the active Manager until
-    /// the user explicitly edits the connection in Settings.
+    /// Automatic mode is driven by the baked public seed and server-provided
+    /// candidates. A manually entered single endpoint disables switching.
     var shouldDiscoverNearestPublicManager: Bool {
-        selectionSource == .automatic && isLoopback
+        selectionSource == .automatic
     }
 
     func url(forPath path: String) -> URL? {
