@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — implemented in #214
 
 ## Context
 
@@ -35,7 +35,10 @@ Use one account-domain synchronization protocol with per-entity adapters:
 5. Large or server-local objects (factor source files, generated artifacts,
    submissions, and research files) do not pass through PostgreSQL. Their
    metadata and ownership manifests use the account protocol; bytes use the
-   authenticated 7997/WireGuard data plane.
+   authenticated 7997/WireGuard data plane. A research publication metadata
+   row includes owner, Profile, visibility, authorized users, generation,
+   projection hash, and storage Manager. Revoking a publication emits a
+   tombstone; it does not delete a remote copy's bytes.
 6. Runtime state is excluded from account synchronization: Manager sessions,
    live node capabilities, provider online status, and route selection remain
    local/federated projections.
@@ -49,6 +52,21 @@ Use one account-domain synchronization protocol with per-entity adapters:
   server that provides `Local`.
 - Each new account-owned feature adds an adapter and schema projection, not a
   new Manager-to-Manager synchronization protocol.
-- The current product-category SQLite table is the local projection point; the
-  generic outbox, pull cursor, and PostgreSQL tables are a follow-up
-  implementation and are not implied by the first local-only migration.
+- The implementation is intentionally lazy rather than real-time: an affected
+  view pulls after its per-principal cooldown, then flushes the local outbox.
+  PostgreSQL downtime therefore leaves local login and local metadata reads
+  available; new remote visibility waits for recovery.
+- `account_domain_entities`, `account_domain_outbox`,
+  `account_domain_cursors`, and `account_domain_conflicts` live in the existing
+  Manager SQLite database. The corresponding PostgreSQL table is only a
+  metadata authority. No second SQLite file, port, or peer listener is added.
+- Product categories/groups, factor sets/parameter configurations, factor
+  source manifests, Profiles, user/org/level metadata, factor research-run
+  metadata, and uploaded/shared research publication metadata use the same
+  local adapter seam. Source code, report projections, assets, and generated
+  bytes remain on their owning storage Manager and are never copied into the
+  account-domain tables. Job artifacts/submissions continue to use the
+  existing authenticated 7997/WireGuard data plane; the existing public
+  research read-through endpoint is intentionally unchanged by #214 and
+  still needs a separate research-object data-plane adapter before its
+  cross-Manager byte path can be described as 7997-native.

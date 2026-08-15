@@ -34,6 +34,7 @@ class FederatedPublicDataService:
         gateway: object,
         public_research: object,
         client_state: object,
+        account_domain_sync: object | None = None,
         cache_seconds: float = DEFAULT_CACHE_SECONDS,
     ) -> None:
         self.server_id = str(server_id or "").strip()
@@ -41,6 +42,7 @@ class FederatedPublicDataService:
         self.gateway = gateway
         self.public_research = public_research
         self.client_state = client_state
+        self.account_domain_sync = account_domain_sync
         self.cache_seconds = max(1.0, float(cache_seconds))
         self._cache: dict[tuple[object, ...], tuple[float, Any]] = {}
         self._publication_sources: dict[str, str] = {}
@@ -154,6 +156,57 @@ class FederatedPublicDataService:
             None if viewer == VISITOR_PRINCIPAL else viewer,
         )
         merged: dict[str, dict[str, Any]] = {}
+        # Shared publication metadata is pulled lazily from the local SQLite
+        # mirror/PG cursor. It lets a public Manager list a report even when
+        # the source Manager is currently offline; bytes still use the source
+        # Manager's authenticated research/data path.
+        if self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_research_library(
+                    self.public_research,
+                )
+                rows = self.account_domain_sync.entities(
+                    viewer,
+                    entity_type="research_publication",
+                    include_shared=True,
+                )
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                rows = []
+            for row in rows:
+                if not isinstance(row, dict) or row.get("deleted"):
+                    continue
+                payload = row.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                publication_id = str(
+                    payload.get("publication_id") or row.get("entity_id") or ""
+                ).strip()
+                if not publication_id:
+                    continue
+                value = {
+                    key: payload.get(key)
+                    for key in (
+                        "publication_id", "report_id", "owner_ref", "profile_ref",
+                        "title", "generation", "updated_at", "visibility",
+                        "is_owned", "href", "projection_hash",
+                    )
+                    if key in payload
+                }
+                value.setdefault("owner_ref", row.get("principal") or "")
+                value.setdefault("visibility", "private")
+                value.setdefault("is_owned", value.get("owner_ref") == viewer)
+                value.setdefault("href", f"/research/{publication_id}")
+                source_id = str(
+                    payload.get("storage_server_id")
+                    or row.get("origin_manager_id")
+                    or ""
+                ).strip()
+                value["source_server_id"] = source_id
+                if value.get("visibility") == "public" or value.get("is_owned"):
+                    merged[publication_id] = value
+                    if source_id:
+                        with self._lock:
+                            self._publication_sources[publication_id] = source_id
         for item in local:
             if not isinstance(item, dict):
                 continue
@@ -255,6 +308,10 @@ class FederatedPublicDataService:
         except (TypeError, ValueError):
             route = self._publication_route(publication_id, viewer_ref)
             if route is None:
+                with self._lock:
+                    source_id = self._publication_sources.get(publication_id, "")
+                if source_id and source_id != self.server_id:
+                    raise ConnectionError("research source Manager is offline")
                 raise
             peer_payload = dict(payload or {})
             peer_payload["publication_id"] = publication_id
@@ -340,7 +397,35 @@ class FederatedPublicDataService:
         return self._research_bytes(publication_id, viewer_ref, operation="local_resource", item_id=resource_id)
 
     def list_owner(self, owner_ref: str) -> list[dict[str, Any]]:
-        return self.public_research.list_owner(owner_ref)
+        merged: dict[str, dict[str, Any]] = {
+            str(item.get("publication_id") or ""): dict(item)
+            for item in self.public_research.list_owner(owner_ref)
+            if isinstance(item, dict) and str(item.get("publication_id") or "")
+        }
+        if self.account_domain_sync is not None:
+            try:
+                rows = self.account_domain_sync.entities(
+                    owner_ref,
+                    entity_type="research_publication",
+                    include_shared=False,
+                )
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                rows = []
+            for row in rows:
+                if not isinstance(row, dict) or row.get("deleted"):
+                    continue
+                payload = row.get("payload")
+                publication_id = str(
+                    payload.get("publication_id")
+                    if isinstance(payload, dict) else row.get("entity_id") or ""
+                ).strip()
+                if publication_id and isinstance(payload, dict):
+                    merged.setdefault(publication_id, dict(payload))
+        return sorted(
+            merged.values(),
+            key=lambda item: str(item.get("synced_at") or item.get("updated_at") or ""),
+            reverse=True,
+        )
 
     def profiles(self, principal: str) -> list[dict[str, Any]]:
         key = ("profiles", str(principal))

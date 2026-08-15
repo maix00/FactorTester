@@ -16,6 +16,7 @@ from server.modules.products.product_category_store import list_product_categori
 from tools.products.product_path_selection import ProductPathSelection
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
+from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
 
 
 def _resolve_group_products(paths: list) -> list:
@@ -252,8 +253,11 @@ def delete_product_group(username: str, name: str) -> bool:
     idx = find_group_by_name(groups, name)
     if idx < 0:
         return False
+    group_id = str(groups[idx].get("id") or "").strip()
     groups.pop(idx)
     save_product_groups(username, groups)
+    if group_id:
+        enqueue_entity(username, "product_group", group_id, {}, deleted=True)
     return True
 
 

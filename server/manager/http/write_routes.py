@@ -20,6 +20,25 @@ class WriteRoutesMixin:
         if callable(invalidate):
             invalidate()
 
+    def _sync_research_metadata(
+        self, publication_id: str, *, deleted: bool = False,
+    ) -> None:
+        """Enqueue publication metadata; report bytes stay on the source node."""
+        synchronizer = getattr(self.state, "account_domain_sync", None)
+        if synchronizer is None:
+            return
+        try:
+            metadata = self.state.public_research.publication_metadata(
+                publication_id,
+            )
+            synchronizer.sync_research_publication(
+                metadata, deleted=deleted,
+            )
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            # The local publication has already been committed. The SQLite
+            # outbox is best-effort here and will be retried on a later read.
+            return
+
     def do_POST(self) -> None:
         if self._redirect_plain_http_to_https():
             return
@@ -86,6 +105,8 @@ class WriteRoutesMixin:
                 return
             try:
                 value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
+                if value.get("publication_id"):
+                    self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
@@ -143,6 +164,7 @@ class WriteRoutesMixin:
                     relay_local_files=False,
                     authorized_users=[],
                 )
+                self._sync_research_metadata(str(settings["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
@@ -166,8 +188,10 @@ class WriteRoutesMixin:
                 return
             try:
                 payload = self._json_body(64 * 1024)
+                publication_id = str(payload.get("publication_id") or "")
+                self._sync_research_metadata(publication_id, deleted=True)
                 value = self.state.public_research.revoke_publication(
-                    str(payload.get("publication_id") or ""),
+                    publication_id,
                 )
                 self._invalidate_federated_public_research()
             except ValueError as exc:
@@ -191,6 +215,7 @@ class WriteRoutesMixin:
                     relay_local_files=bool(payload.get("relay_local_files", False)),
                     authorized_users=list(payload.get("authorized_users") or []),
                 )
+                self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
