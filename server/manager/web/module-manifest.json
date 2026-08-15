@@ -14,7 +14,8 @@
     "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
     "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
     "job-detail-input": ["katex/katex.min.js"],
-    "catalog": ["vendor/highcharts/highstock.min.js"]
+    "catalog": ["vendor/highcharts/highstock.min.js"],
+    "research": ["vendor/cytoscape/cytoscape.min.js"]
   },
   "group_dependencies": {
     "charts": ["core"],
@@ -300,7 +301,8 @@
   },
   "external_scripts": [
     "katex/katex.min.js",
-    "vendor/highcharts/highstock.min.js"
+    "vendor/highcharts/highstock.min.js",
+    "vendor/cytoscape/cytoscape.min.js"
   ],
   "scripts": [
     "core/module-loader.js",

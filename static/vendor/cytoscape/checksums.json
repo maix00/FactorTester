@@ -1,0 +1,11 @@
+{
+  "package": "cytoscape",
+  "version": "3.34.1",
+  "license": "MIT",
+  "files": {
+    "cytoscape.min.js": {
+      "sha256": "5141892eb19898946e5af8300e14cec15a63a22186a4ca56d76819a91e2a3fe6",
+      "bytes": 435503
+    }
+  }
+}

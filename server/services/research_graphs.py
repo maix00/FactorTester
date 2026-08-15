@@ -76,6 +76,11 @@ from server.services.research_graph.versions import (
     load_graph,
     register_graph,
 )
+from server.services.research_graph.yaml_export import (
+    graph_definition,
+    graph_yaml_bytes,
+    graph_yaml_filename,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -96,6 +101,9 @@ __all__ = [
     "create_graph_instance",
     "ensure_schema",
     "fork_graph_branch",
+    "graph_definition",
+    "graph_yaml_bytes",
+    "graph_yaml_filename",
     "handoff_graph_branch",
     "authorize_human_gate_override",
     "list_graph_versions",

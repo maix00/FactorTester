@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request, session
+from flask import Response, jsonify, request, session
 
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
@@ -93,6 +93,41 @@ def get_active_research_graph(graph_id: str):
     if graph is None:
         return jsonify({"success": False, "error": "active graph not found"}), 404
     return jsonify({"success": True, "graph": graph})
+
+
+@sft_bp.get(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/yaml"
+)
+def download_research_graph_yaml(graph_id: str, version: int):
+    """Download one immutable, server-validated Graph version as YAML."""
+    _require_graph_viewer()
+    graph = research_graphs.load_graph(graph_id=graph_id, version=version)
+    if graph is None:
+        return jsonify({"success": False, "error": "graph version not found"}), 404
+    try:
+        body = research_graphs.graph_yaml_bytes(graph)
+        filename = research_graphs.graph_yaml_filename(graph)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "error": "research graph YAML export failed",
+        }), 500
+
+    etag = f'"{graph["content_hash"]}"'
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status=304, headers={"ETag": etag})
+    response = Response(body, status=200, mimetype="application/yaml")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{filename}"'
+    )
+    response.headers["Content-Length"] = str(len(body))
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["X-FactorTester-Graph-Version"] = str(version)
+    response.headers["X-FactorTester-Graph-Content-Hash"] = (
+        str(graph["content_hash"])
+    )
+    return response
 
 
 @sft_bp.get(
