@@ -12,6 +12,9 @@
   Manager API 暂时不可用时，原生仅使用最小公共回退目录。
 - **用户自填服务器地址**：首次启动进入「配置服务器」，填协议 / 主机 / 端口，
   持久化保存，之后可在右上角菜单「服务器设置」随时修改。
+- **默认公网 Manager**：首次使用时，Swift 先把本机可达的 Manager 作为 bootstrap，
+  读取服务器提供的公网节点排序并选择第一项；不在客户端硬编码公网 IP。设置中手动
+  保存地址后，以用户选择为准。
 - **自签名证书**：对已配置的那台主机放行自签名 https（URLSession + WKWebView 双通道），
   其余主机仍走系统校验。
 - **苹果原生界面**：NavigationStack、Form、系统材质与系统色，自动明暗模式。
@@ -87,6 +90,10 @@ macOS hosted tests 和 UI tests 会启动使用 `com.gtht.client` 的应用宿�
 测试脚本会在缺少持久 identity 时直接失败，不会降级成 ad-hoc 或无签名宿主。
 
 ## 构建可安装版本
+
+客户端构建只操作 FTClient，不会重启本机 Docker Manager 或任何 FactorTester
+测试服务端口。Docker 服务的 `up`、`restart` 和源代码热重载由
+`scripts/server/factortester_container.sh` 单独负责。
 
 ### macOS
 

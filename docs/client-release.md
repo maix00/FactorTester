@@ -13,18 +13,22 @@ No server source checkout, database driver, or local backtest engine is needed.
 Release operations intentionally have two authorities:
 
 - Publisher: `factortester client release --channel stable|beta ...` performs
-  an authenticated Manager restart gate for the selected `--service-port`
-  first. If Manager 7998 is not logged in, the port is not uniquely registered,
-  or the restart is rejected, the command stops before checkout or build. After
-  that gate succeeds it performs the common clean-checkout, build, runtime
-  embedding, inside-out signing, DMG,
+  the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
   Sparkle appcast, compatibility manifest, publication, remote read-back, and
-  receipt pipeline. Main becomes public only after all GitHub draft assets
-  exist. Beta writes immutable assets before switching its appcast and
-  compatibility pointers. It never installs an app.
+  receipt pipeline. It never logs into, stops, restarts, or restores a
+  FactorTester Manager or test-service port. Main becomes public only after
+  all GitHub draft assets exist. Beta writes immutable assets before switching
+  its appcast and compatibility pointers. It never installs an app.
 
-  The lower-level module entry point has the same gate and requires
-  `--service-port`; there is no ungated publish entry point.
+  Server deployment is separate: Docker Compose owns the internal/public
+  Manager and test services. A source/image rollout may invoke the relevant
+  server deployment script, but that operation is not part of the FTClient
+  build or release command. Beta publication receives `--server-origin` and
+  `--release-root` explicitly; it does not discover either value by logging in
+  to or restarting a Manager.
+
+  The lower-level module entry point has the same client-only behavior; there
+  is no implicit server restart hidden inside the publish entry point.
 - Client: FTClient's thin SwiftUI update panel delegates discovery, EdDSA
   verification, download, extraction, post-exit replacement, and relaunch to
   Sparkle. It displays one primary action at a time: check, download, or restart.

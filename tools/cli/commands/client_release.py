@@ -113,15 +113,6 @@ def app_update_restart(as_json: bool) -> None:
 @click.option("--version", required=True)
 @click.option("--build", type=click.IntRange(min=1), required=True)
 @click.option("--source-revision", required=True)
-@click.option(
-    "--service-port",
-    type=click.IntRange(1, 65535),
-    required=True,
-    help=(
-        "本次发布对应的服务端口；发布前会关闭全部已开启端口、"
-        "重启 Manager 7998，再恢复原端口集合"
-    ),
-)
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(
     "--signing-identity",
@@ -141,30 +132,6 @@ def app_update_restart(as_json: bool) -> None:
         "Manifest signing key; Beta defaults to the persistent FactorTester "
         "server release key."
     ),
-)
-@click.option(
-    "--manager-source-mode",
-    type=click.Choice(["worktree", "git-commit"]),
-    default=None,
-    help="发布前 Manager 按当前工作区或指定 Git 提交恢复。",
-)
-@click.option(
-    "--manager-source-revision",
-    default="",
-    help="Manager git-commit 模式使用的完整 Git SHA；默认使用发布 revision。",
-)
-@click.option(
-    "--manager-stop-mode",
-    type=click.Choice(["wait", "force"]),
-    default="wait",
-    show_default=True,
-    help="默认关闭策略：wait 等待优雅退出，force 立即终止活动服务。",
-)
-@click.option(
-    "--manager-port-stop-mode",
-    multiple=True,
-    metavar="PORT=MODE",
-    help="覆盖单个服务端口的关闭策略，可重复，例如 8141=force。",
 )
 @click.option(
     "--legacy-public-key",
@@ -219,20 +186,12 @@ def publish_release(**options) -> None:
     from scripts.release.publish import publish_release as run_release
     from tools.cli.release.signing_keys import manifest_private_key
 
-    service_port = options.pop("service_port")
     options["legacy_private_key"] = manifest_private_key(
         str(options.get("channel") or ""),
         options.get("legacy_private_key"),
     )
-    receipt, restart = run_release(
-        service_port=service_port,
-        **options,
-    )
-    payload = {
-        **receipt.__dict__,
-        "service_restart": restart.__dict__,
-    }
-    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    receipt = run_release(**options)
+    click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
 
 
 @client.command("activate-bundle", hidden=True)

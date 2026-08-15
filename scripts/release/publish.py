@@ -25,7 +25,7 @@ from uuid import uuid4
 # Keep the public script entry point usable when invoked as
 # ``python scripts/release/publish.py``.  In that mode Python initially puts
 # ``scripts/release`` on sys.path, which would otherwise make both the release
-# package and the Manager gate unavailable before argparse can run.
+# package unavailable before argparse can run.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -374,40 +374,20 @@ def _is_loopback_release_origin(value: str | None) -> bool:
         return False
 
 
-def publish_release(*, service_port: int, **options: Any) -> tuple[
-    PublishedRelease, Any
-]:
-    """Run the authenticated Manager gate before any release build work."""
-    from tools.cli.release.service_activation import restart_release_service
+def publish_release(**options: Any) -> PublishedRelease:
+    """Build and publish a client without touching any FactorTester server.
 
+    Client packaging and server deployment have different lifecycle owners.
+    In particular, a Docker-managed internal Manager must not be stopped or
+    restarted merely because FTClient is being built.  Server source/image
+    rollout remains an explicit Docker/deployment operation outside this
+    client release transaction.
+    """
     source_revision = str(options.get("source_revision") or "")
     # A clean-commit release deliberately builds from a temporary detached
     # worktree.  Do not reject the caller's checkout before that worktree is
     # materialized; normal current-checkout releases remain strict.
     clean_revision = str(options.get("from_clean_commit") or "").strip()
-    configured_manager_source_mode = str(
-        options.pop("manager_source_mode", None) or ""
-    ).strip()
-    manager_source_mode = configured_manager_source_mode or (
-        "git-commit" if clean_revision else "worktree"
-    )
-    manager_source_revision = str(
-        options.pop("manager_source_revision", None)
-        or clean_revision or source_revision
-    ).strip()
-    manager_stop_mode = str(options.pop("manager_stop_mode", None) or "wait")
-    manager_port_stop_modes = _parse_manager_port_stop_modes(
-        tuple(options.pop("manager_port_stop_mode", None) or ())
-    )
-    if clean_revision and manager_source_mode != "git-commit":
-        raise ValueError(
-            "--from-clean-commit requires Manager source mode git-commit; "
-            "发布服务不能回退到当前工作区"
-        )
-    if manager_source_mode == "git-commit" and manager_source_revision != source_revision:
-        raise ValueError(
-            "Manager git-commit revision must equal --source-revision"
-        )
     if clean_revision:
         if clean_revision != source_revision:
             raise ValueError(
@@ -422,49 +402,7 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
         )
     else:
         _validate_source_checkout(REPO, source_revision)
-    restart_options: dict[str, Any] = {}
-    if manager_source_mode != "worktree":
-        restart_options["source_mode"] = manager_source_mode
-    if manager_stop_mode != "wait":
-        restart_options["stop_mode"] = manager_stop_mode
-    if manager_port_stop_modes:
-        restart_options["port_stop_modes"] = manager_port_stop_modes
-    service_restart = restart_release_service(
-        port=service_port,
-        source_root=REPO,
-        source_revision=source_revision,
-        **restart_options,
-    )
-    if options.get("channel") == "beta":
-        configured_origin = options.get("server_origin")
-        if configured_origin and str(configured_origin).rstrip("/") != (
-            service_restart.manager_url.rstrip("/")
-        ):
-            raise ValueError("Beta release origin must be Manager 7998")
-        configured_root = options.get("release_root")
-        if configured_root and Path(configured_root).resolve() != Path(
-            service_restart.release_root
-        ).resolve():
-            raise ValueError("Beta release root must be Manager release storage")
-        options["server_origin"] = service_restart.manager_url
-        options["release_root"] = Path(service_restart.release_root)
-    receipt = release_client(**options)
-    return receipt, service_restart
-
-
-def _parse_manager_port_stop_modes(values: tuple[str, ...]) -> dict[int, str]:
-    parsed: dict[int, str] = {}
-    for value in values:
-        raw_port, separator, mode = value.partition("=")
-        if not separator or not raw_port.isdigit() or mode not in {"wait", "force"}:
-            raise ValueError(
-                "--manager-port-stop-mode must use PORT=wait or PORT=force"
-            )
-        port = int(raw_port)
-        if not 1 <= port <= 65535 or port in parsed:
-            raise ValueError("--manager-port-stop-mode ports must be unique 1..65535")
-        parsed[port] = mode
-    return parsed
+    return release_client(**options)
 
 
 def _persist_clean_commit_receipt(
@@ -946,15 +884,6 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--build", type=int, required=True)
     parser.add_argument("--source-revision", required=True)
-    parser.add_argument(
-        "--service-port",
-        type=int,
-        required=True,
-        help=(
-            "本次发布对应端口；发布前关闭全部已开启端口、重启 "
-            "Manager 7998，再恢复原端口集合"
-        ),
-    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--signing-identity",
@@ -998,19 +927,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     options = vars(args)
-    service_port = options.pop("service_port")
-    receipt, service_restart = publish_release(
-        service_port=service_port,
-        **options,
-    )
-    print(json.dumps(
-        {
-            **asdict(receipt),
-            "service_restart": asdict(service_restart),
-        },
-        ensure_ascii=False,
-        indent=2,
-    ))
+    receipt = publish_release(**options)
+    print(json.dumps(asdict(receipt), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

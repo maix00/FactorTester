@@ -13,8 +13,9 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     view = (
         SOURCES / "Features" / "Settings" / "ClientReleaseSettingsView.swift"
     ).read_text(encoding="utf-8")
-    home = (
-        SOURCES / "Features" / "Home" / "HomeView.swift"
+    root = (SOURCES / "App" / "RootView.swift").read_text(encoding="utf-8")
+    web_shell = (
+        SOURCES / "Features" / "Web" / "ClientWebShellView.swift"
     ).read_text(encoding="utf-8")
     app = (SOURCES / "App" / "FactorTesterClientApp.swift").read_text(
         encoding="utf-8"
@@ -40,8 +41,10 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "handleUpdateCommand" in controller
     assert 'pendingExternalAction = action' in controller
     assert 'case "download"' in controller
-    assert "ClientSidebar" in home
-    assert "openResearch: { open(.research) }" in home
+    assert "ClientWebShellView()" in root
+    assert "ClientWebShellToolbar" in web_shell
+    assert "client-shell.update-restart" in web_shell
+    assert "client-shell.update-download" in web_shell
     assert "approval" not in view.lower()
     assert 'Window("FTClient", id: "main")' in app
     assert "WindowGroup" in app
@@ -375,19 +378,17 @@ def test_macos_tabs_and_account_center_use_real_routes() -> None:
     assert "baseURL" in config and "port" in config
 
 
-def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
+def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None:
     navigation_root = SOURCES / "Navigation"
-    sidebar = (navigation_root / "ClientSidebar.swift").read_text(
-        encoding="utf-8"
-    )
     tab_model = (navigation_root / "ClientTab.swift").read_text(
         encoding="utf-8"
     )
-    home = (SOURCES / "Features" / "Home" / "HomeView.swift").read_text(
+    tab_view = (navigation_root / "ClientTabView.swift").read_text(
         encoding="utf-8"
     )
-    dashboard = (
-        SOURCES / "Features" / "Home" / "HomeDashboardView.swift"
+    root = (SOURCES / "App" / "RootView.swift").read_text(encoding="utf-8")
+    web_shell = (
+        SOURCES / "Features" / "Web" / "ClientWebShellView.swift"
     ).read_text(encoding="utf-8")
     profile_root = SOURCES / "Features" / "Profiles"
     directory = (profile_root / "ProfilesDirectoryView.swift").read_text(
@@ -414,22 +415,20 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
         encoding="utf-8"
     )
 
-    for label in ("主页", "研究", "因子库", "产品", "设置"):
-        assert label in sidebar + tab_model
-    assert "个人中心" not in sidebar + tab_model
-    assert 'Section("已打开")' in sidebar
-    assert "openTabs.filter(\\.isClosable)" in sidebar
-    assert "TabView(selection:" not in home
-    assert "LocalProfileController()" in home
+    for label in ("研究", "因子库", "产品", "设置"):
+        assert label in tab_model
+    assert "个人中心" not in tab_model
+    assert "ClientWebShellView()" in root
+    assert "WebPageView(" in web_shell
+    assert "LocalProfileController()" in web_shell
+    assert "case .profiles:" in tab_view
+    assert "case .accountSettings:" in tab_view
     assert "List(controller.profiles)" in directory
     assert "MaxA" not in directory and "MaxB" not in directory
     assert "所有进行中和已完成的研究统一从 Research" in workspace
     for label in ("实时过程", "Trial Plans", "Evidence"):
         assert label not in workspace
     assert "不轮询完整 trace" in sections + live
-    for label in ("研究进度",):
-        assert label in dashboard
-    assert "openTab(.profiles)" not in dashboard
     assert "Form {" not in login
     assert "Form {" not in server
     assert "SettingsEditableText" in server
@@ -440,8 +439,6 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert 'path: "/factors"' in tab_model
     assert 'route = ("/factors/family/", "function", reference.targetRef)' in tab_model
     assert "/custom-factors/editor" not in tab_model
-    assert ".safeAreaInset(edge: .bottom" in sidebar
-    assert ".onTapGesture { selection = tab.id }" in sidebar
     settings_hub = (
         SOURCES / "Features" / "Settings" / "ClientSettingsHub.swift"
     ).read_text(encoding="utf-8")
@@ -449,7 +446,7 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
         SOURCES / "Features" / "Account" / "AccountCenterView.swift"
     ).read_text(encoding="utf-8")
     assert (
-        "case account, server, workspace, language, updates"
+        "case account, server, workspace, adapters, localResearch, language, updates"
         in settings_hub
     )
     assert "LocalProfilesView()" not in settings_hub
@@ -514,12 +511,6 @@ def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     assert "selectedBranchID" in combined
     for forbidden in ("stdout", "full trace", "markdown"):
         assert forbidden not in service.lower() + controller.lower()
-    for identifier in (
-        "sidebar.launch.home",
-        "sidebar.launch.research",
-        "sidebar.launch.account",
-        "sidebar.launch.settings",
-        "sidebar.launch.web:factor-library",
-        "sidebar.launch.web:products",
-    ):
-        assert identifier in ui_test
+    assert "WebShellNavigationUITests" in ui_test
+    assert 'app.buttons["sidebar.launch.home"]' in ui_test
+    assert "XCTAssertFalse" in ui_test
