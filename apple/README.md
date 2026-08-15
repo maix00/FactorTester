@@ -10,8 +10,10 @@
   不依赖 Web 侧栏是否显示。
 - **跨客户端模块注册表**：Web shell 与原生 fallback 都使用 Manager 的 `/api/modules`；
   Manager API 暂时不可用时，原生仅使用最小公共回退目录。
-- **用户自填服务器地址**：首次启动进入「配置服务器」，填协议 / 主机 / 端口，
-  持久化保存，之后可在右上角菜单「服务器设置」随时修改。
+- **服务器引导与手动回退**：发布构建内置一个公网 HTTPS 引导地址；首次启动先读取
+  引导 Manager 的在线目录。引导不可达时才进入「连接 FactorTester」，用户可手动填
+  Manager 的协议 / 主机 / 端口，连通后持久化保存，之后可在右上角菜单「服务器设置」
+  随时修改。
 - **默认公网 Manager**：发布构建内置一个公网 IP 的 HTTPS Manager 作为唯一引导
   地址。首次启动只从该地址读取在线公网节点和机构内网节点，并从当前设备并发测速
   选择最快公网 Manager；登录后按用户机构筛选并测速可达的内网 Manager，优先使用
@@ -31,7 +33,7 @@
 apple/
   project.yml                 XcodeGen 工程定义（macOS + iOS 两个 target）
   Sources/
-    App/                      @main 入口、RootView（按是否配置服务器分流）
+    App/                      @main 入口、RootView（自动引导失败时手动配置）
     Config/ServerConfig.swift 服务器地址（持久化、可改）
     Networking/               APIClient、自签名信任、数据模型
     Navigation/               Module 模型、ModuleRegistry（共享注册表）、页面解析
@@ -119,7 +121,9 @@ macOS hosted tests 和 UI tests 会启动使用 `com.gtht.client` 的应用宿�
 
 ## 首次使用
 
-1. 启动 App → 「配置服务器」填写：协议（http/https）、主机或 IP、端口（如 `8000`）→ 保存。
+1. 启动 App → 客户端先尝试内置公网 HTTPS 引导地址；若引导不可达，进入「连接
+   FactorTester」，填写 Manager 的协议（公网必须 HTTPS）、主机或 IP、端口（默认
+   `7998`）并测试连接。
 2. 首页出现模块网格（来自服务器注册表）。点需要登录的模块会弹出登录/注册。
 3. 右上角菜单可「服务器设置」改地址、或退出登录。
 4. 客户端设置中选择人类或 Agent profile，并配置本地 adapter 的 executable
@@ -129,3 +133,7 @@ macOS hosted tests 和 UI tests 会启动使用 `com.gtht.client` 的应用宿�
 
 审批不在设置页面完成。设置页只负责配置和展示已有审批事实；Skill 执行、图变更
 和后端更新仍在对应 Agent 对话中接受审计。
+
+研究报告的共享附件、嵌入图片和本地资源使用同一条对象数据面：7998 只返回短时
+访问票据，实际字节从 7997 读取。Swift 客户端与 Web shell 都校验授权声明的大小；
+客户端还会校验 SHA-256，源 Manager 离线时明确报告对象不可用。
