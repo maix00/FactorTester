@@ -40,6 +40,19 @@ def test_task_density_overrides_load_last_and_cover_every_task_surface() -> None
         _rule(css, selector)
 
 
+def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
+    css = (WEB_ROOT / "styles" / "task-inputs.css").read_text()
+    row = _rule(css, ".test-workbench .test-settings-manager-row")
+    defaults = _rule(
+        css,
+        ".test-workbench .test-settings-manager-defaults.backend-settings-chip-row",
+    )
+    assert "padding: 3px 0" in row
+    assert "border-top" not in row
+    assert "min-height: 0" in defaults
+    assert "padding: 0" in defaults
+
+
 def test_backtest_source_panel_covers_executable_and_retained_inputs() -> None:
     source = (WEB_ROOT / "workbench" / "test-source-upload.js").read_text()
     contracts = (ROOT / "tools" / "testers" / "run_input_contracts.py").read_text()

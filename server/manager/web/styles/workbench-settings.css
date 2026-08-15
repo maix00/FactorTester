@@ -84,7 +84,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-settings-manager-row-body > span:first-child { display: block; min-width: 0; }
 .test-settings-manager-row-body small { color: var(--muted); line-height: 1.25; }
 .test-settings-manager-defaults { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
-.test-settings-manager-defaults .backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
+.test-settings-manager-defaults.backend-settings-chip-row { min-height: 0; padding: 0; background: transparent; }
 .test-settings-manager-defaults .backend-settings-chip-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
 .test-settings-manager-defaults .backend-settings-chip-group-label { display: none; }
 .test-settings-manager-defaults .backend-setting-chip { min-width: 0; padding-top: 3px; padding-bottom: 3px; white-space: nowrap; }
