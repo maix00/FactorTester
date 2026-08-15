@@ -26,13 +26,14 @@ from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from server.manager.domain.devices import PUBLIC_DEVICE_LIMIT
+from server.manager.storage.account_domain.remote import AccountDomainControlMixin
 
 
 CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 5
+CONTROL_DATABASE_SCHEMA_VERSION = 6
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -356,6 +357,31 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     """
+    CREATE SEQUENCE IF NOT EXISTS control_account_domain_revision_seq
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS control_account_domain_entities (
+        principal TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        visibility TEXT NOT NULL DEFAULT 'private',
+        authorized_users JSONB NOT NULL DEFAULT '[]'::jsonb,
+        storage_server_id TEXT NOT NULL DEFAULT '',
+        origin_manager_id TEXT NOT NULL DEFAULT '',
+        revision BIGINT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (principal, entity_type, entity_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS control_account_domain_revision ON control_account_domain_entities(revision)",
+    "CREATE INDEX IF NOT EXISTS control_account_domain_principal ON control_account_domain_entities(principal, entity_type, updated_at DESC)",
+    "ALTER TABLE control_account_domain_entities ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'",
+    "ALTER TABLE control_account_domain_entities ADD COLUMN IF NOT EXISTS authorized_users JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE control_account_domain_entities ADD COLUMN IF NOT EXISTS storage_server_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE control_account_domain_entities ADD COLUMN IF NOT EXISTS origin_manager_id TEXT NOT NULL DEFAULT ''",
+    """
     CREATE TABLE IF NOT EXISTS source_versions (
         source_id TEXT NOT NULL,
         version_id TEXT NOT NULL,
@@ -444,7 +470,7 @@ def _row_value(row: object, key: str, index: int = 0, default: object = None) ->
 ConnectFactory = Callable[[ControlDatabaseConfig], Any]
 
 
-class PostgresControlStore:
+class PostgresControlStore(AccountDomainControlMixin):
     """Small PostgreSQL repository with lazy connections and idempotent writes."""
 
     def __init__(

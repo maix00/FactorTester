@@ -39,6 +39,10 @@ from tools.data.sqlite.account_manager import (
     save_factor_set as _save_factor_set,
     delete_factor_set as _delete_factor_set,
 )
+from tools.data.sqlite.account_manager.domain_sync import (
+    enqueue_entity as _enqueue_domain_entity,
+    replace_entities as _replace_domain_entities,
+)
 from server.manager.domain.organization_scope import canonical_username
 
 accounts_lock = threading.Lock()
@@ -77,7 +81,16 @@ def load_accounts() -> list:
 
     control_store = control_store_from_env()
     if control_store is not None:
-        return control_store.load_accounts()
+        try:
+            accounts = control_store.load_accounts()
+        except Exception:
+            ensure_account_manager_sqlite_store()
+            return _load_accounts()
+        try:
+            _save_accounts(accounts)
+        except Exception:
+            pass
+        return accounts
     ensure_account_manager_sqlite_store()
     return _load_accounts()
 
@@ -88,8 +101,14 @@ def save_accounts(accounts: list) -> None:
     control_store = control_store_from_env()
     if control_store is not None:
         control_store.replace_accounts(accounts)
+        try:
+            _save_accounts(accounts)
+        except Exception:
+            pass
+        _enqueue_user_metadata(accounts)
         return
     _save_accounts(accounts)
+    _enqueue_user_metadata(accounts)
 
 
 def load_organizations() -> list:
@@ -97,7 +116,16 @@ def load_organizations() -> list:
 
     control_store = control_store_from_env()
     if control_store is not None:
-        return control_store.load_organizations()
+        try:
+            organizations = control_store.load_organizations()
+        except Exception:
+            ensure_account_manager_sqlite_store()
+            return _load_organizations()
+        try:
+            _save_organizations(organizations)
+        except Exception:
+            pass
+        return organizations
     ensure_account_manager_sqlite_store()
     return _load_organizations()
 
@@ -108,8 +136,18 @@ def save_organizations(organizations: list) -> None:
     control_store = control_store_from_env()
     if control_store is not None:
         control_store.replace_organizations(organizations)
+        try:
+            _save_organizations(organizations)
+        except Exception:
+            pass
+        _replace_domain_entities(
+            "__system__", "organization", organizations, id_key="id",
+        )
         return
     _save_organizations(organizations)
+    _replace_domain_entities(
+        "__system__", "organization", organizations, id_key="id",
+    )
 
 
 def load_levels() -> list:
@@ -117,7 +155,16 @@ def load_levels() -> list:
 
     control_store = control_store_from_env()
     if control_store is not None:
-        return control_store.load_levels()
+        try:
+            levels = control_store.load_levels()
+        except Exception:
+            ensure_account_manager_sqlite_store()
+            return _load_levels()
+        try:
+            _save_levels(levels)
+        except Exception:
+            pass
+        return levels
     ensure_account_manager_sqlite_store()
     return _load_levels()
 
@@ -128,8 +175,35 @@ def save_levels(levels: list) -> None:
     control_store = control_store_from_env()
     if control_store is not None:
         control_store.replace_levels(levels)
+        try:
+            _save_levels(levels)
+        except Exception:
+            pass
+        _replace_domain_entities(
+            "__system__", "level", levels, id_key="id",
+        )
         return
     _save_levels(levels)
+    _replace_domain_entities("__system__", "level", levels, id_key="id")
+
+
+def _enqueue_user_metadata(accounts: list) -> None:
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        username = str(account.get("username") or "").strip()
+        if not username:
+            continue
+        _enqueue_domain_entity(
+            username,
+            "user_metadata",
+            username,
+            {
+                key: value
+                for key, value in account.items()
+                if key not in {"salt", "hash", "password_hash", "password"}
+            },
+        )
 
 
 def slugify_org_id(name: str) -> str:
@@ -447,6 +521,9 @@ def load_product_groups(username: str) -> list:
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
+    _replace_domain_entities(
+        username, "product_group", groups, id_key="id",
+    )
 
 
 def load_product_categories(username: str) -> list[dict]:
@@ -457,6 +534,9 @@ def load_product_categories(username: str) -> list[dict]:
 def save_product_categories(username: str, categories: list[dict]) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_categories(username, categories)
+    _replace_domain_entities(
+        username, "product_category", categories, id_key="id",
+    )
 
 
 def list_factor_sets(username: str) -> list[dict]:
@@ -471,12 +551,21 @@ def get_factor_set(username: str, target_ref: str) -> dict | None:
 
 def save_factor_set(username: str, value: dict) -> dict:
     ensure_account_manager_sqlite_store()
-    return _save_factor_set(username, value)
+    result = _save_factor_set(username, value)
+    _enqueue_domain_entity(
+        username, "factor_set", str(result.get("target_ref") or result.get("set_ref") or ""), result,
+    )
+    return result
 
 
 def delete_factor_set(username: str, target_ref: str) -> bool:
     ensure_account_manager_sqlite_store()
-    return _delete_factor_set(username, target_ref)
+    deleted = _delete_factor_set(username, target_ref)
+    if deleted:
+        _enqueue_domain_entity(
+            username, "factor_set", target_ref, {}, deleted=True,
+        )
+    return deleted
 
 
 def normalize_product_group(product_group: str | None) -> str:
@@ -497,12 +586,30 @@ def save_factor_param_config(
     metadata: dict | None = None,
 ) -> dict:
     ensure_account_manager_sqlite_store()
-    return _save_factor_param_config(username, ff_alias, params_list, scope_key, metadata=metadata)
+    result = _save_factor_param_config(
+        username, ff_alias, params_list, scope_key, metadata=metadata,
+    )
+    _enqueue_domain_entity(
+        username,
+        "factor_param_config",
+        f"{scope_key}:{ff_alias}",
+        result,
+    )
+    return result
 
 
 def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
     ensure_account_manager_sqlite_store()
-    return _delete_factor_param_config(username, ff_alias, scope_key)
+    deleted = _delete_factor_param_config(username, ff_alias, scope_key)
+    if deleted:
+        _enqueue_domain_entity(
+            username,
+            "factor_param_config",
+            f"{scope_key}:{ff_alias}",
+            {},
+            deleted=True,
+        )
+    return deleted
 
 
 def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
@@ -527,12 +634,34 @@ def ensure_scope_exists(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> st
 
 def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
     ensure_account_manager_sqlite_store()
-    return _rename_scope(username, old_scope_key, new_scope_key)
+    aliases = _list_factor_param_config_aliases(username, old_scope_key)
+    renamed = _rename_scope(username, old_scope_key, new_scope_key)
+    if renamed:
+        for alias in aliases:
+            _enqueue_domain_entity(
+                username, "factor_param_config", f"{old_scope_key}:{alias}",
+                {}, deleted=True,
+            )
+            value = _load_factor_param_config(username, alias, new_scope_key)
+            if isinstance(value, dict):
+                _enqueue_domain_entity(
+                    username, "factor_param_config", f"{new_scope_key}:{alias}",
+                    value,
+                )
+    return renamed
 
 
 def delete_scope(username: str, scope_key: str) -> bool:
     ensure_account_manager_sqlite_store()
-    return _delete_scope(username, scope_key)
+    aliases = _list_factor_param_config_aliases(username, scope_key)
+    deleted = _delete_scope(username, scope_key)
+    if deleted:
+        for alias in aliases:
+            _enqueue_domain_entity(
+                username, "factor_param_config", f"{scope_key}:{alias}",
+                {}, deleted=True,
+            )
+    return deleted
 
 
 def factor_research_config_hash(config: dict | None) -> str:
@@ -561,7 +690,7 @@ def save_factor_research_run(
     run_id: str | None = None,
 ) -> dict:
     ensure_account_manager_sqlite_store()
-    return _save_factor_research_run(
+    result = _save_factor_research_run(
         username,
         ff_alias=ff_alias,
         factor_alias=factor_alias,
@@ -581,6 +710,13 @@ def save_factor_research_run(
         slice_name=slice_name,
         run_id=run_id,
     )
+    _enqueue_domain_entity(
+        username,
+        "factor_research_run",
+        str(result.get("run_id") or run_id or ""),
+        result,
+    )
+    return result
 
 
 def list_factor_research_runs(
@@ -625,4 +761,9 @@ def list_factor_research_runs(
 
 def delete_factor_research_run(username: str, run_id: str) -> bool:
     ensure_account_manager_sqlite_store()
-    return _delete_factor_research_run(username, run_id)
+    deleted = _delete_factor_research_run(username, run_id)
+    if deleted:
+        _enqueue_domain_entity(
+            username, "factor_research_run", run_id, {}, deleted=True,
+        )
+    return deleted

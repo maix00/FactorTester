@@ -1,0 +1,427 @@
+"""Manager-local SQLite mirror and durable outbox for account metadata."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Iterable
+
+from tools.data.sqlite.db import connect_sqlite
+
+
+ENTITY_TYPES = {
+    "user_metadata",
+    "organization",
+    "level",
+    "profile",
+    "factor_set",
+    "factor_param_config",
+    "factor_source",
+    "factor_research_run",
+    "product_category",
+    "product_group",
+    "research_publication",
+}
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create the mirror tables in the existing Manager SQLite database."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS account_domain_entities (
+            principal TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            remote_revision INTEGER,
+            base_revision INTEGER,
+            origin_manager_id TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (principal, entity_type, entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS account_domain_entities_type
+            ON account_domain_entities(entity_type, principal, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS account_domain_entities_remote_revision
+            ON account_domain_entities(remote_revision);
+
+        CREATE TABLE IF NOT EXISTS account_domain_outbox (
+            operation_id TEXT PRIMARY KEY,
+            principal TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            base_revision INTEGER,
+            created_at REAL NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS account_domain_outbox_entity
+            ON account_domain_outbox(principal, entity_type, entity_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS account_domain_cursors (
+            scope_key TEXT PRIMARY KEY,
+            remote_revision INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS account_domain_conflicts (
+            conflict_id TEXT PRIMARY KEY,
+            principal TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            local_payload_json TEXT NOT NULL,
+            remote_payload_json TEXT NOT NULL,
+            remote_deleted INTEGER NOT NULL DEFAULT 0,
+            remote_revision INTEGER,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at REAL NOT NULL,
+            resolved_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS account_domain_conflicts_entity
+            ON account_domain_conflicts(principal, entity_type, entity_id, status);
+        """
+    )
+
+
+class LocalAccountDomainStore:
+    """Small SQLite repository; it never opens PostgreSQL."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+
+    def upsert_local(
+        self,
+        *,
+        principal: str,
+        entity_type: str,
+        entity_id: str,
+        payload: dict[str, Any],
+        manager_id: str,
+        deleted: bool = False,
+    ) -> str:
+        now = time.time()
+        operation_id = uuid.uuid4().hex
+        encoded = _encode(payload)
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            current = conn.execute(
+                """
+                SELECT remote_revision FROM account_domain_entities
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                (principal, entity_type, entity_id),
+            ).fetchone()
+            base_revision = (
+                int(current["remote_revision"])
+                if current and current["remote_revision"] is not None else None
+            )
+            conn.execute(
+                """
+                INSERT INTO account_domain_entities(
+                    principal, entity_type, entity_id, payload_json, deleted,
+                    remote_revision, base_revision, origin_manager_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT(principal, entity_type, entity_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,
+                    deleted=excluded.deleted,
+                    base_revision=excluded.base_revision,
+                    origin_manager_id=excluded.origin_manager_id,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    principal, entity_type, entity_id, encoded, int(deleted),
+                    base_revision, manager_id, now,
+                ),
+            )
+            # Coalesce local edits. The newest state is the only state that
+            # needs to reach the authority; operation_id still makes retries
+            # auditable and independent of a process lifetime.
+            conn.execute(
+                """
+                DELETE FROM account_domain_outbox
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                (principal, entity_type, entity_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO account_domain_outbox(
+                    operation_id, principal, entity_type, entity_id,
+                    payload_json, deleted, base_revision, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation_id, principal, entity_type, entity_id, encoded,
+                    int(deleted), base_revision, now,
+                ),
+            )
+        return operation_id
+
+    def pending(self, *, principal: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if principal:
+            clauses.append("principal=?")
+            params.append(principal)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(max(1, min(int(limit), 1000)))
+        with connect_sqlite(self.path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT operation_id, principal, entity_type, entity_id,
+                       payload_json, deleted, base_revision, attempts, last_error
+                FROM account_domain_outbox{where}
+                ORDER BY created_at, operation_id LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return [_outbox_row(row) for row in rows]
+
+    def mark_attempt(self, operation_id: str, error: str = "") -> None:
+        with connect_sqlite(self.path) as conn:
+            conn.execute(
+                """
+                UPDATE account_domain_outbox
+                SET attempts=attempts+1, last_error=?
+                WHERE operation_id=?
+                """,
+                (str(error or "")[:1000], operation_id),
+            )
+
+    def record_push_conflict(
+        self, item: dict[str, Any], remote: dict[str, Any],
+    ) -> None:
+        """Persist a compare-and-set rejection for later user resolution."""
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO account_domain_conflicts(
+                    conflict_id, principal, entity_type, entity_id,
+                    local_payload_json, remote_payload_json,
+                    remote_deleted, remote_revision, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    item["principal"], item["entity_type"], item["entity_id"],
+                    _encode(item.get("payload") or {}),
+                    _encode(remote.get("payload") or {}),
+                    int(bool(remote.get("deleted"))),
+                    int(remote.get("revision") or 0), time.time(),
+                ),
+            )
+
+    def acknowledge(self, operation_id: str, *, revision: int) -> None:
+        with connect_sqlite(self.path) as conn:
+            row = conn.execute(
+                """
+                SELECT principal, entity_type, entity_id
+                FROM account_domain_outbox WHERE operation_id=?
+                """,
+                (operation_id,),
+            ).fetchone()
+            if row is None:
+                return
+            conn.execute(
+                """
+                UPDATE account_domain_entities
+                SET remote_revision=?, base_revision=?, updated_at=?
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                (
+                    int(revision), int(revision), time.time(),
+                    row["principal"], row["entity_type"], row["entity_id"],
+                ),
+            )
+            conn.execute(
+                "DELETE FROM account_domain_outbox WHERE operation_id=?",
+                (operation_id,),
+            )
+
+    def apply_remote(self, row: dict[str, Any]) -> str:
+        principal = str(row.get("principal") or "").strip()
+        entity_type = str(row.get("entity_type") or "").strip()
+        entity_id = str(row.get("entity_id") or "").strip()
+        payload = row.get("payload")
+        if not principal or not entity_type or not entity_id or not isinstance(payload, dict):
+            raise ValueError("remote account-domain row is invalid")
+        revision = int(row.get("revision") or 0)
+        deleted = bool(row.get("deleted"))
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            pending = conn.execute(
+                """
+                SELECT payload_json, deleted FROM account_domain_outbox
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (principal, entity_type, entity_id),
+            ).fetchone()
+            if pending is not None:
+                local = {
+                    "payload": _decode(pending["payload_json"]),
+                    "deleted": bool(pending["deleted"]),
+                }
+                if local != {"payload": payload, "deleted": deleted}:
+                    conflict_id = uuid.uuid4().hex
+                    conn.execute(
+                        """
+                        INSERT INTO account_domain_conflicts(
+                            conflict_id, principal, entity_type, entity_id,
+                            local_payload_json, remote_payload_json,
+                            remote_deleted, remote_revision, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            conflict_id, principal, entity_type, entity_id,
+                            pending["payload_json"], _encode(payload),
+                            int(deleted), revision, time.time(),
+                        ),
+                    )
+                    return "conflict"
+            current = conn.execute(
+                """
+                SELECT remote_revision FROM account_domain_entities
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                (principal, entity_type, entity_id),
+            ).fetchone()
+            if current and current["remote_revision"] is not None and int(current["remote_revision"]) >= revision:
+                return "stale"
+            conn.execute(
+                """
+                INSERT INTO account_domain_entities(
+                    principal, entity_type, entity_id, payload_json, deleted,
+                    remote_revision, base_revision, origin_manager_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(principal, entity_type, entity_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,
+                    deleted=excluded.deleted,
+                    remote_revision=excluded.remote_revision,
+                    base_revision=excluded.base_revision,
+                    origin_manager_id=excluded.origin_manager_id,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    principal, entity_type, entity_id, _encode(payload),
+                    int(deleted), revision, revision,
+                    str(row.get("origin_manager_id") or ""), time.time(),
+                ),
+            )
+        return "applied"
+
+    def cursor(self, scope_key: str) -> int:
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            row = conn.execute(
+                "SELECT remote_revision FROM account_domain_cursors WHERE scope_key=?",
+                (scope_key,),
+            ).fetchone()
+        return int(row["remote_revision"]) if row else 0
+
+    def advance_cursor(self, scope_key: str, revision: int) -> None:
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            conn.execute(
+                """
+                INSERT INTO account_domain_cursors(scope_key, remote_revision, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(scope_key) DO UPDATE SET
+                    remote_revision=MAX(remote_revision, excluded.remote_revision),
+                    updated_at=excluded.updated_at
+                """,
+                (scope_key, int(revision), time.time()),
+            )
+
+    def list_entities(
+        self,
+        *,
+        principal: str = "",
+        entity_type: str = "",
+        include_shared: bool = True,
+    ) -> list[dict[str, Any]]:
+        clauses = ["deleted=0"]
+        params: list[Any] = []
+        if principal:
+            if include_shared:
+                clauses.append("(principal=? OR json_extract(payload_json, '$.visibility')='public' OR (json_extract(payload_json, '$.visibility')='authorized' AND instr(payload_json, ?) > 0))")
+                params.extend((principal, f'"{principal}"'))
+            else:
+                clauses.append("principal=?")
+                params.append(principal)
+        if entity_type:
+            clauses.append("entity_type=?")
+            params.append(entity_type)
+        with connect_sqlite(self.path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT principal, entity_type, entity_id, payload_json,
+                       deleted, remote_revision, origin_manager_id, updated_at
+                FROM account_domain_entities
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_at DESC, entity_id
+                """,
+                tuple(params),
+            ).fetchall()
+        return [_entity_row(row) for row in rows]
+
+    def conflicts(self, *, principal: str = "", status: str = "open") -> list[dict[str, Any]]:
+        clauses = ["status=?"]
+        params: list[Any] = [status]
+        if principal:
+            clauses.append("principal=?")
+            params.append(principal)
+        with connect_sqlite(self.path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM account_domain_conflicts WHERE {' AND '.join(clauses)} ORDER BY created_at",
+                tuple(params),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def _encode(value: dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _decode(value: object) -> dict[str, Any]:
+    try:
+        decoded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _outbox_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "operation_id": str(row["operation_id"]),
+        "principal": str(row["principal"]),
+        "entity_type": str(row["entity_type"]),
+        "entity_id": str(row["entity_id"]),
+        "payload": _decode(row["payload_json"]),
+        "deleted": bool(row["deleted"]),
+        "base_revision": row["base_revision"],
+        "attempts": int(row["attempts"] or 0),
+        "last_error": str(row["last_error"] or ""),
+    }
+
+
+def _entity_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "principal": str(row["principal"]),
+        "entity_type": str(row["entity_type"]),
+        "entity_id": str(row["entity_id"]),
+        "payload": _decode(row["payload_json"]),
+        "deleted": bool(row["deleted"]),
+        "revision": row["remote_revision"],
+        "origin_manager_id": str(row["origin_manager_id"] or ""),
+        "updated_at": float(row["updated_at"] or 0),
+    }

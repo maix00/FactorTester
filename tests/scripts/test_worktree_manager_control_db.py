@@ -35,10 +35,12 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "public_access" in schema
     assert "last_seen_at" in schema
     assert "source_versions" in schema
+    assert "control_account_domain_entities" in schema
+    assert "control_account_domain_revision_seq" in schema
     assert "client_type" in schema
     assert "enrollment_ip" in schema
     assert "last_seen_ip" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 5
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 6
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:

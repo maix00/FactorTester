@@ -11,6 +11,7 @@ from tools.data.account_manage import (
     load_product_categories,
     save_product_categories,
 )
+from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
 
 
 _CATEGORY_NAME = re.compile(r"[^/\\\r\n]{1,120}")
@@ -162,6 +163,7 @@ def delete_product_category(username: str, category_id: str) -> bool:
     if len(filtered) == len(categories):
         return False
     save_product_categories(username, filtered)
+    enqueue_entity(username, "product_category", wanted, {}, deleted=True)
     return True
 
 
