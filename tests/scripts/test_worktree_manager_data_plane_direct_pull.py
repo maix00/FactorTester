@@ -150,12 +150,11 @@ def test_direct_pull_streams_range_and_head_without_relay_copy(tmp_path) -> None
             assert response.headers["Content-Length"] == str(len(raw))
             assert response.read() == b""
 
-        summary = runtime.telemetry.summary(now=time.time(), since=time.time() - 10)
-        assert summary["totals"]["transferred_bytes"] == 6
-        assert summary["dimensions"][0]["mode"] == "direct_pull"
-        assert summary["dimensions"][0]["surface"] == "client"
-
     assert not any(runtime.staging_root.rglob("*"))
+    summary = runtime.telemetry.summary(now=time.time(), since=time.time() - 10)
+    assert summary["totals"]["transferred_bytes"] == 6
+    assert summary["dimensions"][0]["mode"] == "direct_pull"
+    assert summary["dimensions"][0]["surface"] == "client"
 
 
 def test_direct_pull_forwards_unsatisfied_range(tmp_path) -> None:
