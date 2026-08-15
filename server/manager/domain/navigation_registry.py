@@ -122,7 +122,7 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
         "path": "/",
         "requiresAuth": False,
         "roles": [],
-        "sidebarVisible": False,
+        "sidebarVisible": True,
         "homeVisible": True,
         "pinned": True,
     },

@@ -28,6 +28,9 @@
       const root = document.documentElement;
       const body = document.body;
       const toggle = document.querySelector("#sidebar-toggle");
+      document.querySelector("#home-brand")?.addEventListener(
+        "click", () => tabs.navigate("/"),
+      );
       const handle = document.querySelector("#sidebar-resize-handle");
       const storedWidth = Number(localStorage.getItem("ft-sidebar-width"));
       if (Number.isFinite(storedWidth) && storedWidth >= 180 && storedWidth <= 360) {
