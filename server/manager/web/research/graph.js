@@ -132,7 +132,7 @@
     if (!files.length) {
       panel.append(FTUI.empty(
         context.t("尚无个人研究图"),
-        context.t("上传 YAML 后会显示在这里；用户文件不记录语言版本"),
+        context.t("上传 YAML 后才可以查看网络图；用户文件不记录语言版本"),
       ));
       return panel;
     }
@@ -191,17 +191,17 @@
       ));
       const graph = result?.file?.graph;
       if (!graph) throw new Error(context.t("个人研究图内容不可用"));
-      panel.querySelector(".research-graph-user-preview")?.remove();
-      const preview = document.createElement("section");
-      preview.className = "research-graph-user-preview";
+      panel.querySelector(".research-graph-user-network")?.remove();
+      const network = document.createElement("section");
+      network.className = "research-graph-user-network";
       const toolbar = document.createElement("div");
       toolbar.className = "research-graph-toolbar";
       const title = document.createElement("h4");
       title.textContent = `${file.name || file.filename} @v${file.version}`;
       const close = context.button(
-        context.t("关闭预览"),
-        () => preview.remove(),
-        context.t("关闭个人研究图网络预览"),
+        context.t("关闭网络图"),
+        () => network.remove(),
+        context.t("关闭个人研究图网络图"),
       );
       toolbar.append(title, close);
       const meta = document.createElement("p");
@@ -223,10 +223,10 @@
       details.className = "research-graph-details";
       surface.append(canvas);
       layout.append(surface, details);
-      preview.append(toolbar, meta, layout);
-      panel.append(preview);
+      network.append(toolbar, meta, layout);
+      panel.append(network);
       renderNetwork(context, graph, canvas, details, surface);
-      preview.scrollIntoView({block: "nearest", behavior: "smooth"});
+      network.scrollIntoView({block: "nearest", behavior: "smooth"});
     } catch (error) {
       context.showNotice(error.message || String(error), true);
     }
