@@ -26,4 +26,4 @@
 - 小型研究图使用内置 CoSE 力导向布局；未来若图规模显著增加，应单独评估 WebGL 渲染和布局性能，不在本决策中隐式引入新 CDN 或图形依赖。
 - 语言切换只切换服务端返回的 presentation；前端不维护 node/edge 翻译表。这样 Swift 嵌入页面、Web 页面和 YAML 下载使用同一份服务器发布文本，翻译更新不会伪造新的研究语义版本。
 - 用户 YAML 不是已发布 Graph 版本：Web 明确上传到当前 Manager 的本地 SQLite，用户可下载、删除和选择默认文件；Swift 只把 YAML 导入 `Documents/FactorTester/research-graphs`，不自动上传，也不记录语言字段。用户文件只有一次结构校验，不参与 canonical Graph 的发布/激活/回滚治理。
-- canonical Graph 与 server-managed presentations 按现有 Manager 发布/同步边界同步；用户文件标记为 `sync_scope=manager-local`，不通过 Manager 间联邦代理隐式复制。用户在另一台服务器上需要该文件时，必须再次显式上传，避免跨服务器泄露或产生不一致的默认文件。
+- canonical Graph 与 server-managed presentations 仍以保存它们的 Manager 为来源。现有联邦同步 worker 只同步任务控制事件；本 ADR 不把研究图版本或 presentation 误当成已经自动复制到所有 Manager。需要读取其他服务器的 Graph 时，必须通过已认证的目标节点路由读取；需要让另一台服务器本地拥有该版本，则应走明确的发布/导入流程，并以 `graph_id + version + content_hash` 做幂等校验。presentation 以 `graph_id + version + locale` 对齐，不能改变 canonical Graph 身份。用户文件标记为 `sync_scope=manager-local`，不通过 Manager 间联邦代理隐式复制；用户在另一台服务器上需要该文件时，必须再次显式上传，默认选择也不会跨服务器传播，避免跨服务器泄露或产生不一致的默认文件。

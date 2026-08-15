@@ -22,6 +22,11 @@ struct LocalResearchGraphPanel: View {
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                Text(L10n.text(
+                    "选择的默认研究图仅供本机 Research Agent 使用，不会自动上传"
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if let errorMessage = store.errorMessage {
                     Text(errorMessage)
                         .font(.caption)
