@@ -39,7 +39,7 @@ def operator_set(ctx: click.Context, mode: str, admin_port: int, as_json: bool) 
     else:
         click.echo(
             "说明: 平台代码修复后，先阅读 factortester-server-maintenance Skill，"
-            "再运行 `factortester manager restart-fleet --help`，"
+            "再运行 `factortester-manager restart-fleet --help`，"
             "按其参数通过 7998 执行受控重启。"
         )
 

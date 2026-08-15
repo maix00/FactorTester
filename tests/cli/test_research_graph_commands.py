@@ -8,6 +8,7 @@ from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import agent_flow as agent_flow_commands
 from tools.cli.commands import research_graph as commands
+from tools.cli.manager_app import manager_cli
 from tools.cli.commands import (
     research_graph_continuation_report as continuation_report,
 )
@@ -955,16 +956,16 @@ def test_agent_flow_budget_commands_are_canonical_and_machine_readable(
     )
     runner = CliRunner()
 
-    help_result = runner.invoke(cli, ["agent-flow", "--help"])
-    budget_help = runner.invoke(cli, ["agent-flow", "budget", "--help"])
-    configured = runner.invoke(cli, [
+    help_result = runner.invoke(manager_cli, ["agent-flow", "--help"])
+    budget_help = runner.invoke(manager_cli, ["agent-flow", "budget", "--help"])
+    configured = runner.invoke(manager_cli, [
         "agent-flow", "budget", "configure", "research-agent-1",
         "--token-limit", "2000",
     ])
-    loaded = runner.invoke(cli, [
+    loaded = runner.invoke(manager_cli, [
         "agent-flow", "budget", "load", "research-agent-1",
     ])
-    reset = runner.invoke(cli, [
+    reset = runner.invoke(manager_cli, [
         "agent-flow", "budget", "reset", "research-agent-1",
     ])
 
@@ -1005,7 +1006,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         "conversation": 60,
     }))
 
-    reserved = runner.invoke(cli, [
+    reserved = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "reserve", "research-agent-1",
         "--sponsor-agent-id", "planner-agent-1",
         "--role", "researcher",
@@ -1050,7 +1051,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         },
     )
 
-    settled = runner.invoke(cli, [
+    settled = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "settle", "invocation-1",
         "--input-tokens", "320",
         "--output-tokens", "120",
@@ -1072,7 +1073,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         },
     )
 
-    fallback = runner.invoke(cli, [
+    fallback = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "settle", "invocation-2",
         "--reserved-fallback",
         "--provider-request-id", "provider-request-without-usage",
@@ -1094,7 +1095,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
     receipt_file.write_text(
         '{"provider_request_id":"provider-request-verified"}'
     )
-    verified = runner.invoke(cli, [
+    verified = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "settle", "invocation-3",
         "--provider-id", "provider-a",
         "--provider-receipt-file", str(receipt_file),
@@ -1116,7 +1117,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         },
     )
 
-    released = runner.invoke(cli, [
+    released = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "release", "invocation-1",
     ])
     assert released.exit_code == 0
@@ -1134,13 +1135,13 @@ def test_agent_invocation_settle_rejects_ambiguous_usage_mode(
     )
     runner = CliRunner()
 
-    mixed = runner.invoke(cli, [
+    mixed = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "settle", "invocation-1",
         "--reserved-fallback",
         "--input-tokens", "10",
         "--output-tokens", "5",
     ])
-    missing = runner.invoke(cli, [
+    missing = runner.invoke(manager_cli, [
         "agent-flow", "invocation", "settle", "invocation-1",
     ])
 

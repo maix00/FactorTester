@@ -62,7 +62,7 @@ def load_manager_config(path: Path | None = None) -> ManagerConfig:
     target = path or manager_config_path()
     if not target.is_file():
         raise FileNotFoundError(
-            "Manager 尚未配置，请先运行 factortester manager configure"
+            "Manager 尚未配置，请先运行 factortester-manager configure"
         )
     payload = json.loads(target.read_text(encoding="utf-8"))
     return ManagerConfig.from_url(str(payload.get("base_url") or ""))

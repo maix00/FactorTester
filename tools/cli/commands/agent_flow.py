@@ -24,7 +24,12 @@ def _read_json_object(path: Path, *, label: str) -> dict:
 
 @click.group("agent-flow")
 def agent_flow() -> None:
-    """管理 Agent Budget Period 与 Agent Invocation 生命周期。"""
+    """获取研究 Agent 的恢复包。"""
+
+
+@click.group("agent-flow")
+def operator_agent_flow() -> None:
+    """管理受授权的 Agent Budget Period 与 Invocation 生命周期。"""
 
 
 agent_flow.add_command(resume_local_agent)
@@ -66,7 +71,7 @@ def resume_agent(
     )))
 
 
-@agent_flow.group("budget")
+@operator_agent_flow.group("budget")
 def agent_budget() -> None:
     """读取、配置或重置一个 Agent 的当前预算周期。"""
 
@@ -109,7 +114,7 @@ def reset_agent_budget(
     ))
 
 
-@agent_flow.group("invocation")
+@operator_agent_flow.group("invocation")
 def agent_invocation() -> None:
     """预留、结算或释放一次真实 Agent 调用。"""
 

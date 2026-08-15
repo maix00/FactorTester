@@ -1,4 +1,4 @@
-"""Public ``factortester manager`` command group."""
+"""Commands for the separate ``factortester-manager`` executable."""
 
 from __future__ import annotations
 
@@ -41,6 +41,18 @@ def manager() -> None:
     ``factortester-server-maintenance`` Skill;
     discover the approved transaction with ``restart-fleet --help``.
     """
+
+
+def register_manager_commands(target: click.Group) -> None:
+    """Expose Manager actions directly on the Manager CLI root.
+
+    The historical command group remains the registration source so the
+    command implementations and their option contracts stay in one place;
+    the installed ``factortester-manager`` executable presents them as
+    ``factortester-manager status`` rather than a nested Manager command.
+    """
+    for name, command in manager.commands.items():
+        target.add_command(command, name=name)
 
 
 @manager.command("configure")

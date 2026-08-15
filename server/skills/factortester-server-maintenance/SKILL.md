@@ -17,7 +17,7 @@ authority boundaries:
 | Operation | Required authority | Authentication path |
 |---|---|---|
 | Read, edit, test, and commit the local checkout | The user's repository task authorization | Normal Git/worktree and local process or Docker access |
-| Call a protected local Manager endpoint or restart its owned services | An authorized Manager principal, normally `super_admin` | `factortester manager ...`; the CLI reads its URL-scoped token from macOS Keychain |
+| Call a protected local Manager endpoint or restart its owned services | An authorized Manager principal, normally `super_admin` | `factortester-manager ...`; the CLI reads its URL-scoped token from macOS Keychain |
 | Run the bounded server-maintenance resume/implementation flow | Authenticated developer plus the server-issued maintenance roles | Ordinary FactorTester session cookie through `resume.py`; a Manager token is not a substitute |
 | Merge/push a release | Explicit human release authorization and Git credentials | Git remote workflow |
 | Publish or reload the remote public server | Explicit deployment authorization, remote administrator access, and the approved Alibaba/Aliyun SSH or Session Manager transport | Deployment wrapper/SSH; never inferred from local source access |
@@ -34,7 +34,7 @@ The CLI Manager credential is stored under the Keychain service
 normal CLI surface to check it without printing its value:
 
 ```bash
-factortester manager status --json
+factortester-manager status --json
 ```
 
 The native Swift client and the CLI may have different Keychain items. The
@@ -42,7 +42,7 @@ Swift session credential, native device key, browser cookie, CLI FactorTester
 cookie, and CLI Manager bearer token are different credentials and must not be
 copied or treated as interchangeable. In particular, `resume.py` uses the
 ordinary FactorTester cookie session and therefore may return `401 login
-required` even when `factortester manager status` succeeds as `super_admin`.
+required` even when `factortester-manager status` succeeds as `super_admin`.
 Never dump Keychain values, passwords, bearer tokens, private keys, or cookie
 contents into logs or responses.
 
@@ -109,15 +109,15 @@ The CLI exposes the approved transaction without exposing this private Skill's
 body. Use its normal help surface after reading this Skill:
 
 ```bash
-factortester manager --help
-factortester manager restart-fleet --help
+factortester-manager --help
+factortester-manager restart-fleet --help
 ```
 
 The help output is descriptive only; it does not authenticate or grant
 maintenance authority.
 
 For a local Manager, the command uses the URL-scoped Manager credential already
-managed by the CLI. Confirm the principal with `factortester manager status`
+managed by the CLI. Confirm the principal with `factortester-manager status`
 before a mutating action. This local Manager authority is not Aliyun SSH
 authority and does not authorize a public deployment.
 
@@ -125,7 +125,7 @@ When a server source change needs the local fleet reloaded, use the shared
 Manager transaction rather than stopping ports manually:
 
 ```bash
-factortester manager restart-fleet \
+factortester-manager restart-fleet \
   --source-root /absolute/path/to/the/server-worktree \
   --source-mode worktree --yes --json
 ```

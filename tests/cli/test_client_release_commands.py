@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from tools.cli.app import cli
+from tools.cli.manager_app import manager_cli
 from tools.cli.commands import client_release as commands
 from tools.cli.release import profile as release_profile
 from tools.cli.release.profile import (
@@ -61,7 +62,9 @@ def test_client_release_help_exposes_no_secret_arguments() -> None:
 
 
 def test_publish_release_does_not_require_a_manager_service_port() -> None:
-    result = CliRunner().invoke(cli, ["client", "release", "--help"])
+    result = CliRunner().invoke(
+        manager_cli, ["client", "release", "--help"],
+    )
 
     assert result.exit_code == 0
     assert "--service-port" not in result.output

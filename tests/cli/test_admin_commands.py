@@ -4,7 +4,7 @@ import json
 
 from click.testing import CliRunner
 
-from tools.cli.app import cli
+from tools.cli.manager_app import manager_cli
 
 
 class _Client:
@@ -57,7 +57,7 @@ def test_admin_server_list_exposes_the_same_bounded_server_projection(
         lambda: _Client(),
     )
 
-    result = CliRunner().invoke(cli, ["admin", "server", "list", "--json"])
+    result = CliRunner().invoke(manager_cli, ["admin", "server", "list", "--json"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -71,7 +71,7 @@ def test_admin_server_list_text_uses_the_authoritative_status(monkeypatch) -> No
         lambda: _Client(),
     )
 
-    result = CliRunner().invoke(cli, ["admin", "server", "list"])
+    result = CliRunner().invoke(manager_cli, ["admin", "server", "list"])
 
     assert result.exit_code == 0, result.output
     assert "status=degraded" in result.output
@@ -87,7 +87,7 @@ def test_admin_server_action_uses_opaque_instance_identity(monkeypatch) -> None:
     )
 
     result = CliRunner().invoke(
-        cli,
+        manager_cli,
         ["admin", "server", "restart", "worktree-opaque", "--json"],
     )
 
@@ -109,7 +109,7 @@ def test_admin_server_supports_bounded_start_and_stop_actions(
 
     for action in ("start", "stop"):
         result = runner.invoke(
-            cli,
+            manager_cli,
             ["admin", "server", action, "worktree-opaque", "--json"],
         )
         assert result.exit_code == 0, result.output
@@ -127,7 +127,7 @@ def test_admin_jobs_lists_the_bounded_global_projection(monkeypatch) -> None:
     )
 
     result = CliRunner().invoke(
-        cli,
+        manager_cli,
         ["admin", "jobs", "--limit", "25", "--cursor", "next", "--json"],
     )
 

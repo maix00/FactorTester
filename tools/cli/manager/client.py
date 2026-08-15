@@ -87,7 +87,7 @@ class ManagerClient:
         if authenticated:
             if not self.token:
                 raise RuntimeError(
-                    "Manager 尚未登录，请先运行 factortester manager login"
+                    "Manager 尚未登录，请先运行 factortester-manager login"
                 )
             headers["Authorization"] = f"Bearer {self.token}"
         request = Request(url, data=body, headers=headers, method=method)

@@ -4,7 +4,7 @@ import json
 
 from click.testing import CliRunner
 
-from tools.cli.app import cli
+from tools.cli.manager_app import manager_cli
 from tools.cli.manager.config import ManagerConfig
 
 
@@ -14,8 +14,8 @@ def test_manager_config_is_separate_from_server_config(tmp_path, monkeypatch) ->
     monkeypatch.setenv("FACTORTESTER_MANAGER_CONFIG", str(manager_config))
     monkeypatch.setenv("FACTORTESTER_CONFIG", str(server_config))
 
-    result = CliRunner().invoke(cli, [
-        "manager", "configure",
+    result = CliRunner().invoke(manager_cli, [
+        "configure",
         "--host", "127.0.0.1",
         "--port", "7998",
         "--json",
@@ -41,8 +41,8 @@ def test_manager_login_saves_returned_session(
 ) -> None:
     config_path = tmp_path / "manager.json"
     monkeypatch.setenv("FACTORTESTER_MANAGER_CONFIG", str(config_path))
-    CliRunner().invoke(cli, [
-        "manager", "configure", "--url", "http://127.0.0.1:7998",
+    CliRunner().invoke(manager_cli, [
+        "configure", "--url", "http://127.0.0.1:7998",
     ])
     saved = []
     monkeypatch.setattr(
@@ -59,8 +59,8 @@ def test_manager_login_saves_returned_session(
         lambda _self, token: saved.append(token),
     )
 
-    result = CliRunner().invoke(cli, [
-        "manager", "login",
+    result = CliRunner().invoke(manager_cli, [
+        "login",
         "--username", "root@1",
         "--password", "secret",
         "--json",
@@ -78,7 +78,7 @@ def test_manager_login_accepts_ui_credentials_on_stdin(
         "FACTORTESTER_MANAGER_CONFIG",
         str(tmp_path / "manager.json"),
     )
-    CliRunner().invoke(cli, ["manager", "configure"])
+    CliRunner().invoke(manager_cli, ["configure"])
     received = []
     monkeypatch.setattr(
         "tools.cli.manager.commands.ManagerClient.login",
@@ -93,9 +93,9 @@ def test_manager_login_accepts_ui_credentials_on_stdin(
     )
 
     result = CliRunner().invoke(
-        cli,
+        manager_cli,
         [
-            "manager", "login",
+            "login",
             "--username", "root",
             "--credentials-stdin",
             "--json",
@@ -131,11 +131,11 @@ def test_manager_restart_commands_map_to_distinct_backend_actions(
     )
 
     runner = CliRunner()
-    web = runner.invoke(cli, [
-        "manager", "restart-web", "8141", "--json",
+    web = runner.invoke(manager_cli, [
+        "restart-web", "8141", "--json",
     ])
-    complete = runner.invoke(cli, [
-        "manager", "restart-all", "8141", "--json",
+    complete = runner.invoke(manager_cli, [
+        "restart-all", "8141", "--json",
     ])
 
     assert web.exit_code == 0, web.output
@@ -161,11 +161,11 @@ def test_manager_action_rejects_unknown_or_ambiguous_port(monkeypatch) -> None:
         lambda: (client, object()),
     )
 
-    duplicate = CliRunner().invoke(cli, [
-        "manager", "restart-web", "8141", "--json",
+    duplicate = CliRunner().invoke(manager_cli, [
+        "restart-web", "8141", "--json",
     ])
-    missing = CliRunner().invoke(cli, [
-        "manager", "restart-web", "8999", "--json",
+    missing = CliRunner().invoke(manager_cli, [
+        "restart-web", "8999", "--json",
     ])
 
     assert duplicate.exit_code != 0
@@ -175,11 +175,12 @@ def test_manager_action_rejects_unknown_or_ambiguous_port(monkeypatch) -> None:
 
 
 def test_manager_help_discloses_server_skill_and_restart_transaction() -> None:
-    manager_help = CliRunner().invoke(cli, ["manager", "--help"])
-    restart_help = CliRunner().invoke(cli, ["manager", "restart-fleet", "--help"])
+    manager_help = CliRunner().invoke(manager_cli, ["--help"])
+    restart_help = CliRunner().invoke(manager_cli, ["restart-fleet", "--help"])
 
     assert manager_help.exit_code == 0, manager_help.output
     assert restart_help.exit_code == 0, restart_help.output
-    assert "factortester-server-maintenance" in manager_help.output
+    assert "restart-fleet" in manager_help.output
+    assert "factortester-server-maintenance" in restart_help.output
     assert "source-mode" in restart_help.output
     assert "stop-mode" in restart_help.output

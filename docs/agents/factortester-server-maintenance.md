@@ -18,7 +18,7 @@ or mutates a deployed environment. Git merge/push and public deployment are
 separate approvals even when the source change is already committed.
 
 The CLI's local Manager credential is URL-scoped and stored in macOS Keychain
-under `com.gtht.factortester.manager`; use `factortester manager status` to
+under `com.gtht.factortester.manager`; use `factortester-manager status` to
 inspect the authenticated Manager principal without exposing the bearer value.
 That token is not the ordinary FactorTester browser/CLI session cookie used by
 `resume.py`, and it is not an Aliyun SSH credential. A `401` from the bounded
