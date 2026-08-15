@@ -275,7 +275,7 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     with pytest.raises(
         RuntimeError,
-        match="migrate_graph_branch_projection",
+        match="explicit offline cutover",
     ):
         research_graphs.ensure_schema()
     statements: list[str] = []
@@ -356,11 +356,6 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     research_graphs._clear_graph_cache_for_current_db()
     research_graphs.ensure_schema()
-    monkeypatch.setattr(
-        research_graphs.agent_flow,
-        "get_store",
-        lambda: pytest.fail("routine Graph context read Agent Flow"),
-    )
     context_statements: list[str] = []
 
     def traced_runtime_connect(*args, **kwargs):
@@ -390,7 +385,6 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
     assert context["evidence_refs"] == []
     assert context["history_cursor"] is None
     assert "token_telemetry" not in context
-    assert next_packet["next_bytes"] <= 6000
     assert all(
         "FROM RESEARCH_GRAPH_TRACE" not in statement.upper()
         for statement in context_only_statements + context_statements

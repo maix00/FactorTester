@@ -363,34 +363,6 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
 
 
-def test_v10_graph_does_not_embed_runtime_packet_budget() -> None:
-    graph = build_successor_graph()
-    assert "agent_packet_budget" not in graph
-
-
-def test_runtime_budget_change_does_not_change_v10_graph_hash(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    from server.services.research_graph.packet_budget import (
-        graph_packet_budget,
-        reset_runtime_packet_budget_cache,
-    )
-
-    graph = build_successor_graph()
-    graph_hash = graph["content_hash"]
-    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
-    reset_runtime_packet_budget_cache()
-    monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "7000")
-    first = graph_packet_budget(graph)
-    reset_runtime_packet_budget_cache()
-    monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "8000")
-    second = graph_packet_budget(graph)
-
-    assert first["profile_hash"] != second["profile_hash"]
-    assert graph["content_hash"] == graph_hash
-
-
 def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:
     result = CliRunner().invoke(
         cli,

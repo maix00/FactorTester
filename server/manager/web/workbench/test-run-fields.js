@@ -1,6 +1,11 @@
 (() => {
   function definitions(manifest) {
     return [...(manifest?.run_fields || [])]
+      .filter(item => {
+        const targets = Array.isArray(item.client_targets)
+          ? item.client_targets : ["web", "swift", "cli"];
+        return targets.includes(window.FTTestClientScope || "web");
+      })
       .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
   }
 
@@ -61,7 +66,11 @@
     }
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
-    const control = item.control_template === "profile"
+    const control = item.value_descriptor?.editor === "server_picker"
+      ? runtimeServerControl(context, state, refresh, item)
+      : item.value_descriptor?.editor === "runtime_bundle_picker"
+        ? runtimeBundleControl(context, state, refresh, item)
+        : item.control_template === "profile"
       ? profileControl(context, state, refresh, item)
       : FTTestSettings.controlFor(
         item.key, fieldValue, manifest, state.runValues, context,
@@ -78,9 +87,71 @@
     return root;
   }
 
+  function runtimeServerControl(context, state, refresh, item) {
+    const control = document.createElement("select");
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = context.t("选择提供运行代码的服务器…");
+    control.append(placeholder);
+    const appendServers = () => {
+      (Array.isArray(state.runtimeServers) ? state.runtimeServers : [])
+        .filter(server => server && server.server_id)
+        .forEach(server => {
+          const option = document.createElement("option");
+          option.value = String(server.server_id);
+          option.textContent = `${server.server_id} · ${server.endpoint || ""}`;
+          control.append(option);
+        });
+      control.value = String(state.runValues[item.key] || item.default || "");
+    };
+    if (Array.isArray(state.runtimeServers)) appendServers();
+    control.addEventListener("focus", async () => {
+      if (state.runtimeServersLoaded || state.runtimeServersLoading) return;
+      state.runtimeServersLoading = true;
+      try {
+        const value = await context.api("/api/federation/servers");
+        state.runtimeServers = [
+          ...(Array.isArray(value.servers) ? value.servers : []),
+          ...(Array.isArray(value.local_targets) ? value.local_targets : []),
+        ];
+        state.runtimeServersLoaded = true;
+        appendServers();
+      } catch (error) {
+        context.showNotice?.(error.message, true);
+      } finally {
+        state.runtimeServersLoading = false;
+        refresh?.();
+      }
+    }, {once: true});
+    control.addEventListener("change", () => {
+      state.runValues[item.key] = control.value;
+      refresh?.();
+    });
+    return control;
+  }
+
+  function runtimeBundleControl(context, state, refresh, item) {
+    const control = document.createElement("input");
+    control.type = "text";
+    control.className = "inline-setting";
+    control.placeholder = context.t("留空使用服务器默认运行代码包");
+    control.value = String(state.runValues[item.key] || item.default || "");
+    control.addEventListener("change", () => {
+      state.runValues[item.key] = control.value.trim();
+      refresh?.();
+    });
+    return control;
+  }
+
   function rows(context, state, items, refresh) {
     const root = document.createElement("div"); root.className = "test-setting-rows";
-    items.forEach(item => root.append(row(context, state, item, refresh)));
+    items.forEach(item => {
+      const visible = Object.entries(item.visible_when || {}).every(
+        ([key, values]) => (Array.isArray(values) ? values : [values])
+          .includes(state.runValues?.[key]),
+      );
+      if (visible) root.append(row(context, state, item, refresh));
+    });
     return root;
   }
 

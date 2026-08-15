@@ -29,7 +29,6 @@ from server.services.research_graph.branch.trace_compaction import (
     ENTRY_ASSESSMENT_OBJECT_KIND,
 )
 from server.services.research_graph.graph_objects import load_graph_objects
-from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 from tests.server.data_contract_fixtures import (
     checkpoint,
     graph as data_graph,
@@ -237,12 +236,8 @@ def test_successor_next_packet_is_local_and_requirement_read_is_lazy(
     )
 
     assert packet["entry_requirements"]
-    assert packet["next_actions"][0]["action_id"] == "entry.assess"
-    assert "__EDIT__" in packet["next_actions"][0]["instruction"]
-    assert packet["next_actions"][0]["then"].startswith(
-        "factortester research-graph node advance "
-    )
-    assert packet["next_bytes"] <= MAX_AGENT_PACKET_BYTES
+    assert packet["server_decides_next"] is False
+    assert "next_actions" not in packet
     assert "requirement_catalog" not in packet
     assert detail["requirement"]["requirement_id"] == REQUIREMENT_ID
 
@@ -305,9 +300,8 @@ def test_successor_edge_detail_retains_edge_and_target_entry_reports(
         "report.edge.data_contract__capability_gap",
         "report.node.capability_gap.entry",
     } <= requirement_ids
-    assert packet["next_actions"][0]["action_id"] == (
-        "report.complete_on_edge"
-    )
+    assert packet["server_decides_next"] is False
+    assert "next_actions" not in packet
 
 
 def test_edge_detail_discloses_target_capabilities_before_advance(

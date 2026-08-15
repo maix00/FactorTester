@@ -1,16 +1,40 @@
 """Offline Research Graph navigation for the client CLI.
 
-The Manager may provide a graph version and persist branch state, but it does
-not decide which edge an Agent should take.  This module is intentionally
-free of HTTP, database, token, and packet-size concerns so the same semantic
-decision can be used by a local Agent or by the Swift client.
+The Manager may provide an immutable graph version, but it does not run a
+research Agent or persist the active local session.  This module is
+intentionally free of HTTP, database, token, and packet-size concerns so the
+same semantic decision can be used by a local Agent or by the Swift client.
 """
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
+
+
+def load_graph_document(path: Path | str) -> dict[str, Any]:
+    """Load a local graph from JSON or YAML without contacting a Manager."""
+    source = Path(path)
+    raw = source.read_text(encoding="utf-8")
+    try:
+        if source.suffix.lower() == ".json" or raw.lstrip().startswith(("{", "[")):
+            value = json.loads(raw)
+        else:
+            import yaml
+
+            value = yaml.safe_load(raw)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"graph file is invalid: {source}") from exc
+    except ImportError as exc:
+        raise ValueError(
+            "YAML graph support requires the PyYAML client dependency"
+        ) from exc
+    if not isinstance(value, dict):
+        raise ValueError("graph file must contain a JSON/YAML object")
+    return value
 
 
 def evaluate_next(

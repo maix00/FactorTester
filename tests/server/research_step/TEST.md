@@ -23,11 +23,12 @@
 - All operations are read-only and create no ResearchRun, Job, Evidence,
   report checkpoint, Graph transition, or new database object.
 
-## Regression and budget plan
+## Regression plan
 
-- Existing `research-graph next` and TrialPlan checkpoint tests remain green.
-- Inspect uses the two existing bounded reads and emits a packet below the
-  runtime protocol hard ceiling.
+- Existing local `research-graph next-local` and TrialPlan compatibility tests
+  remain green.
+- The server route is retained only as a migration read/validation contract;
+  it does not calculate the local next step or enforce a token/packet budget.
 - CLI tests verify `research step validate` performs no HTTP request.
 
 ## Test results
@@ -37,7 +38,6 @@ conda run -n GTHT python -m pytest -q \
   tests/server/research_step \
   tests/cli/test_research_step_cli.py \
   tests/server/test_trial_execution_checkpoint_api.py \
-  tests/server/test_research_graph_context_cost.py \
   tests/server/test_research_graph_protocol_v2.py
 
 31 passed in 1.04s

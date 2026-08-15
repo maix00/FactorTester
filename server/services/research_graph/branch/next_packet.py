@@ -9,9 +9,6 @@ from typing import Any
 import orjson
 
 from server.services.research_graph.branch.context import _build_local_state
-from server.services.research_graph.branch.next_actions import (
-    edge_next_actions,
-)
 from server.services.research_graph.branch import server_actions
 
 
@@ -39,15 +36,6 @@ def build_graph_branch_next(
         )
         for edge in edges
     ]
-    ready_l1 = [
-        item["edge_id"]
-        for item in candidates
-        if item["readiness"] == "ready"
-        and item["risk_level"] == "L1"
-    ]
-    non_blocked_count = sum(
-        item["readiness"] != "blocked" for item in candidates
-    )
     cycle = context["research_cycle"]
     obligations_by_id = {}
     for item in [
@@ -89,7 +77,9 @@ def build_graph_branch_next(
         "report_requirements": deepcopy(
             context.get("report_requirements") or {}
         ),
-        "next_actions": deepcopy(context.get("next_actions") or []),
+        # Edge readiness and report requirements are authoritative state. The
+        # client CLI chooses the next action from its downloaded Graph and
+        # local facts; the Manager must not prescribe an ordered action list.
         "candidate_trial_frontier": {
             "current_trial_plan_hash": cycle.get("trial_plan_hash"),
             "trial_stage": deepcopy(context.get("trial_stage")),
@@ -103,14 +93,7 @@ def build_graph_branch_next(
             context.get("evidence_refs", [])
         ),
         "candidate_edges": candidates,
-        "recommended_edge_ids": (
-            ready_l1 if len(ready_l1) == 1 else []
-        ),
-        "requires_agent_judgment": bool(
-            entry_requirements
-            or undetermined_ids
-            or non_blocked_count > 1
-        ),
+        "server_decides_next": False,
         "running_backend_jobs_action": "continue",
     }
     if "entry_requirements" in context:
@@ -195,17 +178,7 @@ def build_graph_branch_edge_info(
         ),
         "state_ref": context.get("history_cursor"),
     }
-    report_contract = context.get("report_requirements") or {}
-    value["next_actions"] = edge_next_actions(
-        instance_id=instance_id,
-        branch_id=branch_id,
-        edge_id=edge_id,
-        requirements=value["report_requirements"],
-        enforcement=str(report_contract.get("enforcement") or "optional"),
-        human_gate_override=(
-            context.get("human_gate_override") or {}
-        ),
-    )
+    value["server_decides_next"] = False
     return value
 
 

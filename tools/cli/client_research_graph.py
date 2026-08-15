@@ -284,7 +284,12 @@ class ResearchGraphClientMixin(ClientMixinBase):
         instance_id: str,
         branch_id: str,
     ) -> dict[str, Any]:
-        """Read the current Node contract and its ordered next actions."""
+        """Read compatibility state and candidate constraints for a Node.
+
+        New local-first clients should load the graph YAML and decide the
+        next edge locally; this method remains only for legacy projections
+        and shared-report imports.
+        """
         data = self._expect_success(self.session.get(
             f"/api/research-graph-instances/{instance_id}"
             f"/branches/{branch_id}/node"

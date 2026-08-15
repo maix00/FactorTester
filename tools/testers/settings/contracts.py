@@ -293,7 +293,13 @@ class RunFieldDefinition:
         "run_options",
     )
     _TEMPLATE_POLICIES = ("exclude", "include")
+    _CLIENTS = ("web", "swift", "cli")
     value_descriptor: ValueDescriptor | None = None
+    # A run field can be meaningful only to one client surface.  The server
+    # filters this declaration before sending a manifest, so Swift-only local
+    # execution controls never become ordinary web submission controls.
+    client_targets: tuple[str, ...] = ("web", "swift", "cli")
+    visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.control_template:
@@ -306,6 +312,12 @@ class RunFieldDefinition:
             raise ValueError(f"run field placement is invalid: {self.placement}")
         if self.template_policy not in self._TEMPLATE_POLICIES:
             raise ValueError(f"run field template policy is invalid: {self.template_policy}")
+        if not self.client_targets or any(
+            client not in self._CLIENTS for client in self.client_targets
+        ):
+            raise ValueError(
+                "run field client_targets must contain only web, swift, or cli"
+            )
         if self.value_descriptor is None:
             object.__setattr__(
                 self,
@@ -338,6 +350,14 @@ class RunFieldDefinition:
         for key in ("_REQUEST_LOCATIONS", "_PLACEMENTS", "_TEMPLATE_POLICIES"):
             value.pop(key, None)
         value["options"] = [asdict(option) for option in self.options]
+        value.pop("client_targets", None)
+        value.pop("visible_when", None)
+        if self.client_targets != self._CLIENTS:
+            value["client_targets"] = list(self.client_targets)
+        if self.visible_when:
+            value["visible_when"] = {
+                key: list(values) for key, values in self.visible_when.items()
+            }
         value["value_descriptor"] = self.value_descriptor.to_dict()
         return value
 

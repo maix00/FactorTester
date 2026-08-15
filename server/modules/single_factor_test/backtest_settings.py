@@ -58,7 +58,7 @@ def get_testers_modules():
     parent = (request.args.get("parent") or "").strip()
     try:
         modules = _navigation_children(home, parent)
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     return jsonify({
         "success": True,
@@ -160,8 +160,11 @@ def _module_application(module: Module) -> str:
 @sft_bp.get("/api/backtest/settings/<application>")
 def get_backtest_setting_application(application: str):
     try:
-        settings_manifest = backtest_setting_registry.get(application).manifest()
-    except KeyError as exc:
+        client = (request.args.get("client") or "web").strip().lower()
+        settings_manifest = backtest_setting_registry.get(application).manifest(
+            client=client,
+        )
+    except (KeyError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     # Merge executable module manifest from the registry
     registry = _registry_for(application)
@@ -176,7 +179,10 @@ def get_backtest_setting_application(application: str):
 @sft_bp.get("/api/backtest/settings/<application>/summary")
 def get_backtest_setting_application_summary(application: str):
     try:
-        settings_manifest = backtest_setting_registry.get(application).summary()
+        client = (request.args.get("client") or "web").strip().lower()
+        settings_manifest = backtest_setting_registry.get(application).summary(
+            client=client,
+        )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     registry = _registry_for(application)

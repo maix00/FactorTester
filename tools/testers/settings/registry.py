@@ -198,9 +198,15 @@ class ApplicationSettings:
             raise ValueError(f"manifest extension {key} must be a non-empty object")
         self.manifest_extensions[key] = dict(manifest)
 
-    def manifest(self) -> dict[str, Any]:
+    def manifest(self, *, client: str = "web") -> dict[str, Any]:
+        if client not in {"web", "swift", "cli"}:
+            raise ValueError(f"unknown tester manifest client: {client}")
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
         ordered_modules = sorted(self.modules.values(), key=lambda item: item.order)
+        run_fields = [
+            field for field in self.run_fields.values()
+            if client in field.client_targets
+        ]
         def tab_manifest(tab: SettingTab) -> dict[str, Any]:
             value = tab.to_dict()
             section_key = self.tab_sections.get(tab.key) or value.get("section_key")
@@ -247,7 +253,7 @@ class ApplicationSettings:
                 },
                 "run": {
                     field.key: field.field_spec().to_dict()
-                    for field in self.run_fields.values()
+                    for field in run_fields
                 },
             },
             "chip_fields": [
@@ -260,7 +266,7 @@ class ApplicationSettings:
             ],
             "run_fields": [
                 run_field.to_dict()
-                for run_field in sorted(self.run_fields.values(), key=lambda item: item.order)
+                for run_field in sorted(run_fields, key=lambda item: item.order)
             ],
             "surfaces": [
                 surface.to_dict()
@@ -306,7 +312,7 @@ class ApplicationSettings:
             },
         }
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, *, client: str = "web") -> dict[str, Any]:
         """Return the first-paint manifest without tab-only control metadata.
 
         The full application manifest remains available for exports and older
@@ -315,7 +321,7 @@ class ApplicationSettings:
         help/range metadata; those arrive from ``tab_manifest`` when a tab is
         actually opened.
         """
-        manifest = self.manifest()
+        manifest = self.manifest(client=client)
         compact_defaults: dict[str, Any] = {}
         for key, field_value in manifest.get("defaults", {}).items():
             compact_defaults[key] = {

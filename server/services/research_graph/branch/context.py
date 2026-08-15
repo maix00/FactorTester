@@ -26,10 +26,6 @@ from server.services.research_graph.branch.report_requirements import (
     compact_report_requirements,
     node_report_requirements,
 )
-from server.services.research_graph.branch.next_actions import (
-    compact_next_actions,
-    node_next_actions,
-)
 from server.services.research_graph.branch.human_gate_override import (
     override_from_branch_row,
 )
@@ -372,19 +368,6 @@ def _build_local_state(
                     ),
                 },
             }
-        next_actions = (
-            node_next_actions(
-                instance_id=instance_id,
-                branch_id=branch_id,
-                context={
-                    "entry_requirements": entry_requirements,
-                    "report_requirements": report_requirements,
-                    "human_gate_override": human_gate_override,
-                },
-                edges=available_edges,
-            )
-            if schema_version >= 2 else []
-        )
     triggered_gap_ids = {
         str(item.get("capability_id") or "")
         for item in resolution.get("triggered_conditional_gaps") or []
@@ -476,7 +459,6 @@ def _build_local_state(
     }
     if schema_version >= 2:
         context["report_requirements"] = report_requirements
-        context["next_actions"] = next_actions
         context["entry_requirements"] = entry_requirements
         compact_frame = compact_entry_resolution_frame(
             entry_resolution_frame
@@ -489,9 +471,6 @@ def _build_local_state(
         ]
         context["report_requirements"] = compact_report_requirements(
             context["report_requirements"]
-        )
-        context["next_actions"] = compact_next_actions(
-            context["next_actions"]
         )
     return context, available_edges
 

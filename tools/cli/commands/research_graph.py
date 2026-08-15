@@ -1,4 +1,10 @@
-"""Research Decision Graph inspection, evidence, audit, and activation."""
+"""Client-side Research Graph commands.
+
+The local graph evaluator and report/session state are the active research
+path. The older server-backed commands in this module remain only while the
+Manager service-proxy migration is completed; new local research must not use
+them as an authority.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
-from tools.cli.local_graph_navigation import evaluate_next
+from tools.cli.local_graph_navigation import evaluate_next, load_graph_document
 from tools.cli.capability_projection import server_capability_resolution
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
@@ -52,7 +58,7 @@ def _client_for_profile(client_root: Path, profile_id: str) -> FactorTesterClien
 
 @click.group("research-graph")
 def research_graph() -> None:
-    """管理服务器提供的研究图版本、默认版本和研究运行。"""
+    """下载研究图并在本地检查或推进研究状态。"""
 
 
 @research_graph.command("publish")
@@ -62,7 +68,7 @@ def research_graph() -> None:
 )
 def publish_graph(graph_file: Path) -> None:
     """将 Observed 或 Draft Graph 发布为不可变服务器版本。"""
-    graph = json.loads(graph_file.read_text(encoding="utf-8"))
+    graph = load_graph_document(graph_file)
     click.echo(_json(client_from_config().publish_research_graph(graph)))
 
 
@@ -172,9 +178,10 @@ def next_local(
     facts_file: Path | None,
 ) -> None:
     """只在本地根据 Graph 与已收集事实计算下一步。"""
-    graph = json.loads(graph_file.read_text(encoding="utf-8"))
-    if not isinstance(graph, dict):
-        raise click.ClickException("graph file must contain a JSON object")
+    try:
+        graph = load_graph_document(graph_file)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     facts = {}
     if facts_file is not None:
         facts = json.loads(facts_file.read_text(encoding="utf-8"))

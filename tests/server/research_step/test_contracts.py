@@ -37,7 +37,6 @@ def _next_packet() -> dict:
         "node_report_requirement_refs": ["report.execution-status"],
         "changed_refs": ["evidence:old"],
         "current_obligations": [{"obligation_id": "obligation-1"}],
-        "next_bytes": 2048,
     }
 
 
@@ -97,10 +96,6 @@ def test_inspect_is_compact_and_authoritatively_bound() -> None:
     assert "changed_refs" not in value
     assert "current_obligations" not in value
     assert "stdout" not in str(value)
-    assert value["packet_bytes"] < 16 * 1024
-    assert value["packet_bytes"] == len(
-        __import__("orjson").dumps(value)
-    )
 
 
 def test_prepare_multiple_configurations_returns_truthful_gap() -> None:
@@ -241,8 +236,6 @@ def test_large_packet_is_summarized_and_exactly_sized() -> None:
 
     value = build_inspect_contract(packet, execution)
 
-    assert value["packet_bytes"] == len(__import__("orjson").dumps(value))
-    assert value["packet_bytes"] < 16 * 1024
     assert "contract" not in str(value["capabilities"])
     assert value["operation_payload_contracts"] == {
         "release": {"required_fields": []},

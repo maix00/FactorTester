@@ -101,6 +101,37 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
     )
 
 
+def test_swift_manifest_exposes_local_run_fields_only_to_swift() -> None:
+    application = backtest_setting_registry.get("group_test")
+    web_keys = [item["key"] for item in application.manifest()["run_fields"]]
+    swift_fields = {
+        item["key"]: item
+        for item in application.manifest(client="swift")["run_fields"]
+    }
+
+    assert "execution_target" not in web_keys
+    assert swift_fields["execution_target"]["client_targets"] == ["swift"]
+    assert swift_fields["execution_target"]["value_descriptor"]["value_type"] == "enum"
+    assert swift_fields["local_runtime_server_ref"]["value_descriptor"] == {
+        "value_type": "reference",
+        "cardinality": "one",
+        "editor": "server_picker",
+        "format": "",
+        "unit": "",
+        "option_source": "server.federation",
+        "resolver": "",
+        "item_type": "",
+        "ref_kind": "manager_server",
+        "schema": {},
+        "minimum": None,
+        "maximum": None,
+        "step": None,
+    }
+    assert swift_fields["local_runtime_bundle_ref"]["visible_when"] == {
+        "execution_target": ["local"],
+    }
+
+
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     application = backtest_setting_registry.get("group_test")
 
