@@ -399,10 +399,8 @@ def test_maintenance_resume_compacts_one_case_long_reference_lists(
         owner="alice",
         agent_id="server-maintenance-agent",
         role="server_maintenance",
-        budget_period=None,
     )
 
-    assert packet["packet_bytes"] <= 6000
     case = packet["maintenance"]["cases"][0]
     assert case["affected_refs"] == affected_refs[:1]
     assert case["remaining_affected_ref_count"] == 7

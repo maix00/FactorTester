@@ -11,7 +11,7 @@ from click.testing import CliRunner
 import pytest
 
 from scripts.release import publish
-from tools.cli.commands.client_release import client
+from tools.cli.commands.client_release import client, operator_client
 from tools.cli.release import app_update_control
 
 
@@ -609,7 +609,7 @@ def test_readback_requires_exact_published_bytes(
 
 
 def test_public_cli_exposes_one_main_beta_release_command() -> None:
-    result = CliRunner().invoke(client, ["release", "--help"])
+    result = CliRunner().invoke(operator_client, ["release", "--help"])
 
     assert result.exit_code == 0
     assert "--channel [stable|beta]" in result.output
@@ -621,7 +621,7 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
 
 def test_direct_publisher_does_not_expose_server_restart_options() -> None:
     result = CliRunner().invoke(
-        client,
+        operator_client,
         ["release", "--help"],
     )
 

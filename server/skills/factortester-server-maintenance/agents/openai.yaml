@@ -1,4 +1,4 @@
 interface:
   display_name: "Server Maintenance"
-  short_description: "审计并维护私有 FactorTester 服务器、容器与网络部署"
-  default_prompt: "Use $factortester-server-maintenance to diagnose and safely resolve this FactorTester server maintenance case."
+short_description: "通过服务器声明的访问契约审计私有 FactorTester 维护案例"
+default_prompt: "Use $factortester-server-maintenance to diagnose and safely resolve this FactorTester server maintenance case using the target server's advertised access contract."

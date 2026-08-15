@@ -40,6 +40,7 @@ from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
 from server.manager.http.object_transfer_routes import ObjectTransferRoutesMixin
 from server.manager.http.transfer_metrics_routes import TransferMetricsRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
+from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.public_research_routes import PublicResearchRoutesMixin
@@ -69,6 +70,7 @@ from server.manager.domain.federation import (
     ServiceRoute,
 )
 from server.manager.services.test_authoring import TestAuthoringService
+from server.manager.services.server_access import configured_management_access
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
     PUBLIC_REGISTRATION_NOTICE,
@@ -245,6 +247,10 @@ class ManagerState(
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.visitor_entry_origins = configured_visitor_origins()
         self.manager_public_endpoint = configured_manager_endpoint()
+        # Host-management connection metadata belongs to this server's
+        # colocated .settings.  The Manager only advertises the validated,
+        # non-secret projection; it never infers a transport from the client.
+        self.management_access = configured_management_access(self.repo)
         self.visitor_access = VisitorAccessStore()
         self.federation_registration_token = os.environ.get(
             "FACTORTESTER_FEDERATION_REGISTRATION_TOKEN", ""
@@ -442,6 +448,7 @@ class Handler(
     WriteRoutesMixin,
     AuthenticationRoutesMixin,
     ClientReleaseRoutesMixin,
+    ManagerIdentityRoutesMixin,
     CoreGetRoutesMixin,
     BaseHTTPRequestHandler,
 ):

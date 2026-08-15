@@ -36,6 +36,7 @@ def test_real_client_and_harness_wheels_materialize_together(
 
     assert result["python"]["commands"] == [
         "factortester",
+        "factortester-manager",
         "cli-anything-factortester-research",
     ]
     bin_root = staging / "runtime" / "python" / "bin"
@@ -43,11 +44,18 @@ def test_real_client_and_harness_wheels_materialize_together(
         [bin_root / "factortester", "--help"],
         text=True,
     )
+    manager_help = subprocess.check_output(
+        [bin_root / "factortester-manager", "--help"],
+        text=True,
+    )
     harness_help = subprocess.check_output(
         [bin_root / "cli-anything-factortester-research", "--help"],
         text=True,
     )
     assert "protocol" in client_help
+    assert "server" in manager_help
+    assert "jobs" in manager_help
+    assert "restart-fleet" not in manager_help
     assert "graph" in harness_help
     assert "\n  cycle " not in harness_help
 

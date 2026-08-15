@@ -26,7 +26,11 @@ from .materialize import (
 from .storage import json_hash, read_json, utc_now
 
 
-COMMANDS = ("factortester", "cli-anything-factortester-research")
+COMMANDS = (
+    "factortester",
+    "factortester-manager",
+    "cli-anything-factortester-research",
+)
 REGISTERED_SKILL_NAME = "factortester-research-skill"
 _SKILL_RELATIVE = Path("skills") / REGISTERED_SKILL_NAME / "SKILL.md"
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -46,7 +50,7 @@ def activate_bundled_runtime(
     """Install once, then atomically select one bundle-owned runtime.
 
     This function is deliberately local-only. It reads one bundle receipt,
-    copies two verified Mach-O commands into a versioned directory, and changes
+    copies the verified client/operator launchers into a versioned directory, and changes
     the current pointer only after the directory is durable.
     """
     root = validate_client_root(client_root)

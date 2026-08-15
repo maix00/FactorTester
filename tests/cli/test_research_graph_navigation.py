@@ -55,7 +55,7 @@ class _Client:
         }
 
 
-def test_node_info_exposes_next_action(monkeypatch):
+def test_node_info_does_not_expose_server_navigation_advice(monkeypatch):
     client = _Client()
     monkeypatch.setattr(navigation, "client_from_config", lambda: client)
 
@@ -65,7 +65,8 @@ def test_node_info_exposes_next_action(monkeypatch):
 
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["next_action"]["action_id"] == "edge.choose"
+    assert "next_action" not in payload
+    assert "next_actions" not in payload
 
 
 def test_edge_choose_is_read_only_and_returns_next_action(monkeypatch, tmp_path):
@@ -85,7 +86,9 @@ def test_edge_choose_is_read_only_and_returns_next_action(monkeypatch, tmp_path)
     assert json.loads(output.read_text()) == payload | {"output": str(output)}
 
 
-def test_node_advance_returns_post_transition_next_action(monkeypatch, tmp_path):
+def test_node_advance_returns_post_transition_state_without_server_advice(
+    monkeypatch, tmp_path,
+):
     client = _Client()
     monkeypatch.setattr(navigation, "client_from_config", lambda: client)
     evidence = tmp_path / "evidence.json"
@@ -99,7 +102,7 @@ def test_node_advance_returns_post_transition_next_action(monkeypatch, tmp_path)
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["doctor"]["operation"] == "node.advance"
-    assert payload["next"]["next_actions"][0]["action_id"] == "edge.choose"
+    assert "next_actions" not in payload["next"]
     assert client.advance_calls == [
         ("instance-1", "branch-1", "edge-1", {"ready": True}),
     ]

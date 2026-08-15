@@ -143,7 +143,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
 
     assert first["activated"] is True
     assert second["activated"] is False
-    assert copied == 2
+    assert copied == len(bundle_runtime.COMMANDS)
     assert (root / "current.json").read_bytes() == pointer_before
     assert (target / "receipt.json").read_bytes() == receipt_before
     assert inodes == {
@@ -170,7 +170,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         local_source_root=tmp_path / "local-sources",
     )
     assert repaired["activated"] is True
-    assert copied == 2
+    assert copied == len(bundle_runtime.COMMANDS)
     assert (root / "current.json").read_bytes() == pointer_before_repair
     assert "'standalone/bin'" in (
         root / "bin" / "factortester"

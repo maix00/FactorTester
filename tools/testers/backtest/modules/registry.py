@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from tools.data.modules.registry import ModuleRegistry
+from tools.testers.field_spec import RuntimeRole
 
 from .base import ExecutableModule
 from .engine import EngineModule
@@ -124,7 +125,13 @@ def register_module_field_settings(
     retain their own high-level SettingModules/tabs, but must not duplicate a
     module field merely to change where it is mounted.
     """
-    from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption, TabMountPoint
+    from tools.testers.settings.contracts import (
+        ScopePolicy,
+        SettingDefinition,
+        SettingModule,
+        SettingOption,
+        TabMountPoint,
+    )
     setting_module_keys = setting_module_keys or {}
     tab_keys = tab_keys or {}
     scope_policy_overrides = scope_policy_overrides or {}
@@ -183,6 +190,8 @@ def register_module_field_settings(
                 adapter_managed=fd.adapter_managed,
                 show_chip=fd.show_chip,
                 execution_policy=fd.execution_policy,
+                value_descriptor=fd.descriptor_for(field_name),
+                runtime_role=RuntimeRole(owner=cls.key),
             ))
 
 

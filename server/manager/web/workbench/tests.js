@@ -1,4 +1,6 @@
 (() => {
+  const clientScope = new URLSearchParams(window.location.search).get("client") || "web";
+  window.FTTestClientScope = clientScope;
   const definitions = {
     ic: {application: "ic_test", nav: "ic-test", title: "IC 测试"},
     backtest: {application: "group_test", nav: "backtest", title: "回测"},
@@ -47,6 +49,9 @@
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = definitions[kind].application;
+    const clientQuery = clientScope === "web"
+      ? ""
+      : `?client=${encodeURIComponent(clientScope)}`;
     const savedWorkspaceID = localStorage.getItem(`ft-${kind}-workspace`) || "";
     const savedWorkspaceConfigurationPromise = savedWorkspaceID
       ? context.api(`/api/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
@@ -54,7 +59,7 @@
         .catch(error => ({value: null, error}))
       : Promise.resolve({value: null, error: null});
     const [manifest, workspaces, savedWorkspaceConfiguration] = await Promise.all([
-      context.api(`/api/backtest/settings/${application}/summary`),
+      context.api(`/api/backtest/settings/${application}/summary${clientQuery}`),
       context.api("/api/workspace-summaries"),
       savedWorkspaceConfigurationPromise,
     ]);
@@ -67,6 +72,8 @@
       outputCapabilities: [], outputCapabilitiesLoaded: false,
       outputRequests: [],
       profiles: [], profilesLoaded: false,
+      runtimeServers: null, runtimeServersLoaded: false,
+      runtimeServersLoading: false,
       lazy: FTTestState.lazyState(),
       runValues: initialRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},

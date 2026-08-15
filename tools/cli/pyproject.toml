@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 factortester = "factortester_cli_bootstrap:main"
+factortester-manager = "factortester_cli_bootstrap:manager_main"
 
 [tool.setuptools]
 include-package-data = false
@@ -69,6 +70,9 @@ packages = [
 "tools.cli.release.research_reporting.public_research" = "release/research_reporting/public_research"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 [tool.setuptools.package-data]
+"tools.cli.manager" = [
+  "skills/*.md",
+]
 "tools.cli.release" = [
   "trusted-release-public.pem",
   "trusted-beta-release-public.pem",

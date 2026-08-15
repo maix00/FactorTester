@@ -11,6 +11,7 @@ from ..core.capabilities import load_builtin_capability_registry, resolve_graph_
 from ..core.graph import build_draft_graph, build_observed_graph, graph_content_hash
 from ..core.replay import replay_graph_trace
 from ..core.session import load_session
+from tools.cli.local_graph_navigation import evaluate_next
 from .common import echo_json
 from .graph_successor import (
     graph_requirements,
@@ -202,6 +203,56 @@ def graph_replay(trace_file: Path, as_json: bool) -> None:
     )
     click.echo(
         f"covered_edges: {len(report['coverage']['edge_ids'])}"
+    )
+
+
+@graph.command("next")
+@click.option(
+    "--graph-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--current-node", required=True)
+@click.option("--capability", "capabilities", multiple=True)
+@click.option("--evidence", "evidence", multiple=True)
+@click.option(
+    "--facts-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def graph_next(
+    graph_file: Path,
+    current_node: str,
+    capabilities: tuple[str, ...],
+    evidence: tuple[str, ...],
+    facts_file: Path | None,
+    as_json: bool,
+) -> None:
+    """在本地根据已下载 Graph 计算下一步，不请求 Manager。"""
+    graph_value = json.loads(graph_file.read_text(encoding="utf-8"))
+    if not isinstance(graph_value, dict):
+        raise click.ClickException("graph file must contain a JSON object")
+    facts: dict[str, object] = {}
+    if facts_file is not None:
+        facts_value = json.loads(facts_file.read_text(encoding="utf-8"))
+        if not isinstance(facts_value, dict):
+            raise click.ClickException("facts file must contain a JSON object")
+        facts = facts_value
+    payload = evaluate_next(
+        graph_value,
+        current_node=current_node,
+        capabilities=capabilities,
+        evidence=evidence,
+        facts=facts,
+    )
+    if as_json:
+        echo_json(payload)
+        return
+    click.echo(f"graph: {payload['graph']}")
+    click.echo(f"current_node: {payload['current_node']}")
+    click.echo(
+        "recommended: "
+        + (", ".join(payload["recommended_edge_ids"]) or "需要本地判断")
     )
 
 

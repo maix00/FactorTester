@@ -86,7 +86,7 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "scripts/release/assets.py").read_text()
-    assert "RUNTIME_CACHE_SCHEMA = 7" in source
+    assert "RUNTIME_CACHE_SCHEMA = 8" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert "research_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
@@ -106,6 +106,9 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     frozen.parent.mkdir(parents=True)
     frozen.write_bytes(b"cached executable")
     frozen.chmod(0o755)
+    manager = cache / key / "bin/factortester-manager"
+    manager.write_bytes(b"cached executable")
+    manager.chmod(0o755)
     harness = cache / key / "bin/cli-anything-factortester-research"
     harness.write_bytes(b"cached executable")
     harness.chmod(0o755)
@@ -224,6 +227,9 @@ def test_incomplete_or_corrupt_runtime_cache_is_rejected(tmp_path: Path) -> None
     assert assets._valid_runtime_cache(cached, "a" * 64) is False
     harness = cached / "bin/cli-anything-factortester-research"
     harness.write_bytes(b"harness")
+    manager = cached / "bin/factortester-manager"
+    manager.write_bytes(b"manager")
+    manager.chmod(0o755)
     renderer = cached / "bin/factortester-report-renderer"
     renderer.write_bytes(b"renderer")
     adapter = cached / "adapters/vibe-trading-adapter.zip"

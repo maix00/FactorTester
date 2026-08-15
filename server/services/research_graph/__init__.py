@@ -1,4 +1,7 @@
-"""Research Graph service internals.
+"""Research Graph server compatibility package.
 
-Public compatibility entry points remain in ``server.services.research_graphs``.
+The retained server surface is the immutable graph catalog and user-file
+storage. Branch transitions, Evidence admission, TrialPlan lifecycle and
+research-Agent execution are legacy migration modules; new authority lives in
+the local CLI/Swift runtime documented by ADR-094/095.
 """

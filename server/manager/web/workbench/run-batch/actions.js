@@ -1,6 +1,22 @@
 (() => {
   const model = () => window.FTTestRunBatchModel;
 
+  function usesLocalRuntime(state) {
+    return String(state.runValues?.execution_target || "server") === "local";
+  }
+
+  async function localRequest(action, request) {
+    const handler = window.webkit?.messageHandlers?.factorTesterLocalRun;
+    if (!handler?.postMessage) {
+      throw new Error("本地运行仅能从 Swift 客户端发起");
+    }
+    const value = await handler.postMessage({action, request});
+    if (!value || value.success === false) {
+      throw new Error(value?.error || "Swift 本地运行没有返回有效结果");
+    }
+    return value;
+  }
+
   async function runRequest(context, state) {
     // Report/reference code and uploaded-source serializers are only needed
     // once an explicit preview/run action starts.  Rendering the batch matrix
@@ -32,13 +48,15 @@
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       await window.FTTests?.ensureRunSubmitCode?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(context.servicePath("/api/runs/preview"), {
-        method: "POST",
-        body: JSON.stringify({
-          ...await runRequest(context, state),
-          configuration_revision: configuration.revision,
-        }),
-      });
+      const request = {
+        ...await runRequest(context, state),
+        configuration_revision: configuration.revision,
+      };
+      const value = usesLocalRuntime(state)
+        ? await localRequest("preview", request)
+        : await context.api(context.servicePath("/api/runs/preview"), {
+          method: "POST", body: JSON.stringify(request),
+        });
       model().recordPreview(item, value);
       refresh?.();
       return true;
@@ -59,14 +77,20 @@
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       await window.FTTests?.ensureRunSubmitCode?.(context, state);
       const configuration = await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(context.servicePath("/api/runs"), {
-        method: "POST",
-        body: JSON.stringify({
-          ...await runRequest(context, state),
-          configuration_revision: configuration.revision,
-        }),
-      });
-      model().recordSubmission(item, value);
+      const request = {
+        ...await runRequest(context, state),
+        configuration_revision: configuration.revision,
+      };
+      const value = usesLocalRuntime(state)
+        ? await localRequest("run", request)
+        : await context.api(context.servicePath("/api/runs"), {
+          method: "POST", body: JSON.stringify(request),
+        });
+      if (usesLocalRuntime(state)) {
+        model().recordLocalSubmission(item, value);
+      } else {
+        model().recordSubmission(item, value);
+      }
       refresh?.();
       return true;
     } catch (error) {

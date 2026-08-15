@@ -307,8 +307,6 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
     evidence = orjson.loads(trace["evidence_json"])
     assert evidence["graph_continuation"]["schema_version"] == 2
     assert evidence["graph_continuation"]["source_branch_id"] == "branch-1"
-    assert evidence["graph_continuation"]["budget_profile_ref"]
-    assert len(evidence["graph_continuation"]["budget_profile_hash"]) == 64
     source_trace_ref = (
         "trace:" + evidence["graph_continuation"]["source_trace_id"]
     )

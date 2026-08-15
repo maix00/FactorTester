@@ -3,5 +3,8 @@
   "sqlite_db_path": "/data/sqlite/unifieddata.sqlite",
   "source_data_dirs": {
     "LocalCNFutures": "/data/sources/LocalCNFutures"
+  },
+  "management_access": {
+    "methods": []
   }
 }

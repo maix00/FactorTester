@@ -5,15 +5,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-import orjson
-
 from tools.cli.protocols.research_step import context_ref, identifier, sha256
 
 
 INSPECT_FIELDS = {
     "schema_version", "operation", "binding", "graph", "action", "cas",
     "allowed_operations", "operation_payload_contracts", "capabilities",
-    "candidate_edges", "report_requirement_refs", "packet_bytes",
+    "candidate_edges", "report_requirement_refs",
 }
 
 
@@ -86,12 +84,7 @@ def build_inspect_contract(
                 "node_report_requirement_refs",
             ) or []
         ],
-        "packet_bytes": 0,
     }
-    for _ in range(4):
-        value["packet_bytes"] = len(orjson.dumps(value))
-    if value["packet_bytes"] != len(orjson.dumps(value)):
-        raise ValueError("research step packet size did not converge")
     return value
 
 

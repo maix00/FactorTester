@@ -4,7 +4,7 @@ import json
 
 from click.testing import CliRunner
 
-from tools.cli.app import cli
+from tools.cli.manager_app import manager_cli
 from tools.cli.manager.config import ManagerConfig
 
 
@@ -14,8 +14,8 @@ def test_manager_config_is_separate_from_server_config(tmp_path, monkeypatch) ->
     monkeypatch.setenv("FACTORTESTER_MANAGER_CONFIG", str(manager_config))
     monkeypatch.setenv("FACTORTESTER_CONFIG", str(server_config))
 
-    result = CliRunner().invoke(cli, [
-        "manager", "configure",
+    result = CliRunner().invoke(manager_cli, [
+        "configure",
         "--host", "127.0.0.1",
         "--port", "7998",
         "--json",
@@ -41,8 +41,8 @@ def test_manager_login_saves_returned_session(
 ) -> None:
     config_path = tmp_path / "manager.json"
     monkeypatch.setenv("FACTORTESTER_MANAGER_CONFIG", str(config_path))
-    CliRunner().invoke(cli, [
-        "manager", "configure", "--url", "http://127.0.0.1:7998",
+    CliRunner().invoke(manager_cli, [
+        "configure", "--url", "http://127.0.0.1:7998",
     ])
     saved = []
     monkeypatch.setattr(
@@ -51,6 +51,7 @@ def test_manager_login_saves_returned_session(
             "success": True,
             "username": username,
             "role": "super_admin",
+            "capabilities": {"manager": True},
             "token": "session-token",
         },
     )
@@ -59,8 +60,8 @@ def test_manager_login_saves_returned_session(
         lambda _self, token: saved.append(token),
     )
 
-    result = CliRunner().invoke(cli, [
-        "manager", "login",
+    result = CliRunner().invoke(manager_cli, [
+        "login",
         "--username", "root@1",
         "--password", "secret",
         "--json",
@@ -78,13 +79,17 @@ def test_manager_login_accepts_ui_credentials_on_stdin(
         "FACTORTESTER_MANAGER_CONFIG",
         str(tmp_path / "manager.json"),
     )
-    CliRunner().invoke(cli, ["manager", "configure"])
+    CliRunner().invoke(manager_cli, ["configure"])
     received = []
     monkeypatch.setattr(
         "tools.cli.manager.commands.ManagerClient.login",
         lambda _self, username, password: (
             received.append((username, password))
-            or {"success": True, "token": "session-token"}
+            or {
+                "success": True,
+                "capabilities": {"manager": True},
+                "token": "session-token",
+            }
         ),
     )
     monkeypatch.setattr(
@@ -93,9 +98,9 @@ def test_manager_login_accepts_ui_credentials_on_stdin(
     )
 
     result = CliRunner().invoke(
-        cli,
+        manager_cli,
         [
-            "manager", "login",
+            "login",
             "--username", "root",
             "--credentials-stdin",
             "--json",
@@ -107,7 +112,37 @@ def test_manager_login_accepts_ui_credentials_on_stdin(
     assert received == [("root", "secret")]
 
 
-def test_manager_restart_commands_map_to_distinct_backend_actions(
+def test_manager_login_rejects_non_manager_principal(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_CONFIG",
+        str(tmp_path / "manager.json"),
+    )
+    CliRunner().invoke(manager_cli, ["configure"])
+    saved = []
+    monkeypatch.setattr(
+        "tools.cli.manager.commands.ManagerClient.login",
+        lambda _self, _username, _password: {
+            "success": True,
+            "role": "user",
+            "capabilities": {"manager": False},
+            "token": "must-not-be-saved",
+        },
+    )
+    monkeypatch.setattr(
+        "tools.cli.manager.commands.ManagerCredentialStore.write",
+        lambda _self, token: saved.append(token),
+    )
+
+    result = CliRunner().invoke(manager_cli, [
+        "login", "--username", "user", "--password", "secret",
+    ])
+
+    assert result.exit_code != 0
+    assert "没有 Manager 管理权限" in result.output
+    assert saved == []
+
+
+def test_manager_service_restart_commands_map_to_distinct_backend_actions(
     monkeypatch,
 ) -> None:
     actions = []
@@ -131,18 +166,18 @@ def test_manager_restart_commands_map_to_distinct_backend_actions(
     )
 
     runner = CliRunner()
-    web = runner.invoke(cli, [
-        "manager", "restart-web", "8141", "--json",
+    web = runner.invoke(manager_cli, [
+        "services", "restart-api", "8141", "--json",
     ])
-    complete = runner.invoke(cli, [
-        "manager", "restart-all", "8141", "--json",
+    complete = runner.invoke(manager_cli, [
+        "services", "restart-bundle", "8141", "--json",
     ])
 
     assert web.exit_code == 0, web.output
     assert complete.exit_code == 0, complete.output
     assert actions == [
-        ("worktree-opaque", "restart-web"),
-        ("worktree-opaque", "restart-all"),
+        ("worktree-opaque", "restart-api"),
+        ("worktree-opaque", "restart-bundle"),
     ]
     assert json.loads(web.output)["port"] == 8141
     assert "instance_id" not in web.output
@@ -161,25 +196,51 @@ def test_manager_action_rejects_unknown_or_ambiguous_port(monkeypatch) -> None:
         lambda: (client, object()),
     )
 
-    duplicate = CliRunner().invoke(cli, [
-        "manager", "restart-web", "8141", "--json",
+    duplicate = CliRunner().invoke(manager_cli, [
+        "services", "restart-api", "8141", "--json",
     ])
-    missing = CliRunner().invoke(cli, [
-        "manager", "restart-web", "8999", "--json",
+    missing = CliRunner().invoke(manager_cli, [
+        "services", "restart-api", "8999", "--json",
     ])
 
     assert duplicate.exit_code != 0
-    assert "多个服务" in duplicate.output
+    assert "多个 FactorTester 服务" in duplicate.output
     assert missing.exit_code != 0
     assert "没有找到" in missing.output
 
 
-def test_manager_help_discloses_server_skill_and_restart_transaction() -> None:
-    manager_help = CliRunner().invoke(cli, ["manager", "--help"])
-    restart_help = CliRunner().invoke(cli, ["manager", "restart-fleet", "--help"])
+def test_manager_help_exposes_application_boundaries_only() -> None:
+    manager_help = CliRunner().invoke(manager_cli, ["--help"])
 
     assert manager_help.exit_code == 0, manager_help.output
-    assert restart_help.exit_code == 0, restart_help.output
-    assert "factortester-server-maintenance" in manager_help.output
-    assert "source-mode" in restart_help.output
-    assert "stop-mode" in restart_help.output
+    assert "server" in manager_help.output
+    assert "jobs" in manager_help.output
+    assert "artifacts" in manager_help.output
+    assert "research-graph" in manager_help.output
+    assert "restart-fleet" not in manager_help.output
+    assert "\n  admin " not in manager_help.output
+
+
+def test_server_access_is_read_only_server_owned_metadata(monkeypatch) -> None:
+    client = type("Client", (), {
+        "identity": lambda _self: {
+            "success": True,
+            "server": {"server_id": "public-1", "role": "main"},
+            "management_access": [{
+                "id": "operator-route",
+                "kind": "server-declared",
+                "endpoint": "opaque://server-provided",
+            }],
+        },
+    })()
+    monkeypatch.setattr(
+        "tools.cli.manager.commands._authenticated_client",
+        lambda: (client, object()),
+    )
+
+    result = CliRunner().invoke(manager_cli, ["server", "access", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["server"]["server_id"] == "public-1"
+    assert payload["management_access"][0]["id"] == "operator-route"

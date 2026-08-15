@@ -17,7 +17,6 @@ _CAPABILITIES = (
     ("research.run", 1),
     ("research.job", 1),
     ("research.graph", 1),
-    ("agent-flow.budget", 1),
     ("products.liquidity", 1),
 )
 

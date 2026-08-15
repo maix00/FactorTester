@@ -93,8 +93,6 @@ artifact contracts produced by the workflow.
   unit tests.
 - `test_full_e2e.py`: installed Harness subprocess workflows with a controlled
   real `factortester` executable.
-- `test_real_server_e2e.py`: installed Harness and FactorTester console scripts
-  against a complete isolated `server.create_app()` over real HTTP.
 
 ### Active Graph activation orchestration
 
@@ -482,9 +480,6 @@ test_core.py
   46 passed
 test_full_e2e.py::TestCLISubprocess
   17 passed
-test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
-  [_resolve_cli] Using installed command:
-    /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
@@ -507,9 +502,8 @@ Last run: 2026-07-20
 PYTHONPATH=tools/cli/agent-harness conda run -n GTHT python -m pytest \
   tests/server/test_profile_research_projection.py \
   tests/cli/test_factortester_client.py \
-  tests/server/test_research_graph_context_cost.py \
   tests/server/test_research_cycle_object_read.py \
-  tests/server/test_research_graph_final_schema.py \
+  tests/server/test_research_graph_protocol_v2.py \
   tests/server/test_active_graph_final_cutover.py \
   tests/server/test_research_graphs.py -v --tb=no
 
@@ -553,7 +547,7 @@ PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
 21 passed in 0.55s
 
 PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
-  tools/cli/agent-harness/cli_anything/factortester_research/tests/test_real_server_e2e.py \
+  tools/cli/agent-harness/cli_anything/factortester_research/tests/test_full_e2e.py \
   -k strategy_intent_cli_round_trips_real_workspace
 
 1 passed, 1 deselected in 2.75s
@@ -775,13 +769,12 @@ selection occurs before ranking and excludes missing/warm-up values.
 - Missing, ambiguous, or mismatched server-owned parent state fails closed and
   leaves the report HEAD unchanged.
 
-## Canonical Research Graph command refinement
+## Canonical local Research Graph command refinement
 
 ### Test inventory plan
 
-- `tests/server/test_research_graph_next_actions.py`: every server-supplied
-  action names the public `factortester research-graph` command group and
-  report actions include the required local report scope.
+- Server-supplied `next_actions` are no longer an authority. Local graph
+  evaluation returns any local guidance from the downloaded graph and facts.
 - `tests/release/test_graph_packet_commands.py`: the Harness report packet
   contains no removed `factortester node` or `factortester edge` shortcut.
 

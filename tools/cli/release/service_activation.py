@@ -93,7 +93,7 @@ def _unique_port(snapshot: dict, port: int) -> dict:
     if len(matches) != 1:
         raise RuntimeError(
             f"Manager 未找到唯一的服务端口 {port}；请先通过 "
-            "factortester manager list 确认部署"
+            "factortester-manager services list 确认部署"
         )
     return matches[0]
 

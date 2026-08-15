@@ -17,7 +17,6 @@ def _packet() -> dict:
         "context_ref": "sha256:" + "a" * 64,
         "branch": {"instance_id": "instance-1", "branch_id": "branch-1"},
         "node": {"node_id": "validation_design"},
-        "budget_profile": {"ceiling_bytes": 12288},
         "current_obligations": [
             {
                 "obligation_id": "sample-boundary",
@@ -49,7 +48,7 @@ def _packet() -> dict:
     }
 
 
-def test_contract_exposes_current_refs_and_independent_budgets() -> None:
+def test_contract_exposes_current_refs_and_request_limits() -> None:
     contract = build_cycle_submission_contract(
         _packet(), edge_id="validation_design__trial_execution",
     )
@@ -66,7 +65,6 @@ def test_contract_exposes_current_refs_and_independent_budgets() -> None:
         item["obligation_id"]
         for item in contract["reusable_refs"]["obligations"]
     ] == ["sample-boundary", "cost-control"]
-    assert contract["budgets"]["agent_context_bytes"] == 12288
     assert contract["budgets"]["transition_evidence_bytes"] == 64 * 1024
     assert contract["budgets"]["report_submission_bytes"] == 16 * 1024
 
@@ -169,7 +167,7 @@ def test_contract_derives_exact_reviewer_task_ref() -> None:
     ] == [f"research-cycle-adjudication:{proposal_hash}"]
 
 
-def test_contract_does_not_confuse_context_and_transition_budgets() -> None:
+def test_contract_validates_transition_evidence_size() -> None:
     contract = build_cycle_submission_contract(
         _packet(), edge_id="validation_design__trial_execution",
     )
@@ -177,7 +175,7 @@ def test_contract_does_not_confuse_context_and_transition_budgets() -> None:
 
     result = validate_against_cycle_submission_contract(evidence, contract)
 
-    assert result["transition_evidence_bytes"] > 12288
+    assert result["transition_evidence_bytes"] > 0
     assert result["contract_valid"] is True
 
 

@@ -20,6 +20,8 @@ def friendly_errors(func=None, *, expose_server_error_body: bool = False):
                 raise click.ClickException(message) from None
             except FileNotFoundError as exc:
                 raise click.ClickException(str(exc)) from None
+            except PermissionError as exc:
+                raise click.ClickException(str(exc)) from None
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from None
             except RuntimeError as exc:
@@ -57,4 +59,3 @@ def http_error_message(exc: HttpClientError, *, expose_body: bool = False) -> st
         if detail:
             return f"请求失败 ({exc.status}): {detail}"
     return f"请求失败 ({exc.status}): {exc.url}"
-

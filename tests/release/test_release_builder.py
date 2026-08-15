@@ -159,6 +159,7 @@ def test_local_build_script_uses_installed_app_identity() -> None:
         "CFBundleIdentifier", "CFBundleShortVersionString",
         "CFBundleVersion", "bundle_hash", "bundle-receipt.json",
         'receipt["files"]["bin/factortester"]',
+        'receipt["files"]["bin/factortester-manager"]',
         'receipt["files"]["bin/factortester-report-renderer"]',
     ):
         assert contract in source
@@ -182,6 +183,8 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     cli = resources / "bin/factortester"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"old")
+    manager_cli = resources / "bin/factortester-manager"
+    manager_cli.write_bytes(b"old")
     research_cli = resources / "bin/cli-anything-factortester-research"
     research_cli.write_bytes(b"old")
     report_renderer = resources / "bin/factortester-report-renderer"
@@ -196,6 +199,7 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     def embed(repo, target, *, version, source_revision):
         calls.append((repo, target, version, source_revision))
         cli.write_bytes(b"new")
+        manager_cli.write_bytes(b"new")
         research_cli.write_bytes(b"new")
         report_renderer.write_bytes(b"new")
         return receipt
@@ -607,6 +611,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     body = receipt.read_text()
     assert '"version":"0.2.0"' in body
     assert '"bin/factortester"' in body
+    assert '"bin/factortester-manager"' in body
     assert '"bin/cli-anything-factortester-research"' in body
     assert '"bin/factortester-report-renderer"' in body
     assert '"adapters/vibe-trading-adapter.zip"' in body

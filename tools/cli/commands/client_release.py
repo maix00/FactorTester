@@ -51,6 +51,11 @@ def client() -> None:
     """Manage the versioned local FactorTester client distribution."""
 
 
+@click.group("client")
+def operator_client() -> None:
+    """Manage authorized FactorTester client publication."""
+
+
 client.add_command(client_adapter)
 client.add_command(client_catalog)
 client.add_command(client_profile)
@@ -108,7 +113,7 @@ def app_update_restart(as_json: bool) -> None:
     _echo(dispatch_app_update("restart"), as_json)
 
 
-@client.command("release")
+@operator_client.command("release")
 @click.option("--channel", type=click.Choice(["stable", "beta"]), required=True)
 @click.option("--version", required=True)
 @click.option("--build", type=click.IntRange(min=1), required=True)

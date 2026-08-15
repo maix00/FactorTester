@@ -18,6 +18,23 @@ enum ClientCLIResolution {
         )
     }
 
+    static func managerExecutable(
+        bundle: Bundle = .main,
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> String {
+        let bundled = bundle.resourceURL?
+            .appendingPathComponent("FactorTester/bin/factortester-manager")
+            .path
+        return resolve(
+            bundledPath: bundled,
+            configuredPath: defaults.string(
+                forKey: "client.release.managerCLIPath"
+            ),
+            isExecutable: fileManager.isExecutableFile(atPath:)
+        )
+    }
+
     static func resolve(
         bundledPath: String?,
         configuredPath: String?,

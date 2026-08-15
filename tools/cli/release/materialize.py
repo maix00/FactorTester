@@ -15,6 +15,7 @@ from .app_archive import install_macos_app
 MAX_INSTALL_OUTPUT_BYTES = 64 * 1024
 COMMAND_MODULES = {
     "factortester": ("tools.cli.app", "cli"),
+    "factortester-manager": ("tools.cli.manager_app", "manager_cli"),
     "cli-anything-factortester-research": (
         "cli_anything.factortester_research.factortester_research_cli",
         "cli",
@@ -53,7 +54,11 @@ def materialize_release(
 def install_stable_launchers(root: Path) -> None:
     bin_root = root / "bin"
     bin_root.mkdir(parents=True, exist_ok=True)
-    for command in ("factortester", "cli-anything-factortester-research"):
+    for command in (
+        "factortester",
+        "factortester-manager",
+        "cli-anything-factortester-research",
+    ):
         target = bin_root / command
         temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
         try:
@@ -75,7 +80,11 @@ def install_stable_launchers(root: Path) -> None:
 
 
 def stable_launchers_are_current(root: Path) -> bool:
-    for command in ("factortester", "cli-anything-factortester-research"):
+    for command in (
+        "factortester",
+        "factortester-manager",
+        "cli-anything-factortester-research",
+    ):
         target = root / "bin" / command
         if (
             not target.is_file()

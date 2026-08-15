@@ -24,4 +24,24 @@ final class ClientCLIResolutionTests: XCTestCase {
 
         XCTAssertEqual(resolved, "/developer/bin/factortester")
     }
+
+    func testManagerResolutionUsesItsBundledExecutableAndFallbackName() {
+        let resolved = ClientCLIResolution.resolve(
+            bundledPath: "/Applications/FTClient.app/bundled/factortester-manager",
+            configuredPath: "/developer/bin/factortester-manager",
+            isExecutable: { $0.contains("bundled") }
+        )
+
+        XCTAssertEqual(
+            resolved,
+            "/Applications/FTClient.app/bundled/factortester-manager"
+        )
+
+        let fallback = ClientCLIResolution.resolve(
+            bundledPath: "/missing/factortester-manager",
+            configuredPath: nil,
+            isExecutable: { _ in false }
+        )
+        XCTAssertEqual(fallback, "factortester-manager")
+    }
 }

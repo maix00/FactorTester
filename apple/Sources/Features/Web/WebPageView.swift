@@ -175,8 +175,13 @@ struct WebPageView: View {
         }
         return EmbeddedPresentationURL.add(
             to: rawURL,
-            language: languageStore.selection
+            language: languageStore.selection,
+            client: isTestWorkbenchPage ? "swift" : nil
         )
+    }
+
+    private var isTestWorkbenchPage: Bool {
+        path == "/ic-test" || path == "/backtest"
     }
 
     private var activeWebSession: WebPageSession {
@@ -204,7 +209,8 @@ struct WebPageView: View {
 enum EmbeddedPresentationURL {
     static func add(
         to url: URL,
-        language: AppLanguage? = nil
+        language: AppLanguage? = nil,
+        client: String? = nil
     ) -> URL? {
         guard var components = URLComponents(
             url: url,
@@ -216,6 +222,10 @@ enum EmbeddedPresentationURL {
         if let language {
             items.removeAll { $0.name == "lang" }
             items.append(URLQueryItem(name: "lang", value: language.rawValue))
+        }
+        if let client {
+            items.removeAll { $0.name == "client" }
+            items.append(URLQueryItem(name: "client", value: client))
         }
         components.queryItems = items
         return components.url
