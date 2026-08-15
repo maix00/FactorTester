@@ -21,7 +21,11 @@ def pointer_reason_hash(reason: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def load_active_graph(*, graph_id: str) -> dict[str, Any] | None:
+def load_active_graph(
+    *,
+    graph_id: str,
+    locale: str | None = None,
+) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = conn.execute(
             """
@@ -40,7 +44,12 @@ def load_active_graph(*, graph_id: str) -> dict[str, Any] | None:
         )
     if graph is None:
         raise ValueError("active pointer references a missing Graph version")
-    return _with_pointer(graph, row)
+    value = _with_pointer(graph, row)
+    if locale is None:
+        return value
+    from server.services.research_graph.presentations import attach_presentation
+
+    return attach_presentation(value, locale=locale)
 
 
 def activate_graph(
