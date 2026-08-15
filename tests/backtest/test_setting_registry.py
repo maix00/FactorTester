@@ -42,7 +42,7 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         assert fields["task_name"]["default"] == ""
         assert fields["task_name"]["placement"] == "run_identity"
         assert fields["acting_profile_ref"]["default"] == ""
-        assert fields["acting_profile_ref"]["control_template"] == "profile"
+        assert fields["acting_profile_ref"]["value_descriptor"]["editor"] == "profile"
         assert fields["acting_profile_ref"]["placement"] == "run_identity"
     assert backtest_setting_registry.get("ic_test").manifest()["run_settings"] == {
         "key": "run_context",
@@ -54,16 +54,21 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
     assert ic_fields["service_port"] == {
         "key": "service_port",
         "label": "服务端口",
-        "control_template": "service_port",
         "default": "",
         "request_location": "query",
         "freeze_target": "job.server_context.port",
         "placement": "global_settings",
         "template_policy": "exclude",
         "order": 10,
-        "options": [],
         "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
         "enabled_payload": None,
+        "rules": {
+            "visible_if": {},
+            "editable_if": {},
+            "default_if": {},
+            "disabled_values": {},
+            "engine_defaults": {},
+        },
         "value_descriptor": {
             "value_type": "reference",
             "cardinality": "one",
@@ -73,9 +78,10 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
             "option_source": "",
             "resolver": "",
             "item_type": "",
-            "ref_kind": "service_port",
-            "schema": {},
-            "minimum": None,
+                "ref_kind": "service_port",
+                "schema": {},
+                "options": [],
+                "minimum": None,
             "maximum": None,
             "step": None,
         },
@@ -189,17 +195,17 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["equity_compute_live"]["label"] == "净值实时计算"
     assert index["defaults"]["equity_compute_live"]["module"] == "equity_curve"
     assert index["defaults"]["equity_compute_live"]["tab_key"] == "engine"
-    assert index["defaults"]["engine"]["options"][0] == {
+    assert index["defaults"]["engine"]["value_descriptor"]["options"][0] == {
         "value": "native",
         "label": "Native 事件驱动回测工具",
     }
     assert index["defaults"]["order_type"]["value"] == "market"
     assert index["defaults"]["matching_model"]["value"] == "auto"
     assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
-    assert index["defaults"]["volatility_lookback"]["visible_when"] == {
+    assert index["defaults"]["volatility_lookback"]["rules"]["visible_if"] == {
         "allocation_policy": ["inverse_volatility"],
     }
-    assert index["defaults"]["volatility_warmup"]["visible_when"] == {
+    assert index["defaults"]["volatility_warmup"]["rules"]["visible_if"] == {
         "allocation_policy": ["inverse_volatility"],
     }
     assert index["defaults"]["engine_mode"]["value"] == "auto"
@@ -207,59 +213,59 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["force_close_before_expiry"]["value"] == "2d"
     assert index["defaults"]["rollover_policy"]["value"] == "date_before_expiry"
     assert index["defaults"]["rollover_before_expiry"]["value"] == "5d"
-    assert index["defaults"]["rollover_before_expiry"]["visible_when"] == {
+    assert index["defaults"]["rollover_before_expiry"]["rules"]["visible_if"] == {
         "rollover_policy": ["date_before_expiry"],
     }
-    assert index["defaults"]["fee_mode"]["editable_when"] == {
+    assert index["defaults"]["fee_mode"]["rules"]["editable_if"] == {
         "engine_mode": ["custom"],
     }
-    assert index["defaults"]["fee_mode"]["default_when"] == {
+    assert index["defaults"]["fee_mode"]["rules"]["default_if"] == {
         "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
-    assert {option["value"] for option in index["defaults"]["fee_mode"]["options"]} == {
+    assert {option["value"] for option in index["defaults"]["fee_mode"]["value_descriptor"]["options"]} == {
         "auto", "exact", "custom", "close_yesterday", "close_today", "fixed", "zero",
     }
     assert index["defaults"]["transaction_fee_source"]["label"] == "交易费来源"
     assert index["defaults"]["transaction_fee_source"]["chip_template"] == "交易费来源: {value}"
-    assert index["defaults"]["transaction_fee_source"]["default_when"] == {
+    assert index["defaults"]["transaction_fee_source"]["rules"]["default_if"] == {
         "counterparty_profile": {"exchange_base": "exchange", "openctp_broker": "openctp"},
     }
-    assert {option["value"] for option in index["defaults"]["transaction_fee_source"]["options"]} == {
+    assert {option["value"] for option in index["defaults"]["transaction_fee_source"]["value_descriptor"]["options"]} == {
         "exchange", "openctp",
     }
-    assert index["defaults"]["fixed_fee_rate"]["visible_when"] == {
+    assert index["defaults"]["fixed_fee_rate"]["rules"]["visible_if"] == {
         "fee_mode": ["fixed"],
     }
-    assert index["defaults"]["slippage_bps"]["visible_when"] == {
+    assert index["defaults"]["slippage_bps"]["rules"]["visible_if"] == {
         "slippage_mode": ["fixed_bps"],
     }
-    assert index["defaults"]["participation_rate"]["visible_when"] == {
+    assert index["defaults"]["participation_rate"]["rules"]["visible_if"] == {
         "liquidity_mode": ["volume_participation"],
     }
-    assert index["defaults"]["collateral_fraction"]["visible_when"] == {
+    assert index["defaults"]["collateral_fraction"]["rules"]["visible_if"] == {
         "margin_mode": ["fixed", "auto", "exact", "custom"],
     }
     assert index["defaults"]["margin_mode"]["value"] == "auto"
     assert index["defaults"]["margin_mode"]["label"] == "保证金模式"
     assert index["defaults"]["margin_mode"]["chip_template"] == "保证金模式: {value}"
-    assert index["defaults"]["margin_mode"]["editable_when"] == {
+    assert index["defaults"]["margin_mode"]["rules"]["editable_if"] == {
         "engine_mode": ["auto", "custom"],
     }
-    assert index["defaults"]["margin_mode"]["default_when"] == {
+    assert index["defaults"]["margin_mode"]["rules"]["default_if"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
     assert index["defaults"]["target_margin_utilization"]["value"] == 0.30
     assert index["defaults"]["max_margin_utilization"]["value"] == 0.40
-    assert index["defaults"]["target_margin_utilization"]["visible_when"] == {
+    assert index["defaults"]["target_margin_utilization"]["rules"]["visible_if"] == {
         "margin_mode": ["auto", "exact", "custom", "fixed"],
     }
-    assert index["defaults"]["accounting_mode"]["editable_when"] == {
+    assert index["defaults"]["accounting_mode"]["rules"]["editable_if"] == {
         "engine_mode": ["custom"],
     }
     assert index["defaults"]["custom_product_fields"]["label"] == "自定义字段"
-    assert index["defaults"]["custom_product_fields"]["visible_when"] == {
+    assert index["defaults"]["custom_product_fields"]["rules"]["visible_if"] == {
         "engine_mode": ["custom"],
     }
     assert index["defaults"]["custom_product_fields"]["chip_template"] == "自定义字段: {value}"
@@ -273,13 +279,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "OpenRatioByMoney",
         "CostBasisMethod",
     }
-    assert index["defaults"]["historical_field_policy"]["options"][1] == {
+    assert index["defaults"]["historical_field_policy"]["value_descriptor"]["options"][1] == {
         "value": "latest_available",
         "label": "缺失历史数据由时间差最近的数据向后填充",
     }
     assert index["defaults"]["fee_custom_product_fields"]["tab_key"] == "cost"
     assert index["defaults"]["fee_custom_product_fields"]["chip_template"] is None
-    assert index["defaults"]["fee_custom_product_fields"]["visible_when"] == {
+    assert index["defaults"]["fee_custom_product_fields"]["rules"]["visible_if"] == {
         "engine_mode": ["custom"],
         "fee_mode": ["custom"],
     }
@@ -291,7 +297,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["margin_custom_product_fields"]["tab_key"] == "margin"
     assert index["defaults"]["margin_custom_product_fields"]["chip_template"] is None
-    assert index["defaults"]["margin_custom_product_fields"]["visible_when"] == {
+    assert index["defaults"]["margin_custom_product_fields"]["rules"]["visible_if"] == {
         "engine_mode": ["custom"],
         "margin_mode": ["custom"],
     }
@@ -305,7 +311,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["trading_rule_custom_product_fields"]["tab_key"] == "accounting"
     assert index["defaults"]["trading_rule_custom_product_fields"]["chip_template"] is None
-    assert index["defaults"]["trading_rule_custom_product_fields"]["visible_when"] == {
+    assert index["defaults"]["trading_rule_custom_product_fields"]["rules"]["visible_if"] == {
         "engine_mode": ["custom"],
         "accounting_mode": ["Custom"],
     }
@@ -356,8 +362,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert set(index["defaults"]) - {"setting_template"} <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["module"] == "factor_execution"
-    assert index["defaults"]["warmup_mode"]["default_when"]["engine_mode"]["basic"] == "none"
-    assert index["defaults"]["warmup_window"]["visible_when"] == {"warmup_mode": ["fixed"]}
+    assert index["defaults"]["warmup_mode"]["rules"]["default_if"]["engine_mode"]["basic"] == "none"
+    assert index["defaults"]["warmup_window"]["rules"]["visible_if"] == {"warmup_mode": ["fixed"]}
     assert index["defaults"]["evaluation_split"]["module"] == "run_window"
     assert "execution_price_basis" not in index["defaults"]
     assert {
@@ -435,11 +441,11 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
     horizon_field = index["defaults"]["forward_return_horizons"]
     assert horizon_field["value"] == {"sampling": "scale_aware"}
-    assert horizon_field["control_template"] == "ic_horizon_grid"
+    assert horizon_field["value_descriptor"]["editor"] == "ic_horizon_grid"
     assert horizon_field["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
     assert index["defaults"]["ic_lags"]["value"] == [0]
-    assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
+    assert index["defaults"]["ic_lags"]["value_descriptor"]["editor"] == "ic_delay_grid"
     assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
     assert [section["key"] for section in index["settings_sections"]] == [
         "authoring", "scope", "data", "core", "analysis",
@@ -450,7 +456,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     }["delay"] == "core"
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_decay_lags"]["value"] == [5]
-    assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
+    assert index["defaults"]["ic_decay_lags"]["value_descriptor"]["editor"] == "ic_decay_grid"
     assert index["defaults"]["ic_decay_lags"]["label"] == "IC 重采样间隔"
     assert "重采样" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert "自相关阶数" in index["defaults"]["ic_decay_lags"]["help_text"]
@@ -458,7 +464,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert {
         "group_adjust", "by_group", "min_cross_section_count",
     }.isdisjoint(index["defaults"])
-    assert index["defaults"]["start_time"]["visible_when"] == {
+    assert index["defaults"]["start_time"]["rules"]["visible_if"] == {
         "time_precision": ["exact"],
     }
     assert {chip["key"] for chip in index["chip_fields"]} >= {
@@ -781,17 +787,17 @@ def test_setting_manifest_does_not_read_page_runtime_time() -> None:
     assert payload["defaults"]["start_time"]["value"] == "00:00"
     assert payload["defaults"]["end_date"]["value"] == ""
     assert payload["defaults"]["end_time"]["value"] == "23:59"
-    assert payload["defaults"]["time_precision"]["options"] == [
+    assert payload["defaults"]["time_precision"]["value_descriptor"]["options"] == [
         {"value": "exact", "label": "精确时间"},
         {"value": "trading_day", "label": "交易日"},
     ]
-    assert payload["defaults"]["start_time"]["visible_when"] == {
+    assert payload["defaults"]["start_time"]["rules"]["visible_if"] == {
         "time_precision": ["exact"],
     }
-    assert payload["defaults"]["end_time"]["visible_when"] == {
+    assert payload["defaults"]["end_time"]["rules"]["visible_if"] == {
         "time_precision": ["exact"],
     }
-    assert payload["defaults"]["timezone"]["visible_when"] == {
+    assert payload["defaults"]["timezone"]["rules"]["visible_if"] == {
         "time_precision": ["exact"],
     }
 
@@ -1186,7 +1192,7 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
 
 # money_unit_policy's per-engine override behavior (qlib keeps default,
 # rqalpha forces engine_native) was specific to that old field's
-# engine_defaults/disabled_values_by_engine mechanism. MinorUnitModule.
+# engine_defaults/disabled_values mechanism. MinorUnitModule.
 # use_minor_units (its replacement) is a plain per-strategy boolean scoped
 # to the native engine only -- other engines' money-precision handling
 # isn't modeled here, so there's no equivalent cross-engine fallback to test.
@@ -1219,10 +1225,13 @@ def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() ->
     for key, field in summary["defaults"].items():
         assert field["value"] == full["defaults"][key]["value"]
         assert field["tab_key"] == full["defaults"][key]["tab_key"]
-        if "options" in full["defaults"][key]:
-            assert field["options"] == full["defaults"][key]["options"]
+        if "value_descriptor" in full["defaults"][key]:
+            assert field["value_descriptor"] == full["defaults"][key]["value_descriptor"]
         assert "help_text" not in field
 
     tab = application.tab_manifest("engine")
     assert tab["defaults"]
-    assert any("options" in field for field in tab["defaults"].values())
+    assert any(
+        field.get("value_descriptor", {}).get("options")
+        for field in tab["defaults"].values()
+    )

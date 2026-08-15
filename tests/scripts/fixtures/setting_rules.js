@@ -17,20 +17,22 @@ const manifest = {defaults: {
   engine_mode: {value: "auto"},
   accounting_mode: {
     value: "Auto",
-    default_when: {engine_mode: {basic: "Basic", auto: "Auto", custom: "Custom"}},
+    rules: {default_if: {engine_mode: {basic: "Basic", auto: "Auto", custom: "Custom"}}},
   },
   daily_mark_to_market_enabled: {
     value: false,
-    editable_when: {engine_mode: ["custom"], accounting_mode: ["Custom"]},
+    rules: {editable_if: {engine_mode: ["custom"], accounting_mode: ["Custom"]}},
   },
   fixed_margin_ratio: {
     value: 0.1,
-    visible_when: {margin_mode: ["fixed"]},
+    rules: {visible_if: {margin_mode: ["fixed"]}},
   },
   margin_mode: {
     value: "auto",
-    default_when: {engine_mode: {basic: "none", auto: "auto", custom: "custom"}},
-    disabled_values_by_engine: {zipline: ["exact"]},
+    rules: {
+      default_if: {engine_mode: {basic: "none", auto: "auto", custom: "custom"}},
+      disabled_values: {zipline: ["exact"]},
+    },
   },
   engine: {value: "native"},
   custom_product_fields: {
@@ -47,6 +49,37 @@ assert.equal(values.accounting_mode, "Basic");
 assert.equal(values.margin_mode, "none");
 assert.equal(rules.isEditable(manifest.defaults.daily_mark_to_market_enabled, values), false);
 assert.equal(rules.isVisible(manifest.defaults.fixed_margin_ratio, values), false);
+assert.equal(
+  rules.displayValueFor(
+    "daily_mark_to_market_enabled",
+    manifest.defaults.daily_mark_to_market_enabled,
+    values,
+  ),
+  false,
+  "a locked field should display its declared default",
+);
+
+rules.setValue(
+  manifest,
+  values,
+  "daily_mark_to_market_enabled",
+  manifest.defaults.daily_mark_to_market_enabled,
+  true,
+);
+assert.equal(
+  rules.valueFor("daily_mark_to_market_enabled", manifest.defaults.daily_mark_to_market_enabled, values),
+  true,
+  "the raw manual value remains in the store for a later editable mode",
+);
+assert.equal(
+  rules.displayValueFor(
+    "daily_mark_to_market_enabled",
+    manifest.defaults.daily_mark_to_market_enabled,
+    values,
+  ),
+  false,
+  "a locked field must not display a stale manual value",
+);
 
 rules.setValue(manifest, values, "engine_mode", manifest.defaults.engine_mode, "custom");
 assert.equal(values.accounting_mode, "Custom");

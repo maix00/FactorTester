@@ -129,7 +129,7 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
             SettingOption("auto", "按因子表达式自动推导"),
         ),
         chip_template="前摇窗口: {value}",
-        default_when={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+        default_if={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
         help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
     ))
     app.register_setting(SettingDefinition(
@@ -141,7 +141,7 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
         ScopePolicy.LOCAL_ONLY,
         module="factor_execution",
         chip_template="前摇时长: {value}",
-        visible_when={"warmup_mode": ("fixed",)},
+        visible_if={"warmup_mode": ("fixed",)},
         help_text="固定前摇窗口必须是时间值，例如 30min、5d、60d。",
     ))
 
@@ -173,14 +173,14 @@ def register_run_window_base(
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 40},
         **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 50},
         **tab_kwargs,
     ))
@@ -205,7 +205,7 @@ def register_run_window_base(
             SettingOption("Europe/London", "Europe/London"),
         ),
         chip_template="时区: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 60},
         **tab_kwargs,
     ))

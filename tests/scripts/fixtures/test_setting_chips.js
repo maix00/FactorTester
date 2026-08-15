@@ -17,7 +17,23 @@ class Element {
 }
 global.document = {createElement: tagName => new Element(tagName)};
 global.FTSettingRules = {
-  isVisible: field => field.visible !== false,
+  isVisible: (field, values) => field.visible !== false
+    && Object.entries(field.rules?.visible_if || {}).every(([key, allowed]) => (
+      (Array.isArray(allowed) ? allowed : [allowed]).map(String).includes(String(values?.[key]))
+    )),
+  displayValueFor: (key, field, values) => {
+    if (Object.entries(field.rules?.editable_if || {}).some(([name, allowed]) => (
+      !(Array.isArray(allowed) ? allowed : [allowed]).map(String).includes(String(values?.[name]))
+    ))) {
+      const mapping = field.rules?.default_if || {};
+      for (const [name, choices] of Object.entries(mapping)) {
+        const value = values?.[name];
+        if (Object.prototype.hasOwnProperty.call(choices || {}, value)) return choices[value];
+      }
+      return field.value;
+    }
+    return values[field.serialization?.storage_key || key];
+  },
   valueFor: (key, field, values) => values[field.serialization?.storage_key || key],
 };
 
@@ -33,30 +49,38 @@ const manifest = {
   defaults: {
     factor_owner_ref: {
       tab_key: "factor", label: "因子所有者", chip_template: "因子所有者: {value}",
-      show_chip: false, serialization: {kind: "factor_owner_selection"}, options: [],
+      show_chip: false, serialization: {kind: "factor_owner_selection"},
+      value_descriptor: {options: []},
     },
     factor_candidates: {
       tab_key: "factor", label: "因子候选", chip_template: "因子候选: {value}",
-      show_chip: false, serialization: {kind: "factor_candidate_list"}, options: [],
+      show_chip: false, serialization: {kind: "factor_candidate_list"},
+      value_descriptor: {options: []},
     },
     product_path_selections: {
       tab_key: "product_path_selection", label: "产品路径选择",
       chip_template: "产品路径选择: {value}",
-      show_chip: false, serialization: {kind: "product_path_selection_list"}, options: [],
+      show_chip: false, serialization: {kind: "product_path_selection_list"},
+      value_descriptor: {options: []},
     },
     start_date: {
       tab_key: "time", label: "开始日期", chip_template: "开始日期: {value}",
-      serialization: {}, options: [],
+      serialization: {}, value_descriptor: {options: []},
     },
     ic_method: {
       tab_key: "ic_method", label: "IC 类型", chip_template: "IC: {value}",
-      serialization: {}, options: [
+      serialization: {}, value_descriptor: {options: [
         {value: "both", label: "Rank + Pearson"},
-      ],
+      ]},
     },
     hidden: {
       tab_key: "time", label: "隐藏", chip_template: "隐藏: {value}",
-      serialization: {}, options: [], visible: false,
+      serialization: {}, value_descriptor: {options: []}, visible: false,
+    },
+    conditional: {
+      tab_key: "time", label: "条件字段", chip_template: "条件字段: {value}",
+      serialization: {}, value: "stale", value_descriptor: {options: []},
+      rules: {visible_if: {mode: ["advanced"]}},
     },
   },
   chip_fields: [
@@ -122,21 +146,22 @@ const runManifest = {
   run_settings: {key: "run_context", label: "任务提交"},
   run_fields: [
     {
-      key: "task_name", label: "任务名称", default: "", control_template: "text",
+      key: "task_name", label: "任务名称", default: "", value_descriptor: {editor: "text"},
       placement: "run_identity", order: 1,
     },
     {
-      key: "acting_profile_ref", label: "提交身份", default: "", control_template: "profile",
+      key: "acting_profile_ref", label: "提交身份", default: "", value_descriptor: {editor: "profile"},
       placement: "run_identity", order: 2,
     },
     {
       key: "retention_mode", label: "结果保留范围", default: "summary",
-      control_template: "select", placement: "run_options", order: 20,
-      options: [{value: "summary", label: "摘要结果"}],
+      value_descriptor: {editor: "select", options: [{value: "summary", label: "摘要结果"}]},
+      placement: "run_options", order: 20,
     },
     {
       key: "output_requests", label: "结果与生成物", default: [],
-      control_template: "artifact_output_picker", placement: "outputs", order: 40,
+      value_descriptor: {editor: "artifact_output_picker"},
+      placement: "outputs", order: 40,
     },
   ],
 };
@@ -151,6 +176,27 @@ assert.deepEqual(runDescriptors.map(item => [item.label, item.value, item.tabKey
   ["结果保留范围", "摘要结果", "run_context"],
   ["结果与生成物", "未选择（使用默认输出）", "run_context"],
 ]);
+
+const hiddenActive = FTTestSettingChips.descriptors({
+  manifest,
+  values: {mode: "basic", conditional: "stale"},
+  mountedTabs: ["time"],
+  includeUnregistered: true,
+  context: {t: value => value},
+});
+assert.equal(hiddenActive.some(item => item.label === "条件字段"), false,
+  "conditional fields must stay out of the active chip area when hidden");
+const hiddenChooser = FTTestSettingChips.descriptors({
+  manifest,
+  values: {mode: "basic", conditional: "stale"},
+  mountedTabs: ["time"],
+  includeUnregistered: true,
+  includeHidden: true,
+  context: {t: value => value},
+});
+const hiddenChip = hiddenChooser.find(item => item.label === "条件字段");
+assert.equal(hiddenChip.value, "N/A",
+  "+ 设置 must show conditional fields as N/A when they are not applicable");
 
 const unregistered = FTTestSettingChips.descriptors({
   manifest,

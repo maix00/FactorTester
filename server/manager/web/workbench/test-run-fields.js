@@ -43,8 +43,7 @@
   function controlField(item) {
     return {
       ...item, value: structuredClone(item.default), serialization: {},
-      visible_when: {}, editable_when: {}, disabled_values_by_engine: {},
-      engine_defaults: {}, default_when: {}, minimum: null, maximum: null, step: null,
+      rules: item.rules || {},
     };
   }
 
@@ -61,7 +60,7 @@
     }
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
-    const control = item.control_template === "profile"
+    const control = item.value_descriptor?.editor === "profile"
       ? profileControl(context, state, refresh, item)
       : FTTestSettings.controlFor(
         item.key, fieldValue, manifest, state.runValues, context,

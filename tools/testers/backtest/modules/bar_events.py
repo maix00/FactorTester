@@ -36,7 +36,7 @@ class BarEventModule(ExecutableModule):
         "bar_price_bases": FieldDefinition(
             public=False,
             default=("close",),
-            control_template="custom",
+            editor="custom",
             help_text="BAR 事件订阅的价格字段；每个字段按 Engine 的 bar proxy 可见时间 policy 单独注册事件。",
         ),
         "dispatched_bar_events": FieldDefinition(public=False),

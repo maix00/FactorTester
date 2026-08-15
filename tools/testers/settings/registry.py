@@ -105,11 +105,12 @@ class ApplicationSettings:
     def _default_manifest_value(
         index: int, key: str, setting: SettingDefinition,
     ) -> dict[str, Any]:
+        spec = setting.field_spec()
+        assert spec.setting is not None
         return {
             "order": index,
             "value": setting.default,
             "label": setting.label,
-            "control_template": setting.control_template,
             "tab_key": setting.tab,
             "scope_policy": setting.scope_policy.value,
             "module": setting.module,
@@ -119,33 +120,10 @@ class ApplicationSettings:
             "execution_policy": setting.execution_policy,
             "info_overlay": setting.info_overlay,
             "has_instance": setting.instance_class is not None,
-            "minimum": setting.minimum,
-            "maximum": setting.maximum,
-            "step": setting.step,
             "help_text": setting.help_text,
-            "engine_defaults": dict(setting.engine_defaults),
             "serialization": dict(setting.serialization),
-            "visible_when": {
-                source_key: list(values)
-                for source_key, values in setting.visible_when.items()
-            },
-            "editable_when": {
-                source_key: list(values)
-                for source_key, values in setting.editable_when.items()
-            },
-            "default_when": {
-                source_key: dict(values)
-                for source_key, values in setting.default_when.items()
-            },
-            "disabled_values_by_engine": {
-                engine: list(values)
-                for engine, values in setting.disabled_values_by_engine.items()
-            },
-            "options": [
-                {"value": option.value, "label": option.label}
-                for option in setting.options
-            ],
             "value_descriptor": setting.value_descriptor.to_dict(),
+            "rules": spec.setting.rules.to_dict(),
         }
 
     def register_chip_field(self, chip: ChipDefinition) -> None:
@@ -239,7 +217,7 @@ class ApplicationSettings:
             # The three lifecycle projections share this canonical contract.
             # Keeping it separate from defaults prevents run-only metadata from
             # entering reusable setting hashes while allowing clients to inspect
-            # the role boundary without reverse engineering control_template.
+            # the role boundary without reverse engineering editor.
             "field_contracts": {
                 "settings": {
                     key: setting.field_spec().to_dict()

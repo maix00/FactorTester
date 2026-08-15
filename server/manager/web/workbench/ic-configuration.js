@@ -62,11 +62,12 @@
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
       const target = field?.serialization?.storage_key || key;
       if (!Object.prototype.hasOwnProperty.call(values || {}, target)) continue;
-      if (field.control_template === "ic_horizon_grid") {
+      const editor = field?.value_descriptor?.editor;
+      if (editor === "ic_horizon_grid") {
         values[target] = normalizeHorizon(values[target]);
-      } else if (field.control_template === "ic_delay_grid") {
+      } else if (editor === "ic_delay_grid") {
         values[target] = normalizeDelays(values[target]);
-      } else if (field.control_template === "ic_decay_grid") {
+      } else if (editor === "ic_decay_grid") {
         values[target] = normalizeDecayLags(values[target]);
       }
     }

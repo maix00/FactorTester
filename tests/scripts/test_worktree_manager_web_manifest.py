@@ -316,7 +316,7 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     from tools.testers.settings import backtest_setting_registry
 
     registered = sorted({
-        field["control_template"]
+        field["value_descriptor"]["editor"]
         for application in ("ic_test", "group_test")
         for field in backtest_setting_registry.get(application).manifest()["defaults"].values()
     })

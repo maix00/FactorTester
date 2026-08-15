@@ -54,10 +54,10 @@ class StrategyBookModule(ExecutableModule):
             public=True,
             label="策略簿模式",
             default="per_strategy_one_ledger",
-            control_template="select",
+            editor="select",
             tab="strategy_book",
             options=(("per_strategy_one_ledger", "每策略一个账本"),),
-            default_when={
+            default_if={
                 "engine_mode": {
                     "basic": "per_strategy_one_ledger",
                     "auto": "per_strategy_one_ledger",
@@ -73,7 +73,7 @@ class StrategyBookModule(ExecutableModule):
             public=True,
             label="账本交易时段策略",
             default="error",
-            control_template="select",
+            editor="select",
             tab="strategy_book",
             options=(
                 ("error", "发现混合交易时段即报错"),
@@ -92,7 +92,7 @@ class StrategyBookModule(ExecutableModule):
             public=True,
             label="现金保留比例",
             default=0.0,
-            control_template="number",
+            editor="number",
             tab="strategy_book",
             minimum=0.0,
             maximum=1.0,
@@ -106,7 +106,7 @@ class StrategyBookModule(ExecutableModule):
             public=True,
             label="现金保留金额",
             default=0.0,
-            control_template="number",
+            editor="number",
             tab="strategy_book",
             minimum=0.0,
             step=1.0,

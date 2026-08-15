@@ -31,7 +31,7 @@ class FactorModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "factor_owner_ref": FieldDefinition(
-            public=True, label="因子所有者", default="", control_template="custom",
+            public=True, label="因子所有者", default="", editor="custom",
             tab="factor", chip_template="因子所有者: {value}",
             tab_label="因子执行", tab_order=20,
             tab_default_mount_points=("local-settings",),
@@ -46,7 +46,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor_git_commit": FieldDefinition(
-            public=True, label="Git commit", default="", control_template="custom",
+            public=True, label="Git commit", default="", editor="custom",
             tab="factor", chip_template="Git commit: {value}",
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
@@ -60,7 +60,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor_family_ref": FieldDefinition(
-            public=True, label="因子家族", default="", control_template="custom",
+            public=True, label="因子家族", default="", editor="custom",
             tab="factor", chip_template="因子家族: {value}",
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
@@ -75,7 +75,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor_params": FieldDefinition(
-            public=True, label="因子参数", default={}, control_template="custom",
+            public=True, label="因子参数", default={}, editor="custom",
             tab="factor", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
@@ -89,7 +89,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor_candidates": FieldDefinition(
-            public=True, label="因子候选", default=[], control_template="custom", tab="factor",
+            public=True, label="因子候选", default=[], editor="custom", tab="factor",
             chip_template="因子候选: {value}", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
@@ -119,7 +119,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor_set_selections": FieldDefinition(
-            public=True, label="因子集合来源", default=[], control_template="custom",
+            public=True, label="因子集合来源", default=[], editor="custom",
             tab="factor", chip_template="因子集合: {value}",
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
@@ -142,7 +142,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor": FieldDefinition(
-            public=True, label="因子", default="", control_template="select", tab="factor",
+            public=True, label="因子", default="", editor="select", tab="factor",
             chip_template="因子: {value}", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
@@ -161,7 +161,7 @@ class FactorModule(ExecutableModule):
             public=True,
             label="因子角色",
             default={},
-            control_template="factor_role_bindings",
+            editor="factor_role_bindings",
             tab="factor",
             chip_template="因子角色: {value}",
             tab_label="因子执行",

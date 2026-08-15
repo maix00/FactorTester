@@ -7,7 +7,7 @@ global.structuredClone = global.structuredClone
   || (value => JSON.parse(JSON.stringify(value)));
 global.FTSettingRules = {
   storageKey: (key, field) => field?.serialization?.storage_key || key,
-  isVisible: (field, values) => Object.entries(field?.visible_when || {}).every(
+  isVisible: (field, values) => Object.entries(field?.rules?.visible_if || {}).every(
     ([key, allowed]) => allowed.includes(values[key]),
   ),
   isEditable: () => true,
@@ -63,7 +63,7 @@ const manifest = {
     },
     fee_custom_product_fields: {
       scope_policy: "overridable", tab_key: "cost",
-      visible_when: {fee_mode: ["custom"]},
+      rules: {visible_if: {fee_mode: ["custom"]}},
       serialization: {
         kind: "custom_product_overrides", storage_key: "custom_product_fields",
         module_filter: "fee",

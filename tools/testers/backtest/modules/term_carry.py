@@ -43,28 +43,28 @@ class TermCarryStrategyModule(TargetStrategyModule):
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "term_carry_near_rank": FieldDefinition(
             public=True, label="近月排名", default=0,
-            control_template="number", minimum=0,
-            visible_when={"strategy_intent_mode": ("term_carry",)},
+            editor="number", minimum=0,
+            visible_if={"strategy_intent_mode": ("term_carry",)},
         ),
         "term_carry_far_rank": FieldDefinition(
             public=True, label="远月排名", default=1,
-            control_template="number", minimum=1,
-            visible_when={"strategy_intent_mode": ("term_carry",)},
+            editor="number", minimum=1,
+            visible_if={"strategy_intent_mode": ("term_carry",)},
         ),
         "term_carry_entry_threshold": FieldDefinition(
             public=True, label="Carry入场阈值", default=0.05,
-            control_template="number",
-            visible_when={"strategy_intent_mode": ("term_carry",)},
+            editor="number",
+            visible_if={"strategy_intent_mode": ("term_carry",)},
         ),
         "term_carry_exit_threshold": FieldDefinition(
             public=True, label="Carry退出阈值", default=0.01,
-            control_template="number", minimum=0.0,
-            visible_when={"strategy_intent_mode": ("term_carry",)},
+            editor="number", minimum=0.0,
+            visible_if={"strategy_intent_mode": ("term_carry",)},
         ),
         "term_carry_gross_weight": FieldDefinition(
             public=True, label="价差总权重", default=1.0,
-            control_template="number", minimum=0.0, maximum=1.0,
-            visible_when={"strategy_intent_mode": ("term_carry",)},
+            editor="number", minimum=0.0, maximum=1.0,
+            visible_if={"strategy_intent_mode": ("term_carry",)},
         ),
         "term_carry_diagnostics": FieldDefinition(
             public=False,

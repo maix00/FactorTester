@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .options import AnalysisOptionDefinition
+from tools.testers.field_spec import ValueDescriptor
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,30 +13,35 @@ class CoreAxisDefinition:
     key: str
     label: str
     authoring_key: str
-    control_template: str
+    value_descriptor: ValueDescriptor
     source_adapter: str = ""
     accepts_many: bool = False
     resolution_adapter: str = "identity"
-    options: tuple[AnalysisOptionDefinition, ...] = ()
     help_text: str = ""
     value_contract: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.authoring_key:
             raise ValueError("core axis requires key, label, and authoring key")
-        if not self.control_template or not self.resolution_adapter:
-            raise ValueError("core axis requires control and resolution adapters")
+        if not self.resolution_adapter:
+            raise ValueError("core axis requires a resolution adapter")
+        descriptor_many = self.value_descriptor.cardinality == "many"
+        if descriptor_many != self.accepts_many:
+            raise ValueError(
+                "core axis cardinality must match value descriptor: "
+                f"{self.key} accepts_many={self.accepts_many} "
+                f"descriptor={self.value_descriptor.cardinality}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "label": self.label,
             "authoring_key": self.authoring_key,
-            "control_template": self.control_template,
+            "value_descriptor": self.value_descriptor.to_dict(),
             "source_adapter": self.source_adapter,
             "accepts_many": self.accepts_many,
             "resolution_adapter": self.resolution_adapter,
-            "options": [option.to_dict() for option in self.options],
             "help_text": self.help_text,
             "value_contract": dict(self.value_contract),
         }

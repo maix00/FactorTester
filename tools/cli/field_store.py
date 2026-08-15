@@ -72,28 +72,77 @@ class FieldStore:
         return self.defaults.get(key, {})
 
     def is_visible(self, key: str) -> bool:
-        return _condition_matches(self, self.defaults.get(key, {}).get("visible_when"))
+        rules = self.defaults.get(key, {}).get("rules") or {}
+        return _condition_matches(self, rules.get("visible_if"))
 
     def is_editable(self, key: str) -> bool:
         meta = self.defaults.get(key, {})
-        return self.is_visible(key) and _condition_matches(self, meta.get("editable_when", meta.get("editible_when")))
+        rules = meta.get("rules") or {}
+        return self.is_visible(key) and _condition_matches(self, rules.get("editable_if"))
+
+    def display_value(self, key: str) -> Any:
+        """Return the value a client should show for a registered field.
+
+        A value locked by a condition must not leak a stale manual override
+        into previews.  This mirrors the Web ``displayValueFor`` contract.
+        """
+        meta = self.defaults.get(key, {})
+        if self.is_editable(key):
+            return self.effective(key)
+        conditional = self.conditional_default(key)
+        if conditional is not UNSET:
+            return deepcopy(conditional)
+        return deepcopy(meta.get("value"))
+
+    def conditional_default(self, key: str) -> Any:
+        meta = self.defaults.get(key, {})
+        rules = meta.get("rules") or {}
+        for source_key, mapping in (rules.get("default_if") or {}).items():
+            source_value = self.effective(str(source_key))
+            if not isinstance(mapping, Mapping):
+                continue
+            if source_value in mapping:
+                return mapping[source_value]
+            source_text = str(source_value)
+            for candidate, value in mapping.items():
+                if str(candidate) == source_text:
+                    return value
+        engine = self.effective("engine")
+        if engine in (None, ""):
+            engine = self.effective("engine_mode")
+        by_engine = rules.get("engine_defaults") or {}
+        if isinstance(by_engine, Mapping):
+            if engine in by_engine:
+                return by_engine[engine]
+            engine_text = str(engine)
+            for candidate, value in by_engine.items():
+                if str(candidate) == engine_text:
+                    return value
+        return UNSET
 
     def validate_value(self, key: str, value: Any) -> None:
         if key not in self.defaults:
             raise ValueError(f"未注册字段: {key}")
         meta = self.defaults[key]
-        options = meta.get("options") or []
+        descriptor = meta.get("value_descriptor") or {}
+        options = descriptor.get("options") or []
         if options:
             allowed = {option.get("value") for option in options if isinstance(option, Mapping)}
             if value not in allowed:
                 raise ValueError(f"字段 {key} 的值不合法: {value!r}，允许值: {', '.join(str(item) for item in allowed)}")
-        control = meta.get("control_template")
-        if control == "number":
+        value_type = descriptor.get("value_type")
+        if value_type in {"number", "integer"}:
             try:
-                float(value)
+                numeric = float(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"字段 {key} 需要数字值: {value!r}") from exc
-        if control == "boolean" and not isinstance(value, bool):
+            minimum = descriptor.get("minimum")
+            maximum = descriptor.get("maximum")
+            if minimum is not None and numeric < minimum:
+                raise ValueError(f"字段 {key} 小于最小值: {minimum}")
+            if maximum is not None and numeric > maximum:
+                raise ValueError(f"字段 {key} 大于最大值: {maximum}")
+        if value_type == "boolean" and not isinstance(value, bool):
             if str(value).lower() not in {"true", "false", "1", "0", "yes", "no"}:
                 raise ValueError(f"字段 {key} 需要布尔值: {value!r}")
 
@@ -125,7 +174,7 @@ class FieldStore:
 def visible_fields(store: FieldStore, *, tab_key: str | None = None) -> list[tuple[str, dict[str, Any]]]:
     fields: list[tuple[str, dict[str, Any]]] = []
     for key, meta in store.defaults.items():
-        if tab_key is not None and meta.get("tab_key", meta.get("tab")) != tab_key:
+        if tab_key is not None and meta.get("tab_key") != tab_key:
             continue
         if store.is_visible(key):
             fields.append((key, meta))
@@ -141,6 +190,6 @@ def _condition_matches(store: FieldStore, condition: Any) -> bool:
             allowed = set(allowed_values)
         else:
             allowed = {allowed_values}
-        if current not in allowed:
+        if not any(current == candidate or str(current) == str(candidate) for candidate in allowed):
             return False
     return True

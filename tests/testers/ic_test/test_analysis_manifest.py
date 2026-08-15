@@ -7,6 +7,7 @@ from tools.testers.analysis_graph import (
     CoreAxisDefinition,
     CoreTestDefinition,
 )
+from tools.testers.field_spec import ValueDescriptor
 from tools.testers.ic_test.analysis_graph import ic_analysis_graph_definition
 from tools.testers.ic_test.analysis_graph.runtime.adapters import (
     builtin_runtime_adapters,
@@ -40,11 +41,25 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "key": "factor_ref",
         "label": "因子",
         "authoring_key": "factor_refs",
-        "control_template": "reference_multi_select",
         "source_adapter": "selected_factors",
         "accepts_many": True,
         "resolution_adapter": "frozen_factor_members",
-        "options": [],
+        "value_descriptor": {
+            "value_type": "reference",
+            "cardinality": "many",
+            "editor": "catalog",
+            "format": "",
+            "unit": "",
+            "option_source": "catalog.factor",
+            "resolver": "selected_factors",
+            "item_type": "reference",
+            "ref_kind": "frozen_factor_ref",
+            "schema": {},
+            "options": [],
+            "minimum": None,
+            "maximum": None,
+            "step": None,
+        },
         "help_text": "选择冻结因子或因子集合；集合在冻结运行配置时展开为具体因子",
         "value_contract": {
             "item_type": "frozen_factor_ref",
@@ -53,7 +68,7 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         },
     }
     assert axes["horizon"]["authoring_key"] == "horizon"
-    assert axes["horizon"]["control_template"] == "base_multiplier_grid"
+    assert axes["horizon"]["value_descriptor"]["editor"] == "base_multiplier_grid"
     assert axes["horizon"]["resolution_adapter"] == "per_factor_frequency"
     assert axes["horizon"]["accepts_many"] is True
     assert axes["horizon"]["value_contract"] == {
@@ -73,7 +88,7 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "unique_items": True,
     }
     assert axes["method"]["authoring_key"] == "methods"
-    assert axes["method"]["options"] == [
+    assert axes["method"]["value_descriptor"]["options"] == [
         {"value": "rank", "label": "Rank IC"},
         {"value": "pearson", "label": "Pearson IC"},
     ]
@@ -156,7 +171,8 @@ def test_core_axis_contract_cannot_drift_from_execution_axes() -> None:
             output_kinds=("ic_series",),
             axis_definitions=(
                 CoreAxisDefinition(
-                    "factor_ref", "因子", "factor_selections", "reference_select",
+                    "factor_ref", "因子", "factor_selections",
+                    ValueDescriptor("reference", cardinality="one", editor="catalog"),
                 ),
             ),
         )

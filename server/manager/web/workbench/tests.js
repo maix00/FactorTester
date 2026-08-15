@@ -172,7 +172,9 @@
   }
 
   function ensureControl(context, state, field, refresh) {
-    const descriptor = window.FTStaticLoader?.controlDescriptor?.(field?.control_template);
+    const descriptor = window.FTStaticLoader?.controlDescriptor?.(
+      field?.value_descriptor?.editor,
+    );
     if (!descriptor?.group) return Promise.resolve();
     return FTTestControlLoader.ensure(state, descriptor.group, refresh);
   }

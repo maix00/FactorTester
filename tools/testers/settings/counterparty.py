@@ -110,7 +110,7 @@ def _ledger_ids_from_strategy_book_alias(book: object, alias: str) -> tuple[str,
 
 
 def unregister_counterparty_profile(profile_id: str) -> None:
-    """Remove a profile and its injected `default_when` entries. Mainly for
+    """Remove a profile and its injected `default_if` entries. Mainly for
     test isolation (this registry is process-global mutable state, same as
     `traderules`'s exchange-rule registries) -- production code registers
     profiles once at import time and never unregisters them."""
@@ -118,7 +118,7 @@ def unregister_counterparty_profile(profile_id: str) -> None:
     if profile is None:
         return
     for ref in profile.field_defaults:
-        _remove_default_when(ref, profile_id)
+        _remove_default_if(ref, profile_id)
     _refresh_counterparty_profile_options()
 
 
@@ -147,43 +147,43 @@ def _put_counterparty_profile(result: dict[str, str], ledger_id: str, profile: o
     result[ledger_id] = profile_id
 
 
-def _remove_default_when(ref: FieldRef, profile_id: str) -> None:
+def _remove_default_if(ref: FieldRef, profile_id: str) -> None:
     from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
     for cls in _ALL_MODULE_CLASSES:
         for field_name, fd in cls.fields.items():
             if getattr(cls, field_name, None) != ref:
                 continue
-            if fd.default_when is not None:
-                fd.default_when.get("counterparty_profile", {}).pop(profile_id, None)
+            if fd.default_if is not None:
+                fd.default_if.get("counterparty_profile", {}).pop(profile_id, None)
             return
 
 
 def apply_counterparty_profile_defaults() -> None:
     """Inject every registered profile's field defaults into each target
-    field's own `default_when["counterparty_profile"]` dict, and refresh
+    field's own `default_if["counterparty_profile"]` dict, and refresh
     `EngineModule.counterparty_profile`'s select options. Called once from
     `register_all_module_settings`, after all profiles have been registered
     by their source modules -- mirrors
     `refresh_custom_product_field_definitions`'s timing."""
     for profile in _COUNTERPARTY_PROFILES.values():
         for ref, value in profile.field_defaults.items():
-            _inject_default_when(ref, profile.id, value)
+            _inject_default_if(ref, profile.id, value)
     _refresh_counterparty_profile_options()
 
 
-def _inject_default_when(ref: FieldRef, profile_id: str, value: Any) -> None:
+def _inject_default_if(ref: FieldRef, profile_id: str, value: Any) -> None:
     from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
     for cls in _ALL_MODULE_CLASSES:
         for field_name, fd in cls.fields.items():
             if getattr(cls, field_name, None) != ref:
                 continue
-            if fd.default_when is not None:
-                fd.default_when.setdefault("counterparty_profile", {})[profile_id] = value
+            if fd.default_if is not None:
+                fd.default_if.setdefault("counterparty_profile", {})[profile_id] = value
             else:
                 cls.fields[field_name] = replace(
-                    fd, default_when={"counterparty_profile": {profile_id: value}})
+                    fd, default_if={"counterparty_profile": {profile_id: value}})
             return
     raise ValueError(f"counterparty profile field {ref.qualified_name!r} is not a registered field")
 

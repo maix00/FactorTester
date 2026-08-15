@@ -1,10 +1,10 @@
 (() => {
-  const supportedControlTemplates = Object.freeze([
-    "boolean", "custom", "custom_product_overrides", "date",
-    "factor_role_bindings", "ic_decay_grid", "ic_delay_grid",
-    "ic_horizon_grid", "number", "select", "text", "time",
+  const supportedEditors = Object.freeze([
+    "input", "boolean", "json", "catalog", "select", "date", "time",
+    "service_port", "profile", "output_picker", "custom_product_overrides",
+    "factor_role_bindings", "ic_decay_grid", "ic_delay_grid", "ic_horizon_grid",
   ]);
-  const supportedControlSet = new Set(supportedControlTemplates);
+  const supportedEditorSet = new Set(supportedEditors);
 
   function fieldsForTab(tabKey, manifest) {
     return Object.entries(manifest.defaults || {})
@@ -39,7 +39,7 @@
     copy.append(label);
     const editable = FTSettingRules.isEditable(field, values);
     const hints = [field.help_text];
-    if (!editable && Object.keys(field.editable_when || {}).length) {
+    if (!editable && Object.keys(field.rules?.editable_if || {}).length) {
       hints.push(context.t("当前模式使用自动值"));
     }
     const hint = hints.filter(Boolean).join("\n");
@@ -53,13 +53,11 @@
 
   function inputFor(key, field, manifest, values, context, options, disabled) {
     const descriptor = field.value_descriptor || null;
-    // New manifests identify the value contract independently from the legacy
-    // control template.  Keep the template check only for old manifests and
-    // domain adapters that still need a named renderer.
-    if (!supportedControlSet.has(field.control_template) && !descriptor) {
-      throw new Error(`未实现的测试设置控件: ${field.control_template}`);
+    const editor = descriptor?.editor || "input";
+    if (!supportedEditorSet.has(editor)) {
+      throw new Error(`未实现的测试设置编辑器: ${editor}`);
     }
-    const loaderDescriptor = window.FTStaticLoader?.controlDescriptor?.(field.control_template);
+    const loaderDescriptor = window.FTStaticLoader?.controlDescriptor?.(editor);
     if (loaderDescriptor?.group && loaderDescriptor.global && !window[loaderDescriptor.global]) {
       options.ensureControl?.(field);
       const deferred = document.createElement("span");
@@ -68,38 +66,38 @@
       return deferred;
     }
     const value = FTSettingRules.valueFor(key, field, values);
-    if (field.control_template === "ic_horizon_grid") {
+    if (editor === "ic_horizon_grid") {
       return FTICHorizonSettings.renderHorizon({
         value, context, disabled,
         onChange: next => commit(key, field, manifest, values, next, options),
       });
     }
-    if (field.control_template === "ic_delay_grid") {
+    if (editor === "ic_delay_grid") {
       return FTICHorizonSettings.renderDelays({
         value, context, disabled,
         onChange: next => commit(key, field, manifest, values, next, options),
       });
     }
-    if (field.control_template === "ic_decay_grid") {
+    if (editor === "ic_decay_grid") {
       return FTICHorizonSettings.renderDecayLags({
         value, context, disabled,
         onChange: next => commit(key, field, manifest, values, next, options),
       });
     }
-    if (field.control_template === "factor_role_bindings") {
+    if (editor === "factor_role_bindings") {
       return FTTestFactorRoles.render({
         field, values, context, disabled, value,
         onChange: next => commit(key, field, manifest, values, next, options),
       });
     }
-    if (field.control_template === "custom_product_overrides") {
+    if (editor === "custom_product_overrides") {
       return FTCustomProductOverrides.render({
         key, field, manifest, values, context, disabled,
         onPatch: patch => commitPatch(manifest, values, patch, options),
       });
     }
     let control;
-    if (descriptor?.value_type === "boolean" || field.control_template === "boolean") {
+    if (descriptor?.value_type === "boolean") {
       control = document.createElement("input");
       control.type = "checkbox";
       control.checked = Boolean(value);
@@ -109,11 +107,10 @@
       });
       return control;
     }
-    if ((descriptor?.value_type === "enum" || field.control_template === "select")
-      && field.options?.length) {
+    if (descriptor?.value_type === "enum" && descriptor.options?.length) {
       control = document.createElement("select");
       const disabledValues = FTSettingRules.disabledValues(field, values);
-      for (const option of field.options) {
+      for (const option of descriptor.options) {
         const item = document.createElement("option");
         item.value = String(option.value ?? "");
         item.textContent = option.label || item.value;
@@ -125,7 +122,6 @@
       descriptor?.editor === "json"
       || descriptor?.value_type === "object"
       || descriptor?.value_type === "array"
-      || field.control_template === "custom"
     ) {
       control = document.createElement("textarea");
       control.className = "json-code json-editor";
@@ -145,18 +141,18 @@
       return control;
     } else {
       control = document.createElement("input");
-      const valueType = descriptor?.value_type || field.control_template;
+      const valueType = descriptor?.value_type || "string";
       control.type = ["date", "time", "number"].includes(valueType)
         ? valueType : (valueType === "integer" ? "number" : "text");
       control.value = value ?? "";
-      if (descriptor?.minimum != null || field.minimum != null) {
-        control.min = descriptor?.minimum ?? field.minimum;
+      if (descriptor?.minimum != null) {
+        control.min = descriptor.minimum;
       }
-      if (descriptor?.maximum != null || field.maximum != null) {
-        control.max = descriptor?.maximum ?? field.maximum;
+      if (descriptor?.maximum != null) {
+        control.max = descriptor.maximum;
       }
-      if (descriptor?.step != null || field.step != null) {
-        control.step = descriptor?.step ?? field.step;
+      if (descriptor?.step != null) {
+        control.step = descriptor.step;
       }
     }
     control.disabled = disabled;
@@ -169,7 +165,7 @@
   }
 
   window.FTTestSettingFields = Object.freeze({
-    fieldsForTab, inputFor, settingRow, supportedControlTemplates, visibleFields,
-    supportsControl: control => supportedControlSet.has(control),
+    fieldsForTab, inputFor, settingRow, supportedEditors, visibleFields,
+    supportsEditor: editor => supportedEditorSet.has(editor),
   });
 })();
