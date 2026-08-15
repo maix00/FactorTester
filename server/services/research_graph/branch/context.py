@@ -24,7 +24,6 @@ from server.services.research_graph.branch.entry_requirements import (
 )
 from server.services.research_graph.branch.report_requirements import (
     compact_report_requirements,
-    minimal_report_requirements,
     node_report_requirements,
 )
 from server.services.research_graph.branch.next_actions import (
@@ -38,10 +37,6 @@ from server.services.research_graph.branch.entry_resolution import (
     active_entry_requirement_ids,
     compact_entry_resolution_frame,
 )
-from server.services.research_graph.branch.context_budget import (
-    fit_compacted_context,
-    with_context_bytes,
-)
 from server.services.research_graph.branch.research_cycle import (
     agent_cycle_summary,
     checkpoint_from_branch_row,
@@ -49,7 +44,6 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.protocol import (
     loads,
 )
-from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.trial_plan.stage_projection import (
     agent_trial_stage_summary,
@@ -65,7 +59,6 @@ from tools.data.sqlite.db import connect_sqlite
 
 MAX_CONTEXT_EVIDENCE_REFS = 6
 MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES = 72
-COMPACT_CONTEXT_TARGET_BYTES = 6000
 
 
 def _merged_report_submission(*values: Any) -> dict[str, Any] | None:
@@ -171,160 +164,17 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _compact_context_for_budget(
-    context: dict[str, Any],
-    *,
-    report_edge_id: str | None = None,
-) -> dict[str, Any]:
-    """Keep routing identities when a schema-v2 packet needs lazy details.
-
-    The full capability and requirement contracts remain available through
-    their detail reads.  This path is deliberately conditional: ordinary,
-    already-small packets retain their richer explanatory projection.
-    """
-    value = deepcopy(context)
-    for field in ("required_capabilities", "triggered_capabilities"):
-        value[field] = [
-            {
-                "capability_id": str(item.get("capability_id") or ""),
-                "status": "gap" if item.get("gap") else "bound",
-                "detail_ref": (
-                    "capability-resolution:"
-                    f"{item.get('capability_id') or ''}"
-                ),
-            }
-            for item in value.get(field) or []
-            if isinstance(item, dict)
-        ]
-    value["open_gaps"] = [
-        {
-            "capability_id": str(item.get("capability_id") or ""),
-            "detail_ref": (
-                "capability-resolution:"
-                f"{item.get('capability_id') or ''}"
-            ),
-        }
-        for item in value.get("open_gaps") or []
-        if isinstance(item, dict)
-    ]
-    value["undetermined_conditions"] = [
-        {
-            "capability_id": str(item.get("capability_id") or ""),
-            "explanation": _bounded_text(
-                item.get("explanation"), max_bytes=96
-            ),
-        }
-        for item in value.get("undetermined_conditions") or []
-        if isinstance(item, dict)
-    ]
-    value["entry_requirements"] = [
-        {
-            key: deepcopy(item.get(key))
-            for key in (
-                "requirement_id",
-                "detail_ref",
-            )
-        }
-        for item in value.get("entry_requirements") or []
-        if isinstance(item, dict)
-    ]
-    value["research_cycle"] = _compact_cycle_for_budget(
-        value.get("research_cycle")
-    )
-    value["report_requirements"] = (
-        compact_report_requirements(value.get("report_requirements"))
-        if report_edge_id
-        else minimal_report_requirements(value.get("report_requirements"))
-    )
-    value["next_actions"] = [
-        {
-            key: deepcopy(item.get(key))
-            for key in (
-                "action_id", "blocking", "command", "validate_command",
-                "instruction", "then", "edge_ids", "requirement_ids",
-            )
-            if key in item
-        }
-        for item in value.get("next_actions") or []
-        if isinstance(item, dict)
-    ]
-    # The report contract already carries the active node's requirement IDs;
-    # retaining this second graph-level list duplicates the same payload at
-    # the byte ceiling. Keep a count so the agent can still detect that
-    # additional node-level bindings exist and fetch the detail packet.
-    node_report_refs = value.pop("node_report_requirement_refs", [])
-    if isinstance(node_report_refs, list) and node_report_refs:
-        value["node_report_requirement_count"] = len(node_report_refs)
-    # These stable policies are available from the node detail read.  The
-    # bounded resume packet prioritizes the action and gate state instead of
-    # repeating two explanatory policy objects.
-    value.pop("skill_policy", None)
-    value.pop("review_policy", None)
-    value["packet_compaction"] = {
-        "mode": "lazy_contract_details",
-        "detail_command": (
-            "factortester research-graph requirement-detail "
-            "<instance-id> <branch-id> <requirement-id>"
-        ),
-    }
-    return value
-
-
-def _compact_cycle_for_budget(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    result = deepcopy(value)
-    result["obligations"] = [
-        {
-            **{
-                key: item.get(key)
-                for key in (
-                    "obligation_id", "materiality", "status",
-                    "requirement_refs", "coverage_scope",
-                )
-                if key in item
-            },
-            "question_summary": _bounded_text(
-                item.get("question_summary"), max_bytes=12,
-            ),
-            "detail_ref": _bounded_text(item.get("detail_ref"), max_bytes=40),
-        }
-        for item in value.get("obligations") or []
-        if isinstance(item, dict)
-    ]
-    result["open_obligations"] = [
-        {
-            **{
-                key: item.get(key)
-                for key in (
-                    "obligation_id", "materiality", "status",
-                    "requirement_refs", "coverage_scope",
-                )
-                if key in item
-            },
-            "question_summary": _bounded_text(
-                item.get("question_summary"), max_bytes=12,
-            ),
-            "detail_ref": _bounded_text(item.get("detail_ref"), max_bytes=40),
-        }
-        for item in value.get("open_obligations") or []
-        if isinstance(item, dict)
-    ]
-    result["open_obligation_count"] = len(result["open_obligations"])
-    return result
-
-
 def _build_local_state(
     *,
     instance_id: str,
     branch_id: str,
     owner: str,
     report_edge_id: str = "",
-) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build compact current state plus internal candidate edge definitions.
 
-    ``report_edge_id`` keeps one lazy-loaded Edge report contract intact
-    before the general context-budget compactor discards candidate details.
+    ``report_edge_id`` keeps one lazy-loaded Edge report contract focused on
+    the requested edge; it is not a runtime byte-budget switch.
     """
     with closing(connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         branch_row = load_instance_branch_with_latest_trace(
@@ -643,28 +493,7 @@ def _build_local_state(
         context["next_actions"] = compact_next_actions(
             context["next_actions"]
         )
-    packet_budget = graph_packet_budget(graph)
-    if packet_budget.get("budget_scope") == "runtime_profile":
-        context["budget_profile_ref"] = packet_budget["profile_ref"]
-        context["budget_profile_hash"] = packet_budget["profile_hash"]
-    ceiling_bytes = int(packet_budget["ceiling_bytes"])
-    serialized_bytes = with_context_bytes(context)
-    if serialized_bytes > min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES):
-        context = _compact_context_for_budget(
-            context, report_edge_id=report_edge_id,
-        )
-        context = fit_compacted_context(
-            context,
-            target_bytes=min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES),
-        )
-        serialized_bytes = with_context_bytes(context)
-    if serialized_bytes > ceiling_bytes:
-        raise ValueError(
-            "bounded context exceeds "
-            f"{ceiling_bytes} bytes: {serialized_bytes}; "
-            "request the detail packet before continuing"
-        )
-    return context, available_edges, ceiling_bytes
+    return context, available_edges
 
 
 def _edge_obligation_requirements(
@@ -761,7 +590,7 @@ def build_graph_branch_context(
     owner: str,
 ) -> dict[str, Any]:
     """Return current state without edge-selection instructions."""
-    context, _, _ = _build_local_state(
+    context, _ = _build_local_state(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,

@@ -94,7 +94,6 @@ def test_research_resume_compacts_eleven_entry_requirements(
         owner="alice",
         agent_id="research-maxa",
         role="research",
-        budget_period=None,
         instance_id="instance-1",
         branch_id="branch-1",
     )
@@ -223,7 +222,6 @@ def test_research_resume_uses_runtime_profile_without_dropping_local_state(
         owner="alice",
         agent_id="research-maxa",
         role="research",
-        budget_period=None,
         instance_id="instance-1",
         branch_id="branch-1",
     )
@@ -277,7 +275,6 @@ def test_research_resume_without_runtime_profile_keeps_legacy_ceiling(
             owner="alice",
             agent_id="research-maxa",
             role="research",
-            budget_period=None,
             instance_id="instance-1",
             branch_id="branch-1",
         )

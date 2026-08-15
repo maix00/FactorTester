@@ -188,11 +188,6 @@ def build_cycle_submission_contract(
             "report_submission_bytes": MAX_REPORT_SUBMISSION_BYTES,
             "trial_plan_bytes": MAX_TRIAL_PLAN_BYTES,
             "trial_plan_evidence_action_bytes": MAX_EVIDENCE_ACTION_BYTES,
-            "agent_context_bytes": int(
-                (packet.get("budget_profile") or {}).get(
-                    "ceiling_bytes"
-                ) or 0
-            ),
         },
         "repair_hints": {
             "stale_contract": (

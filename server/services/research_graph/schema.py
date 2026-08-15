@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import settings as Settings
-from server.services import agent_flow
+from server.services import agent_execution
 from server.services.maintenance_cases.schema import (
     create_schema as create_maintenance_schema,
 )
@@ -52,9 +52,6 @@ GRAPH_SCHEMA_TABLES = GRAPH_OWNER_TABLES | GRAPH_SUPPORT_TABLES
 
 LEGACY_GRAPH_TABLES = frozenset({
     "research_agent_executions",
-    "research_token_budgets",
-    "research_token_reservations",
-    "research_provider_usage_receipts",
     "research_backend_assurance_receipts",
     "research_graph_validations",
     "research_graph_proposals",
@@ -72,7 +69,7 @@ LEGACY_GRAPH_TABLES = frozenset({
 def ensure_schema() -> None:
     """Create a fresh target schema or reject an uncut legacy database."""
     clear_graph_cache_for_current_db()
-    agent_flow.get_store().ensure_schema()
+    agent_execution.get_store().ensure_schema()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         definitions = _table_definitions(conn)
         tables = set(definitions)
@@ -80,10 +77,8 @@ def ensure_schema() -> None:
         if legacy:
             raise RuntimeError(
                 "legacy Graph schema requires explicit offline cutover "
-                "(migrate_legacy_agent_flow, migrate_backend_assurance, "
-                "migrate_graph_governance, "
-                "migrate_graph_branch_projection, "
-                "migrate_graph_activation_pointer): "
+                "(backend assurance, branch projection, and legacy control "
+                "table removal): "
                 + ", ".join(legacy)
             )
         owner_tables_missing = not GRAPH_OWNER_TABLES.issubset(tables)

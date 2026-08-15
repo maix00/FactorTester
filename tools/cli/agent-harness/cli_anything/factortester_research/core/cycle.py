@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-import json
 import importlib.util
 from importlib.resources import as_file, files
 from types import ModuleType
@@ -34,12 +33,6 @@ _FORBIDDEN_SKILL_FIELDS = {
     "source_fingerprint",
     "source_path",
 }
-# The server applies the lower, graph-version calibrated ceiling. The Harness
-# keeps only a provider-neutral protocol safety ceiling so a valid newer Graph
-# is not rejected by an older project-local magic number.
-MAX_NEXT_PACKET_HARD_CEILING_BYTES = 16 * 1024
-
-
 def validate_transition_evidence(
     evidence: dict[str, Any],
 ) -> dict[str, Any]:
@@ -127,17 +120,6 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(
                     f"candidate edge {field} must be a text array"
                 )
-    size = len(json.dumps(
-        packet,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode())
-    if size > MAX_NEXT_PACKET_HARD_CEILING_BYTES:
-        raise ValueError(
-            "FactorTester next packet exceeds protocol hard ceiling "
-            f"{MAX_NEXT_PACKET_HARD_CEILING_BYTES} bytes"
-        )
     return packet
 
 

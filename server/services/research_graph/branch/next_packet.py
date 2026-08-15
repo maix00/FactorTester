@@ -9,133 +9,10 @@ from typing import Any
 import orjson
 
 from server.services.research_graph.branch.context import _build_local_state
-from server.services.research_graph.branch.report_requirements import (
-    compact_report_requirements,
-)
 from server.services.research_graph.branch.next_actions import (
-    compact_next_actions,
     edge_next_actions,
 )
 from server.services.research_graph.branch import server_actions
-
-
-COMPACT_NEXT_TARGET_BYTES = 6000
-
-
-def _with_next_bytes(packet: dict[str, Any]) -> int:
-    packet["next_bytes"] = 0
-    for _ in range(3):
-        packet["next_bytes"] = len(orjson.dumps(packet))
-    return len(orjson.dumps(packet))
-
-
-def _compact_next_for_budget(packet: dict[str, Any]) -> dict[str, Any]:
-    """Preserve routable choices while moving verbose contracts to detail reads."""
-    value = deepcopy(packet)
-    value["capabilities"] = [
-        {
-            "capability_id": str(item.get("capability_id") or ""),
-            "status": str(item.get("status") or ""),
-            "detail_ref": (
-                "capability-resolution:"
-                f"{item.get('capability_id') or ''}"
-            ),
-        }
-        for item in value.get("capabilities") or []
-        if isinstance(item, dict)
-    ]
-    value["candidate_edges"] = [
-        {
-            key: deepcopy(item.get(key))
-            for key in (
-                "edge_id",
-                "to_node",
-                "edge_type",
-                "risk_level",
-                "readiness",
-                "blockers",
-                "target_required_capability_ids",
-            )
-            if key in item
-        } | {
-            "detail_ref": (
-                "graph-edge:"
-                f"{item.get('edge_id') or ''}"
-            ),
-            **({"requires_server_action": True}
-               if item.get("action_contract") else {}),
-        }
-        for item in value.get("candidate_edges") or []
-        if isinstance(item, dict)
-    ]
-    frontier = value.get("candidate_trial_frontier") or {}
-    value["candidate_trial_frontier"] = {
-        "current_trial_plan_hash": frontier.get("current_trial_plan_hash"),
-        "unassessed_obligation_count": frontier.get(
-            "unassessed_obligation_count", 0
-        ),
-    }
-    value.pop("entry_resolution", None)
-    value["report_requirements"] = _minimal_next_report_requirements(
-        value.get("report_requirements")
-    )
-    value["entry_requirements"] = [
-        {
-            key: deepcopy(item.get(key))
-            for key in ("requirement_id",)
-            if key in item
-        }
-        for item in value.get("entry_requirements") or []
-        if isinstance(item, dict)
-    ]
-    value["next_actions"] = compact_next_actions(
-        value.get("next_actions")
-    )
-    if "entry_requirement_policy" in value:
-        value["entry_requirement_policy"] = {
-            "detail_ref": "graph-entry-requirements",
-        }
-    value.pop("node_report_requirement_refs", None)
-    value["packet_compaction"] = {
-        "mode": "lazy_edge_contracts",
-        "detail_command": (
-            "factortester research-graph edge info "
-            "<instance> <branch> <edge-id>"
-        ),
-    }
-    return value
-
-
-def _minimal_next_report_requirements(value: Any) -> dict[str, Any]:
-    """Keep current-node status; edge detail is available from ``edge info``."""
-    if not isinstance(value, dict):
-        return {
-            "enforcement": "optional",
-            "current_node": {},
-            "candidate_edges": {},
-        }
-
-    def rows(items: Any) -> list[dict[str, Any]]:
-        return [
-            {
-                key: item[key]
-                for key in ("report_requirement_id", "status")
-                if key in item
-            }
-            for item in items or []
-            if isinstance(item, dict)
-        ]
-
-    current = value.get("current_node") or {}
-    return {
-        "enforcement": str(value.get("enforcement") or "optional"),
-        "current_node": {
-            key: rows(items)
-            for key, items in current.items()
-            if key in {"on_entry", "on_exit"}
-        },
-        "candidate_edges": {},
-    }
 
 
 def build_graph_branch_next(
@@ -145,7 +22,7 @@ def build_graph_branch_next(
     owner: str,
 ) -> dict[str, Any]:
     """Return current semantics without a full Graph, catalog, or history."""
-    context, edges, ceiling_bytes = _build_local_state(
+    context, edges = _build_local_state(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
@@ -235,14 +112,7 @@ def build_graph_branch_next(
             or non_blocked_count > 1
         ),
         "running_backend_jobs_action": "continue",
-        "next_bytes": 0,
     }
-    if context.get("budget_profile_ref"):
-        packet["budget_profile"] = {
-            "profile_ref": str(context["budget_profile_ref"]),
-            "profile_hash": str(context["budget_profile_hash"]),
-            "ceiling_bytes": ceiling_bytes,
-        }
     if "entry_requirements" in context:
         packet["entry_requirements"] = entry_requirements
         if "entry_resolution" in context:
@@ -268,16 +138,6 @@ def build_graph_branch_next(
         packet["node_report_requirement_refs"] = list(
             context.get("node_report_requirement_refs") or []
         )
-    serialized_bytes = _with_next_bytes(packet)
-    if serialized_bytes > min(ceiling_bytes, COMPACT_NEXT_TARGET_BYTES):
-        packet = _compact_next_for_budget(packet)
-        serialized_bytes = _with_next_bytes(packet)
-    if serialized_bytes > ceiling_bytes:
-        raise ValueError(
-            "bounded next packet exceeds "
-            f"{ceiling_bytes} bytes: {serialized_bytes}; "
-            "request the detail packet before continuing"
-        )
     return packet
 
 
@@ -289,7 +149,7 @@ def build_graph_branch_edge_info(
     edge_id: str,
 ) -> dict[str, Any]:
     """Return one candidate Edge and its exact report requirements."""
-    context, edges, ceiling_bytes = _build_local_state(
+    context, edges = _build_local_state(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
@@ -334,7 +194,6 @@ def build_graph_branch_edge_info(
             }
         ),
         "state_ref": context.get("history_cursor"),
-        "next_bytes": 0,
     }
     report_contract = context.get("report_requirements") or {}
     value["next_actions"] = edge_next_actions(
@@ -347,22 +206,6 @@ def build_graph_branch_edge_info(
             context.get("human_gate_override") or {}
         ),
     )
-    serialized = _with_next_bytes(value)
-    if serialized > ceiling_bytes:
-        value["report_requirements"] = compact_report_requirements({
-            "enforcement": (
-                context.get("report_requirements") or {}
-            ).get("enforcement"),
-            "current_node": {"on_entry": [], "on_exit": []},
-            "candidate_edges": {
-                edge_id: value["report_requirements"],
-            },
-        }).get("candidate_edges", {}).get(edge_id, [])
-        serialized = _with_next_bytes(value)
-    if serialized > ceiling_bytes:
-        raise ValueError(
-            f"bounded edge info exceeds {ceiling_bytes} bytes: {serialized}"
-        )
     return value
 
 

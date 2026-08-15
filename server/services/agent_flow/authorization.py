@@ -1,4 +1,4 @@
-"""Server-derived authorization for privileged Agent Flow operations."""
+"""Server-derived authorization for Agent execution registration."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ _BACKEND_SCOPE = "server_backend_code"
 _MAINTENANCE_ROLE = "server_maintenance"
 
 
-def require_invocation_authority(
+def require_execution_authority(
     *,
     username: str,
     actor_role: str,
     authority_scope: str,
 ) -> None:
-    """Authorize only privileged requests; ordinary calls add no DB read."""
+    """Authorize execution registration without granting token controls."""
     if actor_role not in _BACKEND_ROLES and authority_scope != _BACKEND_SCOPE:
         return
     _require_developer(username)

@@ -14,7 +14,7 @@ def test_local_research_authority_requires_no_account_lookup(
         lambda _username: pytest.fail("ordinary path queried account store"),
     )
 
-    authorization.require_invocation_authority(
+    authorization.require_execution_authority(
         username="alice",
         actor_role="researcher",
         authority_scope="local_research",
@@ -41,7 +41,7 @@ def test_backend_authority_rejects_ordinary_account(
     )
 
     with pytest.raises(PermissionError, match="developer account"):
-        authorization.require_invocation_authority(
+        authorization.require_execution_authority(
             username="alice",
             actor_role=actor_role,
             authority_scope=authority_scope,
@@ -55,7 +55,7 @@ def test_backend_authority_accepts_developer_account(monkeypatch) -> None:
         lambda _username: {"username": "dev", "role": "developer"},
     )
 
-    authorization.require_invocation_authority(
+    authorization.require_execution_authority(
         username="dev",
         actor_role="backend_verifier",
         authority_scope="server_backend_code",

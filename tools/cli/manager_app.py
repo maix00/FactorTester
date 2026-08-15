@@ -5,7 +5,6 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.admin import admin
-from tools.cli.commands.agent_flow import operator_agent_flow
 from tools.cli.commands.client_release import operator_client
 from tools.cli.manager.commands import register_manager_commands
 
@@ -27,7 +26,6 @@ def manager_cli(ports: tuple[int, ...]) -> None:
 register_manager_commands(manager_cli)
 manager_cli.add_command(admin)
 manager_cli.add_command(operator_client)
-manager_cli.add_command(operator_agent_flow)
 
 
 if __name__ == "__main__":

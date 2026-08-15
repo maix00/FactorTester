@@ -1,4 +1,4 @@
-"""Protocol validation and bounded serialization shared by Graph services."""
+"""Graph protocol validation and bounded persistence serialization."""
 
 from __future__ import annotations
 
@@ -12,19 +12,9 @@ from cli_anything.factortester_research.core.graph import (
     graph_content_hash as protocol_graph_content_hash,
     validate_graph as validate_protocol_graph,
 )
-from server.services.research_graph.packet_budget import (
-    LEGACY_AGENT_PACKET_BYTES,
-    validate_graph_packet_budget,
-)
-
-
-# Compatibility name for provider-neutral startup packets and pre-v9 Graphs.
-# Schema-v2 Graphs always resolve a separately hashed runtime Budget Profile.
-MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
-# A repeated Agent packet is a model-context budget. A transition submission
-# is a one-time structured transport whose nested documents are independently
-# validated and later normalized into a bounded trace. It must not inherit a
-# model-context ceiling.
+# A transition submission is a one-time structured transport whose nested
+# documents are independently validated and later normalized into a bounded
+# trace. It is not a model-context or Agent quota.
 MAX_TRANSITION_EVIDENCE_BYTES = 64 * 1024
 # Compatibility export for callers released before the transport boundary was
 # named independently from Agent context.
@@ -100,15 +90,11 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("graph version must be positive")
     if str(protocol_value.get("research_semantics") or "") != "product_neutral":
         raise ValueError("research graph must declare product_neutral semantics")
-    if (
-        int(protocol_value.get("schema_version") or 1) >= 2
-        and "agent_packet_budget" in protocol_value
-    ):
-        raise ValueError(
-            "schema-v2 Graph must not embed agent_packet_budget"
-        )
     if "agent_packet_budget" in protocol_value:
-        validate_graph_packet_budget(protocol_value["agent_packet_budget"])
+        raise ValueError(
+            "research graph contains removed runtime packet settings; "
+            "publish the graph without agent_packet_budget"
+        )
     actual_hash = graph_content_hash(protocol_value)
     declared_hash = str(protocol_value.get("content_hash") or "")
     if declared_hash and declared_hash != actual_hash:
