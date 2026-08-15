@@ -82,8 +82,11 @@ Flow 和 Research Step 路由，属于待迁出的旧服务器运行时，不再
 
 1. 先让本地 CLI/Swift 具备读取已下载 YAML、保存会话、计算下一步、编辑
    报告和本地运行测试的能力；共享报告通过本地 outbox 延迟同步。
-2. 将服务器图目录的实现集中到 `research_graph/catalog/`，让 Manager 直接
-   使用该目录；移除 Manager 对旧研究推进路由的 service proxy。
+2. 先建立 Manager-owned 的 `/api/catalog/research-graphs/...` 接口。它只
+   负责版本、默认指针、语言 presentation、YAML 下载和用户图文件，并复用
+   现有目录表的兼容格式；Web/Manager CLI 改用该接口，不再把目录请求选到
+   8000。随后再把共享目录实现集中到 `research_graph/catalog/`，最后移除
+   Manager 对旧研究推进路由的 service proxy。
 3. 更新 Web/Swift 读取路径到本地研究存储或公开报告读取路径。
 4. 删除旧的服务器研究推进模块、表和测试；删除旧导入兼容层。
 
@@ -91,6 +94,19 @@ Flow 和 Research Step 路由，属于待迁出的旧服务器运行时，不再
 `server/modules/single_factor_test/__init__.py` 会自动注册旧路由，
 `server/manager/http/federation/service_proxy.py` 仍会转发旧研究 API，且
 大量测试直接导入旧模块；半迁移会导致启动失败或形成两个不一致的实现。
+
+本阶段已经完成目录接口的第一步：
+
+```text
+server/manager/services/research_graph_catalog.py
+server/manager/http/research_graph_catalog_routes.py
+/api/catalog/research-graphs/...
+```
+
+这是一层明确的 Manager HTTP seam，不是第二套数据库或第二份研究图权威；
+它只调用 catalog 子模块，并在 Manager 启动时创建目录所需的最小表。旧的
+`/api/research-graphs/...` 仍作为已发布客户端的兼容路由保留，直到研究运行
+时调用全部迁出后再删除。
 
 ## 不做的事
 

@@ -43,6 +43,9 @@ from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
+from server.manager.http.research_graph_catalog_routes import (
+    ResearchGraphCatalogRoutesMixin,
+)
 from server.manager.http.public_research_routes import PublicResearchRoutesMixin
 from server.manager.http.write_routes import WriteRoutesMixin
 from server.manager.http.auth_routes import AuthenticationRoutesMixin
@@ -70,6 +73,7 @@ from server.manager.domain.federation import (
     ServiceRoute,
 )
 from server.manager.services.test_authoring import TestAuthoringService
+from server.manager.services.research_graph_catalog import ResearchGraphCatalog
 from server.manager.services.server_access import configured_management_access
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
@@ -294,6 +298,14 @@ class ManagerState(
         )
         self.sessions_path = self.state_root / "sessions.json"
         self.session_store = ManagerSessionStore(self.sessions_db_path)
+        # Graph catalog files and the server's default pointer are Manager
+        # data.  The catalog service creates only its small catalog schema;
+        # branch/evidence/trial runtime schema is still owned by the legacy
+        # compatibility service until its callers are migrated.
+        self.research_graph_catalog = ResearchGraphCatalog(
+            self.sessions_db_path,
+            server_id=self.server_id,
+        )
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the
@@ -437,6 +449,7 @@ class Handler(
     ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
     CatalogRoutesMixin,
+    ResearchGraphCatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
     JobTransferRoutesMixin,
