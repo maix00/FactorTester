@@ -72,6 +72,17 @@ def test_shared_module_manifest_limits_server_operations_to_super_admin() -> Non
     assert module["roles"] == ["super_admin"]
 
 
+def test_shared_module_manifest_restores_home_and_excludes_test_launchers() -> None:
+    manifest = json.loads(
+        (ROOT / "static/config/modules.json").read_text(encoding="utf-8")
+    )
+    module_ids = [item["id"] for item in manifest["modules"]]
+
+    assert module_ids[0] == "home"
+    assert "ic-test" not in module_ids
+    assert "backtest" not in module_ids
+
+
 @pytest.mark.parametrize(
     "role", ["user", "developer", "level_admin", "org_admin"]
 )

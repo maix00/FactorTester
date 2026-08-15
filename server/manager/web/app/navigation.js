@@ -71,7 +71,7 @@
   // stable public entries and the research child tabs, but never replaces the
   // server-side filtering performed by /api/modules when that endpoint works.
   const fallbackModuleDefinitions = [
-    {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
+    {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: false, homeVisible: true, pinned: true},
     {
       id: "research", title: "研究", title_key: "研究",
       description_key: "查看各 Profile 的实时步骤、义务与报告",
@@ -85,8 +85,8 @@
         {id: "research.profiles", title: "研究身份", title_key: "研究身份", path: "/research?section=profiles", requiresAuth: true},
       ],
     },
-    {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "new"},
-    {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
+    {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: true, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {id: "jobs", title: "测试任务", title_key: "测试任务", description_key: "跨端口查看配置、进度、结果与生成物", sfSymbol: "checklist", path: "/jobs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品", title_key: "产品", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
