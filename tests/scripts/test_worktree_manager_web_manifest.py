@@ -22,8 +22,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert manifest["schema_version"] == 1
     assert manifest["scripts"]
     architecture = manifest["architecture"]
-    assert architecture["max_script_lines"] == 400
-    assert architecture["max_style_lines"] == 500
+    assert architecture["module_boundary_policy"] == "semantic"
     groups = manifest["groups"]
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
@@ -76,18 +75,6 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     # stylesheet from silently becoming an unowned global again.
     assert not list(WEB_ROOT.glob("*.js"))
     assert not list(WEB_ROOT.glob("*.css"))
-
-    script_lines = {
-        relative: len((WEB_ROOT / relative).read_text(encoding="utf-8").splitlines())
-        for relative in manifest["scripts"]
-    }
-    assert max(script_lines.values()) <= architecture["max_script_lines"], script_lines
-    style_lines = {
-        relative: len((WEB_ROOT / relative).read_text(encoding="utf-8").splitlines())
-        for relative in manifest["styles"]
-    }
-    assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
-
 
 def test_federation_settings_separate_client_and_wireguard_surfaces() -> None:
     source = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")

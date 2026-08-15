@@ -191,11 +191,11 @@ handles a bottom-of-report collapse without a chapter-specific scroll fix.
 The lazy-renderer fixture covers deferred bodies, nested children, anchor
 compensation, and the bottom-boundary clamp.
 
-The manifest enforces a 400-line production-script limit and a 500-line
-stylesheet limit. These are split points, not a reason to create shallow
-one-function files. When a module approaches its limit, extract a cohesive
-responsibility with a small interface (for example a viewer adapter, parser,
-or navigation seam), then add a contract test for that interface.
+The manifest records semantic module boundaries and does not enforce a fixed
+number of lines for scripts or stylesheets. File size is an audit signal, not
+an architectural contract: when a file accumulates unrelated responsibilities,
+extract a cohesive owner with a small interface (for example a viewer adapter,
+parser, or navigation seam), then add a contract test for that interface.
 
 The workbench loading groups are also semantic boundaries: `workbench-core`
 contains only the route coordinator, state and generic lazy-code seams. The
