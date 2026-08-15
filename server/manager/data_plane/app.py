@@ -12,6 +12,17 @@ from typing import Sequence
 from server.manager.config import CLIENT_DATA_PORT, PEER_DATA_PORT
 from server.manager.data_plane.artifacts import ArtifactOriginResolver
 from server.manager.data_plane.context import DataPlaneRuntime
+from server.manager.objects.adapters.factor_source import (
+    FactorSourceDestinationAdapter,
+    FactorSourceOriginAdapter,
+)
+from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
+from server.manager.objects.adapters.public_research_destination import (
+    PublicResearchDestinationAdapter,
+)
+from server.manager.objects.origin import ObjectOriginRegistry
+from server.manager.objects.destination import ObjectDestinationRegistry
+from server.manager.objects.models import TransferObjectKind
 from server.manager.data_plane.server import (
     ClientDataPlaneHTTPServer,
     PeerDataPlaneHTTPServer,
@@ -24,6 +35,12 @@ from server.manager.http.security import (
 from server.manager.network_endpoints import peer_bind_address
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.peer_gateway import TransferPeerGateway
+from tools.cli.release.research_reporting.public_research.library import (
+    PublicResearchLibrary,
+)
+from tools.cli.release.research_reporting.public_research.object_store import (
+    PublicResearchObjectStore,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job-database", required=True)
     parser.add_argument("--artifact-root", required=True)
     parser.add_argument("--submission-root", required=True)
+    parser.add_argument("--research-root", default="")
+    parser.add_argument("--factor-source-database", default="")
+    parser.add_argument("--origin-cache-root", default="")
     parser.add_argument("--allowed-origin", action="append", default=[])
     parser.add_argument("--tls-cert", default=None)
     parser.add_argument("--tls-key", default=None)
@@ -54,16 +74,58 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     key = NodeKey.load_or_create(args.node_key, node_id=args.server_id)
     peer = TransferPeerGateway(key=key)
+    artifact_resolver = ArtifactOriginResolver(
+        job_database=args.job_database,
+        artifact_root=args.artifact_root,
+    )
+    adapters = {}
+    research_store = None
+    if args.research_root:
+        research = PublicResearchLibrary(
+            Path(args.research_root), storage_server_id=args.server_id,
+        )
+        research_store = PublicResearchObjectStore(research)
+        adapters[TransferObjectKind.RESEARCH_ASSET.value] = PublicResearchOriginAdapter(
+            research_store,
+        )
+        adapters[TransferObjectKind.RESEARCH_ATTACHMENT.value] = PublicResearchOriginAdapter(
+            research_store,
+        )
+        adapters[TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value] = PublicResearchOriginAdapter(
+            research_store,
+        )
+    if args.factor_source_database:
+        adapters[TransferObjectKind.FACTOR_SOURCE.value] = FactorSourceOriginAdapter(
+            database=args.factor_source_database,
+            cache_root=args.origin_cache_root or args.submission_root,
+        )
+    destination_adapters = {}
+    if research_store is not None:
+        research_destination = PublicResearchDestinationAdapter(research_store)
+        for kind in (
+            TransferObjectKind.RESEARCH_ASSET.value,
+            TransferObjectKind.RESEARCH_ATTACHMENT.value,
+            TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value,
+        ):
+            destination_adapters[kind] = research_destination
+    if args.factor_source_database:
+        destination_adapters[TransferObjectKind.FACTOR_SOURCE.value] = (
+            FactorSourceDestinationAdapter(database=args.factor_source_database)
+        )
     runtime = DataPlaneRuntime(
         server_id=args.server_id,
         transfer_database=args.transfer_database,
         staging_root=args.submission_root,
-        origin_resolver=ArtifactOriginResolver(
-            job_database=args.job_database,
-            artifact_root=args.artifact_root,
+        origin_resolver=ObjectOriginRegistry(
+            adapters=adapters,
+            fallback=artifact_resolver,
         ),
         origin_ticket_provider=peer.origin_ticket,
         destination_ticket_provider=peer.destination_ticket,
+        destination_committer=(
+            ObjectDestinationRegistry(destination_adapters)
+            if destination_adapters else None
+        ),
         allowed_origins=tuple(args.allowed_origin),
     )
     client = ClientDataPlaneHTTPServer(

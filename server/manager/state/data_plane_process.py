@@ -150,6 +150,12 @@ class DataPlaneProcessStateMixin:
             str((self.data_root / "job-results").resolve()),
             "--submission-root",
             str((self.data_root / "submissions").resolve()),
+            "--research-root",
+            str((self.data_root / "public-research").resolve()),
+            "--factor-source-database",
+            str(Path(CACHE_DB_PATH).expanduser().resolve()),
+            "--origin-cache-root",
+            str((self.data_root / "object-cache").resolve()),
             "--allowed-origin",
             _origin(config.client_control_endpoint),
         ]

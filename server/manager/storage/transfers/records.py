@@ -10,6 +10,7 @@ from server.manager.transfers.models import (
     TransferRecord,
     TransferStatus,
 )
+from server.manager.objects.models import TransferObjectKind, legacy_object_kind
 
 
 def required(value: object, *, field: str) -> str:
@@ -36,6 +37,10 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
     expires_at = float(request.expires_at)
     if expires_at <= now:
         raise ValueError("transfer request expiry must be in the future")
+    object_kind = TransferObjectKind(request.object_kind or legacy_object_kind(
+        request.job_id, request.artifact_name,
+    )).value
+    object_id = str(request.object_id or "").strip()
     return NewTransfer(
         idempotency_key=required(
             request.idempotency_key, field="idempotency_key",
@@ -60,6 +65,8 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
         expected_size=expected_size,
         expected_sha256=expected_sha256,
         expires_at=expires_at,
+        object_kind=object_kind,
+        object_id=object_id,
     )
 
 
@@ -82,6 +89,10 @@ def transfer_record(row: sqlite3.Row) -> TransferRecord:
         created_at=float(row["created_at"]),
         updated_at=float(row["updated_at"]),
         expires_at=float(row["expires_at"]),
+        object_kind=str(row["object_kind"] or legacy_object_kind(
+            str(row["job_id"]), str(row["artifact_name"]),
+        ).value),
+        object_id=str(row["object_id"] or ""),
     )
 
 
@@ -100,4 +111,8 @@ def same_request(row: sqlite3.Row, request: NewTransfer) -> bool:
         and str(row["artifact_name"]) == request.artifact_name
         and int(row["expected_size"]) == request.expected_size
         and str(row["expected_sha256"]) == request.expected_sha256
+        and str(row["object_kind"] or legacy_object_kind(
+            str(row["job_id"]), str(row["artifact_name"]),
+        ).value) == request.object_kind
+        and str(row["object_id"] or "") == request.object_id
     )

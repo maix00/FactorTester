@@ -70,6 +70,8 @@ class NewTransfer:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    object_kind: str = "job_artifact"
+    object_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +93,8 @@ class TransferRecord:
     created_at: float
     updated_at: float
     expires_at: float
+    object_kind: str = "job_artifact"
+    object_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

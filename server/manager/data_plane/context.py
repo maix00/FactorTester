@@ -40,6 +40,9 @@ class DataPlaneRuntime:
         destination_endpoint_provider: (
             Callable[[TransferContext], str] | None
         ) = None,
+        destination_committer: (
+            Callable[[TransferContext, Path], object] | None
+        ) = None,
         allowed_origins: tuple[str, ...] = (),
         transport: FederationTransport | None = None,
     ) -> None:
@@ -61,6 +64,7 @@ class DataPlaneRuntime:
         self.source_endpoint_provider = source_endpoint_provider
         self.destination_ticket_provider = destination_ticket_provider
         self.destination_endpoint_provider = destination_endpoint_provider
+        self.destination_committer = destination_committer
         self.allowed_origins = frozenset(
             str(value or "").strip().rstrip("/")
             for value in allowed_origins
@@ -94,3 +98,12 @@ class DataPlaneRuntime:
 
     def resume_offset(self, transfer: TransferRecord) -> int:
         return resume_offset(self.staging_root, transfer)
+
+    def commit_destination(
+        self, context: TransferContext, staged_path: Path,
+    ) -> Path:
+        """Give a domain Adapter the verified file, if this object has one."""
+        if self.destination_committer is None:
+            return staged_path
+        value = self.destination_committer(context, staged_path)
+        return Path(value).expanduser().resolve() if value is not None else staged_path

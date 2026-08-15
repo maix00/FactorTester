@@ -26,6 +26,8 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             expires_at REAL NOT NULL,
+            object_kind TEXT NOT NULL DEFAULT 'job_artifact',
+            object_id TEXT NOT NULL DEFAULT '',
             CHECK (operation IN ('download', 'upload')),
             CHECK (status IN (
                 'created', 'planned', 'dispatched', 'streaming',
@@ -42,3 +44,15 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
             ON transfer_requests(source_server_id, status, created_at);
         """
     )
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(transfer_requests)")
+    }
+    if "object_kind" not in columns:
+        connection.execute(
+            "ALTER TABLE transfer_requests ADD COLUMN object_kind TEXT NOT NULL DEFAULT 'job_artifact'"
+        )
+    if "object_id" not in columns:
+        connection.execute(
+            "ALTER TABLE transfer_requests ADD COLUMN object_id TEXT NOT NULL DEFAULT ''"
+        )

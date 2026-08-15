@@ -49,7 +49,8 @@ def _write_verified(handler, runtime, context) -> None:
             writer.write(chunk)
             remaining -= len(chunk)
         runtime.lifecycle.verify(context.attempt.attempt_id)
-        writer.finish()
+        promoted = writer.finish()
+        runtime.commit_destination(context, promoted)
     except BaseException as exc:
         if writer is not None:
             writer.preserve()

@@ -47,7 +47,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             json_response(self, {"success": True, **value})
@@ -75,7 +75,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             json_response(self, {"success": True, **value})
@@ -96,7 +96,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             etag = '"' + str(value["projection_hash"]) + '"'
@@ -131,7 +131,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             self.send_response(200)
@@ -159,7 +159,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             safe_filename = re.sub(r"[^A-Za-z0-9._-]", "_", Path(filename).name) or "resource"
@@ -191,7 +191,7 @@ class PublicResearchRoutesMixin:
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
-            except (ConnectionError, OSError) as exc:
+            except (ConnectionError, OSError, RuntimeError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True
             self.send_response(200)

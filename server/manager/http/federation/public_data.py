@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import json
 
 from server.manager.http.responses import json_response
+from tools.cli.release.research_reporting.public_research.object_store import (
+    PublicResearchObjectStore,
+)
 
 
 VISITOR_PRINCIPAL = "__public_jobs__"
@@ -121,16 +123,18 @@ class FederationPublicDataRoutesMixin:
             return {"value": library.component(
                 publication_id, str(args[0]), str(args[1]), viewer,
             )}
-        if operation in {"asset", "attachment", "local_resource"}:
+        if operation == "object-metadata":
             if len(args) != 1:
                 raise ValueError("research object id is required")
-            raw, content_type, filename = getattr(library, operation)(
-                publication_id, str(args[0]), viewer,
-            )
+            object_kind = str(payload.get("object_kind") or "").strip()
+            if not object_kind:
+                raise ValueError("research object kind is required")
             return {
-                "kind": "bytes",
-                "raw_b64": base64.b64encode(raw).decode("ascii"),
-                "content_type": content_type,
-                "filename": filename,
+                "kind": "object",
+                "value": PublicResearchObjectStore(library).metadata(
+                    publication_id, object_kind, str(args[0]), viewer,
+                ),
             }
+        if operation in {"asset", "attachment", "local_resource"}:
+            raise ValueError("research object bytes require the 7997 data plane")
         raise ValueError("unsupported federated research operation")

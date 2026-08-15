@@ -42,9 +42,16 @@ def resume_offset(root: str | Path, transfer: TransferRecord) -> int:
 
 
 def storage_reference(transfer: TransferRecord) -> str:
+    object_kind = str(getattr(transfer, "object_kind", "job_artifact") or "job_artifact")
+    object_id = str(getattr(transfer, "object_id", "") or transfer.transfer_id)
+    if object_kind == "job_submission":
+        return (
+            f"submission:{transfer.storage_server_id}:"
+            f"{transfer.transfer_id}:{transfer.expected_sha256}"
+        )
     return (
-        f"submission:{transfer.storage_server_id}:"
-        f"{transfer.transfer_id}:{transfer.expected_sha256}"
+        f"{object_kind}:{transfer.storage_server_id}:"
+        f"{object_id}:{transfer.expected_sha256}"
     )
 
 
