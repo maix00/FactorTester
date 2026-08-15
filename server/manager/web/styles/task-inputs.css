@@ -44,9 +44,9 @@
 .test-workbench .test-settings-manager-section-heading:not(:first-child) { margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--line); }
 .test-workbench .test-settings-manager-section-heading b { font-size: 12px; }
 .test-workbench .test-settings-manager-section-heading small { color: var(--muted); line-height: 1.35; }
-.test-workbench .test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: center; gap: 7px; min-height: 0; padding: 3px 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; line-height: 1.25; }
+.test-workbench .test-settings-manager-row { display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: start; gap: 7px; min-height: 0; padding: 3px 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; line-height: 1.25; }
 .test-workbench .test-settings-manager-row input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
-.test-workbench .test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; }
+.test-workbench .test-settings-manager-row-body { display: grid; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: start; gap: 7px; min-width: 0; }
 .test-workbench .test-settings-manager-row-body > span:first-child { display: block; }
 .test-workbench .test-settings-manager-row-body small { color: var(--muted); line-height: 1.3; }
 .test-workbench .test-settings-manager-defaults { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
