@@ -38,6 +38,7 @@ from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
 from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
 from server.manager.http.object_transfer_routes import ObjectTransferRoutesMixin
+from server.manager.http.transfer_metrics_routes import TransferMetricsRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -434,6 +435,7 @@ class Handler(
     JobProxyRoutesMixin,
     JobTransferRoutesMixin,
     ObjectTransferRoutesMixin,
+    TransferMetricsRoutesMixin,
     JobListRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

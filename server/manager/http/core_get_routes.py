@@ -63,6 +63,8 @@ class CoreGetRoutesMixin:
             return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
+        if self._get_transfer_metrics(parsed):
+            return True
         if parsed.path == "/api/devices":
             self._device_list()
             return True

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -176,6 +177,12 @@ def test_client_upload_streams_to_wireguard_destination_without_relay_copy(
             )
             with urlopen(request, timeout=2) as response:
                 assert response.status == 201
+
+    summary = requester_runtime.telemetry.summary(
+        now=time.time(), since=time.time() - 10,
+    )
+    assert summary["totals"]["transferred_bytes"] == len(raw)
+    assert summary["dimensions"][0]["mode"] == "direct_push"
 
     destination = destination_runtime.destination_path(transfer, attempt)
     assert destination.read_bytes() == raw

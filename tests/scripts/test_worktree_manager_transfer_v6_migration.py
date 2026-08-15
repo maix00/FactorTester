@@ -105,12 +105,21 @@ def test_v5_nat_attempt_is_archived_and_never_loaded_as_wireguard_route(
             ).fetchall()
         }
 
-    assert version == "8"
+    assert version == "9"
     assert active == 0
     assert archived[0:2] == ("source_push", "waiting_consumer")
     assert "WireGuard-direct" in archived[2]
     assert "source_peer_data_endpoint" in columns
     assert "relay_data_endpoint" not in columns
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert "transfer_telemetry" in tables
+    assert "transfer_active_streams" in tables
 
 
 def test_v6_endpoint_registry_upgrades_additively_to_signed_advertisements(
@@ -139,10 +148,12 @@ def test_v6_endpoint_registry_upgrades_additively_to_signed_advertisements(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-    assert version == "8"
+    assert version == "9"
     assert "transfer_node_advertisement_nonces" in tables
     assert "transfer_node_advertisement_state" in tables
     assert "transfer_node_advertisement_clock" in tables
+    assert "transfer_telemetry" in tables
+    assert "transfer_active_streams" in tables
 
 
 def test_future_schema_version_is_rejected_without_modification(tmp_path) -> None:

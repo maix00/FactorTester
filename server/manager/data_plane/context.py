@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import secrets
+import sqlite3
+import threading
+import time
 from typing import Callable
 
 from server.manager.domain.federation_transport import FederationTransport
@@ -14,6 +18,7 @@ from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferStore,
     TransferTicketStore,
+    TransferTelemetryStore,
 )
 from server.manager.transfers.models import TransferAttemptRecord, TransferRecord
 
@@ -53,6 +58,10 @@ class DataPlaneRuntime:
         self.requests = TransferStore(path, server_id=self.server_id)
         self.attempts = TransferAttemptStore(path, server_id=self.server_id)
         self.tickets = TransferTicketStore(path, server_id=self.server_id)
+        self.telemetry = TransferTelemetryStore(path, server_id=self.server_id)
+        self.process_instance_id = secrets.token_hex(16)
+        self._maintenance_lock = threading.Lock()
+        self._next_maintenance_at = 0.0
         self.lifecycle = TransferLifecycle(
             requests=self.requests,
             attempts=self.attempts,
@@ -71,6 +80,89 @@ class DataPlaneRuntime:
             if str(value or "").strip()
         )
         self.transport = transport or FederationTransport()
+        try:
+            self.maintain_transfer_storage(force=True)
+        except (OSError, sqlite3.Error):
+            # Telemetry and cleanup are observability concerns.  They must not
+            # make the already-authorized byte plane unavailable.
+            pass
+
+    def maintain_transfer_storage(self, *, force: bool = False) -> None:
+        """Prune bounded local transfer state without entering PostgreSQL."""
+        current = time.monotonic()
+        if not force and current < self._next_maintenance_at:
+            return
+        with self._maintenance_lock:
+            current = time.monotonic()
+            if not force and current < self._next_maintenance_at:
+                return
+            self.tickets.cleanup_expired()
+            self.telemetry.prune()
+            self._next_maintenance_at = current + 300.0
+
+    def begin_transfer_telemetry(
+        self,
+        context: TransferContext,
+        *,
+        surface: str,
+        action: str,
+    ):
+        try:
+            self.maintain_transfer_storage()
+            return self.telemetry.begin(
+                context,
+                surface=surface,
+                action=action,
+                process_instance_id=self.process_instance_id,
+            )
+        except (OSError, sqlite3.Error):
+            return None
+
+    def authorize_transfer_telemetry(self, handler) -> None:
+        handle = getattr(handler, "_ft_transfer_telemetry", None)
+        if handle is not None:
+            try:
+                self.telemetry.authorize(handle)
+            except (OSError, sqlite3.Error):
+                pass
+
+    def record_transfer_bytes(self, handler, count: int) -> None:
+        handle = getattr(handler, "_ft_transfer_telemetry", None)
+        if handle is not None:
+            try:
+                self.telemetry.record_bytes(handle, count)
+            except (OSError, sqlite3.Error):
+                pass
+
+    def set_transfer_expected_bytes(self, handler, count: int) -> None:
+        handle = getattr(handler, "_ft_transfer_telemetry", None)
+        if handle is not None:
+            try:
+                self.telemetry.set_expected_bytes(handle, count)
+            except (OSError, sqlite3.Error):
+                pass
+
+    def finish_transfer_telemetry(
+        self,
+        handle,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        try:
+            attempt = self.attempts.require(handle.attempt_id)
+            status = attempt.status.value
+            reason = attempt.last_error or (str(error) if error else "")
+        except (KeyError, AttributeError):
+            status = "failed"
+            reason = str(error or "transfer attempt is unavailable")
+        try:
+            self.telemetry.finish(
+                handle,
+                status=status,
+                failure_reason=reason,
+            )
+        except (OSError, sqlite3.Error):
+            pass
 
     def context(self, attempt_id: str) -> TransferContext:
         attempt = self.attempts.require(attempt_id)

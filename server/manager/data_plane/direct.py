@@ -71,9 +71,18 @@ def serve_direct_pull(
             handler.send_header("Cache-Control", "private, no-store")
             handler.send_header("X-Content-Type-Options", "nosniff")
             handler.end_headers()
+            content_length = upstream.headers.get("Content-Length")
+            if content_length:
+                try:
+                    runtime.set_transfer_expected_bytes(
+                        handler, int(content_length),
+                    )
+                except ValueError:
+                    pass
             if handler.command != "HEAD":
                 while chunk := upstream.read(1024 * 1024):
                     handler.wfile.write(chunk)
+                    runtime.record_transfer_bytes(handler, len(chunk))
     except BaseException as exc:
         runtime.lifecycle.fail(context.attempt.attempt_id, exc)
         raise

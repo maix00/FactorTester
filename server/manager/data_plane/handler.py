@@ -41,10 +41,18 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
         if not method_allowed(route.action, self.command):
             json_error(self, 405, "method is not allowed for transfer route")
             return
+        telemetry_handle = None
         try:
-            context = self.server.runtime.context(route.attempt_id)
+            runtime = self.server.runtime
+            context = runtime.context(route.attempt_id)
+            telemetry_handle = runtime.begin_transfer_telemetry(
+                context,
+                surface=self.surface.value,
+                action=route.action,
+            )
+            self._ft_transfer_telemetry = telemetry_handle
             self._handler(route.action, context)(
-                self, self.server.runtime, context,
+                self, runtime, context,
             )
         except PermissionError as exc:
             json_error(self, 403, str(exc))
@@ -62,6 +70,10 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
             return
         except RuntimeError as exc:
             json_error(self, 500, str(exc))
+        finally:
+            if telemetry_handle is not None:
+                self.server.runtime.finish_transfer_telemetry(telemetry_handle)
+                self._ft_transfer_telemetry = None
 
     def _handler(self, action: str, context):
         if action == "origin":
