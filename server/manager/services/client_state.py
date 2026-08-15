@@ -447,7 +447,7 @@ class ClientStateService:
 
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        return project_account_product_groups(
+        projected = project_account_product_groups(
             groups=load_product_groups(principal),
             principal=principal,
             profiles=profiles,
@@ -455,6 +455,17 @@ class ClientStateService:
             product_records=[dict(item) for item in catalog_product_records()],
             origin="server",
         )
+        categories = {
+            str(item.get("id") or ""): item
+            for item in self.product_categories(principal)
+        }
+        for group in projected:
+            group["category_bindings"] = [
+                categories[category_id]
+                for category_id in group.get("category_ids") or []
+                if category_id in categories
+            ]
+        return projected
 
     def product_group(
         self, principal: str, group_ref: str,
@@ -472,12 +483,18 @@ class ClientStateService:
         )
 
     def create_product_group(
-        self, principal: str, name: str, paths: list[str],
+        self,
+        principal: str,
+        name: str,
+        paths: list[str],
+        category_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Create an account product group and return its catalog projection."""
         from server.modules.products.product_group_store import create_product_group
 
-        created = create_product_group(principal, name, paths)
+        created = create_product_group(
+            principal, name, paths, category_ids=category_ids,
+        )
         if created is None:
             return None
         return self.product_group(
@@ -536,11 +553,17 @@ class ClientStateService:
         return factor_set_descriptor(principal, target_ref)
 
     @staticmethod
-    def product_categories() -> list[dict[str, Any]]:
-        """Return the same explicit category contract used by service ports."""
+    def product_categories(principal: str = "") -> list[dict[str, Any]]:
+        """Return source and account-owned product category definitions."""
+        from server.modules.products.product_category_store import (
+            list_product_categories,
+        )
         from server.modules.shared.price_services import available_product_categories
 
-        return available_product_categories()
+        # Keep the old no-principal service contract for callers that only
+        # need the built-in source dimensions.  An authenticated Manager
+        # request gets the source definitions plus that account's categories.
+        return list_product_categories(principal) if principal else available_product_categories()
 
     @staticmethod
     def product_sources() -> list[dict[str, Any]]:
@@ -610,21 +633,21 @@ class ClientStateService:
     def product_tree(
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render a Manager-owned product tree without a service port."""
-        from server.modules.shared.price_services import (
-            cached_product_tree,
-            cached_product_tree_for_category,
-            normalize_product_category_id,
-        )
+        from server.modules.products.product_category_paths import category_tree
+        from server.modules.shared.price_services import cached_product_tree
         from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import convert_to_fancytree
 
-        tree = cached_product_tree() if not str(category_id or "").strip() else cached_product_tree_for_category(
-            normalize_product_category_id(category_id)
+        tree = (
+            cached_product_tree().tree
+            if not str(category_id or "").strip()
+            else category_tree(str(category_id), principal)
         )
         return convert_to_fancytree(
-            filter_product_tree(tree.tree, source_ids),
+            filter_product_tree(tree, source_ids),
             checkbox_default=False,
         )
 
@@ -633,15 +656,15 @@ class ClientStateService:
         path: str | None = None,
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
+        from server.modules.products.product_category_paths import category_tree
         from server.modules.shared.price_services import (
             available_sources_for_product,
             cached_contracts,
             cached_product_tree,
-            cached_product_tree_for_category,
             contract_has_data,
-            normalize_product_category_id,
         )
         from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import find_node_by_path
@@ -649,10 +672,10 @@ class ClientStateService:
         from tools.products.classifier_paths import classifier_object_path
 
         tree = (
-            cached_product_tree()
+            cached_product_tree().tree
             if not str(category_id or "").strip()
-            else cached_product_tree_for_category(normalize_product_category_id(category_id))
-        ).tree
+            else category_tree(str(category_id), principal)
+        )
         tree = filter_product_tree(tree, source_ids)
         node_path = str(path or "")
         if node_path.endswith("/_products"):

@@ -66,11 +66,16 @@
   function catalogSwitch(context, active, source) {
     // The catalog has one navigation control.  The source page is a peer of
     // products and groups, not a second source-specific segmented control.
-    const options = [["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]];
+    const options = [
+      ["sources", "数据源"], ["products", "产品"],
+      ["categories", "产品分类"], ["groups", "产品组"],
+    ];
     context.toolbar.append(segment(
       context, options, active,
       id => context.navigate(pathFor(
-        id === "sources" ? "/products/sources" : id === "groups" ? "/products/groups" : "/products",
+        id === "sources" ? "/products/sources"
+          : id === "groups" ? "/products/groups"
+          : id === "categories" ? "/products/categories" : "/products",
         source,
       )),
       "research-section-tabs product-catalog-tabs",
@@ -166,6 +171,12 @@
 
   async function list(context, page = "products") {
     const source = sourceOf();
+    if (page === "categories") {
+      return window.FTProductCategories.list(context, {
+        localCatalogAvailable, sourceOf, pathFor, catalogSwitch,
+        loadCategories, sourceSummary, isCurrent: () => isCurrent(context),
+      });
+    }
     context.activeNav("products");
     context.setHeading(
       page === "groups" ? context.t("产品组") : context.t("产品"),
@@ -219,11 +230,7 @@
       ]);
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
-      const combinationStorageKey = `ft-product-category-definitions:${source}`;
       let selected = localStorage.getItem(categoryStorageKey) || "";
-      let combinations = [];
-      try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
-      if (!Array.isArray(combinations)) combinations = [];
       const selectedSources = FTProductCategoryModel.availableSourceIDs(
         sourceDefinitions,
       );
@@ -246,13 +253,10 @@
           dataSourceDefinitions: sourceDefinitions,
           selectedDataSources: selectedSources,
           selectedCategory: selected,
-          savedCombinations: combinations,
           contractTreePath,
-          onSave: async (nextID, nextCombinations) => {
+          onSave: async nextID => {
             selected = nextID;
-            combinations = nextCombinations;
             localStorage.setItem(categoryStorageKey, selected);
-            localStorage.setItem(combinationStorageKey, JSON.stringify(combinations));
             cache.clear();
             context.navigate(pathFor("/products", source));
           },
@@ -288,14 +292,15 @@
       mount.prepend(section); return;
     }
     const view = FTUI.table(
-      page === "groups"
-        ? [context.t("名称"), context.t("创建者"), context.t("研究绑定"), context.t("产品"), context.t("说明"), context.t("来源")]
+        page === "groups"
+        ? [context.t("名称"), context.t("创建者"), context.t("研究绑定"), context.t("产品分类"), context.t("产品"), context.t("说明"), context.t("来源")]
         : [context.t("类型"), context.t("名称"), context.t("说明"), context.t("产品路径"), context.t("来源")],
       items.map(item => item.kind === "group"
         ? [
             item.value.name,
             creatorLabel(item.value, context),
             researchLabel(item.value, context),
+            categoryLabel(item.value, context),
             productCount(item.value),
             item.value.description || "",
             groupSourceLabel(item.value, context),
@@ -319,7 +324,10 @@
   }
 
   function detailHelpers() {
-    return {sourceOf, load, catalogSwitch, sourceSummary, pathFor};
+    return {
+      sourceOf, load, loadCategories, catalogSwitch, sourceSummary, pathFor,
+      isCurrent,
+    };
   }
   async function productDetail(context, target) {
     return window.FTProductDetails.productDetail(context, target, detailHelpers());
@@ -345,6 +353,15 @@
       ? group.research_bindings : [];
     if (!bindings.length) return context.t("未绑定研究");
     return bindings.map(item => item.title || item.research_ref).join("、");
+  }
+  function categoryLabel(group, context) {
+    const bindings = Array.isArray(group.category_bindings)
+      ? group.category_bindings : [];
+    if (bindings.length) {
+      return bindings.map(item => item.title_zh || item.alias || item.id).join("、");
+    }
+    return (group.category_ids || []).length
+      ? group.category_ids.join("、") : context.t("未绑定分类");
   }
   function groupSourceLabel(group, context) {
     return group.source === "server" ? context.t("服务器") : context.t("本地");

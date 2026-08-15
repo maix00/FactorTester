@@ -167,7 +167,7 @@
       if (pathname === "/settings" || pathname.startsWith("/settings/")) {
         return openTab(path, {id: "settings", title: t("设置"), closable: false});
       }
-      const productFeature = ["/products", "/products/sources", "/products/groups"]
+      const productFeature = ["/products", "/products/sources", "/products/categories", "/products/groups"]
         .includes(pathname);
       if (productFeature) {
         return openTab(path, {id: "products", title: t("产品"), closable: false});

@@ -2534,7 +2534,11 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
         with urlopen(f"{base_url}/research-static/catalog/source-list.js") as response:
             source_script = response.read().decode("utf-8")
 
-    assert '[["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]]' in script
+    assert '["sources", "数据源"]' in script
+    assert '["products", "产品"]' in script
+    assert '["categories", "产品分类"]' in script
+    assert '["groups", "产品组"]' in script
+    assert "/api/catalog/categories" in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
     assert 'FTProductSources.list' in script
@@ -2569,7 +2573,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "product_tree",
-        lambda category, source_ids: [{
+        lambda category, source_ids, principal="": [{
             "title": category or "Product",
             "source_ids": list(source_ids),
             "origin": "server",
@@ -2591,10 +2595,11 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "create_product_group",
-        lambda principal, name, paths: {
+        lambda principal, name, paths, category_ids=None: {
             "group_ref": "product-group:created",
             "name": name,
             "paths": paths,
+            "category_ids": category_ids or [],
             "principal": principal,
         },
     )
@@ -2662,6 +2667,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         "group_ref": "product-group:created",
         "name": "新建组",
         "paths": ["China Futures/Day"],
+        "category_ids": [],
         "principal": "user@1",
     }
     product_reads = (
@@ -2808,19 +2814,25 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/catalog/product-tree.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-categories.js") as response:
+            categories = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert "contractTreePath" in script
-    assert "创建乘积分类" in script
+    assert "创建乘积分类" not in script
     assert "应用分类" in script
     assert "product-category-actions" in script
     assert "产品 Category" not in script
     assert "应用 Category" not in script
     assert "创建乘积 Category" not in script
-    assert "FTProductCategoryModel.multiply" in script
-    assert "FTProductCategoryOverlay.choose" in script
+    assert "FTProductCategoryModel.multiply" not in script
+    assert "FTProductCategoryOverlay.choose" not in script
     assert "FTProductCategoryModel.treeNodeInitiallyOpen" in script
+    assert "window.FTProductCategories" in categories
+    assert '"新增分类"' in categories
+    assert '"新增乘积分类"' in categories
+    assert "split(/\\r?\\n/)" in categories
     assert "window.FTProductCategoryOverlay" in overlay
     assert "创建乘积分类" in overlay
     assert "选择两个已有分类" in overlay

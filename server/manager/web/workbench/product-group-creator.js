@@ -20,13 +20,6 @@
     };
   }
 
-  function storageValue(key, fallback) {
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || "null");
-      return value == null ? fallback : value;
-    } catch (_) { return fallback; }
-  }
-
   function sourceField(context, state, rerender) {
     const field = document.createElement("label");
     field.className = "test-object-field";
@@ -82,11 +75,8 @@
     status.textContent = "";
     try {
       const value = await catalog(context, state);
-      const combinationKey = `ft-product-category-definitions:${state.source}`;
-      const combinations = storageValue(combinationKey, []);
       const options = {
         categoryDefinitions: value.categories,
-        savedCombinations: Array.isArray(combinations) ? combinations : [],
         selectedCategory: state.categoryID,
         selectable: true,
         selectedPaths: state.selectedPaths,
@@ -97,10 +87,9 @@
         contractTreePath: path => queryPath(
           value.paths.contracts, state.categoryID, value.sourceIDs, path,
         ),
-        onSave: async (categoryID, nextCombinations) => {
+        onSave: async categoryID => {
           state.categoryID = categoryID || "";
           state.selectedPaths = [];
-          localStorage.setItem(combinationKey, JSON.stringify(nextCombinations || []));
           localStorage.setItem(`ft-product-category:${state.source}`, state.categoryID);
           await renderTree(context, state, mount, status, updateSummary);
           updateSummary();
@@ -165,7 +154,11 @@
       try {
         const value = await context.api("/api/catalog/product-groups", {
           method: "POST",
-          body: JSON.stringify({name: name.value.trim(), paths: state.selectedPaths}),
+          body: JSON.stringify({
+            name: name.value.trim(),
+            paths: state.selectedPaths,
+            category_ids: state.categoryID ? [state.categoryID] : [],
+          }),
         });
         await options.onCreate?.(value.group);
         dialog.close();

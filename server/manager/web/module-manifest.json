@@ -193,6 +193,7 @@
       "catalog/factor-details.js",
       "catalog/factors.js",
       "catalog/product-category-overlay.js",
+      "catalog/product-categories.js",
       "catalog/source-list.js",
       "catalog/products.js",
       "catalog/details.js"
@@ -367,6 +368,7 @@
     "catalog/factors.js",
     "catalog/product-category-model.js",
     "catalog/product-category-overlay.js",
+    "catalog/product-categories.js",
     "catalog/product-tree.js",
     "catalog/source-list.js",
     "catalog/products.js",
