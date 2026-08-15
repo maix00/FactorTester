@@ -97,6 +97,10 @@ class WriteRoutesMixin:
             return
         if self._issue_submission_transfer_access(parsed):
             return
+        if self._issue_object_download_access(parsed):
+            return
+        if self._issue_object_transfer_access(parsed):
+            return
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/public-research/sync":
@@ -180,6 +184,7 @@ class WriteRoutesMixin:
                 "visibility": settings["visibility"],
                 "generation": settings.get("generation"),
                 "projection_hash": projection["projection_hash"],
+                "storage_server_id": settings.get("storage_server_id") or self.state.server_id,
             })
             return
         if self.path == "/api/public-research/revoke":

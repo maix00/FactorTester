@@ -9,7 +9,6 @@ source-free projections and keeps the report bytes on the source node.
 
 from __future__ import annotations
 
-import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import time
@@ -17,6 +16,10 @@ from typing import Any
 
 from server.manager.domain.federation import ServiceRoute
 from server.manager.services.public_catalog import public_factor_library
+from tools.cli.release.research_reporting.public_research.object_store import (
+    PublicResearchObjectStore,
+)
+from server.manager.services.research_object_transfer import ResearchObjectTransfer
 
 
 VISITOR_PRINCIPAL = "__public_jobs__"
@@ -35,6 +38,7 @@ class FederatedPublicDataService:
         public_research: object,
         client_state: object,
         account_domain_sync: object | None = None,
+        object_transfer_provider: object | None = None,
         cache_seconds: float = DEFAULT_CACHE_SECONDS,
     ) -> None:
         self.server_id = str(server_id or "").strip()
@@ -43,6 +47,14 @@ class FederatedPublicDataService:
         self.public_research = public_research
         self.client_state = client_state
         self.account_domain_sync = account_domain_sync
+        self.object_transfer_provider = object_transfer_provider
+        self.public_research_objects = PublicResearchObjectStore(public_research)
+        self.research_object_transfer = ResearchObjectTransfer(
+            metadata_reader=self._research_value,
+            access_provider=object_transfer_provider,
+            server_id=self.server_id,
+            source_server_reader=self._publication_source_id,
+        )
         self.cache_seconds = max(1.0, float(cache_seconds))
         self._cache: dict[tuple[object, ...], tuple[float, Any]] = {}
         self._publication_sources: dict[str, str] = {}
@@ -261,6 +273,10 @@ class FederatedPublicDataService:
             None,
         )
 
+    def _publication_source_id(self, publication_id: str) -> str:
+        with self._lock:
+            return str(self._publication_sources.get(publication_id) or "")
+
     def _research_value(
         self,
         publication_id: str,
@@ -288,16 +304,20 @@ class FederatedPublicDataService:
                 value = self.public_research.component(
                     publication_id, args[0], args[1], library_viewer,
                 )
-            elif operation in {"asset", "attachment", "local_resource"}:
-                raw, content_type, filename = getattr(self.public_research, operation)(
-                    publication_id, args[0], library_viewer,
-                )
+            elif operation == "object-metadata":
+                object_kind = str((payload or {}).get("object_kind") or "").strip()
+                if len(args) != 1 or not object_kind:
+                    raise ValueError("research object metadata is incomplete")
                 return {
-                    "kind": "bytes",
-                    "raw_b64": base64.b64encode(raw).decode("ascii"),
-                    "content_type": content_type,
-                    "filename": filename,
+                    "kind": "object",
+                    "value": self.public_research_objects.metadata(
+                        publication_id, object_kind, args[0], library_viewer,
+                    ),
                 }
+            elif operation in {"asset", "attachment", "local_resource"}:
+                # Object bytes are no longer a federated 7998 JSON value.  The
+                # public methods below use the metadata seam and 7997 access.
+                raise ValueError("research object bytes require the 7997 data plane")
             else:
                 value = getattr(self.public_research, operation)(
                     publication_id, *args, library_viewer,
@@ -368,23 +388,18 @@ class FederatedPublicDataService:
         operation: str,
         item_id: str,
     ) -> tuple[bytes, str, str]:
-        response = self._research_value(
+        object_kind = {
+            "asset": "research_asset",
+            "attachment": "research_attachment",
+            "local_resource": "research_local_resource",
+        }.get(operation)
+        if object_kind is None:
+            raise ValueError("research object kind is unsupported")
+        return self.research_object_transfer.read(
             publication_id,
             viewer_ref,
-            operation=operation,
-            payload={"args": [item_id]},
-        )
-        if response.get("kind") != "bytes":
-            raise ValueError("federated research response is invalid")
-        try:
-            raw = base64.b64decode(
-                str(response.get("raw_b64") or "").encode("ascii"),
-                validate=True,
-            )
-        except (ValueError, UnicodeEncodeError) as exc:
-            raise ValueError("federated research bytes are invalid") from exc
-        return raw, str(response.get("content_type") or "application/octet-stream"), str(
-            response.get("filename") or item_id
+            object_kind=object_kind,
+            item_id=item_id,
         )
 
     def asset(self, publication_id: str, asset_id: str, viewer_ref: str | None) -> tuple[bytes, str, str]:
@@ -395,6 +410,25 @@ class FederatedPublicDataService:
 
     def local_resource(self, publication_id: str, resource_id: str, viewer_ref: str | None) -> tuple[bytes, str, str]:
         return self._research_bytes(publication_id, viewer_ref, operation="local_resource", item_id=resource_id)
+
+    def object_metadata(
+        self,
+        publication_id: str,
+        object_kind: str,
+        item_id: str,
+        viewer_ref: str | None,
+    ) -> dict[str, Any]:
+        """Return only the metadata needed to issue a 7997 read ticket."""
+        response = self._research_value(
+            publication_id,
+            viewer_ref,
+            operation="object-metadata",
+            payload={"args": [item_id], "object_kind": object_kind},
+        )
+        value = response.get("value")
+        if not isinstance(value, dict):
+            raise ValueError("research object metadata is invalid")
+        return dict(value)
 
     def list_owner(self, owner_ref: str) -> list[dict[str, Any]]:
         merged: dict[str, dict[str, Any]] = {

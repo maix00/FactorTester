@@ -116,6 +116,8 @@ class TransferCoordinator:
             expected_size=request.expected_size,
             expected_sha256=request.expected_sha256,
             expires_at=request.expires_at,
+            object_kind=request.object_kind,
+            object_id=request.object_id,
         ), now=now)
         attempt = None
         try:

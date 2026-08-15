@@ -85,6 +85,11 @@ class JobProxyRoutesMixin:
         if route is None:
             return True
         try:
+            if run_request:
+                self._stage_factor_sources_for_route(
+                    route,
+                    principal=str(session["username"]),
+                )
             response = self.state.route_request(
                 route,
                 path=self._forwarded_service_path(parsed),
@@ -98,7 +103,7 @@ class JobProxyRoutesMixin:
                     else ""
                 ),
             )
-        except (ConnectionError, ValueError):
+        except (ConnectionError, RuntimeError, ValueError):
             json_response(
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )

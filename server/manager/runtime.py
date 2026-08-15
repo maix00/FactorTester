@@ -37,6 +37,7 @@ from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
 from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
+from server.manager.http.object_transfer_routes import ObjectTransferRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -361,6 +362,9 @@ class ManagerState(
             public_research=self.public_research,
             client_state=self.client_state,
             account_domain_sync=self.account_domain_sync,
+            object_transfer_provider=lambda **kwargs: self.prepare_object_download(
+                **kwargs,
+            ),
         )
         # Keep the route name explicit: public research is a read-through
         # projection, while ``public_research`` remains the local authority
@@ -429,6 +433,7 @@ class Handler(
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
     JobTransferRoutesMixin,
+    ObjectTransferRoutesMixin,
     JobListRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

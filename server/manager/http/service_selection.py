@@ -15,6 +15,7 @@ from server.manager.domain.federation import (
 from server.manager.http.gateway import GatewayResponse
 from server.manager.http.responses import json_response
 from server.manager.services.test_authoring import TestAuthoringError
+from server.manager.services.factor_source_transfer import FactorSourceTransfer
 from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
@@ -46,6 +47,26 @@ _MAX_PREPARED_RUN_BODY_BYTES = 11 * 1024 * 1024
 
 class ServiceSelectionRoutesMixin:
     """Resolve one capable service before any request is forwarded."""
+
+    def _stage_factor_sources_for_route(
+        self,
+        route: ServiceRoute,
+        *,
+        principal: str,
+    ) -> None:
+        """Stage each factor object at most once per request and target."""
+        target = str(route.server_id or "").strip()
+        staged = getattr(self, "_staged_factor_source_targets", set())
+        if target in staged:
+            return
+        FactorSourceTransfer(self.state).stage(
+            getattr(self, "_prepared_factor_source_entries", ()),
+            principal=principal,
+            target_server_id=target,
+        )
+        staged.add(target)
+        self._staged_factor_source_targets = staged
+
     def _has_manager_ui_session(self) -> bool:
         session = self.state.session(self._bearer_token())
         return bool(
@@ -405,10 +426,26 @@ class ServiceSelectionRoutesMixin:
             )
             return None
         value.pop(MANAGER_RUN_CONTEXT_KEY, None)
+        source_entries: list[dict[str, object]] = []
+        self._prepared_factor_source_entries = source_entries
+        self._staged_factor_source_targets = set()
         try:
-            context = self.state.test_authoring.prepare_run_context(
-                dict(value), owner=principal,
-            )
+            try:
+                context = self.state.test_authoring.prepare_run_context(
+                    dict(value),
+                    owner=principal,
+                    source_free=True,
+                    storage_server_id=self.state.server_id,
+                    source_collector=source_entries.extend,
+                )
+            except TypeError as exc:
+                # Keep the injected test/legacy authoring seam usable while
+                # deployed Managers use the source-free object contract.
+                if "unexpected keyword" not in str(exc):
+                    raise
+                context = self.state.test_authoring.prepare_run_context(
+                    dict(value), owner=principal,
+                )
         except TestAuthoringError as exc:
             json_response(
                 self,
@@ -449,6 +486,9 @@ class ServiceSelectionRoutesMixin:
         requirements: list[dict[str, object]] = []
         for route in routes:
             try:
+                self._stage_factor_sources_for_route(
+                    route, principal=principal,
+                )
                 response = self.state.route_request(
                     route,
                     path="/api/runs/capability-preview",
@@ -457,7 +497,7 @@ class ServiceSelectionRoutesMixin:
                     body=body,
                     content_type=content_type,
                 )
-            except (ConnectionError, OSError, ValueError) as exc:
+            except (ConnectionError, OSError, RuntimeError, ValueError) as exc:
                 unavailable.append({
                     "server_id": route.server_id,
                     "port": route.port,

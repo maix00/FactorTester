@@ -17,6 +17,8 @@ class DownloadRequest:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    object_kind: str = "job_artifact"
+    object_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,8 @@ class UploadRequest:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    object_kind: str = "job_submission"
+    object_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

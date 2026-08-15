@@ -105,7 +105,7 @@ def test_v5_nat_attempt_is_archived_and_never_loaded_as_wireguard_route(
             ).fetchall()
         }
 
-    assert version == "7"
+    assert version == "8"
     assert active == 0
     assert archived[0:2] == ("source_push", "waiting_consumer")
     assert "WireGuard-direct" in archived[2]
@@ -139,7 +139,7 @@ def test_v6_endpoint_registry_upgrades_additively_to_signed_advertisements(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-    assert version == "7"
+    assert version == "8"
     assert "transfer_node_advertisement_nonces" in tables
     assert "transfer_node_advertisement_state" in tables
     assert "transfer_node_advertisement_clock" in tables
