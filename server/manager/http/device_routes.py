@@ -109,6 +109,7 @@ class DeviceNetworkRoutesMixin:
             session is None
             and self._visitor_mode() is None
             and not self._is_private_lan_client()
+            and not self._is_swift_network_discovery_request()
         ):
             json_response(self, {"success": False, "error": "login required"}, 401)
             return

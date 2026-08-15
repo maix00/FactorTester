@@ -312,7 +312,19 @@ def test_public_network_info_stays_private_behind_loopback_proxy(
         with pytest.raises(HTTPError) as denied:
             urlopen(request)
 
+        swift_request = Request(
+            f"{base_url}/api/server/network-info",
+            headers={
+                "X-Forwarded-For": "2001:b030:8150:ff07::5",
+                "X-Forwarded-Proto": "https",
+                "X-FactorTester-Client": "swift",
+            },
+        )
+        with urlopen(swift_request) as response:
+            payload = json.loads(response.read())
+
     assert denied.value.code == 401
+    assert payload["success"] is True
 
 
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:

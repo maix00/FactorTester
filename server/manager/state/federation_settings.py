@@ -72,6 +72,7 @@ class FederationSettingsStateMixin:
             manager_public_endpoint=str(
                 getattr(self, "manager_public_endpoint", "") or ""
             ),
+            managed_organizations=self.managed_organizations,
         )
 
     def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:

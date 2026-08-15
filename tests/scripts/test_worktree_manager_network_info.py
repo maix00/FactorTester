@@ -35,6 +35,40 @@ def test_public_device_targets_are_server_discovered_https_peers(tmp_path) -> No
     assert info["internal_addresses"]
     assert info["manager_port"] == 7998
     assert all(item["endpoint"].startswith("https://") for item in targets)
+    assert [item["server_id"] for item in info["online_public_server_targets"]] == [
+        "public-near",
+        "public-far",
+    ]
+
+
+def test_internal_targets_expose_their_managed_organization_scope(tmp_path) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="main",
+        server_id="public-main",
+        state_root=tmp_path / "manager-state",
+    )
+    state.public_server = True
+    internal = _registration("internal-gtht", latency_ms=4, load=0)
+    internal.update({
+        "role": "feat",
+        "public_server": False,
+        "managed_organizations": ["GTHT"],
+        "internal_addresses": ["192.168.50.10"],
+    })
+    state.federation_registry.register(internal)
+
+    targets = state.server_network_info()["internal_server_targets"]
+
+    assert targets == [{
+        "server_id": "internal-gtht",
+        "role": "feat",
+        "addresses": ["192.168.50.10"],
+        "manager_port": 7998,
+        "managed_organizations": ["GTHT"],
+        "online": True,
+    }]
 
 
 def test_lan_addresses_exclude_loopback_and_local_only_values() -> None:
@@ -74,4 +108,3 @@ def test_public_manager_network_info_uses_its_request_endpoint(tmp_path) -> None
     assert info["public_server"] is True
     assert info["advertised_public_endpoint"] == "https://198.51.100.10:7998"
     assert info["current_public_target"] is None
-

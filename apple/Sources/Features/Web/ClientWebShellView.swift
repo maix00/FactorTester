@@ -59,9 +59,19 @@ struct ClientWebShellView: View {
             .environmentObject(session)
             .environmentObject(languageStore)
         }
-        .task {
-            _ = await ManagerEndpointDiscoveryService.shared
-                .selectNearestPublicManagerIfNeeded()
+        .task(id: "\(session.isLoggedIn)|\(session.user?.organizationId ?? "")") {
+            let wasLoggedIn = session.isLoggedIn
+            let selected = await ManagerEndpointDiscoveryService.shared
+                .selectBestManager(
+                    organizationID: session.user?.organizationId
+                )
+            // Manager cookies/tokens are origin-scoped. When an authenticated
+            // user moves from the public Manager to an organization-owned
+            // internal Manager, refresh the same credentials on that new
+            // endpoint before the Web shell is reloaded.
+            if wasLoggedIn, selected != nil {
+                _ = await session.refresh()
+            }
             await releaseController.refresh(force: false)
         }
     }
