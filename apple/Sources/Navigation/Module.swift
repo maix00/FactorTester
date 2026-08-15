@@ -86,7 +86,7 @@ struct Module: Codable, Identifiable, Hashable {
     static let fallbackModules: [Module] = [
         Module(
             id: "home", title: "主页", path: "/",
-            requiresAuth: false, sidebarVisible: true, homeVisible: true
+            requiresAuth: false, sidebarVisible: true, homeVisible: false
         ),
         Module(
             id: "research", title: "研究",
