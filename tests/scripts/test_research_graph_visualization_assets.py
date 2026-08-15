@@ -36,5 +36,7 @@ def test_graph_page_uses_network_canvas_and_yaml_download() -> None:
     assert "research-graph-canvas" in source
     assert "/yaml" in source
     assert "download" in source
+    assert "viewUserGraph" in source
+    assert "research-graph-user-preview" in source
     assert "nodeList" not in source
     assert "edgeList" not in source

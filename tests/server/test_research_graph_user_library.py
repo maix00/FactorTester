@@ -143,6 +143,13 @@ def test_user_graph_routes_are_explicit_and_manager_local(client):
     assert download.status_code == 200
     assert "locale" not in download.data.decode("utf-8")
 
+    view = client.get(
+        f"/api/research-graphs/user-library/{file_id}?view=1"
+    )
+    assert view.status_code == 200
+    assert view.json["file"]["graph"]["graph_id"] == "personal-research"
+    assert "yaml" not in view.json["file"]
+
     deleted = client.delete(f"/api/research-graphs/user-library/{file_id}")
     assert deleted.status_code == 200
     assert client.get(

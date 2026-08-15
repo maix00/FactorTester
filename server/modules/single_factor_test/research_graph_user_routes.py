@@ -69,6 +69,9 @@ def get_user_research_graph(graph_file_id: str):
             f'attachment; filename="{value["filename"]}"'
         )
         return response
+    if request.args.get("view") in {"1", "true", "yes"}:
+        value.pop("yaml", None)
+        return jsonify({"success": True, "file": value})
     value.pop("yaml", None)
     value.pop("graph", None)
     return jsonify({"success": True, "file": value})

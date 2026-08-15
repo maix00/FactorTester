@@ -138,12 +138,12 @@
     }
     const list = document.createElement("div");
     list.className = "research-graph-user-files";
-    files.forEach(file => list.append(userGraphRow(context, file, mount)));
+    files.forEach(file => list.append(userGraphRow(context, file, panel)));
     panel.append(list);
     return panel;
   }
 
-  function userGraphRow(context, file, mount) {
+  function userGraphRow(context, file, panel) {
     const row = document.createElement("article");
     row.className = "research-graph-user-file";
     const heading = document.createElement("strong");
@@ -156,6 +156,11 @@
     ].filter(Boolean).join(" · ");
     const controls = document.createElement("div");
     controls.className = "research-graph-actions";
+    const view = context.button(
+      context.t("查看网络图"),
+      () => void viewUserGraph(context, file, panel),
+      context.t("在网络节点图中查看这个个人研究图"),
+    );
     const download = document.createElement("a");
     download.className = "button secondary";
     download.href = context.servicePath(
@@ -165,18 +170,66 @@
     download.download = file.filename || "research-graph.yaml";
     const select = context.button(
       file.is_default ? context.t("默认研究图") : context.t("设为默认"),
-      () => setUserDefault(context, file.graph_file_id, mount),
+      () => setUserDefault(context, file.graph_file_id, panel),
       context.t("供研究 Agent 使用的默认研究图"),
     );
     select.disabled = Boolean(file.is_default);
     const remove = context.button(
       context.t("删除"),
-      () => deleteUserGraph(context, file.graph_file_id, mount),
+      () => deleteUserGraph(context, file.graph_file_id, panel),
       context.t("删除这个个人研究图"),
     );
-    controls.append(download, select, remove);
+    controls.append(view, download, select, remove);
     row.append(heading, metadata, controls);
     return row;
+  }
+
+  async function viewUserGraph(context, file, panel) {
+    try {
+      const result = await context.api(context.servicePath(
+        `/api/research-graphs/user-library/${encodeURIComponent(file.graph_file_id)}?view=1`,
+      ));
+      const graph = result?.file?.graph;
+      if (!graph) throw new Error(context.t("个人研究图内容不可用"));
+      panel.querySelector(".research-graph-user-preview")?.remove();
+      const preview = document.createElement("section");
+      preview.className = "research-graph-user-preview";
+      const toolbar = document.createElement("div");
+      toolbar.className = "research-graph-toolbar";
+      const title = document.createElement("h4");
+      title.textContent = `${file.name || file.filename} @v${file.version}`;
+      const close = context.button(
+        context.t("关闭预览"),
+        () => preview.remove(),
+        context.t("关闭个人研究图网络预览"),
+      );
+      toolbar.append(title, close);
+      const meta = document.createElement("p");
+      meta.className = "secondary research-graph-meta";
+      meta.textContent = [
+        file.filename,
+        `${graph.graph_id}@v${graph.version}`,
+        context.t("用户文件不记录语言版本"),
+      ].filter(Boolean).join(" · ");
+      const layout = document.createElement("div");
+      layout.className = "research-graph-layout";
+      const surface = document.createElement("div");
+      surface.className = "research-graph-surface";
+      const canvas = document.createElement("div");
+      canvas.className = "research-graph-canvas";
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", context.t("个人研究图拓扑", "Personal research graph topology"));
+      const details = document.createElement("aside");
+      details.className = "research-graph-details";
+      surface.append(canvas);
+      layout.append(surface, details);
+      preview.append(toolbar, meta, layout);
+      panel.append(preview);
+      renderNetwork(context, graph, canvas, details, surface);
+      preview.scrollIntoView({block: "nearest", behavior: "smooth"});
+    } catch (error) {
+      context.showNotice(error.message || String(error), true);
+    }
   }
 
   function serverDefaultButton(context, graph, currentDefault, mount) {
