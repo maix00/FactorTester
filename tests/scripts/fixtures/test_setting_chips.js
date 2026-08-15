@@ -151,6 +151,32 @@ assert.deepEqual(runDescriptors.map(item => [item.label, item.value, item.tabKey
   ["结果保留范围", "摘要结果", "run_context"],
   ["结果与生成物", "未选择（使用默认输出）", "run_context"],
 ]);
+
+const unregistered = FTTestSettingChips.descriptors({
+  manifest,
+  values: {start_date: "2025-01-02"},
+  mountedTabs: ["time"],
+  includeUnregistered: true,
+  context: {t: value => value},
+});
+assert.deepEqual(unregistered.map(item => [item.label, item.value]), [
+  ["开始日期", "2025-01-02"],
+]);
+
+const adapterFallback = FTTestSettingChips.descriptors({
+  manifest,
+  values: {},
+  mountedTabs: ["product_path_selection"],
+  includeUnregistered: true,
+  includeEmpty: true,
+  includeTabFallbacks: true,
+  fallbackTabs: ["product_path_selection"],
+  context: {t: value => value},
+});
+assert.deepEqual(adapterFallback.map(item => [item.label, item.value, item.tabKey]), [
+  ["默认", "未设置（默认）", "product_path_selection"],
+]);
+
 const grouped = FTTestSettingChips.render({
   manifest: runManifest,
   runValues: {task_name: "", acting_profile_ref: "", retention_mode: "summary"},

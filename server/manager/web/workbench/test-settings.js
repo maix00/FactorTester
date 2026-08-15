@@ -90,6 +90,7 @@
       const chips = FTTestSettingChips.render({
         manifest, values, context,
         mountedTabs: [...mounted],
+        includeUnregistered: true,
         sources: options.chipSources || {},
         runValues: options.state?.runValues || {},
         outputRequests: options.state?.outputRequests || [],
@@ -239,6 +240,8 @@
             includeEmpty: true,
             includeUnregistered: true,
             includeHidden: true,
+            includeTabFallbacks: true,
+            fallbackTabs: [item.tab.key],
             groupBy: "tab",
             sources: {},
           });
