@@ -62,6 +62,16 @@ def test_missing_settings_means_no_guessed_connection_method(tmp_path) -> None:
     assert configured_management_access(tmp_path) == ()
 
 
+def test_missing_management_access_key_means_no_guessed_connection_method(
+    tmp_path,
+) -> None:
+    (tmp_path / ".settings").write_text(json.dumps({
+        "data_dir": str(tmp_path / "data"),
+    }), encoding="utf-8")
+
+    assert configured_management_access(tmp_path) == ()
+
+
 def test_management_access_rejects_secrets_and_commands(tmp_path) -> None:
     (tmp_path / ".settings").write_text(json.dumps({
         "management_access": [{

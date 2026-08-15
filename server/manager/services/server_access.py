@@ -75,7 +75,9 @@ def configured_management_access(repo: Path) -> tuple[dict[str, Any], ...]:
     settings = _load_settings(repo)
     if not settings:
         return ()
-    raw = settings.get(_ACCESS_KEY, ())
+    raw = settings.get(_ACCESS_KEY)
+    if raw in (None, ""):
+        return ()
     if isinstance(raw, Mapping):
         for key in _METHODS_KEYS:
             if key in raw:
@@ -83,8 +85,6 @@ def configured_management_access(repo: Path) -> tuple[dict[str, Any], ...]:
                 break
         else:
             raw = ()
-    if raw in (None, ""):
-        return ()
     if not isinstance(raw, list):
         raise ValueError(".settings management_access must be a list or object")
     methods = tuple(
