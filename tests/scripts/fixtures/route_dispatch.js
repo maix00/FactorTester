@@ -26,7 +26,7 @@ const dispatch = window.FTAppRouteDispatch.create({
   handlers: {
     home: () => calls.push("home"),
     research: token => calls.push(`research:${token}`),
-    jobs: context => calls.push(`jobs:${context.token}`),
+    jobs: (context, section) => calls.push(`jobs:${context.token}:${section}`),
     job: (context, port, id) => calls.push(`job:${context.token}:${port}:${id}`),
     jobConfiguration: (context, port, id) => (
       calls.push(`job-config:${context.token}:${port}:${id}`)
@@ -61,7 +61,7 @@ const dispatch = window.FTAppRouteDispatch.create({
 
   loggedIn = false;
   await dispatch.render({kind: "jobs"}, 5);
-  assert.equal(calls.at(-1), "jobs:5", "public server task feed must render without auth");
+  assert.equal(calls.at(-1), "jobs:5:types", "public test type page must render without auth");
   await dispatch.render({kind: "job", port: 8141, id: "job-one"}, 6);
   assert.equal(calls.at(-1), "job:6:8141:job-one", "public job detail must render without auth");
   await dispatch.render({kind: "job-configuration", port: 8141, id: "job-one"}, 7);

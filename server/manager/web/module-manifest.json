@@ -145,6 +145,8 @@
     "jobs": [
       "jobs/list-format.js",
       "jobs/progress.js",
+      "jobs/page-tabs.js",
+      "jobs/test-types.js",
       "jobs/jobs.js"
     ],
     "job-detail-core": [
@@ -309,6 +311,8 @@
     "core/price-chart.js",
     "core/market-data.js",
     "jobs/list-format.js",
+    "jobs/page-tabs.js",
+    "jobs/test-types.js",
     "jobs/highcharts-viewers.js",
     "jobs/factor-series-model.js",
     "jobs/factor-series-chart.js",

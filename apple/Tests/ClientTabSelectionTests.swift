@@ -75,6 +75,22 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(ClientTab.backtestLauncher.id, "backtest-launcher")
     }
 
+    func testTestsPageUsesTypeTabAndKeepsTestTypeDestinationsIndependent() {
+        XCTAssertEqual(ClientTab.jobs.title, "测试")
+        guard case .jobs = ClientTab.jobs.content else {
+            return XCTFail("the Tests feature must own the jobs page")
+        }
+
+        for path in ["/ic-test", "/backtest"] {
+            let first = ClientTab.embeddedNavigationDestination(for: path)
+            let second = ClientTab.embeddedNavigationDestination(for: path)
+            XCTAssertNotNil(first, path)
+            XCTAssertNotNil(second, path)
+            XCTAssertNotEqual(first?.id, second?.id, path)
+            XCTAssertTrue(first?.isClosable == true, path)
+        }
+    }
+
     func testDashboardTestModulesUseFreshWebDestinations() throws {
         for (id, path) in [
             ("ic-test", "/ic-test"),

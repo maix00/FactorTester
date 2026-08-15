@@ -1798,6 +1798,13 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
         assert modules[module_id]["homeVisible"] is False
         assert modules[module_id]["path"] == path
     assert modules["jobs"]["sfSymbol"] == "checklist"
+    assert modules["jobs"]["title_key"] == "测试"
+    assert modules["jobs"]["path"] == "/jobs?section=types"
+    test_tabs = modules["jobs"]["children"]
+    assert [item["id"] for item in test_tabs] == ["jobs.types", "jobs.list"]
+    assert [item["id"] for item in test_tabs[0]["children"]] == [
+        "ic-test", "backtest",
+    ]
     assert "single_factor_test" not in modules
 
 
@@ -1895,6 +1902,11 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
             manifest = json.loads(response.read())
 
     modules = {item["id"]: item for item in manifest["modules"]}
+    assert modules["home"]["title"] == "主页"
+    assert modules["jobs"]["title"] == "测试"
+    assert modules["jobs"]["path"] == "/jobs?section=types"
+    assert "ic-test" not in modules
+    assert "backtest" not in modules
     assert modules["sqlite_web"]["title"] == "数据库"
     assert modules["sqlite_web"]["managerOnly"] is True
     assert modules["sqlite_web"]["homeOnly"] is True
