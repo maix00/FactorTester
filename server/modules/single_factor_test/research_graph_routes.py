@@ -21,6 +21,14 @@ def _require_graph_viewer() -> str:
     return require_user()
 
 
+def _requested_graph_locale() -> str | None:
+    """Read an explicit presentation locale without changing old API defaults."""
+    raw = request.args.get("locale")
+    if raw is None:
+        return None
+    return research_graphs.normalize_graph_locale(raw)
+
+
 @sft_bp.post("/api/research-graphs/versions")
 def create_research_graph_version():
     data = request.get_json(silent=True) or {}
@@ -80,19 +88,80 @@ def revise_unused_research_graph_draft(graph_id: str, version: int):
 @sft_bp.get("/api/research-graphs/<graph_id>/versions")
 def list_research_graph_versions(graph_id: str):
     _require_graph_viewer()
+    try:
+        locale = _requested_graph_locale()
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     return jsonify({
         "success": True,
-        "versions": research_graphs.list_graph_versions(graph_id=graph_id),
+        "locale": locale,
+        "versions": research_graphs.list_graph_versions(
+            graph_id=graph_id,
+            locale=locale,
+        ),
     })
 
 
 @sft_bp.get("/api/research-graphs/<graph_id>/active")
 def get_active_research_graph(graph_id: str):
     _require_graph_viewer()
-    graph = research_graphs.load_active_graph(graph_id=graph_id)
+    try:
+        locale = _requested_graph_locale()
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    graph = research_graphs.load_active_graph(
+        graph_id=graph_id,
+        locale=locale,
+    )
     if graph is None:
         return jsonify({"success": False, "error": "active graph not found"}), 404
-    return jsonify({"success": True, "graph": graph})
+    return jsonify({"success": True, "locale": locale, "graph": graph})
+
+
+@sft_bp.get(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/presentations"
+)
+def list_research_graph_presentations(graph_id: str, version: int):
+    _require_graph_viewer()
+    graph = research_graphs.load_graph(graph_id=graph_id, version=version)
+    if graph is None:
+        return jsonify({"success": False, "error": "graph version not found"}), 404
+    return jsonify({
+        "success": True,
+        "graph_id": graph_id,
+        "version": version,
+        "content_hash": graph["content_hash"],
+        "presentations": research_graphs.list_presentations(
+            graph_id=graph_id,
+            version=version,
+        ),
+    })
+
+
+@sft_bp.post(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/presentations"
+)
+def register_research_graph_presentation(graph_id: str, version: int):
+    actor = require_user()
+    if not is_super_admin_account(get_account(actor)):
+        return jsonify({
+            "success": False,
+            "error": "only a super administrator may publish a graph presentation",
+        }), 403
+    graph = research_graphs.load_graph(graph_id=graph_id, version=version)
+    if graph is None:
+        return jsonify({"success": False, "error": "graph version not found"}), 404
+    data = request.get_json(silent=True) or {}
+    presentation = data.get("presentation", data)
+    try:
+        value = research_graphs.register_presentation(
+            graph,
+            presentation,
+            actor=actor,
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "presentation": value}), 201
 
 
 @sft_bp.get(
@@ -105,15 +174,41 @@ def download_research_graph_yaml(graph_id: str, version: int):
     if graph is None:
         return jsonify({"success": False, "error": "graph version not found"}), 404
     try:
-        body = research_graphs.graph_yaml_bytes(graph)
-        filename = research_graphs.graph_yaml_filename(graph)
+        locale = _requested_graph_locale()
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    presentation = None
+    if locale is not None:
+        presentation = research_graphs.load_presentation(
+            graph_id=graph_id,
+            version=version,
+            locale=locale,
+        )
+        if presentation is None:
+            return jsonify({
+                "success": False,
+                "error": f"research graph presentation is not published for locale {locale}",
+                "locale": locale,
+            }), 409
+    try:
+        body = research_graphs.graph_yaml_bytes(
+            graph,
+            presentation=presentation,
+        )
+        filename = research_graphs.graph_yaml_filename(
+            graph,
+            presentation=presentation,
+        )
     except (TypeError, ValueError):
         return jsonify({
             "success": False,
             "error": "research graph YAML export failed",
         }), 500
 
-    etag = f'"{graph["content_hash"]}"'
+    etag_identity = str(graph["content_hash"])
+    if presentation is not None:
+        etag_identity += ":" + str(presentation["translation_hash"])
+    etag = f'"{etag_identity}"'
     if request.headers.get("If-None-Match") == etag:
         return Response(status=304, headers={"ETag": etag})
     response = Response(body, status=200, mimetype="application/yaml")
@@ -127,6 +222,12 @@ def download_research_graph_yaml(graph_id: str, version: int):
     response.headers["X-FactorTester-Graph-Content-Hash"] = (
         str(graph["content_hash"])
     )
+    if locale is not None and presentation is not None:
+        response.headers["Content-Language"] = locale
+        response.headers["X-FactorTester-Graph-Locale"] = locale
+        response.headers["X-FactorTester-Graph-Translation-Hash"] = str(
+            presentation["translation_hash"]
+        )
     return response
 
 

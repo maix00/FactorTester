@@ -39,7 +39,7 @@ _SERVICE_GET_PREFIXES = (
     "/api/testers/modules",
 )
 _PUBLIC_GRAPH_READ_RE = re.compile(
-    r"/api/research-graphs/[^/]+/(?:active|versions(?:/[0-9]+/yaml)?)$"
+    r"/api/research-graphs/[^/]+/(?:active|versions(?:/[0-9]+/(?:yaml|presentations))?)$"
 )
 _MAX_PREPARED_RUN_BODY_BYTES = 11 * 1024 * 1024
 

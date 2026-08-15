@@ -3,9 +3,15 @@
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     const graphID = "factor-research";
+    const locale = graphLocale();
+    const localeQuery = `?locale=${encodeURIComponent(locale)}`;
     const [versionsResult, activeResult] = await Promise.allSettled([
-      context.api(context.servicePath(`/api/research-graphs/${graphID}/versions`)),
-      context.api(context.servicePath(`/api/research-graphs/${graphID}/active`)),
+      context.api(context.servicePath(
+        `/api/research-graphs/${graphID}/versions${localeQuery}`,
+      )),
+      context.api(context.servicePath(
+        `/api/research-graphs/${graphID}/active${localeQuery}`,
+      )),
     ]);
     if (!isCurrent()) return;
     if (versionsResult.status !== "fulfilled") throw versionsResult.reason;
@@ -26,7 +32,7 @@
     const toolbar = document.createElement("div");
     toolbar.className = "research-graph-toolbar";
     const title = document.createElement("h2");
-    title.textContent = `${context.t("研究图")} ${graph.graph_id || graphID}@v${graph.version}`;
+    title.textContent = `${graph.presentation?.title || context.t("研究图")} @v${graph.version}`;
     toolbar.append(title);
     const actions = document.createElement("div");
     actions.className = "research-graph-actions";
@@ -34,11 +40,11 @@
     const download = document.createElement("a");
     download.className = "button secondary";
     download.href = context.servicePath(
-      `/api/research-graphs/${encodeURIComponent(graphID)}/versions/${graph.version}/yaml`,
+      `/api/research-graphs/${encodeURIComponent(graphID)}/versions/${graph.version}/yaml${localeQuery}`,
     );
     download.download = "";
-    download.textContent = localized(context, "下载 YAML", "Download YAML");
-    download.title = localized(context, "下载当前研究图版本", "Download this graph version");
+    download.textContent = context.t("下载 YAML");
+    download.title = context.t("下载当前研究图版本");
     download.addEventListener("click", event => {
       event.preventDefault();
       void downloadGraph(context, download.href, graph, graphID);
@@ -50,12 +56,21 @@
     const meta = document.createElement("p");
     meta.className = "secondary research-graph-meta";
     meta.textContent = [
-      `${localized(context, "当前激活版本", "Active version")}: v${active?.version || "—"}`,
+      `${context.t("当前激活版本")}: v${active?.version || "—"}`,
       formatCount(context, "%lld 个节点", (graph.nodes || []).length),
       formatCount(context, "%lld 条边", (graph.edges || []).length),
       `${context.t("内容哈希", "Content hash")}: ${graph.content_hash || "—"}`,
+      graph.presentation_status === "available"
+        ? `${context.t("语言版本")}: ${graph.presentation_locale}`
+        : context.t("当前语言版本尚未发布"),
     ].join(" · ");
     section.append(meta);
+    if (graph.presentation?.description) {
+      const description = document.createElement("p");
+      description.className = "secondary research-graph-description";
+      description.textContent = graph.presentation.description;
+      section.append(description);
+    }
 
     const layout = document.createElement("div");
     layout.className = "research-graph-layout";
@@ -77,7 +92,7 @@
   function versionPicker(context, versions, graph) {
     const picker = document.createElement("select");
     picker.className = "graph-version-picker";
-    picker.setAttribute("aria-label", localized(context, "研究图版本", "Research graph version"));
+    picker.setAttribute("aria-label", context.t("研究图版本"));
     versions.forEach(item => {
       const option = document.createElement("option");
       option.value = item.version;
@@ -102,9 +117,12 @@
       const graphName = String(graph.graph_id || graphID).replace(
         /[^A-Za-z0-9._-]+/g, "-",
       ) || "research-graph";
-      const filename = `${graphName}-v${graph.version}-${String(
-        graph.content_hash || "",
-      ).slice(0, 16)}.yaml`;
+      const localeSuffix = graph.presentation
+        ? `-${graph.presentation.locale}-${String(
+          graph.presentation.translation_hash || "",
+        ).slice(0, 16)}`
+        : `-${String(graph.content_hash || "").slice(0, 16)}`;
+      const filename = `${graphName}-v${graph.version}${localeSuffix}.yaml`;
       const objectURL = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectURL;
@@ -119,14 +137,14 @@
   function renderNetwork(context, graph, canvas, details, surface) {
     if (typeof window.cytoscape !== "function") {
       details.append(FTUI.empty(
-        localized(context, "网络图不可用", "Network graph unavailable"),
-        localized(context, "图形资源尚未加载", "The graph renderer has not loaded"),
+        context.t("网络图不可用"),
+        context.t("图形资源尚未加载"),
       ));
       return;
     }
     const cy = window.cytoscape({
       container: canvas,
-      elements: graphElements(context, graph),
+      elements: graphElements(graph),
       style: graphStyle(),
       layout: {
         name: "cose", animate: false, fit: true, padding: 42,
@@ -139,10 +157,10 @@
     const controls = document.createElement("div");
     controls.className = "research-graph-controls";
     controls.append(
-      graphButton(context, "+", "放大", "Zoom in", () => cy.zoom(cy.zoom() * 1.18)),
-      graphButton(context, "−", "缩小", "Zoom out", () => cy.zoom(cy.zoom() / 1.18)),
-      graphButton(context, "⌖", "适应窗口", "Fit graph", () => cy.fit(undefined, 42)),
-      graphButton(context, "↻", "重新布局", "Re-layout", () => cy.layout({
+      graphButton(context, "+", "放大", () => cy.zoom(cy.zoom() * 1.18)),
+      graphButton(context, "−", "缩小", () => cy.zoom(cy.zoom() / 1.18)),
+      graphButton(context, "⌖", "适应窗口", () => cy.fit(undefined, 42)),
+      graphButton(context, "↻", "重新布局", () => cy.layout({
         name: "cose", animate: true, fit: true, padding: 42,
         idealEdgeLength: 110, nodeRepulsion: 5000, edgeElasticity: 0.35,
       }).run()),
@@ -150,7 +168,7 @@
     surface.append(controls);
     details.append(FTUI.empty(
       context.t("选择节点或边"),
-      localized(context, "点击连线查看义务", "Select a node or edge to inspect its meaning"),
+      context.t("点击连线查看义务"),
     ));
     cy.on("tap", "node", event => {
       focus(cy, event.target);
@@ -165,42 +183,48 @@
       cy.elements().removeClass("faded");
       details.replaceChildren(FTUI.empty(
         context.t("选择节点或边"),
-        localized(context, "点击连线查看义务", "Select a node or edge to inspect its meaning"),
+        context.t("点击连线查看义务"),
       ));
     });
   }
 
-  function graphButton(context, label, title, englishTitle, action) {
-    const button = context.button(label, action, localized(context, title, englishTitle));
+  function graphButton(context, label, title, action) {
+    const button = context.button(label, action, context.t(title));
     button.className = "research-graph-control";
     button.type = "button";
     return button;
   }
 
-  function graphElements(context, graph) {
-    const nodes = (graph.nodes || []).map(node => ({
-      data: {
-        id: `node:${node.node_id}`,
-        nodeID: node.node_id,
-        label: node.title || node.title_zh || node.label || node.node_id,
-        kind: node.kind || "research",
-        enforcement: node.enforcement || "advisory",
-        purpose: node.purpose || "",
-        entryEvidence: node.entry_evidence || [],
-        exitEvidence: node.exit_evidence || [],
-        requiredCapabilities: node.required_capabilities || [],
-        conditionalCapabilities: node.conditional_capabilities || [],
-      },
-    }));
+  function graphElements(graph) {
+    const presentation = graph.presentation || {};
+    const nodePresentations = presentation.nodes || {};
+    const nodes = (graph.nodes || []).map(node => {
+      const localizedNode = nodePresentations[node.node_id] || {};
+      return {
+        data: {
+          id: `node:${node.node_id}`,
+          nodeID: node.node_id,
+          label: localizedNode.label || node.node_id,
+          kind: node.kind || "research",
+          enforcement: node.enforcement || "advisory",
+          purpose: localizedNode.purpose || node.purpose || "",
+          entryEvidence: localizedNode.entry_evidence || node.entry_evidence || [],
+          exitEvidence: localizedNode.exit_evidence || node.exit_evidence || [],
+          requiredCapabilities: node.required_capabilities || [],
+          conditionalCapabilities: node.conditional_capabilities || [],
+        },
+      };
+    });
     const edges = graph.edges || [];
     if (edges.some(edge => edge.from_node === "*")) {
+      const wildcard = presentation.wildcard || {};
       nodes.push({data: {
         id: "node:any",
         nodeID: "*",
-        label: localized(context, "任意节点", "Any node"),
+        label: wildcard.label || "*",
         kind: "wildcard",
         enforcement: "advisory",
-        purpose: localized(context, "适用于所有节点", "Applies to every node"),
+        purpose: wildcard.purpose || "",
         synthetic: true,
       }});
     }
@@ -208,11 +232,12 @@
       ...nodes,
       ...edges.map(edge => {
         const from = edge.from_node === "*" ? "any" : edge.from_node;
+        const localizedEdge = (presentation.edges || {})[edge.edge_id] || {};
         return {data: {
           id: `edge:${edge.edge_id}`,
           source: `node:${from}`,
           target: `node:${edge.to_node}`,
-          label: edge.edge_type || edge.edge_id,
+          label: localizedEdge.label || edge.edge_type || edge.edge_id,
           edgeID: edge.edge_id,
           edgeType: edge.edge_type || "recommended",
           riskLevel: edge.risk_level || "",
@@ -223,6 +248,7 @@
           requiredResearchEvidence: edge.required_research_evidence || [],
           requiredTransitionFacts: edge.required_transition_facts || [],
           requiredCapabilities: edge.required_capabilities || [],
+          description: localizedEdge.description || "",
         }};
       }),
     ];
@@ -262,12 +288,12 @@
   function showNode(context, data, details) {
     details.replaceChildren(detailHeading(context, "节点：%@", data.label || data.nodeID));
     appendField(details, context.t("类型"), data.kind);
-    appendField(details, localized(context, "执行约束", "Enforcement"), data.enforcement);
+    appendField(details, context.t("执行约束"), data.enforcement);
     appendField(details, context.t("研究图对象"), data.nodeID);
     appendField(details, context.t("用途"), data.purpose);
-    appendList(details, localized(context, "所需能力", "Required capabilities"), data.requiredCapabilities);
+    appendList(details, context.t("所需能力"), data.requiredCapabilities);
     appendList(details, context.t("期望证据"), [...data.entryEvidence, ...data.exitEvidence]);
-    appendList(details, localized(context, "条件能力", "Conditional capabilities"), data.conditionalCapabilities);
+    appendList(details, context.t("条件能力"), data.conditionalCapabilities);
   }
 
   function showEdge(context, data, details) {
@@ -278,12 +304,13 @@
       data.toNode,
     ));
     appendField(details, context.t("类型"), data.edgeType);
-    appendField(details, localized(context, "风险等级", "Risk level"), data.riskLevel);
-    appendField(details, localized(context, "服务器动作", "Server action"), data.serverAction);
+    appendField(details, context.t("风险等级"), data.riskLevel);
+    appendField(details, context.t("服务器动作"), data.serverAction);
+    appendField(details, context.t("说明"), data.description);
     appendList(details, context.t("期望证据"), data.requiredEvidence);
     appendList(details, context.t("研究证据"), data.requiredResearchEvidence);
-    appendList(details, localized(context, "转换事实", "Transition facts"), data.requiredTransitionFacts);
-    appendList(details, localized(context, "所需能力", "Required capabilities"), data.requiredCapabilities);
+    appendList(details, context.t("转换事实"), data.requiredTransitionFacts);
+    appendList(details, context.t("所需能力"), data.requiredCapabilities);
   }
 
   function detailHeading(context, key, ...values) {
@@ -332,9 +359,9 @@
     return context.t(key, key).replace("%lld", String(value));
   }
 
-  function localized(context, chinese, english) {
-    const fallback = document.documentElement.lang === "en" ? english : chinese;
-    return context.t(chinese, fallback);
+  function graphLocale() {
+    return String(document.documentElement.lang || "zh-Hans")
+      .toLowerCase().startsWith("en") ? "en" : "zh-Hans";
   }
 
   window.FTResearchGraph = Object.freeze({render});

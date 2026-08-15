@@ -156,7 +156,11 @@ def load_graph(*, graph_id: str, version: int) -> dict[str, Any] | None:
         )
 
 
-def list_graph_versions(*, graph_id: str) -> list[dict[str, Any]]:
+def list_graph_versions(
+    *,
+    graph_id: str,
+    locale: str | None = None,
+) -> list[dict[str, Any]]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         rows = conn.execute(
             """
@@ -165,7 +169,12 @@ def list_graph_versions(*, graph_id: str) -> list[dict[str, Any]]:
             """,
             (graph_id,),
         ).fetchall()
-    return [_cache_graph(_row_payload(row) or {}) for row in rows]
+    values = [_cache_graph(_row_payload(row) or {}) for row in rows]
+    if locale is None:
+        return values
+    from server.services.research_graph.presentations import attach_presentation
+
+    return [attach_presentation(value, locale=locale) for value in values]
 
 
 def graph_lifecycle(

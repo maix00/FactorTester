@@ -70,6 +70,19 @@ from server.services.research_graph.proposal_review_packet import (
     load_proposal_review_packet,
 )
 from server.services.research_graph.schema import ensure_schema
+from server.services.research_graph.presentation_contract import (
+    DEFAULT_GRAPH_LOCALE,
+    SUPPORTED_GRAPH_LOCALES,
+    normalize_graph_locale,
+    presentation_content_hash,
+    validate_presentation,
+)
+from server.services.research_graph.presentations import (
+    attach_presentation,
+    list_presentations,
+    load_presentation,
+    register_presentation,
+)
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db as _clear_graph_cache_for_current_db,
     list_graph_versions,
@@ -87,6 +100,8 @@ from tools.data.sqlite.db import connect_sqlite
 __all__ = [
     "GraphActivationBlocked",
     "GraphVersionConflict",
+    "DEFAULT_GRAPH_LOCALE",
+    "SUPPORTED_GRAPH_LOCALES",
     "activate_reviewed_graph",
     "activation_preflight",
     "activate_graph",
@@ -107,9 +122,11 @@ __all__ = [
     "handoff_graph_branch",
     "authorize_human_gate_override",
     "list_graph_versions",
+    "list_presentations",
     "load_active_graph",
     "load_graph",
     "load_graph_branch",
+    "load_presentation",
     "load_human_gate_override",
     "load_proposal_review_packet",
     "load_current_graph_requirement",
@@ -121,6 +138,11 @@ __all__ = [
     "derive_upgrade_validation",
     "record_upgrade_validation",
     "register_graph",
+    "register_presentation",
     "revise_unused_draft",
     "rollback_active_graph",
+    "attach_presentation",
+    "normalize_graph_locale",
+    "presentation_content_hash",
+    "validate_presentation",
 ]

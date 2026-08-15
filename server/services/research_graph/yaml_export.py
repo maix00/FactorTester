@@ -16,7 +16,11 @@ import yaml
 from server.services.research_graph.protocol import validate_graph
 
 
-_RUNTIME_FIELDS = frozenset({"created_by", "created_at"})
+_RUNTIME_FIELDS = frozenset({
+    "created_by", "created_at", "active_pointer", "is_active",
+    "presentation", "presentation_locale", "presentation_status",
+})
+_PRESENTATION_RUNTIME_FIELDS = frozenset({"created_by", "created_at"})
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -30,11 +34,30 @@ def graph_definition(graph: dict[str, Any]) -> dict[str, Any]:
     return validate_graph(value)
 
 
-def graph_yaml_bytes(graph: dict[str, Any]) -> bytes:
-    """Serialize one verified graph version as stable, UTF-8 YAML."""
+def presentation_definition(presentation: dict[str, Any]) -> dict[str, Any]:
+    """Remove SQLite row metadata from a localized presentation bundle."""
+    value = deepcopy(presentation)
+    for field in _PRESENTATION_RUNTIME_FIELDS:
+        value.pop(field, None)
+    return value
+
+
+def graph_yaml_bytes(
+    graph: dict[str, Any],
+    *,
+    presentation: dict[str, Any] | None = None,
+) -> bytes:
+    """Serialize a canonical Graph or a locale-specific presentation bundle."""
     definition = graph_definition(graph)
+    payload: dict[str, Any] = definition
+    if presentation is not None:
+        payload = {
+            "graph": definition,
+            "presentation": presentation_definition(presentation),
+            "format": "factor-tester.research-graph-presentation.v1",
+        }
     rendered = yaml.safe_dump(
-        definition,
+        payload,
         allow_unicode=True,
         default_flow_style=False,
         sort_keys=True,
@@ -43,14 +66,27 @@ def graph_yaml_bytes(graph: dict[str, Any]) -> bytes:
     return rendered.encode("utf-8")
 
 
-def graph_yaml_filename(graph: dict[str, Any]) -> str:
+def graph_yaml_filename(
+    graph: dict[str, Any],
+    *,
+    presentation: dict[str, Any] | None = None,
+) -> str:
     """Build a safe, content-identifying filename for a graph download."""
     definition = graph_definition(graph)
     graph_id = _SAFE_FILENAME.sub("-", str(definition["graph_id"])).strip(".-")
     graph_id = graph_id or "research-graph"
     content_hash = str(definition["content_hash"])
     version = int(definition["version"])
-    return f"{graph_id}-v{version}-{content_hash[:16]}.yaml"
+    if presentation is None:
+        return f"{graph_id}-v{version}-{content_hash[:16]}.yaml"
+    locale = str(presentation.get("locale") or "locale")
+    translation_hash = str(presentation.get("translation_hash") or "")
+    return f"{graph_id}-v{version}-{locale}-{translation_hash[:16]}.yaml"
 
 
-__all__ = ["graph_definition", "graph_yaml_bytes", "graph_yaml_filename"]
+__all__ = [
+    "graph_definition",
+    "graph_yaml_bytes",
+    "graph_yaml_filename",
+    "presentation_definition",
+]

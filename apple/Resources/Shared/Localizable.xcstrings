@@ -12825,7 +12825,27 @@
     "正在读取" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取"}}}},
     "内网 Manager 地址需要 HTTPS 或私有网络 HTTP。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The internal Manager address must use HTTPS or private-network HTTP."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"内网 Manager 地址需要 HTTPS 或私有网络 HTTP。"}}}},
     "本机登记信息" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"This device enrollment"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本机登记信息"}}}},
-    "服务器记录的客户端类型、登记 IP 与最近访问 IP" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Client type, enrollment IP, and last access IP recorded by the server"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器记录的客户端类型、登记 IP 与最近访问 IP"}}}}
+    "服务器记录的客户端类型、登记 IP 与最近访问 IP" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Client type, enrollment IP, and last access IP recorded by the server"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器记录的客户端类型、登记 IP 与最近访问 IP"}}}},
+    "下载 YAML" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Download YAML"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"下载 YAML"}}}},
+    "下载当前研究图版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Download this research graph version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"下载当前研究图版本"}}}},
+    "当前激活版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Active version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前激活版本"}}}},
+    "研究图版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research graph version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究图版本"}}}},
+    "网络图不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Network graph unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"网络图不可用"}}}},
+    "图形资源尚未加载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The graph renderer has not loaded"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"图形资源尚未加载"}}}},
+    "任意节点" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Any node"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任意节点"}}}},
+    "适用于所有节点" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Applies to every node"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适用于所有节点"}}}},
+    "执行约束" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enforcement"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"执行约束"}}}},
+    "所需能力" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Required capabilities"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"所需能力"}}}},
+    "条件能力" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Conditional capabilities"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"条件能力"}}}},
+    "风险等级" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Risk level"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"风险等级"}}}},
+    "服务器动作" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Server action"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"服务器动作"}}}},
+    "转换事实" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Transition facts"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"转换事实"}}}},
+    "语言版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Language version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"语言版本"}}}},
+    "当前语言版本尚未发布" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The current language version has not been published"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前语言版本尚未发布"}}}},
+    "放大" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom in"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"放大"}}}},
+    "缩小" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom out"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"缩小"}}}},
+    "适应窗口" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Fit graph"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"适应窗口"}}}},
+    "重新布局" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Re-layout"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"重新布局"}}}}
   },
   "version" : "1.0"
 }
