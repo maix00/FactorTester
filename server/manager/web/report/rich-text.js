@@ -112,10 +112,31 @@
     image.className = "report-image inline-report-image";
     image.alt = alt || "";
     image.loading = "lazy";
+    const setBlob = blob => {
+      if (!blob || !image.isConnected) return;
+      const url = URL.createObjectURL(blob);
+      image.src = url;
+      image.addEventListener("load", () => URL.revokeObjectURL(url), {once: true});
+    };
+    if (/^factortester-local:\/\//i.test(target) && context.loadLocalResource) {
+      parent.append(image);
+      Promise.resolve(context.loadLocalResource(
+        target.slice("factortester-local://".length),
+      )).then(setBlob).catch(() => {
+        image.alt = `${alt || target} (${context.t?.("读取失败") || "读取失败"})`;
+      });
+      return;
+    }
     if (/^factortester-local:\/\//i.test(target) && context.localResourcePath) {
       image.src = context.localResourcePath(target.slice("factortester-local://".length));
     } else if (/^(?:https?:|data:|blob:)/i.test(target)) {
       image.src = target;
+    } else if (context.loadReportAsset) {
+      parent.append(image);
+      Promise.resolve(context.loadReportAsset(target)).then(setBlob).catch(() => {
+        image.alt = `${alt || target} (${context.t?.("读取失败") || "读取失败"})`;
+      });
+      return;
     } else if (context.reportAssetPath) {
       image.src = context.reportAssetPath(target);
     } else {

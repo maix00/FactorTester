@@ -114,7 +114,18 @@
       image.className = "report-image";
       image.alt = component.title || "";
       image.loading = "lazy";
-      image.src = context.reportAssetPath?.(assetRef) || "";
+      if (context.loadReportAsset) {
+        Promise.resolve(context.loadReportAsset(assetRef)).then(blob => {
+          if (!blob || !image.isConnected) return;
+          const url = URL.createObjectURL(blob);
+          image.src = url;
+          image.addEventListener("load", () => URL.revokeObjectURL(url), {once: true});
+        }).catch(() => {
+          image.alt = `${component.title || assetRef} (${context.t?.("读取失败") || "读取失败"})`;
+        });
+      } else {
+        image.src = context.reportAssetPath?.(assetRef) || "";
+      }
       body.append(image);
     } else if (component.kind === "table") body.append(table(content, context));
     else if (component.kind === "list" && Array.isArray(content?.items || content?.rows || content)) {

@@ -18,6 +18,7 @@
     state.activePublicationID = publicationID;
     context.setHeading(value.title, t("研究报告"));
     context.updateActiveTab({title: value.title});
+    const transferContext = {api, t};
     const branches = Array.isArray(value.branches) ? value.branches : [];
     if (branches.length > 1) {
       const branchPicker = document.createElement("select");
@@ -52,7 +53,21 @@
       // tab router first.  Standalone Web keeps its ordinary in-page routing.
       nativeReference: Boolean(window.webkit?.messageHandlers?.researchReference),
       publicationID,
-      reportAssetPath: source.reportAssetPath,
+      reportAssetPath: source.isLocal ? source.reportAssetPath : null,
+      loadReportAsset: source.isLocal ? null : assetRef =>
+        FTResearchObjectTransfer.blob(
+          transferContext,
+          publicationID,
+          "research_asset",
+          source.assetID(assetRef),
+        ),
+      loadLocalResource: source.isLocal ? null : resourceID =>
+        FTResearchObjectTransfer.blob(
+          transferContext,
+          publicationID,
+          "research_local_resource",
+          resourceID,
+        ),
       captureScrollPosition: context.captureScrollPosition,
       restoreScrollY,
       suppressAutoScroll: true,
@@ -190,9 +205,26 @@
         const hash = /^attachment:sha256:([a-f0-9]{64})$/i.exec(ref || "")?.[1];
         if (!hash) continue;
         const link = document.createElement("a");
-        link.href = `/api/public-research/${encodeURIComponent(publicationID)}/attachments/${hash}`;
+        link.href = "#";
         link.textContent = metadata?.filename || ref;
         link.download = metadata?.filename || "attachment";
+        link.addEventListener("click", async event => {
+          event.preventDefault();
+          try {
+            const blob = await FTResearchObjectTransfer.blob(
+              {api: context.api, t},
+              publicationID,
+              "research_attachment",
+              hash,
+            );
+            downloadBlob(blob, metadata?.filename || "attachment");
+          } catch (error) {
+            context.showNotice?.(
+              error?.message || t("研究附件下载失败"),
+              true,
+            );
+          }
+        });
         section.append(link);
       }
       if (section.querySelector("a")) root.append(section);
@@ -238,13 +270,22 @@
       catch (_) { return showNotice(t("本地文件下载失败"), true); }
       if (!blob.size) return showNotice(t("本地文件下载失败"), true);
     } else {
-      const response = await fetch(
-        `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}`,
-        {credentials: "same-origin"},
-      );
-      if (!response.ok) return showNotice(t("本地文件下载失败"), true);
-      blob = await response.blob();
+      try {
+        blob = await FTResearchObjectTransfer.blob(
+          {api: context.api, t},
+          publicationID,
+          "research_local_resource",
+          resourceID,
+        );
+      } catch (error) {
+        return showNotice(error?.message || t("本地文件下载失败"), true);
+      }
     }
+    downloadBlob(blob, filename);
+  }
+
+  function downloadBlob(blob, filename) {
+    if (!blob) throw new Error("empty research object");
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url; link.download = filename;

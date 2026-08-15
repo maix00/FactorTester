@@ -129,6 +129,7 @@
       "report/component-view.js",
       "report/chapter-rail.js",
       "report/report-renderer.js",
+      "report/object-transfer.js",
       "report/source.js",
       "report/report-entry.js"
     ],
@@ -335,6 +336,7 @@
     "report/component-view.js",
     "report/chapter-rail.js",
     "report/report-renderer.js",
+    "report/object-transfer.js",
     "report/source.js",
     "report/report-entry.js",
     "research/run-spec-view.js",
