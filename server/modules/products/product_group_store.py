@@ -8,6 +8,11 @@ from hashlib import sha1
 import re
 
 from server.modules.products.product_path_selection import resolve_selection_products
+from server.modules.products.product_category_paths import (
+    canonicalize_product_paths,
+    infer_category_ids,
+)
+from server.modules.products.product_category_store import list_product_categories
 from tools.products.product_path_selection import ProductPathSelection
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
@@ -28,7 +33,32 @@ def load_product_groups(username: str) -> list:
         if "id" not in group:
             group["id"] = _legacy_group_id(group.get("name"))
             dirty = True
-        if "product_names" not in group:
+        category_ids = _category_ids(group.get("category_ids"))
+        if not category_ids:
+            inferred = infer_category_ids(group.get("paths"), username=username)
+            if inferred:
+                category_ids = inferred
+        try:
+            canonical_paths = canonicalize_product_paths(
+                group.get("paths"),
+                category_ids=category_ids,
+                username=username,
+            )
+        except ValueError:
+            # Keep a legacy row readable while reporting its unresolved paths;
+            # new writes fail instead of silently storing a category path.
+            canonical_paths = [
+                str(path).strip() for path in group.get("paths", [])
+                if isinstance(path, str) and path.strip()
+            ]
+        paths_changed = group.get("paths") != canonical_paths
+        if paths_changed:
+            group["paths"] = canonical_paths
+            dirty = True
+        if group.get("category_ids") != category_ids:
+            group["category_ids"] = category_ids
+            dirty = True
+        if paths_changed or "product_names" not in group:
             _enrich_group(group)
             dirty = True
         for key in ("factor_refs", "factor_set_refs"):
@@ -98,6 +128,7 @@ def create_product_group(
     creator_kind: str = "user",
     creator_ref: str = "",
     research_refs: list[str] | None = None,
+    category_ids: list[str] | None = None,
 ) -> dict | None:
     name = name.strip()
     if not name:
@@ -105,6 +136,17 @@ def create_product_group(
     groups = load_product_groups(username)
     if find_group_by_name(groups, name) >= 0:
         return None
+    normalized_category_ids = _validate_category_ids(username, category_ids)
+    normalized_paths = canonicalize_product_paths(
+        paths,
+        category_ids=normalized_category_ids,
+        username=username,
+        # Product groups may reference a provider path that is not present in
+        # this Manager's current catalog. Preserve such category-free paths,
+        # but canonicalize/reject recognizable category-qualified paths.
+        allow_unresolved=True,
+        infer_legacy_categories=False,
+    )
     creator = _creator_metadata(
         username,
         creator_kind=creator_kind,
@@ -113,7 +155,8 @@ def create_product_group(
     group = {
         "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
-        "paths": [path for path in paths if isinstance(path, str) and path.strip()],
+        "paths": normalized_paths,
+        "category_ids": normalized_category_ids,
         **creator,
         "research_refs": _research_refs(research_refs),
         "factor_refs": [],
@@ -125,14 +168,32 @@ def create_product_group(
     return group
 
 
-def update_product_group(username: str, name: str, paths: list = None) -> dict | None:
+def update_product_group(
+    username: str,
+    name: str,
+    paths: list | None = None,
+    category_ids: list[str] | None = None,
+) -> dict | None:
     groups = load_product_groups(username)
     idx = find_group_by_name(groups, name)
     if idx < 0:
         return None
     group = groups[idx]
+    next_category_ids = (
+        _validate_category_ids(username, category_ids)
+        if category_ids is not None
+        else _category_ids(group.get("category_ids"))
+    )
     if paths is not None:
-        group["paths"] = [path for path in paths if isinstance(path, str) and path.strip()]
+        group["paths"] = canonicalize_product_paths(
+            paths,
+            category_ids=next_category_ids,
+            username=username,
+            allow_unresolved=True,
+            infer_legacy_categories=False,
+        )
+    group["category_ids"] = next_category_ids
+    if paths is not None or category_ids is not None:
         groups[idx] = _enrich_group(group)
     groups[idx]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     save_product_groups(username, groups)
@@ -199,6 +260,27 @@ def delete_product_group(username: str, name: str) -> bool:
 def _legacy_group_id(name: object) -> str:
     raw = str(name or "").strip() or "unnamed"
     return f"pg_{sha1(raw.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _category_ids(value: object) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(
+        str(item).strip() for item in value if str(item).strip()
+    ))
+
+
+def _validate_category_ids(username: str, value: object) -> list[str]:
+    ids = _category_ids(value)
+    definitions = {
+        str(item.get("id") or "") for item in list_product_categories(username)
+    }
+    unknown = sorted(set(ids) - definitions)
+    if unknown:
+        raise ValueError("产品分类不存在: " + ", ".join(unknown))
+    return ids
 
 
 def _group_by_ref(groups: list, product_group_ref: str) -> dict | None:

@@ -18,6 +18,11 @@ from .product_group import (
     load_product_groups,
     save_product_groups,
 )
+from .product_category import (
+    ensure_product_category_schema,
+    load_product_categories,
+    save_product_categories,
+)
 from .factor_set import (
     delete_factor_set,
     ensure_factor_set_schema,
@@ -52,6 +57,7 @@ def ensure_account_manager_sqlite_store() -> str:
         ensure_user_schema(conn)
         ensure_user_level_schema(conn)
         ensure_product_group_schema(conn)
+        ensure_product_category_schema(conn)
         ensure_factor_set_schema(conn)
         ensure_factor_param_config_schema(conn)
         ensure_factor_research_result_schema(conn)

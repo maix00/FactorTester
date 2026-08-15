@@ -46,7 +46,9 @@ def project_product_groups(
         subjects = store.list_group_subjects(str(value.get("group_ref") or ""))
         value["factor_refs"] = _subject_refs(subjects, "factor")
         value["factor_set_refs"] = _subject_refs(subjects, "factor_set")
-        for key in ("paths", "product_names", "description"):
+        for key in (
+            "paths", "product_names", "description", "category_ids",
+        ):
             if key in definition:
                 value[key] = definition[key]
         value["source"] = "local"

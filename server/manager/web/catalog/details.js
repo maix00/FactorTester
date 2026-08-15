@@ -173,6 +173,10 @@
         [context.t("稳定引用"), group.group_ref || group.id || ""],
         [context.t("创建者类型"), group.creator_kind === "profile" ? context.t("Profile") : context.t("用户")],
         [context.t("创建者"), group.creator_title || group.creator_ref || ""],
+        [context.t("产品分类"), (group.category_bindings || []).map(item =>
+          item.title_zh || item.alias || item.id).join("、")
+          || (group.category_ids || []).join("、")
+          || context.t("未绑定分类")],
         [context.t("是否为研究创建"), group.created_for_research ? context.t("是") : context.t("否")],
         [context.t("状态"), group.state || ""],
       ],

@@ -24,6 +24,7 @@ from tools.data.sqlite.account_manager import (
     load_organizations as _load_organizations,
     load_factor_param_config as _load_factor_param_config,
     load_product_groups as _load_product_groups,
+    load_product_categories as _load_product_categories,
     list_factor_sets as _list_factor_sets,
     get_factor_set as _get_factor_set,
     normalize_product_group as _normalize_product_group,
@@ -34,6 +35,7 @@ from tools.data.sqlite.account_manager import (
     save_organizations as _save_organizations,
     save_factor_param_config as _save_factor_param_config,
     save_product_groups as _save_product_groups,
+    save_product_categories as _save_product_categories,
     save_factor_set as _save_factor_set,
     delete_factor_set as _delete_factor_set,
 )
@@ -445,6 +447,16 @@ def load_product_groups(username: str) -> list:
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
+
+
+def load_product_categories(username: str) -> list[dict]:
+    ensure_account_manager_sqlite_store()
+    return _load_product_categories(username)
+
+
+def save_product_categories(username: str, categories: list[dict]) -> None:
+    ensure_account_manager_sqlite_store()
+    _save_product_categories(username, categories)
 
 
 def list_factor_sets(username: str) -> list[dict]:

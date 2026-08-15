@@ -61,9 +61,7 @@
     const all = roots(value).filter(Boolean);
     const definitions = Array.isArray(options.categoryDefinitions)
       ? options.categoryDefinitions : [];
-    const combinations = Array.isArray(options.savedCombinations)
-      ? options.savedCombinations : [];
-    const available = [...definitions, ...combinations].filter(
+    const available = definitions.filter(
       (item, index, allItems) => item?.id && (
         allItems.findIndex(candidate => candidate?.id === item.id) === index
       ),
@@ -73,7 +71,7 @@
     categories.className = "product-category-filter";
     const heading = document.createElement("div");
     heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("产品分类")}</h2><p>${context.t("自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类")}</p></div>`;
+    heading.innerHTML = `<div><h2>${context.t("产品分类")}</h2><p>${context.t("选择一个分类；新增分类和乘积分类请到产品分类选项卡管理")}</p></div>`;
     const save = FTUI.actionButton(context.t("应用分类"), null, {
       variant: "primary",
     });
@@ -95,30 +93,10 @@
     available.forEach(item => appendChoice(item, selected === item.id));
     categories.append(choices);
 
-    const create = FTUI.actionButton(context.t("创建乘积分类"), null, {
-      variant: "secondary",
-    });
     const actions = document.createElement("div");
     actions.className = "product-category-actions";
-    actions.append(create, save);
+    actions.append(save);
     categories.append(actions);
-
-    create.addEventListener("click", async () => {
-      const selectedCategories = await FTProductCategoryOverlay.choose(
-        context, available,
-      );
-      if (!selectedCategories) return;
-      try {
-        const definition = FTProductCategoryModel.multiply(
-          available, selectedCategories,
-        );
-        const next = combinations.some(item => item.id === definition.id)
-          ? combinations.slice() : [...combinations, definition];
-        await options.onSave?.(definition.id, next);
-      } catch (error) {
-        context.showNotice?.(context.t(error.message), true);
-      }
-    });
 
     const tree = document.createElement("div");
     tree.className = "product-tree";
@@ -128,7 +106,7 @@
       )?.value || "";
       save.disabled = true;
       try {
-        await options.onSave?.(nextID, combinations.slice());
+        await options.onSave?.(nextID);
       } catch (error) {
         context.showNotice?.(error.message || context.t("产品树读取失败"), true);
       } finally { save.disabled = false; }
