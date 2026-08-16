@@ -61,7 +61,8 @@
 
     const search = document.createElement("input");
     search.className = "toolbar-search";
-    search.placeholder = FTFactorList.searchPlaceholder(context, page);
+    search.placeholder = FTFactorList.searchPlaceholder(context, page, familyScope);
+    search.setAttribute("aria-label", search.placeholder);
     context.toolbar.append(
       search,
       context.button("↻", async () => {

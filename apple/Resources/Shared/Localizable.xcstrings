@@ -672,6 +672,7 @@
     "暂无私有因子家族" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No private factor families"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"暂无私有因子家族"}}}},
     "正在读取因子库…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading factor library…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取因子库…"}}}},
     "搜索因子家族" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search factor families"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索因子家族"}}}},
+    "搜索下级用户或因子家族" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search subordinate users or factor families"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索下级用户或因子家族"}}}},
     "搜索因子、因子集合或产品组" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search factors, factor sets, or product groups"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索因子、因子集合或产品组"}}}},
     "输入关键词开始检索" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter a keyword to search"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入关键词开始检索"}}}},
     "可检索公共或用户因子家族" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search public and user factor families"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"可检索公共或用户因子家族"}}}},

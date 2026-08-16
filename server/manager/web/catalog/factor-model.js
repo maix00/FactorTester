@@ -55,6 +55,22 @@
     return !query || JSON.stringify(value || {}).toLowerCase().includes(query);
   }
 
+  function familySearchText(value) {
+    const item = value || {};
+    return [
+      familyName(item),
+      item.factor_family_alias,
+      description(item),
+      item.owner_alias,
+      item.owner_username,
+      ...(Array.isArray(item.categories) ? item.categories : []),
+    ].filter(item => String(item || "").trim()).join(" ").toLowerCase();
+  }
+
+  function matchesFamily(value, query) {
+    return !query || familySearchText(value).includes(String(query).toLowerCase());
+  }
+
   function familyName(value) {
     return value.factor_family_name
       || value.factor_family_alias
@@ -154,6 +170,7 @@
     groupLabels,
     groupRef,
     matches,
+    matchesFamily,
     mergeFactorSets,
     owner,
     productGroupNames,
