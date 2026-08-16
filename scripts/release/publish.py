@@ -51,7 +51,10 @@ from scripts.release.update_manifest import (
     write_update_manifest,
 )
 from scripts.release.source_checkout import clean_worktree
-from tools.cli.release.beta_version import resolve_beta_identity
+from tools.cli.release.beta_version import (
+    read_installed_beta_release,
+    resolve_beta_identity,
+)
 
 
 CHANNELS = {"stable", "beta"}
@@ -412,6 +415,11 @@ def publish_release(**options: Any) -> PublishedRelease:
         server_origin = str(options.get("server_origin") or "").strip()
         if server_origin:
             sources.append(server_origin)
+        installed_release = read_installed_beta_release(
+            Path("/Applications/FTClient.app/Contents/Info.plist"),
+        )
+        if installed_release is not None:
+            sources.append(Path(installed_release.source))
         version, build, _discovered = resolve_beta_identity(
             version=options.get("version"),
             build=options.get("build"),

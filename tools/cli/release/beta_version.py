@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import plistlib
 from pathlib import Path
 import re
 from typing import Any, Iterable
@@ -104,7 +105,11 @@ def resolve_beta_identity(
     discovered_items: list[ExistingBetaRelease] = []
     for source in sources:
         try:
-            release = read_beta_release(source)
+            release = (
+                read_installed_beta_release(source)
+                if isinstance(source, Path) and source.name == "Info.plist"
+                else read_beta_release(source)
+            )
         except OSError:
             # A server that is currently offline cannot receive this release
             # either. It is intentionally omitted from the high-water mark;
@@ -170,6 +175,36 @@ def read_beta_release(source: str | Path) -> ExistingBetaRelease | None:
     if isinstance(build, bool) or not isinstance(build, int) or build < 1:
         raise ValueError(f"Beta manifest from {label} has an invalid build")
     return ExistingBetaRelease(version=version, build=build, source=label)
+
+
+def read_installed_beta_release(
+    info_plist: Path,
+) -> ExistingBetaRelease | None:
+    """Use an installed Beta app as a local monotonic version floor."""
+    if not info_plist.is_file():
+        return None
+    try:
+        value = plistlib.loads(info_plist.read_bytes())
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise ValueError(f"installed FTClient Info.plist is invalid: {info_plist}") from exc
+    version = str(value.get("CFBundleShortVersionString") or "").strip()
+    if not version:
+        return None
+    if "-beta." not in version:
+        return None
+    parse_beta_version(version)
+    raw_build = value.get("CFBundleVersion")
+    try:
+        build = int(str(raw_build or "0"))
+    except ValueError as exc:
+        raise ValueError(f"installed FTClient build is invalid: {info_plist}") from exc
+    if build < 1:
+        raise ValueError(f"installed FTClient build is invalid: {info_plist}")
+    return ExistingBetaRelease(
+        version=version,
+        build=build,
+        source=str(info_plist),
+    )
 
 
 def project_build_number(project_file: Path) -> int:

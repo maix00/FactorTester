@@ -11,6 +11,7 @@ from tools.cli.release.beta_version import (
     ExistingBetaRelease,
     next_beta_version,
     parse_beta_version,
+    read_installed_beta_release,
     resolve_beta_identity,
 )
 
@@ -125,6 +126,29 @@ def test_parse_beta_version_rejects_non_beta_versions() -> None:
     assert parse_beta_version("1.2.3-beta.7") == (1, 2, 3, 7)
     with pytest.raises(ValueError, match="X.Y.Z-beta.N"):
         parse_beta_version("1.2.3")
+
+
+def test_installed_beta_app_is_a_local_version_floor(tmp_path: Path) -> None:
+    info = tmp_path / "Info.plist"
+    info.write_bytes(plist_bytes(
+        "0.1.3-beta.32",
+        "35",
+    ))
+
+    release = read_installed_beta_release(info)
+
+    assert release is not None
+    assert release.version == "0.1.3-beta.32"
+    assert release.build == 35
+
+
+def plist_bytes(version: str, build: str) -> bytes:
+    import plistlib
+
+    return plistlib.dumps({
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": build,
+    })
 
 
 def test_publish_transaction_resolves_auto_identity_before_build(
