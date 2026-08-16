@@ -41,7 +41,7 @@
     pickerHeading.textContent = context.t("选择产品路径");
     const pickerNote = document.createElement("p");
     pickerNote.textContent = context.t(
-      "选择右侧产品树中的终端路径，结果会加入当前条目",
+      "可选择各层级路径；展开到本级产品列表后，也可选择其中的每一行",
     );
     const pickerTarget = document.createElement("small");
     pickerTarget.className = "product-category-picker-target";

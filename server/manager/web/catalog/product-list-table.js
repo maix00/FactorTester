@@ -29,27 +29,68 @@
     };
   }
 
-  function productTable(context, nodes, source) {
+  function productPath(node) {
+    return String(
+      node?.product_path || node?.key || node?.product_name || node?.title || "",
+    ).trim();
+  }
+
+  function selectionCell(node, options) {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "product-list-selection";
+    input.dataset.productPath = productPath(node);
+    input.checked = FTProductTree.minimalPaths(options.selectedPaths)
+      .includes(input.dataset.productPath);
+    input.setAttribute("aria-label", input.dataset.productPath);
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      options.selectedPaths = FTProductTree.updateSelection(
+        options.selectedPaths, input.dataset.productPath, input.checked,
+      );
+      FTProductTree.syncSelectionControls(
+        input.closest(".product-tree"), options.selectedPaths,
+      );
+      options.onSelectionChange?.([...options.selectedPaths]);
+    });
+    return input;
+  }
+
+  function productTable(context, nodes, source, options = {}) {
     const values = Array.isArray(nodes) ? nodes : [];
+    const selectable = options.selectable === true;
     const rows = values.map(node => [
+      ...(selectable ? [selectionCell(node, options)] : []),
       node.product_name || node.title || "—",
       node.description || node.desc || "—",
       node.exchange || "—",
       node.product_code || node.code || "—",
+      productPath(node) || "—",
       Array.isArray(node.source_ids) ? node.source_ids.join(", ") : "—",
       node.product_type === "contract" ? context.t("合约") : context.t("产品"),
     ]);
     const view = FTUI.table([
+      ...(selectable ? [context.t("选择")] : []),
       context.t("名称"), context.t("产品描述"), context.t("交易所"),
-      context.t("代码"), context.t("数据源"), context.t("类型"),
+      context.t("代码"), context.t("产品路径"), context.t("数据源"),
+      context.t("类型"),
     ], rows);
     view.shell.classList.add("product-list-table-shell");
     view.table.className = "product-list-table";
     [...view.body.rows].forEach((row, index) => {
       const node = values[index];
       if (!node) return;
-      row.dataset.href = "true";
-      row.addEventListener("click", () => {
+      row.dataset.productPath = productPath(node);
+      if (selectable) row.dataset.selectable = "true";
+      row.dataset.href = selectable ? "false" : "true";
+      row.addEventListener("click", event => {
+        if (selectable) {
+          if (event.target instanceof HTMLInputElement) return;
+          const input = row.querySelector("input[data-product-path]");
+          input?.click();
+          return;
+        }
         const kind = node.product_type === "contract" ? "contract" : "product";
         const target = node.product_name || node.contract_uid || node.key || node.title;
         context.navigate(catalogPath(
@@ -109,7 +150,7 @@
         state.page = model.page;
         state.limit = model.limit;
         tableMount.replaceChildren(productTable(
-          context, payload.nodes || payload.products || [], options.source,
+          context, payload.nodes || payload.products || [], options.source, options,
         ));
         pagination.replaceChildren();
         const previous = FTUI.actionButton(context.t("上一页"), () => {
