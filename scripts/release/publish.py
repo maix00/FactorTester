@@ -51,6 +51,7 @@ from scripts.release.update_manifest import (
     write_update_manifest,
 )
 from scripts.release.source_checkout import clean_worktree
+from tools.cli.release.beta_version import resolve_beta_identity
 
 
 CHANNELS = {"stable", "beta"}
@@ -402,6 +403,30 @@ def publish_release(**options: Any) -> PublishedRelease:
         )
     else:
         _validate_source_checkout(REPO, source_revision)
+    channel = str(options.get("channel") or "").strip()
+    if channel == "beta":
+        sources: list[str | Path] = []
+        release_root = options.get("release_root")
+        if release_root is not None:
+            sources.append(Path(release_root))
+        server_origin = str(options.get("server_origin") or "").strip()
+        if server_origin:
+            sources.append(server_origin)
+        version, build, _discovered = resolve_beta_identity(
+            version=options.get("version"),
+            build=options.get("build"),
+            sources=sources,
+            project_file=REPO / "apple/project.yml",
+        )
+        options["version"] = version
+        options["build"] = build
+    elif (
+        not str(options.get("version") or "").strip()
+        or str(options.get("version") or "").strip().lower() == "auto"
+    ):
+        raise ValueError("Stable release requires an explicit --version")
+    elif str(options.get("build") or "").strip().lower() == "auto":
+        raise ValueError("Stable release requires an explicit --build")
     return release_client(**options)
 
 
@@ -881,8 +906,16 @@ def main() -> None:
         description="Build and publish one verified FTClient Main or Beta release"
     )
     parser.add_argument("--channel", choices=sorted(CHANNELS), required=True)
-    parser.add_argument("--version", required=True)
-    parser.add_argument("--build", type=int, required=True)
+    parser.add_argument(
+        "--version",
+        default="auto",
+        help="Beta defaults to the next version from reachable Beta manifests.",
+    )
+    parser.add_argument(
+        "--build",
+        default="auto",
+        help="Beta defaults to the next build from reachable Beta manifests.",
+    )
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(

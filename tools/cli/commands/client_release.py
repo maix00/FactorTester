@@ -115,8 +115,18 @@ def app_update_restart(as_json: bool) -> None:
 
 @operator_client.command("release")
 @click.option("--channel", type=click.Choice(["stable", "beta"]), required=True)
-@click.option("--version", required=True)
-@click.option("--build", type=click.IntRange(min=1), required=True)
+@click.option(
+    "--version",
+    default="auto",
+    show_default=True,
+    help="Beta: auto-increment from reachable Beta manifests; Stable: required.",
+)
+@click.option(
+    "--build",
+    default="auto",
+    show_default=True,
+    help="Beta: next build above reachable servers; Stable: required.",
+)
 @click.option("--source-revision", required=True)
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(

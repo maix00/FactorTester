@@ -20,6 +20,13 @@ Release operations intentionally have two authorities:
   all GitHub draft assets exist. Beta writes immutable assets before switching
   its appcast and compatibility pointers. It never installs an app.
 
+  For Beta, `--version auto` and `--build auto` are the defaults. The publisher
+  reads the reachable servers' `beta.json` manifests and advances the highest
+  `X.Y.Z-beta.N` and build. A server that is offline is skipped and is not
+  automatically retried; the administrator must explicitly publish to it later
+  with the recorded version/build. A reachable server with an invalid manifest
+  is an error. Stable still requires explicit version and build values.
+
   Server deployment is separate: Docker Compose owns the internal/public
   Manager and test services. A source/image rollout may invoke the relevant
   server deployment script, but that operation is not part of the FTClient

@@ -174,17 +174,17 @@ final class LocalizationTests: XCTestCase {
             L10n.format(
                 "当前版本 %@",
                 language: .english,
-                arguments: ["0.1.3-beta.32"]
+                arguments: ["0.1.3-dev"]
             ),
-            "Current version 0.1.3-beta.32"
+            "Current version 0.1.3-dev"
         )
         XCTAssertEqual(
             L10n.format(
                 "当前版本 %@",
                 language: .simplifiedChinese,
-                arguments: ["0.1.3-beta.32"]
+                arguments: ["0.1.3-dev"]
             ),
-            "当前版本 0.1.3-beta.32"
+            "当前版本 0.1.3-dev"
         )
     }
 

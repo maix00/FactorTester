@@ -45,7 +45,10 @@ non-manager principal.
   SHA-256 verification; it is never executed;
 - `server health|network|federation|database`: inspect FactorTester runtime
   state and redacted federation/database status;
-- `client release`: publish an authorized FactorTester client release.
+- `client release`: publish an authorized FactorTester client release. For
+  `--channel beta`, omit `--version` and `--build` (or use `auto`) to read the
+  reachable servers' Beta manifests and allocate the next version/build. An
+  unreachable server is skipped; an invalid reachable manifest is an error.
 
 The CLI does not expose legacy server-admin commands, host restart, container
 lifecycle, tunnel changes, SSH, or repository-transfer commands.
