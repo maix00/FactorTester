@@ -59,23 +59,54 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function artifactRows(context, artifacts, onOpen) {
-    const result = FTUI.table([context.t("中文说明"), context.t("原文件名"), context.t("文件大小")], []);
-    artifacts.filter(item => item.state === "active").forEach(item => {
+  function artifactRows(context, artifacts, onOpen, options = {}) {
+    const canUpload = typeof options.onUpload === "function"
+      && artifacts.some(item => item.state === "local_only");
+    const headers = [context.t("中文说明"), context.t("原文件名"), context.t("文件大小")];
+    if (canUpload) headers.push(context.t("操作"));
+    const result = FTUI.table(headers, []);
+    artifacts.filter(item => item.state === "active"
+      || (options.includeLocalOnly && item.state === "local_only")).forEach(item => {
       const row = result.body.insertRow();
       const description = row.insertCell();
       description.textContent = item.description || item.name;
       const file = row.insertCell();
-      const link = document.createElement("a");
-      link.href = "#";
-      link.textContent = item.file_name || item.name;
-      link.addEventListener("click", event => {
-        event.preventDefault();
-        onOpen(item);
-      });
-      file.append(link);
+      if (item.state === "active" && typeof onOpen === "function") {
+        const link = document.createElement("a");
+        link.href = "#";
+        link.textContent = item.file_name || item.name;
+        link.addEventListener("click", event => {
+          event.preventDefault(); onOpen(item);
+        });
+        file.append(link);
+      } else {
+        file.textContent = item.file_name || item.name;
+      }
       const size = row.insertCell();
       size.textContent = formatBytes(item.size_bytes || 0);
+      if (canUpload) {
+        const action = row.insertCell();
+        if (item.state === "local_only") {
+          const upload = document.createElement("button");
+          upload.type = "button";
+          upload.className = "secondary-button";
+          upload.textContent = context.t("上传到服务器");
+          upload.addEventListener("click", async event => {
+            event.stopPropagation();
+            upload.disabled = true;
+            try {
+              await options.onUpload(item);
+              upload.textContent = context.t("已提交上传");
+            } catch (error) {
+              upload.disabled = false;
+              context.showNotice?.(error.message || String(error), true);
+            }
+          });
+          action.append(upload);
+        } else {
+          action.textContent = context.t("已上传");
+        }
+      }
     });
     return result.shell;
   }

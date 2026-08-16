@@ -234,5 +234,39 @@ class TransferAccessStateMixin:
             ),
         }
 
+    def require_completed_submission_upload(
+        self,
+        transfer_id: str,
+        *,
+        principal: str,
+        job_id: str,
+        artifact_name: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> dict[str, object]:
+        """Validate one completed 7997 upload before promoting its metadata.
+
+        A transfer id is a bearer-like value.  Completion callers must not be
+        able to reuse a different completed upload belonging to the same
+        account to mark an arbitrary local artifact as remotely available.
+        """
+        transfer = self.transfer_store.require(str(transfer_id or "").strip())
+        if (
+            transfer.principal != str(principal or "").strip()
+            or transfer.operation.value != "upload"
+            or transfer.object_kind != "job_submission"
+            or transfer.job_id != str(job_id or "").strip()
+            or transfer.artifact_name != str(artifact_name or "").strip()
+            or transfer.expected_size != int(expected_size)
+            or transfer.expected_sha256 != str(expected_sha256 or "").strip().lower()
+        ):
+            raise KeyError("transfer was not found")
+        status = self.transfer_access_status(
+            transfer.transfer_id, principal=principal,
+        )
+        if status.get("status") != "completed":
+            raise RuntimeError("local artifact upload is not complete")
+        return status
+
 
 __all__ = ["TransferAccessStateMixin"]

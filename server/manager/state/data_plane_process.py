@@ -154,6 +154,8 @@ class DataPlaneProcessStateMixin:
             str((self.data_root / "public-research").resolve()),
             "--factor-source-database",
             str(Path(CACHE_DB_PATH).expanduser().resolve()),
+            "--local-run-database",
+            str((self.state_root / "local-run-projection.sqlite").resolve()),
             "--origin-cache-root",
             str((self.data_root / "object-cache").resolve()),
             "--release-root",

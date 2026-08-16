@@ -195,6 +195,10 @@
     const loaded = await fetchDetail(context, port, jobID, serverID);
     if (!isCurrent()) return;
     const {payload, taskDetail, job, resolvedPort, portQuery} = loaded;
+    const localRun = Boolean(
+      payload.local_run || taskDetail.local_run
+        || job.local_run || job.execution_mode === "local",
+    );
     const artifacts = taskDetail.artifacts || [];
     const inputNames = new Set(
       (taskDetail.input_artifacts || []).map(item => item.name),
@@ -213,10 +217,10 @@
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
       FTRunSpecView.open(context, runSpec.target);
     }, runSpec.title));
-    FTJobActions.install(context, {
+    if (!localRun) FTJobActions.install(context, {
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
     });
-    if (artifacts.some(item => item.state === "active") && context.session) {
+    if (!localRun && artifacts.some(item => item.state === "active") && context.session) {
       context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部任务文件")));
       context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空任务文件")));
     }
@@ -261,7 +265,8 @@
     );
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
-    const activeArtifacts = outputArtifacts.filter(item => item.state === "active");
+    const activeArtifacts = localRun
+      ? [] : outputArtifacts.filter(item => item.state === "active");
     const resultGroupName = resultGroup(job, activeArtifacts, results);
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
@@ -285,7 +290,23 @@
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("输出生成物"); artifactSection.append(artifactTitle);
-    if (activeArtifacts.length) artifactSection.append(FTJobArtifacts.artifactRows(
+    if (localRun) {
+      artifactSection.append(Object.assign(document.createElement("p"), {
+        className: "job-local-run-note",
+        textContent: context.t("本地运行的原始文件保存在客户端；服务器只保存摘要和文件清单，只有主动上传的文件可以下载"),
+      }));
+      if (outputArtifacts.length) artifactSection.append(FTJobArtifacts.artifactRows(
+        context, outputArtifacts,
+        item => downloadArtifact(item, context.t("该文件尚未主动上传到服务器")),
+        {
+          includeLocalOnly: true,
+          onUpload: item => uploadLocalArtifact(item),
+        },
+      ));
+      else artifactSection.append(Object.assign(document.createElement("p"), {
+        textContent: context.t("暂无输出生成物"),
+      }));
+    } else if (activeArtifacts.length) artifactSection.append(FTJobArtifacts.artifactRows(
       context, activeArtifacts,
       item => downloadArtifact(item, context.t("登录后才能下载生成物")),
     ));
@@ -295,7 +316,7 @@
     // capability discovery are independent follow-up work, not a prerequisite
     // for displaying this page.
     context.content.replaceChildren(root);
-    if (resultGroupName) {
+    if (resultGroupName && !localRun) {
       loadResultGroup(job, activeArtifacts, results).then(() => {
         if (!isCurrent()) return;
         resultHost.replaceChildren(resultSections(
@@ -307,7 +328,7 @@
         ));
       });
     }
-    if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
+    if (!localRun && ["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
       (async () => {
         let capabilities = [];
         let capabilityError = "";
@@ -325,8 +346,25 @@
 
     async function detailPage() { return window.FTJobs.detail(context, port, jobID, serverID); }
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
+    async function uploadLocalArtifact(item) {
+      const handler = window.webkit?.messageHandlers?.factorTesterLocalRun;
+      if (!handler?.postMessage) {
+        throw new Error(context.t("主动上传只能从 Swift 客户端发起"));
+      }
+      const value = await handler.postMessage({
+        action: "upload", local_job_id: jobID, name: item.name,
+      });
+      if (!value || value.success === false) {
+        throw new Error(value?.error || context.t("本地生成物上传失败"));
+      }
+      await detailPage();
+    }
     function downloadArtifact(item, loginMessage) {
       if (!context.session) return context.openLogin(loginMessage);
+      if (localRun && item.state !== "active") {
+        return context.alert?.(loginMessage)
+          || context.showMessage?.(loginMessage);
+      }
       const path = `/api/jobs/${encodeURIComponent(jobID)}`
         + `/artifacts/${encodeURIComponent(item.name)}${portQuery}`;
       return FTJobArtifacts.saveBlob(

@@ -69,6 +69,107 @@ class LocalCatalogStore:
                 ),
             )
 
+    def materialize_source(
+        self,
+        source: dict[str, Any],
+        products: list[dict[str, Any]],
+    ) -> None:
+        """Atomically materialize one client-owned source and its products."""
+        now = time.time()
+        source_id = str(source.get("source_id") or "").strip()
+        source_kind = str(source.get("source_kind") or "").strip()
+        if not source_id or not source_kind:
+            raise ValueError("catalog source_id and source_kind are required")
+        with self.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO catalog_sources (
+                    source_id, source_kind, owner_ref, class_path,
+                    source_revision, content_hash, state, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    source_kind=excluded.source_kind,
+                    owner_ref=excluded.owner_ref,
+                    class_path=excluded.class_path,
+                    source_revision=excluded.source_revision,
+                    content_hash=excluded.content_hash,
+                    state=excluded.state,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    source_id, source_kind, str(source.get("owner_ref") or ""),
+                    str(source.get("class_path") or ""),
+                    str(source.get("source_revision") or ""),
+                    str(source.get("content_hash") or ""),
+                    str(source.get("state") or "active"), now, now,
+                ),
+            )
+            product_refs = {
+                str(product.get("product_ref") or "").strip()
+                for product in products
+                if str(product.get("product_ref") or "").strip()
+            }
+            if product_refs:
+                placeholders = ", ".join("?" for _ in product_refs)
+                connection.execute(
+                    f"UPDATE products SET state='unavailable', updated_at=? "
+                    f"WHERE source_id=? AND product_ref NOT IN ({placeholders})",
+                    (now, source_id, *sorted(product_refs)),
+                )
+            else:
+                connection.execute(
+                    "UPDATE products SET state='unavailable', updated_at=? "
+                    "WHERE source_id=?",
+                    (now, source_id),
+                )
+            for product in products:
+                product_ref = str(product.get("product_ref") or "").strip()
+                product_source = str(product.get("source_id") or source_id).strip()
+                class_path = str(product.get("class_path") or "").strip()
+                alias = str(product.get("alias") or "").strip()
+                if not all((product_ref, product_source, class_path, alias)):
+                    raise ValueError(
+                        "product_ref, source_id, class_path and alias are required"
+                    )
+                if product_source != source_id:
+                    raise ValueError("materialized product source_id does not match source")
+                if "/_products/" in class_path or any(
+                    part == "Category" for part in class_path.split("/")
+                ):
+                    raise ValueError(
+                        "product class_path must not contain category or _products segments"
+                    )
+                metadata = product.get("metadata") or {}
+                if not isinstance(metadata, dict):
+                    raise ValueError("product metadata must be an object")
+                connection.execute(
+                    """
+                    INSERT INTO products (
+                        product_ref, source_id, class_path, alias, display_name,
+                        product_kind, catalog_revision, metadata_json, state,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(product_ref) DO UPDATE SET
+                        source_id=excluded.source_id,
+                        class_path=excluded.class_path,
+                        alias=excluded.alias,
+                        display_name=excluded.display_name,
+                        product_kind=excluded.product_kind,
+                        catalog_revision=excluded.catalog_revision,
+                        metadata_json=excluded.metadata_json,
+                        state=excluded.state,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        product_ref, product_source, class_path, alias,
+                        str(product.get("display_name") or alias),
+                        str(product.get("product_kind") or "product"),
+                        str(product.get("catalog_revision") or ""),
+                        json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                        str(product.get("state") or "active"), now, now,
+                    ),
+                )
+
     def upsert_product(self, value: dict[str, Any]) -> None:
         now = time.time()
         product_ref = str(value.get("product_ref") or "").strip()
