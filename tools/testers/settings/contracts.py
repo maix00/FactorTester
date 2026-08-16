@@ -311,9 +311,10 @@ class RunFieldDefinition:
     # (for example local Swift execution).  Keep this routing metadata in the
     # canonical run-field declaration; it is not a second value protocol.
     client_targets: tuple[str, ...] = ("web", "swift", "cli")
-    # Accepted as registration input during the one-time protocol migration;
-    # manifests expose the canonical FieldRules representation instead.
-    visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    # Conditional visibility is declared with the same ``*_if`` rules
+    # vocabulary used by reusable settings and engine fields.  The manifest
+    # exposes this unchanged as ``rules.visible_if``.
+    visible_if: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.editor:
@@ -359,7 +360,7 @@ class RunFieldDefinition:
                 placement=self.placement,
                 template_policy=self.template_policy,
                 default=self.default,
-                rules=FieldRules.from_registration(visible_if=self.visible_when),
+                rules=FieldRules.from_registration(visible_if=self.visible_if),
             ),
         )
 
@@ -372,7 +373,7 @@ class RunFieldDefinition:
         value["value_descriptor"] = self.value_descriptor.to_dict()
         value["rules"] = self.field_spec().run.rules.to_dict()  # type: ignore[union-attr]
         value.pop("client_targets", None)
-        value.pop("visible_when", None)
+        value.pop("visible_if", None)
         if self.client_targets != self._CLIENTS:
             value["client_targets"] = list(self.client_targets)
         return value

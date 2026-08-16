@@ -88,7 +88,7 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "local_runtime_server_ref", "本地运行服务器", "text", "", "body",
         "run_spec.local_runtime.server_ref", "run_options", order=16,
         client_targets=("swift",),
-        visible_when={"execution_target": ("local",)},
+        visible_if={"execution_target": ("local",)},
         value_descriptor=ValueDescriptor(
             "reference", editor="server_picker", ref_kind="manager_server",
             option_source="server.federation",
@@ -99,7 +99,7 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "local_runtime_bundle_ref", "本地运行代码包", "text", "", "body",
         "run_spec.local_runtime.bundle_ref", "run_options", order=17,
         client_targets=("swift",),
-        visible_when={"execution_target": ("local",)},
+        visible_if={"execution_target": ("local",)},
         value_descriptor=ValueDescriptor(
             "source_file", editor="runtime_bundle_picker",
             ref_kind="factor_test_runtime", option_source="server.7997",

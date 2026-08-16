@@ -150,12 +150,7 @@
     const root = document.createElement("div"); root.className = "test-setting-rows";
     items.forEach(item => {
       const field = controlField(item);
-      const visible = window.FTSettingRules?.isVisible
-        ? FTSettingRules.isVisible(field, state.runValues || {})
-        : Object.entries(item.visible_when || {}).every(
-          ([key, values]) => (Array.isArray(values) ? values : [values])
-            .includes(state.runValues?.[key]),
-        );
+      const visible = FTSettingRules.isVisible(field, state.runValues || {});
       if (visible) root.append(row(context, state, item, refresh));
     });
     return root;
