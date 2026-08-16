@@ -1298,6 +1298,60 @@ console.log(JSON.stringify({{browser, swift}}));
     assert json.loads(result.stdout) == {"browser": False, "swift": True}
 
 
+def test_web_runtime_retries_read_only_requests_after_transient_disconnect() -> None:
+    runtime = ROOT / "server" / "manager" / "web" / "app" / "runtime.js"
+    program = f"""
+global.window = globalThis;
+global.document = {{querySelector: () => ({{}})}};
+global.localStorage = {{getItem: () => null}};
+global.sessionStorage = {{getItem: () => null}};
+eval(require("fs").readFileSync({json.dumps(str(runtime))}, "utf8"));
+let attempts = 0;
+global.fetch = async (_path, options) => {{
+  attempts += 1;
+  if (attempts < 3) throw new TypeError("Load failed");
+  return {{status: 200, ok: true, json: async () => ({{success: true}})}};
+}};
+(async () => {{
+  const value = await FTAppRuntime.create().api("/api/catalog/factors");
+  console.log(JSON.stringify({{value, attempts}}));
+}})().catch(error => {{ console.error(error); process.exit(1); }});
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == {
+        "value": {"success": True},
+        "attempts": 3,
+    }
+
+
+def test_web_runtime_does_not_retry_mutating_requests_after_disconnect() -> None:
+    runtime = ROOT / "server" / "manager" / "web" / "app" / "runtime.js"
+    program = f"""
+global.window = globalThis;
+global.document = {{querySelector: () => ({{}})}};
+global.localStorage = {{getItem: () => null}};
+global.sessionStorage = {{getItem: () => null}};
+eval(require("fs").readFileSync({json.dumps(str(runtime))}, "utf8"));
+let attempts = 0;
+global.fetch = async (_path, _options) => {{
+  attempts += 1;
+  throw new TypeError("Load failed");
+}};
+(async () => {{
+  try {{
+    await FTAppRuntime.create().api("/api/catalog/categories", {{method: "POST"}});
+  }} catch (_) {{}}
+  console.log(JSON.stringify({{attempts}}));
+}})().catch(error => {{ console.error(error); process.exit(1); }});
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == {"attempts": 1}
+
+
 def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

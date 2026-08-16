@@ -16,6 +16,48 @@
     const savedToken = () =>
       localStorage.getItem("ft-session") || sessionStorage.getItem("ft-session") || "";
 
+    const readOnlyRetryDelays = [150, 400, 900];
+
+    function readOnlyMethod(options) {
+      return String(options.method || "GET").toUpperCase();
+    }
+
+    function retryableNetworkError(error, method, signal) {
+      if (!["GET", "HEAD", "OPTIONS"].includes(method) || signal?.aborted) {
+        return false;
+      }
+      // WebKit reports a dropped connection as either TypeError/Load failed
+      // or NetworkError.  A hot-reloaded local Manager can briefly close all
+      // in-flight GETs; never retry mutations because they may not be safe.
+      return error?.name === "TypeError" || error?.name === "NetworkError";
+    }
+
+    async function fetchReadOnly(path, options, headers) {
+      const method = readOnlyMethod(options);
+      const retry = ["GET", "HEAD", "OPTIONS"].includes(method);
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const response = await fetch(path, {...options, headers});
+          if (retry && [502, 503, 504].includes(response.status)
+              && attempt < readOnlyRetryDelays.length) {
+            await new Promise(resolve => setTimeout(
+              resolve, readOnlyRetryDelays[attempt],
+            ));
+            continue;
+          }
+          return response;
+        } catch (error) {
+          if (!retryableNetworkError(error, method, options.signal)
+              || attempt >= readOnlyRetryDelays.length) {
+            throw error;
+          }
+          await new Promise(resolve => setTimeout(
+            resolve, readOnlyRetryDelays[attempt],
+          ));
+        }
+      }
+    }
+
     async function api(path, options = {}) {
       if (isLocalCatalogPath(path)) {
         const handler = localCatalogHandler();
@@ -38,7 +80,7 @@
       if (options.body && !headers.has("Content-Type")) {
         headers.set("Content-Type", "application/json");
       }
-      const response = await fetch(path, {...options, headers});
+      const response = await fetchReadOnly(path, options, headers);
       const value = response.status === 204 ? {} : await response.json().catch(() => ({}));
       if (!response.ok) {
         const error = new Error(value.error || `HTTP ${response.status}`);
@@ -64,7 +106,7 @@
     async function raw(path, options = {}) {
       const headers = new Headers(options.headers || {});
       if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
-      const response = await fetch(path, {...options, headers});
+      const response = await fetchReadOnly(path, options, headers);
       if (!response.ok) {
         let message = `HTTP ${response.status}`;
         try { message = (await response.json()).error || message; } catch (_) {}
