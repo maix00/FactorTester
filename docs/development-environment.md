@@ -2,11 +2,11 @@
 
 ## 标准环境
 
-项目以 Conda 环境 `ft` 作为当前标准运行环境。
+项目以 Conda 环境 `GTHT` 作为仓库开发、服务器调试和测试运行环境。
 
 ```bash
 conda env create -f environment.yml
-conda activate ft
+conda activate GTHT
 ```
 
 当前基线依赖来自现有可运行环境：
@@ -26,10 +26,10 @@ conda activate ft
 
 ## 测试
 
-统一用 `ft` 环境执行测试：
+统一用 `GTHT` 环境执行测试：
 
 ```bash
-conda run -n ft python -m pytest -q
+conda run -n GTHT python -m pytest -q
 ```
 
 不要默认使用 shell 当前激活的 `base` 环境；`base` 环境缺少本项目所需的量化计算依赖。
@@ -59,3 +59,30 @@ git config --worktree --unset core.hooksPath
 
 - `conda env export --from-history` 目前只能导出 `python`，因为其余包是后续安装的；因此仓库使用 `environment.yml` 显式记录当前真实运行基线。
 - 数据文件仍位于仓库外部的 `../data/` 目录。若要启动 Flask app，需要保证该目录结构存在。
+
+## CLI 与测试运行时的边界
+
+`GTHT` 不安装 `factortester` 或 `factortester-manager`。这两个命令行应用
+属于用户工具，不属于仓库的服务器/量化开发依赖。终端安装使用 `pipx`，让
+CLI 依赖进入独立的应用环境：
+
+```bash
+brew install pipx
+pipx ensurepath
+scripts/install_factortester_pipx.sh
+```
+
+同一个发布包可以提供两个入口：
+
+```text
+factortester          研究、Profile、Job 和本地客户端操作
+factortester-manager  Manager 登录、任务/生成物查询和服务器声明操作
+```
+
+`factortester` 根命令不会注册 Manager 命令；`pipx` 只负责隔离这两个命令的
+Python 依赖，不改变服务端权限。Swift 客户端则使用 App 内的已签名 runtime，
+不依赖 `GTHT` 或用户 PATH。
+
+本机实际运行测试的依赖不安装到 CLI 环境。它们由执行端负责：优先使用
+FactorTester Docker runner；必须原生运行时，才根据 Job/Worktree 的依赖清单
+创建独立的 runner Conda/venv。这样升级 CLI 不会改变既有测试环境。
