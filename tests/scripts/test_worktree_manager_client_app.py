@@ -3000,6 +3000,9 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "paginationModel" in table_script
     assert "product-list-search" in table_script
     assert "contractTreePath" in table_script
+    assert "product-list-selection" in table_script
+    assert "options.onSelectionChange" in table_script
+    assert 'context.t("产品路径")' in table_script
     assert "创建乘积分类" not in script
     assert "product-category-toolbar" in script
     assert "product-category-dropdown" in script
