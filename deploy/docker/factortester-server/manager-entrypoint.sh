@@ -28,7 +28,6 @@ start_manager() {
         --signal SIGTERM \
         --kill-after 20 \
         --debounce-interval 0.5 \
-        --no-restart-on-command-exit \
         -- "$@"
 }
 
