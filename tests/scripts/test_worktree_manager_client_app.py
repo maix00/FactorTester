@@ -2951,8 +2951,17 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "contractTreePath" in table_script
     assert "创建乘积分类" not in script
     assert "product-category-toolbar" in script
-    assert 'select.addEventListener("change"' in script
-    assert "应用分类" not in script
+    assert "product-category-dropdown" in script
+    assert 'input.type = "checkbox"' in script
+    assert "categorySelectionID" in script
+    assert "noCategoryInput" in script
+    assert "selectedCategories.clear()" in script
+    assert "categoryCountLabel" in script
+    assert "product-category-selection-note" in script
+    assert 'labels.join("、")' in script
+    assert "summary.title" in script
+    assert 'select.addEventListener("change"' not in script
+    assert "应用分类" in script
     assert "product-category-actions" not in script
     assert "产品 Category" not in script
     assert "应用 Category" not in script

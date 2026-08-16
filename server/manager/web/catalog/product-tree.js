@@ -63,6 +63,28 @@
       ? context.t("本级产品列表") : title;
   }
 
+  function categorySelectionValues(value) {
+    const values = Array.isArray(value)
+      ? value
+      : String(value || "").split("_x_");
+    return [...new Set(values.map(item => String(item || "").trim()).filter(Boolean))];
+  }
+
+  function categorySelectionID(values, available) {
+    const selected = new Set(values);
+    return available.filter(item => selected.has(item.id))
+      .map(item => item.id).join("_x_");
+  }
+
+  function categoryLabel(context, item) {
+    return String(item?.title_zh || item?.alias || item?.id || context.t("分类"));
+  }
+
+  function categoryCountLabel(context, count) {
+    return context.t("已选分类数", "已选%lld个")
+      .replace(/%lld/g, String(count));
+  }
+
   async function render(context, mount, value, options = {}) {
     const all = roots(value).filter(Boolean);
     const definitions = Array.isArray(options.categoryDefinitions)
@@ -72,7 +94,11 @@
         allItems.findIndex(candidate => candidate?.id === item.id) === index
       ),
     );
-    const selected = options.selectedCategory || "";
+    const availableIDs = new Set(available.map(item => item.id));
+    const selectedCategories = new Set(
+      categorySelectionValues(options.selectedCategory)
+        .filter(categoryID => availableIDs.has(categoryID)),
+    );
     const categories = document.createElement("section");
     categories.className = "product-category-filter";
     const toolbar = document.createElement("div");
@@ -82,37 +108,89 @@
     toolbar.append(heading);
     const controls = document.createElement("div");
     controls.className = "product-category-controls";
-    const label = document.createElement("label");
-    label.className = "product-category-label";
-    label.textContent = context.t("分类");
-    const select = document.createElement("select");
-    select.name = "product-category";
-    select.setAttribute("aria-label", context.t("产品分类"));
-    const appendChoice = (item, checked = false) => {
-      const option = document.createElement("option");
-      option.value = item.id;
-      option.textContent = item.title_zh || item.alias || item.id;
-      option.selected = checked;
-      select.append(option);
+    const dropdown = document.createElement("details");
+    dropdown.className = "product-category-dropdown";
+    const summary = document.createElement("summary");
+    summary.setAttribute("aria-label", context.t("产品分类"));
+    const summaryLabel = document.createElement("span");
+    summaryLabel.className = "product-category-summary";
+    summary.append(summaryLabel);
+    const selectionNote = document.createElement("div");
+    selectionNote.className = "product-category-selection-note";
+    selectionNote.setAttribute("aria-live", "polite");
+    const menu = document.createElement("div");
+    menu.className = "product-category-menu";
+    menu.setAttribute("role", "group");
+    menu.setAttribute("aria-label", context.t("产品分类"));
+    const choiceInputs = [];
+    const noCategory = document.createElement("label");
+    noCategory.className = "product-category-option product-category-option-none";
+    const noCategoryInput = document.createElement("input");
+    noCategoryInput.type = "checkbox";
+    noCategoryInput.dataset.productCategory = "";
+    noCategoryInput.checked = selectedCategories.size === 0;
+    const noCategoryText = document.createElement("span");
+    noCategoryText.textContent = context.t("不使用分类");
+    noCategory.append(noCategoryInput, noCategoryText);
+    menu.append(noCategory);
+    available.forEach(item => {
+      const choice = document.createElement("label");
+      choice.className = "product-category-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.productCategory = item.id;
+      input.checked = selectedCategories.has(item.id);
+      const text = document.createElement("span");
+      text.textContent = categoryLabel(context, item);
+      choice.append(input, text);
+      menu.append(choice);
+      choiceInputs.push(input);
+    });
+    const actions = document.createElement("div");
+    actions.className = "product-category-menu-actions";
+    const apply = FTUI.actionButton(context.t("应用分类"), async () => {
+      const nextID = categorySelectionID([...selectedCategories], available);
+      apply.disabled = true;
+      try {
+        await options.onSave?.(nextID);
+        dropdown.open = false;
+      } catch (error) {
+        context.showNotice?.(error.message || context.t("产品树读取失败"), true);
+      } finally { apply.disabled = false; }
+    }, {variant: "primary"});
+    apply.classList.add("product-category-apply");
+    actions.append(apply);
+    menu.append(actions);
+    const updateSummary = () => {
+      const labels = available.filter(item => selectedCategories.has(item.id))
+        .map(item => categoryLabel(context, item));
+      const labelText = labels.length ? labels.join("、") : context.t("不使用分类");
+      summaryLabel.textContent = labels.length
+        ? categoryCountLabel(context, labels.length) : labelText;
+      selectionNote.textContent = labelText;
+      summary.title = labelText;
+      noCategoryInput.checked = labels.length === 0;
+      choiceInputs.forEach(input => {
+        input.checked = selectedCategories.has(input.dataset.productCategory);
+      });
     };
-    appendChoice({id: "", title_zh: context.t("不使用分类")}, !selected);
-    available.forEach(item => appendChoice(item, selected === item.id));
-    label.append(select);
-    controls.append(label);
+    noCategoryInput.addEventListener("change", () => {
+      if (noCategoryInput.checked) selectedCategories.clear();
+      updateSummary();
+    });
+    choiceInputs.forEach(input => input.addEventListener("change", () => {
+      if (input.checked) selectedCategories.add(input.dataset.productCategory);
+      else selectedCategories.delete(input.dataset.productCategory);
+      updateSummary();
+    }));
+    updateSummary();
+    dropdown.append(summary, menu);
+    controls.append(dropdown, selectionNote);
     toolbar.append(controls);
     categories.append(toolbar);
 
     const tree = document.createElement("div");
     tree.className = "product-tree";
-    select.addEventListener("change", async () => {
-      const nextID = select.value || "";
-      select.disabled = true;
-      try {
-        await options.onSave?.(nextID);
-      } catch (error) {
-        context.showNotice?.(error.message || context.t("产品树读取失败"), true);
-      } finally { select.disabled = false; }
-    });
     if (options.categoryMount && options.categoryMount !== mount) {
       options.categoryMount.replaceChildren(categories);
       mount.replaceChildren(tree);
