@@ -230,6 +230,29 @@ def test_client_catalog_projects_nested_category_products(tmp_path: Path) -> Non
     assert [item["product_name"] for item in leaves["nodes"]] == ["ALPHA.X"]
 
 
+def test_client_catalog_keeps_alias_out_of_product_description(tmp_path: Path) -> None:
+    source_root = tmp_path / "sources"
+    source = source_root / "Descriptions"
+    source.mkdir(parents=True)
+    manifest = _manifest("Descriptions")
+    manifest["products"][0]["display_name"] = "ALPHA.X"
+    manifest["products"][0]["metadata"]["description_zh"] = "中文标的"
+    manifest["products"][1]["display_name"] = "BETA.X"
+    source.joinpath("source.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8",
+    )
+
+    products = ClientSourceCatalog(tmp_path / "client", source_root).request(
+        "/api/client/product_names?data_source=Descriptions"
+    )["products"]
+    by_name = {item["name"]: item for item in products}
+
+    assert by_name["ALPHA.X"]["desc"] == "中文标的"
+    assert by_name["ALPHA.X"]["description"] == "中文标的"
+    assert by_name["BETA.X"]["desc"] == ""
+    assert by_name["BETA.X"]["description"] == ""
+
+
 def test_client_catalog_reports_invalid_local_manifest(tmp_path: Path) -> None:
     source_root = tmp_path / "sources"
     invalid = source_root / "Broken"

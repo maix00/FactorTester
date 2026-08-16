@@ -293,13 +293,15 @@ def _product_record(
     manifest: LocalSourceManifest,
     product: LocalSourceProduct,
 ) -> dict[str, Any]:
+    description = _product_description(product)
     return {
         "name": product.alias,
         "code": str(product.metadata.get("code") or product.alias),
         "exchange": str(
             product.metadata.get("exchange") or _exchange_from_name(product.alias)
         ),
-        "desc": product.display_name,
+        "desc": description,
+        "description": description,
         "display_name": product.display_name,
         "product_ref": product.product_ref,
         "product_path": f"{product.class_path}/_products/{product.alias}",
@@ -307,6 +309,25 @@ def _product_record(
         "source_ids": [manifest.source_id],
         "metadata": dict(product.metadata),
     }
+
+
+def _product_description(product: LocalSourceProduct) -> str:
+    """Return the source-owned label without exposing an alias as a label."""
+    alias = str(product.alias or "").strip()
+    code = str(product.metadata.get("code") or alias).strip()
+    candidates = [
+        product.metadata.get(key)
+        for key in (
+            "display_name_zh", "description_zh", "underlying_name_zh",
+            "display_name", "description",
+        )
+    ]
+    candidates.append(product.display_name)
+    for value in candidates:
+        text = str(value or "").strip()
+        if text and text not in {alias, code}:
+            return text
+    return ""
 
 
 def _product_tree(
@@ -366,6 +387,7 @@ def _product_leaf(
     product: LocalSourceProduct,
     parent: str,
 ) -> dict[str, Any]:
+    description = _product_description(product)
     return {
         "title": product.alias,
         "key": f"{parent}/_products/{product.alias}",
@@ -379,7 +401,8 @@ def _product_leaf(
         ),
         "product_ref": product.product_ref,
         "product_type": "product",
-        "desc": product.display_name,
+        "desc": description,
+        "description": description,
         "source_ids": [manifest.source_id],
         "_product_count": 1,
     }
