@@ -21,6 +21,7 @@ from server.manager.http.visitor_access import (
     VISITOR_MODE,
     VisitorMode,
     client_access_cookie,
+    normalize_visitor_id,
     request_origin,
     target_compliance_url,
     target_visitor_url,
@@ -45,6 +46,7 @@ MANAGER_ACTION_PATHS = frozenset({
 
 CLIENT_ACCESS_HEADER = "X-FactorTester-Client-Access"
 CLIENT_ACCESS_VALUE = "ftclient"
+VISITOR_ID_HEADER = "X-FactorTester-Visitor-ID"
 
 
 class RequestSecurityMixin:
@@ -275,7 +277,15 @@ class RequestSecurityMixin:
             and current_origin == target_origin
         ):
             return ""
-        token = store.issue_client_access(target_origin)
+        visitor_id = ""
+        if self._client_access_header_allowed():
+            visitor_id = normalize_visitor_id(
+                self.headers.get(VISITOR_ID_HEADER, "")
+            )
+        token = store.issue_client_access(
+            target_origin,
+            visitor_id=visitor_id,
+        )
         return client_access_cookie(token, secure=True)
 
     def _request_origin(self) -> str:
@@ -301,9 +311,13 @@ class RequestSecurityMixin:
         store = getattr(self.state, "visitor_access", None)
         if not origin or not token or store is None:
             return None
-        if not store.valid_session(token, target_origin=origin):
+        visitor_id = store.visitor_id_for_session(
+            token,
+            target_origin=origin,
+        )
+        if not visitor_id:
             return None
-        return VISITOR_MODE
+        return VisitorMode(visitor_id=visitor_id)
 
     def _anonymous_ui_allowed(self) -> bool:
         return (
@@ -403,10 +417,22 @@ class RequestSecurityMixin:
                 return
 
             if self._client_access_allowed():
+                client_access_token = self._cookie_value(CLIENT_ACCESS_COOKIE)
+                visitor_id = store.client_access_visitor_id(
+                    client_access_token,
+                    target_origin=target_origin,
+                )
+                if not visitor_id and self._client_access_header_allowed():
+                    visitor_id = normalize_visitor_id(
+                        self.headers.get(VISITOR_ID_HEADER, "")
+                    )
                 self._send_redirect(
                     next_path,
                     cookie=visitor_cookie(
-                        store.issue_session(target_origin),
+                        store.issue_session(
+                            target_origin,
+                            visitor_id=visitor_id,
+                        ),
                         secure=True,
                     ),
                 )

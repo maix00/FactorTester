@@ -28,6 +28,7 @@ from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
     job_evidence,
     job_urls,
+    job_owner_for_gateway,
     repository,
     require_job,
     require_job_detail,
@@ -431,9 +432,12 @@ def list_test_jobs():
         return jsonify({"success": False, "error": str(exc)}), 400
     scope = str(request.args.get("scope") or "").strip().lower()
     public = bool(session.get("manager_gateway_public_jobs"))
+    visitor_gateway = bool(session.get("manager_gateway_visitor_id"))
     if not scope:
         scope = "server" if public else "mine"
-    if public and scope != "server":
+    if public and scope != "server" and not (
+        visitor_gateway and scope == "mine"
+    ):
         return jsonify({
             "success": True,
             "scope": scope,
@@ -522,7 +526,12 @@ def list_test_jobs():
             "has_more": public_has_more,
             "next_cursor": public_cursor,
         })
-    owner = require_user()
+    owner = job_owner_for_gateway()
+    if not owner:
+        return jsonify({
+            "success": False,
+            "error": "visitor job owner is unavailable",
+        }), 401
     if scope == "subordinates":
         users = _subordinate_users(owner)
         requested_user = str(
@@ -802,7 +811,12 @@ def get_test_job_result(job_id: str):
 
 @sft_bp.get("/api/jobs/storage")
 def get_job_storage():
-    owner = require_user()
+    owner = job_owner_for_gateway()
+    if not owner:
+        return jsonify({
+            "success": False,
+            "error": "visitor job owner is unavailable",
+        }), 401
     job_repository = repository()
     breakdown = job_repository.storage_breakdown(owner=owner)
     usage = breakdown["artifact_bytes"]

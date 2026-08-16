@@ -3,7 +3,17 @@ const fs = require("fs");
 const vm = require("vm");
 
 global.window = {};
-global.document = {createElement() { return {}; }};
+global.document = {
+  createElement(tagName) {
+    return {
+      tagName: String(tagName || "").toUpperCase(),
+      children: [],
+      append(...items) { this.children.push(...items); },
+      addEventListener() {},
+      setAttribute() {},
+    };
+  },
+};
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
@@ -32,7 +42,15 @@ const data = {
     description: "使用端点收益率衡量动量的长篇说明",
     categories: ["momentum"],
     owner_alias: "MaxA",
+    factor_kind: "public",
     factor_count: 2,
+  }, {
+    family_ref: "family:two",
+    factor_family_name: "PrivateFamily",
+    chinese_name: "私有因子",
+    owner_alias: "MaxA",
+    factor_kind: "custom",
+    factor_count: 1,
   }],
   factors: [{
     factor_ref: "factor:one",
@@ -50,11 +68,30 @@ const mount = {replaceChildren(value) { this.value = value; }};
 window.FTFactorList.render(context, data, mount, {
   page: "families", query: "", groupRef: "*",
 });
-assert.deepStrictEqual(mount.value.headers, [
+assert.equal(mount.value.className, "factor-family-lists");
+assert.equal(mount.value.children.length, 2);
+assert.equal(mount.value.children[0].children[0].textContent, "公共因子");
+assert.equal(mount.value.children[1].children[0].textContent, "我的私有因子");
+assert.deepStrictEqual(mount.value.children[0].children[1].headers, [
   "原类名", "说明", "分类", "来源", "所有者", "因子数",
 ]);
-assert.strictEqual(mount.value.rows[0][0], "MmRateOfChg");
-assert.strictEqual(mount.value.rows[0][1], "动量变动率");
+assert.strictEqual(mount.value.children[0].children[1].rows[0][0], "MmRateOfChg");
+assert.strictEqual(mount.value.children[0].children[1].rows[0][1], "动量变动率");
+
+window.FTFactorList.render(context, data, mount, {
+  page: "families", query: "private", groupRef: "*",
+});
+assert.equal(mount.value.children.length, 2);
+assert.equal(mount.value.children[0].children[1].title, "暂无公共因子家族");
+assert.equal(mount.value.children[1].children[1].headers[0], "原类名");
+assert.equal(mount.value.children[1].children[1].rows[0][0], "PrivateFamily");
+
+window.FTFactorList.render(context, {...data, visitor: true}, mount, {
+  page: "families", query: "", groupRef: "*",
+});
+assert.equal(mount.value.children.length, 1);
+assert.equal(mount.value.children[0].children[0].textContent, "公共因子");
+assert.equal(mount.value.children[0].children[1].rows.length, 1);
 
 window.FTFactorList.render(context, data, mount, {
   page: "factors", query: "", groupRef: "*",

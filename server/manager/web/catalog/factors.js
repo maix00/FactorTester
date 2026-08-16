@@ -23,6 +23,7 @@
     cache = {
       factors: Array.isArray(library.factors) ? library.factors : [],
       families: Array.isArray(library.families) ? library.families : [],
+      visitor: Boolean(library.visitor),
       sets: FTFactorModel.mergeFactorSets(sets.items, localSets.items),
       groups: Array.isArray(groups.groups) ? groups.groups : [],
     };

@@ -172,13 +172,13 @@ class CatalogRoutesMixin:
                     end_date=query.get("end_date", [None])[0],
                 )
             elif parsed.path == "/api/catalog/product-groups":
-                if visitor is not None:
-                    raise VisitorCatalogAccessError(
-                        "访客模式不能读取用户产品组"
-                    )
                 value = {
                     "success": True,
                     "origin": "server",
+                    # Product groups created in visitor mode are stored under
+                    # that visitor's UUID namespace.  They are temporary
+                    # authoring objects, not another user's private groups.
+                    "visitor": visitor is not None,
                     "groups": self.state.client_state.product_groups(principal),
                 }
             else:
@@ -324,9 +324,22 @@ class CatalogRoutesMixin:
         } and category_delete is None:
             return False
         session = self._session()
-        if session is None:
+        visitor = self._visitor_mode()
+        if session is None and visitor is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
+        if visitor is not None and parsed.path != "/api/catalog/product-groups":
+            json_response(self, {
+                "success": False,
+                "error": "访客模式只能创建临时产品组，不能修改服务器目录",
+                "code": "visitor_catalog_write_forbidden",
+            }, 403)
+            return True
+        principal = (
+            visitor.principal
+            if session is None and visitor is not None
+            else str(session["username"])
+        )
         try:
             method = str(getattr(self, "command", "POST") or "POST").upper()
             payload = {} if category_delete is not None and method == "DELETE" else self._json_body(256 * 1024)
@@ -336,7 +349,7 @@ class CatalogRoutesMixin:
                 )
 
                 category = create_product_category(
-                    str(session["username"]),
+                    principal,
                     payload.get("name"),
                     payload.get("items"),
                 )
@@ -347,7 +360,7 @@ class CatalogRoutesMixin:
                 )
 
                 category = create_product_category_composition(
-                    str(session["username"]), payload.get("category_ids"),
+                    principal, payload.get("category_ids"),
                 )
                 value = {"success": True, "origin": "server", "category": category}
             elif category_delete is not None and method == "DELETE":
@@ -357,7 +370,7 @@ class CatalogRoutesMixin:
                 )
 
                 ok = delete_product_category(
-                    str(session["username"]),
+                    principal,
                     unquote(category_delete.group(1)),
                 )
                 if not ok:
@@ -387,7 +400,7 @@ class CatalogRoutesMixin:
                 ):
                     raise ValueError("category_ids 必须是字符串数组")
                 group = self.state.client_state.create_product_group(
-                    str(session["username"]), name, paths, category_ids,
+                    principal, name, paths, category_ids,
                 )
                 if group is None:
                     json_response(self, {
@@ -415,20 +428,26 @@ class CatalogRoutesMixin:
         if not self.state.test_authoring.handles(parsed.path, method):
             return False
         session = self._session()
-        if session is None:
+        visitor = self._visitor_mode()
+        if session is None and visitor is None:
             json_response(self, {
                 "success": False, "error": "login required",
             }, 401)
             return True
+        principal = (
+            visitor.principal
+            if session is None and visitor is not None
+            else str(session["username"])
+        )
         try:
             if method == "GET":
                 response = self.state.test_authoring.get(
-                    parsed.path, owner=str(session["username"]),
+                    parsed.path, owner=principal,
                 )
             else:
                 payload = {} if method == "DELETE" else self._json_body(1024 * 1024)
                 response = self.state.test_authoring.write(
-                    method, parsed.path, owner=str(session["username"]),
+                    method, parsed.path, owner=principal,
                     payload=payload,
                 )
         except TestAuthoringError as exc:

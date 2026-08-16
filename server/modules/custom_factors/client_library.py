@@ -49,6 +49,16 @@ def build_client_library_projection(
     families = []
     for (owner_username, family_alias), items in sorted(grouped.items()):
         first = items[0]
+        sources = {
+            str(item.get("source") or item.get("factor_kind") or "")
+            .strip().lower()
+            for item in items
+        }
+        family_source = (
+            "public" if "public" in sources
+            else "custom" if "custom" in sources
+            else "registered"
+        )
         family_ref = _ref(
             "factor-family",
             owner_username,
@@ -63,6 +73,8 @@ def build_client_library_projection(
             "math_expr": first["math_expr"],
             "owner_username": owner_username,
             "owner_alias": first["owner_alias"],
+            "factor_kind": family_source,
+            "source": family_source,
             "factor_count": len(items),
             "categories": sorted({
                 item["category"] for item in items if item["category"]

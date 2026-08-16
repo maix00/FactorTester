@@ -10,6 +10,7 @@ struct ClientWebShellView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var webSession = WebPageSession()
+    @State private var showingServerSettings = false
 
     var body: some View {
         WebPageView(
@@ -19,6 +20,24 @@ struct ClientWebShellView: View {
             onExternalURL: openExternalURL
         )
         .id(managerConfig.baseURL?.absoluteString ?? "manager-unconfigured")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingServerSettings = true
+                } label: {
+                    Label(
+                        L10n.text("服务器设置"),
+                        systemImage: "server.rack"
+                    )
+                }
+                .help(L10n.text("服务器设置"))
+            }
+        }
+        .sheet(isPresented: $showingServerSettings) {
+            ServerSettingsView {
+                showingServerSettings = false
+            }
+        }
         .task(id: "\(session.isLoggedIn)|\(session.user?.organizationId ?? "")") {
             let wasLoggedIn = session.isLoggedIn
             let selected = await ManagerEndpointDiscoveryService.shared

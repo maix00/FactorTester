@@ -53,11 +53,27 @@ def _port_error(job: JobRecord):
     return None
 
 
+def job_owner_for_gateway() -> str | None:
+    """Resolve the service-side owner for one Manager job request.
+
+    Ordinary Manager gateway requests keep their historical broad lookup
+    behavior.  Visitor gateway requests are different: their UUID namespace
+    must be applied to every detail/stream lookup so one visitor cannot open
+    another visitor's task by guessing a Job id.
+    """
+    visitor_id = str(session.get("manager_gateway_visitor_id") or "").strip()
+    if visitor_id:
+        return str(session.get("username") or "").strip() or None
+    if session.get("manager_gateway_public_jobs"):
+        return None
+    return require_user()
+
+
 def require_job(job_id: str):
     try:
         job = repository().require(
             job_id,
-            owner=None if session.get("manager_gateway_public_jobs") else require_user(),
+            owner=job_owner_for_gateway(),
         )
         error = _port_error(job)
         return (None, error) if error else (job, None)
@@ -74,6 +90,10 @@ def require_job(job_id: str):
 def require_job_detail(job_id: str):
     # Manager 7998 marks anonymous, bounded public-job requests in the
     # gateway session. This never applies to artifact mutation/downloads.
+    visitor_owner = str(
+        session.get("username") if session.get("manager_gateway_visitor_id")
+        else ""
+    ).strip()
     gateway_read = bool(
         session.get("manager_gateway_public_jobs")
         or session.get("manager_gateway")
@@ -81,7 +101,11 @@ def require_job_detail(job_id: str):
     try:
         detail = repository().load_detail(
             job_id,
-            owner=None if gateway_read else require_user(),
+            owner=(
+                visitor_owner
+                if visitor_owner
+                else None if gateway_read else require_user()
+            ),
         )
     except Exception as exc:
         # Historical rows can contain optional data written by older clients.

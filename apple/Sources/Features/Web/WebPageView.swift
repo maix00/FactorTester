@@ -9,12 +9,14 @@ final class WebPageSession {
     var loadedURL: URL?
     var loadedToken = ""
     var loadedServicePort = ""
+    var loadedVisitorID = ""
 
     func reset() {
         releaseWebView()
         loadedURL = nil
         loadedToken = ""
         loadedServicePort = ""
+        loadedVisitorID = ""
     }
 
     /// Release the expensive native view without retaining a detached
@@ -122,6 +124,8 @@ struct WebPageView: View {
                     servicePort: externalURL == nil
                         ? ServerConfig.shared.port : "",
                     clientAccess: externalURL == nil,
+                    visitorID: externalURL == nil
+                        ? VisitorIdentityStore.current() : "",
                     webSession: activeWebSession,
                     allowsLocalCatalog: externalURL == nil
                         && (presentation == .standalone
@@ -285,6 +289,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let sessionToken: String
     let servicePort: String
     let clientAccess: Bool
+    let visitorID: String
     let webSession: WebPageSession?
     let allowsLocalCatalog: Bool
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
@@ -301,6 +306,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         sessionToken: String = "",
         servicePort: String = "",
         clientAccess: Bool = false,
+        visitorID: String = "",
         webSession: WebPageSession? = nil,
         allowsLocalCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
@@ -318,6 +324,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.sessionToken = sessionToken
         self.servicePort = servicePort
         self.clientAccess = clientAccess
+        self.visitorID = visitorID
         self.webSession = webSession
         self.allowsLocalCatalog = allowsLocalCatalog
         self.onReference = onReference
@@ -502,10 +509,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         let needsNavigation = webSession?.loadedURL != url
             || webSession?.loadedToken != sessionToken
             || webSession?.loadedServicePort != servicePort
+            || webSession?.loadedVisitorID != visitorID
         guard needsNavigation else { return }
         webSession?.loadedURL = url
         webSession?.loadedToken = sessionToken
         webSession?.loadedServicePort = servicePort
+        webSession?.loadedVisitorID = visitorID
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         let sessionScript: String
@@ -564,6 +573,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 "ftclient",
                 forHTTPHeaderField: "X-FactorTester-Client-Access"
             )
+            if VisitorIdentityStore.isValid(visitorID) {
+                request.setValue(
+                    visitorID,
+                    forHTTPHeaderField: "X-FactorTester-Visitor-ID"
+                )
+            }
         }
         webView.load(request)
     }
