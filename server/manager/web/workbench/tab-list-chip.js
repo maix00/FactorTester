@@ -31,20 +31,22 @@
 
     const shell = document.createElement("div");
     shell.className = options.shellClass || "tab-list-chip-shell";
-    const activeKey = items.some(item => item.key === options.activeKey)
-      ? options.activeKey : items[0]?.key;
+    const activeKey = options.activeKey === null
+      ? null
+      : (items.some(item => item.key === options.activeKey)
+        ? options.activeKey : items[0]?.key);
     const tabset = FTTabChipContent.create({
       items,
       activeKey,
       barClass: options.barClass || "tab-list-chip-tab-bar",
       hostClass: options.hostClass || "tab-list-chip-host",
       actions: typeof options.actionsFor === "function"
-        ? (options.actionsFor(activeKey) || []) : (options.actions || []),
+        ? (options.actionsFor(activeKey || items[0]?.key) || []) : (options.actions || []),
       onActivate: key => options.onActivate?.(key),
     });
     shell.append(tabset.bar, tabset.host);
     const trailing = typeof options.trailing === "function"
-      ? options.trailing(activeKey) : options.trailing;
+      ? options.trailing(activeKey || items[0]?.key) : options.trailing;
     if (trailing) shell.append(trailing);
     root.append(summary, shell);
     return Object.freeze({root, shell, summary, tabset});
