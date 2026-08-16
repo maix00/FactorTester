@@ -34,4 +34,18 @@ assert.deepStrictEqual(tabs.children.map(item => item.textContent), [
 assert.match(tabs.children[1].className, /active/);
 tabs.children[2].listeners.click();
 assert.deepStrictEqual(navigated, ["/factors/sets"]);
+
+const familyTabs = window.FTFactorList.familyScopeTabs(context, "mine", false);
+assert.deepStrictEqual(familyTabs.children.map(item => item.textContent), [
+  "公共因子家族", "我的因子家族", "下级用户因子家族",
+]);
+assert.match(familyTabs.children[1].className, /active/);
+familyTabs.children[2].listeners.click();
+assert.deepStrictEqual(navigated, [
+  "/factors/sets", "/factors/families?scope=subordinates",
+]);
+const visitorTabs = window.FTFactorList.familyScopeTabs(context, "public", true);
+assert.deepStrictEqual(visitorTabs.children.map(item => item.textContent), [
+  "公共因子家族",
+]);
 console.log("ok");

@@ -239,6 +239,9 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .factor-family-lists { display: grid; gap: 18px; }
 .factor-family-section { display: grid; gap: 10px; }
 .factor-family-section h2 { margin: 0; font-size: 1.05rem; }
+.factor-family-scope-tabs { width: fit-content; max-width: 100%; }
+.factor-family-scope-panel { display: grid; gap: 10px; }
+.factor-family-scope-panel h2 { margin: 0; font-size: 1.05rem; }
 .library-results { min-width: 0; }
 .factor-product-group-filter { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .factor-product-group-filter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }

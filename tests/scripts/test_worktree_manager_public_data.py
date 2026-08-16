@@ -88,6 +88,33 @@ class _ClientState:
     def factor_library(self, principal):
         return {"principal": principal, "factors": [], "errors": []}
 
+    def factor_library_scopes(self, principal):
+        return {
+            "mine": {
+                "factors": [{
+                    "factor_ref": "factor:mine",
+                    "factor_alias": "MineFactor",
+                    "factor_family_alias": "MineFamily",
+                    "factor_family_name": "MineFamily",
+                    "family_ref": "family:mine",
+                    "owner_username": principal,
+                    "owner_alias": "MaxA",
+                    "factor_kind": "custom",
+                    "params": [],
+                }],
+                "families": [{
+                    "family_ref": "family:mine",
+                    "factor_family_alias": "MineFamily",
+                    "factor_family_name": "MineFamily",
+                    "owner_username": principal,
+                    "owner_alias": "MaxA",
+                    "factor_kind": "custom",
+                    "factor_count": 1,
+                }],
+            },
+            "subordinates": {"factors": [], "families": []},
+        }
+
 
 def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     class ControlStore:
@@ -140,6 +167,28 @@ def test_federated_public_data_merges_remote_research_profiles_and_factors(
     assert ("research", "list", "__public_jobs__") in gateway.calls
     assert ("catalog", "profiles", "alice") in gateway.calls
     assert ("catalog", "factors", "__public_jobs__") in gateway.calls
+
+
+def test_federated_factor_library_keeps_three_family_scopes(monkeypatch):
+    monkeypatch.setattr(
+        "server.manager.services.federated_public_data.public_factor_library",
+        lambda: {"factors": [], "families": [], "errors": []},
+    )
+    service = FederatedPublicDataService(
+        server_id="public-1",
+        registry=_Registry(_route()),
+        gateway=_Gateway(),
+        public_research=_Research(),
+        client_state=_ClientState(),
+    )
+
+    value = service.factor_library("alice")
+
+    assert set(value["family_scopes"]) == {"public", "mine", "subordinates"}
+    assert value["family_scopes"]["mine"]["families"][0][
+        "factor_family_alias"
+    ] == "MineFamily"
+    assert value["families"][0]["factor_family_alias"] == "MineFamily"
 
 
 def test_federated_public_research_detail_binds_publication_id_to_peer_payload():
