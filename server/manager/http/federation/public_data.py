@@ -8,6 +8,9 @@ from server.manager.http.responses import json_response
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
+from server.manager.services.factor_library_scopes import (
+    compose_factor_library_scopes,
+)
 
 
 VISITOR_PRINCIPAL = "__public_jobs__"
@@ -74,21 +77,24 @@ class FederationPublicDataRoutesMixin:
                 )
                 public = public_factor_library()
                 if viewer is None:
-                    return public
-                from server.modules.custom_factors.client_library import (
-                    build_client_library_projection,
+                    return compose_factor_library_scopes(
+                        {"public": public}, principal=principal,
+                    )
+                scopes = {"public": public}
+                scope_reader = getattr(
+                    self.state.client_state, "factor_library_scopes", None,
                 )
-                private = self.state.client_state.factor_library(principal)
-                return build_client_library_projection({
-                    "factors": [
-                        *list(public.get("factors") or []),
-                        *list(private.get("factors") or []),
-                    ],
-                    "errors": [
-                        *list(public.get("errors") or []),
-                        *list(private.get("errors") or []),
-                    ],
-                }, principal=principal)
+                if callable(scope_reader):
+                    scopes.update(scope_reader(principal))
+                else:
+                    # Compatibility for a small/older Manager seam while all
+                    # real Managers migrate to the scoped API.
+                    scopes["mine"] = self.state.client_state.factor_library(
+                        principal,
+                    )
+                return compose_factor_library_scopes(
+                    scopes, principal=principal,
+                )
             if operation == "factor-sets":
                 if viewer is None:
                     raise PermissionError(

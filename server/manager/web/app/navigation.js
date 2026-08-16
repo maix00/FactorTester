@@ -213,7 +213,14 @@
     if (parts[0] === "test-templates" && parts[1]) {
       return {kind: "test-template", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
-    if (parts[0] === "factors" && parts[1] === "families") return {kind: "factor-families"};
+    if (parts[0] === "factors" && parts[1] === "families") {
+      const scope = new URLSearchParams(search).get("scope") || "public";
+      return {
+        kind: "factor-families",
+        scope: ["public", "mine", "subordinates"].includes(scope)
+          ? scope : "public",
+      };
+    }
     if (parts[0] === "factors" && parts[1] === "sets") return {kind: "factor-sets"};
     if (parts[0] === "factors" && parts[1] === "family" && parts[2]) {
       return {kind: "factor-family", id: decodeURIComponent(parts.slice(2).join("/"))};

@@ -23,6 +23,8 @@
     cache = {
       factors: Array.isArray(library.factors) ? library.factors : [],
       families: Array.isArray(library.families) ? library.families : [],
+      familyScopes: library.family_scopes || library.family_tabs || {},
+      principal: String(library.principal || ""),
       visitor: Boolean(library.visitor),
       sets: FTFactorModel.mergeFactorSets(sets.items, localSets.items),
       groups: Array.isArray(groups.groups) ? groups.groups : [],
@@ -30,7 +32,7 @@
     return cache;
   }
 
-  async function list(context, page = "families") {
+  async function list(context, page = "families", requestedScope = "public") {
     context.activeNav("factors");
     context.setHeading(context.t("因子库"), "FactorTester");
     context.toolbar.append(FTFactorList.headerTabs(context, page));
@@ -39,6 +41,12 @@
     if (!current(context)) return;
     const root = document.createElement("div");
     root.className = "library-page";
+    const familyScope = FTFactorList.normalizeFamilyScope(
+      requestedScope, data.visitor,
+    );
+    if (page === "families") {
+      root.append(FTFactorList.familyScopeTabs(context, familyScope, data.visitor));
+    }
     let group = null;
     if (page !== "families") {
       group = FTFactorGroupFilter.create(
@@ -59,11 +67,12 @@
       context.button("↻", async () => {
         await load(context, true);
         if (!current(context)) return;
-        list(context, page);
+        list(context, page, familyScope);
       }, context.t("刷新")),
     );
     const render = () => FTFactorList.render(context, data, results, {
       page,
+      scope: familyScope,
       query: search.value.trim().toLowerCase(),
       groupRef: group?.value ?? "*",
     });

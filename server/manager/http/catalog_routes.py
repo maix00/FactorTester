@@ -230,13 +230,40 @@ class CatalogRoutesMixin:
         try:
             if parsed.path == "/api/catalog/factors":
                 if visitor is not None:
+                    from server.manager.services.factor_library_scopes import (
+                        compose_factor_library_scopes,
+                    )
+                    from server.manager.services.public_catalog import (
+                        public_factor_library,
+                    )
                     json_response(self, {
                         "success": True,
                         "visitor": True,
-                        **factor_service.factor_library(
-                            principal, visitor=True,
+                        **compose_factor_library_scopes(
+                            {"public": public_factor_library()},
+                            principal=principal,
                         ),
                     })
+                    return True
+                if factor_service is self.state.client_state:
+                    from server.manager.services.factor_library_scopes import (
+                        compose_factor_library_scopes,
+                    )
+                    from server.manager.services.public_catalog import (
+                        public_factor_library,
+                    )
+                    scope_reader = getattr(
+                        factor_service, "factor_library_scopes", None,
+                    )
+                    scopes = {"public": public_factor_library()}
+                    if callable(scope_reader):
+                        scopes.update(scope_reader(principal))
+                    else:
+                        scopes["mine"] = factor_service.factor_library(principal)
+                    value = compose_factor_library_scopes(
+                        scopes, principal=principal,
+                    )
+                    json_response(self, {"success": True, **value})
                     return True
                 json_response(self, {
                     "success": True,
