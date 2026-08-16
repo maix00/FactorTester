@@ -142,6 +142,8 @@
                 manifest: manifest,
                 store: store,
                 settingKeys: tabSettingKeys,
+                includeHidden: true,
+                notApplicableLabel: options.notApplicableLabel || 'N/A',
                 shouldShow: shouldShow,
                 escapeHTML: escapeHTML,
                 renderChipHtml: renderChipHtml,
@@ -160,17 +162,17 @@
     }
 
     function settingVisibleForValues(setting, values) {
-        return matchesConditions((setting && setting.visible_when) || {}, values);
+        return matchesConditions((setting && setting.rules && setting.rules.visible_if) || {}, values);
     }
 
     function settingEditableForValues(setting, values) {
-        return matchesConditions((setting && setting.editable_when) || {}, values);
+        return matchesConditions((setting && setting.rules && setting.rules.editable_if) || {}, values);
     }
 
     function defaultValueForValues(setting, values) {
         setting = setting || {};
         values = values || {};
-        var conditional = setting.default_when || {};
+        var conditional = setting.rules && setting.rules.default_if || {};
         var keys = Object.keys(conditional);
         for (var i = 0; i < keys.length; i++) {
             var sourceKey = keys[i];
@@ -236,9 +238,10 @@
 
     function displaySettingValue(setting, value) {
         var serializationKind = setting && setting.serialization && setting.serialization.kind;
-        if (setting && Array.isArray(setting.options)) {
-            for (var i = 0; i < setting.options.length; i++) {
-                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
+        var descriptor = setting && setting.value_descriptor || {};
+        if (Array.isArray(descriptor.options)) {
+            for (var i = 0; i < descriptor.options.length; i++) {
+                if (String(descriptor.options[i].value) === String(value)) return descriptor.options[i].label;
             }
         }
         if (value === undefined || value === null || value === '') {
@@ -289,7 +292,7 @@
         if (value && typeof value === 'object') {
             return '未注册显示格式';
         }
-        var template = setting && setting.control_template;
+        var template = descriptor.editor;
         if (!template || template === 'custom') {
             // 标量值（string/number/boolean）直接显示；custom 控件只是编辑方式，
             // 值本身（如模板名）仍应能作为 chip 展示。

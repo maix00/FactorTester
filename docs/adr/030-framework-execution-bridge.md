@@ -214,7 +214,7 @@ use_minor_units=False)` 是硬编码的——`MinorUnitModule.use_minor_units` �
 在前端 manifest 上显示默认 `True`，实际代码从来没读过这个字段，现金/权益
 全程都是 major-unit 浮点数，`use_minor_units` 是个纯摆设。
 
-现在按你的纠正，`use_minor_units` 的 `default_when` 只在 `engine_mode="basic"`
+现在按你的纠正，`use_minor_units` 的 `default_if` 只在 `engine_mode="basic"`
 时锁定 `False`（对齐 `fee_mode`/`margin_mode`/`_resolve_use_int_position` 已有
 的"`basic` 用最简单模型，其余模式用完整语义"这条既有约定），其余
 （auto/custom/exact）默认 `True`，`_initialize_ledgers` 读取这个已解析好的

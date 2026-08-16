@@ -185,9 +185,20 @@
             return values;
         }
 
+        function settingVisible(setting, values) {
+            if (window.FTSettingRules && typeof window.FTSettingRules.isVisible === 'function') {
+                return window.FTSettingRules.isVisible(setting, values);
+            }
+            return BSP && typeof BSP.settingVisibleForValues === 'function'
+                ? BSP.settingVisibleForValues(setting, values) : true;
+        }
+
         function settingValue(chip) {
             var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
             var values = valuesForConditions();
+            if (window.FTSettingRules && typeof window.FTSettingRules.displayValueFor === 'function') {
+                return window.FTSettingRules.displayValueFor(chip.key, setting, values);
+            }
             if (BSP && !BSP.settingEditableForValues(setting, values)) {
                 return BSP.defaultValueForValues(setting, values);
             }
@@ -196,15 +207,16 @@
 
         function conditionKeysForSetting(key) {
             var setting = defaults[key] || {};
+            var rules = setting.rules || {};
             var out = [];
             function addFrom(obj) {
                 Object.keys(obj || {}).forEach(function(dep) {
                     if (out.indexOf(dep) < 0) out.push(dep);
                 });
             }
-            addFrom(setting.visible_when);
-            addFrom(setting.editable_when);
-            addFrom(setting.default_when);
+            addFrom(rules.visible_if);
+            addFrom(rules.editable_if);
+            addFrom(rules.default_if);
             return out;
         }
 
@@ -227,6 +239,9 @@
                 resolve: function(resolverName, name) {
                     if (resolverName === SETTING_DISPLAY) {
                         var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
+                        if (opts.includeHidden && !settingVisible(setting, valuesForConditions())) {
+                            return opts.notApplicableLabel || 'N/A';
+                        }
                         var value = settingValue(chip);
                         return BSP ? BSP.displaySettingValue(setting, value) : value;
                     }
@@ -242,9 +257,10 @@
 
         function chipVisible(chip) {
             if (typeof opts.shouldShow === 'function' && !opts.shouldShow(chip.key)) return false;
-            if (chip._setting && BSP && store) {
+            if (chip._setting && store) {
                 var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
-                return BSP.settingVisibleForValues(setting, valuesForConditions());
+                if (opts.includeHidden) return true;
+                return settingVisible(setting, valuesForConditions());
             }
             return true;
         }

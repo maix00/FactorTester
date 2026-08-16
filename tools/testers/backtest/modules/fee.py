@@ -54,15 +54,15 @@ class FeeModule(ExecutableModule):
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "fee_mode": FieldDefinition(
             public=True, label="费用", default="auto",
-            control_template="select", tab="cost",
+            editor="select", tab="cost",
             options=(
                 ("auto", "自动"), ("exact", "严格交易规则"),
                 ("custom", "自定义品种/合约"), ("close_yesterday", "按平昨"),
                 ("close_today", "按平今"), ("fixed", "固定费率"),
                 ("zero", "不计费用"),
             ),
-            editable_when={"engine_mode": ("custom",)},
-            default_when={
+            editable_if={"engine_mode": ("custom",)},
+            default_if={
                 "engine_mode": {
                     "basic": "zero", "auto": "auto", "exact": "exact",
                 },
@@ -71,12 +71,12 @@ class FeeModule(ExecutableModule):
         ),
         "transaction_fee_source": FieldDefinition(
             public=True, label="交易费来源", default="exchange",
-            control_template="select", tab="cost",
+            editor="select", tab="cost",
             options=(
                 ("exchange", "交易所"), ("openctp", "OpenCTP经纪商"),
             ),
-            editable_when={"engine_mode": ("custom",)},
-            default_when={
+            editable_if={"engine_mode": ("custom",)},
+            default_if={
                 "counterparty_profile": {
                     "exchange_base": "exchange",
                     "openctp_broker": "openctp",
@@ -87,14 +87,14 @@ class FeeModule(ExecutableModule):
         ),
         "fixed_fee_rate": FieldDefinition(
             public=True, label="固定费率", default=0.0,
-            control_template="number", tab="cost",
-            visible_when={"fee_mode": ("fixed",)},
+            editor="number", tab="cost",
+            visible_if={"fee_mode": ("fixed",)},
             chip_template="固定费率: {value}", tab_label="费用", tab_order=100,
         ),
         "fee_custom_product_fields": custom_product_editor_definition(
             label="自定义费用字段", tab="cost", tab_label="费用", tab_order=100,
             module_filter="fee",
-            visible_when={"engine_mode": ("custom",), "fee_mode": ("custom",)},
+            visible_if={"engine_mode": ("custom",), "fee_mode": ("custom",)},
             display_order=95, fields=_CUSTOM_FEE_FIELDS,
         ),
     }

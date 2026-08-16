@@ -53,7 +53,7 @@ def test_set_many_and_delete_keep_payload_explicit_only() -> None:
     assert store.to_payload() == {"a": 3}
 
 
-def test_visible_fields_honor_visible_when() -> None:
+def test_visible_fields_honor_visible_if() -> None:
     store = FieldStore(
         defaults={
             "allocation_mode": {"value": "equal_notional", "tab_key": "allocation", "order": 1},
@@ -61,7 +61,7 @@ def test_visible_fields_honor_visible_when() -> None:
                 "value": 20,
                 "tab_key": "allocation",
                 "order": 2,
-                "visible_when": {"allocation_mode": ["equal_risk"]},
+                "rules": {"visible_if": {"allocation_mode": ["equal_risk"]}},
             },
         }
     )
@@ -71,16 +71,21 @@ def test_visible_fields_honor_visible_when() -> None:
     assert [key for key, _ in visible_fields(store, tab_key="allocation")] == ["allocation_mode", "vol_window"]
 
 
-def test_field_store_reports_editable_when_without_blocking_set() -> None:
+def test_field_store_reports_editable_if_without_blocking_set() -> None:
     store = FieldStore(
         defaults={
             "engine_mode": {"value": "basic"},
             "warmup": {
                 "value": "auto",
-                "visible_when": {"engine_mode": ["auto"]},
-                "editable_when": {"engine_mode": ["auto"]},
+                "rules": {
+                    "visible_if": {"engine_mode": ["auto"]},
+                    "editable_if": {"engine_mode": ["auto"]},
+                },
             },
-            "engine": {"value": "Native", "editible_when": {"engine_mode": ["advanced"]}},
+            "engine": {
+                "value": "Native",
+                "rules": {"editable_if": {"engine_mode": ["advanced"]}},
+            },
         }
     )
 
@@ -94,21 +99,66 @@ def test_field_store_reports_editable_when_without_blocking_set() -> None:
     assert store.is_editable("warmup")
 
 
+def test_display_value_uses_conditional_default_when_field_is_locked() -> None:
+    store = FieldStore(
+        defaults={
+            "mode": {"value": "basic"},
+            "warmup": {
+                "value": "30d",
+                "rules": {
+                    "editable_if": {"mode": ["advanced"]},
+                    "default_if": {"mode": {"basic": "auto"}},
+                },
+            },
+        },
+        explicit_values={"warmup": "stale"},
+    )
+
+    assert store.display_value("warmup") == "auto"
+    store.set("mode", "advanced")
+    assert store.display_value("warmup") == "stale"
+
+
+def test_condition_matching_accepts_manifest_scalar_stringification() -> None:
+    store = FieldStore(
+        defaults={
+            "mode": {"value": 1},
+            "dependent": {"value": "ok", "rules": {"visible_if": {"mode": ["1"]}}},
+        }
+    )
+
+    assert store.is_visible("dependent")
+
+
 def test_field_store_validates_registered_values() -> None:
     store = FieldStore(
         defaults={
             "engine": {
                 "value": "Native",
-                "control_template": "select",
-                "options": [{"value": "Native", "label": "Native"}, {"value": "Backtrader", "label": "Backtrader"}],
+                "value_descriptor": {
+                    "value_type": "enum",
+                    "editor": "select",
+                    "options": [{"value": "Native", "label": "Native"}, {"value": "Backtrader", "label": "Backtrader"}],
+                },
             },
-            "window": {"value": 20, "control_template": "number"},
-            "enabled": {"value": False, "control_template": "boolean"},
+            "window": {
+                "value": 20,
+                "value_descriptor": {
+                    "value_type": "number", "editor": "number", "minimum": 1, "maximum": 30,
+                },
+            },
+            "enabled": {"value": False, "value_descriptor": {"value_type": "boolean", "editor": "boolean"}},
         }
     )
 
     store.validate_value("engine", "Native")
     store.validate_value("window", "20")
+    try:
+        store.validate_value("window", "31")
+    except ValueError as exc:
+        assert "大于最大值" in str(exc)
+    else:
+        raise AssertionError("expected maximum to fail")
     store.validate_value("enabled", "true")
     try:
         store.validate_value("engine", "Bad")

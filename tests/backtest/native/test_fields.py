@@ -32,7 +32,7 @@ def test_fieldref_equality_and_hash():
 def test_field_definition_defaults():
     fd = FieldDefinition()
     assert fd.public is False
-    assert fd.visible_when is None
-    assert fd.editable_when is None
-    assert fd.default_when is None
+    assert fd.visible_if is None
+    assert fd.editable_if is None
+    assert fd.default_if is None
     assert fd.options == ()

@@ -155,23 +155,23 @@ class FactorSignalModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "signal_freq": FieldDefinition(
-            public=True, label="信号频率", control_template="select", default="1d", tab="frequency",
+            public=True, label="信号频率", editor="select", default="1d", tab="frequency",
             chip_template="信号频率: {value}", tab_label="数据频率", tab_order=36,
         ),
         "basepoint": FieldDefinition(
-            public=True, label="信号点", control_template="select", default="last", tab="frequency",
+            public=True, label="信号点", editor="select", default="last", tab="frequency",
             chip_template="信号点: {value}", tab_label="数据频率", tab_order=36,
         ),
         "daily_basepoint": FieldDefinition(
-            public=True, label="日内点", control_template="text", default=None, tab="frequency",
+            public=True, label="日内点", editor="text", default=None, tab="frequency",
             chip_template="日内点: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_skip": FieldDefinition(
-            public=True, label="尾盘跳过", control_template="boolean", default=False, tab="frequency",
+            public=True, label="尾盘跳过", editor="boolean", default=False, tab="frequency",
             chip_template="尾盘跳过: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_gap": FieldDefinition(
-            public=True, label="尾盘间隔", control_template="text", default="3h", tab="frequency",
+            public=True, label="尾盘间隔", editor="text", default="3h", tab="frequency",
             chip_template="尾盘间隔: {value}", tab_label="数据频率", tab_order=36,
         ),
             # plain pd.Timedelta-parseable string ("3h" -> pd.Timedelta("3h"));
@@ -179,25 +179,25 @@ class FactorSignalModule(ExecutableModule):
             # wherever this field is actually used (signal_align needs a real
             # Timedelta, not a string)
         "factor_mode": FieldDefinition(
-            public=True, label="因子模式", control_template="select", default="auto", tab="factor",
+            public=True, label="因子模式", editor="select", default="auto", tab="factor",
             options=(("auto", "自动选择"), ("precomputed", "预计算后按事件回放"), ("incremental", "随事件增量计算")),
             chip_template="因子模式: {value}", tab_label="因子执行", tab_order=20,
         ),
         "warmup_mode": FieldDefinition(
-            public=True, label="前摇窗口", control_template="select", default="auto", tab="factor",
+            public=True, label="前摇窗口", editor="select", default="auto", tab="factor",
             options=(("none", "不使用"), ("fixed", "固定时间"), ("auto", "按因子表达式自动推导")),
             chip_template="前摇窗口: {value}", tab_label="因子执行", tab_order=20,
-            default_when={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+            default_if={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
             help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
         ),
         "warmup_window": FieldDefinition(
-            public=True, label="前摇时长", control_template="text", default="30d", tab="factor",
-            visible_when={"warmup_mode": ("fixed",)},
+            public=True, label="前摇时长", editor="text", default="30d", tab="factor",
+            visible_if={"warmup_mode": ("fixed",)},
             chip_template="前摇时长: {value}", tab_label="因子执行", tab_order=20,
             help_text="固定前摇窗口必须是时间值，例如 30min、5d、60d；不接受前端以 bar 数作为业务语义。",
         ),
         "calendar_frequency": FieldDefinition(
-            public=True, label="时钟", control_template="select", default="auto", tab="calendar",
+            public=True, label="时钟", editor="select", default="auto", tab="calendar",
             options=(("auto", "按因子频率自动判断"), ("1min", "1 分钟"), ("5min", "5 分钟"), ("1day", "1 天")),
             chip_template="时钟: {value}", tab_label="回测时钟", tab_order=190,
         ),

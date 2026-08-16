@@ -100,27 +100,27 @@ class TradingRuleModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
-            public=True, label="记账", default="Auto", control_template="select", tab="accounting",
+            public=True, label="记账", default="Auto", editor="select", tab="accounting",
             options=(("Basic", "基础"), ("Custom", "自定义"), ("Auto", "自动")),
-            editable_when={"engine_mode": ("custom",)},
-            default_when={"engine_mode": {"basic": "Basic", "auto": "Auto", "exact": "Auto"}},
+            editable_if={"engine_mode": ("custom",)},
+            default_if={"engine_mode": {"basic": "Basic", "auto": "Auto", "exact": "Auto"}},
             chip_template="记账: {value}", tab_label="记账规则", tab_order=180,
         ),
         "cost_basis_method": FieldDefinition(
-            public=True, label="成本法", default="WeightAverage", control_template="select", tab="accounting",
+            public=True, label="成本法", default="WeightAverage", editor="select", tab="accounting",
             options=(("WeightAverage", "加权平均成本法"), ("FIFO", "先进先出"),
                       ("LIFO", "后进先出"), ("HIFO", "高进先出")),
-            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="成本法: {value}", tab_label="记账规则", tab_order=180,
         ),
         "daily_mark_to_market_enabled": FieldDefinition(
-            public=True, label="逐日盯市", default=False, control_template="boolean", tab="accounting",
-            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            public=True, label="逐日盯市", default=False, editor="boolean", tab="accounting",
+            editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="逐日盯市: {value}", tab_label="记账规则", tab_order=180,
         ),
         "use_int_position": FieldDefinition(
-            public=True, label="整数持仓", default=False, control_template="boolean", tab="accounting",
-            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            public=True, label="整数持仓", default=False, editor="boolean", tab="accounting",
+            editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="整数持仓: {value}", tab_label="记账规则", tab_order=180,
         ),
         "trading_rule_custom_product_fields": custom_product_editor_definition(
@@ -129,7 +129,7 @@ class TradingRuleModule(ExecutableModule):
             tab_label="记账规则",
             tab_order=180,
             module_filter="trading_rule",
-            visible_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            visible_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             display_order=95,
             fields=_CUSTOM_TRADING_RULE_FIELDS,
         ),

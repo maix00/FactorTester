@@ -34,13 +34,13 @@ def register_run_window_base(
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 40},
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 50},
     ))
     app.register_setting(SettingDefinition(
@@ -63,7 +63,7 @@ def register_run_window_base(
             SettingOption("Europe/London", "Europe/London"),
         ),
         chip_template="时区: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 60},
     ))
     app.register_setting(SettingDefinition(

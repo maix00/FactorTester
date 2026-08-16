@@ -316,7 +316,7 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     from tools.testers.settings import backtest_setting_registry
 
     registered = sorted({
-        field["control_template"]
+        field["value_descriptor"]["editor"]
         for application in ("ic_test", "group_test")
         for field in backtest_setting_registry.get(application).manifest()["defaults"].values()
     })
@@ -684,6 +684,9 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     )
     assert "ensureRunCode" in source
     assert "ensureRunBatchCode" in source
+    assert "ensureBacktestCode" in source
+    assert 'state, "backtestCode", "workbench-backtest"' in source
+    assert 'deferredPanel(context, state, "分组策略"' not in source
     assert "ensureSettingsCode" in source
     assert "ensureSettingsChipsCode" in source
     assert "ensureRunSubmitCode" in source

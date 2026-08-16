@@ -10,6 +10,10 @@
     return field?.serialization?.storage_key || key;
   }
 
+  function rulesFor(field) {
+    return field?.rules || {};
+  }
+
   function conditionsMatch(conditions, values) {
     return Object.entries(conditions || {}).every(([key, allowed]) => {
       const choices = Array.isArray(allowed) ? allowed : [allowed];
@@ -18,11 +22,11 @@
   }
 
   function isVisible(field, values) {
-    return conditionsMatch(field?.visible_when, values);
+    return conditionsMatch(rulesFor(field).visible_if, values);
   }
 
   function isEditable(field, values) {
-    return conditionsMatch(field?.editable_when, values);
+    return conditionsMatch(rulesFor(field).editable_if, values);
   }
 
   function engineValue(values) {
@@ -30,18 +34,30 @@
   }
 
   function conditionalDefault(field, values) {
-    for (const [sourceKey, mapping] of Object.entries(field?.default_when || {})) {
+    const rules = rulesFor(field);
+    for (const [sourceKey, mapping] of Object.entries(rules.default_if || {})) {
       const source = String(values?.[sourceKey]);
       if (Object.prototype.hasOwnProperty.call(mapping || {}, source)) {
         return {found: true, value: clone(mapping[source])};
       }
     }
-    const byEngine = field?.engine_defaults || {};
+    const byEngine = rules.engine_defaults || {};
     const engine = engineValue(values);
     if (engine && Object.prototype.hasOwnProperty.call(byEngine, engine)) {
       return {found: true, value: clone(byEngine[engine])};
     }
     return {found: false, value: undefined};
+  }
+
+  // Chip previews and editors use the same effective value semantics.  When
+  // a visible field is locked by a condition, its declared/conditional
+  // default is the value users should see; a stale manual value must not leak
+  // into the preview.
+  function displayValueFor(key, field, values) {
+    const raw = valueFor(key, field, values);
+    if (isEditable(field, values)) return raw;
+    const next = conditionalDefault(field, values);
+    return next.found ? next.value : clone(field?.value);
   }
 
   function applyAutomaticDefaults(manifest, values) {
@@ -151,13 +167,13 @@
 
   function disabledValues(field, values) {
     const engine = engineValue(values);
-    const choices = field?.disabled_values_by_engine?.[engine] || [];
+    const choices = rulesFor(field).disabled_values?.[engine] || [];
     return new Set(choices.map(String));
   }
 
   window.FTSettingRules = Object.freeze({
     initialValues, previewDefaultsForTab, setValue, resetValue, patchValues, valueFor, storageKey,
-    conditionsMatch, isVisible, isEditable, disabledValues,
+    rulesFor, conditionsMatch, isVisible, isEditable, displayValueFor, disabledValues,
     applyAutomaticDefaults,
   });
 })();

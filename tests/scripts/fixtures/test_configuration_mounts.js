@@ -18,6 +18,7 @@ global.FTTestProducts = {
 global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => structuredClone(values),
   executionSettings: (_manifest, values) => structuredClone(values),
+  sanitizeExecutionPayload: (_manifest, payload) => structuredClone(payload),
   factorSubjects: () => [{alias: "ROC", factor_ref: "factor:v1:roc"}],
 };
 global.FTTestOutputs = {selection: () => [{name: "ic_statistics_data"}]};

@@ -19,7 +19,8 @@ def field_flag(key: str) -> str:
 
 
 def field_type_label(meta: Mapping[str, Any]) -> str:
-    options = meta.get("options") or []
+    descriptor = meta.get("value_descriptor") or {}
+    options = descriptor.get("options") or []
     values = [
         str(option.get("value"))
         for option in options
@@ -28,25 +29,26 @@ def field_type_label(meta: Mapping[str, Any]) -> str:
     if values:
         return "Literal[" + ", ".join(values) + "]"
 
-    control = str(meta.get("control_template") or "").lower()
-    if control in {"number", "float"}:
+    value_type = str(descriptor.get("value_type") or "").lower()
+    if value_type in {"number", "float"}:
         return "number"
-    if control in {"integer", "int"}:
+    if value_type in {"integer", "int"}:
         return "int"
-    if control in {"boolean", "bool", "checkbox", "toggle"}:
+    if value_type in {"boolean", "bool"}:
         return "bool"
-    if control in {"date"}:
+    if value_type in {"date"}:
         return "date"
-    if control in {"datetime"}:
+    if value_type in {"datetime"}:
         return "datetime"
-    if control in {"time"}:
+    if value_type in {"time"}:
         return "time"
-    if control in {"select", "radio", "segmented"}:
+    if value_type in {"enum"}:
         return "Literal[...]"
-    if control in {"text", "input", "string"}:
+    if value_type in {"string", "duration"}:
         return "str"
-    if control:
-        return control
+    editor = str(descriptor.get("editor") or "").lower()
+    if editor:
+        return editor
     return "Any"
 
 
@@ -54,7 +56,7 @@ def render_field_help_line(store: FieldStore, key: str, meta: Mapping[str, Any])
     label = str(meta.get("label") or key)
     editable = "可编辑" if store.is_editable(key) else "不可编辑"
     default = meta.get("value")
-    current = store.effective(key)
+    current = store.display_value(key)
     parts = [
         f"  {field_flag(key)}",
         label,
@@ -63,10 +65,11 @@ def render_field_help_line(store: FieldStore, key: str, meta: Mapping[str, Any])
         f"默认={default!r}",
         f"当前={current!r}",
     ]
-    if meta.get("visible_when"):
-        parts.append(f"显示条件={meta['visible_when']!r}")
-    if meta.get("editable_when") or meta.get("editible_when"):
-        parts.append(f"编辑条件={meta.get('editable_when', meta.get('editible_when'))!r}")
+    rules = meta.get("rules") or {}
+    if rules.get("visible_if"):
+        parts.append(f"显示条件={rules['visible_if']!r}")
+    if rules.get("editable_if"):
+        parts.append(f"编辑条件={rules['editable_if']!r}")
     help_text = meta.get("help_text")
     if help_text:
         parts.append(f"说明={help_text}")
@@ -105,18 +108,19 @@ def _field_help_row(store: FieldStore, key: str, meta: Mapping[str, Any]) -> tup
         editable,
         field_type_label(meta),
         repr(meta.get("value")),
-        repr(store.effective(key)),
+        repr(store.display_value(key)),
     )
 
 
 def _field_detail_lines(key: str, meta: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     prefix = f"    {field_flag(key)}"
-    if meta.get("visible_when"):
-        lines.append(f"{prefix} 显示条件: {meta['visible_when']!r}")
-    editable_when = meta.get("editable_when", meta.get("editible_when"))
-    if editable_when:
-        lines.append(f"{prefix} 编辑条件: {editable_when!r}")
+    rules = meta.get("rules") or {}
+    if rules.get("visible_if"):
+        lines.append(f"{prefix} 显示条件: {rules['visible_if']!r}")
+    editable_if = rules.get("editable_if")
+    if editable_if:
+        lines.append(f"{prefix} 编辑条件: {editable_if!r}")
     help_text = meta.get("help_text")
     if help_text:
         lines.append(f"{prefix} 说明: {help_text}")
@@ -126,7 +130,7 @@ def _field_detail_lines(key: str, meta: Mapping[str, Any]) -> list[str]:
 def _tabs_for_store(store: FieldStore) -> list[dict[str, Any]]:
     by_key: dict[str, dict[str, Any]] = {}
     for meta in store.defaults.values():
-        tab_key = str(meta.get("tab_key") or meta.get("tab") or "default")
+        tab_key = str(meta.get("tab_key") or "default")
         if tab_key not in by_key:
             by_key[tab_key] = {"key": tab_key, "label": meta.get("tab_label") or tab_key}
     return sorted(by_key.values(), key=lambda tab: str(tab.get("label") or tab.get("key") or ""))

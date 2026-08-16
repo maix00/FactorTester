@@ -8,6 +8,7 @@ from typing import Any
 
 from tools.testers.field_spec import (
     FieldSpec,
+    FieldRules,
     RunRole,
     RuntimeRole,
     SettingRole,
@@ -63,7 +64,7 @@ class SettingDefinition:
     key: str
     label: str
     tab: str
-    control_template: str
+    editor: str
     default: Any
     scope_policy: ScopePolicy
     module: str = ""
@@ -83,10 +84,10 @@ class SettingDefinition:
     instance_class: type | str | None = None
     help_text: str = ""
     engine_defaults: dict[str, Any] = field(default_factory=dict)
-    disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
-    editable_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
-    default_when: dict[str, dict[Any, Any]] = field(default_factory=dict)
+    disabled_values: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    visible_if: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    editable_if: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    default_if: dict[str, dict[Any, Any]] = field(default_factory=dict)
     serialization: dict[str, Any] = field(default_factory=dict)
     tab_label: str = ""
     tab_order: int | None = None
@@ -103,7 +104,7 @@ class SettingDefinition:
     runtime_role: RuntimeRole | None = None
 
     def __post_init__(self) -> None:
-        if not self.key or not self.label or not self.tab or not self.control_template:
+        if not self.key or not self.label or not self.tab or not self.editor:
             raise ValueError("setting definition requires key, label, tab, and template")
         if not self.module:
             raise ValueError("setting definition requires a backend module owner")
@@ -116,10 +117,10 @@ class SettingDefinition:
                 self,
                 "value_descriptor",
                 infer_value_descriptor(
-                    self.control_template,
+                    self.editor,
                     self.default,
                     field_key=self.key,
-                    options=tuple(option.value for option in self.options),
+                    options=tuple((option.value, option.label) for option in self.options),
                     serialization=self.serialization,
                     minimum=self.minimum,
                     maximum=self.maximum,
@@ -137,33 +138,44 @@ class SettingDefinition:
         return FieldSpec(
             key=self.key,
             value=self.value_descriptor,
+            label=self.label,
+            help_text=self.help_text,
             roles=frozenset(roles),
-            setting=SettingRole(scope_policy=self.scope_policy.value),
-            runtime=self.runtime_role,
+            setting=SettingRole(
+                scope_policy=self.scope_policy.value,
+                default=self.default,
+                rules=FieldRules.from_registration(
+                    visible_if=self.visible_if,
+                    editable_if=self.editable_if,
+                    default_if=self.default_if,
+                    disabled_values=self.disabled_values,
+                    engine_defaults=self.engine_defaults,
+                ),
+            ),
+            runtime=(
+                self.runtime_role
+                if self.runtime_role is not None
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        for key in (
+            "editor", "minimum", "maximum", "step",
+            "engine_defaults", "disabled_values",
+            "visible_if", "editable_if", "default_if", "options",
+        ):
+            value.pop(key, None)
         value["scope_policy"] = self.scope_policy.value
         value["tab_default_mount_points"] = [
             mount.value for mount in self.tab_default_mount_points
         ]
-        value["visible_when"] = {
-            key: list(values)
-            for key, values in self.visible_when.items()
-        }
-        value["editable_when"] = {
-            key: list(values)
-            for key, values in self.editable_when.items()
-        }
-        value["default_when"] = {
-            key: dict(values)
-            for key, values in self.default_when.items()
-        }
         # instance_class 是 Python 类，不能进 JSON manifest；只暴露"是否有实例信息"。
         value.pop("instance_class", None)
         value["has_instance"] = self.instance_class is not None
         value["value_descriptor"] = self.value_descriptor.to_dict()
+        value["rules"] = self.field_spec().setting.rules.to_dict()  # type: ignore[union-attr]
         return value
 
 
@@ -277,7 +289,7 @@ class RunFieldDefinition:
 
     key: str
     label: str
-    control_template: str
+    editor: str
     default: Any
     request_location: str
     freeze_target: str
@@ -295,14 +307,16 @@ class RunFieldDefinition:
     _TEMPLATE_POLICIES = ("exclude", "include")
     _CLIENTS = ("web", "swift", "cli")
     value_descriptor: ValueDescriptor | None = None
-    # A run field can be meaningful only to one client surface.  The server
-    # filters this declaration before sending a manifest, so Swift-only local
-    # execution controls never become ordinary web submission controls.
+    # Some run controls are meaningful only on a specific client surface
+    # (for example local Swift execution).  Keep this routing metadata in the
+    # canonical run-field declaration; it is not a second value protocol.
     client_targets: tuple[str, ...] = ("web", "swift", "cli")
+    # Accepted as registration input during the one-time protocol migration;
+    # manifests expose the canonical FieldRules representation instead.
     visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.key or not self.label or not self.control_template:
+        if not self.key or not self.label or not self.editor:
             raise ValueError("run field requires key, label, and template")
         if self.request_location not in self._REQUEST_LOCATIONS:
             raise ValueError(f"run field request location is invalid: {self.request_location}")
@@ -323,10 +337,10 @@ class RunFieldDefinition:
                 self,
                 "value_descriptor",
                 infer_value_descriptor(
-                    self.control_template,
+                    self.editor,
                     self.default,
                     field_key=self.key,
-                    options=tuple(option.value for option in self.options),
+                    options=tuple((option.value, option.label) for option in self.options),
                 ),
             )
 
@@ -336,12 +350,16 @@ class RunFieldDefinition:
         return FieldSpec(
             key=self.key,
             value=self.value_descriptor,
+            label=self.label,
+            help_text=self.help_text,
             roles=frozenset({"run"}),
             run=RunRole(
                 request_location=self.request_location,
                 freeze_target=self.freeze_target,
                 placement=self.placement,
                 template_policy=self.template_policy,
+                default=self.default,
+                rules=FieldRules.from_registration(visible_if=self.visible_when),
             ),
         )
 
@@ -349,16 +367,14 @@ class RunFieldDefinition:
         value = asdict(self)
         for key in ("_REQUEST_LOCATIONS", "_PLACEMENTS", "_TEMPLATE_POLICIES"):
             value.pop(key, None)
-        value["options"] = [asdict(option) for option in self.options]
+        value.pop("editor", None)
+        value.pop("options", None)
+        value["value_descriptor"] = self.value_descriptor.to_dict()
+        value["rules"] = self.field_spec().run.rules.to_dict()  # type: ignore[union-attr]
         value.pop("client_targets", None)
         value.pop("visible_when", None)
         if self.client_targets != self._CLIENTS:
             value["client_targets"] = list(self.client_targets)
-        if self.visible_when:
-            value["visible_when"] = {
-                key: list(values) for key, values in self.visible_when.items()
-            }
-        value["value_descriptor"] = self.value_descriptor.to_dict()
         return value
 
 

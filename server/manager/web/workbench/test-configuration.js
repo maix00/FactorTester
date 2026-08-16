@@ -156,7 +156,7 @@
     }
     if (state.kind === "factor_evaluation") {
       const selection = FTTestProducts.projection(group);
-      return {
+      return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
         ...prior, ...settings,
         product_path_selection_id: selection.product_path_selection_id,
         product_path_selection: selection,
@@ -166,7 +166,7 @@
         factor_ref: factor.factor_ref || factor.target_ref || "",
         settings,
         local_settings: settings,
-      };
+      }, state.values);
     }
     let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
     if (!groups.length) groups = [{
@@ -182,11 +182,11 @@
       const id = item.product_path_selection_id || FTTestProducts.groupID(selection);
       if (id && selection) productSelections[id] = structuredClone(selection);
     }
-    return {
+    return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
       ...prior, ...settings, local_settings: settings, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
       factor_family_alias: family,
-    };
+    }, state.values);
   }
 
   window.FTTestConfiguration = Object.freeze({

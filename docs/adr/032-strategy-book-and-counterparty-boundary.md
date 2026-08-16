@@ -62,7 +62,7 @@ ADR-028 打算把订单行为（撤单、成交价、现金约束、终态确认
 的 Flow 逻辑完全不动。核实发现这套机制其实已经存在：`EngineModule.engine_mode` 的
 `basic`/`auto`/`exact` 三个值本来就是三个内置的 CounterParty 预设——`FeeModule.fee_mode`/
 `MarginModule.margin_mode`/`TradingRuleModule.accounting_mode`/`use_int_position` 都已经用
-`default_when={"engine_mode": {...}}` 按这三个值批量填默认值；`custom` 就是"自定义
+`default_if={"engine_mode": {...}}` 按这三个值批量填默认值；`custom` 就是"自定义
 CounterParty"的开关。
 
 新增 `EngineModule.counterparty_profile` 字段（仅 `engine_mode=custom` 时可见）。该字段可以
@@ -70,9 +70,9 @@ CounterParty"的开关。
 同一 ledger 上多个 strategy 如果给出不同 CounterParty，应报错，除非调用方显式提供
 per-ledger 覆盖。`tools/testers/settings/counterparty.py` 的
 `register_counterparty_profile` 把一份 `field_defaults` 拼进目标字段自己的
-`default_when["counterparty_profile"]` 字典，跟现有的 `"engine_mode"` key 并列——复用
-`strategy_config_builder._default_value_for_field` 已经支持"一个字段的 default_when 有多个
-source_key"这个能力，不需要新的结算前展开步骤。显式设置的字段值永远优先于 `default_when`
+`default_if["counterparty_profile"]` 字典，跟现有的 `"engine_mode"` key 并列——复用
+`strategy_config_builder._default_value_for_field` 已经支持"一个字段的 default_if 有多个
+source_key"这个能力，不需要新的结算前展开步骤。显式设置的字段值永远优先于 `default_if`
 展开（既有行为）。
 
 ### 死脚手架清理
@@ -91,7 +91,7 @@ source_key"这个能力，不需要新的结算前展开步骤。显式设置的
 
 - 代码里没有找到字面意义上的 `--engine_mode` CLI flag（只有 web 表单/JSON payload 里的
   `engine_mode` 字段键）。内部 FieldRef key `engine_mode` 本轮不改名（改名会牵连每个模块的
-  `editable_when`/`default_when` 字面量和全部测试，跟本次范围不成比例）；如果/当有独立 CLI
+  `editable_if`/`default_if` 字面量和全部测试，跟本次范围不成比例）；如果/当有独立 CLI
   入口把这个字段暴露成 flag，展示层名字可以叫 `--counterparty_mode`，不涉及内部字段。
 - `--counterparty xxx.py`（导入自定义 CounterParty 行为）、`--strategy-book xxx.py`（直接
   导入完整策略簿，含账本分配和自定义决策融合/层级约束机制）**明确推迟**。已确认代码里有可复用的
@@ -104,7 +104,7 @@ source_key"这个能力，不需要新的结算前展开步骤。显式设置的
 ### 正面影响
 - "Broker"这个词不再同时表示两件不同的事，StrategyBook（账本路由）与 CounterParty（商业
   条款）语义边界清晰，不会重蹈 Lean 式命名混乱。
-- CounterParty 复用 `engine_mode` 已经在跑、已经测试过的 `default_when` 机制，没有引入新的
+- CounterParty 复用 `engine_mode` 已经在跑、已经测试过的 `default_if` 机制，没有引入新的
   结算通路，`resolve_group_settings`/`build_strategy_configs` 一行不改。
 - 清理了 8 个从未使用过的 policy selector 死脚手架。
 

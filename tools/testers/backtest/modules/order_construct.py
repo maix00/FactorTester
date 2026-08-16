@@ -46,7 +46,7 @@ class OrderConstructModule(ExecutableModule):
         "orders": FieldDefinition(public=False, display_value_kind="order_table"),
         "quantity_rounding_policy": FieldDefinition(
             public=True, label="数量取整", default="floor_to_lot",
-            control_template="select", tab="order",
+            editor="select", tab="order",
             options=(
                 ("floor_to_lot", "按最小买入手数向下取整"),
                 ("nearest_lot", "按最小买入手数四舍五入"),

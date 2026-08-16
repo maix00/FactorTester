@@ -3,8 +3,115 @@
     return value === undefined ? undefined : structuredClone(value);
   }
 
-  function authoringSettings(_manifest, values) {
-    return clone(values || {});
+  function storageKey(key, field) {
+    return field?.serialization?.storage_key || key;
+  }
+
+  function conditionsMatch(conditions, values) {
+    return Object.entries(conditions || {}).every(([key, allowed]) => {
+      const choices = Array.isArray(allowed) ? allowed : [allowed];
+      return choices.some(value => String(value) === String(values?.[key]));
+    });
+  }
+
+  function isVisible(key, field, values) {
+    if (window.FTSettingRules?.isVisible) {
+      return window.FTSettingRules.isVisible(field, values);
+    }
+    return conditionsMatch(field?.rules?.visible_if, values);
+  }
+
+  function displayValue(key, field, values) {
+    if (window.FTSettingRules?.displayValueFor) {
+      return window.FTSettingRules.displayValueFor(key, field, values);
+    }
+    const target = storageKey(key, field);
+    const editable = conditionsMatch(field?.rules?.editable_if, values);
+    if (editable) return clone(values?.[target]);
+    for (const [sourceKey, mapping] of Object.entries(field?.rules?.default_if || {})) {
+      const source = String(values?.[sourceKey]);
+      if (Object.prototype.hasOwnProperty.call(mapping || {}, source)) {
+        return clone(mapping[source]);
+      }
+    }
+    return clone(field?.value ?? values?.[target]);
+  }
+
+  function deleteField(object, key, field) {
+    if (!object || typeof object !== "object") return;
+    const target = storageKey(key, field);
+    delete object[key];
+    if (target !== key) delete object[target];
+  }
+
+  function normalizeField(object, key, field, values, {executionOnly = false} = {}) {
+    if (!object || typeof object !== "object") return;
+    if (executionOnly && field?.execution_policy === "authoring_only") {
+      deleteField(object, key, field);
+      return;
+    }
+    if (!isVisible(key, field, values)) {
+      deleteField(object, key, field);
+      return;
+    }
+    const target = storageKey(key, field);
+    if (!Object.prototype.hasOwnProperty.call(object, target)
+      && !Object.prototype.hasOwnProperty.call(object, key)) return;
+    const value = displayValue(key, field, values);
+    if (value === undefined) deleteField(object, key, field);
+    else {
+      object[target] = clone(value);
+      if (target !== key) delete object[key];
+    }
+  }
+
+  function sanitizeObject(manifest, object, values) {
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      normalizeField(object, key, field, values, {executionOnly: true});
+    }
+    return object;
+  }
+
+  function effectiveGroupValues(group, parents, inherited, cache = new Map(), stack = new Set()) {
+    if (!group || cache.has(group.id)) return cache.get(group?.id) || {...inherited};
+    if (stack.has(group.id)) return {...inherited, ...group};
+    const nextStack = new Set(stack); nextStack.add(group.id);
+    const parent = group.parentId ? parents.get(group.parentId) : null;
+    const base = parent
+      ? effectiveGroupValues(parent, parents, inherited, cache, nextStack)
+      : {...inherited};
+    const result = {...base, ...group};
+    if (group.id) cache.set(group.id, result);
+    return result;
+  }
+
+  function sanitizeExecutionPayload(manifest, payload, values) {
+    const result = clone(payload || {}) || {};
+    sanitizeObject(manifest, result, values || {});
+    for (const key of ["settings", "local_settings"]) {
+      if (result[key] && typeof result[key] === "object") {
+        sanitizeObject(manifest, result[key], values || {});
+      }
+    }
+    if (Array.isArray(result.groups)) {
+      const parents = new Map(result.groups.map(group => [group.id, group]));
+      const cache = new Map();
+      result.groups = result.groups.map(group => {
+        const next = {...group};
+        const effective = effectiveGroupValues(group, parents, values || {}, cache);
+        sanitizeObject(manifest, next, effective);
+        return next;
+      });
+    }
+    return result;
+  }
+
+  function authoringSettings(manifest, values) {
+    const result = clone(values || {}) || {};
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      normalizeField(result, key, field, values || {});
+    }
+    return result;
   }
 
   function executionSettings(manifest, values) {
@@ -15,8 +122,11 @@
       if (field?.execution_policy === "authoring_only") continue;
       const target = serialization.storage_key || key;
       if (copied.has(target)
-        || !Object.prototype.hasOwnProperty.call(values || {}, target)) continue;
-      result[target] = clone(values[target]);
+        || !Object.prototype.hasOwnProperty.call(values || {}, target)
+        || !isVisible(key, field, values)) continue;
+      const value = displayValue(key, field, values);
+      if (value === undefined) continue;
+      result[target] = clone(value);
       copied.add(target);
     }
     return result;
@@ -50,5 +160,6 @@
     authoringSettings,
     executionSettings,
     factorSubjects,
+    sanitizeExecutionPayload,
   });
 })();

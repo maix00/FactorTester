@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .options import AnalysisOptionDefinition
+from tools.testers.field_spec import ValueDescriptor
 
 
 class AnalysisTargetOrigin(str, Enum):
@@ -29,31 +29,23 @@ class AnalysisMapping(str, Enum):
 class AnalysisParameterDefinition:
     key: str
     label: str
-    control_template: str
+    value_descriptor: ValueDescriptor
     default: Any
     required: bool = False
-    options: tuple[AnalysisOptionDefinition, ...] = ()
-    minimum: float | None = None
-    maximum: float | None = None
-    step: float | None = None
     help_text: str = ""
     serialization: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.key or not self.label or not self.control_template:
-            raise ValueError("analysis parameter requires key, label, and template")
+        if not self.key or not self.label:
+            raise ValueError("analysis parameter requires key and label")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "label": self.label,
-            "control_template": self.control_template,
+            "value_descriptor": self.value_descriptor.to_dict(),
             "default": self.default,
             "required": self.required,
-            "options": [option.to_dict() for option in self.options],
-            "minimum": self.minimum,
-            "maximum": self.maximum,
-            "step": self.step,
             "help_text": self.help_text,
             "serialization": dict(self.serialization),
         }

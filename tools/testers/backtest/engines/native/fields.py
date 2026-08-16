@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from tools.testers.field_spec import (
     FieldSpec,
+    FieldRules,
     RuntimeRole,
     ValueDescriptor,
     infer_value_descriptor,
@@ -67,12 +68,11 @@ class FieldDefinition:
         # not silently substitute `default`. False (the common case) means
         # `default` IS a legitimate backend fallback when the value is absent.
     default_enabled: bool = True  # only meaningful for public fields
-    # The following mirror the old setting_definitions rendering contract;
-    # field names kept identical so the frontend ChipRenderer/tab rendering
-    # logic doesn't need to change:
+    # These registration fields are projected into the shared ValueDescriptor
+    # and FieldRules contract before they reach the CLI or frontend.
     label: str = ""
     tab: str = ""
-    control_template: str = ""           # "select"/"number"/"date"/"boolean"/...
+    editor: str = ""           # "select"/"number"/"date"/"boolean"/...
     chip_template: str = ""
     tab_label: str = ""
     tab_order: int | None = None
@@ -93,12 +93,12 @@ class FieldDefinition:
     info_overlay: dict[str, Any] | None = None
     instance_class: type | str | None = None
     serialization: dict[str, Any] | None = None
-    visible_when: dict[str, tuple[Any, ...]] | None = None
-    editable_when: dict[str, tuple[Any, ...]] | None = None  # field is always
+    visible_if: dict[str, tuple[Any, ...]] | None = None
+    editable_if: dict[str, tuple[Any, ...]] | None = None  # field is always
         # shown; the control is only editable when this condition holds.
         # When disabled, the control shows this field's declared default
-        # (optionally selected by `default_when`), not a user override.
-    default_when: dict[str, dict[Any, Any]] | None = None
+        # (optionally selected by `default_if`), not a user override.
+    default_if: dict[str, dict[Any, Any]] | None = None
     options: tuple[tuple[str, str], ...] = ()  # (value, label) pairs for select controls
     display_offset: int = 0  # presentation-only numeric offset declared by the field owner
     display_value_kind: str | None = None  # Field-value display renderer hint owned by the field definition
@@ -114,10 +114,10 @@ class FieldDefinition:
         if self.value_descriptor is not None:
             return self.value_descriptor
         return infer_value_descriptor(
-            self.control_template,
+            self.editor,
             self.default,
             field_key=key,
-            options=tuple(value for value, _ in self.options),
+            options=tuple(self.options),
             serialization=self.serialization or {},
             minimum=self.minimum,
             maximum=self.maximum,
@@ -130,9 +130,27 @@ class FieldDefinition:
         return FieldSpec(
             key=key,
             value=self.descriptor_for(key),
+            label=self.label,
+            help_text=self.help_text,
             roles=frozenset({"runtime"}),
-            runtime=RuntimeRole(owner=owner),
+            runtime=RuntimeRole(
+                owner=owner,
+                default=self.default,
+                rules=FieldRules.from_registration(
+                    visible_if=self.visible_if,
+                    editable_if=self.editable_if,
+                    default_if=self.default_if,
+                ),
+            ),
         )
+
+    def rules(self):
+        """Return the canonical runtime rule projection."""
+        return self.field_spec(self.label or "field").runtime.rules  # type: ignore[union-attr]
+
+    def default_value(self):
+        """Return the canonical runtime default projection."""
+        return self.field_spec(self.label or "field").runtime.default  # type: ignore[union-attr]
 
 
 class ExecutableModule:

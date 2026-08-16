@@ -27,7 +27,7 @@ class ProductSelectionModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "product_path_candidates": FieldDefinition(
-            public=True, label="产品路径候选", default=[], control_template="custom", tab="product_path_selection",
+            public=True, label="产品路径候选", default=[], editor="custom", tab="product_path_selection",
             chip_template="产品路径候选: {value}", tab_label="产品路径", tab_order=30,
             tab_default_mount_points=("local-settings",),
             tab_content_adapter="product_path_selection",
@@ -56,7 +56,7 @@ class ProductSelectionModule(ExecutableModule):
             },
         ),
         "product_path_selection": FieldDefinition(
-            public=True, label="产品路径", default=None, control_template="select", tab="product_path_selection",
+            public=True, label="产品路径", default=None, editor="select", tab="product_path_selection",
             chip_template="产品路径: {value}", tab_label="产品路径", tab_order=30,
             tab_content_adapter="product_path_selection",
             adapter_managed=True, show_chip=False,

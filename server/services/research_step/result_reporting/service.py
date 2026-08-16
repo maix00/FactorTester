@@ -109,7 +109,7 @@ def load_result_report_projection(
         **value, "instance_id": instance_id, "branch_id": branch_id,
         "node_id": contract["checkpoint"]["execution_node"],
         "audit_status": (
-            "available" if receipt else "unavailable_from_legacy_checkpoint"
+            "available" if receipt else "unavailable_from_registration_checkpoint"
         ),
     }
 

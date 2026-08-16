@@ -154,7 +154,7 @@ def test_translate_copies_long_short_wiring_from_raw_settings():
 
 def test_translate_records_minor_unit_fallback_when_requested(monkeypatch):
     # StrategyConfig here is built directly (bypassing strategy_config_builder's
-    # default_when resolution), so use_minor_units must be set explicitly --
+    # default_if resolution), so use_minor_units must be set explicitly --
     # this asserts the translator's own fallback-recording, not the
     # engine_mode="basic" default policy (covered by ledger_module tests).
     _, config = _config("g1", use_minor_units=True)

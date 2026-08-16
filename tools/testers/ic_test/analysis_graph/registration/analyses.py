@@ -9,6 +9,7 @@ from tools.testers.analysis_graph import (
     AnalysisTargetOrigin,
     AnalysisTypeDefinition,
 )
+from tools.testers.field_spec import ValueDescriptor, infer_value_descriptor
 
 
 def _single_core_input(kind: str) -> AnalysisInputContract:
@@ -56,10 +57,10 @@ def builtin_ic_analyses() -> tuple[AnalysisTypeDefinition, ...]:
             parameters=(AnalysisParameterDefinition(
                 key="maximum_lag",
                 label="最大阶数",
-                control_template="number",
+                value_descriptor=ValueDescriptor(
+                    "integer", editor="input", minimum=1, step=1,
+                ),
                 default=20,
-                minimum=1,
-                step=1,
             ),),
             result_capabilities=("ic_statistics",),
             chip=AnalysisChipDefinition(
@@ -82,7 +83,7 @@ def _single_series_analysis(
     output_kind: str,
     parameter_key: str,
     parameter_label: str,
-    control_template: str,
+    editor: str,
     default,
     result_capability: str,
     help_text: str,
@@ -101,7 +102,7 @@ def _single_series_analysis(
         parameters=(AnalysisParameterDefinition(
             key=parameter_key,
             label=parameter_label,
-            control_template=control_template,
+            value_descriptor=_analysis_value_descriptor(editor, default, parameter_key),
             default=default,
             help_text=parameter_help,
         ),),
@@ -114,6 +115,30 @@ def _single_series_analysis(
             order=order,
         ),
     )
+
+
+def _analysis_value_descriptor(
+    editor: str,
+    default,
+    key: str,
+) -> ValueDescriptor:
+    """Return the typed contract for one registered analysis parameter."""
+    if editor == "positive_integer_list":
+        return ValueDescriptor(
+            "array", cardinality="many", editor=editor,
+            item_type="integer", minimum=1,
+        )
+    if editor == "signal_count_list":
+        return ValueDescriptor(
+            "array", cardinality="many", editor=editor,
+            item_type="object", schema={"item_fields": ["unit", "value"]},
+        )
+    if editor == "ic_period_grid":
+        return ValueDescriptor(
+            "grid", cardinality="many", editor=editor,
+            item_type="period", schema={"calendar": True},
+        )
+    return infer_value_descriptor(editor, default, field_key=key)
 
 
 def _quantile_portfolio_analysis() -> AnalysisTypeDefinition:
@@ -130,7 +155,19 @@ def _quantile_portfolio_analysis() -> AnalysisTypeDefinition:
         parameters=(AnalysisParameterDefinition(
             key="portfolio",
             label="分组组合参数",
-            control_template="quantile_portfolio_statistics",
+            value_descriptor=ValueDescriptor(
+                "object", editor="quantile_portfolio_statistics",
+                schema={
+                    "required": ["group_count", "modes"],
+                    "properties": {
+                        "group_count": {"value_type": "integer", "minimum": 2},
+                        "modes": {"value_type": "enum", "cardinality": "many"},
+                        "target_margin_utilization": {"value_type": "number"},
+                        "initial_capital": {"value_type": "number"},
+                        "include_return_series": {"value_type": "boolean"},
+                    },
+                },
+            ),
             default={
                 "group_count": 5,
                 "modes": ["no_fee", "fee_margin_target"],

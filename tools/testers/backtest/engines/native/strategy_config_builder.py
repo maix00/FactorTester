@@ -305,14 +305,15 @@ def _default_value_for_field(
     for field_name, ref, _fd, _owner_flow_names in entries:
         if ref in materialized:
             values_by_name[field_name] = materialized[ref]
-    for source_key, mapping in (fd.default_when or {}).items():
+    rules = fd.rules()
+    for source_key, mapping in rules.default_if.items():
         source_value = values_by_name.get(source_key)
         if source_value in mapping:
             return mapping[source_value]
         source_text = str(source_value)
         if source_text in mapping:
             return mapping[source_text]
-    return fd.default
+    return fd.default_value()
 
 
 def _field_visible_for_materialization(
@@ -323,14 +324,14 @@ def _field_visible_for_materialization(
 ) -> bool:
     """Return whether a missing field's backend default should be materialized.
 
-    ``visible_when`` is not only a UI concern for ledger-owned fields.  Hidden
+    ``visible_if`` is not only a UI concern for ledger-owned fields.  Hidden
     defaults such as fixed_fee_rate=0.0 when fee_mode=auto, or
     fixed_margin_ratio=1.0 when margin_mode=auto, are stale control defaults,
     not active ledger inputs.  Explicit values are handled before this helper;
     this only gates automatic default materialization.
     """
-    visible_when = getattr(fd, "visible_when", None)
-    if not visible_when:
+    visible_if = fd.rules().visible_if
+    if not visible_if:
         return True
     values_by_name = dict(resolved)
     fields_by_name = {field_name: field_fd for field_name, _ref, field_fd, _flows in entries}
@@ -338,7 +339,7 @@ def _field_visible_for_materialization(
     for field_name, ref in refs_by_name.items():
         if ref in materialized:
             values_by_name[field_name] = materialized[ref]
-    for dep_key, allowed_values in visible_when.items():
+    for dep_key, allowed_values in visible_if.items():
         dep_name = str(dep_key)
         if dep_name in values_by_name:
             dep_value = values_by_name[dep_name]
@@ -633,9 +634,9 @@ def _ledger_owned_setting_should_materialize(
                 return False
             if _is_disabled_margin_dependent_setting(field_name, resolved, materialized_values, entries):
                 return False
-            visible_when = getattr(fd, "visible_when", None) or {}
+            visible_if = fd.rules().visible_if
             raise ValueError(
-                f"ledger-owned field {field_name!r} is only valid when {visible_when!r}; "
+                f"ledger-owned field {field_name!r} is only valid when {visible_if!r}; "
                 f"got {value!r} under current settings"
             )
     return True

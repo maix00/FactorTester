@@ -30,6 +30,9 @@
     const result = {};
     definitions(state.manifest).forEach(item => {
       if (item.request_location !== "body") return;
+      const field = controlField(item);
+      if (window.FTSettingRules?.isVisible
+        && !FTSettingRules.isVisible(field, state.runValues || {})) return;
       if (item.placement === "outputs") {
         result[item.key] = Array.isArray(state.outputRequests)
           ? [...state.outputRequests] : [];
@@ -48,8 +51,7 @@
   function controlField(item) {
     return {
       ...item, value: structuredClone(item.default), serialization: {},
-      visible_when: {}, editable_when: {}, disabled_values_by_engine: {},
-      engine_defaults: {}, default_when: {}, minimum: null, maximum: null, step: null,
+      rules: item.rules || {},
     };
   }
 
@@ -66,11 +68,12 @@
     }
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
-    const control = item.value_descriptor?.editor === "server_picker"
+    const editor = item.value_descriptor?.editor || "input";
+    const control = editor === "server_picker"
       ? runtimeServerControl(context, state, refresh, item)
-      : item.value_descriptor?.editor === "runtime_bundle_picker"
+      : editor === "runtime_bundle_picker"
         ? runtimeBundleControl(context, state, refresh, item)
-        : item.control_template === "profile"
+        : editor === "profile"
       ? profileControl(context, state, refresh, item)
       : FTTestSettings.controlFor(
         item.key, fieldValue, manifest, state.runValues, context,
@@ -146,10 +149,13 @@
   function rows(context, state, items, refresh) {
     const root = document.createElement("div"); root.className = "test-setting-rows";
     items.forEach(item => {
-      const visible = Object.entries(item.visible_when || {}).every(
-        ([key, values]) => (Array.isArray(values) ? values : [values])
-          .includes(state.runValues?.[key]),
-      );
+      const field = controlField(item);
+      const visible = window.FTSettingRules?.isVisible
+        ? FTSettingRules.isVisible(field, state.runValues || {})
+        : Object.entries(item.visible_when || {}).every(
+          ([key, values]) => (Array.isArray(values) ? values : [values])
+            .includes(state.runValues?.[key]),
+        );
       if (visible) root.append(row(context, state, item, refresh));
     });
     return root;

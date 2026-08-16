@@ -57,7 +57,7 @@ def edit(key: str) -> None:
             click.echo("该 tab 没有可编辑字段")
             continue
         for index, (field_key, meta) in enumerate(fields, start=1):
-            click.echo(f"  {index}. {meta.get('label') or field_key}: {tab_store.effective(field_key)!r}")
+            click.echo(f"  {index}. {meta.get('label') or field_key}: {tab_store.display_value(field_key)!r}")
         field_choice = click.prompt("选择字段（q 返回）", default="q", show_default=False)
         if field_choice.lower() in {"q", "quit", "exit"}:
             continue
@@ -87,8 +87,9 @@ def print_manifest(manifest: dict[str, Any]) -> None:
     store = FieldStore.from_manifest(manifest)
     for field_key, meta in visible_fields(store):
         label = meta.get("label") or field_key
-        control = meta.get("control_template") or "unknown"
-        click.echo(f"  {field_key} ({label}, {control}) = {store.effective(field_key)!r}")
+        descriptor = meta.get("value_descriptor") or {}
+        value_type = descriptor.get("value_type") or descriptor.get("editor") or "unknown"
+        click.echo(f"  {field_key} ({label}, {value_type}) = {store.display_value(field_key)!r}")
 
 
 def _dedupe_tabs(tabs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -114,9 +115,10 @@ def _pick(items: list[Any], choice: str) -> Any | None:
 
 
 def _prompt_value(meta: dict[str, Any], current: Any) -> Any:
-    control = meta.get("control_template")
-    options = meta.get("options") or []
-    if control == "select" and options:
+    descriptor = meta.get("value_descriptor") or {}
+    editor = descriptor.get("editor")
+    options = descriptor.get("options") or []
+    if editor == "select" and options:
         for index, option in enumerate(options, start=1):
             click.echo(f"    {index}. {option.get('label') or option.get('value')} [{option.get('value')}]")
         choice = click.prompt("选择值", default="", show_default=False)
@@ -124,12 +126,12 @@ def _prompt_value(meta: dict[str, Any], current: Any) -> Any:
         if picked is not None:
             return picked.get("value")
         return choice if choice != "" else current
-    if control == "number":
+    if descriptor.get("value_type") in {"number", "integer"}:
         raw = click.prompt("输入数字", default=str(current if current is not None else ""), show_default=False)
         try:
             return int(raw)
         except ValueError:
             return float(raw)
-    if control == "boolean":
+    if descriptor.get("value_type") == "boolean":
         return click.confirm("是否启用", default=bool(current))
     return click.prompt("输入值", default=str(current if current is not None else ""), show_default=False)

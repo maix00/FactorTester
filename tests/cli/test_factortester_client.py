@@ -285,7 +285,7 @@ def fake_server() -> Iterator[str]:
             success=True,
             application=application,
             tab_lists={"local-settings": [{"key": "engine", "label": "执行引擎"}]},
-            defaults={"engine_mode": {"value": "auto", "label": "执行模式", "control_template": "select", "tab_key": "engine"}},
+            defaults={"engine_mode": {"value": "auto", "label": "执行模式", "editor": "select", "tab_key": "engine"}},
         )
 
     @app.get("/api/backtest/settings/<application>/tabs/<tab_key>")
@@ -294,7 +294,7 @@ def fake_server() -> Iterator[str]:
             success=True,
             application=application,
             tab={"key": tab_key, "label": "执行引擎"},
-            settings=[{"key": "engine_mode", "label": "执行模式", "control_template": "select", "default": "auto", "tab": tab_key}],
+            settings=[{"key": "engine_mode", "label": "执行模式", "editor": "select", "default": "auto", "tab": tab_key}],
         )
 
     @app.get("/api/product-groups")

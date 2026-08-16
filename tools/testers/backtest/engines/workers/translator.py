@@ -106,7 +106,7 @@ def _note_minor_unit_precision(
     alias: str, config: "StrategyConfig", *, framework: str, fallbacks: list[dict[str, Any]]
 ) -> None:
     """MinorUnitModule.use_minor_units defaults to True for every engine_mode
-    except "basic" (see minor_unit.py's default_when). Worker runners always
+    except "basic" (see minor_unit.py's default_if). Worker runners always
     compute in plain major-unit floats -- there is no integer-minor-unit
     ledger to route into on the framework side -- so a True value can't be
     silently honored (ADR-024). This isn't a different algorithm the way
