@@ -945,30 +945,23 @@ class ClientStateService:
 
     @staticmethod
     def product_tree(
-        category_id: str | None = None,
+        category_id: str | list[str] | tuple[str, ...] | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
         principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render a Manager-owned product tree without a service port."""
-        from server.modules.products.product_category_paths import category_tree
-        from server.modules.shared.price_services import cached_product_tree
-        from server.services.product_catalog_projection import filter_product_tree
-        from server.services.product_tree import convert_to_fancytree
-
-        tree = (
-            cached_product_tree().tree
-            if not str(category_id or "").strip()
-            else category_tree(str(category_id), principal)
+        from server.modules.products.product_category_views import (
+            render_product_tree,
         )
-        return convert_to_fancytree(
-            filter_product_tree(tree, source_ids),
-            checkbox_default=False,
+
+        return render_product_tree(
+            category_id, principal=principal, source_ids=source_ids,
         )
 
     @staticmethod
     def contract_tree(
         path: str | None = None,
-        category_id: str | None = None,
+        category_id: str | list[str] | tuple[str, ...] | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
         principal: str = "",
     ) -> list[dict[str, Any]]:
@@ -980,7 +973,7 @@ class ClientStateService:
     @staticmethod
     def contract_tree_page(
         path: str | None = None,
-        category_id: str | None = None,
+        category_id: str | list[str] | tuple[str, ...] | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
         principal: str = "",
         *,
@@ -995,14 +988,12 @@ class ClientStateService:
         render one ``Product Lists`` folder.  ``contract_tree`` remains the
         compatibility list API for callers that do not need page metadata.
         """
-        from server.modules.products.product_category_paths import category_tree
-        from server.modules.shared.price_services import (
-            available_sources_for_product,
-            cached_contracts,
-            cached_product_tree,
-            contract_has_data,
+        from server.modules.products.product_category_views import (
+            tree_for_path,
         )
-        from server.services.product_catalog_projection import filter_product_tree
+        from server.modules.shared.price_services import (
+            available_sources_for_product, cached_contracts, contract_has_data,
+        )
         from server.services.product_catalog_projection import catalog_product_description
         from server.services.product_tree import find_node_by_path
         from tools.products.Futures import FuturesContract
@@ -1015,15 +1006,12 @@ class ClientStateService:
         )
         search = str(query or "").strip().casefold()
 
-        tree = (
-            cached_product_tree().tree
-            if not str(category_id or "").strip()
-            else category_tree(str(category_id), principal)
-        )
-        tree = filter_product_tree(tree, source_ids)
         node_path = str(path or "")
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]
+        tree, node_path = tree_for_path(
+            node_path, category_id, principal=principal, source_ids=source_ids,
+        )
         node = find_node_by_path(tree, node_path.split("/")) if node_path else None
         objects = (
             node.get("$OBJECTS$", [])

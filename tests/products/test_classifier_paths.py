@@ -7,6 +7,11 @@ from server.modules.shared.price_services import (
     cached_products,
     normalize_product_category_id,
 )
+from server.modules.products.product_category_views import (
+    normalize_category_selection,
+    render_product_tree,
+    tree_for_path,
+)
 from server.services.product_tree import find_node_by_path
 from server.services.product_tree import convert_to_fancytree
 from tools.products.classifier_paths import (
@@ -93,6 +98,33 @@ def test_explicit_product_category_composition_is_canonical_and_projected():
         for node in _walk_nodes(tree)
     }
     assert "日夜盘×行业" in rendered_titles
+
+
+def test_parallel_category_selection_keeps_sibling_trees_separate():
+    assert normalize_category_selection(["day_night,sector"]) == [
+        "day_night", "sector",
+    ]
+    assert normalize_category_selection(["day_night_x_sector"]) == [
+        "day_night_x_sector",
+    ]
+
+    tree = render_product_tree(["day_night", "sector"])
+
+    assert [node["title"] for node in tree] == ["日夜盘", "行业"]
+    assert [node["key"] for node in tree] == [
+        "ProductCategory/day_night", "ProductCategory/sector",
+    ]
+    assert all(node.get("children") for node in tree)
+
+
+def test_parallel_category_path_resolves_the_selected_sibling():
+    tree, path = tree_for_path(
+        "ProductCategory/sector/Product/Futures/CNFutures/行业",
+        ["day_night", "sector"],
+    )
+
+    assert path == "Product/Futures/CNFutures/行业"
+    assert find_node_by_path(tree, path.split("/")) is not None
 
 
 def _walk_nodes(nodes):

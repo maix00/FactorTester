@@ -16,6 +16,7 @@ from server.manager.services.public_catalog import (
     visitor_source_descriptors,
 )
 from server.manager.services.test_authoring import TestAuthoringError
+from server.modules.products.product_category_views import normalize_category_selection
 
 
 def catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
@@ -84,7 +85,12 @@ class CatalogRoutesMixin:
             session["username"] if session is not None else visitor.principal
         )
         query = parse_qs(parsed.query, keep_blank_values=True)
-        category_id = str(query.get("category", [""])[0] or "").strip()
+        category_ids = normalize_category_selection(query.get("category", []))
+        category_arg = (
+            category_ids[0] if len(category_ids) == 1
+            else category_ids if category_ids else ""
+        )
+        category_id = category_ids[0] if len(category_ids) == 1 else ",".join(category_ids)
         try:
             if parsed.path == "/api/catalog/sources":
                 sources = self.state.federated_source_descriptors(
@@ -167,9 +173,10 @@ class CatalogRoutesMixin:
                     "origin": "server",
                     "visitor": visitor is not None,
                     "category_id": category_id,
+                    "category_ids": category_ids,
                     "source_ids": list(source_ids),
                     "tree": self.state.client_state.product_tree(
-                        category_id, source_ids, principal,
+                        category_arg, source_ids, principal,
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
@@ -193,7 +200,7 @@ class CatalogRoutesMixin:
                     except (TypeError, ValueError) as exc:
                         raise ValueError("产品列表分页参数无效") from exc
                     nodes = self.state.client_state.contract_tree_page(
-                        query.get("path", [""])[0], category_id, source_ids,
+                        query.get("path", [""])[0], category_arg, source_ids,
                         principal,
                         query=str(query.get("query", [""])[0] or ""),
                         page=page,
@@ -202,7 +209,7 @@ class CatalogRoutesMixin:
                 else:
                     nodes = {
                         "nodes": self.state.client_state.contract_tree(
-                            query.get("path", [""])[0], category_id, source_ids,
+                            query.get("path", [""])[0], category_arg, source_ids,
                             principal,
                         ),
                     }
@@ -210,6 +217,7 @@ class CatalogRoutesMixin:
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
+                    "category_ids": category_ids,
                     "source_ids": list(source_ids),
                     **nodes,
                 }
