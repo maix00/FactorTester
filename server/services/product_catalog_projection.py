@@ -36,6 +36,50 @@ def _contains(source: Any, product: Any) -> bool:
         return False
 
 
+def catalog_product_description(product: Any, name: str = "") -> str:
+    """Return a human-facing product description without alias fallback.
+
+    ``name`` and ``code`` are stable machine identifiers, not descriptions.
+    Source adapters may expose a localized label through either a direct
+    attribute or metadata; a term-structure contract may inherit its parent
+    product label.  If no source-owned label exists, return an empty string so
+    the UI can show its placeholder instead of displaying the code twice.
+    """
+    machine_names = {
+        str(value or "").strip()
+        for value in (
+            name,
+            getattr(product, "name", ""),
+            getattr(product, "alias", ""),
+            getattr(product, "code", ""),
+        )
+        if str(value or "").strip()
+    }
+    metadata = getattr(product, "metadata", {})
+    metadata_values = (
+        metadata.get(key)
+        for key in (
+            "display_name_zh", "description_zh", "underlying_name_zh",
+            "display_name", "description", "desc",
+        )
+    ) if isinstance(metadata, Mapping) else ()
+    values = (*metadata_values, *(getattr(product, key, "") for key in (
+        "display_name", "description_zh", "desc",
+    )))
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in machine_names:
+            return text
+
+    try:
+        from tools.products.product_utils import product_display_name
+
+        inherited = str(product_display_name(product).get("desc") or "").strip()
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        inherited = ""
+    return inherited if inherited and inherited not in machine_names else ""
+
+
 def _available_products(
     source: Any, products: Iterable[Any],
 ) -> tuple[Any, ...]:
@@ -233,9 +277,11 @@ def catalog_product_records() -> tuple[dict[str, Any], ...]:
             continue
         available = tuple(source for source in sources if _contains(source, product))
         name = str(getattr(product, "name", "") or getattr(product, "alias", ""))
+        description = catalog_product_description(product, name)
         rows.append({
             "name": name,
-            "desc": str(getattr(product, "desc", "") or name),
+            "desc": description,
+            "description": description,
             "code": str(
                 getattr(product, "code", "")
                 or (name.split(".", 1)[0] if "." in name else name)

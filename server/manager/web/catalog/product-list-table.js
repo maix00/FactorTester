@@ -33,7 +33,7 @@
     const values = Array.isArray(nodes) ? nodes : [];
     const rows = values.map(node => [
       node.product_name || node.title || "—",
-      node.desc || node.description || "—",
+      node.description || node.desc || "—",
       node.exchange || "—",
       node.product_code || node.code || "—",
       Array.isArray(node.source_ids) ? node.source_ids.join(", ") : "—",

@@ -1003,6 +1003,7 @@ class ClientStateService:
             contract_has_data,
         )
         from server.services.product_catalog_projection import filter_product_tree
+        from server.services.product_catalog_projection import catalog_product_description
         from server.services.product_tree import find_node_by_path
         from tools.products.Futures import FuturesContract
         from tools.products.classifier_paths import classifier_object_path
@@ -1035,6 +1036,7 @@ class ClientStateService:
             is_contract = isinstance(product, FuturesContract)
             sources = available_sources_for_product(product)
             has_data = contract_has_data(name) if is_contract else bool(sources)
+            description = catalog_product_description(product, name)
             value = {
                 "title": name,
                 "key": classifier_object_path(product),
@@ -1045,10 +1047,8 @@ class ClientStateService:
                 "product_code": str(getattr(product, "code", "") or name),
                 "product_type": "contract" if is_contract else "product",
                 "has_data": has_data,
-                "desc": str(
-                    getattr(product, "desc", "")
-                    or ("合约" if is_contract else "产品")
-                ),
+                "desc": description,
+                "description": description,
                 "source_ids": [item["alias"] for item in sources],
                 "exchange": _catalog_exchange(product, name),
                 "product_path": classifier_object_path(product),

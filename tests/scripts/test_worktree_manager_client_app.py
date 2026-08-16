@@ -2812,6 +2812,21 @@ def test_server_catalog_has_no_client_local_projection_contract() -> None:
     assert "origin" not in inspect.signature(catalog_product_records).parameters
 
 
+def test_catalog_description_does_not_fallback_to_machine_identifier() -> None:
+    from server.services.product_catalog_projection import catalog_product_description
+
+    class Product:
+        name = "A.DCE"
+        alias = "A.DCE"
+        code = "A"
+        desc = ""
+
+    product = Product()
+    assert catalog_product_description(product, product.name) == ""
+    product.desc = "黄大豆1号"
+    assert catalog_product_description(product, product.name) == "黄大豆1号"
+
+
 def test_catalog_exposes_only_base_category_dimensions() -> None:
     from server.modules.shared.price_services import available_product_categories
 
