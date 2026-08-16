@@ -57,6 +57,12 @@
     });
   }
 
+  function nodeTitle(context, node) {
+    const title = String(node.title || node.name || node.key || "");
+    return title === "Product Lists"
+      ? context.t("本级产品列表") : title;
+  }
+
   async function render(context, mount, value, options = {}) {
     const all = roots(value).filter(Boolean);
     const definitions = Array.isArray(options.categoryDefinitions)
@@ -77,21 +83,26 @@
     });
     categories.append(heading);
 
-    const choices = document.createElement("div");
-    choices.className = "product-category-choices";
+    const controls = document.createElement("div");
+    controls.className = "product-category-controls";
+    const label = document.createElement("label");
+    label.className = "product-category-label";
+    label.textContent = context.t("分类");
+    const select = document.createElement("select");
+    select.name = "product-category";
+    select.setAttribute("aria-label", context.t("产品分类"));
     const appendChoice = (item, checked = false) => {
-      const label = document.createElement("label");
-      label.className = "check-row";
-      const input = document.createElement("input");
-      input.type = "radio"; input.name = "product-category";
-      input.value = item.id; input.checked = checked;
-      label.append(input, document.createTextNode(item.title_zh || item.alias || item.id));
-      choices.append(label);
-      return input;
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.title_zh || item.alias || item.id;
+      option.selected = checked;
+      select.append(option);
     };
     appendChoice({id: "", title_zh: context.t("不使用分类")}, !selected);
     available.forEach(item => appendChoice(item, selected === item.id));
-    categories.append(choices);
+    label.append(select);
+    controls.append(label);
+    categories.append(controls);
 
     const actions = document.createElement("div");
     actions.className = "product-category-actions";
@@ -101,9 +112,7 @@
     const tree = document.createElement("div");
     tree.className = "product-tree";
     save.addEventListener("click", async () => {
-      const nextID = categories.querySelector(
-        "input[name=product-category]:checked",
-      )?.value || "";
+      const nextID = select.value || "";
       save.disabled = true;
       try {
         await options.onSave?.(nextID);
@@ -111,7 +120,12 @@
         context.showNotice?.(error.message || context.t("产品树读取失败"), true);
       } finally { save.disabled = false; }
     });
-    mount.replaceChildren(categories, tree);
+    if (options.categoryMount && options.categoryMount !== mount) {
+      options.categoryMount.replaceChildren(categories);
+      mount.replaceChildren(tree);
+    } else {
+      mount.replaceChildren(categories, tree);
+    }
     drawNodes(context, tree, all, options);
   }
 
@@ -147,7 +161,7 @@
 
   function appendNode(context, mount, node, depth, options) {
     const hasChildren = node.folder || node.lazy || Array.isArray(node.children);
-    const title = String(node.title || node.name || node.key || "");
+    const title = nodeTitle(context, node);
     if (!hasChildren) {
       const selection = selectionControl(node, options);
       if (selection) {
@@ -169,6 +183,8 @@
     }
     const details = document.createElement("details");
     details.className = "product-tree-node";
+    details.dataset.depth = String(depth);
+    details.style.setProperty("--tree-depth", String(depth));
     details.open = FTProductCategoryModel.treeNodeInitiallyOpen(node, depth);
     const summary = document.createElement("summary");
     const selection = selectionControl(node, options);
@@ -187,14 +203,12 @@
     details.addEventListener("toggle", async () => {
       if (!details.open || details.dataset.loaded === "true" || !node.lazy) return;
       details.dataset.loaded = "loading";
-      children.replaceChildren(FTUI.loading(context.t("正在读取产品节点…")));
-      try {
-        const payload = await context.api(options.contractTreePath(node.key || ""));
-        renderChildren(payload.nodes || payload);
-      } catch (error) {
-        details.dataset.loaded = "error";
-        children.replaceChildren(FTUI.empty(context.t("产品节点读取失败"), error.message || context.t("请稍后重试")));
-      }
+      // Product Lists nodes and classifier nodes that directly own objects
+      // are both lazy catalog leaves.  The latter is common in the futures
+      // tree and must not fall back to rendering hundreds of buttons.
+      details.dataset.loaded = "true";
+      window.FTProductListTable.render(context, children, node, options);
+      return;
     });
     mount.append(details);
   }
