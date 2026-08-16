@@ -124,6 +124,7 @@ struct WebPageView: View {
                         ? ManagerSessionTokenStore.read() : "",
                     servicePort: externalURL == nil
                         ? ServerConfig.shared.port : "",
+                    clientAccess: externalURL == nil,
                     webSession: activeWebSession,
                     allowsLocalCatalog: externalURL == nil
                         && (presentation == .standalone
@@ -285,6 +286,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let serverOrigin: URL?
     let sessionToken: String
     let servicePort: String
+    let clientAccess: Bool
     let webSession: WebPageSession?
     let allowsLocalCatalog: Bool
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
@@ -300,6 +302,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         serverOrigin: URL? = nil,
         sessionToken: String = "",
         servicePort: String = "",
+        clientAccess: Bool = false,
         webSession: WebPageSession? = nil,
         allowsLocalCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
@@ -316,6 +319,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.serverOrigin = serverOrigin
         self.sessionToken = sessionToken
         self.servicePort = servicePort
+        self.clientAccess = clientAccess
         self.webSession = webSession
         self.allowsLocalCatalog = allowsLocalCatalog
         self.onReference = onReference
@@ -552,7 +556,14 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             }
         }
 
-        webView.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        if clientAccess {
+            request.setValue(
+                "ftclient",
+                forHTTPHeaderField: "X-FactorTester-Client-Access"
+            )
+        }
+        webView.load(request)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate,

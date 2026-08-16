@@ -18,11 +18,38 @@ from tools.cli.commands.margin_budget import margin_budget
 from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_step import research
-from tools.cli.commands.research_graph import research_graph
 from tools.cli.commands.research_report import report
 from tools.cli.commands.research_evidence import research_evidence
 from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
+
+
+def _research_graph_command():
+    """Load the optional Research Harness-backed command group.
+
+    The client wheel must remain usable on its own for authentication,
+    protocol, catalog and job operations.  Research Graph commands use the
+    separately shipped Harness package; keeping that import lazy prevents a
+    missing optional package from breaking the whole client CLI.
+    """
+    try:
+        from tools.cli.commands.research_graph import research_graph as command
+    except ModuleNotFoundError as exc:
+        if not (exc.name or "").startswith("cli_anything"):
+            raise
+
+        @click.group("research-graph")
+        def command() -> None:
+            """研究图命令需要安装匹配版本的 Research Harness。"""
+
+        @command.command("install-help")
+        def install_help() -> None:
+            raise click.ClickException(
+                "research-graph requires the matching "
+                "cli-anything-factortester-research package; install the "
+                "release bundle with scripts/install_factortester_pipx.sh"
+            )
+    return command
 
 
 @click.group()
@@ -71,7 +98,7 @@ cli.add_command(job)
 cli.add_command(research)
 register_job_order_commands(job)
 cli.add_command(agent_flow)
-cli.add_command(research_graph)
+cli.add_command(_research_graph_command())
 cli.add_command(report)
 cli.add_command(research_evidence)
 cli.add_command(trial_plan)
