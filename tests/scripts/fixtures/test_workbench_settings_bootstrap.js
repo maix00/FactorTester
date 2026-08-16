@@ -49,7 +49,21 @@ window.FTTests.ensureSettingsCode({}, preloadedState, () => { refreshes += 1; })
     assert.equal(preloadedState.settingsInitialized, true,
       "a preloaded settings module must still repaint a new test session");
     assert.equal(refreshes, 2);
-    console.log("ok");
+    // The field controls may arrive through another lazy group before the
+    // schema script.  Loading a tab in that state must render an error rather
+    // than dereference FTTestSettingsSchema or create an unhandled rejection.
+    window.FTTestSettingFields = {};
+    const incompleteState = {
+      settingsFieldsCode: {status: "ready", error: "", promise: null},
+      settingsTabLoads: Object.create(null),
+    };
+    return window.FTTests.ensureSettingsTab({}, incompleteState, "engine", () => {})
+      .then(() => {
+        assert.equal(incompleteState.settingsFieldsCode.status, "error");
+        assert.equal(incompleteState.settingsTabLoads.engine.status, "error");
+        assert.match(incompleteState.settingsTabLoads.engine.error, /字段模块/);
+        console.log("ok");
+      });
   })
   .catch(error => {
     console.error(error);

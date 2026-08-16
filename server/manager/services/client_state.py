@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import threading
 from typing import Any
 
 from tools.cli.release.locations import default_client_root
@@ -31,14 +32,54 @@ class ClientStateService:
         control_store: object | None = None,
         profile_cache_root: Path | None = None,
         account_domain_sync: object | None = None,
+        local_account_store: object | None = None,
     ) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
         self.control_store = control_store
         self.account_domain_sync = account_domain_sync
+        self.local_account_store = local_account_store
         self.profile_cache = (
             ProfileProjectionCache(profile_cache_root)
             if profile_cache_root is not None else None
         )
+        self._profile_refresh_lock = threading.RLock()
+        self._profile_refresh_inflight: set[str] = set()
+
+    def _local_account(self, principal: str) -> dict[str, Any]:
+        """Read the account projection from this Manager's SQLite first.
+
+        Catalog pages must remain usable while PostgreSQL is unavailable.  In
+        particular, resolving an owner alias is presentation metadata and
+        must never open a remote connection just to render a family heading.
+        """
+        owner = str(principal or "").strip()
+        store = self.local_account_store
+        if store is None:
+            try:
+                from server.manager.storage.local_accounts import LocalAccountStore
+
+                store = LocalAccountStore()
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+                store = None
+        if store is not None:
+            try:
+                rows = store.load_accounts()
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                rows = []
+            for row in rows:
+                if isinstance(row, dict) and str(row.get("username") or "") == owner:
+                    return dict(row)
+        # The canonical username grammar keeps a useful display alias even
+        # when an old/partial SQLite projection has not been restored yet.
+        parts = owner.split("@")
+        alias = parts[1] if len(parts) == 3 and parts[2].isdigit() else owner
+        organization = parts[0] if len(parts) == 3 else ""
+        return {
+            "username": owner,
+            "alias": alias,
+            "organization_id": organization,
+            "organization_name": organization,
+        }
 
     def profiles(
         self,
@@ -95,6 +136,7 @@ class ClientStateService:
                     principal,
                     entity_type="profile",
                     include_shared=False,
+                    sync=False,
                 )
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 rows = []
@@ -119,36 +161,25 @@ class ClientStateService:
             result = list(indexed.values())
 
         # A deployed public Manager does not mount a user's device-local
-        # Client root.  PostgreSQL therefore supplies the safe Profile
-        # identity projection when it has been migrated.  Local files remain
-        # the fallback for development and for richer owner-side state.
-        if self.control_store is not None:
-            self._flush_profile_cache(principal)
-            try:
-                rows = self.control_store.list_profiles(principal)
-            except (
-                AttributeError, ConnectionError, ControlDatabaseError,
-                OSError, RuntimeError, TypeError, ValueError,
-            ):
-                rows = []
+        # Client root.  Refresh the durable Profile projection in the
+        # background, but never make a catalog read wait for PostgreSQL.
+        self._schedule_profile_refresh(principal)
+        if self.profile_cache is not None:
             indexed = {
                 str(item.get("profile_id") or ""): item
                 for item in result
                 if str(item.get("profile_id") or "")
             }
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                profile_id = str(row.get("profile_id") or "").strip()
+            for item in self.profile_cache.read(principal):
+                profile_id = str(item.get("profile_id") or "").strip()
                 if not profile_id:
                     continue
-                value = control_profile_projection(row, principal)
                 if profile_id in indexed:
-                    merged = dict(value)
+                    merged = dict(item)
                     merged.update(indexed[profile_id])
                     indexed[profile_id] = merged
                 else:
-                    indexed[profile_id] = value
+                    indexed[profile_id] = item
             result = list(indexed.values())
 
         if not include_local_paths:
@@ -240,6 +271,47 @@ class ClientStateService:
             ):
                 return
             self.profile_cache.mark_synced(principal, profile_id)
+
+    def _schedule_profile_refresh(self, principal: str) -> None:
+        """Refresh the central Profile projection without blocking a read."""
+        owner = str(principal or "").strip()
+        if not owner or self.control_store is None or self.profile_cache is None:
+            return
+        with self._profile_refresh_lock:
+            if owner in self._profile_refresh_inflight:
+                return
+            self._profile_refresh_inflight.add(owner)
+
+        def refresh() -> None:
+            try:
+                self._flush_profile_cache(owner)
+                rows = self.control_store.list_profiles(owner)
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    profile_id = str(row.get("profile_id") or "").strip()
+                    if not profile_id:
+                        continue
+                    self.profile_cache.upsert(
+                        owner, control_profile_projection(row, owner),
+                    )
+                    self.profile_cache.mark_synced(owner, profile_id)
+            except (
+                AttributeError, ConnectionError, ControlDatabaseError,
+                OSError, RuntimeError, TypeError, ValueError,
+            ):
+                # The local cache remains the source for this request and a
+                # later request will retry after the in-flight marker clears.
+                pass
+            finally:
+                with self._profile_refresh_lock:
+                    self._profile_refresh_inflight.discard(owner)
+
+        threading.Thread(
+            target=refresh,
+            name="factor-tester-profile-refresh",
+            daemon=True,
+        ).start()
 
     @staticmethod
     def _profile_sync_receipt(
@@ -488,11 +560,6 @@ class ClientStateService:
             project_account_product_groups,
         )
 
-        if self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_principal(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
         profiles = self.profiles(principal)
         research = self.local_research(principal)
         groups = load_product_groups(principal)
@@ -502,6 +569,7 @@ class ClientStateService:
                     principal,
                     entity_type="product_group",
                     include_shared=False,
+                    sync=False,
                 )
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 remote_groups = []
@@ -584,17 +652,15 @@ class ClientStateService:
             factor_rows_from_sync,
         )
 
-        if self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_principal(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
+        owner_account = self._local_account(principal)
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
+            account=owner_account,
         )
         if self.account_domain_sync is not None:
             payload["factors"] = list(payload.get("factors") or []) + factor_rows_from_sync(
                 self.account_domain_sync, principal,
+                owner_account=owner_account,
             )
         return build_client_library_projection(payload, principal=principal)
 
@@ -604,17 +670,13 @@ class ClientStateService:
             factor_set_catalog,
         )
 
-        if self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_principal(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
         values = factor_set_catalog(principal, query)
         if self.account_domain_sync is None:
             return values
         try:
             rows = self.account_domain_sync.entities(
                 principal, entity_type="factor_set", include_shared=False,
+                sync=False,
             )
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             rows = []
@@ -653,6 +715,7 @@ class ClientStateService:
             return value
         rows = self.account_domain_sync.entities(
             principal, entity_type="factor_set", include_shared=False,
+            sync=False,
         )
         payload = next(
             (
@@ -697,6 +760,7 @@ class ClientStateService:
             return value
         rows = self.account_domain_sync.entities(
             principal, entity_type="factor_set", include_shared=False,
+            sync=False,
         )
         payload = next(
             (
@@ -733,17 +797,13 @@ class ClientStateService:
         # Keep the old no-principal service contract for callers that only
         # need the built-in source dimensions.  An authenticated Manager
         # request gets the source definitions plus that account's categories.
-        if principal and self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_principal(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
         values = list_product_categories(principal) if principal else available_product_categories()
         if not principal or self.account_domain_sync is None:
             return values
         try:
             rows = self.account_domain_sync.entities(
                 principal, entity_type="product_category", include_shared=False,
+                sync=False,
             )
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             rows = []

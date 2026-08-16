@@ -205,11 +205,58 @@
     ).then(recoverReadyState);
   }
 
+  function settingsFieldsRuntimeReady() {
+    return Boolean(
+      window.FTTestSettingFields
+      && window.FTTestSettingsSchema
+      && typeof window.FTTestSettingsSchema.ensureTab === "function",
+    );
+  }
+
+  function settingsFieldsRecord(state) {
+    return state.settingsFieldsCode || (state.settingsFieldsCode = {
+      status: "idle", error: "", promise: null,
+    });
+  }
+
+  function markSettingsFieldsError(state, error, refresh) {
+    const record = settingsFieldsRecord(state);
+    record.status = "error";
+    record.error = error?.message || String(error || "测试设置字段模块加载不完整");
+    record.promise = null;
+    refresh?.();
+  }
+
   function ensureSettingsFieldsCode(context, state, refresh) {
-    if (window.FTTestSettingFields) return Promise.resolve();
+    const record = settingsFieldsRecord(state);
+    if (settingsFieldsRuntimeReady()) {
+      record.status = "ready";
+      record.error = "";
+      return Promise.resolve();
+    }
+    // A controls-only request can leave this shared record in `ready` before
+    // the schema script has been evaluated.  Re-open the group instead of
+    // allowing callers to dereference a missing global.
+    if (record.status === "ready") {
+      record.status = "idle";
+      record.promise = null;
+    }
+    if (record.status === "error") return Promise.resolve();
     return FTTestLazyCode.ensureGroupCode(
       state, "settingsFieldsCode", "workbench-settings-fields", null, refresh,
-    );
+    ).then(() => {
+      if (!settingsFieldsRuntimeReady()) {
+        markSettingsFieldsError(
+          state,
+          record.error || new Error("测试设置字段模块加载不完整"),
+          refresh,
+        );
+      }
+    }).catch(error => {
+      // ensureGroupCode normally records failures itself, but keep this
+      // boundary non-rejecting because it is also called from render paths.
+      markSettingsFieldsError(state, error, refresh);
+    });
   }
 
   function ensureRunSubmitCode(context, state) {
@@ -364,6 +411,7 @@
       ),
       settingsTabReady: tabKey => state.settingsLoadedTabs.has(tabKey),
       settingsTabLoadState: tabKey => state.settingsTabLoads[tabKey],
+      settingsFieldsLoadState: () => state.settingsFieldsCode,
       ensureTab: tab => ensureTab(context, state, tab, () => render(context, state)),
       onChipOpen: tabKey => {
         const runTab = state.manifest.run_settings?.key;
@@ -427,7 +475,30 @@
     // The schema loader belongs to the same deferred group as editable field
     // controls. A direct request must cross that code boundary first.
     return ensureSettingsFieldsCode(context, state, refresh)
-      .then(() => FTTestSettingsSchema.ensureTab(context, state, tabKey, refresh));
+      .then(() => {
+        if (!settingsFieldsRuntimeReady()) {
+          const error = new Error(
+            settingsFieldsRecord(state).error || "测试设置字段模块加载不完整",
+          );
+          const load = state.settingsTabLoads[tabKey] || (state.settingsTabLoads[tabKey] = {
+            status: "idle", error: "", promise: null,
+          });
+          load.status = "error";
+          load.error = error.message;
+          refresh?.();
+          return null;
+        }
+        return window.FTTestSettingsSchema.ensureTab(context, state, tabKey, refresh);
+      })
+      .catch(error => {
+        const load = state.settingsTabLoads[tabKey] || (state.settingsTabLoads[tabKey] = {
+          status: "idle", error: "", promise: null,
+        });
+        load.status = "error";
+        load.error = error.message || String(error);
+        load.promise = null;
+        refresh?.();
+      });
   }
 
   window.FTTests = {
