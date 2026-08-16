@@ -73,7 +73,12 @@ class ClientSourceCatalog:
         if target.path == "/api/client/product_categories":
             return self._categories(manifests)
         if target.path == "/api/client/product_names":
-            return self._products(manifests)
+            return self._products(
+                manifests,
+                query=_first(query, "query"),
+                page=_optional_int(query, "page"),
+                limit=_optional_int(query, "limit"),
+            )
         if target.path == "/api/client/product_fields":
             return self._fields(manifests, _first(query, "name"))
         if target.path == "/api/client/product_tree":
@@ -86,14 +91,24 @@ class ClientSourceCatalog:
                 "tree": _product_tree(manifests, category_id),
             }
         if target.path == "/api/client/contract_tree":
+            path = _first(query, "path")
+            category = _first(query, "category")
+            if not any(key in query for key in ("query", "page", "limit")):
+                return {
+                    "success": True,
+                    "source": "local",
+                    "nodes": _product_leaves(manifests, path, category),
+                }
+            page, limit = _bounded_page(query)
             return {
                 "success": True,
                 "source": "local",
-                "nodes": _product_leaves(
+                **_page_result(_product_leaves(
                     manifests,
-                    _first(query, "path"),
-                    _first(query, "category"),
-                ),
+                    path,
+                    category,
+                    query=_first(query, "query"),
+                ), page=page, limit=limit),
             }
         if target.path == "/api/client/product-groups" or is_group_detail:
             return self._groups(unquote(group_detail) or _first(query, "group_ref"))
@@ -167,17 +182,25 @@ class ClientSourceCatalog:
     @staticmethod
     def _products(
         manifests: tuple[LocalSourceManifest, ...],
+        *,
+        query: str = "",
+        page: int | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
-        return {
+        rows = [
+            _product_record(manifest, product)
+            for manifest in manifests
+            for product in manifest.products
+        ]
+        value = {
             "success": True,
             "source": "local",
             "source_ids": [item.source_id for item in manifests],
-            "products": [
-                _product_record(manifest, product)
-                for manifest in manifests
-                for product in manifest.products
-            ],
+            "products": rows,
         }
+        if query or page is not None or limit is not None:
+            value.update(_page_result(rows, query=query, page=page, limit=limit))
+        return value
 
     @staticmethod
     def _fields(
@@ -273,6 +296,9 @@ def _product_record(
     return {
         "name": product.alias,
         "code": str(product.metadata.get("code") or product.alias),
+        "exchange": str(
+            product.metadata.get("exchange") or _exchange_from_name(product.alias)
+        ),
         "desc": product.display_name,
         "display_name": product.display_name,
         "product_ref": product.product_ref,
@@ -321,8 +347,7 @@ def _tree_node(name: str, value: dict[str, Any], parent: str) -> dict[str, Any]:
             "key": f"{path}/_products",
             "checkbox": False,
             "folder": True,
-            "lazy": False,
-            "children": product_leaves,
+            "lazy": True,
             "_product_count": len(product_leaves),
         })
     return {
@@ -349,6 +374,9 @@ def _product_leaf(
         "lazy": False,
         "product_name": product.alias,
         "product_code": str(product.metadata.get("code") or product.alias),
+        "exchange": str(
+            product.metadata.get("exchange") or _exchange_from_name(product.alias)
+        ),
         "product_ref": product.product_ref,
         "product_type": "product",
         "desc": product.display_name,
@@ -361,14 +389,29 @@ def _product_leaves(
     manifests: tuple[LocalSourceManifest, ...],
     path: str,
     category_id: str = "",
+    *,
+    query: str = "",
 ) -> list[dict[str, Any]]:
     normalized = str(path or "").removesuffix("/_products")
     categories = _category_projection(manifests, category_id)
-    return [
+    rows = [
         _product_leaf(manifest, product, normalized)
         for manifest in manifests
         for product in manifest.products
         if _path_text(_projected_product_path(product, categories)) == normalized
+    ]
+    search = str(query or "").strip().casefold()
+    if not search:
+        return rows
+    return [
+        row for row in rows
+        if search in " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "title", "product_name", "product_code", "desc",
+                "exchange", "product_ref", "source_ids",
+            )
+        ).casefold()
     ]
 
 
@@ -477,3 +520,55 @@ def _path_text(path: tuple[str, ...] | None) -> str:
 
 def _first(query: dict[str, list[str]], key: str) -> str:
     return str(query.get(key, [""])[0] or "").strip()
+
+
+def _optional_int(query: dict[str, list[str]], key: str) -> int | None:
+    value = _first(query, key)
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError("local product list pagination is invalid") from exc
+
+
+def _bounded_page(query: dict[str, list[str]]) -> tuple[int, int]:
+    page = _optional_int(query, "page") or 1
+    limit = _optional_int(query, "limit") or 25
+    return max(1, page), min(100, max(1, limit))
+
+
+def _page_result(
+    rows: list[dict[str, Any]],
+    *,
+    query: str = "",
+    page: int | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    search = str(query or "").strip().casefold()
+    if search:
+        rows = [
+            row for row in rows
+            if search in " ".join(
+                str(value or "") for value in row.values()
+            ).casefold()
+        ]
+    current_page = max(1, int(page or 1))
+    current_limit = min(100, max(1, int(limit or 25)))
+    total = len(rows)
+    total_pages = max(1, (total + current_limit - 1) // current_limit)
+    offset = (current_page - 1) * current_limit
+    return {
+        "products": rows[offset:offset + current_limit],
+        "nodes": rows[offset:offset + current_limit],
+        "page": current_page,
+        "limit": current_limit,
+        "total": total,
+        "total_pages": total_pages,
+        "has_more": current_page < total_pages,
+    }
+
+
+def _exchange_from_name(name: str) -> str:
+    value = str(name or "")
+    return value.split(".", 1)[1].split("@", 1)[0] if "." in value else ""

@@ -22,6 +22,22 @@ from server.manager.services.profile_projection import (
 from server.manager.storage.control_db import ControlDatabaseError
 
 
+def _catalog_exchange(product: object, name: str) -> str:
+    """Read a stable exchange label without depending on a service port."""
+    exchange = str(
+        getattr(product, "exchange_id", "")
+        or getattr(product, "exchange", "")
+        or ""
+    ).strip()
+    if exchange:
+        return exchange
+    value = str(name or "")
+    if "." in value:
+        return value.split(".", 1)[1].split("@", 1)[0]
+    parts = value.split("|")
+    return parts[1] if len(parts) >= 3 else ""
+
+
 class ClientStateService:
     """Project and update principal-owned state without invoking a service port."""
 
@@ -957,6 +973,28 @@ class ClientStateService:
         principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
+        return ClientStateService.contract_tree_page(
+            path, category_id, source_ids, principal, limit=None,
+        )["nodes"]
+
+    @staticmethod
+    def contract_tree_page(
+        path: str | None = None,
+        category_id: str | None = None,
+        source_ids: list[str] | tuple[str, ...] | None = None,
+        principal: str = "",
+        *,
+        query: str = "",
+        page: int = 1,
+        limit: int | None = 25,
+    ) -> dict[str, Any]:
+        """Return one searchable, bounded page of lazy catalog leaves.
+
+        The tree endpoint deliberately owns the paging boundary.  A browser
+        or embedded client never needs to download every product merely to
+        render one ``Product Lists`` folder.  ``contract_tree`` remains the
+        compatibility list API for callers that do not need page metadata.
+        """
         from server.modules.products.product_category_paths import category_tree
         from server.modules.shared.price_services import (
             available_sources_for_product,
@@ -968,6 +1006,13 @@ class ClientStateService:
         from server.services.product_tree import find_node_by_path
         from tools.products.Futures import FuturesContract
         from tools.products.classifier_paths import classifier_object_path
+
+        requested_page = max(1, int(page or 1))
+        requested_limit = (
+            10**9 if limit is None
+            else min(100, max(1, int(limit or 25)))
+        )
+        search = str(query or "").strip().casefold()
 
         tree = (
             cached_product_tree().tree
@@ -1005,11 +1050,31 @@ class ClientStateService:
                     or ("合约" if is_contract else "产品")
                 ),
                 "source_ids": [item["alias"] for item in sources],
+                "exchange": _catalog_exchange(product, name),
+                "product_path": classifier_object_path(product),
             }
             if is_contract:
                 value["contract_uid"] = name
-            result.append(value)
-        return result
+            searchable = " ".join(
+                str(value.get(key) or "")
+                for key in (
+                    "title", "product_name", "product_code", "desc",
+                    "exchange", "product_path", "source_ids",
+                )
+            ).casefold()
+            if not search or search in searchable:
+                result.append(value)
+        total = len(result)
+        total_pages = max(1, (total + requested_limit - 1) // requested_limit)
+        offset = (requested_page - 1) * requested_limit
+        return {
+            "nodes": result[offset:offset + requested_limit],
+            "page": requested_page,
+            "limit": requested_limit,
+            "total": total,
+            "total_pages": total_pages,
+            "has_more": requested_page < total_pages,
+        }
 
     @staticmethod
     def _git_projection(path: Path) -> dict[str, Any]:

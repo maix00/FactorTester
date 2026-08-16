@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 from tools.cli.local_sources import ClientSourceCatalog
@@ -145,6 +146,21 @@ def test_client_catalog_reads_products_and_tree_from_local_manifest(
     assert tree["source_ids"] == ["Synthetic"]
     assert tree["tree"][0]["title"] == "Product"
     assert tree["tree"][0]["_product_count"] == 2
+    product_list = next(
+        node for node in _walk_tree(tree["tree"])
+        if node.get("title") == "Product Lists"
+    )
+    assert product_list["lazy"] is True
+    leaves = local.request("/api/client/contract_tree?" + urlencode({
+        "path": product_list["key"], "page": 1, "limit": 1,
+    }))
+    assert leaves["total"] == 2
+    assert len(leaves["nodes"]) == 1
+    assert leaves["has_more"] is True
+    searched = local.request("/api/client/contract_tree?" + urlencode({
+        "path": product_list["key"], "query": "BETA",
+    }))
+    assert [item["product_name"] for item in searched["nodes"]] == ["BETA.X"]
     assert "交易所" not in json.dumps(tree["tree"], ensure_ascii=False)
     assert "OSE" not in {
         node["title"] for node in _walk_tree(tree["tree"])
@@ -203,7 +219,15 @@ def test_client_catalog_projects_nested_category_products(tmp_path: Path) -> Non
 
     assert "交易所×交易时段×地区" in titles
     assert "(OSE×日盘×日本)" in titles
-    assert "ALPHA.X" in titles
+    product_list = next(
+        node for node in _walk_tree(tree["tree"])
+        if node.get("title") == "Product Lists"
+    )
+    leaves = local.request("/api/client/contract_tree?" + urlencode({
+        "path": product_list["key"],
+        "category": "exchange_x_session_x_region",
+    }))
+    assert [item["product_name"] for item in leaves["nodes"]] == ["ALPHA.X"]
 
 
 def test_client_catalog_reports_invalid_local_manifest(tmp_path: Path) -> None:
