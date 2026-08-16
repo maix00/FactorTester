@@ -12,8 +12,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 VISITOR_COOKIE = "ft-manager-visitor"
+CLIENT_ACCESS_COOKIE = "ft-manager-client-access"
 VISITOR_GRANT_TTL_SECONDS = 300
 VISITOR_SESSION_TTL_SECONDS = 12 * 60 * 60
+CLIENT_ACCESS_TTL_SECONDS = 12 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,40 @@ class VisitorAccessStore:
             ttl=VISITOR_GRANT_TTL_SECONDS,
         )
 
+    def issue_client_access(self, target_origin: str) -> str:
+        """Issue a short-lived capability for an identified native client.
+
+        This capability only enables the visitor entry on the canonical
+        public-origin compliance page.  It is deliberately separate from a
+        visitor session and never authorizes account, device, or Manager
+        operations.
+        """
+        return self._issue(
+            kind="client-access",
+            target_origin=target_origin,
+            ttl=CLIENT_ACCESS_TTL_SECONDS,
+        )
+
+    def issue_session(self, target_origin: str) -> str:
+        """Create a visitor session after an explicit entry action."""
+        return self._issue(
+            kind="session",
+            target_origin=target_origin,
+            ttl=VISITOR_SESSION_TTL_SECONDS,
+        )
+
+    def valid_client_access(self, token: str, *, target_origin: str) -> bool:
+        now = time.time()
+        with self._lock:
+            self._purge(now)
+            record = self._records.get(self._digest(token))
+            return bool(
+                record
+                and record.kind == "client-access"
+                and record.target_origin == target_origin
+                and record.expires_at > now
+            )
+
     def redeem_grant(self, token: str, *, target_origin: str) -> str | None:
         now = time.time()
         with self._lock:
@@ -238,5 +274,13 @@ def visitor_cookie(token: str, *, secure: bool = True) -> str:
     secure_flag = " Secure;" if secure else ""
     return (
         f"{VISITOR_COOKIE}={token}; Max-Age={VISITOR_SESSION_TTL_SECONDS};"
+        f" HttpOnly; SameSite=Lax;{secure_flag} Path=/"
+    )
+
+
+def client_access_cookie(token: str, *, secure: bool = True) -> str:
+    secure_flag = " Secure;" if secure else ""
+    return (
+        f"{CLIENT_ACCESS_COOKIE}={token}; Max-Age={CLIENT_ACCESS_TTL_SECONDS};"
         f" HttpOnly; SameSite=Lax;{secure_flag} Path=/"
     )

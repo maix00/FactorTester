@@ -16,9 +16,11 @@ from server.manager.http.pages import (
 )
 from server.manager.http.responses import json_response
 from server.manager.http.visitor_access import (
+    CLIENT_ACCESS_COOKIE,
     VISITOR_COOKIE,
     VISITOR_MODE,
     VisitorMode,
+    client_access_cookie,
     request_origin,
     target_compliance_url,
     target_visitor_url,
@@ -35,6 +37,9 @@ MANAGER_ACTION_PATHS = frozenset({
     "/restart-bundle",
     "/force-stop",
 })
+
+CLIENT_ACCESS_HEADER = "X-FactorTester-Client-Access"
+CLIENT_ACCESS_VALUE = "ftclient"
 
 
 class RequestSecurityMixin:
@@ -219,6 +224,55 @@ class RequestSecurityMixin:
                 return value.strip()
         return ""
 
+    def _client_access_header_allowed(self) -> bool:
+        """Recognize the public, non-privileged native-client entry marker."""
+        return (
+            getattr(self.state, "require_login_for_ui", False)
+            and getattr(self.state, "public_server", False)
+            and self._has_secure_ui_transport()
+            and self.headers.get(CLIENT_ACCESS_HEADER, "").strip().lower()
+            == CLIENT_ACCESS_VALUE
+        )
+
+    def _client_access_allowed(self) -> bool:
+        """Return whether this request may display the native client entry.
+
+        The marker is intentionally only a presentation/access-policy signal;
+        it never bypasses account, device, or Manager authentication.
+        """
+        if self._client_access_header_allowed():
+            return True
+        if not (
+            getattr(self.state, "require_login_for_ui", False)
+            and getattr(self.state, "public_server", False)
+        ):
+            return False
+        origin = self._request_origin()
+        token = self._cookie_value(CLIENT_ACCESS_COOKIE)
+        store = getattr(self.state, "visitor_access", None)
+        return bool(
+            origin
+            and token
+            and store is not None
+            and store.valid_client_access(token, target_origin=origin)
+        )
+
+    def _issue_client_access_cookie(self) -> str:
+        """Persist a native-client marker across the WebView navigation."""
+        if not self._client_access_header_allowed():
+            return ""
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        store = getattr(self.state, "visitor_access", None)
+        if not (
+            store is not None
+            and target_origin
+            and current_origin == target_origin
+        ):
+            return ""
+        token = store.issue_client_access(target_origin)
+        return client_access_cookie(token, secure=True)
+
     def _request_origin(self) -> str:
         scheme = (
             "https"
@@ -253,8 +307,11 @@ class RequestSecurityMixin:
         )
 
     def _visitor_entry_origin_allowed(self) -> bool:
-        return self._request_origin() in tuple(
-            getattr(self.state, "visitor_entry_origins", ())
+        return (
+            self._request_origin() in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+            or self._client_access_allowed()
         )
 
     def _visitor_redirect_target(self) -> str:
@@ -340,6 +397,16 @@ class RequestSecurityMixin:
                 )
                 return
 
+            if self._client_access_allowed():
+                self._send_redirect(
+                    next_path,
+                    cookie=visitor_cookie(
+                        store.issue_session(target_origin),
+                        secure=True,
+                    ),
+                )
+                return
+
         self._send_redirect(
             "/compliance?next=" + quote(next_path, safe="/?=&%")
         )
@@ -366,7 +433,7 @@ class RequestSecurityMixin:
         )
         self._send_html(body)
 
-    def _send_html(self, body: bytes) -> None:
+    def _send_html(self, body: bytes, *, cookie: str = "") -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header(
@@ -378,6 +445,8 @@ class RequestSecurityMixin:
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -408,7 +477,13 @@ class RequestSecurityMixin:
                 target_origin=target_origin,
             )
         )
-        show_visitor_entry = bool(show_visitor_entry or grant_is_valid)
+        client_access_cookie = self._issue_client_access_cookie()
+        show_visitor_entry = bool(
+            show_visitor_entry
+            or grant_is_valid
+            or self._client_access_allowed()
+            or bool(client_access_cookie)
+        )
         visitor_entry_href = ""
         if show_visitor_entry:
             safe_next = quote(
@@ -444,7 +519,7 @@ class RequestSecurityMixin:
             visitor_entry_href=visitor_entry_href,
             device_auth_target=device_auth_target,
         )
-        self._send_html(body)
+        self._send_html(body, cookie=client_access_cookie)
 
     def _public_login_gate(self, parsed, *, method: str) -> bool:
         """Apply the instance-level public UI policy before route dispatch."""
@@ -629,8 +704,11 @@ class RequestSecurityMixin:
         location = destination + quote(
             manager_safe_login_next(requested), safe="/?=&%"
         )
+        client_access_cookie = self._issue_client_access_cookie()
         self.send_response(303)
         self.send_header("Location", location)
+        if client_access_cookie:
+            self.send_header("Set-Cookie", client_access_cookie)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Length", "0")
