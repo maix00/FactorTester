@@ -34,6 +34,42 @@ VISITOR_PRINCIPAL = "__public_jobs__"
 DEFAULT_CACHE_SECONDS = 10.0
 
 
+def _legacy_public_factor(item: dict[str, Any]) -> bool:
+    """Identify an old peer's public family template masquerading as a factor."""
+    return str(item.get("owner_username") or "").strip() == VISITOR_PRINCIPAL
+
+
+def _legacy_public_family(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert one legacy public factor row into an empty family template."""
+    owner = VISITOR_PRINCIPAL
+    family_alias = str(
+        item.get("factor_family_alias") or item.get("factor_family_name") or ""
+    ).strip()
+    family_ref = str(item.get("family_ref") or "").strip()
+    if not family_ref:
+        family_ref = "factor-family:sha256:" + sha256(
+            f"{owner}\x1f{family_alias}".encode()
+        ).hexdigest()
+    return {
+        "family_ref": family_ref,
+        "factor_family_alias": family_alias,
+        "factor_family_name": item.get("factor_family_name") or family_alias,
+        "chinese_name": item.get("chinese_name") or "",
+        "description": item.get("description") or "",
+        "math_expr": item.get("math_expr") or "",
+        "category": item.get("category") or "",
+        "categories": list(item.get("categories") or []),
+        "params": list(item.get("params") or []),
+        "owner_username": owner,
+        "owner_alias": item.get("owner_alias") or "公共因子库",
+        "factor_kind": "public",
+        "source": "public",
+        "factor_count": 0,
+        "factor_refs": [],
+        "updated_at": item.get("updated_at") or "",
+    }
+
+
 def merge_factor_library_projections(
     values: list[dict[str, Any]], *, principal: str,
 ) -> dict[str, Any]:
@@ -60,6 +96,11 @@ def merge_factor_library_projections(
         for item in value.get("factors") or []:
             if not isinstance(item, dict):
                 continue
+            if _legacy_public_factor(item):
+                family = _legacy_public_family(item)
+                if family["factor_family_alias"]:
+                    families.setdefault(family["family_ref"], family)
+                continue
             ref = str(item.get("factor_ref") or "").strip()
             if ref:
                 factors.setdefault(ref, dict(item))
@@ -69,9 +110,13 @@ def merge_factor_library_projections(
         for item in value.get("families") or []:
             if not isinstance(item, dict):
                 continue
+            item = dict(item)
+            if _legacy_public_factor(item):
+                item["factor_count"] = 0
+                item["factor_refs"] = []
             ref = str(item.get("family_ref") or "").strip()
             if ref:
-                families.setdefault(ref, dict(item))
+                families[ref] = {**families.get(ref, {}), **item}
             for category in item.get("categories") or []:
                 category = str(category or "").strip()
                 if category:

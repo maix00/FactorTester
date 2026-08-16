@@ -106,11 +106,15 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
     value = public_factor_library()
 
     assert value["principal"] == "__public_jobs__"
-    assert value["factors"][0]["factor_alias"] == "Momentum"
-    assert "source_code" not in value["factors"][0]
+    assert value["factors"] == []
     assert [item["factor_family_alias"] for item in value["families"]] == [
         "momentum", "volatility",
     ]
+    assert value["families"][0]["factor_count"] == 0
+    assert value["families"][0]["params"] == [
+        {"alias": "window", "value": "20", "redacted": False},
+    ]
+    assert "source_code" not in value["families"][0]
 
 
 def test_source_provider_extracts_endpoint_host():

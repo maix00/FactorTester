@@ -163,7 +163,8 @@ def test_federated_public_data_merges_remote_research_profiles_and_factors(
 
     assert reports[0]["source_server_id"] == "internal-1"
     assert profiles[0]["profile_id"] == "maxa"
-    assert factors["factors"][0]["factor_alias"] == "RemoteMomentum"
+    assert factors["factors"] == []
+    assert factors["families"][0]["factor_family_alias"] == "MomentumFamily"
     assert ("research", "list", "__public_jobs__") in gateway.calls
     assert ("catalog", "profiles", "alice") in gateway.calls
     assert ("catalog", "factors", "__public_jobs__") in gateway.calls
@@ -189,6 +190,10 @@ def test_federated_factor_library_keeps_three_family_scopes(monkeypatch):
         "factor_family_alias"
     ] == "MineFamily"
     assert value["families"][0]["factor_family_alias"] == "MineFamily"
+    assert all(
+        item["owner_username"] != "__public_jobs__"
+        for item in value["factors"]
+    )
 
 
 def test_federated_public_research_detail_binds_publication_id_to_peer_payload():
