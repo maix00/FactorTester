@@ -92,8 +92,16 @@ const data = {
         family_ref: "family:four",
         factor_family_name: "ChildFamily",
         chinese_name: "下级因子",
+        categories: ["child-category"],
         owner_username: "child",
         owner_alias: "Child",
+        factor_kind: "custom",
+        factor_count: 1,
+      }, {
+        family_ref: "family:five",
+        factor_family_name: "OtherFamily",
+        owner_username: "other-child",
+        owner_alias: "Other Child",
         factor_kind: "custom",
         factor_count: 1,
       }],
@@ -136,7 +144,14 @@ window.FTFactorList.render(context, data, mount, {
   page: "families", scope: "subordinates", query: "", groupRef: "*",
 });
 assert.equal(mount.value.children[0].textContent, "下级用户因子家族");
+assert.strictEqual(mount.value.children[1].rows.length, 2);
 assert.strictEqual(mount.value.children[1].rows[0][0], "ChildFamily");
+
+window.FTFactorList.render(context, data, mount, {
+  page: "families", scope: "subordinates", query: "other-child", groupRef: "*",
+});
+assert.strictEqual(mount.value.children[1].rows.length, 1);
+assert.strictEqual(mount.value.children[1].rows[0][0], "OtherFamily");
 
 window.FTFactorList.render(context, {...data, visitor: true}, mount, {
   page: "families", scope: "public", query: "", groupRef: "*",

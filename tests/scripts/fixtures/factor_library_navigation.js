@@ -48,4 +48,9 @@ const visitorTabs = window.FTFactorList.familyScopeTabs(context, "public", true)
 assert.deepStrictEqual(visitorTabs.children.map(item => item.textContent), [
   "公共因子家族",
 ]);
+assert.equal(window.FTFactorList.searchPlaceholder(context, "families", "public"), "搜索因子家族");
+assert.equal(
+  window.FTFactorList.searchPlaceholder(context, "families", "subordinates"),
+  "搜索下级用户或因子家族",
+);
 console.log("ok");

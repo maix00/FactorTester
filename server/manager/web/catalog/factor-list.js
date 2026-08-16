@@ -21,7 +21,10 @@
     return tabs;
   }
 
-  function searchPlaceholder(context, page) {
+  function searchPlaceholder(context, page, scope = "") {
+    if (page === "families" && scope === "subordinates") {
+      return context.t("搜索下级用户或因子家族");
+    }
     if (page === "families") return context.t("搜索因子家族");
     if (page === "sets") return context.t("搜索因子集合");
     return context.t("搜索因子");
@@ -66,7 +69,7 @@
 
   function renderFamilies(context, data, mount, query, scope) {
     const scoped = dataForScope(data, scope);
-    const rows = scoped.families.filter(item => model().matches(item, query));
+    const rows = scoped.families.filter(item => model().matchesFamily(item, query));
     const panel = document.createElement("section");
     panel.className = `factor-family-scope-panel ${scope}`;
     const heading = document.createElement("h2");
