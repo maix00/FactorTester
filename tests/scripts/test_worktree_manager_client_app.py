@@ -2950,8 +2950,10 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "product-list-search" in table_script
     assert "contractTreePath" in table_script
     assert "创建乘积分类" not in script
-    assert "应用分类" in script
-    assert "product-category-actions" in script
+    assert "product-category-toolbar" in script
+    assert 'select.addEventListener("change"' in script
+    assert "应用分类" not in script
+    assert "product-category-actions" not in script
     assert "产品 Category" not in script
     assert "应用 Category" not in script
     assert "创建乘积 Category" not in script
