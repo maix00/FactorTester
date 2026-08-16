@@ -156,6 +156,15 @@ class DataPlaneProcessStateMixin:
             str(Path(CACHE_DB_PATH).expanduser().resolve()),
             "--origin-cache-root",
             str((self.data_root / "object-cache").resolve()),
+            "--release-root",
+            str(self.release_root.resolve()),
+            "--release-trust-root",
+            str(
+                (self.runtime_source_root /
+                 "tools/cli/release/trusted-beta-release-public.pem").resolve()
+            ),
+            "--release-origin",
+            str(config.client_control_endpoint),
             "--allowed-origin",
             _origin(config.client_control_endpoint),
         ]

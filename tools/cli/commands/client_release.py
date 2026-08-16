@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from importlib.resources import files
 from pathlib import Path
 import sys
+import tempfile
+from urllib.error import URLError
 
 import click
 
@@ -18,6 +21,13 @@ from tools.cli.release.transaction import ClientReleaseStore
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
 from tools.cli.release.app_update_control import dispatch_app_update, read_status
+from tools.cli.release.client_release_bundle import inspect_client_release_bundle
+from tools.cli.release.client_release_targets import build_target_beta_package
+from tools.cli.manager.client import ManagerClient
+from tools.cli.manager.config import (
+    ManagerConfig,
+    ManagerCredentialStore,
+)
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_catalog import client_catalog
 from tools.cli.commands.client_profile import client_profile, profile_factor_worktree
@@ -207,6 +217,154 @@ def publish_release(**options) -> None:
     )
     receipt = run_release(**options)
     click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
+
+
+@operator_client.command("release-upload")
+@click.option(
+    "--target",
+    "targets",
+    multiple=True,
+    required=True,
+    help="目标 Manager 的 HTTP(S) 地址；可重复指定多个在线服务器。",
+)
+@click.option(
+    "--package",
+    "package_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="已经生成的单目标 ZIP 包；多目标发布请使用 --release-dir。",
+)
+@click.option(
+    "--release-dir",
+    "release_directory",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="factortester-manager client release 的输出目录；按目标重签名并打包。",
+)
+@click.option("--version", default="", help="可选；默认读取包内 beta.json。")
+@click.option("--build", type=click.IntRange(min=1), default=None)
+@click.option(
+    "--legacy-private-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="目标 URL 重签 Beta manifest 时使用的私钥。",
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def upload_release(
+    targets: tuple[str, ...],
+    package_path: Path | None,
+    release_directory: Path | None,
+    version: str,
+    build: int | None,
+    legacy_private_key: Path | None,
+    as_json: bool,
+) -> None:
+    """Upload one already-built signed Beta package to each target Manager.
+
+    The package is sent through the Manager-issued 7997 capability.  An
+    unreachable target is reported and skipped once; it is never retried or
+    republished implicitly.
+    """
+    if bool(package_path) == bool(release_directory):
+        raise click.ClickException("必须且只能指定 --package 或 --release-dir")
+    if package_path is not None and len(targets) > 1:
+        raise click.ClickException(
+            "向多个目标发布时必须使用 --release-dir，以便为每个 URL 重签 manifest"
+        )
+    trusted_public_key = Path(str(
+        files("tools.cli.release").joinpath("trusted-beta-release-public.pem")
+    ))
+    private_key = None
+    if release_directory is not None:
+        from tools.cli.release.signing_keys import manifest_private_key
+
+        private_key = manifest_private_key("beta", legacy_private_key)
+    selected_version = str(version or "").strip()
+    selected_build = int(build or 0)
+    results: list[dict[str, object]] = []
+    with tempfile.TemporaryDirectory(prefix="factortester-release-upload-") as raw:
+        staging = Path(raw)
+        for index, target in enumerate(targets):
+            package_for_target = package_path
+            metadata: dict[str, object]
+            try:
+                config = ManagerConfig.from_url(target)
+                if release_directory is not None:
+                    package_for_target = staging / f"target-{index}.zip"
+                    metadata = build_target_beta_package(
+                        release_directory,
+                        target_origin=config.base_url,
+                        output=package_for_target,
+                        private_key=private_key,  # type: ignore[arg-type]
+                        public_key=trusted_public_key,
+                    )
+                else:
+                    metadata = inspect_client_release_bundle(package_for_target)  # type: ignore[arg-type]
+                selected_version = selected_version or str(metadata["version"])
+                selected_build = selected_build or int(metadata["build"])
+                if selected_version != str(metadata["version"]):
+                    raise click.ClickException("版本与 Beta 包内版本不一致")
+                if selected_build != int(metadata["build"]):
+                    raise click.ClickException("构建号与 Beta 包内构建号不一致")
+                token = ManagerCredentialStore(config).read()
+                if not token:
+                    results.append({
+                        "target": config.base_url,
+                        "status": "not_configured",
+                        "error": "没有该目标 Manager 的 Keychain 会话",
+                    })
+                    continue
+                client = ManagerClient(config, token=token, timeout=30)
+                client.require_manager()
+                receipt = client.upload_client_beta_release(
+                    package_for_target,  # type: ignore[arg-type]
+                    version=selected_version,
+                    build=selected_build,
+                    timeout=15 * 60,
+                )
+                results.append({"target": config.base_url, "status": "published", **receipt})
+            except Exception as exc:  # target isolation is deliberate
+                if _release_target_offline(exc):
+                    results.append({
+                        "target": str(target).rstrip("/"),
+                        "status": "offline",
+                        "error": "目标 Manager 不在线；本次跳过，稍后可手动补发",
+                    })
+                    continue
+                raise
+    published_digests = {
+        str(item["package_sha256"])
+        for item in results
+        if item.get("status") == "published" and item.get("package_sha256")
+    }
+    payload = {
+        "success": any(item.get("status") == "published" for item in results),
+        "channel": "beta",
+        "version": selected_version,
+        "build": selected_build,
+        # Per-target packages are intentionally different because their
+        # signed URLs contain different Manager origins.  Keep a scalar only
+        # when it is unambiguous; target receipts always retain their digest.
+        "package_sha256": next(iter(published_digests))
+        if len(published_digests) == 1 else None,
+        "targets": results,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        for item in results:
+            click.echo(
+                f"{item.get('target')}: {item.get('status')}"
+                + (f" ({item.get('error')})" if item.get("error") else "")
+            )
+
+
+def _release_target_offline(error: BaseException) -> bool:
+    from tools.cli.http import HttpClientError
+
+    if isinstance(error, (ConnectionError, TimeoutError, URLError)):
+        return True
+    return isinstance(error, HttpClientError) and (
+        error.status == 0 or error.status in {408, 425, 429} or error.status >= 500
+    )
 
 
 @client.command("activate-bundle", hidden=True)

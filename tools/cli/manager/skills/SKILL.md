@@ -45,10 +45,16 @@ non-manager principal.
   SHA-256 verification; it is never executed;
 - `server health|network|federation|database`: inspect FactorTester runtime
   state and redacted federation/database status;
-- `client release`: publish an authorized FactorTester client release. For
+- `client release`: build and publish an authorized FactorTester client release. For
   `--channel beta`, omit `--version` and `--build` (or use `auto`) to read the
   reachable servers' Beta manifests and allocate the next version/build. An
   unreachable server is skipped; an invalid reachable manifest is an error.
+- `client release-upload`: publish an already-built signed Beta package to one
+  or more explicit Manager URLs. The package uses the Manager-issued 7998
+  capability and the target's 7997 byte plane; the target activates it only
+  after signature, digest, archive-path, and appcast validation. Each target
+  has its own URL-scoped Keychain session. Offline targets are reported once
+  and skipped for manual later publication.
 
 The CLI does not expose legacy server-admin commands, host restart, container
 lifecycle, tunnel changes, SSH, or repository-transfer commands.

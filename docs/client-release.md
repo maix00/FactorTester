@@ -15,10 +15,11 @@ Release operations intentionally have two authorities:
 - Publisher: `factortester-manager client release --channel stable|beta ...` performs
   the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
   Sparkle appcast, compatibility manifest, publication, remote read-back, and
-  receipt pipeline. It never logs into, stops, restarts, or restores a
-  FactorTester Manager or test-service port. Main becomes public only after
-  all GitHub draft assets exist. Beta writes immutable assets before switching
-  its appcast and compatibility pointers. It never installs an app.
+  receipt pipeline for the explicitly selected release root. It never logs
+  into, stops, restarts, or restores a FactorTester Manager or test-service
+  port. Main becomes public only after all GitHub draft assets exist. Beta
+  writes immutable assets before switching its appcast and compatibility
+  pointers. It never installs an app.
 
   For Beta, `--version auto` and `--build auto` are the defaults. The publisher
   reads the reachable servers' `beta.json` manifests and the locally installed
@@ -35,6 +36,23 @@ Release operations intentionally have two authorities:
   `--release-root` explicitly; it does not discover either value by logging in
   to or restarting a Manager.
 
+  After a signed Beta package has been built, an administrator can publish it
+  to several online Managers through the application protocol:
+
+  ```bash
+  factortester-manager client release-upload \
+    --target https://public-manager.example:7998 \
+    --target http://127.0.0.1:7998 \
+    --release-dir /path/to/beta-release-output --json
+  ```
+
+  The command obtains a short-lived capability from each target's 7998
+  control plane and sends the bytes through that target's 7997 data plane.
+  The target validates the signed manifest, DMG digest, archive paths, and
+  appcast before atomically switching `beta.json` and `beta.xml`. Each target
+  receives a manifest signed for its own URL. Unreachable targets are reported
+  once and skipped; there is no background retry or implicit republish.
+
   The lower-level module entry point has the same client-only behavior; there
   is no implicit server restart hidden inside the publish entry point.
 - Client: FTClient's thin SwiftUI update panel delegates discovery, EdDSA
@@ -49,6 +67,16 @@ through its registered URL scheme; FTClient then delegates to Sparkle:
 factortester client app-update check
 factortester client app-update download
 factortester client app-update restart
+```
+
+`check` and `download` wait for FTClient/Sparkle to report their result when
+given `--wait`; `restart` asks Sparkle to install the prepared update. A
+typical local Beta acceptance sequence is:
+
+```bash
+factortester client app-update check --wait 30 --json
+factortester client app-update download --wait 600 --json
+factortester client app-update restart --json
 ```
 
 The CLI never downloads, mounts, verifies, copies, or replaces the application.
