@@ -85,7 +85,6 @@ struct WebPageView: View {
     @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
     @State private var reloadID = UUID()
-    @State private var showLogin = false
     // Some generic module callers do not own a ClientTabSession. Keep one
     // lightweight WebPageSession at the view boundary so SwiftUI updates do
     // not treat every body refresh as a fresh navigation.
@@ -107,8 +106,6 @@ struct WebPageView: View {
                             activeWebSession.reset()
                             reloadID = UUID()
                         }
-                        Button("登录 / 注册") { showLogin = true }
-                            .buttonStyle(.borderedProminent)
                     }
                 }
                 .padding(30)
@@ -143,13 +140,6 @@ struct WebPageView: View {
                 Text("服务器地址无效，请在设置中修正。")
                     .foregroundStyle(.secondary)
             }
-        }
-        .sheet(isPresented: $showLogin) {
-            LoginView { success in
-                showLogin = false
-                if success { loadError = nil; reloadID = UUID() }
-            }
-            .environmentObject(session)
         }
     }
 
@@ -194,14 +184,22 @@ struct WebPageView: View {
         _ action: ClientWebAuthenticationMessage.Action
     ) {
         switch action {
-        case .open:
-            showLogin = true
         case .logout:
             Task { @MainActor in
                 await session.logout()
                 activeWebSession.reset()
                 loadError = nil
                 reloadID = UUID()
+            }
+        case .sessionUpdated:
+            Task { @MainActor in
+                if let webView = activeWebSession.webView {
+                    await WebSessionCookieSynchronizer.importManagerSession(
+                        from: webView,
+                        endpoint: ManagerConfig.shared.baseURL
+                    )
+                }
+                _ = await session.refresh()
             }
         }
     }
@@ -510,15 +508,19 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webSession?.loadedServicePort = servicePort
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
+        let sessionScript: String
         if !sessionToken.isEmpty,
            let data = try? JSONEncoder().encode(sessionToken),
            let literal = String(data: data, encoding: .utf8) {
-            controller.addUserScript(WKUserScript(
-                source: "localStorage.setItem('ft-session', \(literal));",
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: true
-            ))
+            sessionScript = "localStorage.setItem('ft-session', \(literal));"
+        } else {
+            sessionScript = "localStorage.removeItem('ft-session');"
         }
+        controller.addUserScript(WKUserScript(
+            source: sessionScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         let selectedPort = servicePort.trimmingCharacters(in: .whitespaces)
         if let data = try? JSONEncoder().encode(selectedPort),
            let literal = String(data: data, encoding: .utf8) {

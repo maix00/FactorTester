@@ -172,7 +172,11 @@ final class SessionStoreTests: XCTestCase {
                     password: "secret",
                     serverURL: nil
                 )
-            }
+            },
+            // This fixture represents a private/internal Manager.  The real
+            // default restorer probes the baked public endpoint, which would
+            // make the test depend on the machine's current network.
+            managerDeviceSessionRestorer: { _ in .notRequired }
         )
 
         let succeeded = await store.refresh()

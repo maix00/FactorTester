@@ -23,7 +23,14 @@ struct RootView: View {
                 ClientWebShellView()
             case .manual:
                 ServerSettingsView(isInitialSetup: true) {
-                    state = .ready
+                    Task { @MainActor in
+                        if let endpoint = managerConfig.baseURL {
+                            await authenticateEnrolledPublicDeviceIfNeeded(
+                                at: endpoint
+                            )
+                        }
+                        state = .ready
+                    }
                 }
             }
         }
@@ -45,9 +52,25 @@ struct RootView: View {
         }
         do {
             _ = try await ManagerNetworkInfoService.shared.fetch(endpoint: endpoint)
+            await authenticateEnrolledPublicDeviceIfNeeded(at: endpoint)
             state = .ready
         } catch {
             state = .manual
         }
+    }
+
+    @MainActor
+    private func authenticateEnrolledPublicDeviceIfNeeded(at endpoint: URL) async {
+        guard let host = endpoint.host,
+              !ManagerEndpointPolicy.isPrivateNetwork(host),
+              ManagerDeviceKeyStore.load() != nil else {
+            return
+        }
+        // A missing or revoked device is non-fatal: the Web shell must still
+        // show its public visitor compliance page. A successful challenge
+        // stores the Manager session before WebView creation.
+        _ = try? await ManagerDeviceAuthenticationService.shared.authenticate(
+            endpoint: endpoint
+        )
     }
 }
