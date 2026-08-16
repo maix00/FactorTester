@@ -86,6 +86,9 @@ class CatalogRoutesMixin:
         )
         query = parse_qs(parsed.query, keep_blank_values=True)
         category_ids = normalize_category_selection(query.get("category", []))
+        checkbox = str(query.get("checkbox", [""])[0] or "").lower() in {
+            "1", "true",
+        }
         category_arg = (
             category_ids[0] if len(category_ids) == 1
             else category_ids if category_ids else ""
@@ -175,8 +178,14 @@ class CatalogRoutesMixin:
                     "category_id": category_id,
                     "category_ids": category_ids,
                     "source_ids": list(source_ids),
-                    "tree": self.state.client_state.product_tree(
-                        category_arg, source_ids, principal,
+                    "tree": (
+                        self.state.client_state.product_tree(
+                            category_arg, source_ids, principal,
+                            checkbox_default=True,
+                        )
+                        if checkbox else self.state.client_state.product_tree(
+                            category_arg, source_ids, principal,
+                        )
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":

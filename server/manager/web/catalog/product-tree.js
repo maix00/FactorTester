@@ -114,6 +114,7 @@
       categorySelectionValues(options.selectedCategory, available)
         .filter(categoryID => availableIDs.has(categoryID)),
     );
+    const showCategoryFilter = options.showCategoryFilter !== false;
     const categories = document.createElement("section");
     categories.className = "product-category-filter";
     const toolbar = document.createElement("div");
@@ -210,7 +211,7 @@
       options.categoryMount.replaceChildren(categories);
       mount.replaceChildren(tree);
     } else {
-      mount.replaceChildren(categories, tree);
+      mount.replaceChildren(...(showCategoryFilter ? [categories, tree] : [tree]));
     }
     drawNodes(context, tree, all, options);
   }
@@ -229,8 +230,10 @@
 
   function selectionControl(node, options) {
     if (!options.selectable || node.checkbox === false) return null;
+    if (options.leafOnly && !isLeafPathNode(node)) return null;
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.setAttribute("aria-label", String(node.title || node.name || node.key || ""));
     input.dataset.productPath = node.key;
     input.checked = minimalPaths(options.selectedPaths).includes(node.key);
     input.addEventListener("click", event => event.stopPropagation());
@@ -243,6 +246,14 @@
       options.onSelectionChange?.([...options.selectedPaths]);
     });
     return input;
+  }
+
+  function isLeafPathNode(node) {
+    // A lazy node owns the concrete products for one terminal classifier
+    // path.  It is a selectable path even though its product list opens as a
+    // table; non-lazy folders remain navigation-only nodes.
+    return node?.lazy === true
+      || (!node?.folder && !Array.isArray(node?.children));
   }
 
   function appendNode(context, mount, node, depth, options) {
