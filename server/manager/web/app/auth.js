@@ -19,7 +19,6 @@
     }
 
     function openLogin(message = "") {
-      if (nativeAuthentication("open")) return;
       const dialog = document.querySelector("#login-dialog");
       showAuthForm("login");
       document.querySelector("#login-error").hidden = !message;
@@ -28,12 +27,12 @@
     }
 
     async function logout() {
-      if (nativeAuthentication("logout")) return;
       try { await api("/auth/logout", {method: "POST"}); } catch (_) {}
       localStorage.removeItem("ft-session");
       sessionStorage.removeItem("ft-session");
       state.token = "";
       state.session = null;
+      nativeAuthentication("logout");
       await context.loadModules();
       await FTSettings.show(context.appContext(), "account");
     }
@@ -74,6 +73,7 @@
         const storage = document.querySelector("#keep-login").checked
           ? localStorage : sessionStorage;
         storage.setItem("ft-session", result.token);
+        nativeAuthentication("session-updated");
         document.querySelector("#login-dialog").close();
         await context.loadLanguage();
         await context.loadModules();
@@ -106,6 +106,7 @@
         });
         state.token = result.token; state.session = result;
         localStorage.setItem("ft-session", result.token);
+        nativeAuthentication("session-updated");
         document.querySelector("#login-dialog").close();
         await context.loadLanguage();
         await context.loadModules();

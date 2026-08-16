@@ -26,7 +26,9 @@ Use `--help` at each boundary and `--json` for automation:
 - `research-graph versions|active|set-default` — manage graph activation;
 - `services list|start|stop|restart-api|restart-bundle|force-stop` — control
   Manager-owned FactorTester services;
-- `client release` — publish an authorized FactorTester client release.
+- `client release` — build and publish an authorized FactorTester client release.
+- `client release-upload` — send an already-built signed Beta package to one
+  or more explicit Manager targets through 7998/7997.
 
 Host/container/tunnel/repository transport is deliberately outside this CLI.
 If a server declares operator access in its settings, `server access --json`

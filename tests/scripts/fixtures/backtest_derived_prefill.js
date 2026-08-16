@@ -9,6 +9,7 @@ global.sessionStorage = {
   removeItem: key => values.delete(key),
 };
 global.window = globalThis;
+global.window.location = {search: ""};
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "tests.js",
 });

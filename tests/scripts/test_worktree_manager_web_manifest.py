@@ -1039,8 +1039,8 @@ def test_embedded_authentication_uses_the_native_session_store() -> None:
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
 
     assert "factorTesterAuthentication" in auth
-    assert 'nativeAuthentication("open")' in auth
     assert 'nativeAuthentication("logout")' in auth
+    assert 'nativeAuthentication("session-updated")' in auth
 
 
 def test_route_dispatch_contract() -> None:

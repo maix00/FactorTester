@@ -4,12 +4,14 @@ import XCTest
 final class ClientWebAuthenticationMessageTests: XCTestCase {
     func testAcceptsOnlyDeclaredNativeAuthenticationActions() {
         XCTAssertEqual(
-            ClientWebAuthenticationMessage.action(from: ["action": "open"]),
-            .open
-        )
-        XCTAssertEqual(
             ClientWebAuthenticationMessage.action(from: ["action": "logout"]),
             .logout
+        )
+        XCTAssertEqual(
+            ClientWebAuthenticationMessage.action(
+                from: ["action": "session-updated"]
+            ),
+            .sessionUpdated
         )
         XCTAssertNil(
             ClientWebAuthenticationMessage.action(

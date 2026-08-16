@@ -31,14 +31,16 @@ enum ClientCLIResolution {
             configuredPath: defaults.string(
                 forKey: "client.release.managerCLIPath"
             ),
-            isExecutable: fileManager.isExecutableFile(atPath:)
+            isExecutable: fileManager.isExecutableFile(atPath:),
+            fallback: "factortester-manager"
         )
     }
 
     static func resolve(
         bundledPath: String?,
         configuredPath: String?,
-        isExecutable: (String) -> Bool
+        isExecutable: (String) -> Bool,
+        fallback: String = "factortester"
     ) -> String {
         if let bundledPath, isExecutable(bundledPath) {
             return bundledPath
@@ -46,6 +48,6 @@ enum ClientCLIResolution {
         if let configuredPath, !configuredPath.isEmpty {
             return configuredPath
         }
-        return "factortester"
+        return fallback
     }
 }

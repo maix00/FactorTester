@@ -68,6 +68,8 @@ class WriteRoutesMixin:
         if parsed.path == "/api/device/authorization":
             self._device_authorization_create()
             return
+        if self._issue_client_release_upload_access(parsed):
+            return
         if parsed.path == "/api/devices/enroll":
             self._device_enroll()
             return

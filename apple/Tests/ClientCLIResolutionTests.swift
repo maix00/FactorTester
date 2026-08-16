@@ -40,7 +40,8 @@ final class ClientCLIResolutionTests: XCTestCase {
         let fallback = ClientCLIResolution.resolve(
             bundledPath: "/missing/factortester-manager",
             configuredPath: nil,
-            isExecutable: { _ in false }
+            isExecutable: { _ in false },
+            fallback: "factortester-manager"
         )
         XCTAssertEqual(fallback, "factortester-manager")
     }

@@ -18,6 +18,13 @@ from tests.release.test_release_manifest import signed_manifest
 from tools.cli.release.update_channel import ValidatedUpdateManifest
 
 
+def test_beta_release_upload_only_skips_network_failures() -> None:
+    assert commands._release_target_offline(ConnectionError("refused"))
+    assert commands._release_target_offline(TimeoutError("timed out"))
+    assert not commands._release_target_offline(FileNotFoundError("local package"))
+    assert not commands._release_target_offline(ValueError("bad manifest"))
+
+
 def test_client_bootstrap_dry_run_is_machine_readable_and_read_only(
     tmp_path: Path,
     monkeypatch,
