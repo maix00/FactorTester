@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -9,6 +10,13 @@ PACKAGED_SKILL = (
     ROOT
     / "tools/cli/agent-harness/cli_anything/factortester_research/skills/SKILL.md"
 )
+HARNESS_SOURCE = ROOT / "tools/cli/agent-harness"
+
+# The repository test suite exercises both release wheels, but GTHT is
+# deliberately not a FactorTester runtime.  Make the source-only Harness
+# available to tests without installing either wheel into that environment.
+if str(HARNESS_SOURCE) not in sys.path:
+    sys.path.insert(0, str(HARNESS_SOURCE))
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

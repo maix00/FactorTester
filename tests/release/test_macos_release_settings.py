@@ -42,9 +42,13 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert 'pendingExternalAction = action' in controller
     assert 'case "download"' in controller
     assert "ClientWebShellView()" in root
-    assert "ClientWebShellToolbar" in web_shell
-    assert "client-shell.update-restart" in web_shell
-    assert "client-shell.update-download" in web_shell
+    assert "ClientWebShellToolbar" not in web_shell
+    assert ".toolbar" not in web_shell
+    web_page = (SOURCES / "Features" / "Web" / "WebPageView.swift").read_text(
+        encoding="utf-8"
+    )
+    assert 'X-FactorTester-Client-Access' in web_page
+    assert '"ftclient"' in web_page
     assert "approval" not in view.lower()
     assert 'Window("FTClient", id: "main")' in app
     assert "WindowGroup" in app
@@ -420,7 +424,8 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     assert "个人中心" not in tab_model
     assert "ClientWebShellView()" in root
     assert "WebPageView(" in web_shell
-    assert "LocalProfileController()" in web_shell
+    assert "LocalProfileController()" not in web_shell
+    assert "ClientSettingsHub" not in web_shell
     assert "case .profiles:" in tab_view
     assert "case .accountSettings:" in tab_view
     assert "List(controller.profiles)" in directory

@@ -11,6 +11,7 @@ import zipfile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ROOT = REPO_ROOT / "tools" / "cli" / "agent-harness"
+CLIENT_ROOT = REPO_ROOT / "tools" / "cli"
 PACKAGE_ROOT = "cli_anything/factortester_research/"
 
 
@@ -44,6 +45,41 @@ def _build_wheel(output_dir: Path) -> Path:
         text=True,
     )
     wheels = list(output_dir.glob("*.whl"))
+    assert len(wheels) == 1
+    return wheels[0]
+
+
+def _build_client_wheel(output_dir: Path) -> Path:
+    source_dir = output_dir / "client-source"
+    shutil.copytree(
+        CLIENT_ROOT,
+        source_dir,
+        ignore=shutil.ignore_patterns(
+            "agent-harness",
+            "build",
+            "dist",
+            "*.egg-info",
+            "__pycache__",
+            "*.pyc",
+        ),
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--no-cache-dir",
+            "--wheel-dir",
+            str(output_dir),
+            str(source_dir),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheels = list(output_dir.glob("factortester-*.whl"))
     assert len(wheels) == 1
     return wheels[0]
 
@@ -94,6 +130,7 @@ def test_harness_wheel_is_relocatable_release_artifact(tmp_path: Path) -> None:
 
 def test_built_harness_runs_from_outside_repository(tmp_path: Path) -> None:
     wheel = _build_wheel(tmp_path)
+    client_wheel = _build_client_wheel(tmp_path)
     install_root = tmp_path / "installed"
     subprocess.run(
         [
@@ -104,6 +141,7 @@ def test_built_harness_runs_from_outside_repository(tmp_path: Path) -> None:
             "--no-deps",
             "--target",
             str(install_root),
+            str(client_wheel),
             str(wheel),
         ],
         check=True,
