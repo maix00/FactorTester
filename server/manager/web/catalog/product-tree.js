@@ -75,14 +75,11 @@
     const selected = options.selectedCategory || "";
     const categories = document.createElement("section");
     categories.className = "product-category-filter";
-    const heading = document.createElement("div");
-    heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("产品分类")}</h2><p>${context.t("选择一个分类；新增分类和乘积分类请到产品分类选项卡管理")}</p></div>`;
-    const save = FTUI.actionButton(context.t("应用分类"), null, {
-      variant: "primary",
-    });
-    categories.append(heading);
-
+    const toolbar = document.createElement("div");
+    toolbar.className = "product-category-toolbar";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("产品分类");
+    toolbar.append(heading);
     const controls = document.createElement("div");
     controls.className = "product-category-controls";
     const label = document.createElement("label");
@@ -102,23 +99,19 @@
     available.forEach(item => appendChoice(item, selected === item.id));
     label.append(select);
     controls.append(label);
-    categories.append(controls);
-
-    const actions = document.createElement("div");
-    actions.className = "product-category-actions";
-    actions.append(save);
-    categories.append(actions);
+    toolbar.append(controls);
+    categories.append(toolbar);
 
     const tree = document.createElement("div");
     tree.className = "product-tree";
-    save.addEventListener("click", async () => {
+    select.addEventListener("change", async () => {
       const nextID = select.value || "";
-      save.disabled = true;
+      select.disabled = true;
       try {
         await options.onSave?.(nextID);
       } catch (error) {
         context.showNotice?.(error.message || context.t("产品树读取失败"), true);
-      } finally { save.disabled = false; }
+      } finally { select.disabled = false; }
     });
     if (options.categoryMount && options.categoryMount !== mount) {
       options.categoryMount.replaceChildren(categories);
