@@ -1609,6 +1609,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/tab-view-cache.js") as response:
+            tab_view_cache = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
             tests = response.read().decode("utf-8")
 
@@ -1617,6 +1619,11 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function closeTab" in tabs
     assert "function renderOpenedTabs" in tabs
     assert "forceNew: true" in tabs
+    assert "activeTabHasOverlay" in tabs
+    assert "markActiveViewReady" in research
+    assert "sessionStorage" in tab_view_cache
+    assert "activeTabHasOverlay" in tab_view_cache
+    assert "viewReady" in tab_view_cache
     assert "window.FTAppRuntime" in runtime
     assert "Object.freeze" in runtime
     assert "FTAppRuntime.create()" in research

@@ -31,6 +31,10 @@ global.window = {scrollY: 0};
 global.FTIcons = {node: () => element(), module: () => "shippingbox"};
 
 vm.runInThisContext(
+  fs.readFileSync("server/manager/web/app/tab-view-cache.js", "utf8"),
+  {filename: "tab-view-cache.js"},
+);
+vm.runInThisContext(
   fs.readFileSync("server/manager/web/app/tabs.js", "utf8"),
   {filename: "tabs.js"},
 );
