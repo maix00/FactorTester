@@ -32,7 +32,7 @@
       "icon": "📈",
       "sfSymbol": "chart.line.uptrend.xyaxis",
       "path": "/products",
-      "requiresAuth": true,
+      "requiresAuth": false,
       "roles": []
     },
     {

@@ -7,6 +7,11 @@ import os
 
 from flask import Flask, request, session
 
+from server.manager.http.visitor_access import (
+    VISITOR_PRINCIPAL_PREFIX,
+    normalize_visitor_id,
+    visitor_principal,
+)
 from tools.data.account_manage import accounts_lock, load_accounts
 
 
@@ -25,6 +30,20 @@ def install_manager_gateway_auth(app: Flask) -> None:
             return
         if owner == "__public_jobs__":
             session["manager_gateway_public_jobs"] = True
+            return
+        if owner.startswith(VISITOR_PRINCIPAL_PREFIX):
+            visitor_id = normalize_visitor_id(
+                owner.removeprefix(VISITOR_PRINCIPAL_PREFIX)
+            )
+            if not visitor_id or owner != visitor_principal(visitor_id):
+                return
+            # A visitor owner is constructed by the Manager from an
+            # origin-bound visitor session.  The service still receives the
+            # owner through the existing Manager capability channel, but it
+            # can only be a UUID namespace, never an account principal.
+            session["username"] = owner
+            session["manager_gateway_public_jobs"] = True
+            session["manager_gateway_visitor_id"] = visitor_id
             return
         if owner == "__public_graph__":
             session["manager_gateway_public_graph"] = True

@@ -34,11 +34,44 @@
 
   function renderFamilies(context, data, mount, query) {
     const rows = data.families.filter(item => model().matches(item, query));
+    const publicRows = rows.filter(item => familyKind(item) === "public");
+    const privateRows = rows.filter(item => familyKind(item) !== "public");
+    const sections = document.createElement("div");
+    sections.className = "factor-family-lists";
+    const groups = data.visitor
+      ? [["public", publicRows]]
+      : [["public", publicRows], ["private", privateRows]];
+    groups.forEach(([kind, values]) => sections.append(
+      familySection(context, kind, values),
+    ));
+    mount.replaceChildren(sections);
+  }
+
+  function familyKind(value) {
+    const kind = String(
+      value?.factor_kind || value?.source || "",
+    ).trim().toLowerCase();
+    if (kind === "public") return "public";
+    if (String(value?.owner_username || "") === "__public_jobs__") {
+      return "public";
+    }
+    return "private";
+  }
+
+  function familySection(context, kind, rows) {
+    const section = document.createElement("section");
+    section.className = `factor-family-section ${kind}`;
+    const heading = document.createElement("h2");
+    heading.textContent = context.t(
+      kind === "public" ? "公共因子" : "我的私有因子",
+    );
+    section.append(heading);
     if (!rows.length) {
-      mount.replaceChildren(FTUI.empty(
-        context.t("没有匹配的因子家族"), context.t("请更换关键词"),
+      section.append(FTUI.empty(
+        context.t(kind === "public" ? "暂无公共因子家族" : "暂无私有因子家族"),
+        context.t("没有匹配的因子家族"),
       ));
-      return;
+      return section;
     }
     const view = FTUI.table(
       [context.t("原类名"), context.t("说明"), context.t("分类"), context.t("来源"), context.t("所有者"), context.t("因子数")],
@@ -54,7 +87,8 @@
     linkRows(view, rows, item =>
       `/factors/family/${encodeURIComponent(item.family_ref)}`, context,
     );
-    mount.replaceChildren(view.shell);
+    section.append(view.shell);
+    return section;
   }
 
   function renderSubjects(context, data, mount, {page, query, groupRef}) {

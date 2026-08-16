@@ -245,10 +245,7 @@
   // downloading the complete IC/backtest/catalog implementation just to
   // discover that the handler will return "登录后继续".
   const protectedRouteKinds = new Set([
-    "ic-test", "backtest", "factor-series", "test-template",
-    "factor-families", "factor-sets", "factor-family", "factor",
-    "factor-set", "factors", "product-group", "product",
-    "product-reference", "product-sources", "product-groups", "product-categories", "products",
+    "factor-sets", "factor-set",
     "profile", "profiles", "manager",
   ]);
 

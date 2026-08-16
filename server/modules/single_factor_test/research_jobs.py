@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 
-from flask import jsonify, request
+from flask import jsonify, request, session
 import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
@@ -89,6 +89,8 @@ from tools.testers.backtest.modules.margin_budget_impl.observability import (
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
 _TASK_NAME_LIMIT = 160
 _PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_VISITOR_MAX_JOBS = 20
+_VISITOR_STORAGE_QUOTA_BYTES = 256 * 1024 * 1024
 
 
 def _normalise_task_name(value: object) -> str:
@@ -1004,9 +1006,23 @@ def submit_research_run():
     data = request.get_json(silent=True) or {}
     owner = require_user()
     repository = JobRepository()
-    quota = repository.storage_quota(
-        owner=owner, default_bytes=default_user_quota_bytes()
+    visitor_gateway = bool(session.get("manager_gateway_visitor_id"))
+    if visitor_gateway and repository.count_with_metadata(owner=owner) >= _VISITOR_MAX_JOBS:
+        return jsonify({
+            "success": False,
+            "error": "访客模式最多保留 20 个测试任务",
+            "code": "visitor_job_limit_exceeded",
+            "limit": _VISITOR_MAX_JOBS,
+        }), 429
+    default_quota = (
+        _VISITOR_STORAGE_QUOTA_BYTES
+        if visitor_gateway else default_user_quota_bytes()
     )
+    quota = repository.storage_quota(
+        owner=owner, default_bytes=default_quota,
+    )
+    if visitor_gateway:
+        quota = min(quota, _VISITOR_STORAGE_QUOTA_BYTES)
     usage = repository.storage_usage(owner=owner)
     if usage > quota:
         return jsonify({

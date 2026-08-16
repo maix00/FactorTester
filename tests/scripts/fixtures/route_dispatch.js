@@ -54,9 +54,8 @@ const dispatch = window.FTAppRouteDispatch.create({
   await dispatch.render({
     kind: "factor-series", factorRef: "factor:v1:roc", groupRef: "product-group:night",
   }, 4);
-  assert.deepEqual(calls.slice(-4), [
-    "nav:factors", "heading:因子序列", "auth",
-    "factor-series:4:factor:v1:roc:product-group:night",
+  assert.deepEqual(calls.slice(-3), [
+    "nav:factors", "heading:因子序列", "factor-series:4:factor:v1:roc:product-group:night",
   ]);
 
   loggedIn = false;
@@ -77,14 +76,14 @@ const dispatch = window.FTAppRouteDispatch.create({
   await dispatch.render({kind: "factors"}, 9);
   assert.deepEqual(
     calls.slice(-3),
-    ["nav:factors", "heading:因子库", "auth"],
-    "a protected route must establish its own shell before showing login",
+    ["nav:factors", "heading:因子库", "factors:9"],
+    "public visitors must be able to browse the factor catalog",
   );
   await dispatch.render({kind: "products"}, 10);
   assert.deepEqual(
     calls.slice(-3),
-    ["nav:products", "heading:产品", "auth"],
-    "switching protected routes must not retain the previous page header",
+    ["nav:products", "heading:产品", "products:10"],
+    "public visitors must be able to browse the product catalog",
   );
   console.log("ok");
 })().catch(error => {

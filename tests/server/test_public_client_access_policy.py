@@ -9,6 +9,10 @@ from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from server.manager import runtime as manager
+from server.manager.http.visitor_access import (
+    VisitorAccessStore,
+    visitor_principal,
+)
 
 
 @contextmanager
@@ -41,6 +45,21 @@ def _headers(*, cookie: str = "", client: bool = False) -> dict[str, str]:
     if client:
         value["X-FactorTester-Client-Access"] = "ftclient"
     return value
+
+
+def test_visitor_access_uses_distinct_uuid_owner_namespaces() -> None:
+    store = VisitorAccessStore()
+    first = store.issue_session("https://101.133.144.27:7998")
+    second = store.issue_session("https://101.133.144.27:7998")
+    first_id = store.visitor_id_for_session(
+        first, target_origin="https://101.133.144.27:7998",
+    )
+    second_id = store.visitor_id_for_session(
+        second, target_origin="https://101.133.144.27:7998",
+    )
+    assert first_id and second_id and first_id != second_id
+    assert visitor_principal(first_id).endswith(first_id)
+    assert visitor_principal(second_id).endswith(second_id)
 
 
 def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(

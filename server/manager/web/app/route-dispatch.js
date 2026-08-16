@@ -8,7 +8,7 @@
     const guarded = (pageContext, shell, handler, ...args) => {
       pageContext.activeNav?.(shell.nav || "");
       pageContext.setHeading?.(t(shell.title));
-      if (requireLogin()) return undefined;
+      if (!shell.allowVisitor && requireLogin()) return undefined;
       return handler?.(pageContext, ...args);
     };
 
@@ -46,57 +46,57 @@
           jobsContext(routeToken), route.port, route.id, route.inputName, route.serverID,
         );
         case "ic-test": return guarded(
-          context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,
+          context(routeToken), {nav: "", title: "IC 测试", allowVisitor: true}, pages.icTest,
         );
         case "backtest": return guarded(
-          context(routeToken), {nav: "", title: "回测"}, pages.backtest,
+          context(routeToken), {nav: "", title: "回测", allowVisitor: true}, pages.backtest,
         );
         case "factor-series": return guarded(
-          context(routeToken), {nav: "factors", title: "因子序列"},
+          context(routeToken), {nav: "factors", title: "因子序列", allowVisitor: true},
           pages.factorSeries, route.factorRef, route.groupRef,
         );
         case "test-template": return guarded(
-          context(routeToken), {nav: "", title: "测试模板"}, pages.testTemplate, route.id,
+          context(routeToken), {nav: "", title: "测试模板", allowVisitor: true}, pages.testTemplate, route.id,
         );
         case "factor-families": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorFamilies, route,
+          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factorFamilies, route,
         );
         case "factor-sets": return guarded(
           context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSets, route,
         );
         case "factor-family": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorFamily, route.id,
+          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factorFamily, route.id,
         );
         case "factor": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库"}, pages.factor, route.id,
+          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factor, route.id,
         );
         case "factor-set": return guarded(
           context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSet, route.id,
         );
         case "factors": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库"}, pages.factors,
+          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factors,
         );
         case "product-group": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.productGroup, route.id,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroup, route.id,
         );
         case "product": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.product, route.id,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.product, route.id,
         );
         case "product-reference": return guarded(
-          context(routeToken), {nav: "products", title: "产品"},
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true},
           pages.productReference, route.referenceKind, route.id,
         );
         case "product-sources": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.productSources, route,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productSources, route,
         );
         case "product-groups": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.productGroups, route,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroups, route,
         );
         case "product-categories": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.productCategories, route,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productCategories, route,
         );
         case "products": return guarded(
-          context(routeToken), {nav: "products", title: "产品"}, pages.products,
+          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.products,
         );
         case "profile": return guarded(
           context(routeToken), {nav: "research", title: "研究身份"}, pages.profile, route.id,
