@@ -33,7 +33,7 @@
       panel.className = ["tab-chip-content-panel", item.panelClass || ""]
         .filter(Boolean).join(" ");
       panel.hidden = true;
-      button.addEventListener("click", () => activate(item.key));
+      button.addEventListener("click", () => toggle(item.key));
       bar.append(button); host.append(panel);
       entries.set(item.key, {button, panel, item, loaded: false});
     }
@@ -56,9 +56,12 @@
       bar.append(actionHost);
     }
 
+    let activeKey = null;
+
     function activate(requestedKey, notify = true) {
       const key = entries.has(requestedKey) ? requestedKey : items[0]?.key;
       if (!key) return "";
+      activeKey = key;
       for (const [entryKey, entry] of entries) {
         const active = entryKey === key;
         entry.button.classList.toggle("active", active);
@@ -75,8 +78,35 @@
       return key;
     }
 
-    const activeKey = activate(options.activeKey, false);
-    return Object.freeze({bar, host, activate, activeKey, entries});
+    function close(requestedKey = activeKey, notify = true) {
+      if (!requestedKey || activeKey !== requestedKey) return false;
+      activeKey = null;
+      for (const entry of entries.values()) {
+        entry.button.classList.toggle("active", false);
+        entry.panel.hidden = true;
+      }
+      if (notify) options.onActivate?.(null);
+      return true;
+    }
+
+    function toggle(requestedKey, notify = true) {
+      const key = entries.has(requestedKey) ? requestedKey : items[0]?.key;
+      if (!key) return null;
+      if (activeKey === key) {
+        close(key, notify);
+        return null;
+      }
+      return activate(key, notify);
+    }
+
+    // `null` is an intentional closed state.  Other callers may omit the
+    // initial key and still get the first tab as before.
+    if (options.activeKey !== null) activate(options.activeKey, false);
+    return Object.freeze({
+      bar, host, activate, close, toggle,
+      get activeKey() { return activeKey; },
+      entries,
+    });
   }
 
   window.FTTabChipContent = Object.freeze({create});

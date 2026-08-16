@@ -124,14 +124,33 @@ const factorGroup = chipRow.children.find(item => item.className === "backend-se
 assert.ok(factorGroup, "tab-based chip group should be present");
 const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(factorChip.children[1].textContent, "ROC 1m");
-factorChip.listeners.click();
-assert.equal(opened, "factor");
-
 const host = first.children[2];
 assert.equal(host.children[1].children.length, 0,
   "inactive settings tabs should not render their content on first load");
 assert.equal(host.children[2].children.length, 0,
   "the settings manager should be lazy until its tab is opened");
+first.children[0].children[1].listeners.click();
+factorChip.listeners.click();
+assert.equal(opened, "factor");
+assert.equal(host.children[0].hidden, false,
+  "clicking a chip for an inactive tab should open its content");
+factorChip.listeners.click();
+assert.equal(host.children[0].hidden, true,
+  "clicking the active chip should collapse its tab content");
+first.children[0].children[0].listeners.click();
+assert.equal(host.children[0].hidden, false,
+  "clicking a collapsed tab should reopen its content");
+first.children[0].children[0].listeners.click();
+assert.equal(host.children[0].hidden, true,
+  "clicking the active tab again should collapse its content");
+const closed = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
+  t: value => value,
+}, {
+  activeTab: null, mountedTabs: ["factor", "time"],
+  chipSources: {factorAlias: ["ROC 1m"]}, lazyState: () => ({status: "ready"}),
+});
+assert.equal(closed.children[2].children[0].hidden, true,
+  "an explicit closed tab state should stay closed after settings rerender");
 const manageButton = first.children[0].children[first.children[0].children.length - 1];
 manageButton.listeners.click();
 const managePanel = host.children[host.children.length - 1];

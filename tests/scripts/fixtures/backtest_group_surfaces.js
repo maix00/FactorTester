@@ -117,6 +117,19 @@ const context = {
 };
 
 let root = window.FTBacktestGroups.render(context, state, () => { refreshCount += 1; });
+const tabButton = find(root, node => node.className.includes("tab-chip-button"));
+assert.ok(tabButton, "surface tabs should be rendered by the shared tab component");
+tabButton.listeners.click();
+assert.equal(state.backtestGroupSurfaceKey, null,
+  "clicking the active surface tab should close its content");
+root = window.FTBacktestGroups.render(context, state, () => { refreshCount += 1; });
+const closedHost = find(root, node => node.className.includes("backtest-group-host"));
+assert.equal(closedHost.children[0].hidden, true,
+  "a closed surface tab must stay closed after its parent rerenders");
+const reopenedButton = find(root, node => node.className.includes("tab-chip-button"));
+reopenedButton.listeners.click();
+assert.equal(state.backtestGroupSurfaceKey, "arbitrary-book",
+  "clicking a closed surface tab should reopen its content");
 let selection = find(root, node => node.tagName === "input");
 assert.equal(selection.type, "radio", "backend single-selection controls the input type");
 selection.checked = true;

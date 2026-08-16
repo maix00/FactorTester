@@ -79,8 +79,10 @@
       label: context.t("+ 设置"),
       render: () => settingsManager(manifest, available, mounted, values, context, options),
     });
-    const activeKey = items.some(item => item.key === options.activeTab)
-      ? options.activeTab : items[0]?.key;
+    const activeKey = options.activeTab === null
+      ? null
+      : (items.some(item => item.key === options.activeTab)
+        ? options.activeTab : items[0]?.key);
     tabset = FTTabChipContent.create({
       items, context, activeKey,
       onActivate: key => options.onTabChange?.(key),
@@ -99,7 +101,7 @@
         extraDescriptors: options.extraChips || [],
         groupBy: "tab",
         onOpen: tabKey => {
-          if (tabset?.entries.has(tabKey)) tabset.activate(tabKey);
+          if (tabset?.entries.has(tabKey)) tabset.toggle(tabKey);
           else options.onChipOpen?.(tabKey);
         },
       });

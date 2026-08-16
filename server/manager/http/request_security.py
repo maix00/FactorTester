@@ -36,6 +36,11 @@ MANAGER_ACTION_PATHS = frozenset({
     "/restart-api",
     "/restart-bundle",
     "/force-stop",
+    # A public Manager keeps this control-plane route behind the same
+    # loopback/capability boundary as the other operator actions.  Without
+    # listing it here, the public login gate rejects the Manager capability
+    # before the release route can issue its short-lived 7997 upload ticket.
+    "/api/client/releases/beta/upload-access",
 })
 
 CLIENT_ACCESS_HEADER = "X-FactorTester-Client-Access"

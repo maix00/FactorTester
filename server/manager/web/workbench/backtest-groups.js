@@ -42,9 +42,11 @@
         context.t("暂无策略组设置"), context.t("后端没有为该测试注册策略组 surface"),
       );
     }
-    const active = available.find(item => item.key === state.backtestGroupSurfaceKey)
-      || available[0];
-    state.backtestGroupSurfaceKey = active.key;
+    const collapsed = state.backtestGroupSurfaceKey === null;
+    const active = collapsed
+      ? null
+      : (available.find(item => item.key === state.backtestGroupSurfaceKey) || available[0]);
+    if (active) state.backtestGroupSurfaceKey = active.key;
     const items = available.map(surface => ({
       key: surface.key,
       label: context.t(surface.label || surface.key),
@@ -66,9 +68,10 @@
       open: state.backtestGroupsOpen !== false,
       onToggle: open => { state.backtestGroupsOpen = open; },
       items,
-      activeKey: active.key,
+      activeKey: collapsed ? null : active?.key,
       actionsFor: surfaceKey => {
-        const surface = available.find(item => item.key === surfaceKey) || active;
+        const surface = available.find(item => item.key === surfaceKey) || active || available[0];
+        if (!surface) return [];
         const selected = adapterFor(surface).selected(state);
         return flows(state, surface.key).map(flow => ({
           label: context.t(flow.label),
