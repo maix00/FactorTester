@@ -948,6 +948,8 @@ class ClientStateService:
         category_id: str | list[str] | tuple[str, ...] | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
         principal: str = "",
+        *,
+        checkbox_default: bool = False,
     ) -> list[dict[str, Any]]:
         """Render a Manager-owned product tree without a service port."""
         from server.modules.products.product_category_views import (
@@ -956,6 +958,7 @@ class ClientStateService:
 
         return render_product_tree(
             category_id, principal=principal, source_ids=source_ids,
+            checkbox_default=checkbox_default,
         )
 
     @staticmethod

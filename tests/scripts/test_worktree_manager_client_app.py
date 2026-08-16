@@ -2821,6 +2821,28 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 
+def test_manager_product_catalog_can_request_selectable_tree_nodes(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    calls = []
+
+    def product_tree(category, source_ids, principal, *, checkbox_default=False):
+        calls.append((category, list(source_ids), principal, checkbox_default))
+        return [{"title": "Product", "checkbox": checkbox_default}]
+
+    monkeypatch.setattr(state.client_state, "product_tree", product_tree)
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/tree?checkbox=1", headers=headers,
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["tree"] == [{"title": "Product", "checkbox": True}]
+    assert calls == [("", ["Local"], "user@1", True)]
+
+
 def test_server_catalog_has_no_client_local_projection_contract() -> None:
     from server.services.product_catalog_projection import (
         catalog_product_records,
@@ -2969,6 +2991,8 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             table_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-categories.js") as response:
             categories = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-create.js") as response:
+            create_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
@@ -2987,6 +3011,9 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "product-category-selection-note" in script
     assert 'labels.join("、")' in script
     assert "summary.title" in script
+    assert "showCategoryFilter" in script
+    assert "leafOnly" in script
+    assert "isLeafPathNode" in script
     assert 'select.addEventListener("change"' not in script
     assert "应用分类" in script
     assert "product-category-actions" not in script
@@ -2999,7 +3026,13 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "window.FTProductCategories" in categories
     assert '"新增分类"' in categories
     assert '"新增乘积分类"' in categories
-    assert "split(/\\r?\\n/)" in categories
+    assert "FTProductCategoryCreate.open" in categories
+    assert "split(/\\r?\\n/)" in create_script
+    assert "从产品树选择" in create_script
+    assert "loadProductTree" in create_script
+    assert "leafOnly: true" in create_script
+    assert "product-category-create-layout" in create_script
+    assert "DELETE" in categories
     assert "window.FTProductCategoryOverlay" in overlay
     assert "创建乘积分类" in overlay
     assert "选择两个已有分类" in overlay

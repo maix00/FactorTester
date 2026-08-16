@@ -177,12 +177,34 @@
     return treeCache.get(key);
   }
 
+  async function loadProductTree(context, source = "server") {
+    const sourceDefinitions = await loadSources(context, source);
+    const sourceIDs = FTProductCategoryModel.availableSourceIDs(sourceDefinitions);
+    const tree = await loadTree(context, source, [], sourceIDs);
+    const endpoint = source === "local"
+      ? "/api/client/contract_tree" : "/api/catalog/contract-tree";
+    return {
+      tree,
+      source,
+      sourceIDs,
+      contractTreePath: (path, params = {}) => {
+        const query = new URLSearchParams({path});
+        sourceIDs.forEach(value => query.append("data_source", value));
+        if (params.query) query.set("query", params.query);
+        if (params.page) query.set("page", String(params.page));
+        if (params.limit) query.set("limit", String(params.limit));
+        return `${endpoint}?${query}`;
+      },
+    };
+  }
+
   async function list(context, page = "products") {
     const source = sourceOf();
     if (page === "categories") {
       return window.FTProductCategories.list(context, {
         localCatalogAvailable, sourceOf, pathFor, catalogSwitch,
-        loadCategories, sourceSummary, isCurrent: () => isCurrent(context),
+        loadCategories, loadProductTree, sourceSummary,
+        isCurrent: () => isCurrent(context),
       });
     }
     context.activeNav("products");
@@ -412,7 +434,8 @@
 
   function detailHelpers() {
     return {
-      sourceOf, load, loadCategories, catalogSwitch, sourceSummary, pathFor,
+      sourceOf, load, loadCategories, loadProductTree, catalogSwitch,
+      sourceSummary, pathFor,
       isCurrent,
     };
   }
