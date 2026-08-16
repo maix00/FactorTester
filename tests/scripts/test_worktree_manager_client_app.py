@@ -2615,6 +2615,8 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'Manager 提供的产品、合约与行情目录' not in source_script
     assert 'categoryPayload.default_category_id' not in script
     assert 'localStorage.getItem(categoryStorageKey) || ""' in script
+    assert "FTProductTree.categorySelectionValues" in script
+    assert 'query.append("category", value)' in script
     assert 'product-source-tabs' not in script
     assert '/api/catalog/categories' in script
     assert 'servicePath("/api/product_tree")' not in script
@@ -2791,6 +2793,31 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         not any(path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES)
         for path in product_reads
     )
+
+
+def test_manager_product_catalog_passes_parallel_category_selection(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    calls = []
+
+    def product_tree(category, source_ids, principal):
+        calls.append((category, list(source_ids), principal))
+        return [{"title": "日夜盘"}, {"title": "行业"}]
+
+    monkeypatch.setattr(state.client_state, "product_tree", product_tree)
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/tree?category=day_night"
+            "&category=sector",
+            headers=headers,
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["category_ids"] == ["day_night", "sector"]
+    assert value["tree"] == [{"title": "日夜盘"}, {"title": "行业"}]
+    assert calls[0][0] == ["day_night", "sector"]
     assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 

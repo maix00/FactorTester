@@ -15,13 +15,15 @@ from flask import jsonify, request
 from server.modules.shared.price_services import (
     available_product_categories,
     cached_contracts,
-    cached_product_tree,
-    cached_product_tree_for_category,
     cached_products,
     contract_has_data,
     find_product,
-    normalize_product_category_id,
     product_public_fields,
+)
+from server.modules.products.product_category_views import (
+    normalize_category_selection,
+    render_product_tree,
+    tree_for_path,
 )
 from server.services.product_catalog_projection import product_source_descriptors
 from server.services.product_market_data import (
@@ -29,7 +31,7 @@ from server.services.product_market_data import (
     contract_listing,
     price_series,
 )
-from server.services.product_tree import convert_to_fancytree, find_node_by_path
+from server.services.product_tree import find_node_by_path
 
 from . import shared_bp
 
@@ -75,21 +77,13 @@ def list_product_names():
 def get_product_tree():
     """Return the product category tree in Fancytree format."""
     try:
-        requested = str(request.args.get("category") or "").strip()
-        category_tree = (
-            cached_product_tree()
-            if not requested
-            else cached_product_tree_for_category(
-                normalize_product_category_id(requested),
-            )
+        category_ids = normalize_category_selection(
+            request.args.getlist("category"),
         )
         checkbox = str(request.args.get("checkbox") or "").lower() in {
             "1", "true",
         }
-        return jsonify(convert_to_fancytree(
-            category_tree.tree,
-            checkbox_default=checkbox,
-        ))
+        return jsonify(render_product_tree(category_ids, checkbox_default=checkbox))
     except Exception as error:
         return _unexpected_error(error)
 
@@ -130,16 +124,12 @@ def get_contract_tree():
     """Return contract-level lazy nodes for the selected tree path."""
     try:
         path = request.args.get("path")
-        requested = str(request.args.get("category") or "").strip()
-        tree = (
-            cached_product_tree()
-            if not requested
-            else cached_product_tree_for_category(
-                normalize_product_category_id(requested),
-            )
-        ).tree
         if path:
             node_path = path[:-10] if path.endswith("/_products") else path
+            tree, node_path = tree_for_path(
+                node_path,
+                normalize_category_selection(request.args.getlist("category")),
+            )
             node = find_node_by_path(tree, node_path.split("/"))
             contracts = (
                 node.get("$OBJECTS$", [])

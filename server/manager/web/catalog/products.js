@@ -160,12 +160,14 @@
     return Array.isArray(value.sources) ? value.sources : [];
   }
 
-  async function loadTree(context, source, categoryID, dataSourceIDs) {
+  async function loadTree(context, source, categoryIDs, dataSourceIDs) {
+    const categories = Array.isArray(categoryIDs) ? categoryIDs : [];
     const sourceKey = (dataSourceIDs || []).join(",") || "all";
-    const key = `${source}:${sourceKey}:${categoryID || "all"}`;
+    const categoryKey = categories.join(",") || "all";
+    const key = `${source}:${sourceKey}:${categoryKey}`;
     if (treeCache.has(key)) return treeCache.get(key);
     const query = new URLSearchParams({checkbox: "1"});
-    if (categoryID) query.set("category", categoryID);
+    categories.forEach(value => query.append("category", value));
     (dataSourceIDs || []).forEach(value => query.append("data_source", value));
     const endpoint = source === "local"
       ? `/api/client/product_tree?${query}`
@@ -249,6 +251,16 @@
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       let selected = localStorage.getItem(categoryStorageKey) || "";
+      const selectedIDs = FTProductTree.categorySelectionValues(
+        selected, categoryPayload.categories,
+      );
+      const canonicalSelected = FTProductTree.categorySelectionID(
+        selectedIDs, categoryPayload.categories,
+      );
+      if (canonicalSelected !== selected) {
+        selected = canonicalSelected;
+        localStorage.setItem(categoryStorageKey, selected);
+      }
       const selectedSources = FTProductCategoryModel.availableSourceIDs(
         sourceDefinitions,
       );
@@ -256,11 +268,11 @@
         // No selected Category means the stable classifier-only product tree.
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
-        const tree = await loadTree(context, source, selected, selectedSources);
+        const tree = await loadTree(context, source, selectedIDs, selectedSources);
         if (!isCurrent(context)) return;
         const contractTreePath = (path, params = {}) => {
           const query = new URLSearchParams({path});
-          if (selected) query.set("category", selected);
+          selectedIDs.forEach(value => query.append("category", value));
           selectedSources.forEach(value => query.append("data_source", value));
           if (params.query) query.set("query", params.query);
           if (params.page) query.set("page", String(params.page));
