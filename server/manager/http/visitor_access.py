@@ -7,6 +7,7 @@ import ipaddress
 import secrets
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
@@ -16,16 +17,43 @@ CLIENT_ACCESS_COOKIE = "ft-manager-client-access"
 VISITOR_GRANT_TTL_SECONDS = 300
 VISITOR_SESSION_TTL_SECONDS = 12 * 60 * 60
 CLIENT_ACCESS_TTL_SECONDS = 12 * 60 * 60
+VISITOR_PRINCIPAL_PREFIX = "__public_jobs__:"
+
+
+def normalize_visitor_id(value: object) -> str:
+    """Return a canonical pseudonymous visitor id, or ``""``.
+
+    The id is an owner namespace for bounded anonymous jobs.  It is not an
+    authentication credential and is deliberately limited to UUID values so
+    a caller cannot inject a Manager principal or an account name.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return str(uuid.UUID(raw)).lower()
+    except (AttributeError, ValueError):
+        return ""
+
+
+def visitor_principal(visitor_id: object) -> str:
+    """Map one visitor id to the private owner namespace used by Jobs."""
+    normalized = normalize_visitor_id(visitor_id)
+    return f"{VISITOR_PRINCIPAL_PREFIX}{normalized}" if normalized else "__public_jobs__"
 
 
 @dataclass(frozen=True)
 class VisitorMode:
     """The single anonymous capability set exposed by the public entry."""
 
-    principal: str = "__public_jobs__"
+    visitor_id: str = ""
     max_server_jobs: int = 20
     can_download_artifacts: bool = False
-    can_submit: bool = False
+    can_submit: bool = True
+
+    @property
+    def principal(self) -> str:
+        return visitor_principal(self.visitor_id)
 
 
 VISITOR_MODE = VisitorMode()
@@ -147,6 +175,7 @@ class _VisitorRecord:
     kind: str
     target_origin: str
     expires_at: float
+    visitor_id: str
 
 
 class VisitorAccessStore:
@@ -171,15 +200,26 @@ class VisitorAccessStore:
             if record.expires_at <= now:
                 self._records.pop(digest, None)
 
-    def _issue(self, *, kind: str, target_origin: str, ttl: int) -> str:
+    def _issue(
+        self,
+        *,
+        kind: str,
+        target_origin: str,
+        ttl: int,
+        visitor_id: str = "",
+    ) -> str:
         token = secrets.token_urlsafe(32)
         now = time.time()
+        normalized_visitor_id = normalize_visitor_id(visitor_id) or str(
+            uuid.uuid4()
+        )
         with self._lock:
             self._purge(now)
             self._records[self._digest(token)] = _VisitorRecord(
                 kind=kind,
                 target_origin=target_origin,
                 expires_at=now + ttl,
+                visitor_id=normalized_visitor_id,
             )
         return token
 
@@ -190,7 +230,9 @@ class VisitorAccessStore:
             ttl=VISITOR_GRANT_TTL_SECONDS,
         )
 
-    def issue_client_access(self, target_origin: str) -> str:
+    def issue_client_access(
+        self, target_origin: str, *, visitor_id: str = ""
+    ) -> str:
         """Issue a short-lived capability for an identified native client.
 
         This capability only enables the visitor entry on the canonical
@@ -202,27 +244,40 @@ class VisitorAccessStore:
             kind="client-access",
             target_origin=target_origin,
             ttl=CLIENT_ACCESS_TTL_SECONDS,
+            visitor_id=visitor_id,
         )
 
-    def issue_session(self, target_origin: str) -> str:
+    def issue_session(
+        self, target_origin: str, *, visitor_id: str = ""
+    ) -> str:
         """Create a visitor session after an explicit entry action."""
         return self._issue(
             kind="session",
             target_origin=target_origin,
             ttl=VISITOR_SESSION_TTL_SECONDS,
+            visitor_id=visitor_id,
         )
 
     def valid_client_access(self, token: str, *, target_origin: str) -> bool:
+        return bool(
+            self.client_access_visitor_id(token, target_origin=target_origin)
+        )
+
+    def client_access_visitor_id(
+        self, token: str, *, target_origin: str
+    ) -> str:
         now = time.time()
         with self._lock:
             self._purge(now)
             record = self._records.get(self._digest(token))
-            return bool(
+            if not (
                 record
                 and record.kind == "client-access"
                 and record.target_origin == target_origin
                 and record.expires_at > now
-            )
+            ):
+                return ""
+            return record.visitor_id
 
     def redeem_grant(self, token: str, *, target_origin: str) -> str | None:
         now = time.time()
@@ -241,6 +296,7 @@ class VisitorAccessStore:
             kind="session",
             target_origin=target_origin,
             ttl=VISITOR_SESSION_TTL_SECONDS,
+            visitor_id=record.visitor_id,
         )
 
     def valid_grant(self, token: str, *, target_origin: str) -> bool:
@@ -258,16 +314,23 @@ class VisitorAccessStore:
             )
 
     def valid_session(self, token: str, *, target_origin: str) -> bool:
+        return bool(self.visitor_id_for_session(token, target_origin=target_origin))
+
+    def visitor_id_for_session(
+        self, token: str, *, target_origin: str
+    ) -> str:
         now = time.time()
         with self._lock:
             self._purge(now)
             record = self._records.get(self._digest(token))
-            return bool(
+            if not (
                 record
                 and record.kind == "session"
                 and record.target_origin == target_origin
                 and record.expires_at > now
-            )
+            ):
+                return ""
+            return record.visitor_id
 
 
 def visitor_cookie(token: str, *, secure: bool = True) -> str:

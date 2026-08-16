@@ -69,12 +69,26 @@ class FederationPublicDataRoutesMixin:
                     ),
                 }
             if operation == "factors":
+                from server.manager.services.public_catalog import (
+                    public_factor_library,
+                )
+                public = public_factor_library()
                 if viewer is None:
-                    from server.manager.services.public_catalog import (
-                        public_factor_library,
-                    )
-                    return public_factor_library()
-                return self.state.client_state.factor_library(principal)
+                    return public
+                from server.modules.custom_factors.client_library import (
+                    build_client_library_projection,
+                )
+                private = self.state.client_state.factor_library(principal)
+                return build_client_library_projection({
+                    "factors": [
+                        *list(public.get("factors") or []),
+                        *list(private.get("factors") or []),
+                    ],
+                    "errors": [
+                        *list(public.get("errors") or []),
+                        *list(private.get("errors") or []),
+                    ],
+                }, principal=principal)
             if operation == "factor-sets":
                 if viewer is None:
                     raise PermissionError(

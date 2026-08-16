@@ -240,8 +240,18 @@ class ServiceSelectionRoutesMixin:
         if not any(parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES):
             return False
         session = self._session()
+        visitor = self._visitor_mode()
+        if visitor is not None and not self._visitor_service_get_allowed(parsed.path):
+            json_response(self, {
+                "success": False,
+                "error": "访客模式不能读取该服务端私有接口",
+                "code": "visitor_private_service_read_forbidden",
+            }, 403)
+            return True
         public_graph = (
-            session is None and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
+            session is None
+            and visitor is None
+            and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
         )
         public_docs = (
             parsed.path == "/docs"
@@ -251,7 +261,7 @@ class ServiceSelectionRoutesMixin:
             or parsed.path.startswith("/static/vendor/")
             or parsed.path.startswith("/static/images/")
         )
-        if session is None and not (public_graph or public_docs):
+        if session is None and visitor is None and not (public_graph or public_docs):
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -264,7 +274,8 @@ class ServiceSelectionRoutesMixin:
                 route,
                 path=self._forwarded_service_path(parsed),
                 principal=(
-                    "__public_graph__" if public_graph
+                    visitor.principal if visitor is not None
+                    else "__public_graph__" if public_graph
                     else "__public_docs__" if public_docs
                     else str(session["username"])
                 ),
@@ -276,6 +287,18 @@ class ServiceSelectionRoutesMixin:
             return True
         self._send_gateway_response(response, route=route)
         return True
+
+    @staticmethod
+    def _visitor_service_get_allowed(path: str) -> bool:
+        """Keep visitor service reads limited to public test metadata.
+
+        Catalogs, workspaces, schemas, and job reads are served by Manager
+        routes.  A visitor only needs this service seam for the executable
+        test-module manifest; allowing the broader authenticated prefix list
+        here would expose private Profile/research/run-spec endpoints through
+        the UUID-backed gateway session.
+        """
+        return path.startswith("/api/testers/modules")
 
     def _service_route_candidates(
         self, parsed,

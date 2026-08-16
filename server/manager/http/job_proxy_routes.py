@@ -47,11 +47,27 @@ class JobProxyRoutesMixin:
         if not any(re.fullmatch(pattern, parsed.path) for pattern in patterns):
             return False
         session = self._session()
-        if session is None:
+        visitor = self._visitor_mode()
+        visitor_submission = session is None and visitor is not None
+        if session is None and not visitor_submission:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
+        if visitor_submission and parsed.path not in {
+            "/api/runs", "/api/runs/preview", "/api/runs/capability-preview",
+        }:
+            json_response(self, {
+                "success": False,
+                "error": "访客模式只能提交公开因子和产品测试",
+                "code": "visitor_service_write_forbidden",
+            }, 403)
+            return True
+        principal = (
+            visitor.principal
+            if visitor_submission and visitor is not None
+            else str(session["username"])
+        )
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 1024 * 1024:
             json_response(
@@ -64,13 +80,15 @@ class JobProxyRoutesMixin:
             "/api/runs", "/api/runs/preview", "/api/runs/capability-preview",
         }
         if run_request:
+            if visitor_submission and not self._visitor_run_body_allowed(body):
+                return True
             body = self._normalise_run_submission_identity(
-                body, principal=str(session["username"]),
+                body, principal=principal,
             )
             if body is None:
                 return True
             body = self._prepare_manager_run_context(
-                body, principal=str(session["username"]),
+                body, principal=principal,
             )
             if body is None:
                 return True
@@ -78,7 +96,7 @@ class JobProxyRoutesMixin:
             route = self._capable_service_route(
                 parsed,
                 body=body,
-                principal=str(session["username"]),
+                principal=principal,
                 content_type=content_type,
             )
         else:
@@ -89,12 +107,12 @@ class JobProxyRoutesMixin:
             if run_request:
                 self._stage_factor_sources_for_route(
                     route,
-                    principal=str(session["username"]),
+                    principal=principal,
                 )
             response = self.state.route_request(
                 route,
                 path=self._forwarded_service_path(parsed),
-                principal=str(session["username"]),
+                principal=principal,
                 method=method,
                 body=body,
                 content_type=content_type,
@@ -112,11 +130,49 @@ class JobProxyRoutesMixin:
         if method == "POST" and parsed.path == "/api/runs":
             self.state.record_run_submission(
                 response,
-                principal=str(session["username"]),
+                principal=principal,
                 route=route,
                 origin_server_id=self.state.server_id,
             )
         self._send_gateway_response(response, route=route)
+        return True
+
+    def _visitor_run_body_allowed(self, body: bytes) -> bool:
+        """Reject executable/private source injection from visitor runs."""
+        try:
+            value = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            # The normal JSON validation below returns the more precise error.
+            return True
+        if not isinstance(value, dict):
+            return True
+        forbidden = {
+            "transient_factor_sources",
+            "transient_strategy_sources",
+            "portable_factor_sources",
+        }
+        if any(value.get(key) for key in forbidden):
+            json_response(self, {
+                "success": False,
+                "error": "访客模式只能运行服务器公开因子和产品，不能提交源码",
+                "code": "visitor_source_submission_forbidden",
+            }, 403)
+            return False
+        strategy_specs = value.get("strategy_specs")
+        if isinstance(strategy_specs, list) and any(
+            isinstance(item, dict) and (
+                item.get("source_code")
+                or item.get("source_path")
+                or item.get("local_path")
+            )
+            for item in strategy_specs
+        ):
+            json_response(self, {
+                "success": False,
+                "error": "访客模式不能提交策略源码",
+                "code": "visitor_strategy_source_forbidden",
+            }, 403)
+            return False
         return True
     def _send_gateway_response(
         self,

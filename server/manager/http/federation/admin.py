@@ -6,6 +6,25 @@ from server.manager.http.responses import json_response
 
 class FederationAdminRoutesMixin:
     def _federation_servers(self) -> None:
+        visitor = self._visitor_mode()
+        if visitor is not None:
+            # The test workbench uses this list only to offer an optional
+            # execution target.  A visitor may see public local targets, but
+            # never the federation registration/proxy metadata of peers.
+            json_response(self, {
+                "success": True,
+                "visitor": True,
+                "server_id": self.state.server_id,
+                "role": self.state.server_role,
+                "local_targets": [
+                    route.as_dict()
+                    for route in self.state.local_service_routes(
+                        include_offline=False,
+                    )
+                ],
+                "servers": [],
+            })
+            return
         if not self._has_api_authorization():
             self._require_capability()
             return

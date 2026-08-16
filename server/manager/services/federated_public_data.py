@@ -10,6 +10,8 @@ source-free projections and keeps the report bytes on the source node.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from hashlib import sha256
+import json
 import threading
 import time
 from typing import Any
@@ -24,6 +26,81 @@ from server.manager.services.research_object_transfer import ResearchObjectTrans
 
 VISITOR_PRINCIPAL = "__public_jobs__"
 DEFAULT_CACHE_SECONDS = 10.0
+
+
+def merge_factor_library_projections(
+    values: list[dict[str, Any]], *, principal: str,
+) -> dict[str, Any]:
+    """Merge bounded factor projections without re-encoding stable refs.
+
+    Factor projections may come from an older Manager or a small test seam
+    that only supplies an already-frozen ``factor_ref``.  Rebuilding such
+    rows from display fields would silently change their identifiers, so the
+    federation layer merges the safe projections directly and only computes
+    a new envelope hash.
+    """
+    factors: dict[str, dict[str, Any]] = {}
+    families: dict[str, dict[str, Any]] = {}
+    categories: set[str] = set()
+    errors: list[Any] = []
+    schema_version = 1
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        try:
+            schema_version = max(schema_version, int(value.get("schema_version") or 1))
+        except (TypeError, ValueError):
+            pass
+        for item in value.get("factors") or []:
+            if not isinstance(item, dict):
+                continue
+            ref = str(item.get("factor_ref") or "").strip()
+            if ref:
+                factors.setdefault(ref, dict(item))
+            category = str(item.get("category") or "").strip()
+            if category:
+                categories.add(category)
+        for item in value.get("families") or []:
+            if not isinstance(item, dict):
+                continue
+            ref = str(item.get("family_ref") or "").strip()
+            if ref:
+                families.setdefault(ref, dict(item))
+            for category in item.get("categories") or []:
+                category = str(category or "").strip()
+                if category:
+                    categories.add(category)
+        errors.extend(item for item in value.get("errors") or [])
+    factor_values = sorted(
+        factors.values(),
+        key=lambda item: (
+            str(item.get("factor_family_alias") or ""),
+            str(item.get("owner_alias") or ""),
+            str(item.get("factor_alias") or ""),
+            str(item.get("factor_ref") or ""),
+        ),
+    )
+    family_values = sorted(
+        families.values(),
+        key=lambda item: (
+            str(item.get("factor_family_alias") or ""),
+            str(item.get("owner_alias") or ""),
+            str(item.get("family_ref") or ""),
+        ),
+    )
+    projection = {
+        "schema_version": schema_version,
+        "mode": "embedded_read_only_library",
+        "principal": str(principal or ""),
+        "factors": factor_values,
+        "families": family_values,
+        "categories": sorted(categories),
+        "omitted_error_count": len(errors),
+    }
+    encoded = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode()
+    return {**projection, "projection_hash": sha256(encoded).hexdigest()}
 
 
 class FederatedPublicDataService:
@@ -503,37 +580,37 @@ class FederatedPublicDataService:
         cached = self._cached(key)
         if cached is not None:
             return dict(cached)
-        local = (
-            public_factor_library()
-            if visitor else self.client_state.factor_library(principal)
-        )
-        factor_rows = [
-            dict(item) for item in (local.get("factors") or [])
-            if isinstance(item, dict)
-        ]
-        errors = list(local.get("errors") or [])
+        public = public_factor_library()
+        if visitor:
+            local = public
+        else:
+            # Public families are available to every signed-in researcher,
+            # even before that researcher registers a parameterized factor.
+            # Private rows still come only from the current user's local and
+            # synchronized account-domain projection.
+            private = self.client_state.factor_library(principal)
+            local = {
+                "factors": list(public.get("factors") or []) + list(
+                    private.get("factors") or []
+                ),
+                "families": list(public.get("families") or []) + list(
+                    private.get("families") or []
+                ),
+                "errors": [
+                    *list(public.get("errors") or []),
+                    *list(private.get("errors") or []),
+                ],
+            }
+        projections = [local]
         peer_values = self._query_peers(
             kind="catalog", operation="factors", principal=viewer,
         )
-        if not peer_values:
-            return dict(self._store(key, dict(local)))
         for _route, response in peer_values:
-            factor_rows.extend(
-                dict(item) for item in (response.get("factors") or [])
-                if isinstance(item, dict)
-            )
-            errors.extend(item for item in response.get("errors") or [])
-        for item in factor_rows:
-            if "source" not in item and item.get("factor_kind") in {
-                "custom", "public",
-            }:
-                item["source"] = item["factor_kind"]
-        from server.modules.custom_factors.client_library import (
-            build_client_library_projection,
-        )
-        result = build_client_library_projection(
-            {"factors": factor_rows, "errors": errors},
-            principal=viewer,
+            projections.append(response)
+        if not peer_values and visitor:
+            return dict(self._store(key, dict(local)))
+        result = merge_factor_library_projections(
+            projections, principal=str(principal or viewer),
         )
         return dict(self._store(key, result))
 
