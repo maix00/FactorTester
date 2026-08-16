@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
+from server.manager.http import catalog_routes
 from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
@@ -2597,6 +2598,7 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert '["products", "产品"]' in script
     assert '["categories", "产品分类"]' in script
     assert '["groups", "产品组"]' in script
+    assert "includeProducts" in script
     assert "/api/catalog/categories" in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
@@ -2620,6 +2622,54 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'FTProductCategoryModel.availableSourceIDs' in script
     assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
+
+
+def test_product_catalog_lazy_page_forwards_search_and_paging(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        catalog_routes, "catalog_source_ids", lambda _query: ("Synthetic",),
+    )
+    monkeypatch.setattr(
+        state.client_state, "product_names", lambda *_: [
+            {"name": "ALPHA.X", "desc": "Alpha", "source_ids": ["Synthetic"]},
+            {"name": "BETA.X", "desc": "Beta", "source_ids": ["Synthetic"]},
+        ],
+    )
+    calls = []
+
+    def contract_page(path, category, sources, principal, **values):
+        calls.append((path, category, list(sources), principal, values))
+        return {
+            "nodes": [{"title": "BETA.X"}], "page": values["page"],
+            "limit": values["limit"], "total": 1, "total_pages": 1,
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(state.client_state, "contract_tree_page", contract_page)
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/products?query=beta&page=1&limit=1",
+            headers=headers,
+        )) as response:
+            products = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/contract-tree?path=Product%2F_products"
+            "&query=beta&page=2&limit=10",
+            headers=headers,
+        )) as response:
+            leaves = json.loads(response.read())
+
+    assert [item["name"] for item in products["products"]] == ["BETA.X"]
+    assert products["total"] == 1
+    assert leaves["nodes"] == [{"title": "BETA.X"}]
+    assert calls == [(
+        "Product/_products", "", ["Synthetic"], "user@1", {
+            "query": "beta", "page": 2, "limit": 10,
+        },
+    )]
 
 
 def test_manager_product_catalog_does_not_select_a_service_port(
@@ -2873,12 +2923,17 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/catalog/product-tree.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-list-table.js") as response:
+            table_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-categories.js") as response:
             categories = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
-    assert "contractTreePath" in script
+    assert "window.FTProductListTable" in table_script
+    assert "paginationModel" in table_script
+    assert "product-list-search" in table_script
+    assert "contractTreePath" in table_script
     assert "创建乘积分类" not in script
     assert "应用分类" in script
     assert "product-category-actions" in script

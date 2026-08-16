@@ -109,16 +109,22 @@
     });
   }
 
-  async function load(context, source) {
+  async function load(context, source, options = {}) {
     const origin = source || sourceOf();
-    const key = origin;
+    const includeProducts = options.includeProducts !== false;
+    const includeGroups = options.includeGroups !== false;
+    const key = `${origin}:products=${includeProducts}:groups=${includeGroups}`;
     if (cache.has(key)) return cache.get(key);
-    const groupsRequest = origin === "local"
-      ? request(context, "/api/client/product-groups")
-      : request(context, "/api/catalog/product-groups");
-    const productsRequest = origin === "local"
-      ? request(context, "/api/client/product_names")
-      : request(context, "/api/catalog/products");
+    const groupsRequest = includeGroups
+      ? (origin === "local"
+        ? request(context, "/api/client/product-groups")
+        : request(context, "/api/catalog/product-groups"))
+      : Promise.resolve({});
+    const productsRequest = includeProducts
+      ? (origin === "local"
+        ? request(context, "/api/client/product_names")
+        : request(context, "/api/catalog/products"))
+      : Promise.resolve({});
     const [productsResult, groupsResult] = await Promise.allSettled([
       productsRequest, groupsRequest,
     ]);
@@ -188,7 +194,8 @@
     search.placeholder = page === "groups"
       ? context.t("搜索产品组") : context.t("搜索产品或代码");
     const refresh = context.button("↻", () => {
-      cache.delete(source);
+      [...cache.keys()].filter(key => key.startsWith(`${source}:`))
+        .forEach(key => cache.delete(key));
       [...treeCache.keys()].filter(key => key.startsWith(`${source}:`)).forEach(key => treeCache.delete(key));
       list(context, page);
     }, context.t("刷新"));
@@ -196,7 +203,10 @@
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     let value;
     try {
-      value = await load(context, source);
+      value = await load(context, source, {
+        includeProducts: page !== "products",
+        includeGroups: page === "groups",
+      });
     } catch (error) {
       if (!isCurrent(context)) return;
       context.content.replaceChildren(FTUI.empty(context.t("产品目录读取失败"), error.message || ""));
@@ -210,7 +220,13 @@
     results.className = "library-results";
     root.append(results);
     context.content.replaceChildren(root);
-    search.addEventListener("input", () => renderSearch(context, results, search.value, value, page, source));
+    search.addEventListener("input", () => {
+      if (page === "groups") {
+        renderSearch(context, results, search.value, value, page, source);
+      } else {
+        renderProductSearch(context, results, search.value, source);
+      }
+    });
     if (page === "groups") {
       if (value.errors?.groups) {
         renderSearch(context, results, "", {...value, groups: []}, page, source);
@@ -220,9 +236,11 @@
       renderSearch(context, results, "", value, page, source);
       return;
     }
+    const categoryMount = document.createElement("div");
+    categoryMount.className = "product-category-mount";
     const treeMount = document.createElement("div");
     treeMount.className = "product-tree-panel";
-    results.replaceChildren(treeMount);
+    results.replaceChildren(categoryMount, treeMount);
     try {
       const [categoryPayload, sourceDefinitions] = await Promise.all([
         loadCategories(context, source),
@@ -240,10 +258,13 @@
         // a dimension or a composition.
         const tree = await loadTree(context, source, selected, selectedSources);
         if (!isCurrent(context)) return;
-        const contractTreePath = path => {
+        const contractTreePath = (path, params = {}) => {
           const query = new URLSearchParams({path});
           if (selected) query.set("category", selected);
           selectedSources.forEach(value => query.append("data_source", value));
+          if (params.query) query.set("query", params.query);
+          if (params.page) query.set("page", String(params.page));
+          if (params.limit) query.set("limit", String(params.limit));
           return source === "local"
             ? `/api/client/contract_tree?${query}`
             : `/api/catalog/contract-tree?${query}`;
@@ -254,6 +275,8 @@
           selectedDataSources: selectedSources,
           selectedCategory: selected,
           contractTreePath,
+          categoryMount,
+          source,
           onSave: async nextID => {
             selected = nextID;
             localStorage.setItem(categoryStorageKey, selected);
@@ -265,7 +288,7 @@
       };
       await renderTree();
       if (!isCurrent(context)) return;
-      if (search.value.trim()) renderSearch(context, results, search.value, value, page, source);
+      if (search.value.trim()) renderProductSearch(context, results, search.value, source);
     } catch (error) {
       if (!isCurrent(context)) return;
       treeMount.replaceChildren(FTUI.empty(context.t("产品树读取失败"), error.message || ""));
@@ -320,6 +343,58 @@
       });
     });
     section.append(view.shell);
+    mount.prepend(section);
+  }
+
+  async function renderProductSearch(context, mount, rawQuery, source) {
+    const query = String(rawQuery || "").trim();
+    mount.querySelectorAll?.(".product-search-results").forEach(item => item.remove());
+    if (!query) return;
+    const requestID = Number(mount.dataset.productSearchRequest || 0) + 1;
+    mount.dataset.productSearchRequest = String(requestID);
+    const section = document.createElement("section");
+    section.className = "product-search-results";
+    section.append(Object.assign(document.createElement("h2"), {
+      textContent: context.t("搜索结果"),
+    }));
+    const endpoint = source === "local"
+      ? "/api/client/product_names" : "/api/catalog/products";
+    const params = new URLSearchParams({query, page: "1", limit: "50"});
+    try {
+      const payload = await request(context, `${endpoint}?${params}`);
+      if (mount.dataset.productSearchRequest !== String(requestID)) return;
+      const items = Array.isArray(payload.products) ? payload.products : [];
+      if (!items.length) {
+        section.append(FTUI.empty(
+          context.t("没有匹配的产品"), context.t("请检查当前目录"),
+        ));
+        mount.prepend(section);
+        return;
+      }
+      const view = FTUI.table([
+        context.t("类型"), context.t("名称"), context.t("产品描述"),
+        context.t("交易所"), context.t("产品路径"), context.t("数据源"),
+      ], items.map(item => [
+        context.t("产品"), item.name || item.code || "—", item.desc || "—",
+        item.exchange || "—", item.product_path || "—",
+        (item.source_ids || []).join(", "),
+      ]));
+      view.shell.classList.add("product-search-table-shell");
+      [...view.body.rows].forEach((row, index) => {
+        const item = items[index];
+        row.dataset.href = "true";
+        row.addEventListener("click", () => context.navigate(pathFor(
+          `/products/product/${encodeURIComponent(item.name || item.code)}`,
+          source,
+        )));
+      });
+      section.append(view.shell);
+    } catch (error) {
+      if (mount.dataset.productSearchRequest !== String(requestID)) return;
+      section.append(FTUI.empty(
+        context.t("产品目录读取失败"), error.message || "",
+      ));
+    }
     mount.prepend(section);
   }
 

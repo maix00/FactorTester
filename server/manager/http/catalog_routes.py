@@ -34,6 +34,41 @@ def catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
     return normalize_source_ids(requested) if requested else default_source_ids()
 
 
+def _catalog_page(
+    rows: list[dict],
+    query: dict[str, list[str]],
+) -> dict[str, object]:
+    """Filter and bound a product search response for lazy clients."""
+    search = str(query.get("query", [""])[0] or "").strip().casefold()
+    if search:
+        rows = [
+            row for row in rows
+            if search in " ".join(
+                str(row.get(key) or "")
+                for key in (
+                    "name", "code", "desc", "description", "exchange",
+                    "product_path", "source_ids",
+                )
+            ).casefold()
+        ]
+    try:
+        page = max(1, int(query.get("page", ["1"])[0] or 1))
+        limit = min(100, max(1, int(query.get("limit", ["25"])[0] or 25)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("产品列表分页参数无效") from exc
+    total = len(rows)
+    total_pages = max(1, (total + limit - 1) // limit)
+    offset = (page - 1) * limit
+    return {
+        "products": rows[offset:offset + limit],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": total_pages,
+        "has_more": page < total_pages,
+    }
+
+
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
     def _serve_product_catalog(self, parsed) -> bool:
@@ -93,6 +128,8 @@ class CatalogRoutesMixin:
                     "source_ids": list(source_ids),
                     "products": products,
                 }
+                if any(key in query for key in ("query", "page", "limit")):
+                    value.update(_catalog_page(products, query))
             elif parsed.path == "/api/catalog/product-fields":
                 product = self.state.client_state.product_fields(
                     query.get("name", [""])[0]
@@ -144,15 +181,37 @@ class CatalogRoutesMixin:
                     source_ids = select_visitor_source_ids(query, descriptors)
                 else:
                     source_ids = catalog_source_ids(query)
+                paged = any(
+                    key in query for key in ("query", "page", "limit")
+                )
+                if paged:
+                    try:
+                        page = max(1, int(query.get("page", ["1"])[0] or 1))
+                        limit = min(100, max(
+                            1, int(query.get("limit", ["25"])[0] or 25),
+                        ))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("产品列表分页参数无效") from exc
+                    nodes = self.state.client_state.contract_tree_page(
+                        query.get("path", [""])[0], category_id, source_ids,
+                        principal,
+                        query=str(query.get("query", [""])[0] or ""),
+                        page=page,
+                        limit=limit,
+                    )
+                else:
+                    nodes = {
+                        "nodes": self.state.client_state.contract_tree(
+                            query.get("path", [""])[0], category_id, source_ids,
+                            principal,
+                        ),
+                    }
                 value = {
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
                     "source_ids": list(source_ids),
-                    "nodes": self.state.client_state.contract_tree(
-                        query.get("path", [""])[0], category_id, source_ids,
-                        principal,
-                    ),
+                    **nodes,
                 }
             elif parsed.path == "/api/catalog/contracts":
                 if visitor is not None:

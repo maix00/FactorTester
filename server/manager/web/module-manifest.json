@@ -114,6 +114,7 @@
     "catalog-core": [
       "catalog/factor-model.js",
       "catalog/product-category-model.js",
+      "catalog/product-list-table.js",
       "catalog/product-tree.js"
     ],
     "output-choice": [
@@ -370,6 +371,7 @@
     "catalog/product-category-model.js",
     "catalog/product-category-overlay.js",
     "catalog/product-categories.js",
+    "catalog/product-list-table.js",
     "catalog/product-tree.js",
     "catalog/source-list.js",
     "catalog/products.js",
