@@ -145,14 +145,21 @@ def list_factor_library_product_groups(username: str) -> list[str]:
     return result
 
 
-def build_factor_library_overview(current_username: str, include_subordinates: bool, product_group: str | None = None, factor_family_alias: str | None = None) -> dict:
+def build_factor_library_overview(
+    current_username: str,
+    include_subordinates: bool,
+    product_group: str | None = None,
+    factor_family_alias: str | None = None,
+    *,
+    account: dict | None = None,
+) -> dict:
     product_group = normalize_product_group(product_group) if product_group else None
     accounts = (
         visible_accounts_for(current_username, include_self=True)
         if include_subordinates
-        else [get_account(current_username) or {'username': current_username}]
+        else [account or get_account(current_username) or {'username': current_username}]
     )
-    current_account = get_account(current_username) or {}
+    current_account = account or get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
 
