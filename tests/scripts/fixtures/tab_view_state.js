@@ -1,0 +1,155 @@
+const assert = require("assert");
+const fs = require("fs");
+const vm = require("vm");
+
+class FakeElement {
+  constructor(tagName = "div") {
+    this.tagName = tagName.toUpperCase();
+    this.children = [];
+    this.dataset = {};
+    this.style = {color: ""};
+    this.className = "";
+    this.hidden = false;
+    this.open = false;
+    this.isConnected = true;
+    this.textContent = "";
+    this.value = "";
+    this.parentNode = null;
+  }
+
+  get firstChild() { return this.children[0] || null; }
+  get childNodes() { return this.children; }
+  append(...values) {
+    values.forEach(value => {
+      if (value?.parentNode) {
+        value.parentNode.children = value.parentNode.children.filter(item => item !== value);
+      }
+      value.parentNode = this;
+      this.children.push(value);
+    });
+  }
+  appendChild(value) { this.append(value); return value; }
+  replaceChildren(...values) {
+    this.children.forEach(value => { if (value.parentNode === this) value.parentNode = null; });
+    this.children = [];
+    this.append(...values);
+  }
+  querySelector() { return new FakeElement(); }
+  querySelectorAll() { return []; }
+  addEventListener() {}
+  setAttribute() {}
+  removeAttribute(name) { if (name === "open") this.open = false; }
+  showModal() { this.open = true; }
+  click() {}
+}
+
+class FakeFragment extends FakeElement {
+  constructor() { super("fragment"); }
+}
+
+const opened = new FakeElement();
+const caption = new FakeElement();
+const content = new FakeElement("main");
+const title = new FakeElement("h1");
+const eyebrow = new FakeElement("small");
+const toolbar = new FakeElement("header");
+const notice = new FakeElement("p");
+const dialogs = [];
+const storage = new Map();
+
+global.document = {
+  body: {classList: {contains: () => false}},
+  createElement: tag => new FakeElement(tag),
+  createDocumentFragment: () => new FakeFragment(),
+  querySelector: selector => ({
+    "#opened-tabs": opened,
+    "#opened-caption": caption,
+  }[selector] || null),
+  querySelectorAll: selector => selector === "dialog" ? dialogs : [],
+};
+global.location = {pathname: "/", search: ""};
+global.history = {
+  pushState(_state, _title, path) {
+    const [pathname, search = ""] = String(path).split("?", 2);
+    location.pathname = pathname;
+    location.search = search ? `?${search}` : "";
+  },
+};
+global.window = {
+  scrollY: 17,
+  requestAnimationFrame: callback => callback(),
+  scrollTo: ({top}) => { window.scrollY = top; },
+};
+global.sessionStorage = {
+  setItem: (key, value) => storage.set(key, value),
+  getItem: key => storage.get(key) || null,
+  removeItem: key => storage.delete(key),
+};
+global.FTIcons = {node: () => new FakeElement(), module: () => "shippingbox"};
+
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/app/tab-view-cache.js", "utf8"),
+  {filename: "tab-view-cache.js"},
+);
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/app/tabs.js", "utf8"),
+  {filename: "tabs.js"},
+);
+
+const state = {
+  tabs: [
+    {id: "home", path: "/", title: "主页", closable: false},
+    {id: "products", path: "/products", title: "产品", closable: false},
+  ],
+  activeTabID: "home", tabSessions: new Map(), modules: [],
+  pendingScrollCapture: null,
+};
+let renderCount = 0;
+const tabs = window.FTTabs.create({
+  state, embeddedPresentation: false, t: value => value,
+  renderRoute() {
+    renderCount += 1;
+    content.replaceChildren(new FakeElement("section"));
+  },
+  content, title, eyebrow, toolbar, notice,
+  modulePath: value => value.path,
+  isPinnedPath: path => ["/", "/products"].includes(String(path).split("?", 1)[0]),
+  titleForPath: () => "详情", tabIcon: () => "shippingbox",
+});
+
+const input = new FakeElement("input");
+input.value = "draft value";
+content.append(input);
+title.textContent = "原始页面";
+const dialog = new FakeElement("dialog");
+dialog.dataset.ftTabID = "home";
+dialog.open = true;
+dialogs.push(dialog);
+
+tabs.navigate("/products/product/A.DCE");
+assert.strictEqual(renderCount, 1);
+assert.strictEqual(dialog.hidden, true);
+assert.strictEqual(dialog.open, false);
+assert.notStrictEqual(state.activeTabID, "home");
+
+tabs.navigate("/");
+assert.strictEqual(state.activeTabID, "home");
+assert.strictEqual(content.firstChild, input);
+assert.strictEqual(input.value, "draft value");
+assert.strictEqual(title.textContent, "原始页面");
+assert.strictEqual(dialog.hidden, false);
+assert.strictEqual(dialog.open, true);
+assert.strictEqual(window.scrollY, 17);
+assert.strictEqual(renderCount, 1);
+
+// A fourth inactive view causes the oldest inactive view to be coldified. Its
+// DOM is released, while the route is re-rendered and control state is restored
+// when the tab is selected again.
+const first = state.activeTabID;
+tabs.navigate("/products/product/B.DCE");
+tabs.navigate("/products/product/C.DCE");
+tabs.navigate("/products/product/D.DCE");
+const coldSession = state.tabSessions.get(first);
+assert(coldSession.view?.coldKey);
+assert.strictEqual(coldSession.view.content, undefined);
+console.log("ok");

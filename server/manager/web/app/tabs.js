@@ -3,33 +3,11 @@
     const {
       state, embeddedPresentation, t, renderRoute,
       modulePath, isPinnedPath, titleForPath, tabIcon,
+      content, title, eyebrow, toolbar, notice, beforeTabChange,
     } = options;
-
-    function tabSession(tabID) {
-      if (!state.tabSessions.has(tabID)) state.tabSessions.set(tabID, {});
-      return state.tabSessions.get(tabID);
-    }
-
-    function saveActiveTabSession() {
-      const reportMatch = /^\/research\/([^/]+)$/.exec(location.pathname);
-      const currentPublicationID = reportMatch?.[1] || null;
-      const pending = state.pendingScrollCapture?.tabID === state.activeTabID
-        ? state.pendingScrollCapture : null;
-      const snapshot = {
-        scrollY: pending ? pending.scrollY : window.scrollY,
-        path: location.pathname,
-        publicationID: currentPublicationID,
-      };
-      Object.assign(tabSession(state.activeTabID), snapshot);
-      if (currentPublicationID) {
-        Object.assign(tabSession(`report:${currentPublicationID}`), snapshot);
-      }
-    }
-
-    function captureScrollPosition() {
-      state.pendingScrollCapture = {tabID: state.activeTabID, scrollY: window.scrollY};
-      saveActiveTabSession();
-    }
+    const viewCache = window.FTTabViewCache.create({
+      state, content, title, eyebrow, toolbar, notice,
+    });
 
     function renderOpenedTabs() {
       const host = document.querySelector("#opened-tabs");
@@ -43,7 +21,7 @@
         row.className = `opened-tab${tab.id === state.activeTabID ? " active" : ""}`;
         const button = document.createElement("button");
         button.className = "tab-main"; button.type = "button";
-        button.innerHTML = `<span class="symbol"></span><span class="tab-label"></span>`;
+        button.innerHTML = '<span class="symbol"></span><span class="tab-label"></span>';
         button.querySelector(".symbol").append(FTIcons.node(tab.icon || tabIcon(tab.path)));
         button.querySelector(".tab-label").textContent = tab.title;
         button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;
@@ -52,31 +30,53 @@
         const close = document.createElement("button");
         close.className = "tab-close"; close.type = "button"; close.textContent = "×";
         close.title = t("关闭");
-        close.addEventListener("click", event => { event.stopPropagation(); closeTab(tab.id); });
+        close.addEventListener("click", event => {
+          event.stopPropagation(); closeTab(tab.id);
+        });
         row.append(button, close); host.append(row);
       }
     }
 
-    function activateTab(tabID) {
+    function activateTab(tabID, options = {}) {
       const tab = state.tabs.find(item => item.id === tabID);
       if (!tab) return;
-      saveActiveTabSession();
+      viewCache.saveActiveTabSession();
+      if (options.discardView) viewCache.discardView(tabID);
+      if (tabID !== state.activeTabID || options.forceRender) {
+        (options.beforeTabChange || beforeTabChange)?.();
+      }
       state.activeTabID = tabID;
       history.pushState({}, "", tab.path);
-      renderOpenedTabs(); renderRoute();
+      renderOpenedTabs();
+      if (!options.forceRender) {
+        const restored = viewCache.restoreView(tabID);
+        if (restored === "live") return;
+        if (restored === "cold") {
+          renderRoute();
+          return;
+        }
+      }
+      renderRoute();
     }
 
     function closeTab(tabID) {
       const index = state.tabs.findIndex(tab => tab.id === tabID);
       if (index < 0) return;
-      if (state.activeTabID === tabID) saveActiveTabSession();
+      if (state.activeTabID === tabID) viewCache.saveActiveTabSession();
+      else viewCache.discardView(tabID);
       state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
-      if (state.activeTabID === tabID) {
-        const fallback = state.tabs[Math.max(0, index - 1)] || state.tabs[0];
-        state.activeTabID = fallback?.id || "home";
-        history.pushState({}, "", fallback?.path || "/");
+      if (state.activeTabID !== tabID) {
+        renderOpenedTabs();
+        return;
       }
-      renderOpenedTabs(); renderRoute();
+      beforeTabChange?.();
+      const fallback = state.tabs[Math.max(0, index - 1)] || state.tabs[0];
+      state.activeTabID = fallback?.id || "home";
+      history.pushState({}, "", fallback?.path || "/");
+      renderOpenedTabs();
+      const restored = viewCache.restoreView(state.activeTabID);
+      if (restored === "live") return;
+      renderRoute();
     }
 
     function openModule(module) {
@@ -84,18 +84,24 @@
       if (module.tab_behavior === "new") {
         return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
       }
-      return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: false});
+      return openTab(path, {
+        id: module.id, title: t(module.title_key || module.title), closable: false,
+      });
     }
 
     function openTab(path, options = {}) {
-      saveActiveTabSession();
       if (!options.forceNew && options.id) {
         const existingByID = state.tabs.find(tab => tab.id === options.id);
         if (existingByID) {
+          const pathChanged = existingByID.path !== path;
           existingByID.path = path;
           if (options.title) existingByID.title = options.title;
           if (options.icon) existingByID.icon = options.icon;
-          activateTab(existingByID.id);
+          activateTab(existingByID.id, {
+            forceRender: pathChanged,
+            discardView: pathChanged,
+            beforeTabChange: options.beforeTabChange,
+          });
           state.pendingScrollCapture = null;
           return;
         }
@@ -103,7 +109,7 @@
       if (!options.forceNew) {
         const existing = state.tabs.find(tab => tab.path === path);
         if (existing) {
-          activateTab(existing.id);
+          activateTab(existing.id, {beforeTabChange: options.beforeTabChange});
           state.pendingScrollCapture = null;
           return;
         }
@@ -111,11 +117,11 @@
       const pinned = options.closable === false || (isPinnedPath(path) && !options.forceNew);
       const id = options.id || `${path}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
       state.tabs.push({
-        id, path, title: options.title || titleForPath(path), icon: options.icon || tabIcon(path),
-        closable: !pinned,
+        id, path, title: options.title || titleForPath(path),
+        icon: options.icon || tabIcon(path), closable: !pinned,
       });
-      state.activeTabID = id; state.pendingScrollCapture = null; history.pushState({}, "", path);
-      renderOpenedTabs(); renderRoute();
+      activateTab(id, {forceRender: true, beforeTabChange: options.beforeTabChange});
+      state.pendingScrollCapture = null;
     }
 
     function productDetailTabID(path) {
@@ -138,11 +144,8 @@
 
     function runSpecTabID(path) {
       let route;
-      try {
-        route = new URL(String(path || ""), "http://factortester.invalid");
-      } catch (_) {
-        return "";
-      }
+      try { route = new URL(String(path || ""), "http://factortester.invalid"); }
+      catch (_) { return ""; }
       if (route.pathname !== "/reference") return "";
       const kind = String(route.searchParams.get("kind") || "")
         .trim().toLowerCase().replaceAll("_", "-");
@@ -150,31 +153,31 @@
       const target = String(route.searchParams.get("target") || "");
       if (!target) return "";
       const match = /^(?:runspec|run-spec|run_spec):sha256:(.+)$/i.exec(target);
-      const identity = match ? `sha256:${match[1].toLowerCase()}` : target;
-      return `reference-detail:run-spec:${identity}`;
+      return `reference-detail:run-spec:${match ? `sha256:${match[1].toLowerCase()}` : target}`;
     }
 
     function detailTabIDForPath(path) {
-      return productDetailTabID(path) || factorDetailTabID(path)
-        || runSpecTabID(path);
+      return productDetailTabID(path) || factorDetailTabID(path) || runSpecTabID(path);
     }
 
     function navigate(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
+      // An overlay owns the source tab.  Any internal navigation initiated
+      // from it gets a dedicated tab, including normally pinned feature routes.
+      if (viewCache.activeTabHasOverlay()) {
+        return openTab(path, {forceNew: true, title: titleForPath(path)});
+      }
       if (pathname === "/jobs") {
         return openTab(path, {id: "jobs", title: t("测试"), closable: false});
       }
       if (pathname === "/settings" || pathname.startsWith("/settings/")) {
         return openTab(path, {id: "settings", title: t("设置"), closable: false});
       }
-      const productFeature = ["/products", "/products/sources", "/products/categories", "/products/groups"]
-        .includes(pathname);
-      if (productFeature) {
+      if (["/products", "/products/sources", "/products/categories", "/products/groups"]
+        .includes(pathname)) {
         return openTab(path, {id: "products", title: t("产品"), closable: false});
       }
-      const factorFeature = ["/factors", "/factors/families", "/factors/sets"]
-        .includes(pathname);
-      if (factorFeature) {
+      if (["/factors", "/factors/families", "/factors/sets"].includes(pathname)) {
         return openTab(path, {id: "factors", title: t("因子库"), closable: false});
       }
       const detailTabID = detailTabIDForPath(path);
@@ -184,17 +187,17 @@
         && (path.startsWith("/research/") || path.startsWith("/jobs/")
             || path.startsWith("/ic-test") || path.startsWith("/backtest")
             || path.startsWith("/factor-series") || nativeDetail || nativeReference)
-          && window.webkit?.messageHandlers?.researchNavigation) {
+        && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;
       }
-      return openTab(path, {id: detailTabID || undefined, forceNew: path.startsWith("/ic-test")
-        || path.startsWith("/backtest")
-        || path.startsWith("/factor-series")
-        || path.startsWith("/docs")
-        || path.startsWith("/sqlite-web")
-        || path.startsWith("/manager")
-        || path.startsWith("/admin/server-operations")});
+      return openTab(path, {
+        id: detailTabID || undefined,
+        forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")
+          || path.startsWith("/factor-series") || path.startsWith("/docs")
+          || path.startsWith("/sqlite-web") || path.startsWith("/manager")
+          || path.startsWith("/admin/server-operations"),
+      });
     }
 
     function updateActiveTab(fields) {
@@ -204,23 +207,30 @@
 
     function initializeTabs() {
       state.tabs = state.modules
-        // Settings remains the fixed account control at the bottom of the
-        // shell. It is part of the backend registry for metadata, but must
-        // not be mounted twice as an opened tab.
         .filter(item => item.pinned && item.id !== "settings")
-        .map(item => ({id: item.id, path: modulePath(item), title: t(item.title_key || item.title), icon: FTIcons.module(item), closable: false}));
-      state.tabs.push({id: "settings", path: "/settings", title: t("设置"), icon: FTIcons.module("settings"), closable: false});
-      state.activeTabID = "home"; renderOpenedTabs();
+        .map(item => ({
+          id: item.id, path: modulePath(item), title: t(item.title_key || item.title),
+          icon: FTIcons.module(item), closable: false,
+        }));
+      state.tabs.push({
+        id: "settings", path: "/settings", title: t("设置"),
+        icon: FTIcons.module("settings"), closable: false,
+      });
+      state.activeTabID = "home";
+      renderOpenedTabs();
     }
 
     function currentTabContext() {
-      return {tabID: state.activeTabID, tabSession: tabSession(state.activeTabID)};
+      return {
+        tabID: state.activeTabID,
+        tabSession: viewCache.tabSession(state.activeTabID),
+      };
     }
 
     return {
-      tabSession, saveActiveTabSession, captureScrollPosition, renderOpenedTabs,
-      activateTab, closeTab, openModule, openTab, navigate, updateActiveTab,
-      initializeTabs, currentTabContext, detailTabIDForPath,
+      ...viewCache,
+      renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
+      updateActiveTab, initializeTabs, currentTabContext, detailTabIDForPath,
     };
   }
 

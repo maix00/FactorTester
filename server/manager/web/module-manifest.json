@@ -297,6 +297,7 @@
     "app": [
       "app/navigation.js",
       "app/route-dispatch.js",
+      "app/tab-view-cache.js",
       "app/tabs.js",
       "app/auth.js",
       "app/runtime.js",
@@ -430,6 +431,7 @@
     "settings/manager.js",
     "app/navigation.js",
     "app/route-dispatch.js",
+    "app/tab-view-cache.js",
     "app/tabs.js",
     "app/auth.js",
     "app/runtime.js",
