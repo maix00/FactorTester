@@ -88,7 +88,7 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "local_runtime_server_ref", "本地运行服务器", "text", "", "body",
         "run_spec.local_runtime.server_ref", "run_options", order=16,
         client_targets=("swift",),
-        visible_when={"execution_target": ("local",)},
+        visible_if={"execution_target": ("local",)},
         value_descriptor=ValueDescriptor(
             "reference", editor="server_picker", ref_kind="manager_server",
             option_source="server.federation",
@@ -99,7 +99,7 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
         "local_runtime_bundle_ref", "本地运行代码包", "text", "", "body",
         "run_spec.local_runtime.bundle_ref", "run_options", order=17,
         client_targets=("swift",),
-        visible_when={"execution_target": ("local",)},
+        visible_if={"execution_target": ("local",)},
         value_descriptor=ValueDescriptor(
             "source_file", editor="runtime_bundle_picker",
             ref_kind="factor_test_runtime", option_source="server.7997",
@@ -172,7 +172,7 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
             SettingOption("auto", "按因子表达式自动推导"),
         ),
         chip_template="前摇窗口: {value}",
-        default_when={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+        default_if={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
         help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
     ))
     app.register_setting(SettingDefinition(
@@ -184,7 +184,7 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
         ScopePolicy.LOCAL_ONLY,
         module="factor_execution",
         chip_template="前摇时长: {value}",
-        visible_when={"warmup_mode": ("fixed",)},
+        visible_if={"warmup_mode": ("fixed",)},
         help_text="固定前摇窗口必须是时间值，例如 30min、5d、60d。",
     ))
 
@@ -216,14 +216,14 @@ def register_run_window_base(
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 40},
         **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 50},
         **tab_kwargs,
     ))
@@ -248,7 +248,7 @@ def register_run_window_base(
             SettingOption("Europe/London", "Europe/London"),
         ),
         chip_template="时区: {value}",
-        visible_when={"time_precision": ("exact",)},
+        visible_if={"time_precision": ("exact",)},
         serialization={"display_order": 60},
         **tab_kwargs,
     ))

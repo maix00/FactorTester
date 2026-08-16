@@ -54,6 +54,8 @@
     const tabKey = manifest.run_settings?.key || "";
     return (manifest.run_fields || [])
       .filter(item => item.placement !== "global_settings")
+      .filter(item => options.includeHidden || !window.FTSettingRules
+        || window.FTSettingRules.isVisible(item, options.runValues || {}))
       .map(item => runChip(item, options, tabKey))
       .filter(Boolean);
   }
@@ -86,7 +88,7 @@
       });
       return names.length ? names : context.t("未选择（使用默认输出）");
     }
-    if (field.control_template === "profile") {
+    if (field.value_descriptor?.editor === "profile") {
       if (!raw) return context.t("用户本人");
       const profileID = String(raw).replace(/^profile:/, "");
       const profile = (options.profiles || []).find(item => (
@@ -124,7 +126,25 @@
   }
 
   function settingChip(key, field, values, context, options = {}) {
-    const raw = FTSettingRules.valueFor(key, field, values);
+    const visible = !FTSettingRules || typeof FTSettingRules.isVisible !== "function"
+      || FTSettingRules.isVisible(field, values);
+    if (options.includeHidden && !visible) {
+      const notApplicable = context.t(options.notApplicableLabel || "N/A");
+      const template = field.chip_template || `${field.label || key}: {value}`;
+      const rendered = interpolate(template, {value: notApplicable}, context);
+      const parts = splitRendered(rendered, context.t(field.label || key));
+      return {
+        key: `setting:${key}`,
+        label: parts.label,
+        value: compact(parts.value, context),
+        fullValue: expanded(parts.value),
+        tabKey: field.tab_key || "",
+        category: "setting-not-applicable",
+      };
+    }
+    const raw = FTSettingRules && typeof FTSettingRules.displayValueFor === "function"
+      ? FTSettingRules.displayValueFor(key, field, values)
+      : FTSettingRules.valueFor(key, field, values);
     const empty = !hasValue(raw);
     if (empty && !options.includeEmpty) return null;
     const value = empty
@@ -223,7 +243,8 @@
   function optionLabel(field, value, context) {
     if (typeof value === "boolean") return context.t(value ? "开启" : "关闭");
     if (Array.isArray(value)) return value.map(item => optionLabel(field, item, context));
-    const option = (field.options || []).find(item => String(item.value) === String(value));
+    const option = (field.value_descriptor?.options || [])
+      .find(item => String(item.value) === String(value));
     return option ? context.t(option.label || option.value) : value;
   }
 

@@ -17,7 +17,7 @@ def custom_product_editor_definition(
     tab_label: str,
     tab_order: int,
     module_filter: str,
-    visible_when: dict[str, tuple[Any, ...]],
+    visible_if: dict[str, tuple[Any, ...]],
     display_order: int,
     fields: tuple[dict[str, Any], ...],
 ) -> FieldDefinition:
@@ -25,16 +25,16 @@ def custom_product_editor_definition(
     serialization = _custom_product_serialization(
         module_filter=module_filter,
         display_order=display_order,
-        module_editor=_module_editor_metadata(tab=tab, visible_when=visible_when),
+        module_editor=_module_editor_metadata(tab=tab, visible_if=visible_if),
     )
     return FieldDefinition(
         public=True,
         label=label,
         default=[],
-        control_template="custom_product_overrides",
+        editor="custom_product_overrides",
         tab=tab,
-        visible_when=visible_when,
-        editable_when=visible_when,
+        visible_if=visible_if,
+        editable_if=visible_if,
         tab_label=tab_label,
         tab_order=tab_order,
         serialization=serialization,
@@ -81,11 +81,11 @@ def refresh_custom_product_field_definitions() -> None:
 def _module_editor_metadata(
     *,
     tab: str,
-    visible_when: dict[str, tuple[Any, ...]],
+    visible_if: dict[str, tuple[Any, ...]],
 ) -> dict[str, Any]:
     mode_conditions = {
         key: list(value)
-        for key, value in visible_when.items()
+        for key, value in visible_if.items()
         if key != "engine_mode"
     }
     return {"tab": tab, "mode_when": mode_conditions}
@@ -129,10 +129,10 @@ class CustomProductModule(ExecutableModule):
             public=True,
             label="自定义字段",
             default=[],
-            control_template="custom_product_overrides",
+            editor="custom_product_overrides",
             tab="engine",
-            visible_when={"engine_mode": ("custom",)},
-            editable_when={"engine_mode": ("custom",)},
+            visible_if={"engine_mode": ("custom",)},
+            editable_if={"engine_mode": ("custom",)},
             chip_template="自定义字段: {value}",
             info_overlay={"type": "custom_product_fields"},
             tab_label="执行引擎",

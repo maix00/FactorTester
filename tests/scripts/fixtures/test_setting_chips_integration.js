@@ -54,12 +54,12 @@ const manifest = {
   defaults: {
     start_date: {
       tab_key: "time", label: "开始日期", chip_template: "开始日期: {value}",
-      control_template: "date", value: "", serialization: {}, options: [],
+      value_descriptor: {editor: "date", options: []}, value: "", serialization: {},
     },
     hidden_default: {
       tab_key: "advanced", label: "隐藏条件字段", chip_template: "隐藏条件字段: {value}",
-      control_template: "text", value: "default", serialization: {}, options: [],
-      visible_when: {mode: ["advanced"]},
+      value_descriptor: {editor: "text", options: []}, value: "default", serialization: {},
+      rules: {visible_if: {mode: ["advanced"]}},
     },
   },
   chip_fields: [{
@@ -154,6 +154,16 @@ const productChip = productDefaultGroup.children
   .find(item => item.className.includes("backend-setting-chip"));
 assert.ok(productChip, "content-only tabs should render a default chip");
 assert.equal(productChip.children[1].textContent, "未设置（默认）");
+
+const advancedRow = managerList.children.find(item => item.className === "test-settings-manager-row"
+  && item.children[1].children[0].children[0].textContent === "高级");
+assert.ok(advancedRow, "+ 设置 content should include conditional fields' tab");
+const advancedChip = advancedRow.children[1].children[1].children
+  .flatMap(group => group.children)
+  .find(item => item.className.includes("backend-setting-chip"));
+assert.ok(advancedChip, "conditional fields should have a chooser chip");
+assert.equal(advancedChip.children[1].textContent, "N/A",
+  "a hidden conditional field must be shown as N/A in + 设置");
 
 const updated = render("SgCCS 5m", () => {});
 const updatedGroup = updated.children[1].children[1].children.find(

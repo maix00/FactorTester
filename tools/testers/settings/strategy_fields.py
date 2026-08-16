@@ -24,14 +24,15 @@ def registered_option_values(key: str) -> frozenset[str]:
     app = backtest_setting_registry.get(GROUP_TEST_APPLICATION)
     defaults = app.manifest().get("defaults") or {}
     item = defaults.get(key) or {}
-    options = item.get("options") or []
+    options = item.get("value_descriptor", {}).get("options") or []
     values = frozenset(str(option.get("value")) for option in options if "value" in option)
     if values:
         return values
     field = _registered_module_field(key)
     if field is None:
         return frozenset()
-    return frozenset(str(value) for value, _label in (field.options or ()))
+    descriptor = field.descriptor_for(key)
+    return frozenset(str(value) for value, _label in descriptor.options)
 
 
 def registered_default_value(key: str) -> Any:

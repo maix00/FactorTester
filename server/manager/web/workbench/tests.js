@@ -1,5 +1,5 @@
 (() => {
-  const clientScope = new URLSearchParams(window.location.search).get("client") || "web";
+  const clientScope = new URLSearchParams(window.location?.search || "").get("client") || "web";
   window.FTTestClientScope = clientScope;
   const definitions = {
     ic: {application: "ic_test", nav: "ic-test", title: "IC 测试"},
@@ -78,6 +78,7 @@
       runValues: initialRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
       runBatchCode: {status: "idle", error: "", promise: null},
+      backtestCode: {status: "idle", error: "", promise: null},
       settingsCode: {status: "idle", error: "", promise: null},
       settingsInitialized: false,
       settingsFieldsCode: {status: "idle", error: "", promise: null},
@@ -141,6 +142,14 @@
     return FTTestLazyCode.ensureRunBatchCode(state, refresh);
   }
 
+  function ensureBacktestCode(context, state, refresh) {
+    if (state.kind !== "backtest" || window.FTBacktestGroups) return Promise.resolve();
+    return FTTestLazyCode.ensureGroupCode(
+      state, "backtestCode", "workbench-backtest",
+      () => window.FTBacktestGroups?.initialize?.(state), refresh,
+    );
+  }
+
   function initializeSettings(state) {
     if (state.settingsInitialized || !window.FTTestSettings) return;
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
@@ -179,7 +188,9 @@
   }
 
   function ensureControl(context, state, field, refresh) {
-    const descriptor = window.FTStaticLoader?.controlDescriptor?.(field?.control_template);
+    const descriptor = window.FTStaticLoader?.controlDescriptor?.(
+      field?.value_descriptor?.editor,
+    );
     if (!descriptor?.group) return Promise.resolve();
     return FTTestControlLoader.ensure(state, descriptor.group, refresh);
   }
@@ -346,9 +357,15 @@
       );
     }
     if (state.kind === "backtest") {
-      root.append(window.FTBacktestGroups?.render
-        ? FTBacktestGroups.render(context, state, () => render(context, state))
-        : FTTestLazyCode.deferredPanel(context, state, "分组策略", "workbench-backtest", () => render(context, state)));
+      if (window.FTBacktestGroups?.render) {
+        root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
+      } else {
+        const code = state.backtestCode || {};
+        root.append(code.status === "error"
+          ? FTUI.empty(context.t("读取策略列表失败"), code.error)
+          : FTUI.loading(context.t("正在读取策略列表…")));
+        ensureBacktestCode(context, state, () => render(context, state));
+      }
     }
     if (window.FTTestRunBatch) {
       root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
@@ -390,6 +407,7 @@
     ensureFactorsForExecution, ensureProductsForExecution, show,
     ensureRunCode,
     ensureRunBatchCode,
+    ensureBacktestCode,
     ensureSettingsCode,
     ensureSettingsFieldsCode,
     ensureSettingsTab,

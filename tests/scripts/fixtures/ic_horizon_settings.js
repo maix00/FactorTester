@@ -42,9 +42,9 @@ const values = {
   ic_decay_lags: 5,
 };
 settings.normalizeSettingValues({defaults: {
-  forward_return_horizons: {control_template: "ic_horizon_grid"},
-  ic_lags: {control_template: "ic_delay_grid"},
-  ic_decay_lags: {control_template: "ic_decay_grid"},
+  forward_return_horizons: {value_descriptor: {editor: "ic_horizon_grid"}},
+  ic_lags: {value_descriptor: {editor: "ic_delay_grid"}},
+  ic_decay_lags: {value_descriptor: {editor: "ic_decay_grid"}},
 }}, values);
 assert.deepEqual(values, {
   forward_return_horizons: {sampling: "scale_aware"},

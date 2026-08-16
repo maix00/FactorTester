@@ -49,7 +49,7 @@ class EquityCurveModule(ExecutableModule):
             public=True,
             label="净值实时计算",
             default=True,
-            control_template="boolean",
+            editor="boolean",
             tab="engine",
             chip_template="净值实时计算: {value}",
             tab_label="执行引擎",

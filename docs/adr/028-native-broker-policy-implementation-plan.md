@@ -78,8 +78,8 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
 ## 阶段 2：注册字段 + `resolve_broker` flow
 
 - `BrokerModule.fields` 补齐 `FieldDefinition`（`public=True`，参考
-  `PositionSizingModule`/`LiquidityModule` 现有字段的 `control_template="select"`
-  写法，`visible_when={"engine_mode": ("custom",)}` 之类的可见性规则待定，先不
+  `PositionSizingModule`/`LiquidityModule` 现有字段的 `editor="select"`
+  写法，`visible_if={"engine_mode": ("custom",)}` 之类的可见性规则待定，先不
   暴露给非 custom 引擎模式，避免过早在前端出现新 tab）。
 - 新增 `resolve_broker: Flow`，`phase=Phase.PRE_REPLAY`，`inputs=()`，
   `outputs=()`（副作用是往 `BrokerStore` 里写，不经过 FieldRef），

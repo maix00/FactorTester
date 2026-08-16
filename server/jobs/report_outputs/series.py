@@ -9,7 +9,7 @@ from typing import Any
 
 def extract_series(result: dict[str, Any], source: dict[str, Any]) -> list[dict[str, Any]]:
     groups = result.get("groups") if isinstance(result.get("groups"), list) else []
-    # Small runners and legacy adapters may return one bare equity list rather
+    # Small runners and registration adapters may return one bare equity list rather
     # than the grouped backtest envelope.  Treat it as the single default
     # series so the same report/evidence contract still applies.
     if not groups and isinstance(result.get("equity_curve"), list):

@@ -28,7 +28,7 @@ _GROUP_FIELDS = {"split_count": 5, "group_index": 1}
 
 
 def setup_module() -> None:
-    # Idempotent: re-injecting the same default_when entries is harmless,
+    # Idempotent: re-injecting the same default_if entries is harmless,
     # and this guarantees the mechanism is applied regardless of whether
     # some other test module already triggered register_all_module_settings.
     apply_counterparty_profile_defaults()

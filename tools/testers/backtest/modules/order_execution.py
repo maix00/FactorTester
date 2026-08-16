@@ -38,24 +38,24 @@ class OrderExecutionModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "execution_price_basis": FieldDefinition(
-            public=False, label="价格", default="open", control_template="select", tab="order",
+            public=False, label="价格", default="open", editor="select", tab="order",
             options=(("open", "下一 bar 开盘价"),),
             chip_template="价格: {value}", tab_label="订单执行", tab_order=120,
         ),
         "volume_execution_price_basis": FieldDefinition(
-            public=True, label="容量撮合价格", default="close", control_template="select", tab="order",
+            public=True, label="容量撮合价格", default="close", editor="select", tab="order",
             options=(("close", "执行 bar 收盘价"), ("vwap", "执行 bar VWAP"), ("twap", "执行 bar TWAP")),
-            visible_when={"matching_model": ("auto", "bar_volume_limited")},
+            visible_if={"matching_model": ("auto", "bar_volume_limited")},
             chip_template="容量价格: {value}", tab_label="订单执行", tab_order=120,
             help_text="完整 execution-bar volume 只能在 bar 完成后使用；价格代理也在该时点确认。",
         ),
         "order_type": FieldDefinition(
-            public=True, label="订单", default="market", control_template="select", tab="order",
+            public=True, label="订单", default="market", editor="select", tab="order",
             options=(("market", "市价单"), ("limit", "限价单")),
             chip_template="订单: {value}", tab_label="订单执行", tab_order=120,
         ),
         "matching_model": FieldDefinition(
-            public=True, label="撮合", default="auto", control_template="select", tab="order",
+            public=True, label="撮合", default="auto", editor="select", tab="order",
             options=(
                 ("auto", "按流动性模式自动"),
                 ("next_bar_full_fill", "下一 bar 全额成交"),

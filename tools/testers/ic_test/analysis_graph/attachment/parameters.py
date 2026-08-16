@@ -31,7 +31,7 @@ def freeze_analysis_parameters(
     for key, parameter in definitions.items():
         value = values[key] if key in values else parameter.default
         try:
-            frozen[key] = _freeze_value(parameter.control_template, value)
+            frozen[key] = _freeze_value(parameter.value_descriptor.editor, value)
             _validate_registered_bounds(parameter, frozen[key])
         except (TypeError, ValueError) as exc:
             issues.append(AnalysisAttachmentIssue(
@@ -42,8 +42,8 @@ def freeze_analysis_parameters(
     return frozen, tuple(issues)
 
 
-def _freeze_value(control_template: str, value: Any) -> Any:
-    if control_template == "signal_count_list":
+def _freeze_value(editor: str, value: Any) -> Any:
+    if editor == "signal_count_list":
         values = value if isinstance(value, (list, tuple)) else (value,)
         counts = []
         for item in values:
@@ -54,7 +54,7 @@ def _freeze_value(control_template: str, value: Any) -> Any:
             {item["value"]: item for item in counts}.values(),
             key=lambda item: item["value"],
         )
-    if control_template == "positive_integer_list":
+    if editor == "positive_integer_list":
         values = value if isinstance(value, (list, tuple)) else (value,)
         return sorted({_integer(item, minimum=1) for item in values})
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -77,19 +77,19 @@ def _validate_registered_bounds(
     for item in values:
         scalar = item.get("value") if isinstance(item, dict) else item
         if (
-            parameter.minimum is not None
+            parameter.value_descriptor.minimum is not None
             and isinstance(scalar, (int, float))
-            and scalar < parameter.minimum
+            and scalar < parameter.value_descriptor.minimum
         ):
-            raise ValueError(f"value must be >= {parameter.minimum:g}")
+            raise ValueError(f"value must be >= {parameter.value_descriptor.minimum:g}")
         if (
-            parameter.maximum is not None
+            parameter.value_descriptor.maximum is not None
             and isinstance(scalar, (int, float))
-            and scalar > parameter.maximum
+            and scalar > parameter.value_descriptor.maximum
         ):
-            raise ValueError(f"value must be <= {parameter.maximum:g}")
-    if parameter.options:
-        accepted = {option.value for option in parameter.options}
+            raise ValueError(f"value must be <= {parameter.value_descriptor.maximum:g}")
+    if parameter.value_descriptor.options:
+        accepted = {option[0] for option in parameter.value_descriptor.options}
         if any(item not in accepted for item in values):
             raise ValueError(f"value must be one of {sorted(accepted)}")
 

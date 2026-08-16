@@ -11,14 +11,12 @@ from .analysis import (
 )
 from .core import CoreAxisDefinition, CoreTestDefinition
 from .graph import AnalysisGraphDefinition
-from .options import AnalysisOptionDefinition
 
 __all__ = [
     "AnalysisGraphDefinition",
     "AnalysisChipDefinition",
     "AnalysisInputContract",
     "AnalysisMapping",
-    "AnalysisOptionDefinition",
     "AnalysisParameterDefinition",
     "AnalysisTargetCardinality",
     "AnalysisTargetOrigin",

@@ -5,6 +5,9 @@ global.window = globalThis;
 global.structuredClone = global.structuredClone || (value => JSON.parse(JSON.stringify(value)));
 
 const source = process.argv[2];
+eval(fs.readFileSync(
+  "server/manager/web/workbench/setting-rules.js", "utf8",
+));
 eval(fs.readFileSync(source, "utf8"));
 eval(fs.readFileSync(
   "server/manager/web/workbench/ic-configuration.js", "utf8",
@@ -78,6 +81,77 @@ assert.equal("factor_candidates" in execution, false);
 assert.equal("factor_selections" in execution, false);
 assert.equal("product_path_selections" in execution, false);
 assert.equal("stale_unknown_field" in execution, false);
+
+const conditionalManifest = {
+  defaults: {
+    mode: {value: "basic", serialization: {}},
+    conditional_execution: {
+      value: "default",
+      serialization: {},
+      rules: {visible_if: {mode: ["advanced"]}},
+    },
+    conditional_authoring: {
+      value: "default",
+      execution_policy: "authoring_only",
+      serialization: {},
+      rules: {visible_if: {mode: ["advanced"]}},
+    },
+    locked_execution: {
+      value: "declared",
+      serialization: {},
+      rules: {
+        editable_if: {mode: ["advanced"]},
+        default_if: {mode: {basic: "automatic"}},
+      },
+    },
+  },
+};
+const basicValues = {
+  mode: "basic",
+  conditional_execution: "stale-execution",
+  conditional_authoring: "stale-authoring",
+  locked_execution: "stale-locked",
+};
+assert.deepEqual(
+  FTTestConfigurationCompiler.authoringSettings(conditionalManifest, basicValues),
+  {mode: "basic", locked_execution: "automatic"},
+);
+assert.deepEqual(
+  FTTestConfigurationCompiler.executionSettings(conditionalManifest, basicValues),
+  {mode: "basic", locked_execution: "automatic"},
+);
+const advancedValues = {...basicValues, mode: "advanced", conditional_execution: "enabled",
+  conditional_authoring: "enabled", locked_execution: "manual"};
+assert.deepEqual(
+  FTTestConfigurationCompiler.executionSettings(conditionalManifest, advancedValues),
+  {mode: "advanced", conditional_execution: "enabled", locked_execution: "manual"},
+);
+
+const stalePayload = {
+  mode: "basic",
+  conditional_execution: "old-root-value",
+  conditional_authoring: "old-root-value",
+  locked_execution: "old-root-value",
+  settings: {conditional_execution: "old-settings-value"},
+  local_settings: {conditional_execution: "old-local-value"},
+  groups: [{
+    id: "group-1", mode: "basic", conditional_execution: "old-group-value",
+    locked_execution: "old-group-value",
+  }],
+};
+const sanitized = FTTestConfigurationCompiler.sanitizeExecutionPayload(
+  conditionalManifest, stalePayload, basicValues,
+);
+for (const value of [sanitized.settings, sanitized.local_settings]) {
+  assert.equal("conditional_execution" in value, false);
+  assert.equal("conditional_authoring" in value, false);
+}
+assert.equal("conditional_execution" in sanitized, false);
+assert.equal("conditional_authoring" in sanitized, false);
+assert.equal(sanitized.locked_execution, "automatic");
+assert.equal("conditional_execution" in sanitized.groups[0], false);
+assert.equal("conditional_authoring" in sanitized.groups[0], false);
+assert.equal(sanitized.groups[0].locked_execution, "automatic");
 
 const subjects = FTTestConfigurationCompiler.factorSubjects([factor]);
 assert.deepEqual(subjects, [{

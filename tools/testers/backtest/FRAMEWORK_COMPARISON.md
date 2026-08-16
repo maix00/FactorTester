@@ -25,7 +25,7 @@ FactorTester 当前不是单纯的事件驱动框架，也不是单纯的向量�
 
 1. 因子作者接口是 `FactorExpr` / `FactorFamily`，不是用户手写 `Strategy.next()`。
 2. native 引擎用 `ExecutableModule + Flow + EventQueue` 表达数据准备、信号、交易意图、订单、账本、结果整理。
-3. 前端/CLI 的可编辑字段由后端模块注册，`visible_when`、`editable_when`、默认值、chip、tab 都来自同一套字段定义。
+3. 前端/CLI 的可编辑字段由后端模块注册，`visible_if`、`editable_if`、默认值、chip、tab 都来自同一套字段定义。
 4. 分组策略是一个比较完整的业务全家桶：因子信号、分组数、分组序号、分配方式、调仓策略、派生组 mask、订单登记等集中在 `GroupMembershipModule`，避免为了“纯粹分层”切成过多浅模块。
 5. 外部框架不挂 native 的 event queue，而是通过 worker bridge 把同一份策略配置翻译给 Backtrader/Qlib/Zipline 等框架，让它们按自己的规范运行。
 6. 资金、账本、StrategyBook、CashPool、TradingRule、Margin、Fee、DMTM 等语义正在向更接近真实账户和交易规则的方向演进。
@@ -68,7 +68,7 @@ Backtrader/Zipline/LEAN 主要是代码 API，UI/CLI 通常不自动知道某个
 - CLI help/参数合法性来源。
 - 默认值、可见性、可编辑性、scope 规则。
 
-优点是设置项不容易在前端、CLI、后端三处变成三套语义。缺点是字段注册质量要求很高：一旦 label、default_when、visible_when 写错，会直接影响所有入口。
+优点是设置项不容易在前端、CLI、后端三处变成三套语义。缺点是字段注册质量要求很高：一旦 label、default_if、visible_if 写错，会直接影响所有入口。
 
 ### 3. Flow/EventQueue 比简单 pipeline 更适合表达“因果回放”
 
@@ -306,7 +306,7 @@ Backtrader/Qlib/Zipline/RQAlpha 应该是 worker/adapter，不应向 native queu
 
 ### 保持字段注册为前端/CLI 单一来源
 
-字段定义应该继续由后端模块提供，前端/CLI 不应硬编码业务字段。尤其是 `visible_when`、`editable_when`、默认值、displayValue/chip formatter 应继续以注册信息为准。
+字段定义应该继续由后端模块提供，前端/CLI 不应硬编码业务字段。尤其是 `visible_if`、`editable_if`、默认值、displayValue/chip formatter 应继续以注册信息为准。
 
 ### 把真实交易规则放到 owner 模块
 

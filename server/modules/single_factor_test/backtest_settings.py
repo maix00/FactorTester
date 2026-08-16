@@ -142,7 +142,7 @@ def _field_nodes(module: Module, tab_key: str) -> list[dict[str, Any]]:
             "application": application,
             "tab_key": tab_key,
             "field_key": setting.key,
-            "control_template": setting.control_template,
+            "value_descriptor": setting.value_descriptor.to_dict(),
             "has_children": False,
         }
         for index, setting in enumerate(fields, start=1)

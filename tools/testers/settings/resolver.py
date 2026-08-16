@@ -29,7 +29,7 @@ def resolve_group_settings(
         raise ValueError("group settings contain unknown group ids")
 
     resolved: dict[str, dict[str, Any]] = {}
-    engine = str(local_values.get("engine", application.settings["engine"].default))
+    engine = str(local_values.get("engine", _default(application.settings["engine"])))
     for group_id in group_ids:
         overrides = group_values.get(group_id, {})
         values: dict[str, Any] = {}
@@ -41,7 +41,7 @@ def resolve_group_settings(
                 and key in local_values
             ):
                 raise ValueError(f"group-only setting {key} cannot be set locally")
-            value = local_values.get(key, definition.default)
+            value = local_values.get(key, _default(definition))
             if key in overrides:
                 if definition.scope_policy == ScopePolicy.LOCAL_ONLY:
                     requested_value = overrides[key]
@@ -56,12 +56,10 @@ def resolve_group_settings(
                         })
                 else:
                     value = overrides[key]
-            if (
-                key not in local_values
-                and key not in overrides
-                and engine in definition.engine_defaults
-            ):
-                value = definition.engine_defaults[engine]
+            rules = _rules(definition)
+            if key not in local_values and key not in overrides \
+                    and engine in rules.engine_defaults:
+                value = rules.engine_defaults[engine]
             try:
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
@@ -69,7 +67,7 @@ def resolve_group_settings(
                 if definition.key == "time_precision":
                     raise
                 requested_value = value
-                value = definition.engine_defaults.get(engine, definition.default)
+                value = rules.engine_defaults.get(engine, _default(definition))
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
                 if user_provided:
@@ -147,7 +145,8 @@ def _replace_setting_value(
 
 
 def _coerce_value(definition: SettingDefinition, value: Any) -> Any:
-    if definition.control_template != "number":
+    descriptor = definition.value_descriptor
+    if descriptor is None or descriptor.value_type not in {"integer", "number"}:
         return value
     if isinstance(value, bool):
         raise ValueError(f"setting {definition.key} requires a number")
@@ -165,14 +164,16 @@ def _coerce_value(definition: SettingDefinition, value: Any) -> Any:
 
 
 def _validate_value(definition: SettingDefinition, value: Any) -> None:
-    if definition.options and value not in {option.value for option in definition.options}:
+    descriptor = definition.value_descriptor
+    if descriptor is not None and descriptor.options \
+            and value not in {option[0] for option in descriptor.options}:
         raise ValueError(f"invalid value for {definition.key}: {value!r}")
-    if definition.control_template == "number":
+    if descriptor is not None and descriptor.value_type in {"integer", "number"}:
         if not isinstance(value, (int, float)):
             raise ValueError(f"setting {definition.key} requires a number")
-        if definition.minimum is not None and value < definition.minimum:
+        if descriptor.minimum is not None and value < descriptor.minimum:
             raise ValueError(f"setting {definition.key} is below minimum")
-        if definition.maximum is not None and value > definition.maximum:
+        if descriptor.maximum is not None and value > descriptor.maximum:
             raise ValueError(f"setting {definition.key} is above maximum")
 
 
@@ -183,10 +184,11 @@ def _resolve_engine_value(
     *,
     user_provided: bool,
 ) -> tuple[Any, dict[str, Any] | None]:
-    disabled = set(definition.disabled_values_by_engine.get(engine, ()))
+    rules = _rules(definition)
+    disabled = set(rules.disabled_values.get(engine, ()))
     if str(value) not in disabled:
         return value, None
-    fallback = definition.engine_defaults.get(engine, definition.default)
+    fallback = rules.engine_defaults.get(engine, _default(definition))
     _validate_value(definition, fallback)
     if str(fallback) in disabled:
         raise ValueError(
@@ -201,3 +203,19 @@ def _resolve_engine_value(
         "reason": "engine_disabled_value",
     } if user_provided else None
     return fallback, diagnostic
+
+
+def _field_spec(definition: SettingDefinition):
+    return definition.field_spec()
+
+
+def _rules(definition: SettingDefinition):
+    spec = _field_spec(definition)
+    assert spec.setting is not None
+    return spec.setting.rules
+
+
+def _default(definition: SettingDefinition) -> Any:
+    spec = _field_spec(definition)
+    assert spec.setting is not None
+    return spec.setting.default

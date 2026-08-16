@@ -24,13 +24,13 @@ class VolumeCapacityMode(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "liquidity_mode": FieldDefinition(
-            public=True, label="成交量容量", default="infinite", control_template="select", tab="volume_capacity",
+            public=True, label="成交量容量", default="infinite", editor="select", tab="volume_capacity",
             options=(("infinite", "不限制"), ("volume_participation", "按执行 bar 成交量占比限制")),
             chip_template="容量约束: {value}", tab_label="成交量容量", tab_order=150,
         ),
         "participation_rate": FieldDefinition(
-            public=True, label="参与率", default=0.1, control_template="number", tab="volume_capacity",
-            visible_when={"liquidity_mode": ("volume_participation",)},
+            public=True, label="参与率", default=0.1, editor="number", tab="volume_capacity",
+            visible_if={"liquidity_mode": ("volume_participation",)},
             chip_template="参与率: {value}", tab_label="成交量容量", tab_order=150,
         ),
         "capacity_allocations": FieldDefinition(public=False, display_value_kind="capacity_table"),

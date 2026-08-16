@@ -41,6 +41,7 @@ def test_scalar_setting_exposes_a_typed_descriptor() -> None:
         "item_type": "",
         "ref_kind": "",
         "schema": {},
+        "options": [],
         "minimum": 2,
         "maximum": None,
         "step": 1,
@@ -110,7 +111,7 @@ def test_run_field_keeps_submission_lifecycle_separate() -> None:
 def test_native_field_descriptor_uses_registry_key_for_dynamic_catalogs() -> None:
     field = FieldDefinition(
         public=True,
-        control_template="select",
+        editor="select",
         default="",
         options=(("", "自动"),),
     )

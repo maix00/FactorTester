@@ -76,7 +76,7 @@ class TargetStrategyModule(ExecutableModule):
             public=True,
             label="策略意图",
             default="group",
-            control_template="select",
+            editor="select",
             tab="group_strategy",
             options=(
                 ("group", "分组"),

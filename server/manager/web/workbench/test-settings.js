@@ -240,6 +240,7 @@
             includeEmpty: true,
             includeUnregistered: true,
             includeHidden: true,
+            notApplicableLabel: "N/A",
             includeTabFallbacks: true,
             fallbackTabs: [item.tab.key],
             groupBy: "tab",
@@ -284,9 +285,9 @@
       return fields().inputFor(...args);
     },
     initialMountedTabs, resetTabValues,
-    get supportedControlTemplates() {
-      return fields()?.supportedControlTemplates || [];
+    get supportedEditors() {
+      return fields()?.supportedEditors || [];
     },
-    supportsControl: control => Boolean(fields()?.supportsControl(control)),
+    supportsEditor: editor => Boolean(fields()?.supportsEditor(editor)),
   });
 })();

@@ -160,7 +160,7 @@ def register_module_field_settings(
                 key=field_name,
                 label=fd.label or field_name,
                 tab=tab_keys.get(cls, fd.tab or cls.key),
-                control_template=fd.control_template or "text",
+                editor=fd.editor or "text",
                 default=fd.default,
                 module=setting_module_key,
                 scope_policy=scope,
@@ -173,11 +173,11 @@ def register_module_field_settings(
                 instance_class=fd.instance_class,
                 help_text=fd.help_text,
                 serialization=dict(fd.serialization or {}),
-                visible_when=dict(fd.visible_when or {}),
-                editable_when=dict(fd.editable_when or {}),
-                default_when={
+                visible_if=dict(fd.visible_if or {}),
+                editable_if=dict(fd.editable_if or {}),
+                default_if={
                     key: dict(values)
-                    for key, values in (fd.default_when or {}).items()
+                    for key, values in (fd.default_if or {}).items()
                 },
                 tab_label=fd.tab_label,
                 tab_order=fd.tab_order,
@@ -191,7 +191,7 @@ def register_module_field_settings(
                 show_chip=fd.show_chip,
                 execution_policy=fd.execution_policy,
                 value_descriptor=fd.descriptor_for(field_name),
-                runtime_role=RuntimeRole(owner=cls.key),
+                runtime_role=fd.field_spec(field_name, owner=cls.key).runtime,
             ))
 
 
