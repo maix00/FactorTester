@@ -149,8 +149,14 @@
     const panel = document.createElement("div");
     panel.className = "test-settings-tab-content";
     if (!fields()) {
-      panel.append(FTUI.loading(context.t("正在读取设置控件…")));
-      options.ensureSettingsFieldsCode?.();
+      const load = options.settingsFieldsLoadState?.();
+      panel.append(load?.status === "error"
+        ? FTUI.empty(
+          context.t("读取设置控件失败"),
+          load.error || context.t("请重试"),
+        )
+        : FTUI.loading(context.t("正在读取设置控件…")));
+      if (load?.status !== "error") options.ensureSettingsFieldsCode?.();
       return panel;
     }
     if (item.fields.length && options.ensureSettingsTab
