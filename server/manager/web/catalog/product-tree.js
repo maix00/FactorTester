@@ -63,17 +63,32 @@
       ? context.t("本级产品列表") : title;
   }
 
-  function categorySelectionValues(value) {
-    const values = Array.isArray(value)
-      ? value
-      : String(value || "").split("_x_");
-    return [...new Set(values.map(item => String(item || "").trim()).filter(Boolean))];
+  function categorySelectionValues(value, available = []) {
+    const known = new Set(available.map(item => String(item?.id || "").trim()));
+    const values = Array.isArray(value) ? value : [String(value || "")];
+    const result = [];
+    values.forEach(item => String(item || "").split(",").forEach(raw => {
+      const categoryID = raw.trim();
+      if (!categoryID) return;
+      // Migrate the old UI's unregistered base-category composition.  A
+      // registered composite ID remains one selectable category.
+      const legacyParts = categoryID.split("_x_");
+      if (!known.has(categoryID) && legacyParts.length > 1
+        && legacyParts.every(part => known.has(part))) {
+        legacyParts.forEach(part => {
+          if (!result.includes(part)) result.push(part);
+        });
+        return;
+      }
+      if (!result.includes(categoryID)) result.push(categoryID);
+    }));
+    return result;
   }
 
   function categorySelectionID(values, available) {
     const selected = new Set(values);
     return available.filter(item => selected.has(item.id))
-      .map(item => item.id).join("_x_");
+      .map(item => item.id).join(",");
   }
 
   function categoryLabel(context, item) {
@@ -96,7 +111,7 @@
     );
     const availableIDs = new Set(available.map(item => item.id));
     const selectedCategories = new Set(
-      categorySelectionValues(options.selectedCategory)
+      categorySelectionValues(options.selectedCategory, available)
         .filter(categoryID => availableIDs.has(categoryID)),
     );
     const categories = document.createElement("section");
@@ -285,6 +300,7 @@
   }
 
   window.FTProductTree = {
-    minimalPaths, render, syncSelectionControls, updateSelection,
+    categorySelectionID, categorySelectionValues, minimalPaths, render,
+    syncSelectionControls, updateSelection,
   };
 })();
