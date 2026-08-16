@@ -8,9 +8,6 @@ from typing import Any, Callable
 
 import click
 
-from cli_anything.factortester_research.core.successor_graph.requirement_titles import (
-    REQUIREMENT_TITLE_MAP_ZH,
-)
 from tools.cli.release.research_obligations import (
     ledger_hash,
     ledger_path,
@@ -178,6 +175,10 @@ def register_title_migration_command(
 
 
 def _load_titles(path: Path) -> dict[str, dict[str, str]]:
+    from cli_anything.factortester_research.core.successor_graph.requirement_titles import (
+        REQUIREMENT_TITLE_MAP_ZH,
+    )
+
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
