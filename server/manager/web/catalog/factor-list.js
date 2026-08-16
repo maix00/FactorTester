@@ -27,51 +27,58 @@
     return context.t("搜索因子");
   }
 
-  function render(context, data, mount, {page, query, groupRef}) {
-    if (page === "families") return renderFamilies(context, data, mount, query);
+  function normalizeFamilyScope(scope, visitor = false) {
+    const value = ["public", "mine", "subordinates"].includes(scope)
+      ? scope : "public";
+    return visitor && value !== "public" ? "public" : value;
+  }
+
+  function familyScopeTabs(context, active, visitor = false) {
+    const tabs = document.createElement("nav");
+    tabs.className = "research-section-tabs factor-family-scope-tabs";
+    tabs.setAttribute("aria-label", context.t("因子家族范围"));
+    const definitions = [
+      ["public", context.t("公共因子家族")],
+      ["mine", context.t("我的因子家族")],
+      ["subordinates", context.t("下级用户因子家族")],
+    ];
+    for (const [id, label] of definitions) {
+      if (visitor && id !== "public") continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `research-section-tab${id === active ? " active" : ""}`;
+      button.textContent = label;
+      button.setAttribute("aria-current", id === active ? "page" : "false");
+      button.addEventListener("click", () => context.navigate(
+        `/factors/families?scope=${encodeURIComponent(id)}`,
+      ));
+      tabs.append(button);
+    }
+    return tabs;
+  }
+
+  function render(context, data, mount, {page, query, groupRef, scope = "public"}) {
+    if (page === "families") {
+      return renderFamilies(context, data, mount, query, scope);
+    }
     return renderSubjects(context, data, mount, {page, query, groupRef});
   }
 
-  function renderFamilies(context, data, mount, query) {
-    const rows = data.families.filter(item => model().matches(item, query));
-    const publicRows = rows.filter(item => familyKind(item) === "public");
-    const privateRows = rows.filter(item => familyKind(item) !== "public");
-    const sections = document.createElement("div");
-    sections.className = "factor-family-lists";
-    const groups = data.visitor
-      ? [["public", publicRows]]
-      : [["public", publicRows], ["private", privateRows]];
-    groups.forEach(([kind, values]) => sections.append(
-      familySection(context, kind, values),
-    ));
-    mount.replaceChildren(sections);
-  }
-
-  function familyKind(value) {
-    const kind = String(
-      value?.factor_kind || value?.source || "",
-    ).trim().toLowerCase();
-    if (kind === "public") return "public";
-    if (String(value?.owner_username || "") === "__public_jobs__") {
-      return "public";
-    }
-    return "private";
-  }
-
-  function familySection(context, kind, rows) {
-    const section = document.createElement("section");
-    section.className = `factor-family-section ${kind}`;
+  function renderFamilies(context, data, mount, query, scope) {
+    const scoped = dataForScope(data, scope);
+    const rows = scoped.families.filter(item => model().matches(item, query));
+    const panel = document.createElement("section");
+    panel.className = `factor-family-scope-panel ${scope}`;
     const heading = document.createElement("h2");
-    heading.textContent = context.t(
-      kind === "public" ? "公共因子" : "我的私有因子",
-    );
-    section.append(heading);
+    heading.textContent = context.t(scopeTitle(scope));
+    panel.append(heading);
     if (!rows.length) {
-      section.append(FTUI.empty(
-        context.t(kind === "public" ? "暂无公共因子家族" : "暂无私有因子家族"),
+      panel.append(FTUI.empty(
+        context.t(scopeEmpty(scope)),
         context.t("没有匹配的因子家族"),
       ));
-      return section;
+      mount.replaceChildren(panel);
+      return;
     }
     const view = FTUI.table(
       [context.t("原类名"), context.t("说明"), context.t("分类"), context.t("来源"), context.t("所有者"), context.t("因子数")],
@@ -87,8 +94,55 @@
     linkRows(view, rows, item =>
       `/factors/family/${encodeURIComponent(item.family_ref)}`, context,
     );
-    section.append(view.shell);
-    return section;
+    panel.append(view.shell);
+    mount.replaceChildren(panel);
+  }
+
+  function familyKind(value) {
+    const owner = String(value?.owner_username || "");
+    if (owner && owner !== "__public_jobs__") return "private";
+    const kind = String(
+      value?.factor_kind || value?.source || "",
+    ).trim().toLowerCase();
+    if (kind === "public") return "public";
+    if (String(value?.owner_username || "") === "__public_jobs__") {
+      return "public";
+    }
+    return "private";
+  }
+
+  function dataForScope(data, scope) {
+    const scopes = data.familyScopes || data.family_scopes;
+    if (scopes && scopes[scope]) return scopes[scope];
+    const families = (data.families || []).filter(item => {
+      if (scope === "public") return familyKind(item) === "public";
+      if (scope === "mine") {
+        return familyKind(item) !== "public"
+          && String(item.owner_username || "") === String(data.principal || "");
+      }
+      return familyKind(item) !== "public"
+        && String(item.owner_username || "") !== String(data.principal || "");
+    });
+    const refs = new Set(families.map(item => item.family_ref));
+    return {
+      ...data,
+      families,
+      factors: (data.factors || []).filter(item => refs.has(
+        item.family_ref || item.factor_family_ref,
+      )),
+    };
+  }
+
+  function scopeTitle(scope) {
+    if (scope === "mine") return "我的因子家族";
+    if (scope === "subordinates") return "下级用户因子家族";
+    return "公共因子家族";
+  }
+
+  function scopeEmpty(scope) {
+    if (scope === "mine") return "暂无我的因子家族";
+    if (scope === "subordinates") return "暂无下级用户因子家族";
+    return "暂无公共因子家族";
   }
 
   function renderSubjects(context, data, mount, {page, query, groupRef}) {
@@ -158,7 +212,9 @@
   }
 
   window.FTFactorList = Object.freeze({
+    familyScopeTabs,
     headerTabs,
+    normalizeFamilyScope,
     render,
     searchPlaceholder,
   });

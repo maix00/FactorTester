@@ -664,6 +664,48 @@ class ClientStateService:
             )
         return build_client_library_projection(payload, principal=principal)
 
+    def factor_library_scopes(self, principal: str) -> dict[str, dict[str, Any]]:
+        """Return the user's own and managed-user factor-family scopes.
+
+        ``factor_library`` intentionally remains the small own-account API
+        used by older callers.  This companion projection adds only accounts
+        that the current account can manage; same-level peers are not treated
+        as subordinates merely because they are visible in an older listing.
+        """
+        from server.modules.custom_factors.client_library import (
+            build_client_library_projection,
+        )
+        from server.modules.custom_factors.factor_library_service import (
+            build_factor_library_overview,
+        )
+        from tools.data.account_manage import visible_accounts_for
+
+        owner_account = self._local_account(principal)
+        payload = build_factor_library_overview(
+            principal, include_subordinates=True,
+            account=owner_account,
+        )
+        managed_usernames = {
+            str(account.get("username") or "")
+            for account in visible_accounts_for(
+                principal, include_self=False,
+            )
+            if isinstance(account, dict) and str(account.get("username") or "")
+        }
+        subordinate_rows = []
+        for item in payload.get("factors") or []:
+            owner = str(item.get("owner_username") or "")
+            if owner in managed_usernames:
+                subordinate_rows.append(item)
+        subordinate = build_client_library_projection({
+            "factors": subordinate_rows,
+            "errors": payload.get("errors") or [],
+        }, principal=principal)
+        return {
+            "mine": self.factor_library(principal),
+            "subordinates": subordinate,
+        }
+
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
         """Return explicitly synchronized immutable factor sets."""
         from server.modules.custom_factors.factor_set_registry import (

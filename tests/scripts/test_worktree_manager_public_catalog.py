@@ -94,6 +94,13 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
         "source_code": "SECRET SOURCE",
         "params": [{"alias": "window", "value": "20"}],
         "is_public": True,
+    }, {
+        "id": "volatility",
+        "name": "Volatility",
+        "factor_family": "FactorFamily",
+        "description": "public volatility",
+        "params": [],
+        "is_public": True,
     }])
 
     value = public_factor_library()
@@ -101,6 +108,9 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
     assert value["principal"] == "__public_jobs__"
     assert value["factors"][0]["factor_alias"] == "Momentum"
     assert "source_code" not in value["factors"][0]
+    assert [item["factor_family_alias"] for item in value["families"]] == [
+        "momentum", "volatility",
+    ]
 
 
 def test_source_provider_extracts_endpoint_host():

@@ -66,6 +66,15 @@ assert.deepStrictEqual(match("/products/continuous-contract/CA%5Bmain%5D", ""), 
   kind: "product-reference", referenceKind: "continuous-contract", id: "CA[main]",
 });
 assert.deepStrictEqual(match("/factors/sets", ""), {kind: "factor-sets"});
+assert.deepStrictEqual(match("/factors/families", ""), {
+  kind: "factor-families", scope: "public",
+});
+assert.deepStrictEqual(match("/factors/families", "?scope=subordinates"), {
+  kind: "factor-families", scope: "subordinates",
+});
+assert.deepStrictEqual(match("/factors/families", "?scope=unknown"), {
+  kind: "factor-families", scope: "public",
+});
 assert.strictEqual(pinned("/products?source=local"), true);
 assert.strictEqual(pinned("/products/sources?source=local"), true);
 assert.strictEqual(pinned("/products/groups"), true);

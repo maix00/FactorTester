@@ -148,12 +148,17 @@ def public_factor_library() -> dict[str, Any]:
         alias = str(item.get("name") or item.get("id") or "").strip()
         if not alias:
             continue
-        family = str(
-            item.get("factor_family") or item.get("factor_family_name") or alias
-        ).strip()
+        # A public source-registry row represents one FactorFamily.  Direct
+        # subclasses commonly report the generic Python base name
+        # ``FactorFamily``; using that value would collapse every public row
+        # into one family in the client projection.  The registry ID is the
+        # stable family identity, while the class name remains its display
+        # name.
+        family = str(item.get("id") or item.get("factor_family") or alias).strip()
+        family_name = str(item.get("name") or family).strip()
         factors.append({
             "factor_family_alias": family,
-            "factor_family_name": family,
+            "factor_family_name": family_name,
             "factor_alias": alias,
             "chinese_name": item.get("chinese_name") or "",
             "description": item.get("description") or "",

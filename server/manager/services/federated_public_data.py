@@ -17,6 +17,12 @@ import time
 from typing import Any
 
 from server.manager.domain.federation import ServiceRoute
+from server.manager.services.factor_library_scopes import (
+    FAMILY_SCOPES,
+    compose_factor_library_scopes,
+    empty_factor_projection,
+    split_factor_library_scopes,
+)
 from server.manager.services.public_catalog import public_factor_library
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
@@ -581,37 +587,46 @@ class FederatedPublicDataService:
         if cached is not None:
             return dict(cached)
         public = public_factor_library()
-        if visitor:
-            local = public
-        else:
-            # Public families are available to every signed-in researcher,
-            # even before that researcher registers a parameterized factor.
-            # Private rows still come only from the current user's local and
-            # synchronized account-domain projection.
-            private = self.client_state.factor_library(principal)
-            local = {
-                "factors": list(public.get("factors") or []) + list(
-                    private.get("factors") or []
-                ),
-                "families": list(public.get("families") or []) + list(
-                    private.get("families") or []
-                ),
-                "errors": [
-                    *list(public.get("errors") or []),
-                    *list(private.get("errors") or []),
-                ],
-            }
+        local_scopes = {"public": public}
+        if not visitor:
+            scope_reader = getattr(
+                self.client_state, "factor_library_scopes", None,
+            )
+            if callable(scope_reader):
+                local_scopes.update(scope_reader(principal))
+            else:
+                # Keep a bounded fallback for older test seams and Managers.
+                local_scopes["mine"] = self.client_state.factor_library(principal)
+        local = compose_factor_library_scopes(
+            local_scopes, principal=str(principal or viewer),
+        )
         projections = [local]
         peer_values = self._query_peers(
             kind="catalog", operation="factors", principal=viewer,
         )
         for _route, response in peer_values:
             projections.append(response)
-        if not peer_values and visitor:
-            return dict(self._store(key, dict(local)))
+        scoped_values = {scope: [] for scope in FAMILY_SCOPES}
+        for value in projections:
+            scopes = split_factor_library_scopes(
+                value,
+                principal=str(principal or viewer),
+                visitor=visitor,
+            )
+            for scope, projection in scopes.items():
+                scoped_values.setdefault(scope, []).append(projection)
+        merged_scopes = {
+            scope: merge_factor_library_projections(
+                scoped_values.get(scope) or [empty_factor_projection(principal)],
+                principal=str(principal or viewer),
+            )
+            for scope in FAMILY_SCOPES
+            if not visitor or scope == "public"
+        }
         result = merge_factor_library_projections(
-            projections, principal=str(principal or viewer),
+            list(merged_scopes.values()), principal=str(principal or viewer),
         )
+        result["family_scopes"] = merged_scopes
         return dict(self._store(key, result))
 
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:

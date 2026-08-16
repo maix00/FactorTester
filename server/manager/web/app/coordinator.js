@@ -344,7 +344,9 @@
         pageContext, "factor_evaluation", {factorRef, groupRef},
       ),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
-      factorFamilies: pageContext => FTFactors.list(pageContext, "families"),
+      factorFamilies: (pageContext, route) => FTFactors.list(
+        pageContext, "families", route?.scope || "public",
+      ),
       factorSets: pageContext => FTFactors.list(pageContext, "sets"),
       factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
       factor: (pageContext, id) => FTFactors.factorDetail(pageContext, id),
