@@ -6,6 +6,7 @@ import hashlib
 import re
 
 from server.manager.http.responses import json_response
+from server.manager.objects.models import TransferObjectKind
 from server.services.client_release_channels import (
     load_beta_sparkle_appcast,
     load_client_release_channel,
@@ -14,6 +15,74 @@ from server.services.client_release_channels import (
 
 class ClientReleaseRoutesMixin:
     """Serve verified release metadata and immutable ranged downloads."""
+
+    _CLIENT_RELEASE_UPLOAD_PATH = "/api/client/releases/beta/upload-access"
+
+    def _issue_client_release_upload_access(self, parsed) -> bool:
+        """Issue a 7997 upload capability only to a Manager principal."""
+        if parsed.path != self._CLIENT_RELEASE_UPLOAD_PATH:
+            return False
+        session = self._session()
+        capabilities = session.get("capabilities") if session else {}
+        is_manager = isinstance(capabilities, dict) and bool(
+            capabilities.get("manager")
+        )
+        # The local Manager capability is useful for the colocated operator
+        # workflow, but it must never become a remotely usable release token.
+        if not is_manager and not (self._is_loopback_client() and self._has_capability()):
+            json_response(self, {
+                "success": False,
+                "error": "Manager administrator authentication is required",
+            }, 403)
+            return True
+        try:
+            payload = self._json_body(256 * 1024)
+            version = str(payload.get("version") or "").strip()
+            build = int(payload.get("build"))
+            package_size = int(payload.get("package_size_bytes"))
+            package_sha256 = str(payload.get("package_sha256") or "").strip().lower()
+            if not re.fullmatch(r"[0-9A-Za-z.+-]{1,128}", version):
+                raise ValueError("client release version is invalid")
+            if build < 1:
+                raise ValueError("client release build is invalid")
+            if not 1 <= package_size <= 2 * 1024 * 1024 * 1024:
+                raise ValueError("client release package size is invalid")
+            if not re.fullmatch(r"[0-9a-f]{64}", package_sha256):
+                raise ValueError("client release package hash is invalid")
+            principal = str(
+                (session or {}).get("username") or "manager"
+            ).strip()
+            access = self.state.prepare_object_upload(
+                principal=principal,
+                storage_server_id=self.state.server_id,
+                object_kind=TransferObjectKind.CLIENT_RELEASE.value,
+                object_id=f"beta:{version}:{build}:{package_sha256}",
+                filename="client-beta-release.zip",
+                expected_size=package_size,
+                expected_sha256=package_sha256,
+                idempotency_key=(
+                    f"client-release:beta:{version}:{build}:{package_sha256}"
+                ),
+                content_type="application/zip",
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        except (ConnectionError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, {
+            "success": True,
+            "release": {
+                "channel": "beta",
+                "version": version,
+                "build": build,
+                "package_sha256": package_sha256,
+                "package_size_bytes": package_size,
+            },
+            "access": access,
+        }, 201)
+        return True
     def _serve_client_release(self, path: str) -> bool:
         public_key = (
             self.state.runtime_source_root

@@ -539,6 +539,19 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_test_workbench_recovers_ready_settings_loader_before_first_paint() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_workbench_settings_bootstrap.js"
+    source = WEB_ROOT / "workbench" / "tests.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
     source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
@@ -1026,8 +1039,8 @@ def test_embedded_authentication_uses_the_native_session_store() -> None:
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
 
     assert "factorTesterAuthentication" in auth
-    assert 'nativeAuthentication("open")' in auth
     assert 'nativeAuthentication("logout")' in auth
+    assert 'nativeAuthentication("session-updated")' in auth
 
 
 def test_route_dispatch_contract() -> None:

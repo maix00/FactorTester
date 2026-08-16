@@ -16,6 +16,32 @@ INSTALLED_APP="/Applications/$APP_NAME.app"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
+# Xcode gives every worktree/test invocation its own DerivedData directory.
+# Those Debug app bundles are discoverable by Spotlight and look like many
+# installed clients even though only /Applications/FTClient.app is released.
+# Keep the cleanup exact to this project's generated directories; never clean
+# arbitrary DerivedData or the release output owned by this script.
+cleanup_stale_debug_artifacts() {
+  if test "${FTCLIENT_SKIP_DEBUG_CLEANUP:-0}" = "1"; then
+    echo "skipping stale FTClient DerivedData cleanup (FTCLIENT_SKIP_DEBUG_CLEANUP=1)"
+    return
+  fi
+  local derived_root="${HOME:-}/Library/Developer/Xcode/DerivedData"
+  if test -z "${HOME:-}" || test "$HOME" = "/" ||
+     test "$derived_root" != "$HOME/Library/Developer/Xcode/DerivedData" ||
+     test ! -d "$derived_root"; then
+    return
+  fi
+  local path
+  while IFS= read -r -d '' path; do
+    echo "removing stale FTClient Debug artifact: $path"
+    rm -rf -- "$path"
+  done < <(
+    find "$derived_root" -maxdepth 1 -type d \
+      -name 'FactorTester-Client-*' -print0
+  )
+}
+
 # This script owns only the FTClient process.  FactorTester Manager, Docker
 # Compose, WireGuard, and test-service ports are server deployment concerns;
 # building or launching the client must never restart them.
@@ -29,6 +55,7 @@ cleanup_staging() {
 trap cleanup_staging EXIT
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+cleanup_stale_debug_artifacts
 
 xcodegen generate --spec "$APPLE_DIR/project.yml" --project "$APPLE_DIR"
 XCODEBUILD_ARGS=(

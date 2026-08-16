@@ -63,7 +63,8 @@ def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
         ".test-workbench .test-settings-manager-defaults .backend-setting-chip-label",
     )
     assert "padding: 3px 0" in row
-    assert "align-items: start" in row
+    assert "align-items: baseline" in row
+    assert "align-items: baseline" in row_body
     assert "border-top" not in row
     assert "width: 100%" in row_list and "min-width: 0" in row_list
     assert "width: 100%" in row_body and "min-width: 0" in row_body
@@ -72,7 +73,14 @@ def test_settings_manager_defaults_reset_the_chip_row_itself() -> None:
     assert "width: 100%" in defaults_shell and "max-width: 100%" in defaults_shell
     assert "flex-wrap: wrap" in chip_group and "width: 100%" in chip_group
     assert "max-width: 100%" in chip and "box-sizing: border-box" in chip
+    assert "white-space: nowrap" in chip
     assert "flex: 0 1 auto" in chip_label
+
+    heading = _rule(css, ".test-workbench .test-settings-manager-section-heading")
+    assert "display: flex" in heading and "align-items: center" in heading
+    assert "min-height: 28px" in heading and "box-sizing: border-box" in heading
+    checkbox = _rule(css, '.test-workbench .test-settings-manager-row input[type="checkbox"]')
+    assert "transform: translateY(2px)" in checkbox
 
 
 def test_settings_manager_uses_inline_chip_nodes_inside_label_rows() -> None:

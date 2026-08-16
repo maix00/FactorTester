@@ -61,6 +61,7 @@ def test_macos_info_plist_uses_project_version_settings() -> None:
 
     assert "CFBundleShortVersionString: $(MARKETING_VERSION)" in project
     assert "CFBundleVersion: $(CURRENT_PROJECT_VERSION)" in project
+    assert "SPARKLE_PUBLIC_ED_KEY:" in project
 
 
 def test_macos_pins_sparkle_and_embeds_one_update_trust_anchor() -> None:

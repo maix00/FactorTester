@@ -155,6 +155,9 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     ).read_text(encoding="utf-8")
     assert 'APP_NAME="FTClient"' in source
     assert 'APP_NAME="FactorTester-Client"' not in source
+    assert "cleanup_stale_debug_artifacts" in source
+    assert "FactorTester-Client-*" in source
+    assert "FTCLIENT_SKIP_DEBUG_CLEANUP" in source
     for contract in (
         "CFBundleIdentifier", "CFBundleShortVersionString",
         "CFBundleVersion", "bundle_hash", "bundle-receipt.json",

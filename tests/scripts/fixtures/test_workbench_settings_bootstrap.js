@@ -1,0 +1,57 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+global.window = {location: {search: ""}};
+global.document = {};
+global.structuredClone = value => JSON.parse(JSON.stringify(value));
+global.FTTestState = {
+  savedMountedTabs: () => [],
+  savedSettings: () => ({}),
+};
+global.FTTestLazyCode = {
+  ensureGroupCode: () => Promise.resolve(),
+};
+global.FTSettingRules = {};
+global.FTTestContentAdapters = {};
+window.FTSettingRules = global.FTSettingRules;
+window.FTTestContentAdapters = global.FTTestContentAdapters;
+global.FTTestSettings = window.FTTestSettings = {
+  initialMountedTabs: () => ["engine"],
+  initialValues: () => ({engine: "native"}),
+};
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+vm.runInThisContext(source, {filename: process.argv[2]});
+
+let refreshes = 0;
+const state = {
+  manifest: {},
+  settingsCode: {status: "ready", error: "", promise: null},
+  settingsInitialized: false,
+};
+window.FTTests.ensureSettingsCode({}, state, () => { refreshes += 1; });
+
+assert.equal(state.settingsInitialized, true,
+  "a ready loader record must still initialize a new test session");
+assert.deepEqual(state.settingsMountedTabs, ["engine"]);
+assert.deepEqual(state.values, {engine: "native"});
+assert.equal(refreshes, 1,
+  "recovering a ready-but-uninitialized session should repaint once");
+
+const preloadedState = {
+  manifest: {},
+  settingsCode: {status: "idle", error: "", promise: null},
+  settingsInitialized: false,
+};
+window.FTTests.ensureSettingsCode({}, preloadedState, () => { refreshes += 1; })
+  .then(() => {
+    assert.equal(preloadedState.settingsInitialized, true,
+      "a preloaded settings module must still repaint a new test session");
+    assert.equal(refreshes, 2);
+    console.log("ok");
+  })
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });

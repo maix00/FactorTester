@@ -150,8 +150,17 @@
     );
   }
 
+  function settingsRuntimeReady() {
+    return Boolean(
+      window.FTTestSettings
+      && window.FTTestContentAdapters
+      && window.FTSettingRules,
+    );
+  }
+
   function initializeSettings(state) {
-    if (state.settingsInitialized || !window.FTTestSettings) return;
+    if (state.settingsInitialized) return true;
+    if (!settingsRuntimeReady()) return false;
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       state.manifest, FTTestState.savedMountedTabs(state),
     );
@@ -159,17 +168,41 @@
       state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
     );
     state.settingsInitialized = true;
+    return true;
   }
 
   function ensureSettingsCode(context, state, refresh) {
-    if (window.FTTestSettings) {
-      initializeSettings(state);
+    if (state.settingsInitialized) return Promise.resolve();
+    const initialize = () => {
+      if (!initializeSettings(state)) {
+        throw new Error("测试设置模块尚未完成初始化");
+      }
+    };
+    const record = state.settingsCode || (state.settingsCode = {
+      status: "idle", error: "", promise: null,
+    });
+    const recoverReadyState = () => {
+      // A previous loader could have marked the group ready before the
+      // runtime globals were installed. Do not leave the workbench in an
+      // eternal loading state; finish initialization on the next render.
+      if (state.settingsInitialized || record.error) return;
+      try {
+        initialize();
+        refresh?.();
+      } catch (error) {
+        record.status = "error";
+        record.error = error.message || String(error);
+        refresh?.();
+      }
+    };
+    if (record.status === "ready") {
+      recoverReadyState();
       return Promise.resolve();
     }
     return FTTestLazyCode.ensureGroupCode(
       state, "settingsCode", "workbench-settings",
-      () => initializeSettings(state), refresh,
-    );
+      initialize, refresh,
+    ).then(recoverReadyState);
   }
 
   function ensureSettingsFieldsCode(context, state, refresh) {

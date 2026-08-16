@@ -16,6 +16,9 @@ from server.manager.objects.adapters.factor_source import (
     FactorSourceDestinationAdapter,
     FactorSourceOriginAdapter,
 )
+from server.manager.objects.adapters.client_release import (
+    ClientReleaseDestinationAdapter,
+)
 from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
 from server.manager.objects.adapters.public_research_destination import (
     PublicResearchDestinationAdapter,
@@ -64,6 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--research-root", default="")
     parser.add_argument("--factor-source-database", default="")
     parser.add_argument("--origin-cache-root", default="")
+    parser.add_argument("--release-root", default="")
+    parser.add_argument("--release-trust-root", default="")
+    parser.add_argument("--release-origin", default="")
     parser.add_argument("--allowed-origin", action="append", default=[])
     parser.add_argument("--tls-cert", default=None)
     parser.add_argument("--tls-key", default=None)
@@ -100,6 +106,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_root=args.origin_cache_root or args.submission_root,
         )
     destination_adapters = {}
+    if args.release_root and args.release_trust_root:
+        destination_adapters[TransferObjectKind.CLIENT_RELEASE.value] = (
+            ClientReleaseDestinationAdapter(
+                release_root=args.release_root,
+                public_key=args.release_trust_root,
+                expected_origin=args.release_origin,
+            )
+        )
     if research_store is not None:
         research_destination = PublicResearchDestinationAdapter(research_store)
         for kind in (

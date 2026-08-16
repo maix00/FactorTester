@@ -13,6 +13,7 @@ class TransferObjectKind(StrEnum):
     RESEARCH_ATTACHMENT = "research_attachment"
     RESEARCH_LOCAL_RESOURCE = "research_local_resource"
     FACTOR_SOURCE = "factor_source"
+    CLIENT_RELEASE = "client_release"
 
 
 @dataclass(frozen=True, slots=True)

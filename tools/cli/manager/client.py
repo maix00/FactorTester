@@ -10,6 +10,7 @@ import tempfile
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urljoin
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from tools.cli.http import HttpClientError
@@ -200,6 +201,88 @@ class ManagerClient:
             payload={"profile": profile},
         )
 
+    def upload_client_beta_release(
+        self,
+        package: str | Path,
+        *,
+        version: str,
+        build: int,
+        timeout: float = 15 * 60,
+    ) -> dict[str, Any]:
+        """Publish one signed Beta package through this Manager's 7997 plane."""
+        source = Path(package).expanduser().resolve()
+        if not source.is_file() or source.is_symlink():
+            raise FileNotFoundError(f"client release package is unavailable: {source}")
+        size = source.stat().st_size
+        digest = _file_sha256(source)
+        issued = self._request(
+            "POST",
+            "/api/client/releases/beta/upload-access",
+            payload={
+                "version": str(version).strip(),
+                "build": int(build),
+                "package_size_bytes": size,
+                "package_sha256": digest,
+            },
+        )
+        access = issued.get("access")
+        if not isinstance(access, dict):
+            raise ValueError("client release upload capability is incomplete")
+        url = str(access.get("url") or "").strip()
+        bearer = str(access.get("bearer") or "").strip()
+        if not url or not bearer:
+            raise ValueError("client release upload capability is incomplete")
+        request = Request(
+            url,
+            data=source.open("rb"),
+            headers={
+                "Authorization": f"Bearer {bearer}",
+                "Content-Type": "application/zip",
+                "Content-Length": str(size),
+            },
+            method="PUT",
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+                status = int(response.status)
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise HttpClientError(exc.code, url, raw) from exc
+        finally:
+            body = request.data
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
+        if status < 200 or status >= 300:
+            raise RuntimeError(f"client release upload failed with HTTP {status}")
+        try:
+            response_value = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            response_value = {"raw": raw}
+        manifest = self._request("GET", "/api/client/releases/beta.json")
+        if (
+            str(manifest.get("version") or "") != str(version).strip()
+            or int(manifest.get("build") or 0) != int(build)
+        ):
+            raise RuntimeError("Manager accepted the package but Beta pointer did not advance")
+        manifest_url = urlsplit(str(manifest.get("dmg_url") or ""))
+        expected_origin = urlsplit(self.config.base_url)
+        if (
+            manifest_url.scheme != expected_origin.scheme
+            or manifest_url.netloc != expected_origin.netloc
+        ):
+            raise RuntimeError("Manager Beta pointer uses a different origin")
+        return {
+            "success": True,
+            "server": self.config.base_url,
+            "version": str(version).strip(),
+            "build": int(build),
+            "package_sha256": digest,
+            "manifest": manifest,
+            "upload": response_value,
+        }
+
     def instances(self) -> dict[str, Any]:
         return self._request("GET", "/api/worktrees")
 
@@ -372,3 +455,11 @@ class ManagerClient:
         if not isinstance(value, dict):
             raise ValueError("Manager returned invalid JSON")
         return value
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
