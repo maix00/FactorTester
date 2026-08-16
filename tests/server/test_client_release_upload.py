@@ -124,3 +124,45 @@ def test_release_upload_access_requires_manager_session(tmp_path: Path) -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_release_upload_access_public_gate_accepts_manager_capability(
+    tmp_path: Path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public")
+    state.require_login_for_ui = True
+    state.require_device_auth = True
+    state.public_server = True
+    state.prepare_object_upload = lambda **kwargs: {
+        "url": "https://127.0.0.1:7997/v1/transfers/a/upload",
+        "bearer": "short-lived",
+        **kwargs,
+    }
+    manager.Handler.state = state
+    server = ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        body = json.dumps({
+            "version": "0.1.3-beta.33",
+            "build": 36,
+            "package_size_bytes": 4,
+            "package_sha256": "a" * 64,
+        }).encode()
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/api/client/releases/beta/upload-access",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {state.capability_token()}",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+        assert payload["success"] is True
+        assert payload["release"]["version"] == "0.1.3-beta.33"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
