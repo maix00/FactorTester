@@ -174,13 +174,11 @@ class FederatedPublicDataService:
         # Manager's authenticated research/data path.
         if self.account_domain_sync is not None:
             try:
-                self.account_domain_sync.reconcile_research_library(
-                    self.public_research,
-                )
                 rows = self.account_domain_sync.entities(
                     viewer,
                     entity_type="research_publication",
                     include_shared=True,
+                    sync=False,
                 )
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 rows = []
@@ -442,6 +440,7 @@ class FederatedPublicDataService:
                     owner_ref,
                     entity_type="research_publication",
                     include_shared=False,
+                    sync=False,
                 )
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 rows = []
