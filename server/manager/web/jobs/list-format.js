@@ -62,6 +62,12 @@
     const heading = document.createElement("strong");
     heading.textContent = taskTitle(job, context);
     root.append(heading);
+    if (job.local_run || job.execution_mode === "local") {
+      const mode = document.createElement("small");
+      mode.className = "job-local-run-label";
+      mode.textContent = context.t("本地运行");
+      root.append(mode);
+    }
     const name = String(job.task_name || "").trim();
     const hash = taskHash(job);
     if (name && hash) {

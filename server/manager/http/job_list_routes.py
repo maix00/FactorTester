@@ -8,6 +8,47 @@ from server.manager.domain.federation import TargetUnavailable
 from server.manager.http.responses import json_response
 
 
+def _merge_local_run_page(
+    payload: dict,
+    local_page: dict | None,
+    *,
+    limit: int,
+) -> dict:
+    """Add client-owned local runs to the normal task projection."""
+    if not isinstance(local_page, dict):
+        return payload
+    local_jobs = [item for item in local_page.get("jobs") or () if isinstance(item, dict)]
+    remote_jobs = [item for item in payload.get("jobs") or () if isinstance(item, dict)]
+    combined = sorted(
+        [*local_jobs, *remote_jobs],
+        key=_updated_at_key,
+        reverse=True,
+    )[:max(1, int(limit))]
+    result = dict(payload)
+    result["jobs"] = combined
+    result["total"] = int(payload.get("total") or len(remote_jobs)) + int(
+        local_page.get("total") or len(local_jobs)
+    )
+    result["page_size"] = max(1, int(limit))
+    result["has_more"] = bool(payload.get("has_more")) or bool(
+        local_page.get("has_more")
+    ) or len(remote_jobs) + len(local_jobs) > int(limit)
+    result["total_pages"] = max(
+        1,
+        (int(result["total"]) + int(limit) - 1) // int(limit),
+    )
+    return result
+
+
+def _updated_at_key(item: dict) -> tuple[int, float | str]:
+    """Sort numeric Manager timestamps without lexicographic regressions."""
+    raw = item.get("updated_at")
+    try:
+        return (1, float(raw))
+    except (TypeError, ValueError):
+        return (0, str(raw or ""))
+
+
 class JobListRoutesMixin:
     """Serve task scopes while preserving local and federated fallbacks."""
 
@@ -141,6 +182,13 @@ class JobListRoutesMixin:
                         payload = self.state.aggregate_server_jobs(
                             principal=principal, cursor=cursor, limit=limit,
                         )
+                        projection = getattr(self.state, "local_run_projection", None)
+                        if projection is not None and not cursor:
+                            payload = _merge_local_run_page(
+                                payload,
+                                projection.page(principal, page=1, limit=limit),
+                                limit=limit,
+                            )
                     else:
                         payload = self.state.aggregate_public_jobs(
                             cursor=cursor, limit=limit,
@@ -191,6 +239,13 @@ class JobListRoutesMixin:
                         page=requested_page,
                         limit=limit,
                     )
+                    projection = getattr(self.state, "local_run_projection", None)
+                    if projection is not None:
+                        payload = _merge_local_run_page(
+                            payload,
+                            projection.page(principal, page=requested_page, limit=limit),
+                            limit=limit,
+                        )
                 elif scope == "subordinates":
                     users = self._subordinate_users(principal)
                     requested_user = str(
@@ -227,6 +282,13 @@ class JobListRoutesMixin:
                         page=requested_page,
                         limit=limit,
                     )
+                    projection = getattr(self.state, "local_run_projection", None)
+                    if projection is not None:
+                        payload = _merge_local_run_page(
+                            payload,
+                            projection.page(requested_user, page=requested_page, limit=limit),
+                            limit=limit,
+                        )
                     payload["users"] = users
                 else:
                     json_response(self, {

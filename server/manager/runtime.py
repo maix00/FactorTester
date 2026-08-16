@@ -62,6 +62,7 @@ from server.manager.domain.accounts import (
 from server.manager.domain.organization_scope import configured_managed_organizations
 from server.manager.storage.preferences import UserPreferenceStore
 from server.manager.storage.job_index import ManagerJobIndex
+from server.manager.storage.local_run_projection import LocalRunProjection
 from server.manager.storage.sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
 from server.manager.domain.federation import (
     FederatedGateway,
@@ -331,6 +332,10 @@ class ManagerState(
         self.device_challenges = DeviceChallengeStore()
         self.job_index = ManagerJobIndex(
             self.state_root / "job-index.sqlite",
+            server_id=self.server_id,
+        )
+        self.local_run_projection = LocalRunProjection(
+            self.state_root / "local-run-projection.sqlite",
             server_id=self.server_id,
         )
         self._local_job_route_cache: dict[int, ServiceRoute] = {}

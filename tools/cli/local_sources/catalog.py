@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from tools.cli.catalog import LocalCatalogStore
+from tools.cli.catalog.source_materialization import materialize_local_manifests
 
 from .contracts import LocalSourceManifest, LocalSourceProduct, validate_local_source_manifest
 from .locations import default_local_sources_root
@@ -65,11 +66,18 @@ class ClientSourceCatalog:
             for value in query.get("data_source", [])
             if value.strip()
         ))
-        manifests = self._selected_manifests(selected)
+        all_manifests = self.manifests()
+        materialized = materialize_local_manifests(
+            LocalCatalogStore(self.client_root), all_manifests,
+        )
+        manifests = self._filter_manifests(all_manifests, selected)
         if target.path == "/api/client/product_sources":
-            return {"success": True, "origin": "local", "sources": [
-                _source_descriptor(item) for item in manifests
-            ]}
+            return {
+                "success": True,
+                "origin": "local",
+                "sources": [_source_descriptor(item) for item in manifests],
+                "materialized": materialized,
+            }
         if target.path == "/api/client/product_categories":
             return self._categories(manifests)
         if target.path == "/api/client/product_names":
@@ -153,7 +161,13 @@ class ClientSourceCatalog:
         self,
         selected: Iterable[str],
     ) -> tuple[LocalSourceManifest, ...]:
-        manifests = self.manifests()
+        return self._filter_manifests(self.manifests(), selected)
+
+    @staticmethod
+    def _filter_manifests(
+        manifests: tuple[LocalSourceManifest, ...],
+        selected: Iterable[str],
+    ) -> tuple[LocalSourceManifest, ...]:
         values = set(selected)
         if not values:
             return manifests

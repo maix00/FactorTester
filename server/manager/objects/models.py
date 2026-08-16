@@ -9,6 +9,7 @@ from enum import StrEnum
 class TransferObjectKind(StrEnum):
     JOB_ARTIFACT = "job_artifact"
     JOB_SUBMISSION = "job_submission"
+    LOCAL_RUN_ARTIFACT = "local_run_artifact"
     RESEARCH_ASSET = "research_asset"
     RESEARCH_ATTACHMENT = "research_attachment"
     RESEARCH_LOCAL_RESOURCE = "research_local_resource"

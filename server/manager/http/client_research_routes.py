@@ -6,13 +6,16 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
+from server.manager.http.local_run_routes import ClientLocalRunRoutesMixin
 from server.manager.http.responses import json_response
 
 
-class ClientResearchRoutesMixin:
+class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
     """Expose owner-scoped local research and workspace projections."""
 
     def _post_client_research_routes(self, parsed) -> bool:
+        if self._post_local_run_routes(parsed):
+            return True
         if parsed.path != "/api/client/profiles/sync":
             return False
         session = self._session()
@@ -34,6 +37,8 @@ class ClientResearchRoutesMixin:
         return True
 
     def _get_client_research_routes(self, parsed) -> bool:
+        if self._get_local_run_routes(parsed):
+            return True
         if parsed.path == "/api/client/profiles":
             session = self._session()
             if session is None:
