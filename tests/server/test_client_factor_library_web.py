@@ -191,6 +191,43 @@ def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -
     assert "product_groups" not in payload
 
 
+def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> None:
+    payload = build_client_library_projection({
+        "families": [{
+            "factor_family_alias": "PublicMomentum",
+            "factor_family_name": "PublicMomentum",
+            "chinese_name": "公共动量",
+            "owner_username": "__public_jobs__",
+            "owner_alias": "公共因子库",
+            "source": "public",
+            "params": [{"alias": "window", "value": "20"}],
+        }],
+        "factors": [{
+            "factor_family_alias": "PublicMomentum",
+            "factor_family_name": "PublicMomentum",
+            "factor_alias": "PublicMomentum|window:20",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "source": "public",
+            "params": [{"alias": "window", "value": "20"}],
+        }],
+    }, principal="alice")
+
+    assert len(payload["families"]) == 2
+    public = next(
+        item for item in payload["families"]
+        if item["owner_username"] == "__public_jobs__"
+    )
+    mine = next(
+        item for item in payload["families"]
+        if item["owner_username"] == "alice"
+    )
+    assert payload["factors"][0]["owner_username"] == "alice"
+    assert public["factor_count"] == 0
+    assert public["params"][0]["alias"] == "window"
+    assert mine["factor_count"] == 1
+
+
 def test_client_library_javascript_has_exactly_one_metadata_network_boundary(
 ) -> None:
     script = (

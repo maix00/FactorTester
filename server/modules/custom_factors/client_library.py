@@ -23,7 +23,12 @@ def build_client_library_projection(
     *,
     principal: str,
 ) -> dict[str, Any]:
-    """Return safe registered metadata without source code or local paths."""
+    """Return safe family templates and registered factors.
+
+    ``families`` may contain source templates with no registered members.
+    Only rows supplied through ``factors`` are treated as parameterized
+    factors owned by an account.
+    """
     projected = [
         _factor_projection(item)
         for item in payload.get("factors") or []
@@ -41,12 +46,19 @@ def build_client_library_projection(
         item["factor_alias"],
     ))
 
+    families_by_ref: dict[str, dict[str, Any]] = {}
+    for item in payload.get("families") or []:
+        if not isinstance(item, dict):
+            continue
+        family = _family_projection(item)
+        if family is not None:
+            families_by_ref[family["family_ref"]] = family
+
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in factors:
         grouped[
             (item["owner_username"], item["factor_family_alias"])
         ].append(item)
-    families = []
     for (owner_username, family_alias), items in sorted(grouped.items()):
         first = items[0]
         sources = {
@@ -64,7 +76,7 @@ def build_client_library_projection(
             owner_username,
             family_alias,
         )
-        families.append({
+        family = {
             "family_ref": family_ref,
             "factor_family_alias": family_alias,
             "factor_family_name": first["factor_family_name"],
@@ -80,7 +92,25 @@ def build_client_library_projection(
                 item["category"] for item in items if item["category"]
             }),
             "factor_refs": sorted({item["factor_ref"] for item in items}),
-        })
+        }
+        existing = families_by_ref.get(family_ref)
+        if existing is not None:
+            family["params"] = existing.get("params") or []
+            try:
+                existing_count = max(0, int(existing.get("factor_count") or 0))
+            except (TypeError, ValueError):
+                existing_count = 0
+            family["factor_count"] = max(existing_count, family["factor_count"])
+        families_by_ref[family_ref] = {**(existing or {}), **family}
+
+    families = sorted(
+        families_by_ref.values(),
+        key=lambda item: (
+            item["factor_family_alias"],
+            item["owner_alias"],
+            item["family_ref"],
+        ),
+    )
 
     projection = {
         "schema_version": 2,
@@ -89,7 +119,12 @@ def build_client_library_projection(
         "factors": factors,
         "families": families,
         "categories": sorted({
-            item["category"] for item in factors if item["category"]
+            category
+            for item in factors + families
+            for category in (
+                [item["category"]] if item.get("category") else []
+            ) + list(item.get("categories") or [])
+            if category
         }),
         "omitted_error_count": len(payload.get("errors") or []),
     }
@@ -102,6 +137,67 @@ def build_client_library_projection(
     return {
         **projection,
         "projection_hash": sha256(encoded).hexdigest(),
+    }
+
+
+def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Sanitize a family template without manufacturing a factor member."""
+    family_alias = _safe_text(
+        item.get("factor_family_alias")
+        or item.get("factor_family_name")
+        or item.get("family_alias")
+        or item.get("family")
+    )
+    if not family_alias:
+        return None
+    owner_username = _safe_text(item.get("owner_username"))
+    family_ref = _safe_text(item.get("family_ref")) or _ref(
+        "factor-family", owner_username, family_alias,
+    )
+    source = str(
+        item.get("source") or item.get("factor_kind") or "registered"
+    ).strip().lower()
+    if source not in {"custom", "public", "registered"}:
+        source = "registered"
+    categories = [
+        _safe_text(value)
+        for value in item.get("categories") or []
+        if _safe_text(value)
+    ]
+    category = _safe_text(item.get("category"))
+    if category and category not in categories:
+        categories.append(category)
+    try:
+        factor_count = max(0, int(item.get("factor_count") or 0))
+    except (TypeError, ValueError):
+        factor_count = 0
+    factor_refs = [
+        _safe_text(value)
+        for value in item.get("factor_refs") or []
+        if _safe_text(value)
+    ]
+    return {
+        "family_ref": family_ref,
+        "factor_family_alias": family_alias,
+        "factor_family_name": _safe_text(
+            item.get("factor_family_name") or family_alias
+        ),
+        "chinese_name": _safe_text(item.get("chinese_name")),
+        "description": _safe_long_text(item.get("description")),
+        "math_expr": _safe_math_text(item.get("math_expr")),
+        "category": category,
+        "categories": sorted(set(categories)),
+        "params": _params(item.get("params")),
+        "owner_username": owner_username,
+        "owner_alias": _safe_text(item.get("owner_alias") or owner_username),
+        "owner_organization_name": _safe_text(
+            item.get("owner_organization_name")
+        ),
+        "factor_kind": source,
+        "source": source,
+        "factor_count": factor_count,
+        "factor_refs": sorted(set(factor_refs)),
+        "updated_at": _safe_text(item.get("updated_at")),
     }
 
 

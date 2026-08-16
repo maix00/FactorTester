@@ -137,13 +137,13 @@ def ensure_visitor_product_access(
 
 
 def public_factor_library() -> dict[str, Any]:
-    """Return registered public factors without owner workspaces or source code."""
+    """Return public family templates, never pretend they are user factors."""
     from server.modules.custom_factors.catalog import list_public_factors
     from server.modules.custom_factors.client_library import (
         build_client_library_projection,
     )
 
-    factors: list[dict[str, Any]] = []
+    families: list[dict[str, Any]] = []
     for item in list_public_factors():
         alias = str(item.get("name") or item.get("id") or "").strip()
         if not alias:
@@ -156,21 +156,22 @@ def public_factor_library() -> dict[str, Any]:
         # name.
         family = str(item.get("id") or item.get("factor_family") or alias).strip()
         family_name = str(item.get("name") or family).strip()
-        factors.append({
+        families.append({
             "factor_family_alias": family,
             "factor_family_name": family_name,
-            "factor_alias": alias,
             "chinese_name": item.get("chinese_name") or "",
             "description": item.get("description") or "",
             "math_expr": item.get("math_expr") or "",
             "category": item.get("category") or "",
+            "categories": [item.get("category")] if item.get("category") else [],
             "params": item.get("params") or [],
             "source": "public",
+            "factor_kind": "public",
             "owner_username": PUBLIC_VISITOR_PRINCIPAL,
             "owner_alias": "公共因子库",
             "updated_at": item.get("updated_at") or "",
         })
     return build_client_library_projection(
-        {"factors": factors, "errors": []},
+        {"factors": [], "families": families, "errors": []},
         principal=PUBLIC_VISITOR_PRINCIPAL,
     )
