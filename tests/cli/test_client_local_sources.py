@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 import pytest
 from tools.cli.local_sources import ClientSourceCatalog
+from tools.cli.catalog import LocalCatalogStore
 
 
 def _manifest(source_id: str = "Synthetic") -> dict:
@@ -104,7 +105,8 @@ def catalog(tmp_path: Path) -> ClientSourceCatalog:
 
 
 def test_client_catalog_projects_tiger_as_live_l2_only(tmp_path: Path) -> None:
-    source = catalog(tmp_path).request("/api/client/product_sources")
+    local = catalog(tmp_path)
+    source = local.request("/api/client/product_sources")
 
     assert source["origin"] == "local"
     assert [item["id"] for item in source["sources"]] == ["Synthetic"]
@@ -126,6 +128,9 @@ def test_client_catalog_projects_tiger_as_live_l2_only(tmp_path: Path) -> None:
         "market_depth": "l2",
         "delivery_mode": "live_stream",
     }]
+    products = LocalCatalogStore(tmp_path / "client").list_products()
+    assert {item["source_id"] for item in products} == {"local:Synthetic"}
+    assert all(item["state"] == "unavailable" for item in products)
 
 
 def test_client_catalog_reads_products_and_tree_from_local_manifest(

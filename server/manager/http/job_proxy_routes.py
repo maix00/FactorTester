@@ -287,6 +287,47 @@ class JobProxyRoutesMixin:
         else:
             principal = str(session["username"])
         job_id = quote(unquote(match.group(1)), safe="")
+        local_projection = getattr(self.state, "local_run_projection", None)
+        local_run = None
+        if local_projection is not None and session is not None:
+            local_run = local_projection.get(
+                principal, unquote(match.group(1)),
+            )
+        if local_run is not None:
+            if method != "GET":
+                json_response(self, {
+                    "success": False,
+                    "error": "本地运行任务只能在客户端本地控制",
+                    "code": "local_run_read_only",
+                }, 409)
+                return True
+            if suffix_value == "":
+                json_response(self, {
+                    "success": True,
+                    "task_detail": local_run["task_detail"],
+                    "result_summary": local_run["result_summary"],
+                    "execution_mode": "local",
+                    "local_run": True,
+                    "raw_artifacts_remote": local_run["raw_artifacts_remote"],
+                    "port": 0,
+                })
+                return True
+            if suffix_value == "/result":
+                json_response(self, {
+                    "success": True,
+                    "result": local_run["result_summary"],
+                    "result_summary": local_run["result_summary"],
+                    "local_run": True,
+                })
+                return True
+            if suffix_value == "/artifacts":
+                json_response(self, {
+                    "success": True,
+                    "artifacts": local_run["task_detail"].get("artifacts") or [],
+                    "raw_artifacts_remote": local_run["raw_artifacts_remote"],
+                    "local_run": True,
+                })
+                return True
         if ".." in unquote(suffix).split("/"):
             json_response(
                 self, {"success": False, "error": "invalid artifact name"}, 400,

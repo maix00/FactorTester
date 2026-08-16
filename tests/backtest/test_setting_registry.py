@@ -78,13 +78,24 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
             "option_source": "",
             "resolver": "",
             "item_type": "",
-                "ref_kind": "service_port",
-                "schema": {},
-                "options": [],
-                "minimum": None,
+            "ref_kind": "service_port",
+            "schema": {},
+            "options": [],
+            "minimum": None,
             "maximum": None,
             "step": None,
         },
+    }
+    swift_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("ic_test").manifest(client="swift")["run_fields"]
+    }
+    assert swift_fields["execution_target"]["value_descriptor"]["editor"] == "select"
+    assert swift_fields["execution_target"]["client_targets"] == ["swift"]
+    assert swift_fields["local_runtime_server_ref"]["value_descriptor"]["editor"] == "server_picker"
+    assert swift_fields["local_runtime_bundle_ref"]["value_descriptor"]["editor"] == "runtime_bundle_picker"
+    assert swift_fields["local_runtime_server_ref"]["rules"]["visible_if"] == {
+        "execution_target": ["local"],
     }
     assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"

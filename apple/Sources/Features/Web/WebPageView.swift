@@ -44,6 +44,9 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalRunBridgeContract.messageName
+        )
         #endif
         webView = nil
     }
@@ -367,6 +370,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientLocalCatalogBridgeContract.messageName
             )
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: LocalRunBridgeContract.messageName
+            )
             if allowsLocalCatalog {
                 existing.configuration.userContentController.addScriptMessageHandler(
                     FactorLibraryLocalBridge(),
@@ -377,6 +383,11 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                     ClientLocalCatalogBridge(),
                     contentWorld: .page,
                     name: ClientLocalCatalogBridgeContract.messageName
+                )
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    LocalRunBridge(),
+                    contentWorld: .page,
+                    name: LocalRunBridgeContract.messageName
                 )
             }
             #endif
@@ -409,6 +420,11 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 ClientLocalCatalogBridge(),
                 contentWorld: .page,
                 name: ClientLocalCatalogBridgeContract.messageName
+            )
+            configuration.userContentController.addScriptMessageHandler(
+                LocalRunBridge(),
+                contentWorld: .page,
+                name: LocalRunBridgeContract.messageName
             )
         }
         #endif
@@ -497,6 +513,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: LocalRunBridgeContract.messageName
         )
         #endif
         webView.navigationDelegate = nil

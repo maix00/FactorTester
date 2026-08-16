@@ -22,6 +22,11 @@ from tools.cli.catalog import (
     list_local_factor_revisions,
     resolve_local_factor_reference,
 )
+from tools.cli.catalog.local_run_sync import sync_local_run_outbox
+from tools.cli.catalog.local_runs import (
+    LocalRunStore,
+    validate_local_run_requirements,
+)
 from tools.cli.catalog.product_paths import parse_classifier_object_path
 from tools.cli.core.sqlite import connect_sqlite
 from tools.cli.local_sources import ClientSourceCatalog
@@ -95,6 +100,107 @@ def init_catalog(release_profile: Path | None, as_json: bool) -> None:
 def catalog_status(release_profile: Path | None, as_json: bool) -> None:
     """Show local catalog schema and row counts."""
     value = LocalCatalogStore(load_profile_root(release_profile)).initialize()
+    click.echo(_json(value) if as_json else _human_status(value))
+
+
+@client_catalog.group("local-run")
+def catalog_local_run() -> None:
+    """Validate and synchronize client-owned local test runs."""
+
+
+@catalog_local_run.command("preflight")
+@click.option("--requirements-json", required=True)
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def local_run_preflight(
+    requirements_json: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Reject a local run before execution when local coverage is incomplete."""
+    try:
+        requirements = json.loads(requirements_json)
+    except json.JSONDecodeError as error:
+        raise ValueError("requirements JSON is invalid") from error
+    if not isinstance(requirements, list):
+        raise ValueError("requirements JSON must be an array")
+    catalog = ClientSourceCatalog(load_profile_root(release_profile))
+    value = validate_local_run_requirements(catalog.manifests(), requirements)
+    click.echo(_json(value) if as_json else _human_status(value))
+
+
+@catalog_local_run.command("record")
+@click.option("--payload-json", required=True)
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def local_run_record(
+    payload_json: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Persist one local execution and enqueue its summary projection."""
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError as error:
+        raise ValueError("local run payload JSON is invalid") from error
+    if not isinstance(payload, dict):
+        raise ValueError("local run payload must be an object")
+    value = LocalRunStore(load_profile_root(release_profile)).record(
+        local_job_id=str(payload.get("local_job_id") or ""),
+        owner_ref=str(payload.get("owner_ref") or ""),
+        requirements=payload.get("requirements") or [],
+        title=str(payload.get("title") or ""),
+        kind=str(payload.get("kind") or "test"),
+        status=str(payload.get("status") or "queued"),
+        workspace_id=str(payload.get("workspace_id") or ""),
+        profile_ref=str(payload.get("profile_ref") or ""),
+        configuration=payload.get("configuration"),
+        summary=payload.get("summary"),
+        source_snapshot=payload.get("source_snapshot"),
+        artifact_manifest=payload.get("artifact_manifest"),
+    )
+    click.echo(_json(value) if as_json else value["local_job_id"])
+
+
+@catalog_local_run.command("upload")
+@click.argument("local_job_id")
+@click.argument("name")
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def local_run_upload_intent(
+    local_job_id: str,
+    name: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Queue explicit upload of one local artifact through the 7997 plane."""
+    value = LocalRunStore(load_profile_root(release_profile)).enqueue_artifact_upload(
+        local_job_id, name,
+    )
+    click.echo(_json(value) if as_json else value["name"])
+
+
+@catalog_local_run.command("outbox")
+@click.option("--sync", "should_sync", is_flag=True)
+@click.option("--limit", default=50, type=click.IntRange(1, 200))
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def local_run_outbox(
+    should_sync: bool,
+    limit: int,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Inspect or flush durable local-run synchronization operations."""
+    store = LocalRunStore(load_profile_root(release_profile))
+    if should_sync:
+        value = sync_local_run_outbox(store, client_from_config().session, limit=limit)
+    else:
+        value = {"success": True, "operations": store.pending_outbox(limit=limit)}
     click.echo(_json(value) if as_json else _human_status(value))
 
 

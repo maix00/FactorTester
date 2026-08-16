@@ -153,6 +153,36 @@ class _ProductGroupCreationClient:
         }
 
 
+class _ProductCategoryClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def list_product_categories(self):
+        self.calls.append(("list",))
+        return {
+            "success": True,
+            "categories": [{
+                "id": "category_day",
+                "title_zh": "日夜盘",
+                "source_managed": False,
+                "is_composite": False,
+                "items": [{"label": "日盘", "paths": ["Product/Futures/CNFutures"]}],
+            }],
+        }
+
+    def create_product_category(self, **kwargs):
+        self.calls.append(("add", kwargs))
+        return {"success": True, "category": {"id": "category-new", "title_zh": kwargs["name"]}}
+
+    def create_product_category_composite(self, **kwargs):
+        self.calls.append(("add-composite", kwargs))
+        return {"success": True, "category": {"id": "category-composite", "title_zh": "日夜盘×行业"}}
+
+    def delete_product_category(self, category_id):
+        self.calls.append(("delete", category_id))
+        return {"success": True}
+
+
 def test_products_info_wraps_long_cells_without_truncation(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: _ProductInfoClient())
 
@@ -303,6 +333,53 @@ def test_product_group_creation_freezes_profile_and_research_refs(
         "profile_id": "maxa",
         "research_refs": ("work-package:research-one",),
     }
+
+
+def test_product_category_cli_manages_regular_and_composite_categories(monkeypatch) -> None:
+    fake = _ProductCategoryClient()
+    monkeypatch.setattr(
+        "tools.cli.modules.products.categories.client_from_config",
+        lambda: fake,
+    )
+
+    added = CliRunner().invoke(cli, [
+        "products", "categories", "add",
+        "--name", "我的分类",
+        "--item", "日盘=Product/Futures/CNFutures",
+        "--item", "日盘=Product/Futures/CNFuturesContract",
+        "--json",
+    ])
+    assert added.exit_code == 0, added.output
+    assert fake.calls[0] == ("add", {
+        "name": "我的分类",
+        "items": [{
+            "label": "日盘",
+            "paths": [
+                "Product/Futures/CNFutures",
+                "Product/Futures/CNFuturesContract",
+            ],
+        }],
+    })
+
+    composite = CliRunner().invoke(cli, [
+        "products", "categories", "add-composite",
+        "--category-id", "day_night",
+        "--category-id", "sector",
+    ])
+    assert composite.exit_code == 0, composite.output
+    assert fake.calls[1] == ("add-composite", {
+        "category_ids": ["day_night", "sector"],
+    })
+
+    listing = CliRunner().invoke(cli, ["products", "categories", "list"])
+    assert listing.exit_code == 0, listing.output
+    assert "日夜盘" in listing.output
+
+    deleted = CliRunner().invoke(cli, [
+        "products", "categories", "delete", "category-new", "--yes",
+    ])
+    assert deleted.exit_code == 0, deleted.output
+    assert fake.calls[3] == ("delete", "category-new")
 
 
 def test_products_availability_renders_orthogonal_stream_dimensions(

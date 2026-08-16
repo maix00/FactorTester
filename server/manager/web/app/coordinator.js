@@ -239,6 +239,7 @@
   }
 
   let routeDispatch;
+  let tabs = null;
 
   // Route protection is checked before loading the route's code group.  This
   // keeps an unauthenticated deep link on the small login view instead of
@@ -251,6 +252,7 @@
 
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
+    tabs?.markActiveViewLoading?.();
     if (await clientAssetsChanged()) {
       location.reload();
       return;
@@ -264,19 +266,24 @@
       if (!state.session && protectedRouteKinds.has(route.kind)) {
         // routeDispatch applies the same existing auth guard and updates the
         // heading/content.  No feature module is needed for this branch.
-        return await routeDispatch.render(route, routeToken);
+        const result = await routeDispatch.render(route, routeToken);
+        if (routeToken === activeRouteToken) tabs?.markActiveViewReady?.();
+        return result;
       }
       if (window.FTStaticLoader?.ensureRoute) {
         content.replaceChildren(FTUI.loading(t("正在加载模块…")));
         await window.FTStaticLoader.ensureRoute(route.kind);
         if (routeToken !== activeRouteToken) return;
       }
-      return await routeDispatch.render(route, routeToken);
+      const result = await routeDispatch.render(route, routeToken);
+      if (routeToken === activeRouteToken) tabs?.markActiveViewReady?.();
+      return result;
     } catch (error) {
       if (routeToken !== activeRouteToken) return;
       content.innerHTML = '<div class="empty"><h2></h2><p></p></div>';
       content.querySelector("h2").textContent = t("无法读取");
       content.querySelector("p").textContent = error.message;
+      tabs?.markActiveViewReady?.();
     }
   }
 
@@ -285,8 +292,10 @@
   const isPinnedPath = FTNavigation.isPinnedPath;
   const titleForPath = path => FTNavigation.titleForPath(path, state.modules, t);
   const tabIcon = path => FTNavigation.tabIcon(path, state.modules);
-  const tabs = FTTabs.create({
+  tabs = FTTabs.create({
     state, embeddedPresentation, t, renderRoute,
+    content, title, eyebrow, toolbar, notice,
+    beforeTabChange: () => { activeRouteToken += 1; },
     modulePath, isPinnedPath, titleForPath, tabIcon,
   });
   const tabSession = tabs.tabSession;

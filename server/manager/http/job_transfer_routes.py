@@ -154,6 +154,52 @@ class JobTransferRoutesMixin:
         idempotency = str(
             self.headers.get("Idempotency-Key") or secrets.token_hex(16)
         ).strip()
+        local_projection = getattr(self.state, "local_run_projection", None)
+        local_run = (
+            local_projection.get(principal, job_id)
+            if local_projection is not None and session is not None
+            else None
+        )
+        if local_run is not None:
+            artifact = next(
+                (item for item in local_run["task_detail"].get("artifacts") or ()
+                 if str(item.get("name") or "") == name),
+                None,
+            )
+            if artifact is None or str(artifact.get("upload_state") or "") != "uploaded":
+                json_response(
+                    self,
+                    {"success": False, "error": "该本地生成物尚未主动上传到服务器"},
+                    404,
+                )
+                return True
+            try:
+                access = self.state.prepare_object_download(
+                    principal=principal,
+                    storage_server_id=self.state.server_id,
+                    object_kind="local_run_artifact",
+                    object_id=f"{job_id}:{name}",
+                    expected_size=int(artifact.get("size_bytes") or 0),
+                    expected_sha256=str(artifact.get("content_hash") or "").strip().lower(),
+                    idempotency_key=idempotency,
+                    job_id=job_id,
+                    artifact_name=name,
+                )
+            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return True
+            json_response(self, {
+                "success": True,
+                "artifact": {
+                    "name": name,
+                    "file_name": str(artifact.get("file_name") or name),
+                    "content_type": str(artifact.get("content_type") or "application/octet-stream"),
+                    "size_bytes": int(artifact.get("size_bytes") or 0),
+                    "content_hash": str(artifact.get("content_hash") or ""),
+                },
+                "access": access,
+            })
+            return True
         try:
             routes = self._job_routes(parsed, principal)
             selected = self._artifact_metadata(

@@ -26,6 +26,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     "has_children": False,
                 },
                 {
+                    "key": "products/categories",
+                    "label": "产品分类库",
+                    "kind": "module",
+                    "has_children": False,
+                },
+                {
                     "key": "products/availability",
                     "label": "数据可用性",
                     "kind": "module",
@@ -207,6 +213,44 @@ class FactorLibraryClientMixin(ClientMixinBase):
                 },
             )
         )
+
+    def list_product_categories(self) -> dict[str, Any]:
+        """List source and current-user product categories."""
+        return self._expect_success(self.session.get("/api/catalog/categories"))
+
+    def create_product_category(
+        self,
+        *,
+        name: str,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Create one user-owned product category."""
+        return self._expect_success(self.session.post(
+            "/api/catalog/categories",
+            {"name": name, "items": items},
+        ))
+
+    def create_product_category_composite(
+        self,
+        *,
+        category_ids: list[str] | tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Create one registered product-category composition."""
+        return self._expect_success(self.session.post(
+            "/api/catalog/categories/composite",
+            {"category_ids": list(category_ids)},
+        ))
+
+    def delete_product_category(self, category_id: str) -> dict[str, Any]:
+        """Delete one user-owned product category."""
+        category_id = str(category_id or "").strip()
+        if not category_id:
+            raise ValueError("category_id is required")
+        from urllib.parse import quote
+
+        return self._expect_success(self.session.delete(
+            f"/api/catalog/categories/{quote(category_id, safe='')}"
+        ))
 
     def product_group_subjects(
         self,

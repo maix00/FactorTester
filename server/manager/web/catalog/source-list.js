@@ -19,24 +19,25 @@
       origin,
       payload: await request(context, origin.endpoint),
     })));
-    const rows = [];
+    const merged = new Map();
     settled.forEach((result, index) => {
       const origin = origins[index];
       if (result.status === "fulfilled") {
         (result.value.payload.sources || []).forEach(descriptor => {
-          rows.push([origin, descriptor]);
+          mergeSourceDescriptor(merged, origin, descriptor);
         });
       } else {
-        rows.push([origin, {
+        mergeSourceDescriptor(merged, origin, {
           source_name: origin.id,
           bundle_name: "—",
           bundle_id: "—",
           server_provided: origin.id === "server",
           product_paths: [], categories: [], data_modes: [],
           availability: {status: "error", error: result.reason?.message || ""},
-        }]);
+        });
       }
     });
+    const rows = [...merged.values()];
     if (!isCurrent(context)) return;
     const root = document.createElement("div");
     root.className = "detail-stack product-source-page";
@@ -85,6 +86,77 @@
         : context.t("Web 端只能访问服务器提供的数据源"),
     }));
     context.content.replaceChildren(root);
+  }
+
+  function mergeSourceDescriptor(target, origin, incoming) {
+    const descriptor = incoming && typeof incoming === "object"
+      ? incoming : {};
+    const key = String(
+      descriptor.bundle_id || descriptor.source_name || descriptor.id || origin.id,
+    ).trim().toLocaleLowerCase();
+    const existing = target.get(key);
+    if (!existing) {
+      const value = {...descriptor};
+      value.local_available = origin.id === "local";
+      target.set(key, [origin, value]);
+      return;
+    }
+    const [, value] = existing;
+    value.local_available = value.local_available || origin.id === "local";
+    value.server_provided = value.server_provided || Boolean(descriptor.server_provided);
+    if (origin.id === "server") {
+      // Prefer the server route when both views describe one bundle.  It keeps
+      // product selection on the normal Manager API while local availability
+      // remains visible in the same row.
+      existing[0] = origin;
+      value.id = descriptor.id || value.id;
+      value.source_ref = descriptor.source_ref || value.source_ref;
+    }
+    value.bundle_name = value.bundle_name && value.bundle_name !== "—"
+      ? value.bundle_name : descriptor.bundle_name;
+    value.server_providers = mergeObjects(
+      value.server_providers || [], descriptor.server_providers || [],
+      item => `${item.server_id || ""}:${item.port || ""}`,
+    );
+    value.product_paths = mergeValues(value.product_paths, descriptor.product_paths);
+    value.categories = mergeObjects(
+      value.categories || [], descriptor.categories || [],
+      item => String(item.id || item.title_zh || item.title || ""),
+    );
+    value.data_modes = mergeObjects(
+      value.data_modes || [], descriptor.data_modes || [],
+      item => String(item.id || item.frequency || item.title_zh || ""),
+    );
+    const oldAvailability = value.availability || {};
+    const newAvailability = descriptor.availability || {};
+    value.availability = {
+      ...oldAvailability,
+      status: oldAvailability.status === "ready" || newAvailability.status === "ready"
+        ? "ready" : oldAvailability.status || newAvailability.status,
+      product_count: Math.max(
+        Number(oldAvailability.product_count || 0),
+        Number(newAvailability.product_count || 0),
+      ),
+      frequency_names: mergeValues(
+        oldAvailability.frequency_names, newAvailability.frequency_names,
+      ),
+    };
+    value.catalog_product_count = Math.max(
+      Number(value.catalog_product_count || 0),
+      Number(descriptor.catalog_product_count || 0),
+    );
+  }
+
+  function mergeValues(first, second) {
+    return [...new Set([...(Array.isArray(first) ? first : []),
+      ...(Array.isArray(second) ? second : [])].map(value => String(value)))];
+  }
+
+  function mergeObjects(first, second, keyOf) {
+    const result = new Map();
+    [...(Array.isArray(first) ? first : []), ...(Array.isArray(second) ? second : [])]
+      .forEach(value => result.set(keyOf(value), value));
+    return [...result.values()];
   }
 
   function providersCell(context, descriptor) {
