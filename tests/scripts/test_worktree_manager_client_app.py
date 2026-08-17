@@ -2972,7 +2972,8 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert "async function productDetail(context, target)" in products
     assert 'context.servicePath("/api/get_price_data")' not in details
     assert "FTProductPricePanel.render" in details
-    assert '"/api/catalog/prices"' in details
+    assert "product-price-panel-mount" in details
+    assert '"/api/catalog/prices"' not in details
     assert '"/api/catalog/contracts"' in details
 
 
@@ -3057,16 +3058,11 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "options.onSelectionChange" in table_script
     assert 'context.t("产品路径")' in table_script
     assert "创建乘积分类" not in script
-    assert "product-category-toolbar" in script
-    assert "product-category-dropdown" in script
+    assert "product-category-filter" in script
+    assert "FTMultiSelectFilter.create" in script
     assert 'input.type = "checkbox"' in script
     assert "categorySelectionID" in script
-    assert "noCategoryInput" in script
-    assert "selectedCategories.clear()" in script
     assert "categoryCountLabel" in script
-    assert "product-category-selection-note" in script
-    assert 'labels.join("、")' in script
-    assert "summary.title" in script
     assert "showCategoryFilter" in script
     assert "leafOnly" in script
     assert "isLeafPathNode" in script
