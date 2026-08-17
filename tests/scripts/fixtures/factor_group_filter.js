@@ -3,15 +3,25 @@ const fs = require("fs");
 const vm = require("vm");
 
 function element(tagName) {
-  return {
+  let ownText = "";
+  const node = {
     tagName: tagName.toUpperCase(),
     children: [],
     listeners: {},
+    dataset: {},
+    classList: {add() {}, toggle() {}},
+    value: "",
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener(name, handler) { this.listeners[name] = handler; },
     setAttribute() {},
+    focus() {},
   };
+  Object.defineProperty(node, "textContent", {
+    get() { return ownText || node.children.map(item => item.textContent || "").join(""); },
+    set(value) { ownText = String(value || ""); node.children = []; },
+  });
+  return node;
 }
 
 global.document = {createElement: element};
@@ -20,6 +30,10 @@ global.window = {
     groupRef(group) { return group.group_ref || `product-group:${group.id}`; },
   },
 };
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/shared/multi-select-filter.js", "utf8"),
+  {filename: "multi-select-filter.js"},
+);
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-group-filter.js", "utf8"),
   {filename: "factor-group-filter.js"},
@@ -40,18 +54,30 @@ assert.strictEqual(view.element.tagName, "SECTION");
 assert.strictEqual(view.search.type, "search");
 assert.strictEqual(view.search.placeholder, "搜索产品组");
 assert.strictEqual(view.value, "*");
-assert.ok(view.options.children.some(item => item.textContent === "全部产品组"));
-assert.ok(view.options.children.some(item => item.textContent === "未绑定产品组"));
-assert.ok(view.options.children.some(item => item.textContent === "日盘期货"));
+const rowLabel = item => item.children[1]?.textContent || item.textContent;
+assert.ok(view.options.children.some(item => rowLabel(item) === "全部产品组"));
+assert.ok(view.options.children.some(item => rowLabel(item) === "未绑定产品组"));
+assert.ok(view.options.children.some(item => rowLabel(item) === "日盘期货"));
 
 view.search.value = "夜盘";
 view.search.listeners.input();
 assert.deepStrictEqual(
-  view.options.children.map(item => item.textContent), ["夜盘期货"],
+  view.options.children.map(rowLabel), ["夜盘期货"],
 );
-view.options.children[0].listeners.click();
+view.options.children[0].children[0].checked = true;
+view.options.children[0].children[0].listeners.change();
 assert.strictEqual(view.value, "product-group:night");
-assert.deepStrictEqual(changes, ["product-group:night"]);
+assert.deepStrictEqual(changes, [["product-group:night"]]);
+view.clear.listeners.click();
+assert.strictEqual(rowLabel(view.options.children[0]), "夜盘期货");
+const day = view.options.children.find(item => rowLabel(item) === "日盘期货");
+day.children[0].checked = true;
+day.children[0].listeners.change();
+assert.deepStrictEqual(view.values, ["product-group:night", "product-group:day"]);
+const all = view.options.children.find(item => rowLabel(item) === "全部产品组");
+all.children[0].checked = true;
+all.children[0].listeners.change();
+assert.deepStrictEqual(view.values, ["*"]);
 
 function tags(node) {
   return [node.tagName, ...(node.children || []).flatMap(tags)];

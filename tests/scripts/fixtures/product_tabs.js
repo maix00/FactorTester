@@ -79,6 +79,12 @@ assert.strictEqual(
   state.tabs.find(tab => tab.id === "product-detail:product:A.DCE").path,
   "/products/product/A.DCE?source=local&data_source=LocalCNFuturesDAY1",
 );
+tabs.navigate("/products/product/A.DCE?contract=DCE%7CA%7C2501&contract_has_data=1");
+assert.strictEqual(state.activeTabID, "product-detail:product:A.DCE");
+assert.strictEqual(
+  state.tabs.some(tab => tab.id === "product-detail:contract:DCE|A|2501"),
+  false,
+);
 
 tabs.navigate("/jobs?scope=mine");
 assert.strictEqual(state.activeTabID, "jobs");
@@ -101,6 +107,41 @@ assert.strictEqual(state.activeTabID, runSpecTabID);
 assert.strictEqual(state.tabs.filter(tab => tab.id === runSpecTabID).length, 1);
 assert.match(state.tabs.find(tab => tab.id === runSpecTabID).path, /label=second$/);
 assert.strictEqual(state.tabs.filter(tab => !tab.closable).length, 4);
+
+// Closing the final user-opened tab must land on home, not on the nearest
+// pinned feature tab that happens to precede it in state.tabs.
+const closeState = {
+  tabs: [
+    {id: "home", path: "/", title: "主页", closable: false},
+    {id: "products", path: "/products", title: "产品", closable: false},
+    {id: "settings", path: "/settings", title: "设置", closable: false},
+  ],
+  activeTabID: "home", tabSessions: new Map(), modules: [],
+  pendingScrollCapture: null,
+};
+const closeTabs = window.FTTabs.create({
+  state: closeState, embeddedPresentation: false, t: value => value,
+  renderRoute() {}, modulePath: value => value.path,
+  isPinnedPath: () => false, titleForPath: () => "产品详情",
+  tabIcon: () => "shippingbox",
+});
+closeTabs.navigate("/products/product/CN.SHF");
+const lastTabID = closeState.activeTabID;
+closeTabs.closeTab(lastTabID);
+assert.strictEqual(closeState.activeTabID, "home");
+assert.strictEqual(location.pathname, "/");
+assert.strictEqual(closeState.tabs.filter(tab => tab.closable).length, 0);
+
+// With multiple detail tabs, closing one still selects the adjacent detail
+// tab before the final close returns to home.
+closeTabs.navigate("/products/product/A.SHF");
+const firstDetailTabID = closeState.activeTabID;
+closeTabs.navigate("/products/product/B.SHF");
+const secondDetailTabID = closeState.activeTabID;
+closeTabs.closeTab(secondDetailTabID);
+assert.strictEqual(closeState.activeTabID, firstDetailTabID);
+closeTabs.closeTab(firstDetailTabID);
+assert.strictEqual(closeState.activeTabID, "home");
 
 const nativeMessages = [];
 window.webkit = {messageHandlers: {researchNavigation: {
