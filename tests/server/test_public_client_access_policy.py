@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
+import pytest
+
 from server.manager import runtime as manager
+from server.manager.http import visitor_access
 from server.manager.http.visitor_access import (
     VisitorAccessStore,
     visitor_principal,
@@ -60,6 +64,86 @@ def test_visitor_access_uses_distinct_uuid_owner_namespaces() -> None:
     assert first_id and second_id and first_id != second_id
     assert visitor_principal(first_id).endswith(first_id)
     assert visitor_principal(second_id).endswith(second_id)
+
+
+def test_redeeming_a_grant_twice_reuses_the_same_session() -> None:
+    store = VisitorAccessStore()
+    target = "https://101.133.144.27:7998"
+    grant = store.issue_grant(target)
+
+    first = store.redeem_grant(grant, target_origin=target)
+    second = store.redeem_grant(grant, target_origin=target)
+
+    assert first
+    assert second == first
+    assert store.valid_session(first, target_origin=target)
+
+
+def test_concurrent_grant_redeems_are_idempotent() -> None:
+    store = VisitorAccessStore()
+    target = "https://101.133.144.27:7998"
+    grant = store.issue_grant(target)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        sessions = list(executor.map(
+            lambda _: store.redeem_grant(grant, target_origin=target),
+            range(8),
+        ))
+
+    assert sessions[0]
+    assert all(session == sessions[0] for session in sessions)
+
+
+def test_redeemed_grant_replay_expires(monkeypatch) -> None:
+    store = VisitorAccessStore()
+    target = "https://101.133.144.27:7998"
+    now = 1_000.0
+    monkeypatch.setattr(visitor_access.time, "time", lambda: now)
+    grant = store.issue_grant(target)
+    first = store.redeem_grant(grant, target_origin=target)
+
+    monkeypatch.setattr(
+        visitor_access.time,
+        "time",
+        lambda: now + visitor_access.VISITOR_GRANT_REPLAY_TTL_SECONDS + 1,
+    )
+
+    assert first
+    assert store.redeem_grant(grant, target_origin=target) is None
+
+
+def test_visitor_http_entry_replays_a_duplicate_grant(tmp_path) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_id="public-main",
+    )
+    state.visitor_access = VisitorAccessStore()
+    state.require_login_for_ui = True
+    state.require_device_auth = True
+    state.public_server = True
+    state.manager_public_endpoint = "https://101.133.144.27:7998"
+    target = state.manager_public_endpoint
+    grant = state.visitor_access.issue_grant(target)
+    opener = build_opener(_NoRedirect())
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/visitor?grant={grant}&next=%2F",
+            headers=_headers(),
+        )
+        with pytest.raises(HTTPError) as first_error:
+            opener.open(request)
+        with pytest.raises(HTTPError) as second_error:
+            opener.open(request)
+
+    assert first_error.value.code == 303
+    assert second_error.value.code == 303
+    assert first_error.value.headers["Location"] == "/"
+    assert second_error.value.headers["Location"] == "/"
+    assert first_error.value.headers["Set-Cookie"] == second_error.value.headers[
+        "Set-Cookie"
+    ]
 
 
 def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
