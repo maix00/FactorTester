@@ -79,7 +79,10 @@ services:
       FACTORTESTER_FIXED_BRANCH: ${FACTORTESTER_FIXED_BRANCH:-feat}
       FACTORTESTER_FIXED_PORT: ${FACTORTESTER_FIXED_PORT:-7999}
       FACTORTESTER_FIXED_STARTUP_TIMEOUT: ${FACTORTESTER_FIXED_STARTUP_TIMEOUT:-180}
-      FACTORTESTER_HOT_RELOAD: ${FACTORTESTER_HOT_RELOAD:-0}
+      # The local Docker server is a feature-node development runtime.  Its
+      # mounted source watcher is enabled by default; public main uses a
+      # separate Compose project and explicitly prohibits hot reload.
+      FACTORTESTER_HOT_RELOAD: ${FACTORTESTER_HOT_RELOAD:-1}
       FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
       FACTORTESTER_LAN_ADDRESSES: ${FACTORTESTER_LAN_ADDRESS:?set FACTORTESTER_LAN_ADDRESS}
       FACTORTESTER_LOCAL_CLIENT_CIDRS: ${FACTORTESTER_LOCAL_CLIENT_CIDRS:-172.18.0.1/32}
