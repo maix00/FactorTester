@@ -29,7 +29,6 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "control_users" in schema
     assert "control_public_visitor_allowlist" in schema
     assert "control_devices" in schema
-    assert "control_device_authorizations" in schema
     assert "control_user_preferences" in schema
     assert "preferred_language" in schema
     assert "public_key" in schema
@@ -253,7 +252,6 @@ def test_manager_switches_control_database_only_after_connection_succeeds(
     assert result["host"] == "101.133.144.27"
     assert connected
     assert state.device_registry.control_store is state.control_store
-    assert state.device_authorizations.control_store is state.control_store
     assert state.user_preferences.control_store is state.control_store
     assert CONTROL_DATABASE_ENV not in os.environ
 

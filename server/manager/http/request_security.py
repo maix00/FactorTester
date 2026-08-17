@@ -48,9 +48,9 @@ CLIENT_ACCESS_HEADER = "X-FactorTester-Client-Access"
 CLIENT_ACCESS_VALUE = "ftclient"
 VISITOR_ID_HEADER = "X-FactorTester-Visitor-ID"
 
-
 class RequestSecurityMixin:
     """Define the public/private HTTP boundary before route dispatch."""
+
     def setup(self) -> None:
         """Negotiate TLS per worker when this listener also accepts HTTP."""
         if getattr(self.server, "tls_accepts_plain_http", False):
@@ -542,25 +542,10 @@ class RequestSecurityMixin:
                 )
             else:
                 visitor_entry_href = "/visitor?next=" + safe_next
-        device_auth_target = ""
-        if (
-            current_origin
-            and target_origin
-            and current_origin != target_origin
-            and current_origin in tuple(
-                getattr(self.state, "visitor_entry_origins", ())
-            )
-        ):
-            device_auth_target = (
-                target_origin
-                + "/compliance?next="
-                + quote(manager_safe_login_next(next_path), safe="/?=&%")
-            )
         body = manager_compliance_page(
             next_path,
             accept_language=self.headers.get("Accept-Language", ""),
             visitor_entry_href=visitor_entry_href,
-            device_auth_target=device_auth_target,
         )
         self._send_html(body, cookie=client_access_cookie)
 
@@ -583,21 +568,6 @@ class RequestSecurityMixin:
         if path == "/compliance":
             return True
 
-        if path == "/device-authorize":
-            if not self.state.public_server:
-                json_response(self, {
-                    "success": False,
-                    "error": "device authorization is available only on a public Manager",
-                }, 404)
-                return False
-            if not self._has_secure_ui_transport():
-                json_response(self, {
-                    "success": False,
-                    "error": "device authorization requires HTTPS",
-                }, 400)
-                return False
-            return True
-
         if path == "/device-handoff":
             if not self.state.public_server:
                 json_response(self, {
@@ -609,21 +579,6 @@ class RequestSecurityMixin:
                 json_response(self, {
                     "success": False,
                     "error": "device handoff requires HTTPS",
-                }, 400)
-                return False
-            return True
-
-        if path == "/api/device/authorization/redeem":
-            if not self.state.public_server:
-                json_response(self, {
-                    "success": False,
-                    "error": "device authorization is available only on a public Manager",
-                }, 404)
-                return False
-            if not self._has_secure_ui_transport():
-                json_response(self, {
-                    "success": False,
-                    "error": "device authorization requires HTTPS",
                 }, 400)
                 return False
             return True

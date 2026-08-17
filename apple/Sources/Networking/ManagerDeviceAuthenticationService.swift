@@ -3,122 +3,12 @@ import Foundation
 /// Native counterpart of the browser device flow.
 ///
 /// The Swift client keeps its P-256 private key in Keychain/Secure Enclave and
-/// speaks the same challenge/verify protocol as the browser. A one-time grant
-/// can be redeemed only after an administrator creates it from the internal
-/// Manager; this service never implements public registration.
+/// speaks the same challenge/verify protocol as the browser. Device enrollment
+/// is intentionally not part of this service: public allowlist users enroll a
+/// browser origin by signing in through public visitor mode. This service only
+/// authenticates a device that has already been enrolled.
 final class ManagerDeviceAuthenticationService {
     static let shared = ManagerDeviceAuthenticationService()
-
-    /// Ask the current internal Manager for its nearest online HTTPS peer,
-    /// then switch the client to that server without opening a browser.
-    func switchToNearestPublicEndpoint(
-        deviceName: String = "",
-        sourceEndpoint: URL? = nil
-    ) async throws -> ManagerDeviceSwitchResult {
-        guard let sourceCandidate = sourceEndpoint ?? ManagerConfig.shared.baseURL else {
-            throw APIError.notConfigured
-        }
-        let source = try Self.normalizedSourceEndpoint(sourceCandidate)
-        let sourceToken = ManagerSessionTokenStore.read(for: source)
-        guard !sourceToken.isEmpty else {
-            throw APIError.unauthorized(
-                L10n.text("请先在内网 Manager 登录，再切换到公网地址。")
-            )
-        }
-        let response: PublicTargetsResponse = try await request(
-            endpoint: source,
-            path: "/api/device/public-targets",
-            method: "GET",
-            body: nil,
-            bearerToken: sourceToken
-        )
-        guard let target = response.targets.first else {
-            throw APIError.server(L10n.text("内网 Manager 未发现在线的 HTTPS 公网服务器。"))
-        }
-        let authentication = try await switchToPublicEndpoint(
-            endpoint: target.endpoint,
-            targetServerID: target.serverID,
-            deviceName: deviceName,
-            sourceEndpoint: source
-        )
-        return ManagerDeviceSwitchResult(target: target, authentication: authentication)
-    }
-
-    /// Switch the native client from its current Manager to a public Manager.
-    ///
-    /// If this native device was already enrolled at the target, the method
-    /// only performs challenge/verify. Otherwise it asks the currently
-    /// authenticated internal Manager for a one-time grant and redeems that
-    /// grant directly over HTTPS. No browser navigation is involved.
-    func switchToPublicEndpoint(
-        endpoint: URL,
-        targetServerID: String,
-        deviceName: String = "",
-        sourceEndpoint: URL? = nil
-    ) async throws -> ManagerDeviceAuthenticationResult {
-        let target = try Self.normalizedEndpoint(endpoint)
-        if ManagerDeviceKeyStore.load() != nil {
-            do {
-                return try await authenticate(endpoint: target)
-            } catch let error as APIError {
-                guard case .unauthorized = error else { throw error }
-            }
-        }
-        guard let source = sourceEndpoint ?? ManagerConfig.shared.baseURL else {
-            throw APIError.notConfigured
-        }
-        let sourceToken = ManagerSessionTokenStore.read(for: source)
-        guard !sourceToken.isEmpty else {
-            throw APIError.unauthorized(
-                L10n.text("请先在内网 Manager 登录，再切换到公网地址。")
-            )
-        }
-        let grant = try await issueAuthorization(
-            sourceEndpoint: source,
-            sourceToken: sourceToken,
-            targetEndpoint: target,
-            targetServerID: targetServerID,
-            deviceName: deviceName
-        )
-        return try await redeemAuthorization(
-            token: grant.token,
-            endpoint: target,
-            deviceName: deviceName
-        )
-    }
-
-    func redeemAuthorization(
-        token: String,
-        endpoint: URL,
-        deviceName: String = ""
-    ) async throws -> ManagerDeviceAuthenticationResult {
-        let endpoint = try Self.normalizedEndpoint(endpoint)
-        guard !token.isEmpty else {
-            throw APIError.server(L10n.text("设备授权链接缺少一次性令牌。"))
-        }
-        let credential = try ManagerDeviceKeyStore.create()
-        do {
-            let response: DeviceSessionResponse = try await request(
-                endpoint: endpoint,
-                path: "/api/device/authorization/redeem",
-                method: "POST",
-                body: [
-                    "token": token,
-                    "device_id": credential.deviceID,
-                    "public_key": credential.publicKey,
-                    "device_name": String(deviceName.prefix(128)),
-                ]
-            )
-            try ManagerDeviceKeyStore.updateUsername(response.username)
-            ManagerSessionTokenStore.save(response.token, for: endpoint)
-            return response.result(deviceID: credential.deviceID, endpoint: endpoint)
-        } catch {
-            // Do not leave an unregistered private key behind after a failed
-            // one-time grant or a failed network request.
-            ManagerDeviceKeyStore.delete()
-            throw error
-        }
-    }
 
     func authenticate(
         endpoint: URL? = nil,
@@ -177,46 +67,11 @@ final class ManagerDeviceAuthenticationService {
         return response.result(deviceID: credential.deviceID, endpoint: endpoint)
     }
 
-    private func issueAuthorization(
-        sourceEndpoint: URL,
-        sourceToken: String,
-        targetEndpoint: URL,
-        targetServerID: String,
-        deviceName: String
-    ) async throws -> DeviceAuthorizationGrant {
-        let response: AuthorizationResponse = try await request(
-            endpoint: try Self.normalizedSourceEndpoint(sourceEndpoint),
-            path: "/api/device/authorization",
-            method: "POST",
-            body: [
-                "target_server_id": targetServerID,
-                "target_endpoint": targetEndpoint.absoluteString
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-                "device_name": String(deviceName.prefix(128)),
-                "next": "/",
-            ],
-            bearerToken: sourceToken
-        )
-        guard let authorizationURL = URL(string: response.authorizationURL),
-              let components = URLComponents(
-                url: authorizationURL,
-                resolvingAgainstBaseURL: false
-              ),
-              let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
-              authorizationURL.scheme?.lowercased() == targetEndpoint.scheme?.lowercased(),
-              authorizationURL.host?.lowercased() == targetEndpoint.host?.lowercased(),
-              authorizationURL.port == targetEndpoint.port else {
-            throw APIError.server(L10n.text("服务器返回的设备授权地址无效。"))
-        }
-        return DeviceAuthorizationGrant(token: token)
-    }
-
     private func request<Response: Decodable>(
         endpoint: URL,
         path: String,
         method: String,
-        body: [String: Any]?,
-        bearerToken: String? = nil
+        body: [String: Any]?
     ) async throws -> Response {
         guard let url = Self.url(endpoint: endpoint, path: path) else {
             throw APIError.server(L10n.text("设备认证地址无效。"))
@@ -229,9 +84,6 @@ final class ManagerDeviceAuthenticationService {
         }
         request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
-        if let bearerToken, !bearerToken.isEmpty {
-            request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        }
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
@@ -275,24 +127,7 @@ final class ManagerDeviceAuthenticationService {
         }
         let loopback = ManagerEndpointPolicy.isLoopback(host)
         guard scheme == "https" || (scheme == "http" && loopback) else {
-            throw APIError.server(L10n.text("公网设备登记需要 HTTPS，不能使用公网 HTTP。"))
-        }
-        return endpoint
-    }
-
-    private static func normalizedSourceEndpoint(_ endpoint: URL) throws -> URL {
-        guard let scheme = endpoint.scheme?.lowercased(),
-              let host = endpoint.host,
-              !host.isEmpty,
-              endpoint.user == nil,
-              endpoint.password == nil,
-              endpoint.query == nil,
-              endpoint.fragment == nil else {
-            throw APIError.server(L10n.text("设备认证地址无效。"))
-        }
-        let privateNetwork = ManagerEndpointPolicy.isPrivateNetwork(host)
-        guard scheme == "https" || (scheme == "http" && privateNetwork) else {
-            throw APIError.server(L10n.text("内网 Manager 地址需要 HTTPS 或私有网络 HTTP。"))
+            throw APIError.server(L10n.text("公网设备认证需要 HTTPS，不能使用公网 HTTP。"))
         }
         return endpoint
     }
@@ -372,24 +207,6 @@ final class ManagerDeviceAuthenticationService {
         }
     }
 
-    private struct PublicTargetsResponse: Decodable {
-        let success: Bool
-        let targets: [ManagerPublicTarget]
-    }
-
-    private struct AuthorizationResponse: Decodable {
-        let success: Bool
-        let authorizationURL: String
-
-        enum CodingKeys: String, CodingKey {
-            case success
-            case authorizationURL = "authorization_url"
-        }
-    }
-
-    private struct DeviceAuthorizationGrant {
-        let token: String
-    }
 }
 
 struct ManagerDeviceAuthenticationResult: Equatable {
@@ -412,9 +229,4 @@ struct ManagerPublicTarget: Decodable, Equatable {
         case serverID = "server_id"
         case latencyMS = "latency_ms"
     }
-}
-
-struct ManagerDeviceSwitchResult: Equatable {
-    let target: ManagerPublicTarget
-    let authentication: ManagerDeviceAuthenticationResult
 }

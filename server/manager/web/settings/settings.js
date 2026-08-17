@@ -3,7 +3,7 @@
     ["account", "账户", "person.crop.circle"], ["server", "服务器", "server.rack"],
     ["federation", "服务器互联", "server.rack"],
     ["control-database", "控制数据库", "externaldrive.connected.to.line.below"],
-    ["devices", "设备白名单", "checkmark.seal"],
+    ["devices", "我的设备", "checkmark.seal"],
     ["workspace", "工作区", "square.grid.2x2"], ["language", "语言", "globe"],
     ["updates", "客户端更新", "arrow.down.circle"],
   ];

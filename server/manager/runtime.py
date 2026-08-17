@@ -83,7 +83,6 @@ from server.manager.http.pages import (
 )
 from server.manager.domain.devices import (
     DeviceChallengeStore,
-    DeviceAuthorizationStore,
     DeviceRegistry,
 )
 from server.manager.storage.control_db import control_store_from_env
@@ -330,11 +329,6 @@ class ManagerState(
             server_id=self.server_id,
             control_store=self.control_store,
             public_server=self.public_server,
-        )
-        self.device_authorizations = DeviceAuthorizationStore(
-            self.state_root / "device-authorizations.json",
-            server_id=self.server_id,
-            control_store=self.control_store,
         )
         self.device_challenges = DeviceChallengeStore()
         self.job_index = ManagerJobIndex(

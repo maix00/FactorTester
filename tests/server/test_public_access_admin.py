@@ -110,16 +110,16 @@ class _DevicePolicyState:
         return _ordinary(username) if self.account else None
 
 
-def test_only_live_allowlisted_visitor_sessions_get_quota_exemption():
+def test_only_live_allowlisted_visitor_sessions_can_enroll_devices():
     route = _DevicePolicyRoute(_DevicePolicyState())
-    assert route._visitor_device_quota_exempt({"username": "GTHT@testA@545963541963"}) is True
+    assert route._is_allowlisted_visitor_session({"username": "GTHT@testA@545963541963"}) is True
 
     route.state.authentication = "password"
-    assert route._visitor_device_quota_exempt({"username": "GTHT@testA@545963541963"}) is False
+    assert route._is_allowlisted_visitor_session({"username": "GTHT@testA@545963541963"}) is False
 
     route.state.authentication = "visitor-password"
     route.state.account = False
-    assert route._visitor_device_quota_exempt({"username": "GTHT@testA@545963541963"}) is False
+    assert route._is_allowlisted_visitor_session({"username": "GTHT@testA@545963541963"}) is False
 
 
 def test_admin_access_control_is_super_admin_only_and_centralized(tmp_path, monkeypatch):

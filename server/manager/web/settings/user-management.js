@@ -152,9 +152,7 @@
       row.className = "settings-row";
       const copy = document.createElement("div");
       const title = document.createElement("b");
-      title.textContent = record.quota_exempt
-        ? context.t("白名单自动设备（不占普通设备名额）")
-        : (record.device_name || record.device_id || "");
+      title.textContent = record.device_name || context.t("白名单设备");
       const detail = document.createElement("small");
       const status = record.enabled ? context.t("已启用") : context.t("已撤销");
       detail.textContent = `${record.username || ""} · ${status} · ${record.source_server_id || ""}`;

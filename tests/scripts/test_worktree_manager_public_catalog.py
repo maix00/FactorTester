@@ -134,19 +134,43 @@ def test_source_provider_extracts_endpoint_host():
     assert value["public_server"] is True
 
 
-def test_compliance_alias_can_fall_back_to_canonical_public_ip():
+def test_compliance_page_uses_public_allowlist_visitor_enrollment():
     from server.manager.http.pages import compliance_page
 
-    body = compliance_page(
-        "/jobs",
-        device_auth_target="https://198.51.100.10:7998/compliance?next=/jobs",
-    ).decode("utf-8")
+    body = compliance_page("/jobs").decode("utf-8")
 
-    assert 'const deviceAuthTarget="https://198.51.100.10:7998/compliance?next=/jobs"' in body
     assert "当前浏览器来源没有已登记的设备密钥" in body
-    assert "切换到服务器公网 IP进行设备登录" in body
-    assert 'id="device-auth-target"' in body
-    assert "window.location.replace(deviceAuthTarget)" not in body
+    assert "白名单用户请点击访客模式" in body
+    assert "内网设置页" not in body
+    assert "deviceAuthTarget" not in body
+    assert "device-auth-target" not in body
+
+
+def test_removed_internal_device_registration_routes_are_not_present(tmp_path):
+    state = manager.ManagerState(tmp_path, "python")
+
+    with running_manager(state) as base_url:
+        for path in (
+            "/device-authorize",
+            "/api/device/public-targets",
+        ):
+            with pytest.raises(HTTPError) as failed:
+                urlopen(f"{base_url}{path}")
+            assert failed.value.code == 404
+
+        for path in (
+            "/api/device/authorization",
+            "/api/device/authorization/redeem",
+        ):
+            request = Request(
+                f"{base_url}{path}",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with pytest.raises(HTTPError) as failed:
+                urlopen(request)
+            assert failed.value.code == 404
 
 
 def test_visitor_entry_is_marked_for_testing_only():

@@ -29,27 +29,34 @@ device policy.
    super-admin “用户与机构” settings page.  Management reads and writes fail
    with an unavailable response when the central database is not usable; no
    stale local management copy is presented.
-3. After a successful `visitor-password` login, the web client may generate a
-   non-exportable P-256 browser key in the existing origin-local IndexedDB.
-   It submits only the device id and public JWK to `/api/devices/enroll`; the
-   private key never leaves browser storage.
-4. The server derives `quota_exempt` from the live session authentication
-   method and a fresh allowlist check.  It ignores any client-supplied flag.
-   Such automatic browser devices are stored in the shared `control_devices`
-   table, do not consume the ordinary three-device quota, and remain visible
-   and revocable to super administrators.  Normal password and native-client
-   enrollments continue to use the ordinary quota.
+3. Device enrollment is available only as part of a successful
+   `visitor-password` login for an allowlisted account.  The web client may
+   generate a non-exportable P-256 browser key in the existing origin-local
+   IndexedDB.  It submits only the device id and public JWK to
+   `/api/devices/enroll`; the private key never leaves browser storage.  The
+   old internal Manager target-discovery, one-time authorization page, and
+   authorization-link redemption flow are removed rather than hidden behind a
+   UI-only restriction.
+4. The server derives enrollment permission from the live session
+   authentication method and a fresh allowlist check. It ignores any
+   client-supplied device-policy flag. Every surviving `control_devices` row is
+   a public allowlist device; existing rows are migrated to that policy and
+   remain visible and revocable to users and super administrators. There is
+   no ordinary-device quota or internal/native enrollment path.
 
 ## Consequences
 
 - A normal browser can become a persistent approved device after an
   allowlisted visitor login without sharing a private key between IP and
   ingress origins.
+- There is no internal-network registration step.  A user must first be
+  present in the public-server allowlist; the compliance page explains this
+  path and never links to an internal Manager enrollment page.
 - A private window may create a temporary, separately registered browser key;
-  the server intentionally does not claim to detect that mode.  Revocation,
-  audit metadata, and the explicit `quota_exempt` marker remain the controls.
-- `public_device_count` continues to mean ordinary quota-consuming devices;
-  `public_device_total_count` includes automatic allowlisted devices for
-  truthful UI and compliance counts.
+  the server intentionally does not claim to detect that mode. Revocation and
+  audit metadata remain the controls.
+- `public_device_count` and `public_device_total_count` both report enabled
+  allowlist devices for compatibility with existing clients; no quota is
+  enforced.
 - The existing device registry and IndexedDB store are reused.  No duplicate
   device-authentication protocol or device-cache table is introduced.

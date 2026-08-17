@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR 103. This document is retained as historical context only;
+the one-time internal authorization page, grant API, and redemption API are no
+longer implemented.
 
 ## Context
 

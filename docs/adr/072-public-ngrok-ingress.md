@@ -53,10 +53,11 @@ address.
    Enrollment and last-seen IPs are audit metadata only; they are neither an
    authentication factor nor required to equal one another.
 7. Direct public access to `https://<public-ip>:7998` remains available.  The
-   ngrok origin is an additional browser origin, so its WebCrypto private key
-   must be enrolled for that origin through the existing one-time device
-   authorization flow.  A key stored under the direct-IP origin cannot be
-   copied into the ngrok origin.
+   ngrok origin is an additional browser origin and therefore has its own
+   origin-local WebCrypto storage.  A user on the public allowlist signs in
+   through visitor mode at either origin; that origin then enrolls its current
+   browser automatically.  No internal Manager handoff or one-time grant is
+   used, and a key stored under one origin is never copied to the other.
 
 ## Operations and failure behavior
 

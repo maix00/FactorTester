@@ -20,12 +20,10 @@ import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
-from server.manager.domain.devices import PUBLIC_DEVICE_LIMIT
 from server.manager.storage.account_domain.remote import AccountDomainControlMixin
 from server.manager.storage.access_control import VisitorAccessControlMixin
 
@@ -334,6 +332,7 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS quota_exempt BOOLEAN NOT NULL DEFAULT FALSE",
+    "UPDATE control_devices SET public_access=TRUE, quota_exempt=TRUE WHERE public_access IS DISTINCT FROM TRUE OR quota_exempt IS DISTINCT FROM TRUE",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, quota_exempt, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
@@ -345,23 +344,6 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         CHECK (preferred_language IN ('system', 'zh-Hans', 'en'))
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS control_device_authorizations (
-        token_hash TEXT PRIMARY KEY,
-        username TEXT NOT NULL,
-        target_server_id TEXT NOT NULL,
-        target_endpoint TEXT NOT NULL,
-        device_name TEXT NOT NULL DEFAULT '',
-        preferred_language TEXT NOT NULL DEFAULT 'system',
-        source_server_id TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        expires_at TIMESTAMPTZ NOT NULL,
-        used_at TIMESTAMPTZ
-    )
-    """,
-    "ALTER TABLE control_device_authorizations ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT 'system'",
-    "CREATE INDEX IF NOT EXISTS control_device_authorizations_target ON control_device_authorizations(target_server_id, expires_at)",
-    "CREATE INDEX IF NOT EXISTS control_device_authorizations_user ON control_device_authorizations(username, created_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_profiles (
         principal TEXT NOT NULL,
@@ -719,8 +701,8 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             "client_name": _row_value(row, "client_name", 5, ""),
             "enrollment_ip": _row_value(row, "enrollment_ip", 6, ""),
             "last_seen_ip": _row_value(row, "last_seen_ip", 7, ""),
-            "public_access": _row_value(row, "public_access", 8, False),
-            "quota_exempt": _row_value(row, "quota_exempt", 9, False),
+            "public_access": True,
+            "quota_exempt": True,
             "enabled": _row_value(row, "enabled", 10, False),
             "source_server_id": _row_value(row, "source_server_id", 11, ""),
             "created_at": _row_value(row, "created_at", 12, None),
@@ -734,7 +716,8 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             except (TypeError, ValueError, json.JSONDecodeError):
                 public_key = {}
         value["public_key"] = public_key if isinstance(public_key, dict) else {}
-        value.setdefault("quota_exempt", False)
+        value["public_access"] = True
+        value["quota_exempt"] = True
         for key in ("created_at", "updated_at", "last_seen_at"):
             timestamp = value.get(key)
             if hasattr(timestamp, "isoformat"):
@@ -749,11 +732,9 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
         username: str,
         device_name: str = "",
         source_server_id: str,
-        public_access: bool = False,
         client_type: str = "unknown",
         client_name: str = "",
         enrollment_ip: str = "",
-        quota_exempt: bool = False,
     ) -> dict[str, Any]:
         """Register one browser public key in the central control database."""
         self.ensure_schema()
@@ -764,27 +745,6 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             ).fetchone()
             if existing is not None:
                 raise ValueError("device_id is already registered")
-            if public_access and not quota_exempt:
-                # All public-device enrollments for an account serialize on
-                # the same transaction-level advisory lock.  The count and
-                # insert therefore remain atomic across every Manager using
-                # this PostgreSQL control plane.
-                connection.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    (f"factortester:public-device:{username}",),
-                )
-                count_row = connection.execute(
-                    """
-                    SELECT COUNT(*) AS count
-                    FROM control_devices
-                    WHERE username=%s AND public_access=TRUE
-                      AND quota_exempt=FALSE AND enabled=TRUE
-                    """,
-                    (str(username),),
-                ).fetchone()
-                count = int(_row_value(count_row, "count", 0, 0))
-                if count >= PUBLIC_DEVICE_LIMIT:
-                    raise ValueError("public device limit reached")
             row = connection.execute(
                 """
                 INSERT INTO control_devices(
@@ -806,7 +766,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                     str(client_name or "")[:128],
                     str(enrollment_ip or "")[:45],
                     str(enrollment_ip or "")[:45],
-                    bool(public_access), bool(quota_exempt), str(source_server_id),
+                    True, True, str(source_server_id),
                 ),
             ).fetchone()
         if row is None:
@@ -895,7 +855,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
 
     def public_device_count(self, *, username: str = "") -> int:
         self.ensure_schema()
-        predicates = ["public_access=TRUE", "quota_exempt=FALSE", "enabled=TRUE"]
+        predicates = ["public_access=TRUE", "enabled=TRUE"]
         parameters: list[Any] = []
         owner = str(username or "").strip()
         if owner:
@@ -921,7 +881,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
         return int(_row_value(row, "count", 0, 0))
 
     def public_device_total_count(self, *, username: str = "") -> int:
-        """Count all enabled public devices, including quota-exempt rows."""
+        """Count all enabled public allowlist devices."""
         self.ensure_schema()
         predicates = ["public_access=TRUE", "enabled=TRUE"]
         parameters: list[Any] = []
@@ -990,124 +950,6 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
         return value
 
     @staticmethod
-    def _device_authorization_value(row: object) -> dict[str, Any]:
-        value = dict(row) if isinstance(row, Mapping) else {
-            "username": _row_value(row, "username", 0, ""),
-            "target_server_id": _row_value(row, "target_server_id", 1, ""),
-            "target_endpoint": _row_value(row, "target_endpoint", 2, ""),
-            "device_name": _row_value(row, "device_name", 3, ""),
-            "preferred_language": _row_value(
-                row, "preferred_language", 4, "system"
-            ),
-            "source_server_id": _row_value(row, "source_server_id", 5, ""),
-            "created_at": _row_value(row, "created_at", 6, None),
-            "expires_at": _row_value(row, "expires_at", 7, None),
-            "used_at": _row_value(row, "used_at", 8, None),
-        }
-        for key in ("created_at", "expires_at", "used_at"):
-            timestamp = value.get(key)
-            if hasattr(timestamp, "isoformat"):
-                value[key] = timestamp.isoformat()
-        return value
-
-    def create_device_authorization(
-        self,
-        *,
-        token_hash: str,
-        username: str,
-        target_server_id: str,
-        target_endpoint: str,
-        device_name: str = "",
-        preferred_language: str = "system",
-        expires_at: float,
-        source_server_id: str,
-    ) -> None:
-        """Persist only a hash for a short-lived public-device grant."""
-        self.ensure_schema()
-        expiration = datetime.fromtimestamp(float(expires_at), tz=timezone.utc)
-        with self._connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO control_device_authorizations(
-                    token_hash, username, target_server_id, target_endpoint,
-                    device_name, preferred_language, source_server_id, expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    str(token_hash), str(username), str(target_server_id),
-                    str(target_endpoint), str(device_name or "")[:128],
-                    str(preferred_language), str(source_server_id), expiration,
-                ),
-            )
-
-    def preview_device_authorization(
-        self,
-        *,
-        token_hash: str,
-        target_server_id: str,
-    ) -> dict[str, Any] | None:
-        """Read one unconsumed live grant for localized page rendering."""
-        self.ensure_schema()
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT username, target_server_id, target_endpoint, device_name,
-                       preferred_language, source_server_id, created_at,
-                       expires_at, used_at
-                FROM control_device_authorizations
-                WHERE token_hash=%s AND target_server_id=%s
-                  AND used_at IS NULL AND expires_at>CURRENT_TIMESTAMP
-                """,
-                (str(token_hash), str(target_server_id)),
-            ).fetchone()
-        return self._device_authorization_value(row) if row is not None else None
-
-    def consume_device_authorization(
-        self,
-        *,
-        token_hash: str,
-        target_server_id: str,
-    ) -> dict[str, Any] | None:
-        """Atomically validate and consume a grant on its target Manager."""
-        self.ensure_schema()
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT username, target_server_id, target_endpoint, device_name,
-                       preferred_language, source_server_id, created_at,
-                       expires_at, used_at
-                FROM control_device_authorizations
-                WHERE token_hash=%s
-                FOR UPDATE
-                """,
-                (str(token_hash),),
-            ).fetchone()
-            if row is None:
-                return None
-            value = self._device_authorization_value(row)
-            if (
-                value.get("used_at") is not None
-                or str(value.get("target_server_id") or "") != str(target_server_id)
-            ):
-                return None
-            # Keep the expiry check in PostgreSQL so all Managers agree on
-            # the same clock and a slow client cannot redeem an old grant.
-            updated = connection.execute(
-                """
-                UPDATE control_device_authorizations
-                SET used_at=CURRENT_TIMESTAMP
-                WHERE token_hash=%s AND used_at IS NULL
-                  AND target_server_id=%s AND expires_at>CURRENT_TIMESTAMP
-                RETURNING username, target_server_id, target_endpoint,
-                          device_name, preferred_language, source_server_id,
-                          created_at, expires_at, used_at
-                """,
-                (str(token_hash), str(target_server_id)),
-            ).fetchone()
-            if updated is None:
-                return None
-        return self._device_authorization_value(updated)
-
     def load_organizations(self) -> list[dict[str, Any]]:
         self.ensure_schema()
         with self._connection() as connection:

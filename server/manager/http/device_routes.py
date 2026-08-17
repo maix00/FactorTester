@@ -3,57 +3,21 @@
 from __future__ import annotations
 
 import base64
-import ipaddress
 import json
-import re
 import sys
 from typing import Any
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode
 
 from server.manager.config import MANAGER_SESSION_TTL_SECONDS
 from server.manager.domain.device_clients import describe_client, observed_ip
 from server.manager.domain.devices import (
-    DeviceAuthorizationError,
     DeviceRegistryError,
-    PUBLIC_DEVICE_LIMIT,
-    PublicDeviceLimitError,
 )
-from server.manager.http.pages import (
-    device_authorization_page,
-    safe_login_next,
-)
-from server.manager.http.localization import preferred_locale
+from server.manager.http.pages import safe_login_next
 from server.manager.http.responses import json_response
 from server.manager.storage.control_db import (
     ControlDatabaseError,
 )
-
-
-def device_authorization_endpoint(value: object) -> str:
-    """Validate a public Manager base URL used in a one-time grant."""
-    endpoint = str(value or "").strip().rstrip("/")
-    parsed = urlparse(endpoint)
-    if not endpoint or len(endpoint) > 512 or parsed.scheme not in {"http", "https"}:
-        raise DeviceAuthorizationError(
-            "target endpoint must be an http or https URL"
-        )
-    if not parsed.netloc or parsed.username or parsed.password:
-        raise DeviceAuthorizationError("target endpoint must not contain credentials")
-    if parsed.query or parsed.fragment:
-        raise DeviceAuthorizationError(
-            "target endpoint must not contain a query or fragment"
-        )
-    if parsed.scheme == "http":
-        host = str(parsed.hostname or "").lower()
-        try:
-            local_http = ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            local_http = host in {"localhost", "127.0.0.1", "::1"}
-        if not local_http:
-            raise DeviceAuthorizationError(
-                "public device authorization requires an HTTPS endpoint"
-            )
-    return endpoint
 
 
 def device_handoff_url(
@@ -93,16 +57,6 @@ class DeviceNetworkRoutesMixin:
             "enrollment_ip": observed_ip(self._client_ip()),
         }
 
-    def _device_public_targets(self) -> None:
-        if self._session() is None:
-            json_response(self, {"success": False, "error": "login required"}, 401)
-            return
-        json_response(self, {
-            "success": True,
-            "source_server_id": self.state.server_id,
-            "targets": self.state.public_device_targets(),
-        }, headers={"Cache-Control": "no-store"})
-
     def _server_network_info(self) -> None:
         session = self._session()
         if (
@@ -120,200 +74,6 @@ class DeviceNetworkRoutesMixin:
             "success": True,
             **self.state.server_network_info(request_endpoint=request_endpoint),
         }, headers={"Cache-Control": "no-store"})
-
-    def _device_authorization_create(self) -> None:
-        session = self._session()
-        if session is None:
-            json_response(self, {"success": False, "error": "login required"}, 401)
-            return
-        if not self._has_secure_ui_transport():
-            json_response(
-                self,
-                {
-                    "success": False,
-                    "error": (
-                        "device authorization requires HTTPS outside private LAN"
-                    ),
-                },
-                400,
-            )
-            return
-        try:
-            payload = self._json_body(16 * 1024)
-            target_server_id = str(payload.get("target_server_id") or "").strip()
-            if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", target_server_id):
-                raise DeviceAuthorizationError("target_server_id is invalid")
-            target_endpoint = device_authorization_endpoint(
-                payload.get("target_endpoint")
-            )
-            next_path = safe_login_next(str(payload.get("next") or "/"))
-            username = str(session.get("username") or "").strip()
-            if not username:
-                raise DeviceAuthorizationError("logged-in account is invalid")
-            count = self.state.device_registry.public_device_count(username=username)
-            if count >= PUBLIC_DEVICE_LIMIT:
-                raise PublicDeviceLimitError(username=username, count=count)
-            language = str(
-                self.state.user_preferences.read(username).get("language")
-                or "system"
-            )
-            if language == "system":
-                language = preferred_locale(
-                    self.headers.get("Accept-Language", "")
-                )
-            grant = self.state.device_authorizations.issue(
-                username=username,
-                target_server_id=target_server_id,
-                target_endpoint=target_endpoint,
-                device_name=str(payload.get("device_name") or ""),
-                preferred_language=language,
-            )
-            query = urlencode({
-                "token": str(grant["token"]),
-                "next": next_path,
-            })
-            authorization_url = f"{target_endpoint}/device-authorize?{query}"
-        except PublicDeviceLimitError as exc:
-            json_response(self, {
-                "success": False,
-                "error": "public device limit reached",
-                "code": "public_device_limit_reached",
-                "public_device_count": exc.count,
-                "public_device_limit": exc.limit,
-            }, 409)
-            return
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device authorization failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device authorization store is unavailable",
-            }, 503)
-            return
-        except (
-            DeviceAuthorizationError,
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-        ) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
-            return
-        json_response(self, {
-            "success": True,
-            "authorization_url": authorization_url,
-            "target_server_id": target_server_id,
-            "expires_in": grant["expires_in"],
-            "backend": grant["backend"],
-        }, headers={"Cache-Control": "no-store"})
-
-    def _device_authorization_redeem(self) -> None:
-        if not self.state.public_server:
-            json_response(self, {
-                "success": False,
-                "error": (
-                    "device authorization is available only on a public Manager"
-                ),
-            }, 404)
-            return
-        if not self._has_secure_ui_transport():
-            json_response(self, {
-                "success": False,
-                "error": "device authorization requires HTTPS",
-            }, 400)
-            return
-        try:
-            payload = self._json_body(64 * 1024)
-            authorization = self.state.device_authorizations.consume(
-                payload.get("token"),
-                target_server_id=self.state.server_id,
-            )
-            device = self.state.device_registry.enroll(
-                username=str(authorization.get("username") or ""),
-                device_id=str(payload.get("device_id") or ""),
-                public_key=payload.get("public_key"),
-                device_name=str(
-                    payload.get("device_name")
-                    or authorization.get("device_name")
-                    or ""
-                ),
-                **self._device_request_metadata(),
-            )
-            token, principal, role = self.state.login_device(
-                str(authorization.get("username") or ""),
-                origin=self._request_origin(),
-            )
-        except PublicDeviceLimitError as exc:
-            json_response(self, {
-                "success": False,
-                "error": "public device limit reached",
-                "code": "public_device_limit_reached",
-                "public_device_count": exc.count,
-                "public_device_limit": exc.limit,
-            }, 409)
-            return
-        except ControlDatabaseError as exc:
-            sys.stderr.write(
-                f"[manager] device authorization redemption failed: {exc}\n"
-            )
-            json_response(self, {
-                "success": False,
-                "error": "device authorization store is unavailable",
-            }, 503)
-            return
-        except (
-            DeviceAuthorizationError,
-            DeviceRegistryError,
-            PermissionError,
-            TypeError,
-            ValueError,
-            KeyError,
-            json.JSONDecodeError,
-        ):
-            json_response(self, {
-                "success": False,
-                "error": "device authorization is invalid or expired",
-            }, 403)
-            return
-        session = self.state.session(token) or {}
-        json_response(self, {
-            "success": True,
-            "username": principal,
-            "alias": session.get("alias") or principal,
-            "role": role,
-            "capabilities": {
-                "manager": role == "super_admin",
-                "research": True,
-            },
-            "token": token,
-            "expires_in": MANAGER_SESSION_TTL_SECONDS,
-            "device_id": device.get("device_id"),
-        }, headers={
-            "Set-Cookie": self._session_cookie(token),
-            "Cache-Control": "no-store",
-        })
-
-    def _device_authorization_page(self, parsed: Any) -> None:
-        query = parse_qs(parsed.query, keep_blank_values=True)
-        token = query.get("token", [""])[0]
-        next_path = query.get("next", ["/"])[0]
-        language = self.headers.get("Accept-Language", "")
-        try:
-            authorization = self.state.device_authorizations.preview(
-                token, target_server_id=self.state.server_id,
-            )
-            snapshot = str(
-                authorization.get("preferred_language") or "system"
-            )
-            if snapshot != "system":
-                language = snapshot
-        except (ControlDatabaseError, DeviceAuthorizationError):
-            # Keep the public page generic for invalid/expired grants.  The
-            # one-time token is authoritatively checked again on redemption.
-            pass
-        self._send_html(device_authorization_page(
-            token,
-            next_path,
-            accept_language=language,
-        ))
 
     def _device_handoff(self, parsed: Any) -> None:
         """Redeem a device session ticket on the canonical public origin."""
@@ -369,9 +129,6 @@ class DeviceNetworkRoutesMixin:
                 username=owner,
                 include_disabled=True,
             )
-            public_device_count = self.state.device_registry.public_device_count(
-                username=owner,
-            )
             public_device_total_count = self.state.device_registry.public_device_total_count(
                 username=owner,
             )
@@ -390,10 +147,9 @@ class DeviceNetworkRoutesMixin:
         json_response(self, {
             "success": True,
             "devices": devices,
-            "public_device_count": public_device_count,
+            "public_device_count": public_device_total_count,
             "public_device_total_count": public_device_total_count,
             "public_user_count": public_user_count,
-            "public_device_limit": PUBLIC_DEVICE_LIMIT,
             "server_id": self.state.server_id,
             **self.state.device_registry.backend_status(),
         })
@@ -406,7 +162,6 @@ class DeviceNetworkRoutesMixin:
             owner = str(session.get("username") or "")
             scope = "account"
         try:
-            count = self.state.device_registry.public_device_count(username=owner)
             total_count = self.state.device_registry.public_device_total_count(
                 username=owner,
             )
@@ -424,10 +179,9 @@ class DeviceNetworkRoutesMixin:
             return
         json_response(self, {
             "success": True,
-            "public_device_count": count,
+            "public_device_count": total_count,
             "public_device_total_count": total_count,
             "public_user_count": user_count,
-            "public_device_limit": PUBLIC_DEVICE_LIMIT,
             "scope": scope,
             **self.state.device_registry.backend_status(),
         }, headers={"Cache-Control": "no-store"})
@@ -443,7 +197,15 @@ class DeviceNetworkRoutesMixin:
                 "error": "device enrollment requires HTTPS outside private LAN",
             }, 400)
             return
-        quota_exempt = self._visitor_device_quota_exempt(session)
+        if not self._is_allowlisted_visitor_session(session):
+            json_response(self, {
+                "success": False,
+                "error": (
+                    "device enrollment is available only after public allowlist "
+                    "visitor login"
+                ),
+            }, 403)
+            return
         try:
             payload = self._json_body(64 * 1024)
             device = self.state.device_registry.enroll(
@@ -451,7 +213,6 @@ class DeviceNetworkRoutesMixin:
                 device_id=str(payload.get("device_id") or ""),
                 public_key=payload.get("public_key"),
                 device_name=str(payload.get("device_name") or ""),
-                quota_exempt=quota_exempt,
                 **self._device_request_metadata(),
             )
         except ControlDatabaseError as exc:
@@ -460,15 +221,6 @@ class DeviceNetworkRoutesMixin:
                 "success": False,
                 "error": "device registry is unavailable",
             }, 503)
-            return
-        except PublicDeviceLimitError as exc:
-            json_response(self, {
-                "success": False,
-                "code": "public_device_limit_reached",
-                "error": str(exc),
-                "public_device_count": exc.count,
-                "public_device_limit": exc.limit,
-            }, 409)
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
@@ -479,12 +231,13 @@ class DeviceNetworkRoutesMixin:
             "sync": self.state.device_registry.backend_status(),
         }, 201)
 
-    def _visitor_device_quota_exempt(self, session: dict[str, object]) -> bool:
-        """Allow visitor-password devices to bypass the ordinary device cap.
+    def _is_allowlisted_visitor_session(self, session: dict[str, object]) -> bool:
+        """Allow enrollment only for a live public allowlist visitor session.
 
-        The browser is not allowed to select this flag.  It is derived from
-        the private session authentication method and a fresh allowlist check,
-        so a normal password session cannot manufacture an exempt device.
+        The browser cannot select an enrollment policy. The server derives
+        permission from the private session authentication method and a fresh
+        allowlist check, so an internal or ordinary password session cannot
+        manufacture a device record.
         """
         if not bool(getattr(self.state, "public_server", False)):
             return False

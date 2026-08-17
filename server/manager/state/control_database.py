@@ -26,7 +26,6 @@ class ControlDatabaseStateMixin:
         if hasattr(self, "account_domain_sync"):
             self.account_domain_sync.control_store = candidate
         self.device_registry.control_store = candidate
-        self.device_authorizations.control_store = candidate
         self.user_preferences.control_store = candidate
         return {
             **self.control_database_settings.status(),
