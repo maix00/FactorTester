@@ -105,6 +105,7 @@ from server.manager.http.security import (
 from server.manager.http.visitor_access import (
     VisitorAccessStore,
     configured_manager_endpoint,
+    configured_public_visitor_login_allowlist,
     configured_visitor_origins,
 )
 from server.manager.state.models import (
@@ -253,6 +254,9 @@ class ManagerState(
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.local_client_networks = configured_local_client_networks()
         self.visitor_entry_origins = configured_visitor_origins()
+        self.public_visitor_login_allowlist = (
+            configured_public_visitor_login_allowlist()
+        )
         self.manager_public_endpoint = configured_manager_endpoint()
         # Host-management connection metadata belongs to this server's
         # colocated .settings.  The Manager only advertises the validated,

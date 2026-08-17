@@ -28,6 +28,9 @@ services:
       # Only explicitly configured browser ingress origins may display the
       # visitor entry. The Manager public IP is intentionally not included.
       FACTORTESTER_PUBLIC_VISITOR_ORIGINS: ${FACTORTESTER_PUBLIC_VISITOR_ORIGINS:-}
+      # Empty by default: only explicitly allowlisted ordinary accounts may
+      # convert a public visitor session into an origin-bound login.
+      FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST: ${FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST:-}
       FACTORTESTER_MANAGER_TLS_CERT: /run/secrets/manager-tls/manager.crt
       FACTORTESTER_MANAGER_TLS_KEY: /run/secrets/manager-tls/manager.key
       FACTORTESTER_ARTIFACT_TLS_CERT: /run/secrets/manager-tls/manager.crt
