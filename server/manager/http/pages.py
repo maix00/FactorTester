@@ -86,21 +86,11 @@ def login_page(
 def _device_auth_script(
     next_path: str,
     messages: Mapping[str, str],
-    *,
-    device_bridge: str = "",
-    device_bridge_fallback: str = "",
-    device_bridge_redirect: str = "",
 ) -> str:
     """Render bounded, observable browser device authentication logic."""
     return (
         "const nextPath="
         + _script(next_path)
-        + ";const deviceBridge="
-        + _script(device_bridge)
-        + ";const deviceBridgeFallback="
-        + _script(device_bridge_fallback)
-        + ";const deviceBridgeRedirect="
-        + _script(device_bridge_redirect)
         + ";const messages="
         + _script(messages)
         + r""";
@@ -115,8 +105,7 @@ const statusLabel=document.querySelector("#device-auth-status");const setStatus=
 const failureMessage=error=>{const stage=String(error?.stage||"");if(error?.kind==="network")return messages[stage+"NetworkFailed"]||messages.networkFailed;const key=stage+"Failed";return messages[key]||messages.failed;};
 const transientFailure=error=>error?.kind==="network"||[408,425,429,500,502,503,504].includes(Number(error?.status));
 const scheduleAuthenticationRetry=()=>{if(authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS||!transientFailure(lastAuthenticationError)||authenticationRetryTimer)return;authenticationRetryTimer=setTimeout(()=>{authenticationRetryTimer=0;if(authenticationRunning||authenticationSucceeded)return;setStatus(messages.retrying||messages.authenticating);void authenticate();},2500);};
-const bridgeBody=()=>deviceBridge?{device_bridge:deviceBridge}:{};const bridgeFallback=()=>{if(!deviceBridgeFallback)return false;setStatus(messages.bridgeFallback||messages.noCredential);window.location.replace(deviceBridgeFallback);return true;};const bridgeRedirect=()=>{if(!deviceBridgeRedirect)return false;setStatus(messages.bridgeRedirecting||messages.authenticating);window.location.replace(deviceBridgeRedirect);return true;};
-const authenticate=async()=>{if(authenticationRunning||authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS)return;authenticationRunning=true;authenticationRuns+=1;let lastError=null;lastAuthenticationError=null;try{if(window.isSecureContext===false){const error=new Error(messages.transportFailed);error.stage="transport";lastError=error;setStatus(failureMessage(error));return;}let saved;try{saved=await credentials();}catch(error){lastError=error;setStatus(failureMessage(error));return;}if(!saved.length){if(bridgeRedirect())return;if(bridgeFallback())return;setStatus(messages.noCredential);return;}setStatus(messages.authenticating);for(const credential of saved){for(const delay of [0,400,1200]){if(delay)await wait(delay);try{const challenge=await post("/api/device/challenge",{device_id:credential.device_id},"challenge");let signature;try{signature=await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},credential.private_key,b64(challenge.challenge));}catch(error){error.stage="signing";throw error;}const result=await post("/api/device/verify",{...bridgeBody(),challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature),next:nextPath},"verify");authenticationSucceeded=true;lastAuthenticationError=null;setStatus(messages.success);window.location.replace(result.handoff_url||nextPath);return;}catch(error){lastError=error;if(error?.status===403)break;}}}lastAuthenticationError=lastError;if(lastError?.status===403){if(bridgeRedirect())return;if(bridgeFallback())return;}setStatus(failureMessage(lastError));}catch(error){lastAuthenticationError=error;setStatus(failureMessage(error));}finally{authenticationRunning=false;scheduleAuthenticationRetry();}};
+const authenticate=async()=>{if(authenticationRunning||authenticationSucceeded||authenticationRuns>=MAX_AUTHENTICATION_RUNS)return;authenticationRunning=true;authenticationRuns+=1;let lastError=null;lastAuthenticationError=null;try{if(window.isSecureContext===false){const error=new Error(messages.transportFailed);error.stage="transport";lastError=error;setStatus(failureMessage(error));return;}let saved;try{saved=await credentials();}catch(error){lastError=error;setStatus(failureMessage(error));return;}if(!saved.length){setStatus(messages.noCredential);return;}setStatus(messages.authenticating);for(const credential of saved){for(const delay of [0,400,1200]){if(delay)await wait(delay);try{const challenge=await post("/api/device/challenge",{device_id:credential.device_id},"challenge");let signature;try{signature=await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},credential.private_key,b64(challenge.challenge));}catch(error){error.stage="signing";throw error;}const result=await post("/api/device/verify",{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature),next:nextPath},"verify");authenticationSucceeded=true;lastAuthenticationError=null;setStatus(messages.success);window.location.replace(result.handoff_url||nextPath);return;}catch(error){lastError=error;if(error?.status===403)break;}}}lastAuthenticationError=lastError;setStatus(failureMessage(lastError));}catch(error){lastAuthenticationError=error;setStatus(failureMessage(error));}finally{authenticationRunning=false;scheduleAuthenticationRetry();}};
 const startAuthentication=()=>{void authenticate().finally(loadCount);};
 window.addEventListener("online",authenticate);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")authenticate();});if(document.readyState==="complete")startAuthentication();else window.addEventListener("load",startAuthentication,{once:true});"""
     )
@@ -127,9 +116,6 @@ def compliance_page(
     *,
     accept_language: object = "",
     visitor_entry_href: str = "",
-    device_bridge: str = "",
-    device_bridge_fallback: str = "",
-    device_bridge_redirect: str = "",
 ) -> bytes:
     # The public compliance notice is a jurisdiction-specific Chinese notice,
     # so it deliberately does not vary with the requesting browser language.
@@ -162,8 +148,6 @@ def compliance_page(
             "当前浏览器来源没有已登记的设备密钥。白名单用户请点击访客模式，"
             "使用自己的账号和密码登录；登录后当前浏览器会自动登记。"
         ),
-        "bridgeRedirecting": "当前来源没有设备密钥，正在检查已登记的安全入口……",
-        "bridgeFallback": "当前浏览器来源没有可用的已登记设备密钥。",
         "failed": (
             "设备自动登录失败。请确认设备仍在白名单中，或进入访客模式重新登录。"
         ),
@@ -195,9 +179,6 @@ def compliance_page(
     device_auth_script = _device_auth_script(
         safe_login_next(next_path),
         messages,
-        device_bridge=device_bridge,
-        device_bridge_fallback=device_bridge_fallback,
-        device_bridge_redirect=device_bridge_redirect,
     )
     return f"""<!doctype html><html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>
