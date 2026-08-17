@@ -22,6 +22,10 @@ def test_contract_source_member_projects_contract_catalog_and_data() -> None:
         "Product/FuturesContract/CNFuturesContract",
     ]
     assert member["availability"]["status"] == "ready"
+    assert descriptor["product_paths"] == [
+        "Product/Futures/CNFutures",
+        "Product/FuturesContract/CNFuturesContract",
+    ]
 
 
 def test_concrete_source_members_resolve_to_source_families() -> None:

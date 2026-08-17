@@ -253,6 +253,12 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
             _member_descriptor(member, catalog_objects)
             for member in source.members
         )
+        member_product_paths = {
+            str(path).strip()
+            for member in members
+            for path in member.get("product_paths") or ()
+            if str(path).strip()
+        }
         available = _available_products(source, products)
         supported = _supported_products(source, products)
         frequencies = sorted({
@@ -270,8 +276,12 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
             "bundle_name": source.label,
             "server_provided": True,
             "members": list(members),
-            "product_paths": sorted({
-                classifier_class_path(type(product)) for product in supported
+            # A source family can expose several concrete member classes.  A
+            # family page must advertise their union, including contract-only
+            # paths that are absent from the ordinary product collection.
+            "product_paths": sorted(member_product_paths | {
+                classifier_class_path(type(product))
+                for product in supported
             }),
             "categories": categories,
             "data_modes": [mode.as_dict() for mode in source.modes()],
