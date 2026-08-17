@@ -143,6 +143,8 @@ class ClientReleaseStore:
             target_version,
             str(target_receipt["manifest_hash"]),
         )
+        if (target_receipt.get("materialized") or {}).get("python"):
+            install_stable_launchers(self.root)
         return self.status()
 
     def _build_receipt(

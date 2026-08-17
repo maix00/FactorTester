@@ -63,14 +63,17 @@ git config --worktree --unset core.hooksPath
 ## CLI 与测试运行时的边界
 
 `GTHT` 不安装 `factortester` 或 `factortester-manager`。这两个命令行应用
-属于用户工具，不属于仓库的服务器/量化开发依赖。终端安装使用 `pipx`，让
-CLI 依赖进入独立的应用环境：
+属于 FTClient.app 的用户运行时，不属于仓库的服务器/量化开发依赖。普通用户
+安装 App 后由 App 激活内置 runtime；如需在终端调用，使用 App 生成的环境
+脚本：
 
 ```bash
-brew install pipx
-pipx ensurepath
-scripts/install_factortester_pipx.sh
+source "$HOME/Library/Application Support/FactorTester/bin/factortester-env.sh"
 ```
+
+该脚本设置 `FACTORTESTER_CLI`、`FACTORTESTER_MANAGER_CLI` 和 PATH，入口
+始终指向 App 当前激活版本。不要把这两个命令安装到全局 Python、Conda 或
+pipx，也不要让外部 PATH 覆盖 App 管理入口。
 
 同一个发布包可以提供两个入口：
 
@@ -79,8 +82,8 @@ factortester          研究、Profile、Job 和本地客户端操作
 factortester-manager  Manager 登录、任务/生成物查询和服务器声明操作
 ```
 
-`factortester` 根命令不会注册 Manager 命令；`pipx` 只负责隔离这两个命令的
-Python 依赖，不改变服务端权限。Swift 客户端则使用 App 内的已签名 runtime，
+`factortester` 根命令不会注册 Manager 命令；两个入口仍然共享同一个已签名
+runtime，但命令树和服务端权限不同。Swift 客户端使用 App 内的已签名 runtime，
 不依赖 `GTHT` 或用户 PATH。
 
 本机实际运行测试的依赖不安装到 CLI 环境。它们由执行端负责：优先使用

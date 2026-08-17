@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 from click.testing import CliRunner
@@ -158,8 +159,14 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         resources / "skills/factortester-research-skill/SKILL.md"
     ).read_bytes()
     launcher = (root / "bin" / "factortester").read_text()
-    assert "'standalone/bin'" in launcher
-    assert "'python/bin'" in launcher
+    assert launcher.startswith("#!/bin/sh\n")
+    assert "/runtime/standalone/bin/factortester" in launcher
+    assert "/runtime/python/bin/factortester" in launcher
+    assert "python3" not in launcher
+    environment = (root / "bin" / "factortester-env.sh").read_text()
+    assert "FACTORTESTER_CLI=" in environment
+    assert "FACTORTESTER_MANAGER_CLI=" in environment
+    assert "FACTORTESTER_CLIENT_BIN=" in environment
 
     (root / "bin" / "factortester").write_text("tampered")
     registered = skill_root / "factortester-research-skill/SKILL.md"
@@ -172,7 +179,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
     assert repaired["activated"] is True
     assert copied == len(bundle_runtime.COMMANDS)
     assert (root / "current.json").read_bytes() == pointer_before_repair
-    assert "'standalone/bin'" in (
+    assert "/runtime/standalone/bin/factortester" in (
         root / "bin" / "factortester"
     ).read_text()
     assert registered.read_bytes() == (
@@ -199,6 +206,40 @@ def test_bundle_activation_preserves_unrelated_user_sources(tmp_path: Path) -> N
 
     assert user_manifest.read_text(encoding="utf-8") == '{"owner":"user"}\n'
     assert (source_root / "Tiger/source.json").is_file()
+
+
+def test_environment_script_exposes_active_app_commands(tmp_path: Path) -> None:
+    resources = _bundle(tmp_path / "bundles", "2.0.0")
+    root = tmp_path / "support"
+    activate_bundled_runtime(
+        resources,
+        root,
+        local_source_root=tmp_path / "local-sources",
+    )
+
+    environment = root / "bin" / "factortester-env.sh"
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            "source_path=$1; . \"$source_path\"; "
+            "printf '%s\\n' \"$FACTORTESTER_CLI\" "
+            "\"$FACTORTESTER_MANAGER_CLI\" \"$FACTORTESTER_CLIENT_BIN\" "
+            "\"$PATH\"",
+            "sh",
+            str(environment),
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    values = result.stdout.splitlines()
+    assert values[:3] == [
+        str(root / "bin" / "factortester"),
+        str(root / "bin" / "factortester-manager"),
+        str(root / "bin"),
+    ]
+    assert values[3].split(":", 1)[0] == str(root / "bin")
 
 
 def test_bundle_activation_rejects_generated_source_cache(tmp_path: Path) -> None:
