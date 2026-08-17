@@ -101,6 +101,7 @@
     const paths = document.createElement("textarea");
     paths.value = (item.paths || [])
       .filter(path => !String(path).trim().startsWith("-"))
+      .map(path => categoryFreePath(category, path))
       .join("\n");
     paths.rows = 3;
     paths.required = true;
@@ -220,23 +221,20 @@
   }
 
   function qualifiedPaths(category, values) {
-    if (!category) return [...values];
-    const prefix = `ProductCategory/${category.id}/`;
     return (values || [])
       .filter(path => !String(path).trim().startsWith("-"))
-      .map(path => {
-        const value = String(path || "").trim().replace(/^\/+/, "");
-        return value.startsWith("ProductCategory/") ? value : `${prefix}${value}`;
-      });
+      .map(path => categoryFreePath(category, path));
   }
 
   function unqualifiedPaths(category, values) {
-    if (!category) return [...values];
+    return (values || []).map(value => categoryFreePath(category, value));
+  }
+
+  function categoryFreePath(category, value) {
+    const path = String(value || "").trim().replace(/^\/+/, "");
+    if (!category) return path;
     const prefix = `ProductCategory/${category.id}/`;
-    return (values || []).map(value => {
-      const path = String(value || "").trim();
-      return path.startsWith(prefix) ? path.slice(prefix.length) : path;
-    });
+    return path.startsWith(prefix) ? path.slice(prefix.length) : path;
   }
 
   window.FTProductCategoryLabels = Object.freeze({

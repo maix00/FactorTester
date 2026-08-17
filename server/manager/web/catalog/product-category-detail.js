@@ -56,7 +56,7 @@
         : null,
       onSave: payload => saveCategory(context, helpers, category, source, payload),
       renderTree: treeOptions => renderResolvedTree(
-        context, helpers, category, sources, source, treeOptions,
+        context, helpers, category, sources, source, sourcesPromise, treeOptions,
       ),
     });
   }
@@ -80,41 +80,43 @@
     context.navigate(helpers.pathFor("/products/categories", source));
   }
 
-  async function renderResolvedTree(context, helpers, category, sources, source, options) {
+  async function renderResolvedTree(
+    context, helpers, category, sources, source, sourcesPromise, options,
+  ) {
     const {mount, treeState, editable} = options;
     if (!mount) return;
     try {
-      let value;
-      let sourceIDs;
-      let contractTreePath;
-      if (category) {
-        sourceIDs = category.source_ids?.length
-          ? category.source_ids
-          : FTProductCategoryModel.sourceIDsForPaths(
-            (category.items || []).flatMap(item => item.paths || []), sources,
-          );
-        if (!sourceIDs.length) sourceIDs = helpers.loadSourceIDs?.(sources) || [];
-        value = await helpers.loadTree(context, source, [category.id], sourceIDs);
-        contractTreePath = (path, params = {}) => {
-          const query = new URLSearchParams({path});
-          query.append("category", category.id);
-          sourceIDs.forEach(id => query.append("data_source", id));
-          if (params.query) query.set("query", params.query);
-          if (params.page) query.set("page", String(params.page));
-          if (params.limit) query.set("limit", String(params.limit));
-          return source === "local"
-            ? `/api/client/contract_tree?${query}`
-            : `/api/catalog/contract-tree?${query}`;
-        };
-      } else {
-        const loaded = await helpers.loadProductTree(context, source);
-        value = loaded.tree;
-        sourceIDs = loaded.sourceIDs || [];
-        contractTreePath = loaded.contractTreePath;
-      }
+      const sourceDefinitions = Array.isArray(sources)
+        ? sources
+        : await (sourcesPromise || helpers.loadSources(context, source));
+      const sourceIDs = category?.source_ids?.length
+        ? [...category.source_ids]
+        : FTProductCategoryModel.sourceIDsForPaths(
+          (category?.items || []).flatMap(item => item.paths || []),
+          sourceDefinitions,
+        );
+      const selectedSourceIDs = sourceIDs.length
+        ? sourceIDs : helpers.loadSourceIDs?.(sourceDefinitions) || [];
+      // A Category is a selection definition, not a product-tree provider.
+      // Always load the ordinary source tree and only use the Category paths
+      // as selection state in the renderer.
+      const value = await helpers.loadTree(
+        context, source, [], selectedSourceIDs,
+      );
+      const contractTreePath = (path, params = {}) => {
+        const query = new URLSearchParams({path});
+        selectedSourceIDs.forEach(id => query.append("data_source", id));
+        if (params.query) query.set("query", params.query);
+        if (params.page) query.set("page", String(params.page));
+        if (params.limit) query.set("limit", String(params.limit));
+        return source === "local"
+          ? `/api/client/contract_tree?${query}`
+          : `/api/catalog/contract-tree?${query}`;
+      };
       if (!helpers.isCurrent(context)) return;
       const treeOptions = {
-        categoryDefinitions: category ? [category] : [],
+        categoryDefinitions: [],
+        dataSourceDefinitions: sourceDefinitions,
         showCategoryFilter: false,
         selectable: true,
         selectionReadOnly: !editable,
