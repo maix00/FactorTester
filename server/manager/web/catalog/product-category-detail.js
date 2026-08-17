@@ -77,7 +77,9 @@
       return;
     }
     context.closeTab?.(context.tabID);
-    context.navigate(helpers.pathFor("/products/categories", source));
+    context.navigate(helpers.pathFor(
+      `/products/categories?updated=${Date.now()}`, source,
+    ));
   }
 
   async function renderResolvedTree(
@@ -86,26 +88,14 @@
     const {mount, treeState, editable} = options;
     if (!mount) return;
     try {
-      const sourceDefinitions = Array.isArray(sources)
-        ? sources
-        : await (sourcesPromise || helpers.loadSources(context, source));
-      const sourceIDs = category?.source_ids?.length
-        ? [...category.source_ids]
-        : FTProductCategoryModel.sourceIDsForPaths(
-          (category?.items || []).flatMap(item => item.paths || []),
-          sourceDefinitions,
-        );
-      const selectedSourceIDs = sourceIDs.length
-        ? sourceIDs : helpers.loadSourceIDs?.(sourceDefinitions) || [];
-      // A Category is a selection definition, not a product-tree provider.
-      // Always load the ordinary source tree and only use the Category paths
-      // as selection state in the renderer.
-      const value = await helpers.loadTree(
-        context, source, [], selectedSourceIDs,
-      );
+      // Mount the ordinary source tree immediately.  The category is a
+      // selection definition, never a product-tree provider.  Waiting here
+      // for source metadata or the whole tree left the Label row's own
+      // placeholder visible indefinitely on a slow/embedded data bridge.
+      const sourceDefinitions = Array.isArray(sources) ? sources : [];
+      const selectedSourceIDs = [];
       const contractTreePath = (path, params = {}) => {
         const query = new URLSearchParams({path});
-        selectedSourceIDs.forEach(id => query.append("data_source", id));
         if (params.query) query.set("query", params.query);
         if (params.page) query.set("page", String(params.page));
         if (params.limit) query.set("limit", String(params.limit));
@@ -113,7 +103,6 @@
           ? `/api/client/contract_tree?${query}`
           : `/api/catalog/contract-tree?${query}`;
       };
-      if (!helpers.isCurrent(context)) return;
       const treeOptions = {
         categoryDefinitions: [],
         dataSourceDefinitions: sourceDefinitions,
@@ -124,12 +113,25 @@
         selectedPaths: treeState.selectedPaths || [],
         source,
         contractTreePath,
+        isCurrent: () => helpers.isCurrent(context),
+        // An empty source filter means the ordinary tree exposed by this
+        // Manager, including all currently available local data sources.
+        loadTree: () => helpers.loadTree(
+          context, source, [], selectedSourceIDs,
+        ),
+        onTreeLoaded: () => treeState.sync?.(),
         onSelectionChange: selected => {
           treeState.selectedPaths = selected;
           treeState.onTreeSelection?.(selected);
         },
       };
-      await FTProductTree.render(context, mount, value, treeOptions);
+      const definitionsPromise = Array.isArray(sources)
+        ? Promise.resolve(sources)
+        : (sourcesPromise || helpers.loadSources(context, source));
+      void definitionsPromise.then(value => {
+        treeOptions.dataSourceDefinitions = Array.isArray(value) ? value : [];
+      }).catch(() => {});
+      await FTProductTree.render(context, mount, null, treeOptions);
       if (!helpers.isCurrent(context)) return;
       treeState.sync = () => {
         treeOptions.selectedPaths = treeState.selectedPaths;
@@ -151,7 +153,9 @@
           method: "DELETE",
         });
         context.closeTab?.(context.tabID);
-        context.navigate(helpers.pathFor("/products/categories", source));
+        context.navigate(helpers.pathFor(
+          `/products/categories?updated=${Date.now()}`, source,
+        ));
       } catch (error) {
         context.showNotice?.(error.message || context.t("产品分类删除失败"), true);
       }

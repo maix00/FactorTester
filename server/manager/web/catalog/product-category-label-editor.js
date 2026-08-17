@@ -47,7 +47,7 @@
       const row = labelRow(context, category, item, treeState, {
         labelEditable: options.labelsEditable,
         pathEditable: options.pathsEditable,
-        removable: options.labelsEditable,
+        removable: options.removable === true,
         activate: (target = row, targetState = rowState) => activateRow(target, targetState),
         sync: () => syncRow(row, rowState),
         rowState,

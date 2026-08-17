@@ -89,6 +89,29 @@
       .replace(/%lld/g, String(count));
   }
 
+  function loadTreeWithTimeout(context, loader, timeoutMs) {
+    const duration = Number(timeoutMs);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return Promise.resolve().then(loader);
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(new Error(context.t("读取产品目录超时")));
+      }, duration);
+      const finish = callback => value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback(value);
+      };
+      Promise.resolve().then(loader).then(
+        finish(resolve), finish(reject),
+      );
+    });
+  }
+
   async function render(context, mount, value, options = {}) {
     const all = roots(value).filter(Boolean);
     const definitions = Array.isArray(options.categoryDefinitions)
@@ -209,10 +232,13 @@
       const load = () => {
         if (!isTreeMountCurrent(mount, requestID, options)) return;
         Promise.resolve()
-          .then(() => options.loadTree())
+          .then(() => loadTreeWithTimeout(
+            context, options.loadTree, options.loadTimeoutMs || 16000,
+          ))
           .then(loaded => {
             if (!isTreeMountCurrent(mount, requestID, options)) return;
             drawNodes(context, tree, roots(loaded), options);
+            options.onTreeLoaded?.(tree);
           })
           .catch(error => {
             if (!isTreeMountCurrent(mount, requestID, options)) return;
@@ -230,6 +256,7 @@
       return;
     }
     drawNodes(context, tree, all, options);
+    options.onTreeLoaded?.(tree);
   }
 
   function isTreeMountCurrent(mount, requestID, options) {
