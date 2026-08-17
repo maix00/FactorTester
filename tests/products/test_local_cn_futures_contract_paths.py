@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from sources.LocalCNFutures.CNFutures import _contract_data_path
+from sources.LocalCNFutures.CNFutures import (
+    _contract_data_path,
+    _resolve_contract_reference,
+    _resolve_product_reference,
+)
 from sources.LocalCNFutures.contract_files import (
     contract_alias_from_path,
     portable_contract_filename,
@@ -33,3 +37,13 @@ def test_contract_file_helpers_keep_alpha_contract_suffix(tmp_path: Path):
     assert portable_contract_filename(alias) == "DCE_F_L_2605F.parquet"
     assert resolve_contract_parquet_path(tmp_path, alias) == canonical_path
     assert contract_alias_from_path(canonical_path) == alias
+
+
+def test_local_contract_reference_resolver_accepts_exchange_and_uid_forms():
+    assert _resolve_contract_reference("A2605.DCE") == "DCE|F|A|2605"
+    assert _resolve_contract_reference("DCE|F|A|2605") == "DCE|F|A|2605"
+    assert _resolve_contract_reference("A2605") is None
+
+
+def test_local_product_reference_resolver_returns_canonical_product_name():
+    assert _resolve_product_reference("A.DCE") == "A.DCE"
