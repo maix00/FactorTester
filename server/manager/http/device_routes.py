@@ -15,6 +15,7 @@ from server.manager.domain.devices import (
 )
 from server.manager.http.pages import safe_login_next
 from server.manager.http.responses import json_response
+from server.manager.http.visitor_access import device_bridge_fallback_url
 from server.manager.storage.control_db import (
     ControlDatabaseError,
 )
@@ -112,6 +113,49 @@ class DeviceNetworkRoutesMixin:
         self._send_redirect(
             next_path,
             cookie=self._session_cookie(token),
+        )
+
+    def _device_bridge(self, parsed: Any) -> None:
+        """Render the trusted ingress page for a public-IP device handoff."""
+        current_origin = self._request_origin()
+        bridge = parse_qs(parsed.query, keep_blank_values=True).get(
+            "bridge", [""]
+        )[0]
+        next_path = safe_login_next(
+            str(parse_qs(parsed.query, keep_blank_values=True).get(
+                "next", ["/"]
+            )[0] or "/")
+        )
+        store = getattr(self.state, "visitor_access", None)
+        target_origin = ""
+        if store is not None:
+            target_origin = store.device_bridge_target(
+                bridge,
+                source_origin=current_origin,
+            )
+        configured_target = str(
+            getattr(self.state, "manager_public_endpoint", "") or ""
+        ).strip().rstrip("/")
+        if not (
+            target_origin
+            and target_origin == configured_target
+            and current_origin in tuple(
+                getattr(self.state, "visitor_entry_origins", ())
+            )
+            and self._has_secure_ui_transport()
+        ):
+            self._send_redirect(
+                "/compliance?next=" + quote(next_path, safe="/?=&%")
+            )
+            return
+        self._serve_compliance_page(
+            next_path,
+            show_visitor_entry=False,
+            device_bridge=bridge,
+            device_bridge_fallback=device_bridge_fallback_url(
+                target_origin,
+                next_path=next_path,
+            ),
         )
 
     def _device_list(self) -> None:
@@ -314,6 +358,17 @@ class DeviceNetworkRoutesMixin:
             return
         try:
             payload = self._json_body(64 * 1024)
+            device_bridge = str(payload.get("device_bridge") or "").strip()
+            bridge_target = ""
+            if device_bridge:
+                store = getattr(self.state, "visitor_access", None)
+                if store is not None:
+                    bridge_target = store.device_bridge_target(
+                        device_bridge,
+                        source_origin=self._request_origin(),
+                    )
+                if not bridge_target:
+                    raise PermissionError("device bridge is invalid or expired")
             challenge = self.state.device_challenges.consume(
                 payload.get("challenge_id"),
             )
@@ -324,6 +379,14 @@ class DeviceNetworkRoutesMixin:
                 signature=payload.get("signature"),
                 last_seen_ip=observed_ip(self._client_ip()),
             )
+            if device_bridge:
+                store = getattr(self.state, "visitor_access", None)
+                if store is None or not store.consume_device_bridge(
+                    device_bridge,
+                    source_origin=self._request_origin(),
+                    target_origin=bridge_target,
+                ):
+                    raise PermissionError("device bridge is invalid or expired")
             token, principal, role = self.state.login_device(
                 str(record.get("username") or ""),
                 origin=self._request_origin(),
@@ -351,7 +414,7 @@ class DeviceNetworkRoutesMixin:
             }, 403)
             return
         handoff_url = ""
-        target_origin = str(
+        target_origin = bridge_target or str(
             getattr(self.state, "manager_public_endpoint", "") or ""
         ).strip().rstrip("/")
         if (

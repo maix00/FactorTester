@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -77,6 +78,79 @@ def test_redeeming_a_grant_twice_reuses_the_same_session() -> None:
     assert first
     assert second == first
     assert store.valid_session(first, target_origin=target)
+
+
+def test_device_bridge_is_bound_to_ingress_and_consumed_once() -> None:
+    store = VisitorAccessStore()
+    source = "https://eloquence-drizzly-fencing.ngrok-free.dev"
+    target = "https://101.133.144.27:7998"
+    bridge = store.issue_device_bridge(
+        source_origin=source,
+        target_origin=target,
+    )
+
+    assert store.device_bridge_target(bridge, source_origin=source) == target
+    assert store.device_bridge_target(bridge, source_origin=target) == ""
+    assert store.consume_device_bridge(
+        bridge,
+        source_origin=source,
+        target_origin=target,
+    )
+    assert store.device_bridge_target(bridge, source_origin=source) == ""
+    assert not store.consume_device_bridge(
+        bridge,
+        source_origin=source,
+        target_origin=target,
+    )
+
+
+def test_direct_ip_compliance_offers_device_bridge_without_visitor_entry(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    opener = build_opener(_NoRedirect())
+
+    with _running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/compliance?next=%2Fjobs",
+            headers=_headers(),
+        )) as response:
+            direct_body = response.read().decode("utf-8")
+
+        bridge_match = re.search(
+            r"https://eloquence-drizzly-fencing\.ngrok-free\.dev/device-bridge\?"
+            r"bridge=([^\"&]+)&next=%2Fjobs",
+            direct_body,
+        )
+        assert bridge_match
+        bridge = bridge_match.group(1)
+
+        bridge_request = Request(
+            f"{base_url}/device-bridge?bridge={bridge}&next=%2Fjobs",
+            headers={
+                **_headers(),
+                "Host": "eloquence-drizzly-fencing.ngrok-free.dev",
+            },
+        )
+        with urlopen(bridge_request) as response:
+            ingress_body = response.read().decode("utf-8")
+
+    assert 'class="visitor-entry"' not in direct_body
+    assert 'class="visitor-entry"' not in ingress_body
+    assert 'const deviceBridge="' in ingress_body
+    assert "101.133.144.27:7998/compliance" in ingress_body
+    assert "device_bridge_failed=1" in ingress_body
 
 
 def test_concurrent_grant_redeems_are_idempotent() -> None:
