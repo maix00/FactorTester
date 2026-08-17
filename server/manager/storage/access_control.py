@@ -113,14 +113,11 @@ class VisitorAccessControlMixin:
                 "SELECT role, is_admin, active FROM control_users WHERE username=%s",
                 (principal,),
             ).fetchone()
-            role = str(_row_value(account, "role", 0, "") or "") if account else ""
             if (
                 account is None
                 or not bool(_row_value(account, "active", 2, False))
-                or bool(_row_value(account, "is_admin", 1, False))
-                or role != "user"
             ):
-                raise ValueError("only active ordinary users can be added to the visitor allowlist")
+                raise ValueError("only active accounts can be added to the visitor allowlist")
             row = connection.execute(
                 """
                 INSERT INTO control_public_visitor_allowlist(
@@ -190,7 +187,6 @@ class VisitorAccessControlMixin:
                 FROM control_public_visitor_allowlist AS a
                 JOIN control_users AS u ON u.username=a.username
                 WHERE a.server_id=%s AND a.enabled=TRUE AND u.active=TRUE
-                      AND u.role='user' AND u.is_admin=FALSE
                 ORDER BY u.username
                 """, (server,),
             ).fetchall()

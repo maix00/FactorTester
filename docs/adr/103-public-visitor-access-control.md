@@ -9,8 +9,9 @@ Accepted
 Public visitor login was previously controlled by a deployment environment
 variable.  That made the policy difficult to audit and meant that two Managers
 could not manage the same public-access policy from a single authority.  A
-small group of explicitly allowlisted ordinary users also needs a convenient
-browser path into the public Manager.
+small group of explicitly allowlisted accounts also needs a convenient browser
+path into the public Manager; this may include a super-admin when that access
+is explicitly granted.
 
 Browser APIs do not provide a reliable, security-grade way to distinguish a
 private/incognito window from an ordinary window.  The distinction must
@@ -22,9 +23,11 @@ device policy.
 1. Store public visitor policy in the shared PostgreSQL control database as
    `control_public_visitor_allowlist(server_id, username, enabled, ...)`.
    The `server_id` scope is explicit, so every Manager sharing PostgreSQL
-   reads the same policy for that server.  Environment configuration remains
-   only as a compatibility fallback when the central policy API is absent or
-   the established local-login outage path is active.
+   reads the same policy for that server.  Only active accounts may be added;
+   the allowlist is the explicit authorization boundary and may include an
+   administrator.  Environment configuration remains only as a compatibility
+   fallback when the central policy API is absent or the established local-
+   login outage path is active.
 2. Expose allowlist and `control_devices` administration only through the
    super-admin “用户与机构” settings page.  Management reads and writes fail
    with an unavailable response when the central database is not usable; no

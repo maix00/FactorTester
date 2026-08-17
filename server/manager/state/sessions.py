@@ -116,14 +116,16 @@ class SessionStateMixin:
         self,
         username: str,
     ) -> dict[str, object] | None:
-        """Resolve one ordinary allowlisted account for visitor login.
+        """Resolve one explicitly allowlisted account for visitor login.
 
         Visitor login is intentionally narrower than normal Manager login:
         the submitted identifier must resolve to exactly one account, that
-        account must be named by the deployment allowlist, and its effective
-        role must be the ordinary ``user`` role.  References are compared
-        case-sensitively so an alias cannot silently resolve to another
-        account.  An empty or invalid allowlist fails closed.
+        account must be named by the deployment allowlist.  The allowlist may
+        include an active administrator when a super-admin explicitly grants
+        that access; the account's normal role and capabilities are preserved.
+        References are compared case-sensitively so an alias cannot silently
+        resolve to another account.  An empty or invalid allowlist fails
+        closed.
         """
         value = str(username or "").strip()
         central_accounts = self._central_public_visitor_accounts()
@@ -159,13 +161,7 @@ class SessionStateMixin:
             # caused the ambiguity to an unauthenticated visitor.
             return None
         account = candidates[0]
-        from server.manager.domain.accounts import account_role
-
-        if (
-            not bool(account.get("active", True))
-            or bool(account.get("is_admin"))
-            or account_role(account) != "user"
-        ):
+        if not bool(account.get("active", True)):
             return None
         return account
 

@@ -81,13 +81,13 @@ def test_public_visitor_login_allowlist_is_explicit_and_case_sensitive() -> None
     assert configured_public_visitor_login_allowlist("TestA") == ("TestA",)
 
 
-def test_public_visitor_login_resolves_only_one_ordinary_allowlisted_account(
+def test_public_visitor_login_resolves_only_one_explicitly_allowlisted_account(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(manager, "control_store_from_env", lambda *_args: None)
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
     state.control_store = _AccountStore(_accounts())
-    state.public_visitor_login_allowlist = ("testA",)
+    state.public_visitor_login_allowlist = ("testA", "MaxJJW")
 
     assert state.public_visitor_login_account("testA")["username"] == (
         "GTHT@testA@545963541963"
@@ -97,7 +97,10 @@ def test_public_visitor_login_resolves_only_one_ordinary_allowlisted_account(
         "GTHT@testA@545963541963"
     )["alias"] == "testA"
     assert state.public_visitor_login_account("TestA") is None
-    assert state.public_visitor_login_account("MaxJJW") is None
+    assert state.public_visitor_login_account("MaxJJW")["username"] == (
+        "GTHT@MaxJJW@392452984564"
+    )
+    assert state.public_visitor_login_account("MaxJJW")["role"] == "super_admin"
 
 
 def test_public_visitor_password_login_clears_visitor_and_binds_origin(
