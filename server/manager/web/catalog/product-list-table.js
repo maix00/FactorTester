@@ -63,9 +63,18 @@
       : Array.isArray(node?.source_ids) ? node.source_ids : [];
     const definitions = Array.isArray(options?.dataSourceDefinitions)
       ? options.dataSourceDefinitions : [];
-    const byID = new Map(definitions.map(item => [
-      String(item?.family_id || item?.bundle_id || item?.id || ""), item,
-    ]));
+    const byID = new Map();
+    definitions.forEach(item => {
+      const familyID = String(
+        item?.family_id || item?.bundle_id || item?.id || "",
+      ).trim();
+      if (!familyID) return;
+      byID.set(familyID, item);
+      (Array.isArray(item?.members) ? item.members : []).forEach(member => {
+        const memberID = String(member?.id || "").trim();
+        if (memberID) byID.set(memberID, item);
+      });
+    });
     const cell = document.createElement("div");
     cell.className = "catalog-source-lines catalog-source-family-list";
     ids.forEach(rawID => {
@@ -73,12 +82,15 @@
       if (!id) return;
       const descriptor = byID.get(id);
       const label = descriptor?.family_name || descriptor?.bundle_name || id;
+      const familyID = String(
+        descriptor?.family_id || descriptor?.bundle_id || descriptor?.id || id,
+      ).trim();
       const link = document.createElement("a");
       link.className = "catalog-source-family-link";
       link.textContent = label;
       if (options?.sourceFamilyPath) {
         link.href = options.sourceFamilyPath(
-          descriptor?.family_id || descriptor?.bundle_id || descriptor?.id || id,
+          familyID,
           source,
         );
         link.addEventListener("click", event => {
