@@ -107,6 +107,18 @@ class RequestSecurityMixin:
     def _is_loopback_client(self) -> bool:
         return self._client_ip().is_loopback
 
+    def _is_local_ftclient(self) -> bool:
+        """Accept the host FTClient through an explicitly trusted Docker gateway."""
+        if self._is_loopback_client():
+            return True
+        if getattr(getattr(self, "state", None), "public_server", False):
+            return False
+        if self.headers.get("X-FactorTester-Client", "").strip().lower() != "cli":
+            return False
+        client = self._client_ip()
+        networks = getattr(getattr(self, "state", None), "local_client_networks", ())
+        return any(client in network for network in networks)
+
     def _is_private_lan_client(self) -> bool:
         client = self._client_ip()
         return client.is_private or client.is_link_local

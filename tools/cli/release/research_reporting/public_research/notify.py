@@ -23,7 +23,10 @@ def sync_manager(paths: dict[str, Path]) -> None:
         request = Request(
             "http://127.0.0.1:7998/api/public-research/sync",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-FactorTester-Client": "cli",
+            },
             method="POST",
         )
         with urlopen(request, timeout=2.0) as response:

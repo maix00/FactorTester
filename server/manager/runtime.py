@@ -96,6 +96,7 @@ from server.manager.storage.session_store import (
     configured_manager_sqlite_path,
 )
 from server.manager.http.security import (
+    configured_local_client_networks,
     configured_trusted_proxy_networks,
     configured_tls_paths,
     enable_server_tls,
@@ -250,6 +251,7 @@ class ManagerState(
             explicit=managed_organizations,
         )
         self.trusted_proxy_networks = configured_trusted_proxy_networks()
+        self.local_client_networks = configured_local_client_networks()
         self.visitor_entry_origins = configured_visitor_origins()
         self.manager_public_endpoint = configured_manager_endpoint()
         # Host-management connection metadata belongs to this server's
