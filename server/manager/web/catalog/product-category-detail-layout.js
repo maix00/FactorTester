@@ -71,6 +71,7 @@
     const labelView = window.FTProductCategoryLabels.render(
       context, category, treeState, {
         creating, labels, labelsEditable, pathsEditable,
+        removable: labelsEditable && !composite,
         renderTree: options.renderTree,
       },
     );

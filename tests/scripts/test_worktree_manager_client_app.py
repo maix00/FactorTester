@@ -3014,6 +3014,8 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert 'typeof options.loadTree === "function"' in script
+    assert "loadTreeWithTimeout" in script
+    assert "options.onTreeLoaded?.(tree)" in script
     assert "requestAnimationFrame" in script
     assert "window.FTProductListTable" in table_script
     assert "paginationModel" in table_script
@@ -3074,6 +3076,9 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "mode === \"edit\"" in detail_layout
     assert "mode === \"view\"" not in detail_layout
     assert "ProductCategory/" in detail_surface
+    assert "removable: labelsEditable && !composite" in detail_layout
+    assert "removable: options.removable === true" in label_editor
+    assert "/products/categories?updated=" in detail_script
     assert "window.FTProductCategoryOverlay" in overlay
     assert "创建乘积分类" in overlay
     assert "选择两个已有分类" in overlay
