@@ -62,12 +62,6 @@ class WriteRoutesMixin:
         if parsed.path == "/api/device/verify":
             self._device_verify()
             return
-        if parsed.path == "/api/device/authorization/redeem":
-            self._device_authorization_redeem()
-            return
-        if parsed.path == "/api/device/authorization":
-            self._device_authorization_create()
-            return
         if self._issue_client_release_upload_access(parsed):
             return
         if parsed.path == "/api/devices/enroll":
@@ -75,6 +69,12 @@ class WriteRoutesMixin:
             return
         if parsed.path == "/api/devices/revoke":
             self._device_revoke()
+            return
+        if parsed.path == "/api/admin/public-visitor-allowlist":
+            self._admin_add_visitor_allowlist()
+            return
+        if parsed.path == "/api/admin/access-control/devices/revoke":
+            self._admin_revoke_device()
             return
         if parsed.path == "/api/federation/sync":
             self._federation_sync()
@@ -355,6 +355,9 @@ class WriteRoutesMixin:
         if self._serve_manager_application(parsed, method="DELETE"):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
+            return
+        if parsed.path == "/api/admin/public-visitor-allowlist":
+            self._admin_remove_visitor_allowlist()
             return
         self.send_error(404)
 

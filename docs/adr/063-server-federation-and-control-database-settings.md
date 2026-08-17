@@ -9,8 +9,8 @@ Accepted.
 The settings title “peer attachment” mixed two independent concerns. Manager
 federation exchanges server endpoints, online execution ports, load, and data
 source capabilities over port 7998. PostgreSQL on port 5432 is instead the
-authoritative store for users, organizations, hierarchy, quotas, and public
-device authorizations, including the small cross-Manager user-language
+authoritative store for users, organizations, hierarchy, quotas, public visitor
+allowlist entries, and device records, including the small cross-Manager user-language
 preference. A remote server's loopback database URL
 (`127.0.0.1:5432`) cannot be copied unchanged to another Manager.
 
@@ -34,8 +34,8 @@ to a peer. That UI suggested an offline service could be offered remotely.
    may configure PostgreSQL host/IP, port, database, application role,
    write-only password, TLS mode, and timeout.
 4. Validate connectivity, credentials, and schema before replacing the active
-   control store. On success, account authentication, device registration,
-   and authorization grants switch immediately. Newly started execution and
+   control store. On success, account authentication and device registration
+   switch immediately. Newly started execution and
    artifact children receive the same URL; already-running children report a
    restart requirement instead of inheriting a process-global mutation.
 5. Persist UI-managed credentials only in the Manager state directory with
@@ -47,8 +47,8 @@ to a peer. That UI suggested an offline service could be offered remotely.
    authenticated super administrator.
 7. Explicit user-language preferences are write-through PostgreSQL records.
    Managers cache them locally for five minutes, so normal page/API reads do
-   not put PostgreSQL on every-request paths. A one-time device grant stores a
-   concrete language snapshot so rendering at another origin remains stable.
+   not put PostgreSQL on every-request paths. Language preference data is
+   scoped to the account and remains independent of device enrollment.
    The preference projection exposes whether a PostgreSQL row is configured;
    an absent row is not equivalent to an explicit `system` selection. On
    first authenticated synchronization, a native client may bootstrap the
@@ -60,8 +60,9 @@ to a peer. That UI suggested an offline service could be offered remotely.
 
 ## Consequences
 
-- Device authorization grants created on an internal Manager can be consumed
-  by the public Manager because both use one PostgreSQL authority.
+- Public visitor allowlist and device records remain visible to every Manager
+  that shares the same PostgreSQL authority; device enrollment itself happens
+  only after an allowlisted visitor login on the public Manager.
 - The database host shown on the remote node may be loopback, while another
   node must use the remote server's reachable IP or hostname.
 - Federation and database failures are reported independently and no longer

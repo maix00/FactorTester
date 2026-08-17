@@ -73,11 +73,25 @@
         const storage = document.querySelector("#keep-login").checked
           ? localStorage : sessionStorage;
         storage.setItem("ft-session", result.token);
+        let visitorDeviceError = null;
+        if (result.visitor_login && window.FTVisitorDevice) {
+          try {
+            await FTVisitorDevice.ensureForSession(context, result);
+          } catch (error) {
+            visitorDeviceError = error;
+            console.warn("allowlisted visitor device enrollment failed", error);
+          }
+        }
         nativeAuthentication("session-updated");
         document.querySelector("#login-dialog").close();
         await context.loadLanguage();
         await context.loadModules();
         await context.renderRoute();
+        if (visitorDeviceError) {
+          context.showNotice?.(
+            context.t("白名单浏览器设备自动登记失败，本次登录仍然有效"), true,
+          );
+        }
       } catch (error) {
         if (error.code === "visitor_login_forbidden" && error.redirect) {
           window.location.replace(error.redirect);

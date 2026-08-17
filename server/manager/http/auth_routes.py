@@ -125,6 +125,7 @@ class AuthenticationRoutesMixin:
             },
             "token": token,
             "expires_in": MANAGER_SESSION_TTL_SECONDS,
+            "visitor_login": visitor_mode is not None,
         }, headers={
             "Set-Cookie": [
                 self._session_cookie(token),
