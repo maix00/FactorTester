@@ -81,7 +81,8 @@
 
   const appContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, updateActiveTab, closeTab: tabs?.closeTab,
+    servicePath, showNotice, openLogin, logout, updateActiveTab,
+    activateTab: tabs?.activateTab, closeTab: tabs?.closeTab,
     session: state.session, t, ...currentTabContext(),
     isRouteCurrent: () => routeToken === activeRouteToken,
     languagePreference: state.languagePreference,
@@ -370,7 +371,7 @@
       ),
       factorSets: pageContext => FTFactors.list(pageContext, "sets"),
       factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
-      factor: (pageContext, id) => FTFactors.factorDetail(pageContext, id),
+      factor: (pageContext, id, mode) => FTFactors.factorDetail(pageContext, id, mode),
       factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),
       factors: pageContext => FTFactors.list(pageContext, "factors"),
       productGroup: (pageContext, id) => FTProducts.groupDetail(pageContext, id),

@@ -58,38 +58,85 @@
     ));
   }
 
-  function render({context, manifest, inheritedValues = {}, overrides: initial = {}}) {
+  function render({
+    context, manifest, inheritedValues = {}, overrides: initial = {},
+    manageTabs = false, mountedTabs: requestedMountedTabs,
+    onMountedTabsChange, onChange,
+  }) {
     const root = document.createElement("div");
     root.className = "backtest-group-overrides";
     let overrides = normalize(manifest, initial);
     let activeTab = "";
+    let mountedTabs = Array.isArray(requestedMountedTabs)
+      ? [...requestedMountedTabs] : null;
 
     const effectiveValues = () => ({...clone(inheritedValues), ...clone(overrides)});
     const has = key => Object.prototype.hasOwnProperty.call(overrides, key);
+    const notify = () => onChange?.(root.value(), [...(mountedTabs || [])]);
+
     const redraw = () => {
       const values = effectiveValues();
       const tabs = visibleTabs(manifest, values);
-      if (!tabs.some(tab => tab.key === activeTab)) activeTab = tabs[0]?.key || "";
+      const usableTabs = manageTabs
+        ? tabs.filter(tab => (mountedTabs || []).includes(tab.key)) : tabs;
+      if (!usableTabs.some(tab => tab.key === activeTab)) {
+        activeTab = usableTabs[0]?.key || (manageTabs ? "__manage__" : "");
+      }
       root.replaceChildren();
-      if (!tabs.length) {
+      if (!usableTabs.length && !manageTabs) {
         const empty = document.createElement("small");
         empty.textContent = context.t("没有可按组覆盖的设置");
         root.append(empty); return;
       }
+      const items = usableTabs.map(tab => ({
+        key: tab.key,
+        label: context.t(tab.label || tab.key),
+        description: tab.help_text ? context.t(tab.help_text) : "",
+        panelClass: "backtest-group-override-panel",
+        render: () => settingRows(fieldsForTab(tab.key, manifest, values), values),
+      }));
+      if (manageTabs) {
+        items.push({
+          key: "__manage__",
+          label: context.t("+ 设置"),
+          render: () => tabManager(tabs, context),
+        });
+      }
       const tabset = FTTabChipContent.create({
-        items: tabs.map(tab => ({
-          key: tab.key,
-          label: context.t(tab.label || tab.key),
-          description: tab.help_text ? context.t(tab.help_text) : "",
-          panelClass: "backtest-group-override-panel",
-          render: () => settingRows(fieldsForTab(tab.key, manifest, values), values),
-        })),
+        items,
         activeKey: activeTab,
         barClass: "backend-settings-tab-bar backtest-group-override-tab-bar",
         hostClass: "backend-settings-host backtest-group-override-host",
         onActivate: key => { activeTab = key; },
       });
       root.append(tabset.bar, tabset.host);
+    };
+
+    const tabManager = (tabs, managerContext) => {
+      const panel = document.createElement("div");
+      panel.className = "backtest-group-override-tab-manager";
+      const note = document.createElement("small");
+      note.textContent = managerContext.t("选择要挂载到本策略设置栏的覆盖设置 Tab");
+      panel.append(note);
+      tabs.forEach(tab => {
+        const label = document.createElement("label");
+        label.className = "backtest-group-override-tab-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = (mountedTabs || []).includes(tab.key);
+        input.addEventListener("change", () => {
+          mountedTabs = tabs.filter(item => (
+            item.key === tab.key ? input.checked : (mountedTabs || []).includes(item.key)
+          )).map(item => item.key);
+          onMountedTabsChange?.([...mountedTabs]);
+          activeTab = tab.key;
+          redraw();
+          notify();
+        });
+        label.append(input, document.createTextNode(managerContext.t(tab.label || tab.key)));
+        panel.append(label);
+      });
+      return panel;
     };
 
     const settingRows = (fields, values) => {
@@ -101,22 +148,16 @@
 
     const settingRow = (key, field, values) => {
       const target = canonicalKey(key, field);
-      const row = document.createElement("div");
-      row.className = "backtest-group-override-row";
       const enabled = document.createElement("input");
       enabled.type = "checkbox"; enabled.checked = has(target);
       enabled.title = context.t("启用本组覆盖");
-      const copy = document.createElement("span");
-      const label = document.createElement("b"); label.textContent = field.label || key;
-      const help = document.createElement("small");
-      help.textContent = field.help_text || context.t("关闭时继承测试设置");
-      copy.append(label, help);
       const editable = FTSettingRules.isEditable(field, values);
       const control = FTTestSettings.controlFor(
         key, field, manifest, values, context,
         {
           onCommit: ({key: changedKey, field: changedField, value}) => {
             overrides[canonicalKey(changedKey, changedField)] = clone(value);
+            notify();
           },
           onPatch: patch => {
             for (const [changedKey, value] of Object.entries(patch || {})) {
@@ -126,6 +167,7 @@
                 overrides[changedTarget] = clone(value);
               }
             }
+            notify();
           },
           refresh: redraw,
         },
@@ -138,9 +180,17 @@
           delete overrides[target];
         }
         redraw();
+        notify();
       });
-      row.append(enabled, copy, control);
-      return row;
+      const controlHost = document.createElement("div");
+      controlHost.className = "backtest-group-override-control";
+      controlHost.append(enabled, control);
+      return FTTestFieldRow.create(
+        field.label || key,
+        controlHost,
+        field.help_text || context.t("关闭时继承测试设置"),
+        {className: "backtest-group-override-row"},
+      );
     };
 
     root.value = () => normalize(manifest, overrides);

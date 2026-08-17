@@ -74,18 +74,31 @@
       ? normalized : {sampling: "explicit", bases: ["signal"], multipliers: [1]};
     const root = document.createElement("div");
     root.className = "ic-grid-control";
-    const mode = document.createElement("select");
-    for (const [key, label] of [
-      ["scale_aware", context.t("按因子频率自动生成")],
-      ["explicit", context.t("手动冻结收益期网格")],
-    ]) {
-      const option = document.createElement("option");
-      option.value = key;
-      option.textContent = label;
-      mode.append(option);
-    }
-    mode.value = normalized.sampling;
-    mode.disabled = disabled;
+    const mode = FTTestChoicePicker.create(context, {
+      className: "test-choice-picker",
+      compact: true,
+      name: "ic-horizon-sampling",
+      multi: false,
+      disabled,
+      items: [
+        {
+          value: "scale_aware",
+          label: context.t("按因子频率自动生成"),
+          description: context.t("按照因子频率自动生成收益期"),
+        },
+        {
+          value: "explicit",
+          label: context.t("手动冻结收益期网格"),
+          description: context.t("手动填写收益期基准和正整数倍数"),
+        },
+      ],
+      selected: [normalized.sampling],
+      onChange: values => {
+        const value = values[0] || "scale_aware";
+        manual.hidden = value !== "explicit";
+        onChange(value === "explicit" ? explicit : {sampling: "scale_aware"});
+      },
+    });
     const manual = document.createElement("div");
     manual.className = "ic-grid-manual";
     const bases = listEditor({
@@ -108,11 +121,7 @@
     });
     manual.append(bases, multiples);
     manual.hidden = normalized.sampling !== "explicit";
-    mode.addEventListener("change", () => {
-      manual.hidden = mode.value !== "explicit";
-      onChange(mode.value === "explicit" ? explicit : {sampling: "scale_aware"});
-    });
-    root.append(mode, manual);
+    root.append(mode.element, manual);
     return root;
   }
 

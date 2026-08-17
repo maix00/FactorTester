@@ -33,10 +33,11 @@ single source of truth for the script order and semantic module groups.
 - `workbench/`: test settings, factor selection state, templates, and
   submission; `workbench/factor-selection.js` owns candidate identity and
   selection projection so the UI builder does not duplicate state logic;
-  `workbench/factor-family-picker.js` is the searchable public/local family
-  catalog seam, with the public side sourced from the same Manager catalog as
-  the factor-library page and the local side supplied only by the embedded
-  client's frozen Git-revision bridge; `workbench/test-run-fields.js` and
+  `workbench/factor-family-picker.js` is the data-only public/local family
+  catalog seam consumed by the shared `FTMultiSelectFilter`, with the public
+  side sourced from the same Manager catalog as the factor-library page and
+  the local side supplied only by the embedded client's frozen Git-revision
+  bridge; `workbench/test-run-fields.js` and
   `workbench/test-run-summary.js` are the lightweight run-surface seam;
   `workbench/run-batch/model.js` owns batch identity, state transitions, and
   frozen RunSpec/Job links. `workbench/test-run-batch.js` is loaded separately

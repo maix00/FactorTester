@@ -303,9 +303,13 @@ def test_run_input_panel_only_renders_backend_declared_controls() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_input_panel.js"
-    source = WEB_ROOT / "workbench" / "test-source-upload.js"
+    modules = [
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "workbench" / "test-object-picker.js",
+        WEB_ROOT / "workbench" / "test-source-upload.js",
+    ]
     result = subprocess.run(
-        ["node", str(fixture), str(source)], cwd=ROOT,
+        ["node", str(fixture), *(str(path) for path in modules)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -574,6 +578,9 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
         WEB_ROOT / "workbench" / "test-setting-chips.js",
         WEB_ROOT / "workbench" / "tab-chip-content.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "workbench" / "test-object-picker.js",
+        WEB_ROOT / "workbench" / "test-field-row.js",
         WEB_ROOT / "workbench" / "test-setting-fields.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
@@ -810,6 +817,19 @@ def test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contrac
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_group_forms_mount_shared_picker_elements() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_form.js"
+    source = WEB_ROOT / "workbench" / "backtest-group-form.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None:
     import subprocess
 
@@ -923,6 +943,19 @@ def test_backtest_group_overrides_use_registered_sparse_settings() -> None:
     model = WEB_ROOT / "workbench" / "backtest-group-overrides.js"
     result = subprocess.run(
         ["node", str(fixture), str(model)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

@@ -145,6 +145,16 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
 .ft-multi-select-heading h2 { margin: 0; font-size: 14px; }
 .ft-multi-select-selection { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ft-multi-select-heading.is-compact .ft-multi-select-selection { display: none; }
+.ft-multi-select-selection-preview { min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.ft-multi-select-heading-actions { display: inline-flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; }
+.ft-multi-select-heading-action, .ft-multi-select-option-action { border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; color: var(--muted); background: var(--panel); font: inherit; font-size: 11px; cursor: pointer; }
+.ft-multi-select-heading-action:hover, .ft-multi-select-option-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ft-multi-select-heading-action.primary { border-color: var(--accent); color: white; background: var(--accent); }
+.ft-multi-select-option-actions { display: inline-flex; flex: 0 0 auto; gap: 4px; }
+.ft-multi-select-option-action { padding: 2px 5px; }
+.ft-multi-select-option.is-disabled { cursor: not-allowed; opacity: .52; }
+.ft-multi-select-option.is-disabled:hover { background: transparent; }
 .ft-multi-select-dropdown { position: relative; min-width: 0; }
 .ft-multi-select-summary { display: flex; align-items: center; gap: 8px; width: fit-content; min-width: 180px; max-width: min(440px, 100%); cursor: pointer; list-style: none; border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; background: var(--panel); }
 .ft-multi-select-summary::-webkit-details-marker { display: none; }
@@ -156,9 +166,11 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
 .ft-multi-select-clear:hover { color: inherit; background: var(--soft); }
 .ft-multi-select-options { display: grid; gap: 2px; max-height: min(320px, 42vh); overflow-y: auto; }
-.ft-multi-select-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
+.ft-multi-select-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
 .ft-multi-select-option:hover, .ft-multi-select-option.is-selected { background: var(--soft); }
-.ft-multi-select-option.is-exclusive { border-bottom: 1px solid var(--line); border-radius: 6px 6px 0 0; }
+.ft-multi-select-option.is-exclusive { margin-bottom: 3px; border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line)); border-left: 3px solid var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.ft-multi-select-option.is-exclusive .ft-multi-select-option-label { font-weight: 700; }
+.ft-multi-select-exclusive-badge { border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: 999px; padding: 1px 5px; color: var(--accent); background: var(--panel); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .ft-multi-select-option-label { min-width: 0; overflow-wrap: anywhere; }
 .ft-multi-select-option-info { color: var(--muted); font-size: 12px; cursor: help; }
 .ft-multi-select-selection-note { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }

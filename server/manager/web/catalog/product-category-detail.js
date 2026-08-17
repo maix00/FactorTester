@@ -71,6 +71,13 @@
       body: JSON.stringify(payload),
     });
     const saved = value.category || category || {};
+    if (context.onSaved) {
+      context.onSaved(saved);
+      return;
+    }
+    if (FTTabReturn.returnToSource(context, {
+      kind: "category", ref: String(saved.id || ""),
+    })) return;
     if (category) {
       context.navigate(helpers.pathFor(
         `/products/categories/${encodeURIComponent(saved.id)}`, source,

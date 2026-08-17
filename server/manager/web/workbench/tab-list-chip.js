@@ -40,8 +40,8 @@
       activeKey,
       barClass: options.barClass || "tab-list-chip-tab-bar",
       hostClass: options.hostClass || "tab-list-chip-host",
-      actions: typeof options.actionsFor === "function"
-        ? (options.actionsFor(activeKey || items[0]?.key) || []) : (options.actions || []),
+      actions: options.actions || [],
+      actionsFor: typeof options.actionsFor === "function" ? options.actionsFor : null,
       onActivate: key => options.onActivate?.(key),
     });
     shell.append(tabset.bar, tabset.host);

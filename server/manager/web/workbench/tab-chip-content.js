@@ -1,7 +1,7 @@
 (() => {
   function create(options) {
     const items = (options.items || []).filter(item => item?.key);
-    const actions = (options.actions || []).filter(action => action?.label);
+    const staticActions = (options.actions || []).filter(action => action?.label);
     const bar = document.createElement("div");
     bar.className = options.barClass || "backend-settings-tab-bar";
     if (options.title) {
@@ -38,9 +38,20 @@
       entries.set(item.key, {button, panel, item, loaded: false});
     }
 
-    if (actions.length) {
-      const actionHost = document.createElement("div");
+    const actionHost = typeof options.actionsFor === "function" || staticActions.length
+      ? document.createElement("div") : null;
+    if (actionHost) {
       actionHost.className = options.actionsClass || "backend-settings-actions";
+      actionHost.hidden = true;
+      bar.append(actionHost);
+    }
+
+    function renderActions(key) {
+      if (!actionHost) return;
+      const actions = (typeof options.actionsFor === "function"
+        ? options.actionsFor(key) : staticActions || []).filter(action => action?.label);
+      actionHost.replaceChildren();
+      actionHost.hidden = actions.length === 0;
       for (const action of actions) {
         const button = document.createElement("button");
         button.type = "button";
@@ -53,7 +64,6 @@
         button.addEventListener("click", event => action.onClick?.(event));
         actionHost.append(button);
       }
-      bar.append(actionHost);
     }
 
     let activeKey = null;
@@ -67,6 +77,7 @@
         entry.button.classList.toggle("active", active);
         entry.panel.hidden = !active;
       }
+      renderActions(key);
       const entry = entries.get(key);
       if (entry && !entry.loaded) {
         const content = typeof entry.item.render === "function"

@@ -47,6 +47,19 @@ assert.notEqual(repeated[0].name, created[0].name);
 const derived = window.FTBacktestGroupModel.addDerived(state, created[0].id);
 assert.notEqual(derived.batchId, created[0].batchId);
 assert.equal(derived.name, `${derived.batchId}/${derived.id}`);
+const longShort = window.FTBacktestGroupModel.addLongShort(
+  state, created[0].id, created[3].id, "多空组合", {fee_mode: "custom"},
+);
+assert.equal(longShort.name, "多空组合");
+const updatedLongShort = window.FTBacktestGroupModel.updateLongShort(state, longShort.id, {
+  fee_mode: undefined, override_mounted_tabs: ["cost"],
+});
+assert.equal(Object.prototype.hasOwnProperty.call(updatedLongShort, "fee_mode"), false);
+assert.deepEqual(updatedLongShort.override_mounted_tabs, ["cost"]);
+const overrideManifest = {defaults: {fee_mode: {}, engine_mode: {}}};
+assert.deepEqual(window.FTBacktestGroupModel.registeredOverrides(
+  {...created[0], fee_mode: undefined, engine_mode: "custom"}, overrideManifest,
+), {engine_mode: "custom"});
 const batches = window.FTBacktestGroupModel.groupBatches(state);
 assert.equal(batches.length, 3);
 assert.deepEqual(batches.map(item => item.order), [1, 2, 3]);

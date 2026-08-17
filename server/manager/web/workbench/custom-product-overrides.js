@@ -38,30 +38,39 @@
     return control;
   }
 
-  function valueControl(meta, value, disabled, onChange) {
+  function valueControl(meta, value, disabled, onChange, context, name = "custom-product-value") {
     if (meta.value_type === "select") {
-      const select = document.createElement("select");
-      for (const raw of meta.value_options || []) {
-        const option = document.createElement("option");
-        option.value = String(Array.isArray(raw) ? raw[0] : raw.value ?? "");
-        option.textContent = String(Array.isArray(raw) ? raw[1] : raw.label ?? option.value);
-        select.append(option);
-      }
-      select.value = String(value ?? "");
-      select.disabled = Boolean(disabled);
-      select.addEventListener("change", () => onChange(select.value));
-      return select;
+      const picker = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker",
+        compact: true,
+        name,
+        multi: false,
+        disabled,
+        items: (meta.value_options || []).map(raw => {
+          const optionValue = String(Array.isArray(raw) ? raw[0] : raw.value ?? "");
+          const label = String(Array.isArray(raw) ? raw[1] : raw.label ?? optionValue);
+          return {value: optionValue, label, description: raw.description || label};
+        }),
+        selected: [String(value ?? "")],
+        onChange: next => onChange(next[0] ?? ""),
+      });
+      return picker.element;
     }
     if (meta.value_type === "boolean") {
-      const select = document.createElement("select");
-      [[true, "是"], [false, "否"]].forEach(([raw, label]) => {
-        const option = document.createElement("option");
-        option.value = String(raw); option.textContent = label; select.append(option);
+      const picker = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker",
+        compact: true,
+        name,
+        multi: false,
+        disabled,
+        items: [
+          {value: "true", label: context.t("是"), description: context.t("启用")},
+          {value: "false", label: context.t("否"), description: context.t("停用")},
+        ],
+        selected: [String(Boolean(value))],
+        onChange: next => onChange(next[0] === "true"),
       });
-      select.value = String(Boolean(value));
-      select.disabled = Boolean(disabled);
-      select.addEventListener("change", () => onChange(select.value === "true"));
-      return select;
+      return picker.element;
     }
     return input(meta.value_type === "number" ? "number" : "text", value, "值", disabled, raw => {
       onChange(meta.value_type === "number" && raw !== "" ? Number(raw) : raw);
@@ -111,25 +120,30 @@
       line.append(input("text", row.product, context.t("产品/合约代码"), disabled, value => {
         rows[index] = {...rows[index], product: value}; commit(rows);
       }));
-      const fields = document.createElement("select");
-      for (const meta of definitions(field)) {
-        const option = document.createElement("option");
-        option.value = meta.value;
-        option.textContent = meta.label || meta.value;
-        option.title = meta.unit || "";
-        fields.append(option);
-      }
-      fields.value = row.field || definitions(field)[0]?.value || "";
-      fields.disabled = Boolean(disabled);
-      fields.addEventListener("change", () => {
-        rows[index] = {...rows[index], field: fields.value, value: "", start: "", end: ""};
-        commit(rows);
+      const fieldPicker = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker",
+        compact: true,
+        name: `custom-product-field-${index}`,
+        multi: false,
+        disabled,
+        items: definitions(field).map(meta => ({
+          value: meta.value,
+          label: meta.label || meta.value,
+          description: meta.unit || meta.label || meta.value,
+        })),
+        selected: [row.field || definitions(field)[0]?.value || ""],
+        onChange: next => {
+          const selectedField = next[0] || "";
+          rows[index] = {...rows[index], field: selectedField, value: "", start: "", end: ""};
+          commit(rows);
+        },
       });
-      line.append(fields);
-      const meta = fieldMeta(field, fields.value);
+      line.append(fieldPicker.element);
+      const selectedField = fieldPicker.values[0] || definitions(field)[0]?.value || "";
+      const meta = fieldMeta(field, selectedField);
       line.append(valueControl(meta, row.value, disabled, value => {
         rows[index] = {...rows[index], value}; commit(rows);
-      }));
+      }, context, `custom-product-value-${index}`));
       const rangeDisabled = Boolean(disabled || meta.allow_time_range === false);
       line.append(
         input("datetime-local", row.start, context.t("开始时间"), rangeDisabled, value => {

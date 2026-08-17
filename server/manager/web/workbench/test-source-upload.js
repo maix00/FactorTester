@@ -67,6 +67,7 @@
     });
     if (!value.valid) throw new Error(value.error || context.t("策略源码无法通过检查"));
     FTTestInputState.putStrategy(state, {path, source_code: sourceCode}, value);
+    state.strategyTabKey = `strategy:${path}`;
     return value;
   }
 
@@ -156,46 +157,153 @@
     FTTestInputState.initialize(state);
     const root = document.createElement("section");
     root.className = "test-run-inputs";
+    const descriptors = contentOptions.inputs || [];
+    const strategyDescriptors = descriptors.filter(item => (
+      item.kind === "strategy_source" || item.kind === "strategy_spec"
+    ));
+    const dependencyDescriptors = descriptors.filter(item => item.kind === "run_dependency");
     const heading = document.createElement("div"); heading.className = "section-heading";
-    const copy = document.createElement("div");
     const title = document.createElement("h2");
     title.textContent = context.t(contentOptions.title || "运行输入");
     const note = document.createElement("p");
     note.textContent = context.t(contentOptions.description || "");
-    copy.append(title, note);
-    const actions = document.createElement("div"); actions.className = "test-input-actions";
-    for (const descriptor of contentOptions.inputs || []) {
-      appendInputAction(context, state, refresh, actions, descriptor);
+    heading.append(title, note); root.append(heading);
+
+    const strategyItems = (state.transientStrategySources || []).map(source => ({
+      key: `strategy:${source.path}`,
+      label: strategyLabel(state, source),
+      description: source.path,
+      render: () => strategyPreview(context, state, refresh, source),
+    }));
+    strategyItems.push({
+      key: "__new_strategy__",
+      label: context.t("+ 自定义策略"),
+      render: () => newStrategyPanel(context, state, refresh, strategyDescriptors),
+    });
+    const tabContent = window.FTTabChipContent;
+    if (tabContent?.create) {
+      const tabset = tabContent.create({
+        items: strategyItems,
+        activeKey: state.strategyTabKey || (strategyItems[0]?.key || "__new_strategy__"),
+        onActivate: key => { state.strategyTabKey = key; },
+      });
+      root.append(tabset.bar, tabset.host);
+    } else {
+      // Keep the deferred source-input module usable in isolated fixtures and
+      // during a partial static-module load. The normal workbench has the
+      // shared tab component; this fallback retains the previous flat editor.
+      const actions = document.createElement("div");
+      actions.className = "test-input-actions";
+      strategyDescriptors.forEach(descriptor => appendInputAction(
+        context, state, refresh, actions, descriptor,
+      ));
+      if ((actions.childElementCount ?? actions.children?.length ?? 0) > 0) {
+        heading.append(actions);
+      }
+      const previews = runInputPreviews(context, state, refresh);
+      if (previews) root.append(previews);
     }
-    heading.append(copy, actions); root.append(heading);
-    const previews = runInputPreviews(context, state, refresh);
-    if (previews) root.append(previews);
-    else {
-      const empty = document.createElement("small");
-      empty.className = "test-input-empty";
-      empty.textContent = context.t("未添加自定义策略，使用运行配置中的内置策略");
-      root.append(empty);
+
+    if (dependencyDescriptors.length) {
+      const dependencies = document.createElement("section");
+      dependencies.className = "test-run-input-dependencies";
+      const dependencyHeading = document.createElement("strong");
+      dependencyHeading.textContent = context.t("任务依赖");
+      const actions = document.createElement("div"); actions.className = "test-input-actions";
+      dependencyDescriptors.forEach(descriptor => appendInputAction(
+        context, state, refresh, actions, descriptor,
+      ));
+      dependencies.append(dependencyHeading, actions);
+      const previews = dependencyPreviews(context, state, refresh);
+      if (previews) dependencies.append(previews);
+      root.append(dependencies);
     }
     if (state.runInputStatus?.strategyError) root.append(error(state.runInputStatus.strategyError));
     return root;
   }
 
+  function newStrategyPanel(context, state, refresh, descriptors) {
+    const panel = document.createElement("div");
+    panel.className = "test-custom-strategy-create-panel";
+    const copy = document.createElement("small");
+    copy.textContent = context.t("新增策略会在本测试中单独冻结；运行时沿用上方统一策略");
+    panel.append(copy);
+    const actions = document.createElement("div");
+    actions.className = "test-input-actions";
+    descriptors.forEach(descriptor => appendInputAction(
+      context, state, refresh, actions, descriptor,
+    ));
+    panel.append(actions);
+    if (!descriptors.length) panel.append(FTUI.empty(
+      context.t("当前测试未注册自定义策略输入"), "",
+    ));
+    return panel;
+  }
+
+  function strategyLabel(state, source) {
+    const spec = (state.strategySpecs || []).find(value => (
+      value.source === `profile:${source.path}`
+    ));
+    return spec?.strategy_id || source.path.split("/").pop() || source.path;
+  }
+
+  function strategyPreview(context, state, refresh, source) {
+    const inspection = FTTestInputState.strategyInspection?.(state, source.path) || null;
+    const spec = (state.strategySpecs || []).find(value => (
+      value.source === `profile:${source.path}`
+    ));
+    const root = document.createElement("div");
+    root.className = "test-input-preview-body";
+    root.append(
+      FTUI.table(
+        [context.t("字段"), context.t("值")],
+        [[context.t("路径"), source.path], [context.t("策略标识"), spec?.strategy_id || "—"],
+          [context.t("Hook"), (inspection?.callbacks || []).join("、") || "—"]],
+      ).shell,
+    );
+    const pre = document.createElement("pre");
+    pre.textContent = source.source_code || "";
+    root.append(pre);
+    const remove = context.button(context.t("移除策略"), () => {
+      FTTestInputState.removeStrategy(state, source.path);
+      state.strategyTabKey = "__new_strategy__";
+      refresh?.();
+    });
+    remove.className = "secondary";
+    root.append(remove);
+    return root;
+  }
+
+  function dependencyPreviews(context, state, refresh) {
+    const entries = (state.runInputDependencies || []).map(dependency => ({
+      title: dependency.title_zh || dependency.path,
+      detail: dependency.path,
+      blocks: [{label: dependency.content_type || "text/plain", content: dependency.content}],
+      remove: () => { FTTestInputState.removeDependency(state, dependency.path); refresh?.(); },
+    }));
+    return sourcePreviews(context, entries);
+  }
+
   function appendInputAction(context, state, refresh, actions, descriptor) {
     let purpose = null;
     if (descriptor.kind === "run_dependency") {
-      purpose = document.createElement("select");
-      purpose.title = context.t("任务输入用途");
-      purpose.setAttribute("aria-label", context.t("任务输入用途"));
-      for (const item of descriptor.purposes || []) {
-        const option = document.createElement("option");
-        option.value = item.value; option.textContent = context.t(item.label);
-        purpose.append(option);
-      }
-      actions.append(purpose);
+      purpose = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker test-input-purpose-picker",
+        compact: true,
+        name: "test-input-purpose",
+        multi: false,
+        items: (descriptor.purposes || []).map(item => ({
+          value: item.value,
+          label: context.t(item.label),
+          description: item.description ? context.t(item.description) : context.t(item.label),
+        })),
+        selected: [descriptor.purposes?.[0]?.value || ""],
+      });
+      actions.append(purpose.element);
     }
     const picker = filePicker(descriptor, file => runUpload(
       state, "strategyBusy", refresh, () => inputOperation(
-        context, state, file, descriptor, purpose?.value || "",
+        context, state, file, descriptor, purpose?.values?.[0] || "",
       ),
     ));
     const button = context.button(context.t(descriptor.label), () => picker.click());

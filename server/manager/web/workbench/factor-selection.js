@@ -84,6 +84,19 @@
     }
   }
 
+  function setSelectedIDs(state, values) {
+    const wanted = new Set((values || []).map(String));
+    const rows = candidates(state);
+    if (state.kind === "ic") {
+      state.values.factor_selections = rows.filter(item => wanted.has(factorID(item)));
+      state.factorRef = factorID(state.values.factor_selections[0] || {}) || "";
+    } else {
+      const selected = rows.find(item => wanted.has(factorID(item)));
+      state.values.factor = selected ? factorAlias(selected) : "";
+      state.factorRef = selected ? factorID(selected) : "";
+    }
+  }
+
   function isSelected(state, factor) {
     if (state.kind === "ic") return selectedIDs(state).includes(factorID(factor));
     return state.values.factor === factorAlias(factor) || state.factorRef === factorID(factor);
@@ -147,7 +160,7 @@
 
   window.FTTestFactorSelection = Object.freeze({
     candidates, factorID, factorAlias, addCandidate, removeCandidate, detachFactorSet,
-    setSelected, isSelected, selectedIDs,
+    setSelected, setSelectedIDs, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,
     selectedFactor, selectedFactors, selectedFamily,
   });

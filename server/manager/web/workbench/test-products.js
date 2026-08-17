@@ -82,66 +82,107 @@
     setSelected(state, group, true);
   }
 
+  function openEditor(context, mode, ref, onSaved) {
+    return FTTestObjectEditorOverlay.open(context, {
+      kind: "product_group", mode, ref, onSaved,
+    });
+  }
+
+  function upsertGroup(state, group) {
+    const id = groupID(group);
+    if (!id) return null;
+    const index = state.groups.findIndex(value => groupID(value) === id);
+    if (index >= 0) state.groups[index] = {...state.groups[index], ...group};
+    else state.groups.push(group);
+    return state.groups[index >= 0 ? index : state.groups.length - 1];
+  }
+
+  function editAction(context, group, onSaved) {
+    if (!context.session || !group) return null;
+    const id = groupID(group);
+    if (!id || group.source_managed) return null;
+    return {
+      label: context.t("编辑"),
+      title: context.t("在当前浮层编辑产品组"),
+      buttonClass: "secondary",
+      onClick: event => {
+        event?.preventDefault();
+        void openEditor(context, "edit", id, onSaved);
+      },
+    };
+  }
+
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-product-manager";
     root.append(candidatePanel(context, state, refresh));
-    const toolbar = document.createElement("div");
-    toolbar.className = "test-product-manager-actions";
-    toolbar.append(context.button(context.t("构建产品路径候选"), () => {
-      FTProductGroupCreator.open(context, {
-        onCreate: group => {
-          state.groups.push(group);
-          selectNew(state, group);
-          refresh?.();
-        },
-      });
-    }));
-    root.append(toolbar);
     return root;
   }
 
   function candidatePanel(context, state, refresh) {
-    const root = document.createElement("fieldset");
-    root.className = "test-product-selector test-object-field";
-    const legend = document.createElement("legend");
-    legend.textContent = context.t("产品路径候选");
-    const note = document.createElement("small");
-    note.textContent = context.t(state.kind === "ic"
-      ? "可多选产品路径候选；每个候选冻结为独立任务，并共同计算所选因子"
-      : "选择一个候选作为本次回测的产品范围；候选内部可包含多条产品路径");
-    const summary = document.createElement("small");
     const selected = selectedGroups(state);
     const pathCount = selected.reduce((total, group) => (
       total + (group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0)
     ), 0);
-    summary.className = "test-product-selection-summary";
-    summary.textContent = `${context.t("已选")} ${selected.length} ${context.t("个候选")} · ${pathCount} ${context.t("条产品路径")}`;
-    const list = document.createElement("div");
-    list.className = "test-product-group-list";
-    for (const group of state.groups) {
-      const row = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = state.kind === "ic" ? "checkbox" : "radio";
-      input.name = state.kind === "ic" ? "" : `product-path-${state.kind}`;
-      input.checked = state.kind === "ic"
-        ? (state.groupRefs || []).includes(groupID(group))
-        : state.groupRef === groupID(group);
-      input.addEventListener("change", () => {
-        setSelected(state, group, input.checked);
+    const items = state.groups.map(group => ({
+      value: groupID(group),
+      label: groupLabel(group),
+      description: [
+        group.description || group.desc || "",
+        `${group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0} ${context.t("条产品路径")}`,
+      ].filter(Boolean).join(" · "),
+      source_managed: group.source_managed === true,
+    })).filter(item => item.value);
+    const savedGroup = value => {
+      const group = upsertGroup(state, value);
+      if (!group) return;
+      selectNew(state, group);
+      synchronize(state);
+      refresh?.();
+    };
+    const picker = FTTestObjectPicker.create(context, {
+      title: context.t("产品路径候选"),
+      note: context.t(state.kind === "ic"
+        ? "可多选产品组；每个候选冻结为独立 IC 任务"
+        : "选择一个产品组作为本次回测的产品范围"),
+      items,
+      selected: state.kind === "ic" ? state.groupRefs : [state.groupRef],
+      multi: state.kind === "ic",
+      compact: true,
+      name: `test-product-groups-${state.kind}`,
+      onCreate: context.session
+        ? () => void openEditor(context, "create", "new", savedGroup)
+        : null,
+      createLabel: context.t("新建产品组"),
+      itemActions: item => {
+        const action = editAction(
+          context,
+          state.groups.find(group => groupID(group) === item.value),
+          savedGroup,
+        );
+        return action ? [action] : [];
+      },
+      onChange: values => {
+        const refs = uniqueReferences(values);
+        if (state.kind === "ic") {
+          state.groupRefs = refs;
+          state.groupRef = refs[0] || "";
+        } else {
+          state.groupRef = refs[0] || "";
+          state.groupRefs = state.groupRef ? [state.groupRef] : [];
+        }
+        synchronize(state);
         refresh?.();
-      });
-      const copy = document.createElement("span");
-      const title = document.createElement("b");
-      title.textContent = groupLabel(group);
-      const detail = document.createElement("small");
-      const count = group.path_count ?? group.paths?.length ?? 0;
-      detail.textContent = `${count} ${context.t("条产品路径")}`;
-      copy.append(title, detail);
-      row.append(input, copy);
-      list.append(row);
-    }
-    if (!state.groups.length) list.append(FTUI.empty(context.t("暂无产品组"), ""));
+      },
+    });
+    const summary = `${context.t("已选")} ${selected.length} ${context.t("个候选")} · ${pathCount} ${context.t("条产品路径")}`;
+    const root = FTTestFieldRow.create(
+      context.t("产品组"), picker.element,
+      `${context.t(state.kind === "ic"
+        ? "可多选产品组；每个候选冻结为独立 IC 任务"
+        : "选择一个产品组作为本次回测的产品范围")} · ${summary}`,
+      {className: "test-product-selector"},
+    );
     const unavailable = (state.groupRefs || []).filter(ref => (
       !state.groups.some(group => groupID(group) === ref)
     ));
@@ -149,9 +190,7 @@
       const warning = document.createElement("small");
       warning.className = "test-product-warning";
       warning.textContent = `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}`;
-      root.append(legend, note, summary, list, warning);
-    } else {
-      root.append(legend, note, summary, list);
+      root.querySelector(".test-field-row-control").append(warning);
     }
     return root;
   }
