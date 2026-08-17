@@ -285,6 +285,21 @@ def test_public_verifier_checks_real_host_port_bindings() -> None:
     assert '"${compose[@]}" port postgresql-control 5432' not in script
 
 
+def test_public_restore_check_uses_pre_migration_table_count() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+    activate = (
+        ROOT / "scripts" / "server" / "activate_public_revision.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "control_table_count" in script
+    assert "control-table-count" in script
+    assert 'restore_check "$@"' in script
+    assert "postgres_table_count_before" in activate
+    assert 'restore-check \"$postgres_table_count_before\"' in activate
+
+
 def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
     publish_path = ROOT / "scripts" / "server" / "publish_public_main.sh"
     publish = publish_path.read_text(encoding="utf-8")
