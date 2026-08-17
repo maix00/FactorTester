@@ -76,6 +76,15 @@ class WriteRoutesMixin:
         if parsed.path == "/api/admin/access-control/devices/revoke":
             self._admin_revoke_device()
             return
+        if parsed.path == "/api/admin/users":
+            self._admin_create_user()
+            return
+        if parsed.path == "/api/admin/organizations":
+            self._admin_create_organization()
+            return
+        if parsed.path == "/api/admin/levels":
+            self._admin_create_level()
+            return
         if parsed.path == "/api/federation/sync":
             self._federation_sync()
             return
@@ -339,6 +348,12 @@ class WriteRoutesMixin:
             self._update_federation_config()
             return
         if self._serve_manager_application(parsed, method="PUT"):
+            return
+        if parsed.path.startswith("/api/admin/users/"):
+            self._admin_update_user()
+            return
+        if parsed.path.startswith("/api/admin/levels/"):
+            self._admin_update_level()
             return
         if self._proxy_service_write(parsed, method="PUT"):
             return

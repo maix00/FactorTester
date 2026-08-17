@@ -31,6 +31,7 @@ from server.manager.config import (
 from server.manager.http.gateway import GatewayResponse, ServiceGateway
 from server.manager.http.device_routes import DeviceNetworkRoutesMixin
 from server.manager.http.access_control_routes import AccessControlRoutesMixin
+from server.manager.http.account_admin_routes import AccountAdministrationRoutesMixin
 from server.manager.http.control_database_routes import ControlDatabaseRoutesMixin
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
@@ -451,6 +452,7 @@ class ManagerState(
 
 class Handler(
     RequestSecurityMixin,
+    AccountAdministrationRoutesMixin,
     AccessControlRoutesMixin,
     DeviceNetworkRoutesMixin,
     ControlDatabaseRoutesMixin,

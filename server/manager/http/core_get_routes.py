@@ -66,6 +66,9 @@ class CoreGetRoutesMixin:
         if parsed.path == "/api/admin/access-control":
             self._admin_access_control()
             return True
+        if parsed.path == "/api/admin/account-directory":
+            self._admin_account_directory()
+            return True
         if parsed.path == "/api/device/summary":
             self._device_summary()
             return True
