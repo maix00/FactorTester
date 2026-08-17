@@ -13,7 +13,7 @@ _PARALLEL_CATEGORY_PREFIX = "ProductCategory"
 def normalize_category_selection(values: str | Iterable[str] | None) -> list[str]:
     """Normalize repeated/comma-separated category query values.
 
-    ``_x_`` remains reserved for a registered composite category ID.  It is
+    ``×`` remains reserved for a registered composite category ID.  It is
     deliberately not a separator here: two selected categories are rendered
     as separate sibling trees, while a registered composite is one category.
     """
@@ -38,14 +38,21 @@ def render_product_tree(
 ) -> list[dict[str, Any]]:
     """Render selected categories as sibling roots, never as a union.
 
-    A single category keeps the historical tree shape.  Multiple categories
-    receive a stable ``ProductCategory/<id>`` wrapper so lazy product-list
-    requests can identify which sibling tree owns a path.
+    Every explicit category receives a stable ``ProductCategory/<id>``
+    wrapper.  This makes paths emitted by the selectable tree carry the fixed
+    category ID even when only one category is selected; multiple categories
+    remain parallel sibling trees rather than a Cartesian product.
     """
     selected = normalize_category_selection(category_ids)
-    if len(selected) <= 1:
+    if not selected:
+        return _render_one("", principal, source_ids, checkbox_default)
+    if len(selected) == 1:
         category_id = selected[0] if selected else ""
-        return _render_one(category_id, principal, source_ids, checkbox_default)
+        return [_parallel_root(
+            category_id,
+            _render_one(category_id, principal, source_ids, checkbox_default),
+            principal,
+        )]
     return [
         _parallel_root(
             category_id,
@@ -116,12 +123,22 @@ def _parallel_root(
                 item for item in available_product_categories()
                 if str(item.get("id") or "") == category_id
             ),
+            None,
         )
     title = str(
         (definition or {}).get("title_zh")
         or (definition or {}).get("alias")
         or category_id
     )
+    if definition is None and "×" in category_id:
+        source_titles = {
+            str(item.get("id") or ""): str(
+                item.get("title_zh") or item.get("alias") or item.get("id")
+            )
+            for item in available_product_categories()
+        }
+        title = "×".join(source_titles.get(part, part)
+                          for part in category_id.split("×"))
     prefix = f"{_PARALLEL_CATEGORY_PREFIX}/{category_id}"
     children = []
     for node in nodes:

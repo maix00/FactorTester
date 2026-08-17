@@ -53,11 +53,14 @@
       const item = baseByID.get(id);
       return item.title_zh || item.alias || item.id;
     });
+    // The browser may validate the requested dimensions, but it must never
+    // mint a persistent category ID.  The Manager assigns the user-prefixed
+    // ID when the request is saved.
     return {
-      id: ids.join("_x_"),
       alias: labels.join("×"),
       title_zh: labels.join("×"),
       dimensions: ids,
+      parent_category_ids: selected,
       composable: false,
       is_composite: true,
     };

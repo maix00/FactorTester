@@ -81,7 +81,8 @@
 
   const appContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, updateActiveTab, session: state.session, t, ...currentTabContext(),
+    servicePath, showNotice, openLogin, logout, updateActiveTab, closeTab: tabs?.closeTab,
+    session: state.session, t, ...currentTabContext(),
     isRouteCurrent: () => routeToken === activeRouteToken,
     languagePreference: state.languagePreference,
     setLanguagePreference,
@@ -368,6 +369,9 @@
       productSources: pageContext => FTProducts.sourceList(pageContext),
       productGroups: pageContext => FTProducts.list(pageContext, "groups"),
       productCategories: pageContext => FTProducts.list(pageContext, "categories"),
+      productCategory: (pageContext, route) => FTProducts.categoryDetail(
+        pageContext, route?.id || "", route?.mode || "view",
+      ),
       products: pageContext => FTProducts.list(pageContext, "products"),
       profile: (pageContext, id) => FTProfiles.detail(pageContext, id),
       profiles: pageContext => FTProfiles.list(pageContext),

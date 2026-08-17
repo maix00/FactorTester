@@ -1,6 +1,9 @@
 import pytest
 
 from server.modules.shared.price_services import (
+    CN_FUTURES_COMPOSITE_CATEGORY_ID,
+    CN_FUTURES_DAY_NIGHT_CATEGORY_ID,
+    CN_FUTURES_SECTOR_CATEGORY_ID,
     cached_contracts,
     cached_product_tree,
     cached_product_tree_for_category,
@@ -82,15 +85,16 @@ def test_default_product_tree_contains_only_classifier_levels():
 
 
 def test_explicit_product_category_composition_is_canonical_and_projected():
-    assert normalize_product_category_id("sector_x_day_night") == (
-        "day_night_x_sector"
+    assert normalize_product_category_id(
+        f"{CN_FUTURES_SECTOR_CATEGORY_ID}×{CN_FUTURES_DAY_NIGHT_CATEGORY_ID}"
+    ) == (
+        CN_FUTURES_COMPOSITE_CATEGORY_ID
     )
-    assert normalize_product_category_id("行业×日夜盘") == (
-        "day_night_x_sector"
-    )
+    with pytest.raises(ValueError):
+        normalize_product_category_id("行业×日夜盘")
 
     tree = convert_to_fancytree(
-        cached_product_tree_for_category("sector_x_day_night").tree,
+        cached_product_tree_for_category(CN_FUTURES_COMPOSITE_CATEGORY_ID).tree,
         checkbox_default=False,
     )
     rendered_titles = {
@@ -101,26 +105,31 @@ def test_explicit_product_category_composition_is_canonical_and_projected():
 
 
 def test_parallel_category_selection_keeps_sibling_trees_separate():
-    assert normalize_category_selection(["day_night,sector"]) == [
-        "day_night", "sector",
+    assert normalize_category_selection([
+        f"{CN_FUTURES_DAY_NIGHT_CATEGORY_ID},{CN_FUTURES_SECTOR_CATEGORY_ID}"
+    ]) == [
+        CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID,
     ]
-    assert normalize_category_selection(["day_night_x_sector"]) == [
-        "day_night_x_sector",
+    assert normalize_category_selection([CN_FUTURES_COMPOSITE_CATEGORY_ID]) == [
+        CN_FUTURES_COMPOSITE_CATEGORY_ID,
     ]
 
-    tree = render_product_tree(["day_night", "sector"])
+    tree = render_product_tree([
+        CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID,
+    ])
 
-    assert [node["title"] for node in tree] == ["日夜盘", "行业"]
+    assert [node["title"] for node in tree] == ["中国期货日夜盘", "中国期货行业"]
     assert [node["key"] for node in tree] == [
-        "ProductCategory/day_night", "ProductCategory/sector",
+        f"ProductCategory/{CN_FUTURES_DAY_NIGHT_CATEGORY_ID}",
+        f"ProductCategory/{CN_FUTURES_SECTOR_CATEGORY_ID}",
     ]
     assert all(node.get("children") for node in tree)
 
 
 def test_parallel_category_path_resolves_the_selected_sibling():
     tree, path = tree_for_path(
-        "ProductCategory/sector/Product/Futures/CNFutures/行业",
-        ["day_night", "sector"],
+        f"ProductCategory/{CN_FUTURES_SECTOR_CATEGORY_ID}/Product/Futures/CNFutures/行业",
+        [CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID],
     )
 
     assert path == "Product/Futures/CNFutures/行业"

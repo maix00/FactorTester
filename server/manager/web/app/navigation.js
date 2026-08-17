@@ -43,6 +43,9 @@
       research: "研究报告", jobs: "测试", factors: "因子详情",
       products: "产品详情", profiles: "研究身份", "test-templates": "测试模板",
     };
+    if (parts[0] === "products" && parts[1] === "categories") {
+      return t("产品分类");
+    }
     return t(labels[parts[0]] || module.title || parts[0]);
   }
 
@@ -243,7 +246,19 @@
     }
     if (parts[0] === "products" && parts[1] === "sources") return {kind: "product-sources"};
     if (parts[0] === "products" && parts[1] === "groups") return {kind: "product-groups"};
-    if (parts[0] === "products" && parts[1] === "categories") return {kind: "product-categories"};
+    if (parts[0] === "products" && parts[1] === "categories") {
+      if (parts.length >= 3) {
+        const id = parts.slice(2).join("/");
+        const mode = new URLSearchParams(search).get("mode")
+          || (id === "new" ? "create" : "view");
+        return {
+          kind: "product-category",
+          id: id === "new" ? "" : decodeURIComponent(id),
+          mode,
+        };
+      }
+      return {kind: "product-categories"};
+    }
     if (parts[0] === "products") return {kind: "products"};
     if (parts[0] === "profiles" && parts[1]) {
       return {kind: "profile", id: decodeURIComponent(parts.slice(1).join("/"))};

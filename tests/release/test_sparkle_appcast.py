@@ -166,6 +166,55 @@ def test_generate_appcast_stages_previous_archive_and_publishes_content_addresse
     assert "FTClient5-4.delta" not in text
 
 
+def test_previous_ns0_appcast_is_normalized_before_sparkle_reads_it(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    archive = tmp_path / "current.dmg"
+    archive.write_bytes(b"current")
+    previous_appcast = tmp_path / "previous-appcast.xml"
+    previous_appcast.write_text(
+        """<rss xmlns:ns0="http://www.andymatuschak.org/xml-namespaces/sparkle"
+ version="2.0"><channel><item><ns0:version>4</ns0:version>
+<ns0:shortVersionString>0.1.0</ns0:shortVersionString>
+<enclosure url="https://example.test/previous.dmg"
+ ns0:edSignature="signed" /></item></channel></rss>""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "appcast.xml"
+    tool = _tool(tmp_path, "generate_appcast")
+
+    def run(command, **kwargs):
+        root = Path(command[-1])
+        staged = (root / "appcast.xml").read_text(encoding="utf-8")
+        assert 'xmlns:sparkle="' in staged
+        assert "ns0:" not in staged
+        (root / "appcast.xml").write_text(
+            """<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+ version="2.0"><channel><item><sparkle:version>5</sparkle:version>
+<sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+<enclosure url="https://example.test/current.dmg"
+ sparkle:edSignature="signed" />
+<sparkle:deltas><enclosure url="https://example.test/previous.dmg"
+ sparkle:deltaFrom="4" sparkle:edSignature="signed" /></sparkle:deltas>
+</item></channel></rss>""",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    generate_sparkle_appcast(
+        archive=archive,
+        output=output,
+        tool=tool,
+        download_url="https://example.test/current.dmg",
+        version="0.2.0",
+        build=5,
+        channel="stable",
+        previous_appcast=previous_appcast,
+    )
+
+
 def test_delta_only_appcast_keeps_only_the_matching_upgrade(
     tmp_path: Path,
     monkeypatch,
@@ -223,7 +272,10 @@ def test_delta_only_appcast_keeps_only_the_matching_upgrade(
         delta_only=True,
     )
 
-    assert output.read_text(encoding="utf-8").count("<item>") == 1
+    text = output.read_text(encoding="utf-8")
+    assert text.count("<item>") == 1
+    assert 'xmlns:sparkle="' in text
+    assert "<sparkle:version>5</sparkle:version>" in text
 
 
 def test_latest_only_appcast_drops_unreachable_history(

@@ -177,13 +177,30 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-category-item-rows { display: grid; gap: 10px; }
 .product-category-item-row { display: grid; grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr) auto; gap: 8px; align-items: start; }
 .product-category-item-row.active { padding: 6px; margin: -6px; border-radius: 8px; background: var(--soft); }
+.product-category-generated-item { border-color: color-mix(in srgb, var(--muted) 45%, var(--line)); background: color-mix(in srgb, var(--soft) 55%, var(--panel)); }
+.product-category-generated-item input[readonly], .product-category-generated-item textarea[readonly] { cursor: not-allowed; opacity: .78; }
 .product-category-path-editor { display: grid; gap: 6px; min-width: 0; }
 .product-category-item-controls { display: flex; align-items: start; }
 .product-category-delete-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--danger) 5%, var(--panel)); }
 .product-category-delete-confirm span { flex: 1 1 180px; }
 .product-category-item-row textarea { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--panel); color: inherit; font: inherit; }
 .product-category-form-error { min-height: 1em; color: var(--danger); }
-@media (max-width: 700px) { .product-category-create-layout { grid-template-columns: 1fr; } .product-category-path-picker { padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--line); } .product-category-item-row { grid-template-columns: 1fr; } }
+.product-category-detail-actions, .product-category-editor-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.product-category-editor-header h2 { flex: 1 1 260px; margin: 0; }
+.product-category-detail-page > section { min-width: 0; }
+.product-category-detail-page table { width: 100%; }
+.product-category-detail-tree { min-height: 260px; max-height: 58vh; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.product-category-source-section, .product-category-path-definitions, .product-category-resolved-products { display: grid; gap: 10px; }
+.product-category-source-section h2, .product-category-path-definitions h2, .product-category-resolved-products h2 { margin: 0; font-size: 16px; }
+.product-category-label-row { cursor: pointer; }
+.product-category-label-row:hover, .product-category-label-row.active { background: var(--soft); }
+.product-category-composite-edit-layout { display: grid; grid-template-columns: minmax(300px, .9fr) minmax(320px, 1.1fr); gap: 16px; align-items: start; }
+.product-category-composite-label-row { display: grid; grid-template-columns: minmax(120px, .4fr) minmax(160px, .8fr) minmax(0, 1.4fr); gap: 8px; align-items: start; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.product-category-composite-label-row.active { border-color: var(--accent); background: var(--soft); }
+.product-category-composite-label-row code { overflow-wrap: anywhere; padding-top: 7px; }
+.product-category-readonly-paths { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+.product-category-readonly-paths .catalog-source-lines { min-width: 0; }
+@media (max-width: 700px) { .product-category-create-layout, .product-category-composite-edit-layout { grid-template-columns: 1fr; } .product-category-path-picker { padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--line); } .product-category-item-row, .product-category-composite-label-row { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .product-category-toolbar { flex-wrap: wrap; gap: 6px 10px; } .product-category-dropdown > summary, .product-category-selection-note { max-width: min(320px, calc(100vw - 48px)); } }
 .product-tree { display: grid; gap: 1px; min-width: 0; }
 .product-tree-node { position: relative; margin-left: calc(var(--tree-depth, 0) * 12px); border-left: 2px solid color-mix(in srgb, var(--accent) 24%, var(--line)); padding-left: 9px; }

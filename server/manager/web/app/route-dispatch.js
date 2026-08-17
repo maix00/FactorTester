@@ -95,6 +95,10 @@
         case "product-categories": return guarded(
           context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productCategories, route,
         );
+        case "product-category": return guarded(
+          context(routeToken), {nav: "products", title: "产品分类", allowVisitor: true},
+          pages.productCategory, route,
+        );
         case "products": return guarded(
           context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.products,
         );
