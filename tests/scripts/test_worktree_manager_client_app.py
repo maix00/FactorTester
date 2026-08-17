@@ -2639,6 +2639,12 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'let selectedIDs = FTProductTree.categorySelectionValues' in script
     assert 'selectedIDs = FTProductTree.categorySelectionValues' in script
     assert 'await renderTree()' in script
+    assert 'product-category-management-actions product-group-management-actions' in script
+    assert 'context.toolbar.append(search, refresh);' in script
+    assert 'const showWriteActions = !context.session || source !== "local";' in script
+    assert 'rejectProductGroupWrite' in script
+    assert 'root.append(productGroupManagementActions(context, source));' in script
+    assert 'context.toolbar.append(context.button(' not in script
     assert 'descriptors.find(([, item])' in source_family_script
     assert 'const descriptor = entry?.[1]' in source_family_script
 
