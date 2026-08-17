@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
 from server.manager import runtime as manager
@@ -123,3 +124,20 @@ def test_account_directory_http_is_super_admin_only(tmp_path, monkeypatch):
     assert payload["users"][0]["alias"] == "MaxJJW"
     assert "hash" not in payload["users"][0]
     assert payload["control_database"]["local_sqlite_mirror"] is True
+
+
+def test_account_directory_serializes_postgres_timestamps(tmp_path, monkeypatch):
+    monkeypatch.setattr(account_admin, "save_accounts", lambda value: None)
+    monkeypatch.setattr(account_admin, "save_organizations", lambda value: None)
+    monkeypatch.setattr(account_admin, "save_levels", lambda value: None)
+    store = _DirectoryStore()
+    timestamp = datetime(2026, 8, 17, 15, 45, tzinfo=timezone.utc)
+    store.accounts[0]["created_at"] = timestamp
+    store.accounts[0]["updated_at"] = timestamp
+    store.organizations[0]["updated_at"] = timestamp
+    store.levels[0]["updated_at"] = timestamp
+
+    value = account_admin.AccountAdministrationService(store).snapshot()
+    encoded = json.dumps(value, ensure_ascii=False)
+
+    assert "2026-08-17T15:45:00+00:00" in encoded
