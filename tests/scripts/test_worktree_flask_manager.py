@@ -867,9 +867,9 @@ def test_manager_account_jobs_use_one_shared_service_projection(
     assert payload["scope"] == "mine"
     assert payload["total"] == 2
     assert [job["job_id"] for job in payload["jobs"]] == [
-        "job-8141", "job-8176",
+        "job-8176", "job-8141",
     ]
-    assert [job["port"] for job in payload["jobs"]] == [8141, 8176]
+    assert [job["port"] for job in payload["jobs"]] == [8176, 8141]
     assert calls == [(
         8141, "/api/jobs?scope=mine&limit=20&page=1", "user@1",
     )]
@@ -1098,7 +1098,12 @@ def test_public_research_index_and_chapter_routes_are_bounded(tmp_path):
 
 
 def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
-    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        data_root=tmp_path,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
     projection = {
         "schema_version": 2,
         "report_id": "report-public-route",
