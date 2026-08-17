@@ -46,6 +46,9 @@
     if (parts[0] === "products" && parts[1] === "categories") {
       return t("产品分类");
     }
+    if (parts[0] === "products" && parts[1] === "sources") {
+      return t("数据源族");
+    }
     return t(labels[parts[0]] || module.title || parts[0]);
   }
 
@@ -243,6 +246,12 @@
     }
     if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) {
       return {kind: "product-reference", referenceKind: parts[1], id: decodeURIComponent(parts.slice(2).join("/"))};
+    }
+    if (parts[0] === "products" && parts[1] === "sources" && parts[2]) {
+      return {
+        kind: "product-source-family",
+        id: decodeURIComponent(parts.slice(2).join("/")),
+      };
     }
     if (parts[0] === "products" && parts[1] === "sources") return {kind: "product-sources"};
     if (parts[0] === "products" && parts[1] === "groups") return {kind: "product-groups"};

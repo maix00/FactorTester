@@ -1,14 +1,90 @@
 (() => {
   async function list(context, helpers) {
-    const {localCatalogAvailable, sourceOf, pathFor, catalogSwitch, request,
-      sourceSummary, isCurrent} = helpers;
+    const {
+      sourceOf, pathFor, catalogSwitch, sourceSummary, isCurrent,
+      localCatalogAvailable,
+    } = helpers;
     const current = sourceOf();
     context.activeNav("products");
-    context.setHeading(context.t("数据源"), context.t("产品目录"));
+    context.setHeading(context.t("数据源族"), context.t("产品目录"));
     catalogSwitch(context, "sources", current);
-    context.toolbar.append(context.button("↻", () => list(context, helpers), context.t("刷新")));
-    context.content.replaceChildren(FTUI.loading(context.t("正在读取数据源…")));
+    const root = document.createElement("div");
+    root.className = "detail-stack product-source-page";
+    root.append(sourceSummary(context, current));
+    const mount = document.createElement("div");
+    mount.className = "product-source-results";
+    root.append(mount);
+    root.append(Object.assign(document.createElement("p"), {
+      className: "catalog-source-note",
+      textContent: localCatalogAvailable()
+        ? context.t("选择数据源族后，产品与产品组页面会读取对应的数据包")
+        : context.t("Web 端只能访问服务器提供的数据源"),
+    }));
+    context.content.replaceChildren(root);
+    let refresh;
+    let loadToken = 0;
+    const isCurrentView = token => token === loadToken
+      && isCurrent(context) !== false
+      && root.isConnected !== false
+      && mount.isConnected !== false;
+    const loadIntoMount = async () => {
+      const token = ++loadToken;
+      mount.replaceChildren(FTUI.loading(context.t("正在读取数据源族…")));
+      try {
+        const rows = await loadDescriptors(context, helpers);
+        if (!isCurrentView(token)) return;
+        const table = FTUI.table(
+          [context.t("数据源族"), context.t("数据源"), context.t("服务器提供"),
+            context.t("提供服务器"), context.t("访客访问"),
+            context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
+            context.t("可用性"), context.t("数据频率")],
+          rows.map(([, descriptor]) => [
+            familyLink(context, helpers, descriptor),
+            membersCell(context, descriptor.members),
+            descriptor.server_provided ? context.t("是") : context.t("否"),
+            providersCell(context, descriptor),
+            visitorAccessCell(context, descriptor),
+            multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
+            multilineCell((descriptor.categories || []).map(category =>
+              category.title_zh || category.title || category.id || "").filter(Boolean)),
+            dataModesCell(context, descriptor.data_modes),
+            availabilityCell(context, descriptor),
+            frequencyCell(context, descriptor.availability),
+          ]),
+        );
+        rows.forEach(([origin, descriptor], index) => {
+          const row = table.body.rows[index];
+          row.dataset.href = "true";
+          if (descriptor.visitor_data_accessible === false) {
+            row.classList.add("is-unavailable");
+            row.title = context.t("访客只能查看该数据源信息，不能获取数据");
+          }
+          row.addEventListener("click", () => context.navigate(pathFor(
+            `/products/sources/${encodeURIComponent(familyID(descriptor))}`,
+            origin.id,
+          )));
+        });
+        mount.replaceChildren(table.shell);
+      } catch (error) {
+        if (!isCurrentView(token)) return;
+        mount.replaceChildren(FTUI.empty(
+          context.t("数据源族读取失败"), error.message || context.t("请稍后重试"),
+        ));
+      } finally {
+        if (refresh && isCurrentView(token)) refresh.disabled = false;
+      }
+    };
+    refresh = context.button("↻", () => {
+      if (refresh.disabled) return;
+      refresh.disabled = true;
+      void loadIntoMount();
+    }, context.t("刷新"));
+    context.toolbar.append(refresh);
+    void loadIntoMount();
+  }
 
+  async function loadDescriptors(context, helpers) {
+    const {localCatalogAvailable, request} = helpers;
     const origins = [{id: "server", endpoint: "/api/catalog/sources"}];
     // A browser cannot access the client filesystem. Local providers are
     // requested only by the embedded Swift presentation.
@@ -29,74 +105,31 @@
       } else {
         mergeSourceDescriptor(merged, origin, {
           source_name: origin.id,
+          family_name: origin.id,
+          family_id: origin.id,
           bundle_name: "—",
           bundle_id: "—",
           server_provided: origin.id === "server",
-          product_paths: [], categories: [], data_modes: [],
+          product_paths: [], categories: [], data_modes: [], members: [],
           availability: {status: "error", error: result.reason?.message || ""},
         });
       }
     });
-    const rows = [...merged.values()];
-    if (!isCurrent(context)) return;
-    const root = document.createElement("div");
-    root.className = "detail-stack product-source-page";
-    root.append(sourceSummary(context, current));
-    const table = FTUI.table(
-      [context.t("数据源名称"), context.t("Bundle"), context.t("服务器提供"),
-        context.t("提供服务器"), context.t("访客访问"),
-        context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
-        context.t("可用性"), context.t("数据频率")],
-      rows.map(([, descriptor]) => [
-        descriptor.source_name || "—",
-        multilineCell([
-          descriptor.bundle_name,
-          ...(descriptor.members || []).map(member =>
-            `${member.label || member.id} · ${member.frequency || "—"}`),
-        ], "catalog-source-lines catalog-source-bundle"),
-        descriptor.server_provided ? context.t("是") : context.t("否"),
-        providersCell(context, descriptor),
-        visitorAccessCell(context, descriptor),
-        multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
-        multilineCell((descriptor.categories || []).map(category =>
-          category.title_zh || category.title || category.id || "").filter(Boolean)),
-        dataModesCell(context, descriptor.data_modes),
-        availabilityCell(context, descriptor),
-        frequencyCell(context, descriptor.availability),
-      ]),
-    );
-    rows.forEach(([origin, descriptor], index) => {
-      const row = table.body.rows[index];
-      row.dataset.href = "true";
-      if (descriptor.visitor_data_accessible === false) {
-        row.classList.add("is-unavailable");
-        row.title = context.t("访客只能查看该数据源信息，不能获取数据");
-        return;
-      }
-      row.addEventListener("click", () => context.navigate(pathFor(
-        "/products", origin.id, descriptor.id && descriptor.id !== "—"
-          ? [descriptor.id] : [],
-      )));
-    });
-    root.append(table.shell);
-    root.append(Object.assign(document.createElement("p"), {
-      className: "catalog-source-note",
-      textContent: localCatalogAvailable()
-        ? context.t("选择数据源后，产品与产品组页面会读取对应的数据包")
-        : context.t("Web 端只能访问服务器提供的数据源"),
-    }));
-    context.content.replaceChildren(root);
+    return [...merged.values()];
   }
 
   function mergeSourceDescriptor(target, origin, incoming) {
     const descriptor = incoming && typeof incoming === "object"
       ? incoming : {};
     const key = String(
-      descriptor.bundle_id || descriptor.source_name || descriptor.id || origin.id,
+      descriptor.family_id || descriptor.bundle_id || descriptor.source_name
+        || descriptor.id || origin.id,
     ).trim().toLocaleLowerCase();
     const existing = target.get(key);
     if (!existing) {
       const value = {...descriptor};
+      value.family_id = familyID(value) || origin.id;
+      value.family_name = familyName(value) || origin.id;
       value.local_available = origin.id === "local";
       target.set(key, [origin, value]);
       return;
@@ -114,6 +147,9 @@
     }
     value.bundle_name = value.bundle_name && value.bundle_name !== "—"
       ? value.bundle_name : descriptor.bundle_name;
+    value.family_name = familyName(value) || familyName(descriptor);
+    value.family_id = familyID(value) || familyID(descriptor);
+    value.members = mergeMembers(value.members, descriptor.members);
     value.server_providers = mergeObjects(
       value.server_providers || [], descriptor.server_providers || [],
       item => `${item.server_id || ""}:${item.port || ""}`,
@@ -147,6 +183,32 @@
     );
   }
 
+  function familyID(descriptor) {
+    return String(
+      descriptor?.family_id || descriptor?.bundle_id || descriptor?.id || "",
+    ).trim();
+  }
+
+  function familyName(descriptor) {
+    return String(
+      descriptor?.family_name || descriptor?.bundle_name
+        || descriptor?.source_name || descriptor?.id || "",
+    ).trim();
+  }
+
+  function mergeMembers(first, second) {
+    const values = new Map();
+    [...(Array.isArray(first) ? first : []), ...(Array.isArray(second) ? second : [])]
+      .filter(item => item && typeof item === "object")
+      .forEach(item => {
+        const key = String(item.id || item.key || item.label || "").trim();
+        if (!key) return;
+        const existing = values.get(key);
+        values.set(key, existing ? {...existing, ...item} : {...item});
+      });
+    return [...values.values()];
+  }
+
   function mergeValues(first, second) {
     return [...new Set([...(Array.isArray(first) ? first : []),
       ...(Array.isArray(second) ? second : [])].map(value => String(value)))];
@@ -177,6 +239,36 @@
     return button;
   }
 
+  function familyLink(context, helpers, descriptor) {
+    const label = familyName(descriptor) || "—";
+    const link = document.createElement("a");
+    link.className = "catalog-source-family-link";
+    link.textContent = label;
+    const id = familyID(descriptor);
+    if (!id || id === "—") return link;
+    link.href = helpers.pathFor(
+      `/products/sources/${encodeURIComponent(id)}`,
+      helpers.sourceOf(),
+    );
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      context.navigate(link.href);
+    });
+    return link;
+  }
+
+  function membersCell(context, members) {
+    return multilineCell(
+      (Array.isArray(members) ? members : []).map(member => {
+        const label = member.label || member.id || context.t("未命名数据源");
+        const frequency = member.frequency || context.t("暂无频率");
+        return `${label} · ${frequency}`;
+      }),
+      "catalog-source-lines catalog-source-members",
+    );
+  }
+
   function visitorAccessCell(context, descriptor) {
     if (descriptor.visitor_data_accessible === true) {
       return context.t("可获取");
@@ -199,7 +291,7 @@
     close.setAttribute("aria-label", context.t("关闭"));
     close.textContent = "×";
     const title = document.createElement("h2");
-    title.textContent = `${descriptor?.source_name || descriptor?.id || context.t("数据源")} · ${context.t("提供服务器")}`;
+    title.textContent = `${familyName(descriptor) || context.t("数据源族")} · ${context.t("提供服务器")}`;
     const providers = Array.isArray(descriptor?.server_providers)
       ? descriptor.server_providers : [];
     const table = FTUI.table(
@@ -270,5 +362,5 @@
     return multilineCell(names.length ? names : [context.t("暂无频率")], "catalog-source-lines catalog-source-frequency");
   }
 
-  window.FTProductSources = Object.freeze({list});
+  window.FTProductSources = Object.freeze({list, loadDescriptors});
 })();

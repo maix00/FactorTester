@@ -49,6 +49,7 @@
       category, mode, source, sources, canEdit,
       loadSources: sourcesPromise ? () => sourcesPromise : null,
       sourceSummary: () => helpers.sourceSummary(context, source),
+      sourceFamilyPath: helpers.sourceFamilyPath,
       deleteButton: category && canEdit && !category.source_managed
         ? () => deleteButton(context, helpers, category, source) : null,
       refreshButton: category?.is_composite && canEdit
@@ -113,6 +114,7 @@
         selectedPaths: treeState.selectedPaths || [],
         source,
         contractTreePath,
+        sourceFamilyPath: helpers.sourceFamilyPath,
         isCurrent: () => helpers.isCurrent(context),
         // An empty source filter means the ordinary tree exposed by this
         // Manager, including all currently available local data sources.

@@ -57,6 +57,42 @@
     return input;
   }
 
+  function sourceFamilyCell(context, node, source, options) {
+    const ids = Array.isArray(node?.source_family_ids)
+      ? node.source_family_ids
+      : Array.isArray(node?.source_ids) ? node.source_ids : [];
+    const definitions = Array.isArray(options?.dataSourceDefinitions)
+      ? options.dataSourceDefinitions : [];
+    const byID = new Map(definitions.map(item => [
+      String(item?.family_id || item?.bundle_id || item?.id || ""), item,
+    ]));
+    const cell = document.createElement("div");
+    cell.className = "catalog-source-lines catalog-source-family-list";
+    ids.forEach(rawID => {
+      const id = String(rawID || "").trim();
+      if (!id) return;
+      const descriptor = byID.get(id);
+      const label = descriptor?.family_name || descriptor?.bundle_name || id;
+      const link = document.createElement("a");
+      link.className = "catalog-source-family-link";
+      link.textContent = label;
+      if (options?.sourceFamilyPath) {
+        link.href = options.sourceFamilyPath(
+          descriptor?.family_id || descriptor?.bundle_id || descriptor?.id || id,
+          source,
+        );
+        link.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          context.navigate(link.href);
+        });
+      }
+      cell.append(link);
+    });
+    if (!cell.childElementCount) cell.textContent = "—";
+    return cell;
+  }
+
   function productTable(context, nodes, source, options = {}) {
     const values = Array.isArray(nodes) ? nodes : [];
     const selectable = options.selectable === true;
@@ -67,7 +103,7 @@
       node.exchange || "—",
       node.product_code || node.code || "—",
       productPath(node) || "—",
-      Array.isArray(node.source_ids) ? node.source_ids.join(", ") : "—",
+      sourceFamilyCell(context, node, source, options),
       node.product_type === "contract" ? context.t("合约") : context.t("产品"),
     ]);
     const view = FTUI.table([

@@ -367,6 +367,7 @@
       productReference: (pageContext, kind, id) =>
         FTProducts.referenceDetail(pageContext, kind, id),
       productSources: pageContext => FTProducts.sourceList(pageContext),
+      productSourceFamily: (pageContext, id) => FTProducts.sourceFamilyDetail(pageContext, id),
       productGroups: pageContext => FTProducts.list(pageContext, "groups"),
       productCategories: pageContext => FTProducts.list(pageContext, "categories"),
       productCategory: (pageContext, route) => FTProducts.categoryDetail(

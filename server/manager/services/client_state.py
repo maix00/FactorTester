@@ -999,6 +999,7 @@ class ClientStateService:
         compatibility list API for callers that do not need page metadata.
         """
         from server.modules.products.product_category_views import (
+            category_products_for_path,
             tree_for_path,
         )
         from server.modules.shared.price_services import (
@@ -1016,18 +1017,28 @@ class ClientStateService:
         )
         search = str(query or "").strip().casefold()
 
-        node_path = str(path or "")
+        requested_path = str(path or "")
+        node_path = requested_path
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]
         tree, node_path = tree_for_path(
             node_path, category_id, principal=principal, source_ids=source_ids,
         )
-        node = find_node_by_path(tree, node_path.split("/")) if node_path else None
-        objects = (
-            node.get("$OBJECTS$", [])
-            if isinstance(node, dict)
-            else ([] if node_path else list(cached_contracts()))
+        category_objects = category_products_for_path(
+            node_path if "/ProductCategory/" in node_path else requested_path,
+            category_id,
+            principal=principal,
+            source_ids=source_ids,
         )
+        if category_objects is not None:
+            objects = category_objects
+        else:
+            node = find_node_by_path(tree, node_path.split("/")) if node_path else None
+            objects = (
+                node.get("$OBJECTS$", [])
+                if isinstance(node, dict)
+                else ([] if node_path else list(cached_contracts()))
+            )
         result = []
         for product in sorted(objects, key=lambda item: str(getattr(item, "name", item))):
             name = str(getattr(product, "name", product))

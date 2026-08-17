@@ -11,6 +11,7 @@ from server.modules.shared.price_services import (
     normalize_product_category_id,
 )
 from server.modules.products.product_category_views import (
+    category_products_for_path,
     normalize_category_selection,
     render_product_tree,
     tree_for_path,
@@ -118,22 +119,40 @@ def test_parallel_category_selection_keeps_sibling_trees_separate():
         CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID,
     ])
 
-    assert [node["title"] for node in tree] == ["中国期货日夜盘", "中国期货行业"]
-    assert [node["key"] for node in tree] == [
-        f"ProductCategory/{CN_FUTURES_DAY_NIGHT_CATEGORY_ID}",
-        f"ProductCategory/{CN_FUTURES_SECTOR_CATEGORY_ID}",
+    assert [node["key"] for node in tree] == ["Product"]
+    assert not any(
+        node["key"].startswith("ProductCategory/") for node in _walk_nodes(tree)
+    )
+    category_nodes = [
+        node for node in _walk_nodes(tree)
+        if "/ProductCategory/" in node.get("key", "")
+        and node.get("key", "").endswith(
+            (CN_FUTURES_DAY_NIGHT_CATEGORY_ID,
+             CN_FUTURES_SECTOR_CATEGORY_ID),
+        )
     ]
-    assert all(node.get("children") for node in tree)
+    assert {node["title"] for node in category_nodes} == {
+        "中国期货日夜盘", "中国期货行业",
+    }
+    assert all(node["key"].startswith("Product/") for node in category_nodes)
 
 
 def test_parallel_category_path_resolves_the_selected_sibling():
+    path = (
+        "Product/Futures/CNFutures/ProductCategory/"
+        f"{CN_FUTURES_SECTOR_CATEGORY_ID}/有色金属"
+    )
     tree, path = tree_for_path(
-        f"ProductCategory/{CN_FUTURES_SECTOR_CATEGORY_ID}/Product/Futures/CNFutures/行业",
-        [CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID],
+        path, [CN_FUTURES_DAY_NIGHT_CATEGORY_ID, CN_FUTURES_SECTOR_CATEGORY_ID],
     )
 
-    assert path == "Product/Futures/CNFutures/行业"
+    assert path == "Product/Futures/CNFutures"
     assert find_node_by_path(tree, path.split("/")) is not None
+    assert category_products_for_path(
+        "Product/Futures/CNFutures/ProductCategory/"
+        f"{CN_FUTURES_SECTOR_CATEGORY_ID}/有色金属",
+        [CN_FUTURES_SECTOR_CATEGORY_ID],
+    )
 
 
 def _walk_nodes(nodes):
