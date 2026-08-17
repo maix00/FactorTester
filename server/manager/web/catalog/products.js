@@ -434,8 +434,9 @@
 
   function detailHelpers() {
     return {
-      sourceOf, load, loadCategories, loadProductTree, catalogSwitch,
-      sourceSummary, pathFor,
+      sourceOf, load, loadCategories, loadProductTree, loadSources, loadTree,
+      loadSourceIDs: definitions => FTProductCategoryModel.availableSourceIDs(definitions),
+      catalogSwitch, sourceSummary, pathFor,
       isCurrent,
     };
   }
@@ -447,6 +448,11 @@
   }
   async function referenceDetail(context, kind, targetRef) {
     return window.FTProductDetails.referenceDetail(context, kind, targetRef, detailHelpers());
+  }
+  async function categoryDetail(context, target, mode) {
+    return window.FTProductCategoryDetails.render(
+      context, target, mode, detailHelpers(),
+    );
   }
   function pathCount(group) { return Array.isArray(group.paths) ? group.paths.length : (Array.isArray(group.product_names) ? group.product_names.length : 0); }
   function productCount(group) {
@@ -478,5 +484,7 @@
   }
   function matches(value, query) { return !query || JSON.stringify(value || {}).toLowerCase().includes(query); }
 
-  window.FTProducts = {groupDetail, list, productDetail, referenceDetail, sourceList};
+  window.FTProducts = {
+    categoryDetail, groupDetail, list, productDetail, referenceDetail, sourceList,
+  };
 })();
