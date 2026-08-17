@@ -27,28 +27,33 @@
     surface.className = "product-category-detail-surface";
     if (editing) surface.noValidate = true;
 
-    const header = document.createElement("div");
-    header.className = "product-category-editor-header";
-    header.append(backButton(context, helpers, category, source));
-    const heading = document.createElement("h2");
-    heading.textContent = creating
+    const headingText = creating
       ? context.t("新增分类")
       : category.title_zh || category.alias || category.id;
-    header.append(heading);
-    if (creating || editing) {
-      header.append(cancelButton(context, helpers, category, source));
-      const save = FTUI.actionButton(context.t("保存"), null, {variant: "primary"});
-      save.type = "submit";
-      save.dataset.categorySave = "true";
-      header.append(save);
-    } else if (canEdit) {
-      header.append(FTUI.actionButton(context.t("编辑"), () => {
-        context.navigate(helpers.pathFor(
-          `/products/categories/${encodeURIComponent(category.id)}?mode=edit`,
-          source,
-        ));
-      }, {variant: "primary"}));
-    }
+    const headerValue = FTCatalogDetailUI.header(context, {
+      title: headingText,
+      editing: creating || editing,
+      creating,
+      canEdit,
+      backLabel: "返回产品分类",
+      onBack: () => context.navigate(helpers.pathFor("/products/categories", source)),
+      onCancel: () => {
+        if (category) {
+          context.navigate(helpers.pathFor(
+            `/products/categories/${encodeURIComponent(category.id)}`, source,
+          ));
+        } else {
+          context.closeTab?.(context.tabID);
+          context.navigate(helpers.pathFor("/products/categories", source));
+        }
+      },
+      onEdit: () => context.navigate(helpers.pathFor(
+        `/products/categories/${encodeURIComponent(category.id)}?mode=edit`, source,
+      )),
+    });
+    const header = headerValue.root;
+    const save = headerValue.save;
+    if (save) save.dataset.categorySave = "true";
     if (category && canEdit && policy.delete !== false && !sourceManaged) {
       header.append(options.deleteButton?.());
     }
@@ -129,25 +134,6 @@
       });
     }
     return root;
-  }
-
-  function backButton(context, helpers, category, source) {
-    return FTUI.actionButton(context.t("返回产品分类"), () => {
-      context.navigate(helpers.pathFor("/products/categories", source));
-    }, {variant: "secondary"});
-  }
-
-  function cancelButton(context, helpers, category, source) {
-    return FTUI.actionButton(context.t("取消"), () => {
-      if (category) {
-        context.navigate(helpers.pathFor(
-          `/products/categories/${encodeURIComponent(category.id)}`, source,
-        ));
-      } else {
-        context.closeTab?.(context.tabID);
-        context.navigate(helpers.pathFor("/products/categories", source));
-      }
-    }, {variant: "secondary"});
   }
 
   function identitySection(context, category, options) {

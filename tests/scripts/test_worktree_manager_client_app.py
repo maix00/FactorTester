@@ -2773,6 +2773,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             f"{base_url}/api/catalog/product-groups",
             data=json.dumps({
                 "name": "新建组", "paths": ["China Futures/Day"],
+                "category_ids": ["cnfutures_sector"],
             }).encode(),
             headers={**headers, "Content-Type": "application/json"},
             method="POST",
@@ -2795,7 +2796,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         "group_ref": "product-group:created",
         "name": "新建组",
         "paths": ["China Futures/Day"],
-        "category_ids": [],
+        "category_ids": ["cnfutures_sector"],
         "principal": "user@1",
     }
     product_reads = (
@@ -3007,13 +3008,16 @@ def test_product_group_ui_explains_creator_research_and_unavailable_members(
             products = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/details.js") as response:
             details = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-group-detail.js") as response:
+            group_details = response.read().decode("utf-8")
 
     assert "creator_kind" in products
     assert "research_bindings" in products
     assert 'context.t("未绑定研究")' in products
     assert "unavailableProductDetail" in details
     assert "非服务器提供，无法展示相关信息" in details
-    assert 'context.t("是否为研究创建")' in details
+    assert 'context.t("产品数量")' in group_details
+    assert "FTCatalogDetailUI.header" in group_details
 
 
 def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
@@ -3029,6 +3033,8 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             create_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-detail.js") as response:
             detail_script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/shared/selection-tree.js") as response:
+            selection_tree = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-detail-layout.js") as response:
             detail_layout = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-label-editor.js") as response:
@@ -3075,6 +3081,9 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "window.FTProductCategories" in categories
     assert '"新增分类"' in categories
     assert '"新增乘积分类"' in categories
+    assert "const showWriteActions = !context.session || source !== \"local\";" in categories
+    assert "rejectVisitorOrLocalWrite" in categories
+    assert "window.alert(message)" in categories
     assert "FTProductCategoryOverlay.choose" in categories
     assert 'context.t("分类 ID")' in categories
     assert 'context.t("来源/所有者")' in categories
@@ -3086,13 +3095,13 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "显示产品树" in label_editor
     assert "隐藏产品树" in label_editor
     assert "loadSources" in detail_script
-    assert "leafOnly: true" in detail_script
-    assert "helpers.loadTree" in detail_script
-    assert "[], selectedSourceIDs" in detail_script
+    assert "leafOnly: options.leafOnly !== false" in selection_tree
+    assert "helpers.loadTree" in selection_tree
+    assert "sourceIDs: []" in detail_script
     assert 'query.append("category", category.id)' not in detail_script
     assert "product-category-inline-tree" in label_editor
     detail_surface = detail_script + detail_layout + label_editor
-    assert "selectionReadOnly" in detail_surface
+    assert "selectionReadOnly" in selection_tree
     assert "从父分类更新内容" in detail_script
     assert "parent_category_ids" in detail_surface
     assert "DELETE" in detail_script

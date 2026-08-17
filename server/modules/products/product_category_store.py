@@ -36,6 +36,61 @@ from server.modules.products.product_category_definition import (
 )
 
 
+class ProductCategoryInUseError(ValueError):
+    """Raised when a category is still bound to one or more product groups."""
+
+    status = 409
+
+    def __init__(self, category_id: str, references: list[dict[str, Any]]):
+        self.category_id = str(category_id or "").strip()
+        self.references = [dict(item) for item in references]
+        labels = [
+            str(item.get("name") or item.get("id") or "").strip()
+            for item in self.references
+        ]
+        detail = "、".join(item for item in labels if item)
+        suffix = f"：{detail}" if detail else ""
+        super().__init__(f"产品分类仍被产品组引用，不能删除{suffix}")
+
+
+def product_group_references(
+    username: str,
+    category_id: str,
+) -> list[dict[str, Any]]:
+    """Return product groups that explicitly bind ``category_id``.
+
+    The import stays local because product groups validate their category IDs
+    through this module.  Keeping the dependency at call time avoids a module
+    cycle while making deletion checks use the same migrated SQLite view as
+    the product-group editor.
+    """
+    from server.modules.products.product_group_store import load_product_groups
+
+    wanted = str(category_id or "").strip()
+    if not wanted:
+        return []
+    result: list[dict[str, Any]] = []
+    for group in load_product_groups(username):
+        category_ids = {
+            str(value or "").strip()
+            for value in group.get("category_ids") or []
+            if str(value or "").strip()
+        }
+        if wanted not in category_ids:
+            continue
+        result.append({
+            "id": str(group.get("id") or "").strip(),
+            "name": str(group.get("name") or "").strip(),
+        })
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get("name") or "").casefold(),
+            str(item.get("id") or ""),
+        ),
+    )
+
+
 def list_product_categories(username: str) -> list[dict[str, Any]]:
     """Return source categories followed by categories owned by ``username``."""
     from server.modules.shared.price_services import available_product_categories
@@ -246,6 +301,9 @@ def delete_product_category(username: str, category_id: str) -> bool:
     visible = get_product_category(username, wanted)
     if visible is not None and visible.get("source_managed"):
         raise PermissionError("数据源产品分类由服务器固定提供，不能删除")
+    references = product_group_references(username, wanted)
+    if references:
+        raise ProductCategoryInUseError(wanted, references)
     categories = load_product_categories(username)
     filtered = [item for item in categories if str(item.get("id") or "") != wanted]
     if len(filtered) == len(categories):

@@ -571,6 +571,9 @@ class ClientStateService:
     def product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return account groups projected against the server catalog."""
         from tools.data.account_manage import load_product_groups
+        from server.modules.products.product_group_store import (
+            product_group_path_bindings,
+        )
         from server.services.product_catalog_projection import catalog_product_records
         from server.manager.domain.product_groups import (
             project_account_product_groups,
@@ -602,6 +605,11 @@ class ClientStateService:
                 if key and key not in known:
                     groups.append(dict(payload))
                     known.add(key)
+        for group in groups:
+            if "path_bindings" not in group:
+                group["path_bindings"] = product_group_path_bindings(
+                    group.get("paths") or [],
+                )
         projected = project_account_product_groups(
             groups=groups,
             principal=principal,
@@ -655,6 +663,48 @@ class ClientStateService:
         return self.product_group(
             principal, f"product-group:{created['id']}",
         )
+
+    def update_product_group(
+        self,
+        principal: str,
+        group_ref: str,
+        name: str,
+        paths: list[str],
+        category_ids: list[str],
+    ) -> dict[str, Any] | None:
+        """Update one account group while keeping its stable group ID."""
+        from server.modules.products.product_group_store import update_product_group
+
+        current = self.product_group(principal, group_ref)
+        if current is None:
+            return None
+        updated = update_product_group(
+            principal,
+            str(current.get("name") or ""),
+            paths,
+            category_ids,
+            new_name=name,
+        )
+        if updated is None:
+            return None
+        return self.product_group(
+            principal, str(current.get("group_ref") or group_ref),
+        )
+
+    def delete_product_group(
+        self,
+        principal: str,
+        group_ref: str,
+    ) -> bool:
+        """Delete one account group resolved by stable ID or display name."""
+        from server.modules.products.product_group_store import delete_product_group
+
+        current = self.product_group(principal, group_ref)
+        if current is None:
+            return False
+        return bool(delete_product_group(
+            principal, str(current.get("name") or ""),
+        ))
 
     def factor_library(self, principal: str) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""

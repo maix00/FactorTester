@@ -10,12 +10,19 @@
     root.append(helpers.sourceSummary(context, source));
     const toolbar = document.createElement("div");
     toolbar.className = "product-category-management-actions";
-    // A visitor has no account session. The server also rejects catalog
-    // writes for visitors, so do not expose create controls to them.
+    // Keep the complete catalog surface visible to visitors.  The buttons
+    // are useful affordance/context, but their handlers must stop before
+    // navigation or any write request when no account session exists.
     const readOnly = source === "local" || !context.session;
-    if (!readOnly) {
+    const showWriteActions = !context.session || source !== "local";
+    const canWrite = source === "server" && Boolean(context.session);
+    if (showWriteActions) {
       toolbar.append(
         FTUI.actionButton(context.t("新增分类"), () => {
+          if (!canWrite) {
+            rejectVisitorOrLocalWrite(context, source);
+            return;
+          }
           context.navigate(helpers.pathFor(
             "/products/categories/new?mode=create", source,
           ));
@@ -23,6 +30,10 @@
           variant: "primary",
         }),
         FTUI.actionButton(context.t("新增乘积分类"), async () => {
+          if (!canWrite) {
+            rejectVisitorOrLocalWrite(context, source);
+            return;
+          }
           try {
             const value = await helpers.loadCategories(context, source);
             const selected = await window.FTProductCategoryOverlay.choose(
@@ -88,6 +99,16 @@
     }, context.t("刷新"));
     toolbar.append(refresh);
     void loadIntoMount();
+  }
+
+  function rejectVisitorOrLocalWrite(context, source) {
+    const message = !context.session
+      ? context.t("访客模式只能查看产品分类")
+      : source === "local"
+        ? context.t("本地产品分类不可直接编辑")
+        : context.t("产品分类不可编辑");
+    if (typeof window.alert === "function") window.alert(message);
+    else context.showNotice?.(message, true);
   }
 
   function renderCategories(

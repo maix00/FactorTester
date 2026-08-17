@@ -238,6 +238,13 @@
       list(context, page);
     }, context.t("刷新"));
     context.toolbar.append(search, refresh);
+    if (page === "groups" && context.session) {
+      context.toolbar.append(context.button(
+        context.t("新增产品组"),
+        () => context.navigate(pathFor("/products/group/new", source)),
+        context.t("新增产品组"),
+      ));
+    }
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     let value;
     try {
