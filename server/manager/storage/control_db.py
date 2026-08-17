@@ -949,7 +949,6 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             value["updated_at"] = value["updated_at"].isoformat()
         return value
 
-    @staticmethod
     def load_organizations(self) -> list[dict[str, Any]]:
         self.ensure_schema()
         with self._connection() as connection:
