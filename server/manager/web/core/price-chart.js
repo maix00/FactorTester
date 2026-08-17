@@ -108,7 +108,7 @@
   }
 
   function scalarPointFormatter(context, label) {
-    return function() { return pointLabel(context, label, this.y); };
+    return function() { return `${pointLabel(context, label, this.y)}<br/>`; };
   }
 
   function localeTag(context) {
