@@ -288,6 +288,30 @@ def test_configured_docker_gateway_forwards_one_canonical_client_address(
     }
 
 
+def test_configured_local_docker_gateway_accepts_factor_client(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_LOCAL_CLIENT_CIDRS", "172.18.0.1/32")
+    state = manager.ManagerState(tmp_path, "python", server_id="local")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.18.0.1", 51234)
+    handler.headers = {"X-FactorTester-Client": "cli"}
+
+    assert handler._is_local_ftclient()
+
+    handler.headers = {}
+    assert not handler._is_local_ftclient()
+
+    handler.client_address = ("172.18.0.9", 51234)
+    handler.headers = {"X-FactorTester-Client": "cli"}
+    assert not handler._is_local_ftclient()
+
+    state.public_server = True
+    handler.client_address = ("172.18.0.1", 51234)
+    assert not handler._is_local_ftclient()
+
+
 def test_untrusted_docker_gateway_cannot_spoof_forwarded_metadata(
     tmp_path,
 ) -> None:

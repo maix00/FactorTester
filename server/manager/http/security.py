@@ -9,19 +9,16 @@ from pathlib import Path
 
 
 TRUSTED_PROXY_CIDRS_ENV = "FACTORTESTER_TRUSTED_PROXY_CIDRS"
+LOCAL_CLIENT_CIDRS_ENV = "FACTORTESTER_LOCAL_CLIENT_CIDRS"
 
 
-def configured_trusted_proxy_networks(
-    value: str | None = None,
+def _configured_networks(
+    value: str | None,
+    *,
+    environment_name: str,
 ) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
-    """Parse the exact reverse-proxy networks allowed to supply forwarding headers.
-
-    Loopback peers are trusted separately by the request handler.  Any
-    deployment-provided value is validated once while Manager state starts so
-    a typo cannot silently widen or disable the public access boundary.
-    """
     raw = str(
-        os.environ.get(TRUSTED_PROXY_CIDRS_ENV, "")
+        os.environ.get(environment_name, "")
         if value is None
         else value
     ).strip()
@@ -33,18 +30,43 @@ def configured_trusted_proxy_networks(
         candidate = item.strip()
         if not candidate:
             raise ValueError(
-                f"{TRUSTED_PROXY_CIDRS_ENV} contains an empty CIDR"
+                f"{environment_name} contains an empty CIDR"
             )
         try:
             network = ipaddress.ip_network(candidate, strict=True)
         except ValueError as exc:
             raise ValueError(
-                f"{TRUSTED_PROXY_CIDRS_ENV} contains an invalid CIDR: "
+                f"{environment_name} contains an invalid CIDR: "
                 f"{candidate!r}"
             ) from exc
         if network not in networks:
             networks.append(network)
     return tuple(networks)
+
+
+def configured_trusted_proxy_networks(
+    value: str | None = None,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Parse the exact reverse-proxy networks allowed to supply forwarding headers.
+
+    Loopback peers are trusted separately by the request handler.  Any
+    deployment-provided value is validated once while Manager state starts so
+    a typo cannot silently widen or disable the public access boundary.
+    """
+    return _configured_networks(
+        value,
+        environment_name=TRUSTED_PROXY_CIDRS_ENV,
+    )
+
+
+def configured_local_client_networks(
+    value: str | None = None,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Parse trusted Docker gateway networks for local FTClient requests."""
+    return _configured_networks(
+        value,
+        environment_name=LOCAL_CLIENT_CIDRS_ENV,
+    )
 
 
 def configured_tls_paths(
