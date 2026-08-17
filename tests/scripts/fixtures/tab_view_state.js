@@ -142,6 +142,14 @@ assert.strictEqual(dialog.open, true);
 assert.strictEqual(window.scrollY, 17);
 assert.strictEqual(renderCount, 1);
 
+// A language change invalidates the cached home DOM.  Returning to home must
+// render it again instead of restoring labels from the previous locale.
+tabs.navigate("/products/product/LANGUAGE.DCE");
+tabs.discardView("home");
+const renderCountBeforeHomeRefresh = renderCount;
+tabs.navigate("/");
+assert.strictEqual(renderCount, renderCountBeforeHomeRefresh + 1);
+
 // A fourth inactive view causes the oldest inactive view to be coldified. Its
 // DOM is released, while the route is re-rendered and control state is restored
 // when the tab is selected again.

@@ -7,7 +7,10 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from server.modules.shared.price_data_helpers import format_price_row
+from server.modules.shared.price_data_helpers import (
+    format_price_row,
+    open_interest_column,
+)
 from server.modules.shared.price_services import (
     available_freq_names_for_product,
     available_sources_for_product,
@@ -106,7 +109,7 @@ def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
         ("OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED", "VOLUME")
         if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
     )
-    oi_column = "OPEN_INTEREST" if "OPEN_INTEREST" in frame.columns else None
+    oi_column = open_interest_column(frame.columns)
     emitted = frame.copy()
     emitted["__time__"] = list(emitted.index)
     rows = [

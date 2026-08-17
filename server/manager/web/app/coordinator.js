@@ -106,6 +106,10 @@
     await FTI18n.load(state.languagePreference);
     localizeShell();
     await loadModules();
+    // Home is a cached tab without user-authored state.  Re-render it under
+    // the new locale instead of restoring the old localized DOM when the
+    // user returns from Settings.
+    tabs?.discardView?.("home");
     await renderRoute();
   }
 

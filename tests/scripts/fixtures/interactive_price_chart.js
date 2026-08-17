@@ -50,4 +50,33 @@ assert.strictEqual(captured.options.series[2].name, "持仓量");
 assert.strictEqual(captured.options.series[0].data.length, 2);
 assert.ok(Number.isFinite(captured.options.series[0].data[0][0]));
 assert.ok(captured.options.rangeSelector.buttons.length >= 5);
+const zhDate = captured.options.xAxis.labels.formatter.call({value: 1735812000000});
+assert.ok(zhDate.includes("2025"));
+const tooltip = captured.options.series[0].tooltip.pointFormatter.call({
+  open: 10, high: 12, low: 9, close: 11,
+});
+assert.ok(tooltip.includes("开盘价"));
+assert.ok(tooltip.includes("最高价"));
+assert.ok(tooltip.includes("最低价"));
+assert.ok(tooltip.includes("收盘价"));
+const localized = context.FTPriceChart.render({
+  locale: "en",
+  t(value) {
+    return {
+      "开盘价": "Open price", "最高价": "High price",
+      "最低价": "Low price", "收盘价": "Close price",
+      "成交量": "Volume", "持仓量": "Open interest",
+    }[value] || value;
+  },
+}, target, {product: "SI.GFE", data: [
+  {timestamp: 1735897200000, open: 11, high: 13, low: 10, close: 12, volume: 120, open_interest: 90},
+]});
+assert.strictEqual(localized, chart);
+const enDate = captured.options.xAxis.labels.formatter.call({value: 1735812000000});
+assert.ok(enDate.includes("2025"));
+assert.notStrictEqual(enDate, zhDate);
+const localizedTooltip = captured.options.series[0].tooltip.pointFormatter.call({
+  open: 11, high: 13, low: 10, close: 12,
+});
+assert.ok(localizedTooltip.includes("Open price"));
 console.log("ok");

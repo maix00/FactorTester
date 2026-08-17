@@ -60,6 +60,12 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(captured.options.series.map(ite
 assert.strictEqual(captured.options.yAxis.length, 4);
 assert.strictEqual(captured.options.xAxis.plotBands.length, 1);
 assert.strictEqual(captured.options.chart.height, 650);
+assert.strictEqual(typeof captured.options.xAxis.labels.formatter, "function");
+const factorTooltip = captured.options.series[0].tooltip.pointFormatter.call({
+  open: 10, high: 12, low: 9, close: 11,
+});
+assert.ok(factorTooltip.includes("开盘价"));
+assert.ok(factorTooltip.includes("收盘价"));
 assert.strictEqual(context.FTFactorSeriesResults.supports({
   jobKind: "factor_evaluation",
 }), true);

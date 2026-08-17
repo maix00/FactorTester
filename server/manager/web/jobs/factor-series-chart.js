@@ -42,6 +42,9 @@
         color: palette.priceDown, upColor: palette.priceUp,
         lineColor: palette.priceDown, upLineColor: palette.priceUp,
         dataGrouping: {groupAll: true},
+        tooltip: {
+          pointFormatter: window.FTPriceChart.ohlcPointFormatter(context),
+        },
       },
       {
         type: "line", name: options.factorLabel || t("因子"), yAxis: 1,
@@ -53,6 +56,9 @@
         data: bars.map(item => [item.timestamp, item.volume]),
         color: palette.volume,
         dataGrouping: {approximation: "sum", groupAll: true},
+        tooltip: {
+          pointFormatter: window.FTPriceChart.scalarPointFormatter(context, "成交量"),
+        },
       },
     ];
     if (hasOI) series.push({
@@ -60,6 +66,9 @@
       data: bars.map(item => [item.timestamp, item.openInterest]),
       color: palette.openInterest, lineWidth: 1.2,
       dataGrouping: {approximation: "average", groupAll: true},
+      tooltip: {
+        pointFormatter: window.FTPriceChart.scalarPointFormatter(context, "持仓量"),
+      },
     });
     return {
       chart: {
@@ -74,6 +83,9 @@
       navigator: {enabled: true}, scrollbar: {enabled: true},
       xAxis: {
         type: "datetime", ordinal: true,
+        labels: {
+          formatter: window.FTPriceChart.dateLabelFormatter(context),
+        },
         plotBands: contractBands(options.contracts || []),
       },
       yAxis: axes,

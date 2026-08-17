@@ -210,12 +210,18 @@ def test_product_contract_rows_keep_no_data_navigation_and_adjustment_metadata()
 
     assert "row.dataset.href = \"true\"" in details
     assert "contractRows[index].uid || contractRows[index].contract" in details
+    assert "/products/product/${encodeURIComponent(product.name)}?${query}" in details
+    assert "contract_has_data" in details
+    assert 'if (!product) return referenceDetail(context, "product", target, helpers)' not in details
+    assert "Do not fall back to the generic" in details
     assert "function unavailableContractDetail" in details
     assert "context.t(\"无此产品信息\")" in details
     assert "context.t(\"前复权乘法\")" in details
     assert "context.t(\"后复权乘法\")" in details
     assert "context.t(\"换月比值\")" in details
-    assert "Array.isArray(payload.data) && payload.data.length" in details
+    assert "FTProductPricePanel.render" in details
+    assert "query.get(\"has_data\") === \"0\"" in details
+    assert "正在解析产品引用…" in details
 
 
 def test_product_tree_selection_collapses_descendant_paths() -> None:
@@ -1060,6 +1066,7 @@ def test_visitor_language_is_local_while_authenticated_language_is_synced() -> N
     assert 'if (state.session) {' in coordinator
     assert 'api("/api/client/preferences"' in coordinator
     assert "Visitor language is deliberately browser-local" in coordinator
+    assert 'tabs?.discardView?.("home")' in coordinator
     assert "control.disabled = !context.session" not in settings
     assert "访客模式语言仅保存在当前浏览器，不同步用户账户" in settings
     assert "访客模式语言仅保存在当前浏览器，不同步用户账户" in catalog

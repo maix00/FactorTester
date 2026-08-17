@@ -70,7 +70,17 @@
         return;
       }
       beforeTabChange?.();
-      const fallback = state.tabs[Math.max(0, index - 1)] || state.tabs[0];
+      // Pinned feature tabs stay in state.tabs but are not user-opened tabs.
+      // When the last closable tab is closed, always return to the home tab
+      // instead of accidentally selecting a pinned feature tab near it.
+      const closableTabs = state.tabs.filter(tab => tab.closable);
+      const previousClosable = state.tabs.slice(0, index)
+        .filter(tab => tab.closable).at(-1);
+      const nextClosable = state.tabs.slice(index)
+        .find(tab => tab.closable);
+      const fallback = closableTabs.length
+        ? previousClosable || nextClosable || closableTabs[0]
+        : state.tabs.find(tab => tab.id === "home") || state.tabs[0];
       state.activeTabID = fallback?.id || "home";
       history.pushState({}, "", fallback?.path || "/");
       renderOpenedTabs();
