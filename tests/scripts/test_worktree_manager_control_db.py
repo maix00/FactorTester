@@ -153,6 +153,46 @@ def test_control_database_uses_remote_postgres_default_port_and_tls() -> None:
     assert "control.example:5432" in config.redacted_url
 
 
+def test_control_store_organization_loader_is_bound_to_the_store() -> None:
+    from contextlib import contextmanager
+
+    from server.manager.storage.control_db import PostgresControlStore
+
+    class _Cursor:
+        def execute(self, statement):
+            assert "FROM control_organizations" in statement
+            return self
+
+        def fetchall(self):
+            return [("GTHT", "GTHT", "", None)]
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement):
+            return _Cursor().execute(statement)
+
+    store = object.__new__(PostgresControlStore)
+    store.ensure_schema = lambda: None
+
+    @contextmanager
+    def connection():
+        yield _Connection()
+
+    store._connection = connection
+
+    assert store.load_organizations() == [{
+        "id": "GTHT",
+        "name": "GTHT",
+        "description": "",
+        "updated_at": None,
+    }]
+
+
 def test_control_database_accepts_explicit_port_and_verify_full() -> None:
     config = ControlDatabaseConfig.from_url(
         "postgresql://control:secret@10.0.0.5:55432/factortester"
