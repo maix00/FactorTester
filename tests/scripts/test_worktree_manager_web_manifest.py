@@ -160,6 +160,15 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_category_detail_keeps_route_context_and_dynamic_tab_title() -> None:
+    detail = (WEB_ROOT / "catalog" / "product-category-detail.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert detail.count("helpers.isCurrent(context)") == 2
+    assert "context.updateActiveTab?.({title})" in detail
+
+
 def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     import subprocess
 
@@ -351,6 +360,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
+    assert manifest["route_groups"]["product-categories"] == ["catalog"]
     assert manifest["group_dependencies"]["research"] == ["report", "profile"]
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/page-tabs.js",

@@ -8,7 +8,7 @@
       helpers.loadCategories(context, source),
       helpers.loadSources(context, source),
     ]);
-    if (!helpers.isCurrent()) return;
+    if (!helpers.isCurrent(context)) return;
     const category = (payload.categories || []).find(item => item.id === target);
     if (mode === "create") {
       if (source === "local") {
@@ -310,7 +310,7 @@
         ? category.source_ids
         : helpers.loadSourceIDs?.(sources) || [];
       const value = await helpers.loadTree(context, source, [category.id], sourceIDs);
-      if (!helpers.isCurrent()) return;
+      if (!helpers.isCurrent(context)) return;
       const contractTreePath = (path, params = {}) => {
         const query = new URLSearchParams({path});
         query.append("category", category.id);
