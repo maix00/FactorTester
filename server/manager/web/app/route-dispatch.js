@@ -114,7 +114,7 @@
         );
         case "settings": return pages.settings?.(context(routeToken), route.section);
         case "manager": return guarded(
-          context(routeToken), {nav: "", title: "服务器"}, pages.manager,
+          context(routeToken), {nav: "", title: "服务器"}, pages.manager, route,
         );
         default:
           if (requireLogin()) return undefined;

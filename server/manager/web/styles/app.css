@@ -449,6 +449,17 @@ form[hidden] { display: none !important; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .row-actions button { border: 0; border-radius: 7px; padding: 6px 9px; background: #e9e9ed; color: inherit; }
 .manager-page { max-width: 1400px; }
+.manager-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
+.manager-tab { border: 0; border-radius: 7px; padding: 7px 12px; background: transparent; color: inherit; white-space: nowrap; }
+.manager-tab.active { color: #fff; background: var(--accent); }
+.manager-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.manager-tab-content { display: grid; gap: 16px; min-width: 0; }
+.manager-access-section { max-width: 1400px; }
+.manager-access-toolbar { display: flex; gap: 8px; margin: 0 0 10px; }
+.manager-access-toolbar .toolbar-search { min-width: min(360px, 100%); }
+.manager-access-table-shell { max-height: min(560px, 65vh); }
+.manager-access-table-shell table { min-width: 860px; }
+.manager-access-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 42px; }
 .manager-intro { display: grid; gap: 3px; }
 .manager-intro small, .manager-identity small, .manager-actions small { color: var(--muted); }
 .manager-identity { min-width: 210px; display: grid; gap: 2px; }
@@ -578,7 +589,7 @@ button.reference-item { cursor: pointer; }
   .job-user-picker select { min-width: 0; }
   .jobs-page .job-list-table { height: calc(100vh - 220px); }
   .settings-hub { grid-template-columns: 58px minmax(0, 1fr); gap: 14px; }
-  .settings-sidebar button span:last-child { display: none; }
+  .settings-sidebar button > span:last-child { display: none; }
   .settings-row { grid-template-columns: 1fr; gap: 7px; padding: 12px 0; }
   .settings-value { text-align: left; }
   .client-download-grid { grid-template-columns: 1fr; }

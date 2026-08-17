@@ -312,11 +312,24 @@ class RequestSecurityMixin:
         )
 
     def _visitor_mode(self) -> VisitorMode | None:
-        """Return the public anonymous capability set for this origin."""
+        """Return the public anonymous capability set for this origin.
+
+        An account session always takes precedence over the anonymous visitor
+        cookie.  The login response expires that cookie, but a browser can
+        retain a stale/duplicate cookie while processing the response (or
+        replay it during the first post-login requests).  Letting that cookie
+        continue to classify an already authenticated request as a visitor
+        would hide the account's private catalogs, profiles, and full job
+        history.  A valid session is the authoritative signal here; once it
+        expires, the remaining visitor cookie naturally falls back to the
+        bounded anonymous capability.
+        """
         if not (
             getattr(self.state, "require_login_for_ui", False)
             and getattr(self.state, "public_server", False)
         ):
+            return None
+        if self._session() is not None:
             return None
         origin = self._request_origin()
         token = self._cookie_value(VISITOR_COOKIE)

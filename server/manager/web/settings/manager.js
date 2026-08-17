@@ -2,7 +2,10 @@
   function statusPill(context, status) {
     const pill = document.createElement("span");
     pill.className = `pill manager-status ${status}`;
-    const title = ({running: "运行中", degraded: "部分运行", occupied: "端口占用", stopped: "已停止", orphan: "无端口"})[status];
+    const title = ({
+      running: "运行中", degraded: "部分运行", occupied: "端口占用",
+      stopped: "已停止", orphan: "无端口",
+    })[status];
     pill.textContent = title ? context.t(title) : status;
     return pill;
   }
@@ -29,19 +32,22 @@
     actions.append(link);
   }
 
-  async function show(context) {
-    context.activeNav("manager"); context.setHeading(context.t("服务器管理"), "Manager 7998");
-    context.content.replaceChildren(FTUI.loading(context.t("正在读取端口状态…")));
+  async function serviceView(context, body) {
+    body.replaceChildren(FTUI.loading(context.t("正在读取端口状态…")));
     const payload = await context.api("/api/worktrees");
     const worktrees = payload.worktrees || [];
     const manager = payload.manager || {};
-    const wrapper = document.createElement("div"); wrapper.className = "detail-stack manager-page";
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-stack manager-page";
     const intro = document.createElement("div"); intro.className = "manager-intro";
     intro.innerHTML = `<b></b><small></small>`;
     intro.querySelector("b").textContent = context.t("并行服务与工作树");
     intro.querySelector("small").textContent = `${context.t("本机")} 127.0.0.1 · ${context.t("局域网")} ${manager.lan_ip || context.t("不可用")} · ${context.t("VS Code 调试前请先停止同端口服务")}`;
     wrapper.append(intro);
-    const view = FTUI.table([context.t("工作树 / 服务"), context.t("实例"), context.t("端口"), context.t("状态"), context.t("操作")], []);
+    const view = FTUI.table([
+      context.t("工作树 / 服务"), context.t("实例"), context.t("端口"),
+      context.t("状态"), context.t("操作"),
+    ], []);
 
     const vibe = payload.vibe_trading || {};
     if (vibe.instance_id) {
@@ -84,15 +90,62 @@
         identity, item.instance_id, noPort ? "—" : item.port, statusPill(context, status), actions,
       ]);
     });
-    context.toolbar.append(context.button("↻", () => show(context), context.t("刷新")));
     wrapper.append(view.shell);
+    body.replaceChildren(wrapper);
+  }
+
+  function selectTab(context, value) {
+    const path = `/manager?section=${encodeURIComponent(value)}`;
+    if (context.openTab && context.tabID) {
+      context.openTab(path, {
+        id: context.tabID,
+        title: context.t("服务器管理"),
+        closable: true,
+      });
+      return;
+    }
+    context.navigate(path);
+  }
+
+  async function show(context, selected = "services") {
+    context.activeNav("manager");
+    context.setHeading(context.t("服务器管理"), "Manager 7998");
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-stack manager-page";
+    const tabs = document.createElement("div"); tabs.className = "manager-tabs";
+    const body = document.createElement("div"); body.className = "manager-tab-content";
+    const options = [
+      ["services", "服务"],
+      ["allowlist", "公网访客白名单"],
+      ["devices", "已认证设备"],
+    ];
+    options.forEach(([value, label]) => {
+      const tab = document.createElement("button");
+      tab.className = value === selected ? "manager-tab active" : "manager-tab";
+      tab.type = "button";
+      tab.textContent = context.t(label);
+      tab.onclick = () => selectTab(context, value);
+      tabs.append(tab);
+    });
+    wrapper.append(tabs, body);
+    context.toolbar.append(context.button("↻", () => show(context, selected), context.t("刷新")));
     context.content.replaceChildren(wrapper);
+    if (selected === "allowlist" || selected === "devices") {
+      await FTManagerAccessControl.show(context, body, selected);
+    } else {
+      await serviceView(context, body);
+    }
   }
 
   async function action(context, path, instanceID) {
     const body = new URLSearchParams({instance_id: instanceID});
-    await context.api(path, {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body});
-    context.showNotice(context.t("操作已完成")); await show(context);
+    await context.api(path, {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body,
+    });
+    context.showNotice(context.t("操作已完成"));
+    await show(context, "services");
   }
 
   window.FTManager = {show};
