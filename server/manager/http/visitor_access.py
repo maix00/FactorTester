@@ -15,6 +15,10 @@ from urllib.parse import urlsplit, urlunsplit
 VISITOR_COOKIE = "ft-manager-visitor"
 CLIENT_ACCESS_COOKIE = "ft-manager-client-access"
 VISITOR_GRANT_TTL_SECONDS = 300
+# A browser or ingress can replay a navigation while the first response is
+# still in flight.  Keep this window short so the grant remains effectively
+# one-time while making that normal retry safe.
+VISITOR_GRANT_REPLAY_TTL_SECONDS = 30
 VISITOR_SESSION_TTL_SECONDS = 12 * 60 * 60
 CLIENT_ACCESS_TTL_SECONDS = 12 * 60 * 60
 VISITOR_PRINCIPAL_PREFIX = "__public_jobs__:"
@@ -178,6 +182,15 @@ class _VisitorRecord:
     visitor_id: str
 
 
+@dataclass(frozen=True)
+class _RedeemedGrant:
+    """Short-lived idempotency state for a redeemed visitor grant."""
+
+    target_origin: str
+    expires_at: float
+    session_token: str
+
+
 class VisitorAccessStore:
     """Hold short-lived grants and origin-bound visitor sessions in memory.
 
@@ -189,6 +202,7 @@ class VisitorAccessStore:
 
     def __init__(self) -> None:
         self._records: dict[str, _VisitorRecord] = {}
+        self._redeemed_grants: dict[str, _RedeemedGrant] = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -199,6 +213,31 @@ class VisitorAccessStore:
         for digest, record in tuple(self._records.items()):
             if record.expires_at <= now:
                 self._records.pop(digest, None)
+        for digest, record in tuple(self._redeemed_grants.items()):
+            if record.expires_at <= now:
+                self._redeemed_grants.pop(digest, None)
+
+    def _issue_locked(
+        self,
+        *,
+        kind: str,
+        target_origin: str,
+        ttl: int,
+        visitor_id: str,
+        now: float,
+    ) -> str:
+        """Issue a record while the store lock is already held."""
+        token = secrets.token_urlsafe(32)
+        normalized_visitor_id = normalize_visitor_id(visitor_id) or str(
+            uuid.uuid4()
+        )
+        self._records[self._digest(token)] = _VisitorRecord(
+            kind=kind,
+            target_origin=target_origin,
+            expires_at=now + ttl,
+            visitor_id=normalized_visitor_id,
+        )
+        return token
 
     def _issue(
         self,
@@ -208,20 +247,16 @@ class VisitorAccessStore:
         ttl: int,
         visitor_id: str = "",
     ) -> str:
-        token = secrets.token_urlsafe(32)
         now = time.time()
-        normalized_visitor_id = normalize_visitor_id(visitor_id) or str(
-            uuid.uuid4()
-        )
         with self._lock:
             self._purge(now)
-            self._records[self._digest(token)] = _VisitorRecord(
+            return self._issue_locked(
                 kind=kind,
                 target_origin=target_origin,
-                expires_at=now + ttl,
-                visitor_id=normalized_visitor_id,
+                ttl=ttl,
+                visitor_id=visitor_id,
+                now=now,
             )
-        return token
 
     def issue_grant(self, target_origin: str) -> str:
         return self._issue(
@@ -284,6 +319,14 @@ class VisitorAccessStore:
         with self._lock:
             self._purge(now)
             digest = self._digest(token)
+
+            replay = self._redeemed_grants.get(digest)
+            if replay and (
+                replay.target_origin == target_origin
+                and replay.expires_at > now
+            ):
+                return replay.session_token
+
             record = self._records.pop(digest, None)
             if (
                 record is None
@@ -292,12 +335,19 @@ class VisitorAccessStore:
                 or record.expires_at <= now
             ):
                 return None
-        return self._issue(
-            kind="session",
-            target_origin=target_origin,
-            ttl=VISITOR_SESSION_TTL_SECONDS,
-            visitor_id=record.visitor_id,
-        )
+            session_token = self._issue_locked(
+                kind="session",
+                target_origin=target_origin,
+                ttl=VISITOR_SESSION_TTL_SECONDS,
+                visitor_id=record.visitor_id,
+                now=now,
+            )
+            self._redeemed_grants[digest] = _RedeemedGrant(
+                target_origin=target_origin,
+                expires_at=now + VISITOR_GRANT_REPLAY_TTL_SECONDS,
+                session_token=session_token,
+            )
+            return session_token
 
     def valid_grant(self, token: str, *, target_origin: str) -> bool:
         """Check an unconsumed ingress grant without enabling visitor mode."""
