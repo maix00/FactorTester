@@ -140,7 +140,14 @@ class Futures(AdjustableProductMixin, Product):
         contracts: List[Dict[str, Any]] = []
         if self.roller_info is None:
             return contracts
-        rows = cast(pd.DataFrame, self.roller_info)[['CONTRACT_UID', 'CONTRACT', 'STARTDATE', 'ENDDATE']].copy()
+        source_columns = [
+            'CONTRACT_UID', 'CONTRACT', 'STARTDATE', 'ENDDATE',
+            'FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO',
+            'FORWARD_ADD', 'BACKWARD_ADD',
+        ]
+        rows = cast(pd.DataFrame, self.roller_info)[[
+            column for column in source_columns if column in self.roller_info.columns
+        ]].copy()
         rows['STARTDATE'] = pd.to_datetime(rows['STARTDATE'])
         rows['ENDDATE'] = pd.to_datetime(rows['ENDDATE'])
         rows['STARTDATE_NORM'] = rows['STARTDATE'].dt.normalize()
@@ -157,15 +164,26 @@ class Futures(AdjustableProductMixin, Product):
         ):
             start = pd.Timestamp(cast(Any, row.STARTDATE)) if pd.notna(row.STARTDATE) else None
             end = pd.Timestamp(cast(Any, row.ENDDATE)) if pd.notna(row.ENDDATE) else None
-            contracts.append({
+            value = {
                 'contract': str(row.CONTRACT),
                 'uid': str(row.CONTRACT_UID),
                 'start': start.strftime('%Y-%m-%d') if start is not None else None,
                 'end': end.strftime('%Y-%m-%d') if end is not None else None,
                 'start_ts': int(start.timestamp() * 1000) if start is not None else None,
                 'end_ts': int(end.timestamp() * 1000) if end is not None else None,
-            })
+            }
+            value.update(self.contract_listing_metadata(row._asdict()))
+            contracts.append(value)
         return contracts
+
+    def contract_listing_metadata(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Return source-owned metadata for one term-structure row.
+
+        Subclasses may expose naming and adjustment semantics here.  The
+        generic futures layer only transports the metadata and does not infer
+        source-specific column names or aliases.
+        """
+        return {}
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
         """

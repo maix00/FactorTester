@@ -12,7 +12,7 @@ from server.modules.shared.price_services import (
     available_freq_names_for_product,
     available_sources_for_product,
     cached_products,
-    contract_data_path,
+    contract_data_path_for,
     contract_has_data,
     find_contract_product,
     find_product,
@@ -43,6 +43,7 @@ def contract_listing(
             "supports_term_structure": False,
             "has_term_structure": False,
             "contracts": [],
+            "naming_schemes": [],
         }
     contracts = get_product_contracts(
         product,
@@ -51,12 +52,18 @@ def contract_listing(
     )
     for contract in contracts:
         contract["has_data"] = contract_has_data(contract["uid"])
+    naming_schemes = sorted({
+        str(contract.get("naming_scheme") or "").strip()
+        for contract in contracts
+        if str(contract.get("naming_scheme") or "").strip()
+    })
     return {
         "success": True,
         "product": product_name,
         "supports_term_structure": True,
         "has_term_structure": True,
         "contracts": contracts,
+        "naming_schemes": naming_schemes,
         "fields": product_public_fields(product),
     }
 
@@ -74,7 +81,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         available_sources_for_product(contract_product)
         if contract_product else []
     )
-    contract_file = contract_data_path(contract_uid)
+    contract_file = contract_data_path_for(contract_uid, contract_product)
     if not Path(contract_file).is_file():
         raise ProductMarketDataError(
             f"合约数据不存在: {contract_uid}", 404,

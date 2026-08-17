@@ -49,6 +49,7 @@ function settle() {
 
 const requests = [];
 const charts = [];
+const tables = [];
 const context = {
   window: {},
   document: {createElement: tagName => new Node(tagName)},
@@ -60,7 +61,10 @@ context.window = context;
 context.FTUI = {
   empty: () => new Node("div"),
   loading: () => new Node("div"),
-  table: () => ({shell: new Node("div")}),
+  table: (headers, rows) => {
+    tables.push({headers, rows});
+    return {shell: new Node("div")};
+  },
 };
 context.FTPriceChart = {
   render(_context, _target, payload) {
@@ -80,6 +84,9 @@ context.api = async (_url, options) => {
     data_source: alias,
     freq,
     adjusted: Boolean(payload.adjusted),
+    adjustment_method: payload.adjusted ? "continuous_futures_roll" : "raw",
+    adjustment_formula: payload.adjusted
+      ? "raw × adjustment_mul + adjustment_add" : "",
     supports_adjusted: true,
     available_sources: [
       {alias: "LocalCNFuturesDAY1", freq: "DAY1"},
@@ -113,6 +120,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   assert.strictEqual(requests[0].freq, undefined);
   assert.strictEqual(requests[0].data_source, undefined);
   assert.strictEqual(requests[0].adjusted, false);
+  assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "未复权"), true);
 
   sourceSelect.value = "LocalCNFuturesMIN1";
   sourceSelect.listeners.change();
@@ -126,6 +134,8 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   assert.strictEqual(requests[2].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[2].adjusted, true);
   assert.strictEqual(charts.at(-1).adjusted, true);
+  assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "连续合约换月平滑复权"), true);
+  assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "raw × adjustment_mul + adjustment_add"), true);
   console.log("ok");
 })().catch(error => {
   console.error(error);

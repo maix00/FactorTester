@@ -85,8 +85,23 @@
       termMount.replaceChildren(FTUI.empty(context.t("暂无期限结构"), context.t("该产品没有可用的连续合约列表")));
     } else {
       const table = FTUI.table(
-        [context.t("合约"), context.t("开始"), context.t("结束"), context.t("数据")],
-        contractRows.map(item => [item.contract || item.uid, item.start || "", item.end || "", item.has_data ? context.t("可用") : context.t("无数据")]),
+        [
+          context.t("合约"), context.t("开始"), context.t("结束"),
+          context.t("前复权乘法"), context.t("前复权加法"),
+          context.t("后复权乘法"), context.t("后复权加法"),
+          context.t("换月比值"), context.t("数据"),
+        ],
+        contractRows.map(item => [
+          item.contract || item.uid,
+          item.start || "",
+          item.end || "",
+          item.forward_adjustment_mul ?? context.t("—"),
+          item.forward_adjustment_add ?? context.t("—"),
+          item.backward_adjustment_mul ?? context.t("—"),
+          item.backward_adjustment_add ?? context.t("—"),
+          item.adjustment_ratio ?? context.t("—"),
+          item.has_data ? context.t("可用") : context.t("无数据"),
+        ]),
       );
       [...table.body.rows].forEach((row, index) => {
         row.dataset.href = "true";
@@ -126,6 +141,29 @@
     return window.FTProductGroupDetail.render(context, target, helpers);
   }
 
+  function unavailableContractDetail(context, targetRef, helpers) {
+    const source = helpers.sourceOf();
+    const title = String(targetRef || context.t("合约详情"));
+    context.setHeading(title, context.t("合约详情"));
+    helpers.catalogSwitch(context, "products", source);
+    context.updateActiveTab?.({title});
+    const root = document.createElement("div");
+    root.className = "detail-stack product-detail-page";
+    root.append(helpers.sourceSummary(context, source));
+    root.append(FTUI.table(
+      [context.t("字段"), context.t("值")],
+      [
+        [context.t("合约"), title],
+        [context.t("状态"), context.t("无此产品信息")],
+      ],
+    ).shell);
+    root.append(FTUI.empty(
+      context.t("无此产品信息"),
+      context.t("该合约没有可用的数据"),
+    ));
+    context.content.replaceChildren(root);
+  }
+
   async function referenceDetail(context, kind, targetRef, helpers) {
     context.activeNav("products");
     context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
@@ -138,7 +176,7 @@
           body: JSON.stringify({contract_uid: targetRef, freq: "DAY1", adjusted: false}),
         });
         if (!current(context)) return;
-        if (payload.success !== false) {
+        if (payload.success !== false && Array.isArray(payload.data) && payload.data.length) {
           context.setHeading(payload.contract_name || targetRef, context.t("合约详情"));
           helpers.catalogSwitch(context, "products", helpers.sourceOf());
           context.updateActiveTab?.({title: payload.contract_name || targetRef});
@@ -157,7 +195,13 @@
           chart.append(chartMount); root.append(chart);
           context.content.replaceChildren(root); return;
         }
-      } catch (_) {}
+      } catch (_) {
+        if (!current(context)) return;
+      }
+      if (current(context)) {
+        unavailableContractDetail(context, targetRef, helpers);
+      }
+      return;
     }
     const payload = await context.api(context.servicePath(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`));
     if (!current(context)) return;
