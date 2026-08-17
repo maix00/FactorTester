@@ -1005,7 +1005,10 @@ class ClientStateService:
         from server.modules.shared.price_services import (
             available_sources_for_product, cached_contracts, contract_has_data,
         )
-        from server.services.product_catalog_projection import catalog_product_description
+        from server.services.product_catalog_projection import (
+            catalog_product_description,
+            source_family_ids_for_member_ids,
+        )
         from server.services.product_tree import find_node_by_path
         from tools.products.Futures import FuturesContract
         from tools.products.classifier_paths import classifier_object_path
@@ -1059,6 +1062,9 @@ class ClientStateService:
                 "desc": description,
                 "description": description,
                 "source_ids": [item["alias"] for item in sources],
+                "source_family_ids": list(source_family_ids_for_member_ids(
+                    item["alias"] for item in sources
+                )),
                 "exchange": _catalog_exchange(product, name),
                 "product_path": classifier_object_path(product),
             }

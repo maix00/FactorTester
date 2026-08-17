@@ -236,15 +236,21 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
     load_all_sources()
     from server.modules.shared.price_services import (
         available_product_categories,
+        cached_contracts,
         cached_products,
     )
 
     products = tuple(cached_products())
+    # A source member can be product-level or contract-level.  Keep the
+    # family-level statistics product-based for compatibility, but calculate
+    # every member from the complete catalog so contract feeds do not appear
+    # empty merely because they are not ordinary Product objects.
+    catalog_objects = (*products, *tuple(cached_contracts()))
     categories = available_product_categories()
     result: list[dict[str, Any]] = []
     for source in _visible_source_index().values():
         members = tuple(
-            _member_descriptor(member, products)
+            _member_descriptor(member, catalog_objects)
             for member in source.members
         )
         available = _available_products(source, products)
@@ -358,6 +364,47 @@ def source_ids_for_product_paths(
         ):
             matched.add(source_id)
     return tuple(sorted(matched))
+
+
+def source_family_ids_for_member_ids(
+    member_ids: Iterable[str] | None,
+    source_descriptors: Iterable[Mapping[str, Any]] | None = None,
+) -> tuple[str, ...]:
+    """Resolve concrete data-source members to their source-family IDs.
+
+    Product rows are allowed to report the concrete provider that actually
+    serves a product, while the catalog UI links only to the owning source
+    family.  Unknown IDs are retained so an embedded or federated descriptor
+    can still display a useful value instead of silently dropping a source.
+    """
+    requested = tuple(dict.fromkeys(
+        str(value or "").strip()
+        for value in member_ids or ()
+        if str(value or "").strip()
+    ))
+    if not requested:
+        return ()
+    descriptors = tuple(
+        source_descriptors
+        if source_descriptors is not None else product_source_descriptors()
+    )
+    member_to_family: dict[str, str] = {}
+    for descriptor in descriptors:
+        family_id = str(
+            descriptor.get("family_id")
+            or descriptor.get("bundle_id")
+            or descriptor.get("id")
+            or ""
+        ).strip()
+        if not family_id:
+            continue
+        for member in descriptor.get("members") or ():
+            if not isinstance(member, Mapping):
+                continue
+            member_id = str(member.get("id") or "").strip()
+            if member_id:
+                member_to_family[member_id] = family_id
+    return tuple(sorted({member_to_family.get(value, value) for value in requested}))
 
 
 def _category_free_path(value: object) -> str:
