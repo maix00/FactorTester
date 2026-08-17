@@ -2,32 +2,39 @@
 
 ## 终端用户
 
-FactorTester CLI 是 Python 命令行应用，推荐用 `pipx` 安装，而不是安装进
-系统 Python 或仓库的 `GTHT` 环境：
+普通用户不需要、也不应当在系统 Python、Conda 或 pipx 中安装
+`factortester` / `factortester-manager`。这两个命令随 `FTClient.app` 一起
+发布，并由 App 启动时激活到：
 
-```bash
-brew install pipx
-pipx ensurepath
-pipx install /path/to/factortester.whl
+```text
+~/Library/Application Support/FactorTester/bin/
 ```
 
-如果从源码安装，使用普通 wheel 安装而不是 editable 安装：
+激活后的稳定入口会指向当前已验证的 App runtime，不会调用系统 Python。
+需要在终端或外部 Agent 中使用时，执行：
 
 ```bash
-scripts/install_factortester_pipx.sh
+source "$HOME/Library/Application Support/FactorTester/bin/factortester-env.sh"
+factortester --help
+factortester-manager --help
 ```
 
-如果使用发布资产，在同一个 pipx 环境中安装匹配版本的两个 wheel：
+环境脚本提供以下变量：
 
-```bash
-scripts/install_factortester_pipx.sh \
-  /path/to/factortester-0.1.2-py3-none-any.whl \
-  /path/to/cli_anything_factortester_research-0.1.2-py3-none-any.whl
+```text
+FACTORTESTER_CLIENT_ROOT
+FACTORTESTER_CLIENT_BIN
+FACTORTESTER_CLI
+FACTORTESTER_MANAGER_CLI
+FACTORTESTER_RESEARCH_CLI
 ```
 
-脚本通过 `pipx inject --include-apps --pip-args=--no-deps` 安装 Harness。
-这是有意的：两个 wheel 已经由同一次发布构建并锁定版本，避免 pipx 在没有
-内部包索引时重新解析或下载一个不匹配的 `factortester` 依赖。
+App 更新或回滚后会重新生成这些入口。不要把旧版本路径复制到 shell
+profile，也不要用 `pipx` 或 Conda 路径覆盖 `FACTORTESTER_CLI` 与
+`FACTORTESTER_MANAGER_CLI`。
+
+仓库中的 `scripts/install_factortester_pipx.sh` 仅用于历史发行包/内部发布
+验证，不是普通 FTClient 用户的安装方式。
 
 当前发布包包含两个明确的 console entrypoint：
 
@@ -60,7 +67,7 @@ FactorTester CLI。Research Agent Skill 同时随 App 资源安装并注册到�
 
 | 内容 | 所属运行时 |
 | --- | --- |
-| 研究 CLI | pipx 应用环境或 Swift 内置 runtime |
-| Manager CLI | pipx 应用环境；Swift 内部另有签名 launcher |
+| 研究 CLI | FTClient.app 内置并激活的 runtime |
+| Manager CLI | FTClient.app 内置并激活的 runtime |
 | 仓库开发/服务器测试 | `GTHT` Conda 环境 |
 | 实际测试任务 | Docker/native runner 环境 |

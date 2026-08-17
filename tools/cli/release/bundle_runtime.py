@@ -111,6 +111,7 @@ def _activate_locked(
             )
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
+        install_stable_launchers(root)
         return _finish_activation(
             root, version, activated=True, receipt=existing,
             resources=resources, local_skill_root=local_skill_root,
@@ -134,9 +135,9 @@ def _activate_locked(
         _checkpoint(checkpoint, "before_publish")
         os.replace(staging, target)
         _fsync_directory(releases)
-        install_stable_launchers(root)
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
+        install_stable_launchers(root)
         return _finish_activation(
             root, version, activated=True, receipt=receipt,
             resources=resources, local_skill_root=local_skill_root,
