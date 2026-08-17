@@ -226,3 +226,47 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         )) as response:
             visitor_compliance = response.read().decode("utf-8")
         assert 'class="visitor-entry"' not in visitor_compliance
+
+
+def test_public_device_challenge_is_canonical_ip_only(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+
+    with _running_manager(state) as base_url:
+        ingress = Request(
+            f"{base_url}/api/device/challenge",
+            data=b"{}",
+            headers={
+                **_headers(),
+                "Host": "eloquence-drizzly-fencing.ngrok-free.dev",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as rejected:
+            urlopen(ingress)
+        assert rejected.value.code == 403
+        assert "public IP origin" in rejected.value.read().decode("utf-8")
+
+        canonical = Request(
+            f"{base_url}/api/device/challenge",
+            data=b"{}",
+            headers={
+                **_headers(),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(canonical) as response:
+            payload = json.loads(response.read())
+        assert payload["success"] is True

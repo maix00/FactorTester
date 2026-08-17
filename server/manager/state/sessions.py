@@ -26,9 +26,6 @@ from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.session_store import ManagerSessionStore
 
 
-DEVICE_SESSION_HANDOFF_TTL_SECONDS = 120
-
-
 class SessionStateMixin:
     """Own account sessions without coupling them to HTTP transport."""
     def login(
@@ -492,7 +489,7 @@ class SessionStateMixin:
             authentication = str(value[3] or "")
             session_origin = str(value[4] or "").strip().rstrip("/")
         return (
-            authentication in {"device", "device-handoff", "visitor-password"}
+            authentication in {"device", "visitor-password"}
             and session_origin == expected_origin
         )
 
@@ -520,85 +517,6 @@ class SessionStateMixin:
             token_hash = self._token_hash(token)
             self._sessions.pop(token_hash, None)
             self._session_store().delete(token_hash)
-
-    def issue_device_handoff(
-        self,
-        principal: str,
-        role: str,
-        *,
-        target_origin: str,
-    ) -> str:
-        """Create a one-use session handoff for another trusted origin.
-
-        Browser storage remains origin-scoped.  The handoff carries no private
-        key and no session token in the URL; it only allows the target origin
-        to mint its own normal session after the source origin already proved
-        the registered device key.
-        """
-        owner = str(principal or "").strip()
-        account_role = str(role or "").strip()
-        target = str(target_origin or "").strip().rstrip("/")
-        if not owner or not account_role or not target:
-            raise ValueError("device handoff fields are invalid")
-        ticket = secrets.token_urlsafe(32)
-        now = time.time()
-        with self._session_lock:
-            handoffs = getattr(self, "_device_handoffs", {})
-            handoffs = {
-                digest: value for digest, value in handoffs.items()
-                if float(value.get("expires_at") or 0) > now
-            }
-            handoffs[self._token_hash(ticket)] = {
-                "principal": owner,
-                "alias": self._alias_for_principal(owner),
-                "role": account_role,
-                "target_origin": target,
-                "expires_at": now + DEVICE_SESSION_HANDOFF_TTL_SECONDS,
-            }
-            self._device_handoffs = handoffs
-        return ticket
-
-    def redeem_device_handoff(
-        self,
-        ticket: object,
-        *,
-        target_origin: str,
-    ) -> tuple[str, str, str]:
-        """Consume a source-origin handoff and mint a target-origin session."""
-        target = str(target_origin or "").strip().rstrip("/")
-        now = time.time()
-        with self._session_lock:
-            handoffs = getattr(self, "_device_handoffs", {})
-            digest = self._token_hash(str(ticket or ""))
-            value = handoffs.get(digest)
-            handoffs = {
-                key: item for key, item in handoffs.items()
-                if float(item.get("expires_at") or 0) > now
-            }
-            if (
-                value is not None
-                and float(value.get("expires_at") or 0) > now
-                and str(value.get("target_origin") or "") == target
-            ):
-                handoffs.pop(digest, None)
-            self._device_handoffs = handoffs
-        if (
-            value is None
-            or float(value.get("expires_at") or 0) <= now
-            or str(value.get("target_origin") or "") != target
-        ):
-            raise PermissionError("device handoff is expired or target is invalid")
-        principal = str(value.get("principal") or "")
-        alias = str(value.get("alias") or "")
-        role = str(value.get("role") or "")
-        token, principal, role = self._issue_session(
-            principal,
-            role,
-            alias=alias or self._alias_for_principal(principal),
-            authentication="device-handoff",
-            origin=target,
-        )
-        return token, principal, role
 
     @staticmethod
     def _token_hash(token: str) -> str:
