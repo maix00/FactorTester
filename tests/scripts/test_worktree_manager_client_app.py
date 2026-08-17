@@ -1544,6 +1544,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert '"/api/client/product_tree"' in creator
     assert '"/api/catalog/tree"' in creator
     assert "FTProductTree.render" in creator
+    assert "loadTree: async" in creator
     assert "textarea" not in creator
     assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
@@ -3005,9 +3006,15 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             create_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-detail.js") as response:
             detail_script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-detail-layout.js") as response:
+            detail_layout = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-label-editor.js") as response:
+            label_editor = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
+    assert 'typeof options.loadTree === "function"' in script
+    assert "requestAnimationFrame" in script
     assert "window.FTProductListTable" in table_script
     assert "paginationModel" in table_script
     assert "product-list-search" in table_script
@@ -3048,15 +3055,22 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert 'context.t("父分类")' in categories
     assert 'context.t("路径数")' not in categories
     assert "FTProductCategoryCreate.open" not in categories
-    assert "split(/\\r?\\n/)" in create_script
-    assert "从产品树选择" in create_script
-    assert "loadProductTree" in create_script
-    assert "leafOnly: true" in create_script
-    assert "product-category-create-layout" in create_script
-    assert "selectionReadOnly" in detail_script
+    assert "FTProductCategoryDetails.render" in create_script
+    assert "显示产品树" in label_editor
+    assert "隐藏产品树" in label_editor
+    assert "loadProductTree" in detail_script
+    assert "leafOnly: true" in detail_script
+    assert "product-category-inline-tree" in label_editor
+    detail_surface = detail_script + detail_layout + label_editor
+    assert "selectionReadOnly" in detail_surface
     assert "从父分类更新内容" in detail_script
-    assert "parent_category_ids" in detail_script
+    assert "parent_category_ids" in detail_surface
     assert "DELETE" in detail_script
+    assert "product-category-detail-layout" in detail_layout
+    assert "product-category-inline-tree" in label_editor
+    assert "mode === \"edit\"" in detail_layout
+    assert "mode === \"view\"" not in detail_layout
+    assert "ProductCategory/" in detail_surface
     assert "window.FTProductCategoryOverlay" in overlay
     assert "创建乘积分类" in overlay
     assert "选择两个已有分类" in overlay
