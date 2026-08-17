@@ -6,12 +6,13 @@ Accepted
 
 ## Context
 
-The public Manager exposes a deliberately limited visitor session so a
-visitor can inspect the public task and catalog views.  The public deployment
-also requires device-authenticated sessions for ordinary browser access.  A
-visitor must not be able to turn that limited session into an arbitrary
-account session, but a small number of explicitly approved ordinary users
-need a password-login path for controlled testing.
+The public Manager exposes a deliberately limited visitor session so an
+anonymous visitor can inspect the public task and catalog views.  The public
+deployment also requires device-authenticated sessions for ordinary browser
+access.  A visitor must not be able to turn that session into an arbitrary
+account session, but a small number of explicitly approved accounts need a
+password-login path for controlled testing.  This explicit allowlist may
+include a super-admin when that access is intentionally granted.
 
 ## Decision
 
@@ -23,17 +24,18 @@ active only when all of the following hold:
    secure transport check;
 2. the submitted identifier resolves exactly, case-sensitively, to one
    allowlisted account (canonical username, `organization@alias`, or alias);
-3. the account is active and has the ordinary `user` role with no admin flag.
+3. the account is active.  Its normal role and capabilities are preserved;
+   the allowlist is the explicit authorization boundary.
 
 The resulting session is recorded as `visitor-password`, bound to the
 Manager origin, and accepted by the existing public origin gate.  The
-visitor cookie is expired in the same response.  The visitor capability set,
-registration policy, device enrollment, and Manager/admin permissions do not
-change.
+visitor cookie is expired in the same response.  Registration policy and
+device enrollment do not change; an explicitly allowlisted administrator
+retains the normal Manager/admin permissions of that account.
 
-The current deployment allowlist is the non-secret value `testA`.  Account
-hierarchy is separate data: `GTHT@testA@545963541963` remains an ordinary
-user and is recorded as the parent of
+The current deployment allowlist is stored in the central control database.
+Account hierarchy is separate data: `GTHT@testA@545963541963` remains an
+ordinary user and is recorded as the parent of
 `GTHT@MaxJJW@392452984564`.
 
 ## Consequences
