@@ -192,6 +192,19 @@ def test_product_category_composition_uses_all_available_sources() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_price_panel_uses_source_frequency_and_adjusted_controls() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_price_panel.js"
+    module = WEB_ROOT / "catalog" / "product-price-panel.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_product_tree_selection_collapses_descendant_paths() -> None:
     import subprocess
 

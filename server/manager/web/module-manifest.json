@@ -209,6 +209,7 @@
       "catalog/products.js",
       "catalog/product-group-path-editor.js",
       "catalog/product-group-detail.js",
+      "catalog/product-price-panel.js",
       "catalog/details.js"
     ],
     "workbench-core": [
@@ -397,6 +398,7 @@
     "catalog/products.js",
     "catalog/product-group-path-editor.js",
     "catalog/product-group-detail.js",
+    "catalog/product-price-panel.js",
     "catalog/details.js",
     "workbench/setting-rules.js",
     "workbench/test-input-state.js",

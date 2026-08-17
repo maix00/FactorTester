@@ -57,41 +57,29 @@
       [context.t("字段"), context.t("说明"), context.t("当前值")],
       normalizeFields(fieldsPayload.fields).map(item => [item.name || item.key, item.description || item.desc, item.value]),
     ).shell);
-    const metadata = document.createElement("section"); metadata.className = "product-detail-metadata";
-    metadata.append(Object.assign(document.createElement("h2"), {textContent: context.t("数据源与频率")}));
-    const metadataMount = document.createElement("div"); metadataMount.append(FTUI.loading(context.t("正在读取数据能力…")));
-    metadata.append(metadataMount); root.append(metadata);
+    const priceMount = document.createElement("div");
+    priceMount.className = "product-price-panel-mount";
+    root.append(priceMount);
     const term = document.createElement("section"); term.className = "product-term-structure";
     term.append(Object.assign(document.createElement("h2"), {textContent: context.t("期限结构")}));
     const termMount = document.createElement("div"); termMount.append(FTUI.loading(context.t("正在读取合约列表…")));
     term.append(termMount); root.append(term);
-    const chart = document.createElement("section"); chart.className = "product-price-section";
-    chart.append(Object.assign(document.createElement("h2"), {textContent: context.t("价格曲线")}));
-    const chartMount = document.createElement("div"); chartMount.append(FTUI.loading(context.t("正在读取价格曲线…")));
-    chart.append(chartMount); root.append(chart);
     context.content.replaceChildren(root);
     const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
-    const priceEndpoint = source === "local"
-      ? "/api/client/product_prices" : "/api/catalog/prices";
     const contractsEndpoint = source === "local"
       ? "/api/client/product_contracts" : "/api/catalog/contracts";
-    const priceRequest = context.api(priceEndpoint, {
-      method: "POST", body: JSON.stringify({product_name: product.name, freq: "DAY1", adjusted: false,
-        start_date: start.toISOString().slice(0, 10), end_date: end.toISOString().slice(0, 10)}),
-    }).catch(() => ({}));
+    const pricePanelPromise = window.FTProductPricePanel?.render
+      ? window.FTProductPricePanel.render(context, priceMount, {
+          product, source,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+        })
+      : Promise.resolve();
     const contractsRequest = context.api(
       `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
     ).catch(() => ({}));
-    const [price, contracts] = await Promise.all([priceRequest, contractsRequest]);
+    const [, contracts] = await Promise.all([pricePanelPromise, contractsRequest]);
     if (!current(context)) return;
-    const sources = price.available_sources || [];
-    const freqs = price.available_freqs || [];
-    metadataMount.replaceChildren(FTUI.table(
-      [context.t("项目"), context.t("值")],
-      [[context.t("当前数据源"), price.data_source || ""],
-       [context.t("可用数据源"), sources.map(item => item.alias || item).join(", ")],
-       [context.t("可用频率"), freqs.join(", ")]],
-    ).shell);
     const contractRows = Array.isArray(contracts.contracts) ? contracts.contracts : [];
     if (!contracts.supports_term_structure || !contractRows.length) {
       termMount.replaceChildren(FTUI.empty(context.t("暂无期限结构"), context.t("该产品没有可用的连续合约列表")));
@@ -108,15 +96,6 @@
         )));
       });
       termMount.replaceChildren(table.shell);
-    }
-    if (window.FTPriceChart?.render && Array.isArray(price.data)) {
-      FTPriceChart.render(context, chartMount, {
-        ...price,
-        product: price.product || product.name,
-        desc: price.desc || product.desc,
-      });
-    } else {
-      chartMount.replaceChildren(FTUI.empty(context.t("价格曲线暂不可用"), ""));
     }
   }
 
