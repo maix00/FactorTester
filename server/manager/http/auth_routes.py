@@ -12,6 +12,7 @@ from server.manager.http.pages import (
 )
 from server.manager.http.responses import json_response
 from server.manager.storage.control_db import ControlDatabaseError
+from server.manager.http.visitor_access import clear_visitor_cookie
 
 
 class AuthenticationRoutesMixin:
@@ -26,19 +27,12 @@ class AuthenticationRoutesMixin:
         return value
 
     def _login(self) -> None:
-        if self._visitor_mode() is not None:
-            json_response(
-                self,
-                {
-                    "success": False,
-                    "error": "访客模式不能登录，请先离开访客模式。",
-                    "code": "visitor_login_forbidden",
-                    "redirect": "/compliance?next=/",
-                },
-                403,
-            )
-            return
-        if self.state.require_device_auth and not self._is_loopback_client():
+        visitor_mode = self._visitor_mode()
+        if (
+            visitor_mode is None
+            and self.state.require_device_auth
+            and not self._is_loopback_client()
+        ):
             json_response(self, {
                 "success": False,
                 "error": "device authentication required",
@@ -58,11 +52,22 @@ class AuthenticationRoutesMixin:
             }, 400)
             return
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            token, principal, role = self.state.login(
-                str(payload.get("username") or ""),
-                str(payload.get("password") or ""),
-            )
+            payload = self._json_body(16 * 1024)
+            username = str(payload.get("username") or "")
+            password = str(payload.get("password") or "")
+            if visitor_mode is not None:
+                account = self.state.public_visitor_login_account(username)
+                if account is None:
+                    self._visitor_login_forbidden()
+                    return
+                token, principal, role = self.state.login(
+                    str(account["username"]),
+                    password,
+                    authentication="visitor-password",
+                    origin=self._request_origin(),
+                )
+            else:
+                token, principal, role = self.state.login(username, password)
         except (ValueError, TypeError, json.JSONDecodeError):
             json_response(self, {
                 "success": False,
@@ -90,6 +95,24 @@ class AuthenticationRoutesMixin:
                 "error": "manager login failed",
             }, 500)
             return
+        if visitor_mode is not None:
+            try:
+                account = self.state.public_visitor_login_account(principal)
+            except ControlDatabaseError as exc:
+                self.state.logout(token)
+                sys.stderr.write(
+                    f"[manager] visitor login authority unavailable: {exc}\n"
+                )
+                json_response(self, {
+                    "success": False,
+                    "code": "control_database_unavailable",
+                    "error": "control database is unavailable and no usable local account is available",
+                }, 503)
+                return
+            if account is None:
+                self.state.logout(token)
+                self._visitor_login_forbidden()
+                return
         session = self.state.session(token) or {}
         json_response(self, {
             "success": True,
@@ -102,7 +125,24 @@ class AuthenticationRoutesMixin:
             },
             "token": token,
             "expires_in": MANAGER_SESSION_TTL_SECONDS,
-        }, headers={"Set-Cookie": self._session_cookie(token)})
+        }, headers={
+            "Set-Cookie": [
+                self._session_cookie(token),
+                clear_visitor_cookie(secure=self._is_secure_transport()),
+            ] if visitor_mode is not None else self._session_cookie(token),
+        })
+
+    def _visitor_login_forbidden(self) -> None:
+        json_response(
+            self,
+            {
+                "success": False,
+                "error": "访客模式不能登录，请先离开访客模式。",
+                "code": "visitor_login_forbidden",
+                "redirect": "/compliance?next=/",
+            },
+            403,
+        )
 
     def _session_cookie(self, token: str, *, clear: bool = False) -> str:
         secure = " Secure;" if self._is_secure_transport() else ""
