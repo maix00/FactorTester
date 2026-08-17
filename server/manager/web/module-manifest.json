@@ -205,6 +205,7 @@
       "catalog/source-list.js",
       "catalog/source-family-detail.js",
       "catalog/products.js",
+      "catalog/product-price-panel.js",
       "catalog/details.js"
     ],
     "workbench-core": [
@@ -389,6 +390,7 @@
     "catalog/source-list.js",
     "catalog/source-family-detail.js",
     "catalog/products.js",
+    "catalog/product-price-panel.js",
     "catalog/details.js",
     "workbench/setting-rules.js",
     "workbench/test-input-state.js",

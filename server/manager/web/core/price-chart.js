@@ -121,7 +121,7 @@
     }
     return {
       chart: {
-        animation: false, height: 520,
+        animation: false, height: 650,
         panning: {enabled: true, type: "x"}, panKey: "shift",
         zooming: {type: "x", mouseWheel: {enabled: true, type: "x"}},
       },

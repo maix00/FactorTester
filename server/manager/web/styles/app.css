@@ -131,6 +131,14 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .empty { text-align: center; padding: 80px 20px; }
 .product-category-filter, .product-tree-panel, .product-search-results, .product-group-products,
 .product-detail-metadata, .product-term-structure, .product-price-section { display: grid; gap: 12px; }
+.product-price-panel { display: grid; gap: 12px; min-width: 0; }
+.product-price-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.product-price-control { display: grid; gap: 4px; min-width: 170px; color: var(--muted); font-size: 12px; }
+.product-price-control select { min-width: 170px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--panel); color: inherit; font: inherit; }
+.product-price-control select:disabled { opacity: .55; }
+.product-price-frequency { align-self: end; padding: 7px 0; color: var(--muted); font-size: 12px; }
+.product-price-frequency b { font-weight: 600; color: inherit; }
+.product-price-chart-mount { min-width: 0; }
 .product-category-filter { display: flex; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .product-tree-panel { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .catalog-source-summary, .catalog-source-note { margin: 0; color: var(--muted); }
@@ -374,7 +382,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .artifact-image { display: block; width: 100%; max-width: 100%; height: auto; object-fit: initial; margin: 0; }
 .artifact-table-shell { width: 100%; min-width: 0; max-height: min(520px, 65vh); overflow-x: auto; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 9px; contain: inline-size; }
 .artifact-table-shell table { width: max-content; min-width: 100%; }
-.interactive-price-chart { display: block; width: 100%; min-height: 520px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.interactive-price-chart { display: block; width: 100%; min-height: 650px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .artifact-message { color: var(--muted); margin: 6px 0; }
 .field-table table { min-width: 520px; }
 .field-table th:first-child, .field-table td:first-child { width: 34%; }

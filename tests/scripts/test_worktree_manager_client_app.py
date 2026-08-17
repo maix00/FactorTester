@@ -2970,6 +2970,7 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert "detailHelpers" in products
     assert "async function productDetail(context, target)" in products
     assert 'context.servicePath("/api/get_price_data")' not in details
+    assert "FTProductPricePanel.render" in details
     assert '"/api/catalog/prices"' in details
     assert '"/api/catalog/contracts"' in details
 
