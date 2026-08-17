@@ -422,22 +422,26 @@ class CatalogRoutesMixin:
         category_refresh = re.fullmatch(
             r"/api/catalog/categories/([^/]+)/refresh", parsed.path,
         )
+        group_mutation = re.fullmatch(
+            r"/api/catalog/product-groups/([^/]+)", parsed.path,
+        )
         if parsed.path not in {
             "/api/catalog/prices",
             "/api/catalog/product-groups",
             "/api/catalog/categories",
             "/api/catalog/categories/composite",
-        } and category_delete is None and category_refresh is None:
+        } and category_delete is None and category_refresh is None \
+                and group_mutation is None:
             return False
         session = self._session()
         visitor = self._visitor_mode()
         if session is None and visitor is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
-        if visitor is not None and parsed.path != "/api/catalog/product-groups":
+        if visitor is not None:
             json_response(self, {
                 "success": False,
-                "error": "访客模式只能创建临时产品组，不能修改服务器目录",
+                "error": "访客模式只能查看产品组，不能修改产品目录",
                 "code": "visitor_catalog_write_forbidden",
             }, 403)
             return True
@@ -450,6 +454,7 @@ class CatalogRoutesMixin:
             method = str(getattr(self, "command", "POST") or "POST").upper()
             payload = {} if (
                 (category_delete is not None and method == "DELETE")
+                or (group_mutation is not None and method == "DELETE")
                 or category_refresh is not None
             ) else self._json_body(256 * 1024)
             if parsed.path == "/api/catalog/categories":
@@ -556,6 +561,8 @@ class CatalogRoutesMixin:
                     for category_id in category_ids
                 ):
                     raise ValueError("category_ids 必须是字符串数组")
+                if not category_ids:
+                    raise ValueError("产品组至少需要绑定一个产品分类")
                 group = self.state.client_state.create_product_group(
                     principal, name, paths, category_ids,
                 )
@@ -565,6 +572,46 @@ class CatalogRoutesMixin:
                     }, 409)
                     return True
                 value = {"success": True, "origin": "server", "group": group}
+            elif group_mutation is not None and method in {"PUT", "PATCH"}:
+                name = str(payload.get("name") or "").strip()
+                paths = payload.get("paths")
+                category_ids = payload.get("category_ids") or []
+                if not name:
+                    raise ValueError("产品组名称不能为空")
+                if not isinstance(paths, list) or not paths:
+                    raise ValueError("请选择至少一个品种路径")
+                if not all(isinstance(path, str) and path.strip() for path in paths):
+                    raise ValueError("产品路径必须是非空字符串")
+                if not isinstance(category_ids, list) or not all(
+                    isinstance(category_id, str) and category_id.strip()
+                    for category_id in category_ids
+                ):
+                    raise ValueError("category_ids 必须是字符串数组")
+                if not category_ids:
+                    raise ValueError("产品组至少需要绑定一个产品分类")
+                group = self.state.client_state.update_product_group(
+                    principal,
+                    unquote(group_mutation.group(1)),
+                    name,
+                    paths,
+                    category_ids,
+                )
+                if group is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组不存在",
+                    }, 404)
+                    return True
+                value = {"success": True, "origin": "server", "group": group}
+            elif group_mutation is not None and method == "DELETE":
+                ok = self.state.client_state.delete_product_group(
+                    principal, unquote(group_mutation.group(1)),
+                )
+                if not ok:
+                    json_response(self, {
+                        "success": False, "error": "产品组不存在",
+                    }, 404)
+                    return True
+                value = {"success": True, "origin": "server"}
             else:
                 value = self.state.client_state.product_price_series(payload)
         except PermissionError as exc:

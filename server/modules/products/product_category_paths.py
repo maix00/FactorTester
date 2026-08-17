@@ -50,8 +50,11 @@ def canonicalize_product_paths(
         signed = raw.strip()
         negative_path = signed.startswith("-")
         path = signed[1:].strip() if negative_path else signed
-        view_category_id, view_label = _split_category_view_path(path)
-        if view_category_id:
+        view_category_ref, view_label_ref = _split_category_view_path(path)
+        if view_category_ref:
+            view_category_id, view_label = _resolve_category_label_reference(
+                view_category_ref, view_label_ref, username,
+            )
             if not _is_stable_category_id(view_category_id, username):
                 raise ValueError(
                     "带分类的产品路径必须使用已登记的产品分类 ID: "
@@ -70,7 +73,11 @@ def canonicalize_product_paths(
                 raise ValueError(f"无法解析产品分类 Label: {view_label}")
             (negative if negative_path else positive).extend(canonical)
             continue
-        qualified_id, path = _split_category_qualified_path(path)
+        qualified_ref, path = _split_category_qualified_path(path)
+        qualified_id = (
+            _resolve_category_reference(qualified_ref, username)
+            if qualified_ref else ""
+        )
         candidate_trees = category_trees
         if qualified_id:
             if not _is_stable_category_id(qualified_id, username):
@@ -108,6 +115,50 @@ def canonicalize_product_paths(
     ]
 
 
+def normalize_category_selection_paths(
+    raw_paths: Iterable[str] | None,
+    *,
+    username: str = "",
+) -> list[str]:
+    """Normalize category-mounted selections to stable ID-based references.
+
+    This editor representation is kept beside the legacy concrete ``paths``
+    column. Ordinary classifier paths are unchanged; a mounted category view
+    is rewritten from category/label titles to
+    ``ProductCategory/<category_id>/<label_id>`` while preserving its owning
+    classifier prefix and sign.
+    """
+    result: list[str] = []
+    for raw in raw_paths or []:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        signed = raw.strip()
+        negative = signed.startswith("-")
+        path = signed[1:].strip() if negative else signed
+        parsed = _category_view_components(path)
+        if parsed is not None:
+            class_path, category_ref, label_ref = parsed
+            category_id, label_id, _label = _resolve_category_label_identity(
+                category_ref, label_ref, username,
+            )
+            normalized = (
+                f"{class_path}/{_CATEGORY_PATH_PREFIX}/"
+                f"{category_id}/{label_id}"
+            )
+        else:
+            qualified_ref, relative = _split_category_qualified_path(path)
+            if qualified_ref:
+                normalized = (
+                    f"{_CATEGORY_PATH_PREFIX}/"
+                    f"{_resolve_category_reference(qualified_ref, username)}/"
+                    f"{relative}"
+                )
+            else:
+                normalized = path.strip("/")
+        result.append(f"-{normalized}" if negative else normalized)
+    return list(dict.fromkeys(result))
+
+
 def infer_category_ids(
     raw_paths: Iterable[str] | None,
     *,
@@ -123,13 +174,20 @@ def infer_category_ids(
         path = str(raw or "").strip().lstrip("-").strip()
         if not path:
             continue
-        view_category_id, _view_label = _split_category_view_path(path)
-        if view_category_id:
+        view_category_ref, view_label_ref = _split_category_view_path(path)
+        if view_category_ref:
+            view_category_id, _view_label = _resolve_category_label_reference(
+                view_category_ref, view_label_ref, username,
+            )
             if _is_stable_category_id(view_category_id, username):
                 if view_category_id not in result:
                     result.append(view_category_id)
             continue
-        explicit_id, path = _split_category_qualified_path(path)
+        explicit_ref, path = _split_category_qualified_path(path)
+        explicit_id = (
+            _resolve_category_reference(explicit_ref, username)
+            if explicit_ref else ""
+        )
         if explicit_id:
             if _is_stable_category_id(explicit_id, username):
                 result.append(explicit_id) if explicit_id not in result else None
@@ -244,6 +302,97 @@ def _split_category_qualified_path(path: str) -> tuple[str, str]:
     return category_id, relative
 
 
+def _resolve_category_reference(value: str, username: str) -> str:
+    """Resolve either a stable category ID or an exact category title.
+
+    IDs are the only persisted identity.  Titles are accepted at the input
+    boundary for CLI/editor ergonomics and are rejected when ambiguous.
+    """
+    reference = str(value or "").strip()
+    if not reference:
+        raise ValueError("产品分类引用不能为空")
+    if _is_stable_category_id(reference, username):
+        return reference
+    from server.modules.products.product_category_store import (
+        list_product_categories,
+    )
+
+    matches = [
+        item for item in list_product_categories(username)
+        if reference in {
+            str(item.get("title_zh") or "").strip(),
+            str(item.get("alias") or "").strip(),
+        }
+    ]
+    if not matches:
+        raise ValueError(
+            f"产品分类不存在: {reference}；带分类的产品路径必须使用已登记的产品分类 ID: {reference}"
+        )
+    if len(matches) > 1:
+        raise ValueError(f"产品分类标题不唯一，请使用 ID: {reference}")
+    return str(matches[0].get("id") or "").strip()
+
+
+def _resolve_category_label_reference(
+    category_ref: str,
+    label_ref: str,
+    username: str,
+) -> tuple[str, str]:
+    """Resolve category/label IDs or titles to the canonical pair."""
+    category_id, _label_id, label = _resolve_category_label_identity(
+        category_ref, label_ref, username,
+    )
+    return category_id, label
+
+
+def _resolve_category_label_identity(
+    category_ref: str,
+    label_ref: str,
+    username: str,
+) -> tuple[str, str, str]:
+    """Resolve category and label references and return both stable IDs."""
+    category_id = _resolve_category_reference(category_ref, username)
+    label_reference = str(label_ref or "").strip()
+    if not label_reference:
+        raise ValueError("产品分类 Label 引用不能为空")
+    from server.modules.products.product_category_store import (
+        get_product_category,
+        list_product_categories,
+    )
+
+    category = get_product_category(username, category_id)
+    if category is None:
+        category = next(
+            (
+                item for item in list_product_categories(username)
+                if str(item.get("id") or "") == category_id
+            ),
+            None,
+        )
+    if category is None:
+        raise ValueError(f"产品分类不存在: {category_id}")
+    items = category.get("items") or []
+    matches = [
+        item for item in items
+        if label_reference in {
+            str(item.get("label_id") or "").strip(),
+            str(item.get("label") or item.get("title") or "").strip(),
+        }
+    ]
+    if not matches:
+        raise ValueError(
+            f"产品分类 Label 不存在: {category_id}/{label_reference}",
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"产品分类 Label 标题不唯一，请使用 Label ID: {label_reference}",
+        )
+    label = str(
+        matches[0].get("label") or matches[0].get("title") or "",
+    ).strip()
+    return category_id, str(matches[0].get("label_id") or "").strip(), label
+
+
 def _split_category_view_path(path: str) -> tuple[str, str]:
     """Extract a category label from a classifier-owned view path.
 
@@ -255,20 +404,32 @@ def _split_category_view_path(path: str) -> tuple[str, str]:
     This is a selection path for a product group, not a persisted product
     path.  It is expanded to concrete classifier paths before persistence.
     """
+    parsed = _category_view_components(path)
+    if parsed is None:
+        return "", ""
+    _class_path, category_ref, label_ref = parsed
+    return category_ref, label_ref
+
+
+def _category_view_components(
+    path: str,
+) -> tuple[str, str, str] | None:
+    """Return classifier path plus category and label references."""
     parts = [item for item in str(path or "").strip("/").split("/") if item]
     try:
         marker_index = parts.index(_CATEGORY_PATH_PREFIX)
     except ValueError:
-        return "", ""
+        return None
     if marker_index < 1:
-        return "", ""
+        return None
     if len(parts) <= marker_index + 2:
         raise ValueError("产品分类节点路径格式无效")
-    category_id = parts[marker_index + 1].strip()
-    label = "/".join(parts[marker_index + 2:]).strip()
-    if not category_id or not label:
+    class_path = "/".join(parts[:marker_index]).strip("/")
+    category_ref = parts[marker_index + 1].strip()
+    label_ref = "/".join(parts[marker_index + 2:]).strip()
+    if not class_path or not category_ref or not label_ref:
         raise ValueError("产品分类节点路径格式无效")
-    return category_id, label
+    return class_path, category_ref, label_ref
 
 
 def _is_stable_category_id(category_id: str, username: str = "") -> bool:

@@ -11,6 +11,7 @@ from server.modules.products.product_path_selection import resolve_selection_pro
 from server.modules.products.product_category_paths import (
     canonicalize_product_paths,
     infer_category_ids,
+    normalize_category_selection_paths,
 )
 from server.modules.products.product_category_store import (
     list_product_categories,
@@ -47,6 +48,23 @@ def load_product_groups(username: str) -> list:
             for value in group.get("paths", [])
             if isinstance(value, str) and value.strip()
         ]
+        raw_selection_paths = [
+            str(value).strip()
+            for value in (
+                group.get("selection_paths")
+                if isinstance(group.get("selection_paths"), list)
+                else raw_paths
+            )
+            if isinstance(value, str) and value.strip()
+        ]
+        try:
+            selection_paths = normalize_category_selection_paths(
+                raw_selection_paths, username=username,
+            )
+        except ValueError:
+            # Preserve an old row long enough for the editor to show it; new
+            # writes use the strict ID/title resolver and fail clearly.
+            selection_paths = raw_selection_paths
         if not category_ids:
             inferred = infer_category_ids(raw_paths, username=username)
             if inferred:
@@ -71,7 +89,16 @@ def load_product_groups(username: str) -> list:
         if group.get("category_ids") != category_ids:
             group["category_ids"] = category_ids
             dirty = True
-        if paths_changed or "product_names" not in group:
+        if group.get("selection_paths") != selection_paths:
+            group["selection_paths"] = selection_paths
+            dirty = True
+        if (
+            paths_changed
+            or "product_names" not in group
+            or group.get("path_bindings") != product_group_path_bindings(
+                selection_paths,
+            )
+        ):
             _enrich_group(group)
             dirty = True
         for key in ("factor_refs", "factor_set_refs"):
@@ -124,6 +151,9 @@ def product_group_to_path_selection(
 def _enrich_group(group: dict) -> dict:
     paths = group.get("paths", [])
     group["path_count"] = len(paths)
+    selection_paths = group.get("selection_paths") or paths
+    group["selection_paths"] = list(selection_paths)
+    group["path_bindings"] = product_group_path_bindings(selection_paths)
     try:
         group["product_names"] = _resolve_group_products(paths)
         group["product_count"] = len(group["product_names"])
@@ -131,6 +161,31 @@ def _enrich_group(group: dict) -> dict:
         group["product_names"] = []
         group["product_count"] = 0
     return group
+
+
+def product_group_path_bindings(paths: object) -> list[dict[str, object]]:
+    """Project a group's flat signed paths into its two fixed semantic rows.
+
+    A product group has exactly two path slots.  The labels are part of the
+    domain contract rather than user-created category labels: positive paths
+    form the initial membership and negative paths subtract exceptions.
+    """
+    positive: list[str] = []
+    negative: list[str] = []
+    for raw in paths if isinstance(paths, list) else []:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        if value.startswith("-"):
+            path = value[1:].strip()
+            if path:
+                negative.append(path)
+        else:
+            positive.append(value)
+    return [
+        {"id": "positive", "label": "正路径", "paths": positive},
+        {"id": "negative", "label": "负路径", "paths": negative},
+    ]
 
 
 def create_product_group(
@@ -150,6 +205,9 @@ def create_product_group(
     if find_group_by_name(groups, name) >= 0:
         return None
     normalized_category_ids = _validate_category_ids(username, category_ids)
+    selection_paths = normalize_category_selection_paths(
+        paths, username=username,
+    )
     normalized_paths = canonicalize_product_paths(
         paths,
         category_ids=normalized_category_ids,
@@ -169,6 +227,7 @@ def create_product_group(
         "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
         "paths": normalized_paths,
+        "selection_paths": selection_paths,
         "category_ids": normalized_category_ids,
         **creator,
         "research_refs": _research_refs(research_refs),
@@ -186,18 +245,31 @@ def update_product_group(
     name: str,
     paths: list | None = None,
     category_ids: list[str] | None = None,
+    *,
+    new_name: str | None = None,
 ) -> dict | None:
     groups = load_product_groups(username)
     idx = find_group_by_name(groups, name)
     if idx < 0:
         return None
     group = groups[idx]
+    requested_name = str(new_name if new_name is not None else name).strip()
+    if not requested_name:
+        raise ValueError("产品组名称不能为空")
+    if requested_name != str(group.get("name") or "") and (
+        find_group_by_name(groups, requested_name) >= 0
+    ):
+        raise ValueError("产品组名称已存在")
+    group["name"] = requested_name
     next_category_ids = (
         _validate_category_ids(username, category_ids)
         if category_ids is not None
         else _category_ids(group.get("category_ids"))
     )
     if paths is not None:
+        group["selection_paths"] = normalize_category_selection_paths(
+            paths, username=username,
+        )
         group["paths"] = canonicalize_product_paths(
             paths,
             category_ids=next_category_ids,

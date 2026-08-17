@@ -89,54 +89,25 @@
     const {mount, treeState, editable} = options;
     if (!mount) return;
     try {
-      // Mount the ordinary source tree immediately.  The category is a
-      // selection definition, never a product-tree provider.  Waiting here
-      // for source metadata or the whole tree left the Label row's own
-      // placeholder visible indefinitely on a slow/embedded data bridge.
-      const sourceDefinitions = Array.isArray(sources) ? sources : [];
-      const selectedSourceIDs = [];
-      const contractTreePath = (path, params = {}) => {
-        const query = new URLSearchParams({path});
-        if (params.query) query.set("query", params.query);
-        if (params.page) query.set("page", String(params.page));
-        if (params.limit) query.set("limit", String(params.limit));
-        return source === "local"
-          ? `/api/client/contract_tree?${query}`
-          : `/api/catalog/contract-tree?${query}`;
-      };
-      const treeOptions = {
-        categoryDefinitions: [],
-        dataSourceDefinitions: sourceDefinitions,
-        showCategoryFilter: false,
-        selectable: true,
-        selectionReadOnly: !editable,
-        leafOnly: true,
-        selectedPaths: treeState.selectedPaths || [],
+      const sourceDefinitions = Array.isArray(sources)
+        ? sources
+        : await (sourcesPromise || helpers.loadSources(context, source));
+      await FTCatalogSelectionTree.render(context, mount, helpers, {
         source,
-        contractTreePath,
-        sourceFamilyPath: helpers.sourceFamilyPath,
+        categoryIDs: [],
+        sourceDefinitions,
+        sourceIDs: [],
+        editable,
+        selectedPaths: treeState.selectedPaths || [],
         isCurrent: () => helpers.isCurrent(context),
-        // An empty source filter means the ordinary tree exposed by this
-        // Manager, including all currently available local data sources.
-        loadTree: () => helpers.loadTree(
-          context, source, [], selectedSourceIDs,
-        ),
         onTreeLoaded: () => treeState.sync?.(),
         onSelectionChange: selected => {
           treeState.selectedPaths = selected;
           treeState.onTreeSelection?.(selected);
         },
-      };
-      const definitionsPromise = Array.isArray(sources)
-        ? Promise.resolve(sources)
-        : (sourcesPromise || helpers.loadSources(context, source));
-      void definitionsPromise.then(value => {
-        treeOptions.dataSourceDefinitions = Array.isArray(value) ? value : [];
-      }).catch(() => {});
-      await FTProductTree.render(context, mount, null, treeOptions);
+      });
       if (!helpers.isCurrent(context)) return;
       treeState.sync = () => {
-        treeOptions.selectedPaths = treeState.selectedPaths;
         FTProductTree.syncSelectionControls(mount, treeState.selectedPaths);
       };
       treeState.sync();
