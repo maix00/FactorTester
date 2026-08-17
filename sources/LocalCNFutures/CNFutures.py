@@ -372,12 +372,62 @@ class CNFutures(Futures):
             ])
         return variants
 
+    @staticmethod
+    def _adjustment_number(value: Any) -> float | None:
+        if value is None or pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def contract_listing_metadata(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Expose LocalCNFutures naming and roll-adjustment semantics."""
+        forward_mul = self._adjustment_number(row.get('FORWARD_FACTOR'))
+        backward_mul = self._adjustment_number(row.get('BACKWARD_FACTOR'))
+        return {
+            'naming_scheme': 'local_cnfutures_contract_uid_v1',
+            'forward_adjustment_mul': forward_mul,
+            'forward_adjustment_add': self._adjustment_number(
+                row.get('FORWARD_ADD')
+            ) if row.get('FORWARD_ADD') is not None else (
+                0.0 if forward_mul is not None else None
+            ),
+            'backward_adjustment_mul': backward_mul,
+            'backward_adjustment_add': self._adjustment_number(
+                row.get('BACKWARD_ADD')
+            ) if row.get('BACKWARD_ADD') is not None else (
+                0.0 if backward_mul is not None else None
+            ),
+            'adjustment_ratio': self._adjustment_number(row.get('ADJ_RATIO')),
+        }
+
 from tools.products.Product import Product
 
 
 def _contract_data_path(folder: str, alias: str) -> str:
     """Resolve both Windows-safe and legacy contract parquet filenames."""
     return str(resolve_contract_parquet_path(folder, alias))
+
+
+def _resolve_contract_reference(reference: str) -> str | None:
+    """Normalize exchange and storage spellings to the LocalCNFutures UID."""
+    text = str(reference or '').strip().upper()
+    if not text:
+        return None
+    if text.count('|') >= 3:
+        return text
+    try:
+        return contract_uid_from_exchange_contract(text)
+    except ValueError:
+        return None
+
+
+def _resolve_product_reference(reference: str) -> str | None:
+    """Resolve source aliases to the canonical LocalCNFutures product name."""
+    text = str(reference or '').strip().upper()
+    product = CNFutures.get_by_product_name(text)
+    return str(getattr(product, 'name', '') or '') or None
 
 
 def get_all_futures_contract() -> List[Product]:
@@ -394,6 +444,8 @@ def get_all_futures_contract() -> List[Product]:
             _contract_data_path(data_dir_min, object.alias)
         ),
         get_object_path=lambda object: _contract_data_path(data_dir_min, object.alias),
+        naming_scheme='local_cnfutures_contract_uid_v1',
+        reference_resolver=_resolve_contract_reference,
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
@@ -480,6 +532,8 @@ def get_all_futures() -> List[CNFutures]:
         key = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
         get_object_path=lambda object: get_object_path(object, data_dir_min),
+        naming_scheme='local_cnfutures_product_alias_v1',
+        reference_resolver=_resolve_product_reference,
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
@@ -488,6 +542,8 @@ def get_all_futures() -> List[CNFutures]:
         key = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         get_object_path=lambda object: get_object_path(object, data_dir_day),
+        naming_scheme='local_cnfutures_product_alias_v1',
+        reference_resolver=_resolve_product_reference,
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,

@@ -51,14 +51,29 @@
     };
   }
 
+  function adjustmentLabel(context, method) {
+    switch (String(method || "raw")) {
+      case "continuous_futures_roll":
+        return context.t("连续合约换月平滑复权");
+      case "adjusted_source":
+        return context.t("数据源复权");
+      default:
+        return context.t("未复权");
+    }
+  }
+
   function metadata(context, payload) {
     const rows = [
       [context.t("数据源"), payload.data_source || context.t("自动")],
       [context.t("数据频率"), payload.freq || context.t("暂无频率")],
       [context.t("价格序列"), payload.adjusted
         ? context.t("复权价格") : context.t("原始价格")],
+      [context.t("复权方式"), adjustmentLabel(context, payload.adjustment_method)],
       [context.t("数据点"), String(payload.count || (payload.data || []).length)],
     ];
+    if (payload.adjustment_formula) {
+      rows.splice(4, 0, [context.t("复权公式"), payload.adjustment_formula]);
+    }
     return FTUI.table([context.t("项目"), context.t("值")], rows).shell;
   }
 

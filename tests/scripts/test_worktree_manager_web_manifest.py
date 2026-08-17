@@ -205,6 +205,19 @@ def test_product_price_panel_uses_source_frequency_and_adjusted_controls() -> No
     assert result.stdout.strip() == "ok"
 
 
+def test_product_contract_rows_keep_no_data_navigation_and_adjustment_metadata() -> None:
+    details = (WEB_ROOT / "catalog" / "details.js").read_text(encoding="utf-8")
+
+    assert "row.dataset.href = \"true\"" in details
+    assert "contractRows[index].uid || contractRows[index].contract" in details
+    assert "function unavailableContractDetail" in details
+    assert "context.t(\"无此产品信息\")" in details
+    assert "context.t(\"前复权乘法\")" in details
+    assert "context.t(\"后复权乘法\")" in details
+    assert "context.t(\"换月比值\")" in details
+    assert "Array.isArray(payload.data) && payload.data.length" in details
+
+
 def test_product_tree_selection_collapses_descendant_paths() -> None:
     import subprocess
 

@@ -80,6 +80,10 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
             self._if_object_is_supported_func = (
                 if_object_is_supported or self._if_object_is_in_source_func
             )
+            self.naming_scheme = str(
+                kwargs.get('naming_scheme') or 'canonical'
+            )
+            self._reference_resolver = kwargs.get('reference_resolver')
             self.timezone = kwargs.get('timezone', None)
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
@@ -111,6 +115,20 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
     def get_path(self, obj: Any) -> str:
         """通过内部 PathResolver 获取对象路径。"""
         return self._path_resolver.get_path(self, obj)
+
+    def resolve_reference(self, reference: str) -> str | None:
+        """Resolve a source reference to the object's canonical name.
+
+        The source owns aliases and conversion rules.  Manager/catalog code
+        only passes the declared reference through this hook and never
+        guesses whether an exchange, provider, or storage naming convention
+        is in use.
+        """
+        value = str(reference or '').strip()
+        resolver = self._reference_resolver
+        if callable(resolver):
+            return resolver(value)
+        return value or None
 
     @staticmethod
     def _path_has_rows(path: Any) -> bool:

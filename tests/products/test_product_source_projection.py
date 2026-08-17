@@ -22,6 +22,8 @@ def test_contract_source_member_projects_contract_catalog_and_data() -> None:
         "Product/FuturesContract/CNFuturesContract",
     ]
     assert member["availability"]["status"] == "ready"
+    assert member["naming_scheme"] == "local_cnfutures_contract_uid_v1"
+    assert "local_cnfutures_contract_uid_v1" in descriptor["naming_schemes"]
     assert descriptor["product_paths"] == [
         "Product/Futures/CNFutures",
         "Product/FuturesContract/CNFuturesContract",

@@ -158,7 +158,7 @@ def contract_data_path(contract_uid: str) -> str:
 
 
 def contract_has_data(contract_uid: str) -> bool:
-    return os.path.isfile(contract_data_path(contract_uid))
+    return os.path.isfile(contract_data_path_for(contract_uid))
 
 
 def scalar(value: Any) -> Any:
@@ -272,19 +272,78 @@ def available_freq_names_for_product(product):
 
 
 def find_product(products, product_name: str):
-    """Find product by name or alias from an iterable."""
-    return next((p for p in products if p is not None and (
-        getattr(p, 'name', None) == product_name or
-        getattr(p, 'alias', None) == product_name
-    )), None)
+    """Find a product through source-owned naming rules."""
+    wanted = str(product_name or '').strip()
+    products = tuple(products)
+
+    def exact(value: str):
+        return next((product for product in products if product is not None and (
+            getattr(product, 'name', None) == value or
+            getattr(product, 'alias', None) == value
+        )), None)
+
+    product = exact(wanted)
+    if product is not None:
+        return product
+    for source in DataSource.all():
+        resolver = getattr(source, 'resolve_reference', None)
+        if not callable(resolver):
+            continue
+        try:
+            canonical = resolver(wanted)
+        except (TypeError, ValueError, OSError, RuntimeError):
+            continue
+        if canonical and canonical != wanted:
+            product = exact(str(canonical))
+            if product is not None:
+                return product
+    return None
 
 
 def find_contract_product(contract_uid):
+    """Resolve a logical contract reference through source-owned naming rules."""
+    wanted = str(contract_uid or '').strip()
     contracts = cached_contracts()
-    return next((contract for contract in contracts if contract is not None and (
-        getattr(contract, 'name', None) == contract_uid or
-        getattr(contract, 'alias', None) == contract_uid
-    )), None)
+
+    def exact(value: str):
+        return next((contract for contract in contracts if contract is not None and (
+            getattr(contract, 'name', None) == value or
+            getattr(contract, 'alias', None) == value
+        )), None)
+
+    product = exact(wanted)
+    if product is not None:
+        return product
+    for source in DataSource.all():
+        resolver = getattr(source, 'resolve_reference', None)
+        if not callable(resolver):
+            continue
+        try:
+            canonical = resolver(wanted)
+        except (TypeError, ValueError, OSError, RuntimeError):
+            continue
+        if canonical and canonical != wanted:
+            product = exact(str(canonical))
+            if product is not None:
+                return product
+    return None
+
+
+def contract_data_path_for(
+    contract_uid: str,
+    contract_product: Any | None = None,
+) -> str:
+    """Resolve a contract file through its data source before legacy fallback."""
+    product = contract_product or find_contract_product(contract_uid)
+    if product is not None:
+        for source in DataSource.available_for_product(product):
+            try:
+                path = str(source.get_path(product) or '')
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+            if path and os.path.isfile(path):
+                return path
+    return contract_data_path(contract_uid)
 
 
 def _contract_variety_code(product: Any) -> str:

@@ -72,6 +72,42 @@ def _catalog_page(
 
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
+
+    def _ensure_visitor_price_access(self, payload: dict) -> None:
+        """Reject price requests whose product is internal-only.
+
+        Visitor mode may read a curve only when the current public Manager
+        owns a public provider for the product.  The catalog endpoint keeps
+        source metadata visible, so this check must happen again at the byte
+        serving boundary.
+        """
+        from server.modules.shared.price_services import find_contract_product
+
+        product_name = str(payload.get("product_name") or "").strip()
+        if not product_name and payload.get("contract_uid"):
+            contract = find_contract_product(str(payload["contract_uid"]))
+            parent = getattr(contract, "parent_product", None)
+            if callable(parent):
+                parent = parent()
+            if parent is None and contract is not None:
+                parent = getattr(contract, "get_parent_product", lambda: None)()
+            product_name = str(
+                getattr(parent, "name", "")
+                or getattr(contract, "name", "")
+                or "",
+            ).strip()
+        product = (
+            self.state.client_state.product_fields(product_name)
+            if product_name else None
+        )
+        descriptors = visitor_source_descriptors(
+            self.state.federated_source_descriptors(),
+            local_server_id=self.state.server_id,
+        )
+        ensure_visitor_product_access(
+            product, visitor_local_source_ids(descriptors),
+        )
+
     def _serve_product_catalog(self, parsed) -> bool:
         """Serve the Manager-owned catalog without selecting a service port."""
         if not parsed.path.startswith("/api/catalog/"):
@@ -438,7 +474,8 @@ class CatalogRoutesMixin:
         if session is None and visitor is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
-        if visitor is not None:
+        price_request = parsed.path == "/api/catalog/prices"
+        if visitor is not None and not price_request:
             json_response(self, {
                 "success": False,
                 "error": "访客模式只能查看产品组，不能修改产品目录",
@@ -457,6 +494,8 @@ class CatalogRoutesMixin:
                 or (group_mutation is not None and method == "DELETE")
                 or category_refresh is not None
             ) else self._json_body(256 * 1024)
+            if price_request and visitor is not None:
+                self._ensure_visitor_price_access(payload)
             if parsed.path == "/api/catalog/categories":
                 from server.modules.products.product_category_store import (
                     create_product_category,

@@ -284,3 +284,78 @@ def test_visitor_catalog_shows_internal_sources_but_rejects_their_data(
     assert by_id["InternalSource"]["visitor_data_accessible"] is False
     assert [item["name"] for item in products] == ["public-product"]
     assert denied.value.code == 403
+
+
+def test_visitor_can_read_public_price_series_but_not_internal_product_prices(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-0")
+    descriptors = [{
+        "id": "PublicSource",
+        "server_providers": [{
+            "server_id": "public-0", "online": True,
+            "public_server": True,
+        }],
+    }, {
+        "id": "InternalSource",
+        "server_providers": [{
+            "server_id": "internal-1", "online": True,
+            "public_server": False,
+        }],
+    }]
+    monkeypatch.setattr(
+        state, "federated_source_descriptors", lambda **_: descriptors,
+    )
+
+    def product_fields(name):
+        source_id = "PublicSource" if name == "public-product" else "InternalSource"
+        return {"name": name, "source_ids": [source_id]}
+
+    monkeypatch.setattr(state.client_state, "product_fields", product_fields)
+    calls = []
+
+    def price_series(payload):
+        calls.append(payload)
+        return {
+            "success": True,
+            "product": payload["product_name"],
+            "adjusted": False,
+            "data": [{"timestamp": "2026-01-02", "close": 1}],
+        }
+
+    monkeypatch.setattr(
+        state.client_state, "product_price_series", price_series,
+    )
+    grant = state.visitor_access.issue_grant(
+        "https://198.51.100.10:7998",
+    )
+    visitor_token = state.visitor_access.redeem_grant(
+        grant, target_origin="https://198.51.100.10:7998",
+    )
+    headers = {
+        "Host": "198.51.100.10:7998",
+        "X-Forwarded-Proto": "https",
+        "Cookie": f"ft-manager-visitor={visitor_token}",
+        "Content-Type": "application/json",
+    }
+
+    def post(base_url, product_name):
+        body = json.dumps({"product_name": product_name}).encode()
+        request_headers = {**headers, "Content-Length": str(len(body))}
+        return urlopen(Request(
+            f"{base_url}/api/catalog/prices",
+            data=body, headers=request_headers, method="POST",
+        ))
+
+    with running_manager(state) as base_url:
+        with post(base_url, "public-product") as response:
+            value = json.loads(response.read())
+        with pytest.raises(HTTPError) as denied:
+            post(base_url, "internal-product")
+
+    assert value["success"] is True
+    assert calls == [{"product_name": "public-product"}]
+    assert denied.value.code == 403

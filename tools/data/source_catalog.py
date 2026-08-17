@@ -59,6 +59,7 @@ class DataSourceMember:
     time_columns: dict[str, str] = field(default_factory=dict)
     data_columns: dict[str, str] = field(default_factory=dict)
     execution_provider: Any | None = field(default=None, repr=False, compare=False)
+    naming_scheme: str = "canonical"
 
     @property
     def frequency(self) -> str:
@@ -201,6 +202,9 @@ def _historical_member(provider: Any) -> DataSourceMember:
         time_columns=dict(getattr(provider, "time_cols_mapping", {}) or {}),
         data_columns=dict(getattr(provider, "data_cols_mapping", {}) or {}),
         execution_provider=provider,
+        naming_scheme=str(
+            getattr(provider, "naming_scheme", "canonical") or "canonical"
+        ),
     )
 
 
