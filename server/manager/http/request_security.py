@@ -25,6 +25,7 @@ from server.manager.http.visitor_access import (
     request_origin,
     target_compliance_url,
     target_visitor_url,
+    device_bridge_url,
     visitor_cookie,
 )
 
@@ -364,6 +365,44 @@ class RequestSecurityMixin:
         ).strip()
         return target if target.startswith("https://") else ""
 
+    def _device_bridge_source_origin(self) -> str:
+        """Return the first explicitly trusted HTTPS ingress for device auth."""
+        target_origin = self._visitor_redirect_target()
+        for origin in tuple(getattr(self.state, "visitor_entry_origins", ())):
+            normalized = str(origin or "").strip().rstrip("/")
+            if (
+                normalized.startswith("https://")
+                and normalized != target_origin
+            ):
+                return normalized
+        return ""
+
+    def _issue_device_bridge_redirect(self, next_path: str) -> str:
+        """Issue a browser-origin bridge from the public IP to a trusted ingress."""
+        current_origin = self._request_origin()
+        target_origin = self._visitor_redirect_target()
+        source_origin = self._device_bridge_source_origin()
+        store = getattr(self.state, "visitor_access", None)
+        if not (
+            store is not None
+            and current_origin == target_origin
+            and source_origin
+            and self._has_secure_ui_transport()
+        ):
+            return ""
+        try:
+            bridge = store.issue_device_bridge(
+                source_origin=source_origin,
+                target_origin=target_origin,
+            )
+        except ValueError:
+            return ""
+        return device_bridge_url(
+            source_origin,
+            bridge=bridge,
+            next_path=manager_safe_login_next(next_path),
+        )
+
     def _redirect_configured_ingress(self, parsed, *, next_path: str) -> bool:
         """Move an ingress navigation to the canonical public IP origin.
 
@@ -513,6 +552,8 @@ class RequestSecurityMixin:
         *,
         show_visitor_entry: bool | None = None,
         visitor_grant: str = "",
+        device_bridge: str = "",
+        device_bridge_fallback: str = "",
     ) -> None:
         if show_visitor_entry is None:
             show_visitor_entry = (
@@ -555,10 +596,26 @@ class RequestSecurityMixin:
                 )
             else:
                 visitor_entry_href = "/visitor?next=" + safe_next
+        device_bridge_redirect = ""
+        if (
+            not device_bridge
+            and not device_bridge_fallback
+            and not visitor_grant
+            and parse_qs(
+                self.path.partition("?")[2],
+                keep_blank_values=True,
+            ).get("device_bridge_failed", [""])[0] != "1"
+            and self._visitor_mode() is None
+            and self._session() is None
+        ):
+            device_bridge_redirect = self._issue_device_bridge_redirect(next_path)
         body = manager_compliance_page(
             next_path,
             accept_language=self.headers.get("Accept-Language", ""),
             visitor_entry_href=visitor_entry_href,
+            device_bridge=device_bridge,
+            device_bridge_fallback=device_bridge_fallback,
+            device_bridge_redirect=device_bridge_redirect,
         )
         self._send_html(body, cookie=client_access_cookie)
 

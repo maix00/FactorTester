@@ -1887,7 +1887,92 @@ def test_public_device_verify_offers_canonical_origin_handoff(
         with pytest.raises(HTTPError) as replayed:
             opener.open(replay_request)
         assert replayed.value.code == 303
-        assert replayed.value.headers.get("Set-Cookie") is None
+    assert replayed.value.headers.get("Set-Cookie") is None
+
+
+def test_public_device_bridge_verify_hands_off_to_direct_ip(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://101.133.144.27:7998",
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    bridge = state.visitor_access.issue_device_bridge(
+        source_origin="https://eloquence-drizzly-fencing.ngrok-free.dev",
+        target_origin="https://101.133.144.27:7998",
+    )
+    monkeypatch.setattr(
+        state.device_registry,
+        "verify",
+        lambda **_values: {
+            "device_id": "device-bound-to-alice",
+            "username": "alice@default",
+        },
+    )
+    monkeypatch.setattr(
+        state,
+        "login_device",
+        lambda username, **values: state._issue_session(
+            username,
+            "user",
+            authentication="device",
+            origin=str(values.get("origin") or ""),
+        ),
+    )
+    opener = build_opener(_NoRedirect())
+
+    with _running_manager(state) as base_url:
+        challenge_request = Request(
+            f"{base_url}/api/device/challenge",
+            data=b'{}',
+            headers={
+                **_visitor_request_headers(
+                    "eloquence-drizzly-fencing.ngrok-free.dev",
+                ),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(challenge_request) as response:
+            challenge = json.loads(response.read())
+
+        verify_request = Request(
+            f"{base_url}/api/device/verify",
+            data=json.dumps({
+                "challenge_id": challenge["challenge_id"],
+                "device_id": "device-bound-to-alice",
+                "public_key": {},
+                "signature": "ignored-by-test-seam",
+                "device_bridge": bridge,
+                "next": "/jobs",
+            }).encode(),
+            headers={
+                **_visitor_request_headers(
+                    "eloquence-drizzly-fencing.ngrok-free.dev",
+                ),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(verify_request) as response:
+            payload = json.loads(response.read())
+
+    assert payload["username"] == "alice@default"
+    assert payload["handoff_url"].startswith(
+        "https://101.133.144.27:7998/device-handoff?"
+    )
+    assert state.visitor_access.device_bridge_target(
+        bridge,
+        source_origin="https://eloquence-drizzly-fencing.ngrok-free.dev",
+    ) == ""
 
 
 def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
