@@ -83,6 +83,7 @@
     "product-reference": ["catalog"],
     "product-sources": ["catalog"],
     "product-groups": ["catalog"],
+    "product-categories": ["catalog"],
     "product-category": ["catalog"],
     "products": ["catalog"],
     "profile": ["profile"],
