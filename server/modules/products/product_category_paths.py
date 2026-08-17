@@ -50,6 +50,26 @@ def canonicalize_product_paths(
         signed = raw.strip()
         negative_path = signed.startswith("-")
         path = signed[1:].strip() if negative_path else signed
+        view_category_id, view_label = _split_category_view_path(path)
+        if view_category_id:
+            if not _is_stable_category_id(view_category_id, username):
+                raise ValueError(
+                    "带分类的产品路径必须使用已登记的产品分类 ID: "
+                    + view_category_id
+                )
+            if requested_categories and view_category_id not in requested_categories:
+                raise ValueError(
+                    f"产品路径引用的分类 {view_category_id} 未绑定到当前定义"
+                )
+            members = _category_members(view_category_id, username)
+            canonical = [
+                classifier_object_path(product)
+                for product in members.get(view_label, [])
+            ]
+            if not canonical:
+                raise ValueError(f"无法解析产品分类 Label: {view_label}")
+            (negative if negative_path else positive).extend(canonical)
+            continue
         qualified_id, path = _split_category_qualified_path(path)
         candidate_trees = category_trees
         if qualified_id:
@@ -102,6 +122,12 @@ def infer_category_ids(
     for raw in raw_paths or []:
         path = str(raw or "").strip().lstrip("-").strip()
         if not path:
+            continue
+        view_category_id, _view_label = _split_category_view_path(path)
+        if view_category_id:
+            if _is_stable_category_id(view_category_id, username):
+                if view_category_id not in result:
+                    result.append(view_category_id)
             continue
         explicit_id, path = _split_category_qualified_path(path)
         if explicit_id:
@@ -216,6 +242,33 @@ def _split_category_qualified_path(path: str) -> tuple[str, str]:
     if not category_id or not relative:
         raise ValueError("带分类的产品路径格式无效")
     return category_id, relative
+
+
+def _split_category_view_path(path: str) -> tuple[str, str]:
+    """Extract a category label from a classifier-owned view path.
+
+    The product page renders a selected category below its owning Python
+    classifier class, for example::
+
+        Product/Futures/CNFutures/ProductCategory/cnfutures_sector/行业
+
+    This is a selection path for a product group, not a persisted product
+    path.  It is expanded to concrete classifier paths before persistence.
+    """
+    parts = [item for item in str(path or "").strip("/").split("/") if item]
+    try:
+        marker_index = parts.index(_CATEGORY_PATH_PREFIX)
+    except ValueError:
+        return "", ""
+    if marker_index < 1:
+        return "", ""
+    if len(parts) <= marker_index + 2:
+        raise ValueError("产品分类节点路径格式无效")
+    category_id = parts[marker_index + 1].strip()
+    label = "/".join(parts[marker_index + 2:]).strip()
+    if not category_id or not label:
+        raise ValueError("产品分类节点路径格式无效")
+    return category_id, label
 
 
 def _is_stable_category_id(category_id: str, username: str = "") -> bool:

@@ -398,3 +398,16 @@ def test_category_qualified_path_uses_only_current_fixed_source_id() -> None:
             [qualified.replace(DAY_NIGHT_ID, "day_night")],
             category_ids=[DAY_NIGHT_ID], infer_legacy_categories=False,
         )
+
+
+def test_classifier_owned_category_view_path_expands_to_concrete_products() -> None:
+    selected = (
+        "Product/Futures/CNFutures/ProductCategory/"
+        f"{SECTOR_ID}/有色金属"
+    )
+    paths = canonicalize_product_paths(
+        [selected], category_ids=[SECTOR_ID], infer_legacy_categories=False,
+    )
+    assert paths
+    assert all("ProductCategory/" not in path for path in paths)
+    assert all(path.startswith("Product/") for path in paths)

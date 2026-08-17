@@ -8,9 +8,14 @@
     const sourceManaged = category?.source_managed === true;
     const composite = category?.is_composite === true;
     const canEdit = options.canEdit === true;
-    const titleEditable = editing && canEdit && !composite;
-    const labelsEditable = editing && canEdit && !sourceManaged;
-    const pathsEditable = labelsEditable && !composite;
+    const policy = category?.editability || {};
+    const titleEditable = editing && canEdit
+      && (policy.category_title === true || (!sourceManaged && !composite)
+        || (sourceManaged && policy.category_title === "super_admin"));
+    const labelsEditable = editing && canEdit
+      && (policy.label_title === true || (!sourceManaged && !composite));
+    const pathsEditable = editing && canEdit
+      && (policy.label_paths === true || (!sourceManaged && !composite));
     const labels = Array.isArray(category?.items) ? category.items : [];
     const treeState = {
       activeRow: null,
@@ -44,10 +49,10 @@
         ));
       }, {variant: "primary"}));
     }
-    if (category && canEdit && !sourceManaged) {
+    if (category && canEdit && policy.delete !== false && !sourceManaged) {
       header.append(options.deleteButton?.());
     }
-    if (category?.is_composite && canEdit) {
+    if (category?.is_composite && canEdit && policy.refresh !== false) {
       header.append(options.refreshButton?.(editing ? "edit" : "view"));
     }
     surface.append(header);
@@ -71,7 +76,9 @@
     const labelView = window.FTProductCategoryLabels.render(
       context, category, treeState, {
         creating, labels, labelsEditable, pathsEditable,
-        removable: labelsEditable && !composite,
+        removable: editing && canEdit
+          && (policy.label_remove === true || (!sourceManaged && !composite)),
+        editability: policy,
         renderTree: options.renderTree,
       },
     );
@@ -201,7 +208,7 @@
     ).shell;
   }
 
-  function sourceSection(context, category, sources) {
+  function sourceSection(context, category, sources, options = {}) {
     const section = document.createElement("section");
     section.className = "product-category-source-section";
     section.append(Object.assign(document.createElement("h2"), {
@@ -213,19 +220,38 @@
         (category.items || []).flatMap(item => item.paths || []), sources,
       );
     const rows = ids.map(id => {
-      const source = sources.find(item => String(item.id || "") === String(id));
-      return [id, source?.title_zh || source?.name || source?.alias || "—",
-        providerServers(source, context), source?.status || context.t("已登记")];
+      const source = sources.find(item => String(
+        item.id || item.family_id || item.bundle_id || "",
+      ) === String(id));
+      const family = document.createElement("a");
+      family.className = "catalog-source-family-link";
+      family.textContent = source?.family_name || source?.bundle_name
+        || source?.source_name || id || "—";
+      if (source && options.sourceFamilyPath) {
+        family.href = options.sourceFamilyPath(
+          source.family_id || source.bundle_id || source.id, options.source,
+        );
+        family.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          context.navigate(family.href);
+        });
+      }
+      return [
+        family,
+        providerServers(source, context),
+        source?.status || context.t("已登记"),
+      ];
     });
     section.append(rows.length
-      ? FTUI.table([context.t("数据源"), context.t("名称"), context.t("提供服务器"), context.t("状态")], rows).shell
+      ? FTUI.table([context.t("数据源族"), context.t("提供服务器"), context.t("状态")], rows).shell
       : FTUI.empty(context.t("暂无绑定数据源"), context.t("该分类没有声明数据源绑定")));
     return section;
   }
 
   function appendSourceSection(context, main, category, options) {
     if (Array.isArray(options.sources)) {
-      main.append(sourceSection(context, category, options.sources));
+      main.append(sourceSection(context, category, options.sources, options));
       return;
     }
     const mount = document.createElement("section");
@@ -235,7 +261,7 @@
     if (!options.loadSources) return;
     Promise.resolve(options.loadSources()).then(sources => {
       if (!helpersAreCurrent(context)) return;
-      mount.replaceWith(sourceSection(context, category, sources || []));
+      mount.replaceWith(sourceSection(context, category, sources || [], options));
     }).catch(error => {
       if (!helpersAreCurrent(context)) return;
       mount.replaceChildren(FTUI.empty(

@@ -109,6 +109,20 @@
     });
   }
 
+  function sourceFamilyPath(id, source = sourceOf()) {
+    return pathFor(
+      `/products/sources/${encodeURIComponent(String(id || ""))}`,
+      source,
+    );
+  }
+
+  function sourceFamilyDetail(context, id) {
+    return window.FTProductSourceFamilyDetail.render(context, {
+      localCatalogAvailable, sourceOf, pathFor, catalogSwitch, request,
+      loadCategories, loadSources, sourceSummary, isCurrent,
+    }, id);
+  }
+
   async function load(context, source, options = {}) {
     const origin = source || sourceOf();
     const includeProducts = options.includeProducts !== false;
@@ -203,7 +217,7 @@
     if (page === "categories") {
       return window.FTProductCategories.list(context, {
         localCatalogAvailable, sourceOf, pathFor, catalogSwitch,
-        loadCategories, loadProductTree, sourceSummary,
+        loadCategories, loadSources, loadProductTree, sourceSummary, sourceFamilyPath,
         isCurrent: () => isCurrent(context),
       });
     }
@@ -273,7 +287,7 @@
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       let selected = localStorage.getItem(categoryStorageKey) || "";
-      const selectedIDs = FTProductTree.categorySelectionValues(
+      let selectedIDs = FTProductTree.categorySelectionValues(
         selected, categoryPayload.categories,
       );
       const canonicalSelected = FTProductTree.categorySelectionID(
@@ -305,6 +319,7 @@
         await FTProductTree.render(context, treeMount, null, {
           categoryDefinitions: categoryPayload.categories,
           dataSourceDefinitions: sourceDefinitions,
+          sourceFamilyPath,
           selectedDataSources: selectedSources,
           selectedCategory: selected,
           contractTreePath,
@@ -316,9 +331,12 @@
           ),
           onSave: async nextID => {
             selected = nextID;
+            selectedIDs = FTProductTree.categorySelectionValues(
+              selected, categoryPayload.categories,
+            );
             localStorage.setItem(categoryStorageKey, selected);
             cache.clear();
-            context.navigate(pathFor("/products", source));
+            await renderTree();
           },
         });
         if (!isCurrent(context)) return;
@@ -439,7 +457,7 @@
     return {
       sourceOf, load, loadCategories, loadProductTree, loadSources, loadTree,
       loadSourceIDs: definitions => FTProductCategoryModel.availableSourceIDs(definitions),
-      catalogSwitch, sourceSummary, pathFor,
+      catalogSwitch, sourceSummary, sourceFamilyPath, pathFor,
       isCurrent,
     };
   }
@@ -488,6 +506,7 @@
   function matches(value, query) { return !query || JSON.stringify(value || {}).toLowerCase().includes(query); }
 
   window.FTProducts = {
-    categoryDetail, groupDetail, list, productDetail, referenceDetail, sourceList,
+    categoryDetail, groupDetail, list, productDetail, referenceDetail,
+    sourceFamilyDetail, sourceList,
   };
 })();

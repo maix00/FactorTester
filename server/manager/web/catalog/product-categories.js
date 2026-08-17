@@ -45,28 +45,53 @@
         }, {variant: "secondary"}),
       );
     }
-    toolbar.append(context.button("↻", () => list(context, helpers), context.t("刷新")));
+    let refresh;
     root.append(toolbar);
     const mount = document.createElement("div");
     mount.className = "product-category-management-results";
-    mount.append(FTUI.loading(context.t("正在读取产品分类…")));
     root.append(mount);
     context.content.replaceChildren(root);
-    helpers.loadCategories(context, source).then(value => {
-      if (!helpers.isCurrent()) return;
-      renderCategories(
-        context, helpers, mount, value.categories || [], readOnly, source,
-      );
-    }).catch(error => {
-      if (!helpers.isCurrent()) return;
-      mount.replaceChildren(FTUI.empty(
-        context.t("产品分类读取失败"), error.message || "",
-      ));
-    });
+    let loadToken = 0;
+    const isCurrentView = token => token === loadToken
+      && helpers.isCurrent() !== false
+      && root.isConnected !== false
+      && mount.isConnected !== false;
+    const loadIntoMount = async () => {
+      const token = ++loadToken;
+      mount.replaceChildren(FTUI.loading(context.t("正在读取产品分类…")));
+      try {
+        const results = await Promise.allSettled([
+          helpers.loadCategories(context, source),
+          helpers.loadSources?.(context, source) || Promise.resolve([]),
+        ]);
+        if (!isCurrentView(token)) return;
+        if (results[0].status === "rejected") throw results[0].reason;
+        const sourceDefinitions = results[1].status === "fulfilled"
+          ? results[1].value : [];
+        renderCategories(
+          context, helpers, mount, results[0].value.categories || [], readOnly,
+          source, sourceDefinitions,
+        );
+      } catch (error) {
+        if (!isCurrentView(token)) return;
+        mount.replaceChildren(FTUI.empty(
+          context.t("产品分类读取失败"), error.message || "",
+        ));
+      } finally {
+        if (refresh && isCurrentView(token)) refresh.disabled = false;
+      }
+    };
+    refresh = context.button("↻", () => {
+      if (refresh.disabled) return;
+      refresh.disabled = true;
+      void loadIntoMount();
+    }, context.t("刷新"));
+    toolbar.append(refresh);
+    void loadIntoMount();
   }
 
   function renderCategories(
-    context, helpers, mount, categories, readOnly, source,
+    context, helpers, mount, categories, readOnly, source, sourceDefinitions,
   ) {
     if (!categories.length) {
       mount.replaceChildren(FTUI.empty(
@@ -88,7 +113,7 @@
         ownerSummary(context, category),
         Array.isArray(category.items) ? category.items.length : 0,
         parentSummary(context, category, byID),
-        (category.source_ids || []).join("、") || "—",
+        sourceFamilyCell(context, helpers, category.source_ids, sourceDefinitions, source),
       ]),
     );
     [...table.body.rows].forEach((row, index) => {
@@ -99,6 +124,35 @@
       )));
     });
     mount.replaceChildren(table.shell);
+  }
+
+  function sourceFamilyCell(context, helpers, ids, definitions, source) {
+    const cell = document.createElement("div");
+    cell.className = "catalog-source-lines catalog-source-family-list";
+    const byID = new Map((Array.isArray(definitions) ? definitions : []).map(item => [
+      String(item.id || item.family_id || item.bundle_id || ""), item,
+    ]));
+    (Array.isArray(ids) ? ids : []).forEach(id => {
+      const descriptor = byID.get(String(id));
+      const link = document.createElement("a");
+      link.className = "catalog-source-family-link";
+      link.textContent = descriptor?.family_name || descriptor?.bundle_name
+        || descriptor?.source_name || id;
+      if (helpers.sourceFamilyPath) {
+        link.href = helpers.sourceFamilyPath(
+          descriptor?.family_id || descriptor?.bundle_id || descriptor?.id || id,
+          source,
+        );
+        link.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          context.navigate(link.href);
+        });
+      }
+      cell.append(link);
+    });
+    if (!cell.childElementCount) cell.textContent = "—";
+    return cell;
   }
 
   function ownerSummary(context, category) {

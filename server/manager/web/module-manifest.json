@@ -82,6 +82,7 @@
     "product": ["catalog"],
     "product-reference": ["catalog"],
     "product-sources": ["catalog"],
+    "product-source-family": ["catalog"],
     "product-groups": ["catalog"],
     "product-categories": ["catalog"],
     "product-category": ["catalog"],
@@ -202,6 +203,7 @@
       "catalog/product-category-detail.js",
       "catalog/product-categories.js",
       "catalog/source-list.js",
+      "catalog/source-family-detail.js",
       "catalog/products.js",
       "catalog/details.js"
     ],
@@ -385,6 +387,7 @@
     "catalog/product-list-table.js",
     "catalog/product-tree.js",
     "catalog/source-list.js",
+    "catalog/source-family-detail.js",
     "catalog/products.js",
     "catalog/details.js",
     "workbench/setting-rules.js",

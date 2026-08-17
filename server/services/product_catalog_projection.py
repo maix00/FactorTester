@@ -204,15 +204,29 @@ def _member_descriptor(
     member: DataSourceMember,
     products: tuple[Any, ...],
 ) -> dict[str, Any]:
+    available = _available_products(member, products)
+    supported = _supported_products(member, products)
+    mode = member.mode.as_dict()
     return {
         "id": member.key,
+        "source_ref": f"data-source-member:server:{member.key}",
         "label": member.label,
         "frequency": member.frequency,
         "timezone": member.timezone,
         "time_columns": dict(member.time_columns),
         "data_columns": dict(member.data_columns),
-        "product_count": len(_available_products(member, products)),
-        "catalog_product_count": len(_supported_products(member, products)),
+        "dimensions": dict(member.dimensions),
+        "data_modes": [mode],
+        "product_paths": sorted({
+            classifier_class_path(type(product)) for product in supported
+        }),
+        "availability": {
+            "status": "ready" if available else "empty",
+            "product_count": len(available),
+            "frequency_names": [member.frequency] if member.frequency else [],
+        },
+        "product_count": len(available),
+        "catalog_product_count": len(supported),
     }
 
 
@@ -240,6 +254,8 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
         })
         result.append({
             "id": source.key,
+            "family_id": source.key,
+            "family_name": source.label,
             "source_ref": f"data-source:server:{source.key}",
             "source_name": source.label,
             "source_kind": "server",

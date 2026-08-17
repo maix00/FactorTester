@@ -243,6 +243,9 @@ def refresh_product_category_composition(
 
 def delete_product_category(username: str, category_id: str) -> bool:
     wanted = str(category_id or "").strip()
+    visible = get_product_category(username, wanted)
+    if visible is not None and visible.get("source_managed"):
+        raise PermissionError("数据源产品分类由服务器固定提供，不能删除")
     categories = load_product_categories(username)
     filtered = [item for item in categories if str(item.get("id") or "") != wanted]
     if len(filtered) == len(categories):
