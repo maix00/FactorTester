@@ -207,11 +207,15 @@ def test_product_price_panel_uses_source_frequency_and_adjusted_controls() -> No
 
 def test_product_contract_rows_keep_no_data_navigation_and_adjustment_metadata() -> None:
     details = (WEB_ROOT / "catalog" / "details.js").read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "row.dataset.href = \"true\"" in details
     assert "contractRows[index].uid || contractRows[index].contract" in details
-    assert "/products/product/${encodeURIComponent(product.name)}?${query}" in details
+    assert "/products/product/${encodeURIComponent(target)}?${query}" in details
+    assert "[...contracts.contracts].reverse()" in details
     assert "contract_has_data" in details
+    assert "async function contractDetail" in details
+    assert ".table-shell thead th" in styles
     assert 'if (!product) return referenceDetail(context, "product", target, helpers)' not in details
     assert "Do not fall back to the generic" in details
     assert "function unavailableContractDetail" in details
