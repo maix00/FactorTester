@@ -1365,13 +1365,11 @@ def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
     assert chinese["locale"] == "zh-Hans"
     assert english["strings"]["本地研究"] == "Local research"
     assert english["strings"]["需要登录"] == "Sign in required"
-    assert english["strings"]["登录后才能登记或撤销设备"] == (
-        "Sign in to enroll or revoke devices"
+    assert english["strings"]["登录后才能查看或撤销自己的设备"] == (
+        "Sign in to view or revoke your devices"
     )
-    assert english["strings"]["内网只生成一次性授权；公网来源重新生成并保存自己的私钥"] == (
-        "The internal Manager only issues a one-time authorization; "
-        "the public origin generates and stores its own private key"
-    )
+    assert english["strings"]["我的设备"] == "My devices"
+    assert english["strings"]["仅公网访客模式"] == "Public visitor mode only"
     assert english["strings"]["研究身份"] == "Profile"
     assert english["strings"]["研究身份：%@"] == "Profile: %@"
     assert english["strings"]["Profiles"] == "Profile"

@@ -126,24 +126,33 @@ class SessionStateMixin:
         account.  An empty or invalid allowlist fails closed.
         """
         value = str(username or "").strip()
-        allowlist = tuple(
-            str(item or "").strip()
-            for item in getattr(self, "public_visitor_login_allowlist", ())
-            if str(item or "").strip()
-        )
-        if not value or not allowlist:
-            return None
-
-        accounts = self._public_visitor_accounts()
-        candidates = [
-            dict(account)
-            for account in accounts
-            if value in self._account_login_references(account)
-            and any(
-                reference in self._account_login_references(account)
-                for reference in allowlist
+        central_accounts = self._central_public_visitor_accounts()
+        if central_accounts is not None:
+            # An empty central result is authoritative: removing the last
+            # row must not resurrect an old deployment environment variable.
+            candidates = [
+                dict(account)
+                for account in central_accounts
+                if value and value in self._account_login_references(account)
+            ]
+        else:
+            allowlist = tuple(
+                str(item or "").strip()
+                for item in getattr(self, "public_visitor_login_allowlist", ())
+                if str(item or "").strip()
             )
-        ]
+            if not value or not allowlist:
+                return None
+            accounts = self._public_visitor_accounts()
+            candidates = [
+                dict(account)
+                for account in accounts
+                if value in self._account_login_references(account)
+                and any(
+                    reference in self._account_login_references(account)
+                    for reference in allowlist
+                )
+            ]
         if len(candidates) != 1:
             # This includes duplicate aliases and role changes made after a
             # deployment allowlist was written.  Do not reveal which account
@@ -159,6 +168,29 @@ class SessionStateMixin:
         ):
             return None
         return account
+
+    def _central_public_visitor_accounts(
+        self,
+    ) -> list[dict[str, object]] | None:
+        """Read the PostgreSQL visitor policy when its API is available.
+
+        ``None`` means the configured store is unavailable or is an older
+        local/test adapter without the policy API.  An empty list is a valid
+        central result and remains authoritative.
+        """
+        store = getattr(self, "control_store", None)
+        reader = getattr(store, "public_visitor_login_accounts", None)
+        if not callable(reader):
+            return None
+        try:
+            return [
+                dict(item)
+                for item in reader(
+                    server_id=str(getattr(self, "server_id", "") or ""),
+                )
+            ]
+        except (ControlDatabaseError, OSError, RuntimeError, TypeError, ValueError):
+            return None
 
     def _public_visitor_accounts(self) -> list[dict[str, object]]:
         """Read the account authority, falling back to existing local SQLite."""
@@ -471,6 +503,21 @@ class SessionStateMixin:
     def session_principal(self, token: str) -> str | None:
         session = self.session(token)
         return str(session["username"]) if session else None
+
+    def session_authentication(self, token: str) -> str:
+        """Return the authentication method for a live session.
+
+        HTTP routes use this narrow accessor for policy decisions such as the
+        allowlisted visitor-device exemption.  The public session payload does
+        not expose the method to callers, so it cannot be forged through JSON.
+        """
+        if self.session(token) is None:
+            return ""
+        with self._session_lock:
+            value = self._sessions.get(self._token_hash(token))
+            if value is None or len(value) < 4:
+                return ""
+            return str(value[3] or "")
 
     def logout(self, token: str) -> None:
         with self._session_lock:

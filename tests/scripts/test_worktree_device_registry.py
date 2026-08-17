@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from cryptography.hazmat.primitives import hashes
@@ -8,11 +9,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from server.manager.domain.devices import (
-    DeviceAuthorizationError,
-    DeviceAuthorizationStore,
     DeviceChallengeStore,
     DeviceRegistry,
-    PublicDeviceLimitError,
 )
 from server.manager.domain.device_clients import describe_client, observed_ip
 
@@ -90,7 +88,39 @@ def test_device_registry_keeps_only_minimal_client_and_ip_audit_metadata(tmp_pat
         )
 
 
-def test_public_server_enforces_three_active_devices_per_user(tmp_path) -> None:
+def test_existing_device_snapshot_is_migrated_to_allowlist_policy(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    path = tmp_path / "devices.json"
+    path.write_text(json.dumps({
+        "schema_version": 3,
+        "server_id": "public-main",
+        "generation": 2,
+        "devices": {
+            "device-legacy-123456": {
+                "device_id": "device-legacy-123456",
+                "public_key": public_key,
+                "username": "alice@default",
+                "enabled": True,
+                "public_access": False,
+                "quota_exempt": False,
+            },
+        },
+        "sources": {},
+    }), encoding="utf-8")
+
+    registry = DeviceRegistry(path, server_id="public-main", public_server=True)
+    record = registry.list(username="alice@default")[0]
+
+    assert record["public_access"] is True
+    assert record["quota_exempt"] is True
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    migrated = persisted["devices"]["device-legacy-123456"]
+    assert migrated["public_access"] is True
+    assert migrated["quota_exempt"] is True
+
+
+def test_public_server_accepts_all_allowlisted_devices(tmp_path) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = _jwk(private_key.public_key())
     registry = DeviceRegistry(
@@ -99,31 +129,39 @@ def test_public_server_enforces_three_active_devices_per_user(tmp_path) -> None:
         public_server=True,
     )
 
-    for index in range(3):
+    for index in range(5):
         registry.enroll(
             username="alice@default",
             device_id=f"device-public-{index:06d}",
             public_key=public_key,
         )
 
-    assert registry.public_device_count(username="alice@default") == 3
+    assert registry.public_device_count(username="alice@default") == 5
+
     assert registry.public_user_count() == 1
-    with pytest.raises(PublicDeviceLimitError, match="limit reached") as error:
-        registry.enroll(
+    registry.revoke("device-public-000000")
+    assert registry.public_device_count(username="alice@default") == 4
+
+
+def test_all_enrolled_devices_are_allowlisted_devices(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    registry = DeviceRegistry(
+        tmp_path / "devices.json",
+        server_id="public-main",
+        public_server=True,
+    )
+
+    for index in range(5):
+        record = registry.enroll(
             username="alice@default",
-            device_id="device-public-000003",
+            device_id=f"device-auto-{index:06d}",
             public_key=public_key,
         )
-    assert error.value.count == 3
+        assert record["quota_exempt"] is True
 
-    registry.revoke("device-public-000000")
-    assert registry.public_device_count(username="alice@default") == 2
-    registry.enroll(
-        username="alice@default",
-        device_id="device-public-000003",
-        public_key=public_key,
-    )
-    assert registry.public_device_count(username="alice@default") == 3
+    assert registry.public_device_count(username="alice@default") == 5
+    assert registry.public_device_total_count(username="alice@default") == 5
 
 
 def test_device_challenges_are_one_use() -> None:
@@ -157,45 +195,3 @@ def test_device_client_description_discards_raw_user_agent() -> None:
     }
     assert observed_ip("2001:db8::1") == "2001:db8::1"
     assert observed_ip("not-an-ip") == ""
-
-
-def test_public_device_authorization_is_single_use_and_stores_only_a_hash(tmp_path) -> None:
-    store = DeviceAuthorizationStore(
-        tmp_path / "authorizations.json",
-        server_id="feat-local",
-        ttl_seconds=60,
-    )
-    grant = store.issue(
-        username="alice@default",
-        target_server_id="public-main",
-        target_endpoint="https://203.0.113.10:7998",
-        device_name="公网上的 Mac",
-        preferred_language="en",
-    )
-
-    payload = (tmp_path / "authorizations.json").read_text(encoding="utf-8")
-    assert grant["token"] not in payload
-    preview = store.preview(grant["token"], target_server_id="public-main")
-    assert preview["preferred_language"] == "en"
-    consumed = store.consume(grant["token"], target_server_id="public-main")
-    assert consumed["username"] == "alice@default"
-    assert consumed["target_endpoint"] == "https://203.0.113.10:7998"
-    assert consumed["preferred_language"] == "en"
-
-    with pytest.raises(DeviceAuthorizationError, match="invalid or expired"):
-        store.consume(grant["token"], target_server_id="public-main")
-
-
-def test_public_device_authorization_is_bound_to_target_server(tmp_path) -> None:
-    store = DeviceAuthorizationStore(
-        tmp_path / "authorizations.json",
-        server_id="feat-local",
-    )
-    grant = store.issue(
-        username="alice@default",
-        target_server_id="public-main",
-        target_endpoint="https://203.0.113.10:7998",
-    )
-
-    with pytest.raises(DeviceAuthorizationError, match="invalid or expired"):
-        store.consume(grant["token"], target_server_id="other-public")

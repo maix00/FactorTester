@@ -13,7 +13,6 @@ struct ServerSettingsView: View {
     @State private var managerHost = "127.0.0.1"
     @State private var managerPort = "7998"
     @State private var managerServerID = ""
-    @State private var deviceName = ""
     @State private var originManagerEndpoint: URL?
     @State private var currentDeviceAudit: ManagerDeviceAudit?
     @State private var availablePorts: [Int] = []
@@ -77,18 +76,6 @@ struct ServerSettingsView: View {
                 ) {
                     Text(managerServerID.isEmpty ? L10n.text("尚未由服务器提供") : managerServerID)
                         .foregroundStyle(.secondary)
-                }
-                if !managerTargetIsPrivateNetwork {
-                    Divider()
-                    SettingsRow(
-                        title: "原生设备名称",
-                        description: "原生密钥保存在此 Swift 客户端的 Keychain/Secure Enclave"
-                    ) {
-                        SettingsEditableText(
-                            value: $deviceName,
-                            placeholder: "例如：我的 Mac"
-                        )
-                    }
                 }
                 if let currentDeviceAudit {
                     Divider()

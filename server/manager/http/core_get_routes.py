@@ -51,11 +51,6 @@ class CoreGetRoutesMixin:
                 return True
             self._serve_login_page(parsed)
             return True
-        if parsed.path == "/device-authorize":
-            if not self._public_login_gate(parsed, method="GET"):
-                return True
-            self._device_authorization_page(parsed)
-            return True
         if parsed.path == "/device-handoff":
             if not self._public_login_gate(parsed, method="GET"):
                 return True
@@ -68,11 +63,11 @@ class CoreGetRoutesMixin:
         if parsed.path == "/api/devices":
             self._device_list()
             return True
+        if parsed.path == "/api/admin/access-control":
+            self._admin_access_control()
+            return True
         if parsed.path == "/api/device/summary":
             self._device_summary()
-            return True
-        if parsed.path == "/api/device/public-targets":
-            self._device_public_targets()
             return True
         if parsed.path == "/api/server/network-info":
             self._server_network_info()

@@ -57,7 +57,6 @@ SYSTEM_OWNER_VALUES = frozenset({"__public_jobs__", "__public_graph__"})
 
 POSTGRES_USER_REFERENCES: tuple[tuple[str, str], ...] = (
     ("control_devices", "username"),
-    ("control_device_authorizations", "username"),
     ("control_user_preferences", "principal"),
     ("control_profiles", "principal"),
     ("source_versions", "principal"),

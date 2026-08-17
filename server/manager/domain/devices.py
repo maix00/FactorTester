@@ -21,39 +21,13 @@ from pathlib import Path
 from server.manager.domain.device_clients import normalise_client_metadata
 
 
-DEVICE_REGISTRY_SCHEMA_VERSION = 2
-PUBLIC_DEVICE_LIMIT = 3
-DEVICE_AUTHORIZATION_SCHEMA_VERSION = 1
-DEVICE_AUTHORIZATION_TTL_SECONDS = 10 * 60
-DEVICE_AUTHORIZATION_LANGUAGES = {"system", "zh-Hans", "en"}
+DEVICE_REGISTRY_SCHEMA_VERSION = 3
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class DeviceRegistryError(ValueError):
     """A device record or registry snapshot is invalid."""
-
-
-class PublicDeviceLimitError(DeviceRegistryError):
-    """The account has reached its public-server device allowance."""
-
-    def __init__(self, *, username: str, count: int, limit: int = PUBLIC_DEVICE_LIMIT) -> None:
-        self.username = str(username)
-        self.count = int(count)
-        self.limit = int(limit)
-        super().__init__("public device limit reached")
-
-
-class DeviceAuthorizationError(DeviceRegistryError):
-    """A one-time public-device authorization is invalid or expired."""
-
-
-def authorization_token_hash(token: object) -> str:
-    """Return the only representation of an authorization token we persist."""
-    value = str(token or "").strip()
-    if len(value) < 32 or len(value) > 256 or not _B64URL_RE.fullmatch(value):
-        raise DeviceAuthorizationError("device authorization is invalid")
-    return hashlib.sha256(value.encode("ascii")).hexdigest()
 
 
 def _b64url_decode(value: object, *, field: str) -> bytes:
@@ -126,7 +100,11 @@ def _normalise_record(
         "username": username,
         "device_name": str(value.get("device_name") or "").strip()[:128],
         "enabled": bool(value.get("enabled", True)),
-        "public_access": bool(value.get("public_access", False)),
+        # All surviving records are public allowlist devices.  Keep the
+        # persisted columns for non-destructive compatibility with existing
+        # PostgreSQL/JSON snapshots, but normalize old rows to the new policy.
+        "public_access": True,
+        "quota_exempt": True,
         "created_at": created_at,
         "updated_at": updated_at,
         "source_server_id": source,
@@ -229,7 +207,7 @@ class DeviceRegistry:
             "authoritative": self.control_store is not None,
             "server_id": self.server_id,
             "public_server": self.public_server,
-            "public_device_limit": PUBLIC_DEVICE_LIMIT,
+            "device_policy": "public_allowlist_only",
         }
 
     def _load(self) -> None:
@@ -241,6 +219,7 @@ class DeviceRegistry:
             not isinstance(payload, dict)
             or payload.get("schema_version") not in {
                 1,
+                2,
                 DEVICE_REGISTRY_SCHEMA_VERSION,
             }
         ):
@@ -249,10 +228,16 @@ class DeviceRegistry:
             self._generation = max(0, int(payload.get("generation") or 0))
         except (TypeError, ValueError):
             self._generation = 0
+        migrated = False
         local = payload.get("devices") or {}
         if isinstance(local, dict):
             for device_id, value in local.items():
                 try:
+                    if isinstance(value, dict) and (
+                        value.get("public_access") is not True
+                        or value.get("quota_exempt") is not True
+                    ):
+                        migrated = True
                     record = _normalise_record(
                         {**value, "device_id": device_id},
                         source_server_id=self.server_id,
@@ -262,7 +247,7 @@ class DeviceRegistry:
                 self._local[record["device_id"]] = record
         sources = payload.get("sources") or {}
         if not isinstance(sources, dict):
-            return
+            sources = {}
         for source_id, value in sources.items():
             if not isinstance(value, dict) or str(source_id) == self.server_id:
                 continue
@@ -273,6 +258,11 @@ class DeviceRegistry:
             records: dict[str, dict[str, object]] = {}
             for item in value.get("devices") or []:
                 try:
+                    if isinstance(item, dict) and (
+                        item.get("public_access") is not True
+                        or item.get("quota_exempt") is not True
+                    ):
+                        migrated = True
                     record = _normalise_record(
                         item, source_server_id=str(source_id),
                     )
@@ -283,6 +273,8 @@ class DeviceRegistry:
                 "generation": generation,
                 "devices": records,
             }
+        if migrated:
+            self._save()
 
     def _save(self) -> None:
         temporary = self.path.with_name(
@@ -337,7 +329,8 @@ class DeviceRegistry:
                 "enrollment_ip": enrollment_ip,
                 "last_seen_ip": enrollment_ip,
                 "enabled": True,
-                "public_access": self.public_server,
+                "public_access": True,
+                "quota_exempt": True,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -345,27 +338,16 @@ class DeviceRegistry:
             now=now,
         )
         if self.control_store is not None:
-            try:
-                record = self.control_store.enroll_device(
-                    device_id=str(candidate["device_id"]),
-                    public_key=dict(candidate["public_key"]),
-                    username=str(candidate["username"]),
-                    device_name=str(candidate["device_name"]),
-                    source_server_id=self.server_id,
-                    public_access=bool(candidate["public_access"]),
-                    client_type=str(candidate["client_type"]),
-                    client_name=str(candidate["client_name"]),
-                    enrollment_ip=str(candidate["enrollment_ip"]),
-                )
-            except ValueError as exc:
-                if str(exc) != "public device limit reached":
-                    raise
-                raise PublicDeviceLimitError(
-                    username=str(candidate["username"]),
-                    count=self.public_device_count(
-                        username=str(candidate["username"]),
-                    ),
-                ) from exc
+            record = self.control_store.enroll_device(
+                device_id=str(candidate["device_id"]),
+                public_key=dict(candidate["public_key"]),
+                username=str(candidate["username"]),
+                device_name=str(candidate["device_name"]),
+                source_server_id=self.server_id,
+                client_type=str(candidate["client_type"]),
+                client_name=str(candidate["client_name"]),
+                enrollment_ip=str(candidate["enrollment_ip"]),
+            )
             return _public_record(record)
         with self._lock:
             if any(
@@ -373,19 +355,6 @@ class DeviceRegistry:
                 for item in self._all_locked()
             ):
                 raise DeviceRegistryError("device_id is already registered")
-            if bool(candidate["public_access"]):
-                count = sum(
-                    1
-                    for item in self._all_locked()
-                    if item.get("username") == candidate["username"]
-                    and bool(item.get("enabled"))
-                    and bool(item.get("public_access"))
-                )
-                if count >= PUBLIC_DEVICE_LIMIT:
-                    raise PublicDeviceLimitError(
-                        username=str(candidate["username"]),
-                        count=count,
-                    )
             self._local[candidate["device_id"]] = candidate
             self._generation += 1
             self._save()
@@ -413,6 +382,22 @@ class DeviceRegistry:
                 for item in self._all_locked()
                 if bool(item.get("enabled")) and bool(item.get("public_access"))
             } - {""})
+
+    def public_device_total_count(self, *, username: str = "") -> int:
+        """Count all enabled public allowlist devices."""
+        owner = str(username or "").strip()
+        if self.control_store is not None:
+            reader = getattr(self.control_store, "public_device_total_count", None)
+            if callable(reader):
+                return int(reader(username=owner))
+        with self._lock:
+            return sum(
+                1
+                for item in self._all_locked()
+                if (not owner or item.get("username") == owner)
+                and bool(item.get("enabled"))
+                and bool(item.get("public_access"))
+            )
 
     def revoke(self, device_id: str) -> dict[str, object]:
         identifier = normalise_device_id(device_id)
@@ -575,196 +560,6 @@ class DeviceRegistry:
                     self._generation += 1
                     self._save()
         return dict(record)
-
-
-class DeviceAuthorizationStore:
-    """Issue short-lived, single-use grants for a public-origin enrollment.
-
-    The raw token is returned only to the already authenticated internal
-    Manager that creates the grant. PostgreSQL/local JSON store only a hash,
-    so a leaked database snapshot cannot be used to redeem a grant.
-    """
-
-    def __init__(
-        self,
-        path: str | Path,
-        *,
-        server_id: str,
-        control_store: object | None = None,
-        ttl_seconds: float = DEVICE_AUTHORIZATION_TTL_SECONDS,
-    ) -> None:
-        self.path = Path(path).expanduser().resolve()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.server_id = str(server_id or "").strip()
-        if not self.server_id:
-            raise DeviceAuthorizationError("server_id is required")
-        self.control_store = control_store
-        self.ttl_seconds = max(60.0, min(3600.0, float(ttl_seconds)))
-        self._lock = threading.RLock()
-        self._values: dict[str, dict[str, object]] = {}
-        if self.control_store is None:
-            self._load()
-
-    @property
-    def backend(self) -> str:
-        return "postgresql" if self.control_store is not None else "json"
-
-    def _load(self) -> None:
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
-            return
-        if not isinstance(payload, dict) or payload.get("schema_version") != DEVICE_AUTHORIZATION_SCHEMA_VERSION:
-            return
-        values = payload.get("authorizations") or {}
-        if not isinstance(values, dict):
-            return
-        now = time.time()
-        for token_hash, value in values.items():
-            if not isinstance(value, dict):
-                continue
-            try:
-                expires_at = float(value.get("expires_at") or 0)
-            except (TypeError, ValueError):
-                continue
-            if expires_at <= now:
-                continue
-            self._values[str(token_hash)] = dict(value)
-
-    def _save(self) -> None:
-        temporary = self.path.with_name(
-            f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
-        )
-        payload = {
-            "schema_version": DEVICE_AUTHORIZATION_SCHEMA_VERSION,
-            "authorizations": self._values,
-        }
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
-            encoding="utf-8",
-        )
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, self.path)
-
-    def issue(
-        self,
-        *,
-        username: str,
-        target_server_id: str,
-        target_endpoint: str,
-        device_name: str = "",
-        preferred_language: str = "zh-Hans",
-    ) -> dict[str, object]:
-        owner = str(username or "").strip()
-        target = str(target_server_id or "").strip()
-        endpoint = str(target_endpoint or "").strip().rstrip("/")
-        language = str(preferred_language or "").strip()
-        if not owner or len(owner) > 256 or not target or len(target) > 128 or not endpoint:
-            raise DeviceAuthorizationError("device authorization fields are invalid")
-        if language not in DEVICE_AUTHORIZATION_LANGUAGES:
-            raise DeviceAuthorizationError("device authorization language is invalid")
-        token = secrets.token_urlsafe(32)
-        now = time.time()
-        expires_at = now + self.ttl_seconds
-        token_hash = authorization_token_hash(token)
-        if self.control_store is not None:
-            self.control_store.create_device_authorization(
-                token_hash=token_hash,
-                username=owner,
-                target_server_id=target,
-                target_endpoint=endpoint,
-                device_name=str(device_name or "").strip()[:128],
-                preferred_language=language,
-                expires_at=expires_at,
-                source_server_id=self.server_id,
-            )
-        else:
-            with self._lock:
-                current = time.time()
-                self._values = {
-                    key: value for key, value in self._values.items()
-                    if float(value.get("expires_at") or 0) > current
-                    and not value.get("used_at")
-                }
-                self._values[token_hash] = {
-                    "username": owner,
-                    "target_server_id": target,
-                    "target_endpoint": endpoint,
-                    "device_name": str(device_name or "").strip()[:128],
-                    "preferred_language": language,
-                    "expires_at": expires_at,
-                    "source_server_id": self.server_id,
-                }
-                self._save()
-        return {
-            "token": token,
-            "username": owner,
-            "target_server_id": target,
-            "target_endpoint": endpoint,
-            "device_name": str(device_name or "").strip()[:128],
-            "preferred_language": language,
-            "expires_at": expires_at,
-            "expires_in": int(self.ttl_seconds),
-            "backend": self.backend,
-        }
-
-    def preview(self, token: object, *, target_server_id: str) -> dict[str, object]:
-        """Read a live grant without consuming its one-time redemption."""
-        token_hash = authorization_token_hash(token)
-        target = str(target_server_id or "").strip()
-        if not target:
-            raise DeviceAuthorizationError("device authorization target is invalid")
-        if self.control_store is not None:
-            record = self.control_store.preview_device_authorization(
-                token_hash=token_hash,
-                target_server_id=target,
-            )
-            if record is None:
-                raise DeviceAuthorizationError(
-                    "device authorization is invalid or expired"
-                )
-            return dict(record)
-        with self._lock:
-            value = self._values.get(token_hash)
-            if (
-                value is None
-                or value.get("used_at")
-                or float(value.get("expires_at") or 0) <= time.time()
-                or str(value.get("target_server_id") or "") != target
-            ):
-                raise DeviceAuthorizationError(
-                    "device authorization is invalid or expired"
-                )
-            return dict(value)
-
-    def consume(self, token: object, *, target_server_id: str) -> dict[str, object]:
-        token_hash = authorization_token_hash(token)
-        target = str(target_server_id or "").strip()
-        if not target:
-            raise DeviceAuthorizationError("device authorization target is invalid")
-        if self.control_store is not None:
-            record = self.control_store.consume_device_authorization(
-                token_hash=token_hash,
-                target_server_id=target,
-            )
-            if record is None:
-                raise DeviceAuthorizationError("device authorization is invalid or expired")
-            return dict(record)
-        with self._lock:
-            value = self._values.get(token_hash)
-            now = time.time()
-            if (
-                value is None
-                or value.get("used_at")
-                or float(value.get("expires_at") or 0) <= now
-                or str(value.get("target_server_id") or "") != target
-            ):
-                raise DeviceAuthorizationError("device authorization is invalid or expired")
-            result = dict(value)
-            result["used_at"] = now
-            self._values[token_hash] = result
-            self._save()
-            return result
 
 
 class DeviceChallengeStore:
