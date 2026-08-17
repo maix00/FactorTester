@@ -143,6 +143,15 @@ class JobProjectionStateMixin:
                 job_port = int(raw_port)
             except (TypeError, ValueError):
                 job_port = route.port
+            execution_server_id = str(
+                item.get("execution_server_id") or route.server_id
+            ).strip() or route.server_id
+            try:
+                execution_port = int(
+                    item.get("execution_port") or job_port
+                )
+            except (TypeError, ValueError):
+                execution_port = job_port
             endpoint = str(route.endpoint or "")
             host = urlparse(endpoint).hostname or ""
             jobs.append({
@@ -150,6 +159,8 @@ class JobProjectionStateMixin:
                 "port": job_port,
                 "service_port": job_port,
                 "server_id": route.server_id,
+                "execution_server_id": execution_server_id,
+                "execution_port": execution_port,
                 "server_endpoint": endpoint,
                 "server_host": host,
                 "server_role": route.role,
