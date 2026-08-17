@@ -273,7 +273,6 @@
     control.options[0].textContent = context.t("跟随系统");
     control.options[1].textContent = context.t("简体中文");
     control.value = context.languagePreference || "system";
-    control.disabled = !context.session;
     control.onchange = async () => {
       control.disabled = true;
       try {
@@ -285,7 +284,7 @@
     };
     const description = context.session
       ? context.t("语言偏好绑定当前登录用户，并在 Swift 与 Web 客户端之间同步")
-      : context.t("未登录时跟随系统；登录后可保存用户语言偏好");
+      : context.t("访客模式语言仅保存在当前浏览器，不同步用户账户");
     body.append(card(context.t("界面语言"), [[context.t("显示语言"), description, control]]));
   }
 

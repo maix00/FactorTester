@@ -1019,6 +1019,27 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "location.reload();" in coordinator
 
 
+def test_visitor_language_is_local_while_authenticated_language_is_synced() -> None:
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
+        encoding="utf-8",
+    )
+    settings = (WEB_ROOT / "settings" / "settings.js").read_text(
+        encoding="utf-8",
+    )
+    catalog = (ROOT / "apple/Resources/Shared/Localizable.xcstrings").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'const requested = ["system", "zh-Hans", "en"].includes(language)' in coordinator
+    assert 'if (state.session) {' in coordinator
+    assert 'api("/api/client/preferences"' in coordinator
+    assert "Visitor language is deliberately browser-local" in coordinator
+    assert "control.disabled = !context.session" not in settings
+    assert "访客模式语言仅保存在当前浏览器，不同步用户账户" in settings
+    assert "访客模式语言仅保存在当前浏览器，不同步用户账户" in catalog
+    assert "Visitor language is saved only in this browser" in catalog
+
+
 def test_web_shell_restores_an_http_only_manager_cookie_without_a_saved_token() -> None:
     coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
         encoding="utf-8"

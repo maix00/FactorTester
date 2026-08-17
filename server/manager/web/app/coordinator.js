@@ -89,12 +89,19 @@
   });
 
   async function setLanguagePreference(language) {
-    if (!state.session) throw new Error(t("请先登录"));
-    const value = await api("/api/client/preferences", {
-      method: "POST",
-      body: JSON.stringify({language}),
-    });
-    state.languagePreference = value.preferences?.language || "system";
+    const requested = ["system", "zh-Hans", "en"].includes(language)
+      ? language : "system";
+    if (state.session) {
+      const value = await api("/api/client/preferences", {
+        method: "POST",
+        body: JSON.stringify({language: requested}),
+      });
+      state.languagePreference = value.preferences?.language || "system";
+    } else {
+      // Visitor language is deliberately browser-local.  It must not create
+      // an account preference or make an unauthenticated write request.
+      state.languagePreference = requested;
+    }
     FTI18n.rememberPreference(state.languagePreference);
     await FTI18n.load(state.languagePreference);
     localizeShell();
