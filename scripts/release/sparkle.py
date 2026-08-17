@@ -109,7 +109,10 @@ def generate_sparkle_appcast(
         if previous_archive is not None:
             shutil.copy2(previous_archive, root / previous_name)
         if previous_appcast is not None:
-            shutil.copy2(previous_appcast, root / "appcast.xml")
+            _normalize_appcast_namespace(
+                previous_appcast,
+                root / "appcast.xml",
+            )
         command = [
             str(tool),
             "--download-url-prefix",
@@ -193,7 +196,21 @@ def _prune_extraction_cache(*archives: Path | None) -> None:
             shutil.rmtree(candidate)
 
 
+def _normalize_appcast_namespace(source: Path, destination: Path) -> None:
+    """Write a readable Sparkle prefix for legacy appcasts.
+
+    ElementTree accepts any prefix bound to the Sparkle namespace, but older
+    releases of this publisher wrote ``ns0``.  Sparkle's native parser is
+    stricter when it updates an existing appcast and expects the conventional
+    ``sparkle`` prefix to remain declared.
+    """
+    ET.register_namespace("sparkle", SPARKLE_NAMESPACE)
+    tree = ET.parse(source)
+    tree.write(destination, encoding="utf-8", xml_declaration=True)
+
+
 def _retain_latest_item(appcast: Path) -> None:
+    ET.register_namespace("sparkle", SPARKLE_NAMESPACE)
     tree = ET.parse(appcast)
     root = tree.getroot()
     channel = root.find("./channel")
