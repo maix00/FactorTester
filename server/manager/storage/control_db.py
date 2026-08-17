@@ -27,13 +27,14 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from server.manager.domain.devices import PUBLIC_DEVICE_LIMIT
 from server.manager.storage.account_domain.remote import AccountDomainControlMixin
+from server.manager.storage.access_control import VisitorAccessControlMixin
 
 
 CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 6
+CONTROL_DATABASE_SCHEMA_VERSION = 8
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -296,6 +297,19 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS control_public_visitor_allowlist (
+        server_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (server_id, username)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS control_public_visitor_allowlist_user ON control_public_visitor_allowlist(username, enabled)",
+    "CREATE INDEX IF NOT EXISTS control_public_visitor_allowlist_server ON control_public_visitor_allowlist(server_id, enabled, updated_at DESC)",
+    """
     CREATE TABLE IF NOT EXISTS control_devices (
         device_id TEXT PRIMARY KEY,
         public_key JSONB NOT NULL,
@@ -306,6 +320,7 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         enrollment_ip TEXT NOT NULL DEFAULT '',
         last_seen_ip TEXT NOT NULL DEFAULT '',
         public_access BOOLEAN NOT NULL DEFAULT FALSE,
+        quota_exempt BOOLEAN NOT NULL DEFAULT FALSE,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
         source_server_id TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -318,8 +333,9 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_name TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS quota_exempt BOOLEAN NOT NULL DEFAULT FALSE",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
-    "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, enabled)",
+    "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, quota_exempt, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_user_preferences (
@@ -470,7 +486,7 @@ def _row_value(row: object, key: str, index: int = 0, default: object = None) ->
 ConnectFactory = Callable[[ControlDatabaseConfig], Any]
 
 
-class PostgresControlStore(AccountDomainControlMixin):
+class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin):
     """Small PostgreSQL repository with lazy connections and idempotent writes."""
 
     def __init__(
@@ -704,11 +720,12 @@ class PostgresControlStore(AccountDomainControlMixin):
             "enrollment_ip": _row_value(row, "enrollment_ip", 6, ""),
             "last_seen_ip": _row_value(row, "last_seen_ip", 7, ""),
             "public_access": _row_value(row, "public_access", 8, False),
-            "enabled": _row_value(row, "enabled", 9, False),
-            "source_server_id": _row_value(row, "source_server_id", 10, ""),
-            "created_at": _row_value(row, "created_at", 11, None),
-            "updated_at": _row_value(row, "updated_at", 12, None),
-            "last_seen_at": _row_value(row, "last_seen_at", 13, None),
+            "quota_exempt": _row_value(row, "quota_exempt", 9, False),
+            "enabled": _row_value(row, "enabled", 10, False),
+            "source_server_id": _row_value(row, "source_server_id", 11, ""),
+            "created_at": _row_value(row, "created_at", 12, None),
+            "updated_at": _row_value(row, "updated_at", 13, None),
+            "last_seen_at": _row_value(row, "last_seen_at", 14, None),
         }
         public_key = value.get("public_key")
         if isinstance(public_key, str):
@@ -717,6 +734,7 @@ class PostgresControlStore(AccountDomainControlMixin):
             except (TypeError, ValueError, json.JSONDecodeError):
                 public_key = {}
         value["public_key"] = public_key if isinstance(public_key, dict) else {}
+        value.setdefault("quota_exempt", False)
         for key in ("created_at", "updated_at", "last_seen_at"):
             timestamp = value.get(key)
             if hasattr(timestamp, "isoformat"):
@@ -735,6 +753,7 @@ class PostgresControlStore(AccountDomainControlMixin):
         client_type: str = "unknown",
         client_name: str = "",
         enrollment_ip: str = "",
+        quota_exempt: bool = False,
     ) -> dict[str, Any]:
         """Register one browser public key in the central control database."""
         self.ensure_schema()
@@ -745,7 +764,7 @@ class PostgresControlStore(AccountDomainControlMixin):
             ).fetchone()
             if existing is not None:
                 raise ValueError("device_id is already registered")
-            if public_access:
+            if public_access and not quota_exempt:
                 # All public-device enrollments for an account serialize on
                 # the same transaction-level advisory lock.  The count and
                 # insert therefore remain atomic across every Manager using
@@ -758,7 +777,8 @@ class PostgresControlStore(AccountDomainControlMixin):
                     """
                     SELECT COUNT(*) AS count
                     FROM control_devices
-                    WHERE username=%s AND public_access=TRUE AND enabled=TRUE
+                    WHERE username=%s AND public_access=TRUE
+                      AND quota_exempt=FALSE AND enabled=TRUE
                     """,
                     (str(username),),
                 ).fetchone()
@@ -770,13 +790,13 @@ class PostgresControlStore(AccountDomainControlMixin):
                 INSERT INTO control_devices(
                     device_id, public_key, username, device_name,
                     client_type, client_name, enrollment_ip, last_seen_ip,
-                    public_access, enabled, source_server_id, updated_at
+                    public_access, quota_exempt, enabled, source_server_id, updated_at
                 ) VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s,
-                          %s, TRUE, %s, CURRENT_TIMESTAMP)
+                          %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(device_id) DO NOTHING
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
-                          public_access, enabled, source_server_id,
+                          public_access, quota_exempt, enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
                 (
@@ -786,7 +806,7 @@ class PostgresControlStore(AccountDomainControlMixin):
                     str(client_name or "")[:128],
                     str(enrollment_ip or "")[:45],
                     str(enrollment_ip or "")[:45],
-                    bool(public_access), str(source_server_id),
+                    bool(public_access), bool(quota_exempt), str(source_server_id),
                 ),
             ).fetchone()
         if row is None:
@@ -800,7 +820,7 @@ class PostgresControlStore(AccountDomainControlMixin):
                 """
                 SELECT device_id, public_key, username, device_name,
                        client_type, client_name, enrollment_ip, last_seen_ip,
-                       public_access, enabled, source_server_id,
+                       public_access, quota_exempt, enabled, source_server_id,
                        created_at, updated_at, last_seen_at
                 FROM control_devices WHERE device_id=%s
                 """,
@@ -829,7 +849,7 @@ class PostgresControlStore(AccountDomainControlMixin):
                 f"""
                 SELECT device_id, public_key, username, device_name,
                        client_type, client_name, enrollment_ip, last_seen_ip,
-                       public_access, enabled, source_server_id,
+                       public_access, quota_exempt, enabled, source_server_id,
                        created_at, updated_at, last_seen_at
                 FROM control_devices{where}
                 ORDER BY username, device_name, device_id
@@ -848,7 +868,7 @@ class PostgresControlStore(AccountDomainControlMixin):
                 WHERE device_id=%s
                 RETURNING device_id, public_key, username, device_name,
                           client_type, client_name, enrollment_ip, last_seen_ip,
-                          public_access, enabled, source_server_id,
+                          public_access, quota_exempt, enabled, source_server_id,
                           created_at, updated_at, last_seen_at
                 """,
                 (str(device_id),),
@@ -875,7 +895,7 @@ class PostgresControlStore(AccountDomainControlMixin):
 
     def public_device_count(self, *, username: str = "") -> int:
         self.ensure_schema()
-        predicates = ["public_access=TRUE", "enabled=TRUE"]
+        predicates = ["public_access=TRUE", "quota_exempt=FALSE", "enabled=TRUE"]
         parameters: list[Any] = []
         owner = str(username or "").strip()
         if owner:
@@ -897,6 +917,22 @@ class PostgresControlStore(AccountDomainControlMixin):
                 FROM control_devices
                 WHERE public_access=TRUE AND enabled=TRUE
                 """
+            ).fetchone()
+        return int(_row_value(row, "count", 0, 0))
+
+    def public_device_total_count(self, *, username: str = "") -> int:
+        """Count all enabled public devices, including quota-exempt rows."""
+        self.ensure_schema()
+        predicates = ["public_access=TRUE", "enabled=TRUE"]
+        parameters: list[Any] = []
+        owner = str(username or "").strip()
+        if owner:
+            predicates.append("username=%s")
+            parameters.append(owner)
+        with self._connection() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS count FROM control_devices WHERE {' AND '.join(predicates)}",
+                tuple(parameters),
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
 

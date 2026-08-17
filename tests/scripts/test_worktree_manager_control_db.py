@@ -27,12 +27,14 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "organization_id" in schema
     assert "parent_level_id" in schema
     assert "control_users" in schema
+    assert "control_public_visitor_allowlist" in schema
     assert "control_devices" in schema
     assert "control_device_authorizations" in schema
     assert "control_user_preferences" in schema
     assert "preferred_language" in schema
     assert "public_key" in schema
     assert "public_access" in schema
+    assert "quota_exempt" in schema
     assert "last_seen_at" in schema
     assert "source_versions" in schema
     assert "control_account_domain_entities" in schema
@@ -40,7 +42,7 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "client_type" in schema
     assert "enrollment_ip" in schema
     assert "last_seen_ip" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 6
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 8
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:

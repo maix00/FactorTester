@@ -27,7 +27,8 @@ PUBLIC_DEVICE_COMPLIANCE_NOTICE = (
     "已登录的公司内网 FactorTester 设置→设备白名单页面生成一次性公网设备授权"
     "链接，再在本公网地址打开。公网页面会为本来源重新生成设备密钥，私钥只保留"
     "在当前公网来源的浏览器不可导出存储中。授权链接短时有效且只能使用一次。"
-    "每个用户最多登记三台公网服务器访问设备；公司内网设备不占用此公网名额。"
+    "每个用户的普通公网访问设备最多登记三台；白名单用户登录后自动登记的浏览器设备不占用普通名额，"
+    "但仍可由超级管理员撤销。公司内网设备不占用此公网名额。"
     "没有有效授权或已登记设备的访问只能看到本合规提示，未登记设备不开放登录或注册。"
 )
 
@@ -105,7 +106,7 @@ const b64url=value=>{const bytes=new Uint8Array(value);let text="";for(const byt
 const openDB=()=>new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Object.assign(new Error(messages.storageUnavailable),{stage:"storage"}));const request=indexedDB.open("factortester-device",1);request.onupgradeneeded=()=>request.result.createObjectStore("credentials",{keyPath:"device_id"});request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>db.close();resolve(db);};request.onerror=()=>reject(Object.assign(request.error||new Error(messages.storageUnavailable),{stage:"storage"}));});
 const credentials=async()=>{const db=await openDB();return new Promise((resolve,reject)=>{const values=[];const transaction=db.transaction("credentials","readonly");const finish=(error,value)=>{db.close();if(error)reject(Object.assign(error,{stage:"storage"}));else resolve(value);};transaction.oncomplete=()=>finish(null,values);transaction.onerror=()=>finish(transaction.error||new Error(messages.storageUnavailable));transaction.onabort=()=>finish(transaction.error||new Error(messages.storageUnavailable));const request=transaction.objectStore("credentials").openCursor();request.onsuccess=event=>{const cursor=event.target.result;if(cursor){values.push(cursor.value);cursor.continue();}};request.onerror=()=>finish(request.error||new Error(messages.storageUnavailable));});};
 const post=async(path,body,stage)=>{let response;try{response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},credentials:"same-origin",cache:"no-store",mode:"same-origin",redirect:"error",body:JSON.stringify(body)});}catch(cause){cause.stage=stage;cause.kind="network";throw cause;}let payload={};try{payload=await response.json();}catch{}if(!response.ok||!payload.success){const error=new Error(payload.error||messages.notApproved);error.status=response.status;error.stage=stage;throw error;}return payload;};
-const countLabel=document.querySelector("#public-device-count");const loadCount=async()=>{try{const response=await fetch("/api/device/summary",{credentials:"same-origin",cache:"no-store"});const payload=await response.json();if(!response.ok||!payload.success)throw new Error(messages.unavailable);const values={users:Number(payload.public_user_count||0),devices:Number(payload.public_device_count||0),limit:Number(payload.public_device_limit||3)};countLabel.textContent=format(payload.scope==="account"?messages.account:messages.system,values);}catch(_){countLabel.textContent=messages.unavailable;}};
+const countLabel=document.querySelector("#public-device-count");const loadCount=async()=>{try{const response=await fetch("/api/device/summary",{credentials:"same-origin",cache:"no-store"});const payload=await response.json();if(!response.ok||!payload.success)throw new Error(messages.unavailable);const values={users:Number(payload.public_user_count||0),devices:Number(payload.public_device_total_count??payload.public_device_count??0),limit:Number(payload.public_device_limit||3)};countLabel.textContent=format(payload.scope==="account"?messages.account:messages.system,values);}catch(_){countLabel.textContent=messages.unavailable;}};
 const statusLabel=document.querySelector("#device-auth-status");const targetLink=document.querySelector("#device-auth-target");if(deviceAuthTarget&&targetLink){targetLink.hidden=false;targetLink.querySelector("a").href=deviceAuthTarget;}const setStatus=value=>{statusLabel.textContent=value;};const wait=delay=>new Promise(resolve=>setTimeout(resolve,delay));const MAX_AUTHENTICATION_RUNS=2;let authenticationRuns=0;let authenticationRunning=false;let authenticationSucceeded=false;let lastAuthenticationError=null;let authenticationRetryTimer=0;
 const failureMessage=error=>{const stage=String(error?.stage||"");if(error?.kind==="network")return messages[stage+"NetworkFailed"]||messages.networkFailed;const key=stage+"Failed";return messages[key]||messages.failed;};
 const transientFailure=error=>error?.kind==="network"||[408,425,429,500,502,503,504].includes(Number(error?.status));
@@ -130,15 +131,15 @@ def compliance_page(
     messages = {
         "loading": _text(
             strings,
-            "当前已登记的公网访问用户与设备数量：正在查询……（每个用户最多 {limit} 台设备）",
+            "当前已登记的公网访问用户与设备数量：正在查询……（普通设备每用户最多 {limit} 台；白名单自动设备不占名额）",
         ).replace("{limit}", str(PUBLIC_DEVICE_LIMIT)),
         "system": _text(
             strings,
-            "当前系统已登记的公网访问用户数：{users}；设备数：{devices}（每用户最多 {limit} 台）。",
+            "当前系统已登记的公网访问用户数：{users}；设备数：{devices}（普通设备每用户最多 {limit} 台；白名单自动设备不占名额）。",
         ),
         "account": _text(
             strings,
-            "当前账户已登记的公网访问用户数：{users}；设备数：{devices}（每用户最多 {limit} 台）。",
+            "当前账户已登记的公网访问用户数：{users}；设备数：{devices}（普通设备每用户最多 {limit} 台；白名单自动设备不占名额）。",
         ),
         "unavailable": _text(
             strings,

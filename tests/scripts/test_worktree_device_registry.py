@@ -107,6 +107,7 @@ def test_public_server_enforces_three_active_devices_per_user(tmp_path) -> None:
         )
 
     assert registry.public_device_count(username="alice@default") == 3
+
     assert registry.public_user_count() == 1
     with pytest.raises(PublicDeviceLimitError, match="limit reached") as error:
         registry.enroll(
@@ -124,6 +125,28 @@ def test_public_server_enforces_three_active_devices_per_user(tmp_path) -> None:
         public_key=public_key,
     )
     assert registry.public_device_count(username="alice@default") == 3
+
+
+def test_allowlisted_automatic_devices_do_not_use_ordinary_device_slots(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    registry = DeviceRegistry(
+        tmp_path / "devices.json",
+        server_id="public-main",
+        public_server=True,
+    )
+
+    for index in range(5):
+        record = registry.enroll(
+            username="alice@default",
+            device_id=f"device-auto-{index:06d}",
+            public_key=public_key,
+            quota_exempt=True,
+        )
+        assert record["quota_exempt"] is True
+
+    assert registry.public_device_count(username="alice@default") == 0
+    assert registry.public_device_total_count(username="alice@default") == 5
 
 
 def test_device_challenges_are_one_use() -> None:

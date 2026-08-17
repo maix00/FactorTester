@@ -372,8 +372,11 @@ class DeviceNetworkRoutesMixin:
             public_device_count = self.state.device_registry.public_device_count(
                 username=owner,
             )
+            public_device_total_count = self.state.device_registry.public_device_total_count(
+                username=owner,
+            )
             public_user_count = (
-                (1 if public_device_count else 0)
+                (1 if public_device_total_count else 0)
                 if owner
                 else self.state.device_registry.public_user_count()
             )
@@ -388,6 +391,7 @@ class DeviceNetworkRoutesMixin:
             "success": True,
             "devices": devices,
             "public_device_count": public_device_count,
+            "public_device_total_count": public_device_total_count,
             "public_user_count": public_user_count,
             "public_device_limit": PUBLIC_DEVICE_LIMIT,
             "server_id": self.state.server_id,
@@ -403,8 +407,11 @@ class DeviceNetworkRoutesMixin:
             scope = "account"
         try:
             count = self.state.device_registry.public_device_count(username=owner)
+            total_count = self.state.device_registry.public_device_total_count(
+                username=owner,
+            )
             user_count = (
-                (1 if count else 0)
+                (1 if total_count else 0)
                 if owner
                 else self.state.device_registry.public_user_count()
             )
@@ -418,6 +425,7 @@ class DeviceNetworkRoutesMixin:
         json_response(self, {
             "success": True,
             "public_device_count": count,
+            "public_device_total_count": total_count,
             "public_user_count": user_count,
             "public_device_limit": PUBLIC_DEVICE_LIMIT,
             "scope": scope,
@@ -435,6 +443,7 @@ class DeviceNetworkRoutesMixin:
                 "error": "device enrollment requires HTTPS outside private LAN",
             }, 400)
             return
+        quota_exempt = self._visitor_device_quota_exempt(session)
         try:
             payload = self._json_body(64 * 1024)
             device = self.state.device_registry.enroll(
@@ -442,6 +451,7 @@ class DeviceNetworkRoutesMixin:
                 device_id=str(payload.get("device_id") or ""),
                 public_key=payload.get("public_key"),
                 device_name=str(payload.get("device_name") or ""),
+                quota_exempt=quota_exempt,
                 **self._device_request_metadata(),
             )
         except ControlDatabaseError as exc:
@@ -468,6 +478,25 @@ class DeviceNetworkRoutesMixin:
             "device": device,
             "sync": self.state.device_registry.backend_status(),
         }, 201)
+
+    def _visitor_device_quota_exempt(self, session: dict[str, object]) -> bool:
+        """Allow visitor-password devices to bypass the ordinary device cap.
+
+        The browser is not allowed to select this flag.  It is derived from
+        the private session authentication method and a fresh allowlist check,
+        so a normal password session cannot manufacture an exempt device.
+        """
+        if not bool(getattr(self.state, "public_server", False)):
+            return False
+        reader = getattr(self.state, "session_authentication", None)
+        if not callable(reader) or reader(self._bearer_token()) != "visitor-password":
+            return False
+        try:
+            return self.state.public_visitor_login_account(
+                str(session.get("username") or "")
+            ) is not None
+        except ControlDatabaseError:
+            return False
 
     def _device_revoke(self) -> None:
         session = self._session()

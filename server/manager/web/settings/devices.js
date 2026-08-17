@@ -42,7 +42,9 @@
     }
     records.forEach(record => {
       const value = document.createElement("div"); value.style.display = "grid"; value.style.gap = "4px";
-      const title = document.createElement("strong"); title.textContent = record.device_name || record.device_id;
+      const title = document.createElement("strong"); title.textContent = record.quota_exempt
+        ? context.t("白名单自动设备（不占普通设备名额）")
+        : (record.device_name || record.device_id);
       const detail = document.createElement("small");
       const state = record.enabled ? context.t("启用") : context.t("已撤销");
       detail.textContent = `${record.username || ""} · ${state} · ${context.t("公钥指纹")} ${record.public_key_fingerprint || ""} · ${record.source_server_id || ""}`;
@@ -185,11 +187,13 @@
     };
     const limit = Number(payload.public_device_limit || 3);
     const count = Number(payload.public_device_count || 0);
+    const totalCount = Number(payload.public_device_total_count ?? count);
     const userCount = Number(payload.public_user_count || (count ? 1 : 0));
     body.append(card(context, "登记设备", [
       ["当前账户", "设备将绑定到当前登录用户", context.session.username],
       ["公网访问用户数", "当前统计范围内拥有启用公网设备的用户数量", userCount],
-      ["公网设备名额", "每个用户最多登记三台；撤销后可重新登记", `${count} / ${limit}`],
+      ["公网设备名额", "普通设备每个用户最多登记三台；白名单自动设备不占名额", `${count} / ${limit}`],
+      ["公网设备总数", "包括白名单登录后自动登记且不占普通名额的设备", totalCount],
       ["目标公网服务器", "由内网 Manager 提供，并按延迟、负载和服务器标识排序", targetServer],
       ["目标公网地址", "地址来自服务器登记信息；客户端不保存或硬编码公网 IP", targetEndpoint],
       ["设备名称", "设备名称只用于白名单管理，不参与设备识别", deviceName],

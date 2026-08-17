@@ -21,7 +21,7 @@ from pathlib import Path
 from server.manager.domain.device_clients import normalise_client_metadata
 
 
-DEVICE_REGISTRY_SCHEMA_VERSION = 2
+DEVICE_REGISTRY_SCHEMA_VERSION = 3
 PUBLIC_DEVICE_LIMIT = 3
 DEVICE_AUTHORIZATION_SCHEMA_VERSION = 1
 DEVICE_AUTHORIZATION_TTL_SECONDS = 10 * 60
@@ -127,6 +127,7 @@ def _normalise_record(
         "device_name": str(value.get("device_name") or "").strip()[:128],
         "enabled": bool(value.get("enabled", True)),
         "public_access": bool(value.get("public_access", False)),
+        "quota_exempt": bool(value.get("quota_exempt", False)),
         "created_at": created_at,
         "updated_at": updated_at,
         "source_server_id": source,
@@ -241,6 +242,7 @@ class DeviceRegistry:
             not isinstance(payload, dict)
             or payload.get("schema_version") not in {
                 1,
+                2,
                 DEVICE_REGISTRY_SCHEMA_VERSION,
             }
         ):
@@ -324,6 +326,7 @@ class DeviceRegistry:
         client_type: str = "unknown",
         client_name: str = "",
         enrollment_ip: str = "",
+        quota_exempt: bool = False,
     ) -> dict[str, object]:
         now = time.time()
         candidate = _normalise_record(
@@ -338,6 +341,7 @@ class DeviceRegistry:
                 "last_seen_ip": enrollment_ip,
                 "enabled": True,
                 "public_access": self.public_server,
+                "quota_exempt": bool(quota_exempt),
                 "created_at": now,
                 "updated_at": now,
             },
@@ -356,6 +360,7 @@ class DeviceRegistry:
                     client_type=str(candidate["client_type"]),
                     client_name=str(candidate["client_name"]),
                     enrollment_ip=str(candidate["enrollment_ip"]),
+                    quota_exempt=bool(candidate["quota_exempt"]),
                 )
             except ValueError as exc:
                 if str(exc) != "public device limit reached":
@@ -380,6 +385,7 @@ class DeviceRegistry:
                     if item.get("username") == candidate["username"]
                     and bool(item.get("enabled"))
                     and bool(item.get("public_access"))
+                    and not bool(item.get("quota_exempt"))
                 )
                 if count >= PUBLIC_DEVICE_LIMIT:
                     raise PublicDeviceLimitError(
@@ -402,6 +408,7 @@ class DeviceRegistry:
                 if (not owner or item.get("username") == owner)
                 and bool(item.get("enabled"))
                 and bool(item.get("public_access"))
+                and not bool(item.get("quota_exempt"))
             )
 
     def public_user_count(self) -> int:
@@ -413,6 +420,22 @@ class DeviceRegistry:
                 for item in self._all_locked()
                 if bool(item.get("enabled")) and bool(item.get("public_access"))
             } - {""})
+
+    def public_device_total_count(self, *, username: str = "") -> int:
+        """Count all enabled public devices, including quota-exempt rows."""
+        owner = str(username or "").strip()
+        if self.control_store is not None:
+            reader = getattr(self.control_store, "public_device_total_count", None)
+            if callable(reader):
+                return int(reader(username=owner))
+        with self._lock:
+            return sum(
+                1
+                for item in self._all_locked()
+                if (not owner or item.get("username") == owner)
+                and bool(item.get("enabled"))
+                and bool(item.get("public_access"))
+            )
 
     def revoke(self, device_id: str) -> dict[str, object]:
         identifier = normalise_device_id(device_id)

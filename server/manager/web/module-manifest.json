@@ -303,6 +303,7 @@
     ],
     "settings": [
       "settings/settings.js",
+      "settings/user-management.js",
       "settings/devices.js",
       "settings/control-database.js",
       "settings/manager.js"
@@ -312,6 +313,7 @@
       "app/route-dispatch.js",
       "app/tab-view-cache.js",
       "app/tabs.js",
+      "app/visitor-device.js",
       "app/auth.js",
       "app/runtime.js",
       "app/shell.js",
@@ -449,6 +451,7 @@
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",
+    "settings/user-management.js",
     "settings/devices.js",
     "settings/control-database.js",
     "settings/manager.js",
@@ -456,6 +459,7 @@
     "app/route-dispatch.js",
     "app/tab-view-cache.js",
     "app/tabs.js",
+    "app/visitor-device.js",
     "app/auth.js",
     "app/runtime.js",
     "app/shell.js",
