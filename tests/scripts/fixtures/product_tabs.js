@@ -79,11 +79,15 @@ assert.strictEqual(
   state.tabs.find(tab => tab.id === "product-detail:product:A.DCE").path,
   "/products/product/A.DCE?source=local&data_source=LocalCNFuturesDAY1",
 );
-tabs.navigate("/products/product/A.DCE?contract=DCE%7CA%7C2501&contract_has_data=1");
-assert.strictEqual(state.activeTabID, "product-detail:product:A.DCE");
+tabs.navigate("/products/product/DCE%7CA%7C2501?product=A.DCE&contract=DCE%7CA%7C2501&contract_has_data=1");
+assert.strictEqual(state.activeTabID, "product-detail:product:DCE|A|2501");
 assert.strictEqual(
   state.tabs.some(tab => tab.id === "product-detail:contract:DCE|A|2501"),
   false,
+);
+assert.strictEqual(
+  state.tabs.find(tab => tab.id === "product-detail:product:DCE|A|2501").path,
+  "/products/product/DCE%7CA%7C2501?product=A.DCE&contract=DCE%7CA%7C2501&contract_has_data=1",
 );
 
 tabs.navigate("/jobs?scope=mine");
