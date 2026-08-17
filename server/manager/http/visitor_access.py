@@ -21,7 +21,6 @@ VISITOR_GRANT_TTL_SECONDS = 300
 VISITOR_GRANT_REPLAY_TTL_SECONDS = 30
 VISITOR_SESSION_TTL_SECONDS = 12 * 60 * 60
 CLIENT_ACCESS_TTL_SECONDS = 12 * 60 * 60
-DEVICE_BRIDGE_TTL_SECONDS = 5 * 60
 VISITOR_PRINCIPAL_PREFIX = "__public_jobs__:"
 
 
@@ -180,25 +179,6 @@ def target_compliance_url(
     )
 
 
-def device_bridge_url(
-    source_origin: str,
-    *,
-    bridge: str,
-    next_path: str,
-) -> str:
-    """Build the trusted-ingress URL used for cross-origin device auth."""
-    parsed = urlsplit(source_origin)
-    query = f"bridge={_quote(bridge)}&next={_quote(next_path)}"
-    return urlunsplit((parsed.scheme, parsed.netloc, "/device-bridge", query, ""))
-
-
-def device_bridge_fallback_url(target_origin: str, *, next_path: str) -> str:
-    """Return the target compliance URL after a bridge has no credential."""
-    parsed = urlsplit(target_origin)
-    query = f"next={_quote(next_path)}&device_bridge_failed=1"
-    return urlunsplit((parsed.scheme, parsed.netloc, "/compliance", query, ""))
-
-
 def _target_url(
     target_origin: str,
     *,
@@ -224,7 +204,6 @@ class _VisitorRecord:
     target_origin: str
     expires_at: float
     visitor_id: str
-    source_origin: str = ""
 
 
 @dataclass(frozen=True)
@@ -269,7 +248,6 @@ class VisitorAccessStore:
         target_origin: str,
         ttl: int,
         visitor_id: str,
-        source_origin: str,
         now: float,
     ) -> str:
         """Issue a record while the store lock is already held."""
@@ -282,7 +260,6 @@ class VisitorAccessStore:
             target_origin=target_origin,
             expires_at=now + ttl,
             visitor_id=normalized_visitor_id,
-            source_origin=source_origin,
         )
         return token
 
@@ -293,7 +270,6 @@ class VisitorAccessStore:
         target_origin: str,
         ttl: int,
         visitor_id: str = "",
-        source_origin: str = "",
     ) -> str:
         now = time.time()
         with self._lock:
@@ -303,7 +279,6 @@ class VisitorAccessStore:
                 target_origin=target_origin,
                 ttl=ttl,
                 visitor_id=visitor_id,
-                source_origin=source_origin,
                 now=now,
             )
 
@@ -330,77 +305,6 @@ class VisitorAccessStore:
             ttl=CLIENT_ACCESS_TTL_SECONDS,
             visitor_id=visitor_id,
         )
-
-    def issue_device_bridge(
-        self,
-        *,
-        source_origin: str,
-        target_origin: str,
-    ) -> str:
-        """Issue a short-lived, one-use device-auth bridge capability."""
-        source = _origin(source_origin)
-        target = _origin(target_origin)
-        if (
-            not source
-            or not target
-            or source == target
-            or not source.startswith("https://")
-            or not target.startswith("https://")
-        ):
-            raise ValueError("device bridge origins are invalid")
-        return self._issue(
-            kind="device-bridge",
-            source_origin=source,
-            target_origin=target,
-            ttl=DEVICE_BRIDGE_TTL_SECONDS,
-        )
-
-    def device_bridge_target(
-        self,
-        token: str,
-        *,
-        source_origin: str,
-    ) -> str:
-        """Return a valid bridge target without consuming the capability."""
-        now = time.time()
-        source = _origin(source_origin)
-        with self._lock:
-            self._purge(now)
-            record = self._records.get(self._digest(token))
-            if not (
-                record
-                and record.kind == "device-bridge"
-                and record.source_origin == source
-                and record.expires_at > now
-            ):
-                return ""
-            return record.target_origin
-
-    def consume_device_bridge(
-        self,
-        token: str,
-        *,
-        source_origin: str,
-        target_origin: str,
-    ) -> bool:
-        """Consume a bridge only after the device signature was verified."""
-        now = time.time()
-        source = _origin(source_origin)
-        target = _origin(target_origin)
-        with self._lock:
-            self._purge(now)
-            digest = self._digest(token)
-            record = self._records.get(digest)
-            if not (
-                record
-                and record.kind == "device-bridge"
-                and record.source_origin == source
-                and record.target_origin == target
-                and record.expires_at > now
-            ):
-                return False
-            self._records.pop(digest, None)
-            return True
 
     def issue_session(
         self, target_origin: str, *, visitor_id: str = ""
@@ -460,7 +364,6 @@ class VisitorAccessStore:
                 target_origin=target_origin,
                 ttl=VISITOR_SESSION_TTL_SECONDS,
                 visitor_id=record.visitor_id,
-                source_origin=record.source_origin,
                 now=now,
             )
             self._redeemed_grants[digest] = _RedeemedGrant(

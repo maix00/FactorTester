@@ -40,9 +40,6 @@ class CoreGetRoutesMixin:
         if parsed.path == "/visitor":
             self._serve_visitor_entry(parsed)
             return True
-        if parsed.path == "/device-bridge":
-            self._device_bridge(parsed)
-            return True
         if parsed.path == "/login":
             requested = parse_qs(parsed.query, keep_blank_values=True).get(
                 "next", ["/"]
