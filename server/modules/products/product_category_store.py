@@ -27,6 +27,7 @@ from server.modules.products.product_category_definition import (
     normalize_definition as _normalize_definition,
     normalize_composite_label_updates as _normalize_composite_label_updates,
     normalize_items as _normalize_items,
+    validate_category_items as _validate_category_items,
     validate_generated_items_unchanged as _validate_generated_items_unchanged,
     save_source_category_override as _save_source_category_override,
     shared_source_ids as _shared_source_ids,
@@ -60,6 +61,10 @@ def list_product_categories(username: str) -> list[dict[str, Any]]:
     for item in raw_owned:
         migrated = _migrate_owned_definition(item, username)
         value = _normalize_definition(migrated)
+        if not value.get("is_composite"):
+            inferred = infer_category_source_ids(value.get("items") or [])
+            if value.get("source_ids") != inferred:
+                value["source_ids"] = inferred
         migrated_owned.append(dict(value))
         owned.append(_category_view(
             value, kind="user", owner_ref=f"user:{username}",
@@ -89,7 +94,7 @@ def create_product_category(
     category_id: str | None = None,
 ) -> dict[str, Any]:
     title = _category_name(name)
-    normalized_items = _normalize_items(items)
+    normalized_items = _validate_category_items(_normalize_items(items))
     if any(item.get("label") == "Others" for item in normalized_items):
         raise ValueError("Others 标签由系统自动生成，不能由客户端新增")
     from server.modules.products.product_category_paths import canonicalize_product_paths
@@ -103,6 +108,7 @@ def create_product_category(
         }
         for item in normalized_items
     ]
+    source_ids = infer_category_source_ids(normalized_items)
     categories = load_product_categories(username)
     if any(
         str(item.get("title_zh") or item.get("alias") or "").strip() == title
@@ -117,7 +123,7 @@ def create_product_category(
         "alias": title,
         "title_zh": title,
         "dimensions": [],
-        "source_ids": [],
+        "source_ids": source_ids,
         "composable": True,
         "is_composite": False,
         "kind": "user",
@@ -318,8 +324,9 @@ def update_product_category(
         raise ValueError("产品分类 ID 已存在")
 
     normalized_items = None
+    inferred_source_ids: list[str] | None = None
     if items is not None and not target.get("is_composite"):
-        normalized_items = _normalize_items(items)
+        normalized_items = _validate_category_items(_normalize_items(items))
         from server.modules.products.product_category_paths import (
             canonicalize_product_paths,
         )
@@ -333,6 +340,7 @@ def update_product_category(
             }
             for item in normalized_items
         ]
+        inferred_source_ids = infer_category_source_ids(normalized_items)
         current_items = _normalize_definition(target).get("items") or []
         _validate_generated_items_unchanged(current_items, normalized_items)
         from server.modules.products.product_category_paths import (
@@ -350,7 +358,23 @@ def update_product_category(
         updated["updated_at"] = time.time()
         if normalized_items is not None:
             updated["items"] = normalized_items
+            updated["source_ids"] = inferred_source_ids or []
         categories[index] = _normalize_definition(updated)
         save_product_categories(username, categories)
         return get_product_category(username, requested_id)
     return None
+
+
+def infer_category_source_ids(items: list[dict[str, Any]]) -> list[str]:
+    """Infer source bundles from all concrete paths in ordinary categories."""
+    from server.services.product_catalog_projection import (
+        source_ids_for_product_paths,
+    )
+
+    paths = [
+        path
+        for item in items
+        for path in item.get("paths") or []
+        if not str(path or "").strip().startswith("-")
+    ]
+    return list(source_ids_for_product_paths(paths))

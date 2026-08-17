@@ -202,7 +202,40 @@
     } else {
       mount.replaceChildren(...(showCategoryFilter ? [categories, tree] : [tree]));
     }
+    if (typeof options.loadTree === "function") {
+      const requestID = Number(mount.dataset.productTreeRequest || 0) + 1;
+      mount.dataset.productTreeRequest = String(requestID);
+      tree.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
+      const load = () => {
+        if (!isTreeMountCurrent(mount, requestID, options)) return;
+        Promise.resolve()
+          .then(() => options.loadTree())
+          .then(loaded => {
+            if (!isTreeMountCurrent(mount, requestID, options)) return;
+            drawNodes(context, tree, roots(loaded), options);
+          })
+          .catch(error => {
+            if (!isTreeMountCurrent(mount, requestID, options)) return;
+            tree.replaceChildren(FTUI.empty(
+              context.t("产品树读取失败"),
+              error.message || context.t("请稍后重试"),
+            ));
+          });
+      };
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(load);
+      } else {
+        setTimeout(load, 0);
+      }
+      return;
+    }
     drawNodes(context, tree, all, options);
+  }
+
+  function isTreeMountCurrent(mount, requestID, options) {
+    return mount.dataset.productTreeRequest === String(requestID)
+      && mount.isConnected !== false
+      && options.isCurrent?.() !== false;
   }
 
   function drawNodes(context, mount, nodes, options = {}) {

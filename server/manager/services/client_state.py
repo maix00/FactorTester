@@ -871,6 +871,13 @@ class ClientStateService:
             category_id = str(payload.get("id") or "") if isinstance(payload, dict) else ""
             if category_id and category_id not in known and not row.get("deleted"):
                 value = dict(payload)
+                if not value.get("is_composite") and not value.get("source_ids"):
+                    from server.modules.products.product_category_store import (
+                        infer_category_source_ids,
+                    )
+                    value["source_ids"] = infer_category_source_ids(
+                        value.get("items") or [],
+                    )
                 value.update({
                     "owner_ref": f"user:{principal}",
                     "source_managed": False,

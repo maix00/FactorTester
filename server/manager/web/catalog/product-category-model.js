@@ -13,6 +13,42 @@
       .filter(Boolean);
   }
 
+  function sourceIDsForPaths(paths, definitions) {
+    const requested = [...new Set(
+      (Array.isArray(paths) ? paths : [])
+        .map(normalizePath)
+        .filter(Boolean),
+    )];
+    const sources = Array.isArray(definitions) ? definitions : [];
+    return sources
+      .filter(source => {
+        const declared = (Array.isArray(source?.product_paths)
+          ? source.product_paths : [])
+          .map(normalizePath).filter(Boolean);
+        return declared.some(declaredPath => requested.some(requestedPath => (
+          pathsOverlap(requestedPath, declaredPath)
+        )));
+      })
+      .map(source => String(source?.id || source?.source_id || "").trim())
+      .filter(Boolean);
+  }
+
+  function normalizePath(value) {
+    const parts = String(value || "").trim().replace(/^-/, "")
+      .replace(/^\/+|\/+$/g, "").split("/");
+    if (parts[0] === "ProductCategory" && parts.length >= 3) {
+      return parts.slice(2).join("/");
+    }
+    return parts.filter(Boolean).join("/");
+  }
+
+  function pathsOverlap(requested, declared) {
+    // A source declaration provides its own node and descendants.  A generic
+    // hard-coded parent such as Product/Futures must not bind to a child
+    // source declaration such as Product/Futures/CNFutures.
+    return requested === declared || requested.startsWith(`${declared}/`);
+  }
+
   function treeNodeInitiallyOpen(node, depth) {
     const productList = String(node?.key || "").endsWith("/_products");
     return depth === 0 && !productList;
@@ -68,6 +104,7 @@
 
   window.FTProductCategoryModel = Object.freeze({
     availableSourceIDs,
+    sourceIDsForPaths,
     multiply,
     treeNodeInitiallyOpen,
   });

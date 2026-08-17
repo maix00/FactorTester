@@ -286,24 +286,23 @@
       const selectedSources = FTProductCategoryModel.availableSourceIDs(
         sourceDefinitions,
       );
+      const contractTreePath = (path, params = {}) => {
+        const query = new URLSearchParams({path});
+        selectedIDs.forEach(value => query.append("category", value));
+        selectedSources.forEach(value => query.append("data_source", value));
+        if (params.query) query.set("query", params.query);
+        if (params.page) query.set("page", String(params.page));
+        if (params.limit) query.set("limit", String(params.limit));
+        return source === "local"
+          ? `/api/client/contract_tree?${query}`
+          : `/api/catalog/contract-tree?${query}`;
+      };
       const renderTree = async () => {
         // No selected Category means the stable classifier-only product tree.
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
-        const tree = await loadTree(context, source, selectedIDs, selectedSources);
         if (!isCurrent(context)) return;
-        const contractTreePath = (path, params = {}) => {
-          const query = new URLSearchParams({path});
-          selectedIDs.forEach(value => query.append("category", value));
-          selectedSources.forEach(value => query.append("data_source", value));
-          if (params.query) query.set("query", params.query);
-          if (params.page) query.set("page", String(params.page));
-          if (params.limit) query.set("limit", String(params.limit));
-          return source === "local"
-            ? `/api/client/contract_tree?${query}`
-            : `/api/catalog/contract-tree?${query}`;
-        };
-        await FTProductTree.render(context, treeMount, tree, {
+        await FTProductTree.render(context, treeMount, null, {
           categoryDefinitions: categoryPayload.categories,
           dataSourceDefinitions: sourceDefinitions,
           selectedDataSources: selectedSources,
@@ -311,6 +310,10 @@
           contractTreePath,
           categoryMount,
           source,
+          isCurrent: () => isCurrent(context),
+          loadTree: () => loadTree(
+            context, source, selectedIDs, selectedSources,
+          ),
           onSave: async nextID => {
             selected = nextID;
             localStorage.setItem(categoryStorageKey, selected);

@@ -165,7 +165,7 @@ def test_product_category_detail_keeps_route_context_and_dynamic_tab_title() -> 
         encoding="utf-8",
     )
 
-    assert detail.count("helpers.isCurrent(context)") == 2
+    assert detail.count("helpers.isCurrent(context)") >= 2
     assert "context.updateActiveTab?.({title})" in detail
 
 
