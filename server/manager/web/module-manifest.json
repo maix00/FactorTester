@@ -310,6 +310,7 @@
     "manager": [
       "manager/access-control-table.js",
       "manager/access-control.js",
+      "manager/accounts.js",
       "settings/manager.js"
     ],
     "app": [
@@ -459,6 +460,7 @@
     "settings/control-database.js",
     "manager/access-control-table.js",
     "manager/access-control.js",
+    "manager/accounts.js",
     "settings/manager.js",
     "app/navigation.js",
     "app/route-dispatch.js",

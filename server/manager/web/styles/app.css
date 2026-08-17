@@ -460,6 +460,18 @@ form[hidden] { display: none !important; }
 .manager-access-table-shell { max-height: min(560px, 65vh); }
 .manager-access-table-shell table { min-width: 860px; }
 .manager-access-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 42px; }
+.manager-directory-content { display: grid; gap: 16px; }
+.manager-directory-section { max-width: 1400px; }
+.manager-directory-dialog { border: 0; padding: 0; background: transparent; }
+.manager-directory-form { width: min(560px, 94vw); max-height: min(760px, 90vh); overflow: auto; }
+.manager-directory-form-fields { display: grid; gap: 10px; }
+.manager-directory-field { display: grid; gap: 5px; font-size: 13px; }
+.manager-directory-field > span { font-weight: 600; }
+.manager-directory-field input, .manager-directory-field select, .manager-directory-field textarea {
+  width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--line);
+  border-radius: 8px; padding: 9px 10px; color: inherit; background: var(--panel);
+}
+.manager-directory-field textarea { min-height: 76px; resize: vertical; }
 .manager-intro { display: grid; gap: 3px; }
 .manager-intro small, .manager-identity small, .manager-actions small { color: var(--muted); }
 .manager-identity { min-width: 210px; display: grid; gap: 2px; }

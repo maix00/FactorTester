@@ -118,6 +118,7 @@
       ["services", "服务"],
       ["allowlist", "公网访客白名单"],
       ["devices", "已认证设备"],
+      ["accounts", "用户与机构"],
     ];
     options.forEach(([value, label]) => {
       const tab = document.createElement("button");
@@ -132,6 +133,8 @@
     context.content.replaceChildren(wrapper);
     if (selected === "allowlist" || selected === "devices") {
       await FTManagerAccessControl.show(context, body, selected);
+    } else if (selected === "accounts") {
+      await FTManagerAccounts.show(context, body);
     } else {
       await serviceView(context, body);
     }
