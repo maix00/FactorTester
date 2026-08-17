@@ -141,6 +141,11 @@ postgres_before="$(
 )"
 [[ -n "$postgres_before" ]]
 postgres_before="$(sudo docker inspect --format '{{.Id}}' "$postgres_before")"
+postgres_table_count_before="$(
+  sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+    bash "$public_script" control-table-count | tr -d '\r\n'
+)"
+[[ "$postgres_table_count_before" =~ ^[0-9]+$ ]]
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" backup
 sudo cp "$production_env" "$rollback_env"
@@ -168,7 +173,7 @@ sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" verify
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
-  bash "$public_script" restore-check
+  bash "$public_script" restore-check "$postgres_table_count_before"
 
 postgres_after="$(
   sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \

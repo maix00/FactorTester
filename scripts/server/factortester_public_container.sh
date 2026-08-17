@@ -67,7 +67,18 @@ backup_database() {
   echo "$target"
 }
 
+control_table_count() {
+  "${compose[@]}" exec -T postgresql-control \
+    psql -At --username=postgres --dbname=factortester_control \
+      -c "select count(*) from pg_catalog.pg_tables where schemaname='public'"
+}
+
 restore_check() {
+  expected_table_count="${1:-}"
+  if [[ -n "$expected_table_count" && ! "$expected_table_count" =~ ^[0-9]+$ ]]; then
+    echo "expected table count must be a non-negative integer" >&2
+    exit 2
+  fi
   backup_root="${FACTORTESTER_POSTGRES_BACKUP_DIR:?set FACTORTESTER_POSTGRES_BACKUP_DIR}"
   dump="$(find "$backup_root" -maxdepth 1 -type f -name 'factortester_control-*.dump' -print | sort | tail -n 1)"
   [[ -n "$dump" ]] || { echo "No PostgreSQL backup found" >&2; exit 1; }
@@ -82,9 +93,7 @@ restore_check() {
     createdb --username=postgres --template=template0 --encoding=UTF8 "$restore_db"
   "${compose[@]}" exec -T postgresql-control \
     pg_restore --exit-on-error --no-owner --username=postgres --dbname="$restore_db" < "$dump"
-  original_count="$("${compose[@]}" exec -T postgresql-control \
-    psql -At --username=postgres --dbname=factortester_control \
-      -c "select count(*) from pg_catalog.pg_tables where schemaname='public'")"
+  original_count="${expected_table_count:-$(control_table_count)}"
   restored_count="$("${compose[@]}" exec -T postgresql-control \
     psql -At --username=postgres --dbname="$restore_db" \
       -c "select count(*) from pg_catalog.pg_tables where schemaname='public'")"
@@ -179,6 +188,7 @@ case "$command" in
   check-source) check_source ;;
   config) "${compose[@]}" config "$@" ;;
   container-id) "${compose[@]}" ps --quiet "$@" ;;
+  control-table-count) control_table_count ;;
   build) check_source; "${compose[@]}" build "$@" ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;
@@ -186,7 +196,7 @@ case "$command" in
   logs) "${compose[@]}" logs --follow "$@" ;;
   down) "${compose[@]}" down --remove-orphans "$@" ;;
   backup) backup_database ;;
-  restore-check) restore_check ;;
+  restore-check) restore_check "$@" ;;
   verify) verify ;;
   -h|--help|help) usage ;;
   *) echo "Unknown command: $command" >&2; usage >&2; exit 2 ;;
