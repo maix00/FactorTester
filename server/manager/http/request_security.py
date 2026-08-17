@@ -581,21 +581,6 @@ class RequestSecurityMixin:
         if path == "/compliance":
             return True
 
-        if path == "/device-handoff":
-            if not self.state.public_server:
-                json_response(self, {
-                    "success": False,
-                    "error": "device handoff is available only on a public Manager",
-                }, 404)
-                return False
-            if not self._has_secure_ui_transport():
-                json_response(self, {
-                    "success": False,
-                    "error": "device handoff requires HTTPS",
-                }, 400)
-                return False
-            return True
-
         if method == "GET" and path == "/api/device/summary":
             # The compliance page may show an aggregate count before the
             # browser has a session.  It contains no usernames or device IDs.
@@ -613,6 +598,17 @@ class RequestSecurityMixin:
                 return True
 
         if path in {"/api/device/challenge", "/api/device/verify"}:
+            target_origin = self._visitor_redirect_target()
+            if (
+                self.state.public_server
+                and target_origin
+                and self._request_origin() != target_origin
+            ):
+                json_response(self, {
+                    "success": False,
+                    "error": "device authentication is available only on the public IP origin",
+                }, 403)
+                return False
             if not self._has_secure_ui_transport():
                 json_response(
                     self,
