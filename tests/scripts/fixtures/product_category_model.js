@@ -20,36 +20,32 @@ const sources = [
 assert.deepEqual(model.availableSourceIDs(sources), ["ServerDAY1", "ServerMIN1"]);
 
 const definitions = [
-  {id: "day_night", title_zh: "日夜盘", composable: true},
-  {id: "sector", title_zh: "行业", composable: true},
+  {id: "cnfutures_day_night", title_zh: "中国期货日夜盘", composable: true},
+  {id: "cnfutures_sector", title_zh: "中国期货行业", composable: true},
   {id: "exchange", title_zh: "交易所", composable: true},
 ];
-const dayNightSector = model.multiply(definitions, ["sector", "day_night"]);
+const dayNightSector = model.multiply(definitions, [
+  "cnfutures_sector", "cnfutures_day_night",
+]);
 assert.deepEqual(dayNightSector, {
-  id: "day_night_x_sector",
-  alias: "日夜盘×行业",
-  title_zh: "日夜盘×行业",
-  dimensions: ["day_night", "sector"],
+  alias: "中国期货日夜盘×中国期货行业",
+  title_zh: "中国期货日夜盘×中国期货行业",
+  dimensions: ["cnfutures_day_night", "cnfutures_sector"],
+  parent_category_ids: ["cnfutures_sector", "cnfutures_day_night"],
   composable: false,
   is_composite: true,
 });
-assert.deepEqual(
-  model.multiply([...definitions, dayNightSector], [dayNightSector.id, "exchange"]),
-  {
-    id: "day_night_x_sector_x_exchange",
-    alias: "日夜盘×行业×交易所",
-    title_zh: "日夜盘×行业×交易所",
-    dimensions: ["day_night", "sector", "exchange"],
-    composable: false,
-    is_composite: true,
-  },
-);
 assert.throws(
-  () => model.multiply(definitions, ["day_night"]),
+  () => model.multiply(definitions, ["cnfutures_day_night"]),
   /选择两个/,
 );
 assert.throws(
-  () => model.multiply([...definitions, dayNightSector], [dayNightSector.id, "sector"]),
+  () => model.multiply([...definitions, {
+    id: "alice:category_saved",
+    ...dayNightSector,
+  }], [
+    "alice:category_saved", "cnfutures_sector",
+  ]),
   /没有增加新的分类维度/,
 );
 assert.strictEqual(

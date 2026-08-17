@@ -64,22 +64,11 @@
   }
 
   function categorySelectionValues(value, available = []) {
-    const known = new Set(available.map(item => String(item?.id || "").trim()));
     const values = Array.isArray(value) ? value : [String(value || "")];
     const result = [];
     values.forEach(item => String(item || "").split(",").forEach(raw => {
       const categoryID = raw.trim();
       if (!categoryID) return;
-      // Migrate the old UI's unregistered base-category composition.  A
-      // registered composite ID remains one selectable category.
-      const legacyParts = categoryID.split("_x_");
-      if (!known.has(categoryID) && legacyParts.length > 1
-        && legacyParts.every(part => known.has(part))) {
-        legacyParts.forEach(part => {
-          if (!result.includes(part)) result.push(part);
-        });
-        return;
-      }
       if (!result.includes(categoryID)) result.push(categoryID);
     }));
     return result;
@@ -233,6 +222,7 @@
     if (options.leafOnly && !isLeafPathNode(node)) return null;
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.disabled = options.selectionReadOnly === true;
     input.setAttribute("aria-label", String(node.title || node.name || node.key || ""));
     input.dataset.productPath = node.key;
     input.checked = minimalPaths(options.selectedPaths).includes(node.key);

@@ -142,6 +142,15 @@
       return `factor-detail:${match[1]}:${target}`;
     }
 
+    function productCategoryDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/products\/categories\/(.+)$/.exec(pathname);
+      if (!match || match[1] === "new") return "";
+      let target = match[1];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `product-category-detail:${target}`;
+    }
+
     function runSpecTabID(path) {
       let route;
       try { route = new URL(String(path || ""), "http://factortester.invalid"); }
@@ -157,7 +166,8 @@
     }
 
     function detailTabIDForPath(path) {
-      return productDetailTabID(path) || factorDetailTabID(path) || runSpecTabID(path);
+      return productCategoryDetailTabID(path)
+        || productDetailTabID(path) || factorDetailTabID(path) || runSpecTabID(path);
     }
 
     function navigate(path) {

@@ -419,12 +419,15 @@ class CatalogRoutesMixin:
         category_delete = re.fullmatch(
             r"/api/catalog/categories/([^/]+)", parsed.path,
         )
+        category_refresh = re.fullmatch(
+            r"/api/catalog/categories/([^/]+)/refresh", parsed.path,
+        )
         if parsed.path not in {
             "/api/catalog/prices",
             "/api/catalog/product-groups",
             "/api/catalog/categories",
             "/api/catalog/categories/composite",
-        } and category_delete is None:
+        } and category_delete is None and category_refresh is None:
             return False
         session = self._session()
         visitor = self._visitor_mode()
@@ -445,7 +448,10 @@ class CatalogRoutesMixin:
         )
         try:
             method = str(getattr(self, "command", "POST") or "POST").upper()
-            payload = {} if category_delete is not None and method == "DELETE" else self._json_body(256 * 1024)
+            payload = {} if (
+                (category_delete is not None and method == "DELETE")
+                or category_refresh is not None
+            ) else self._json_body(256 * 1024)
             if parsed.path == "/api/catalog/categories":
                 from server.modules.products.product_category_store import (
                     create_product_category,
@@ -455,6 +461,7 @@ class CatalogRoutesMixin:
                     principal,
                     payload.get("name"),
                     payload.get("items"),
+                    category_id=payload.get("id"),
                 )
                 value = {"success": True, "origin": "server", "category": category}
             elif parsed.path == "/api/catalog/categories/composite":
@@ -466,6 +473,48 @@ class CatalogRoutesMixin:
                     principal, payload.get("category_ids"),
                 )
                 value = {"success": True, "origin": "server", "category": category}
+            elif category_refresh is not None and method == "POST":
+                from urllib.parse import unquote
+                from server.modules.products.product_category_store import (
+                    refresh_product_category_composition,
+                )
+
+                category = refresh_product_category_composition(
+                    principal, unquote(category_refresh.group(1)),
+                )
+                if category is None:
+                    json_response(self, {
+                        "success": False, "error": "产品分类不存在",
+                    }, 404)
+                    return True
+                value = {
+                    "success": True, "origin": "server", "category": category,
+                }
+            elif category_delete is not None and method in {"PUT", "PATCH"}:
+                from urllib.parse import unquote
+                from server.modules.products.product_category_store import (
+                    update_product_category,
+                )
+
+                category = update_product_category(
+                    principal,
+                    unquote(category_delete.group(1)),
+                    payload.get("name"),
+                    payload.get("items"),
+                    new_category_id=payload.get("id"),
+                    is_super_admin=(
+                        session is not None
+                        and str(session.get("role") or "") == "super_admin"
+                    ),
+                )
+                if category is None:
+                    json_response(self, {
+                        "success": False, "error": "产品分类不存在",
+                    }, 404)
+                    return True
+                value = {
+                    "success": True, "origin": "server", "category": category,
+                }
             elif category_delete is not None and method == "DELETE":
                 from urllib.parse import unquote
                 from server.modules.products.product_category_store import (
@@ -485,6 +534,11 @@ class CatalogRoutesMixin:
             elif category_delete is not None:
                 json_response(self, {
                     "success": False, "error": "产品分类写入方法不支持",
+                }, 405)
+                return True
+            elif category_refresh is not None:
+                json_response(self, {
+                    "success": False, "error": "产品分类更新方法不支持",
                 }, 405)
                 return True
             elif parsed.path == "/api/catalog/product-groups":
@@ -513,6 +567,11 @@ class CatalogRoutesMixin:
                 value = {"success": True, "origin": "server", "group": group}
             else:
                 value = self.state.client_state.product_price_series(payload)
+        except PermissionError as exc:
+            json_response(
+                self, {"success": False, "error": str(exc)}, 403,
+            )
+            return True
         except ValueError as exc:
             json_response(
                 self,

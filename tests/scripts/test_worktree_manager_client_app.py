@@ -2736,7 +2736,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         with urlopen(Request(f"{base_url}/api/catalog/sources", headers=headers)) as response:
             sources = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=sector", headers=headers,
+            f"{base_url}/api/catalog/tree?category=cnfutures_sector", headers=headers,
         )) as response:
             tree = json.loads(response.read())
         with urlopen(Request(
@@ -2770,8 +2770,8 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             created = json.loads(response.read())
 
     assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
-    assert tree["category_id"] == "sector"
-    assert tree["tree"][0]["title"] == "sector"
+    assert tree["category_id"] == "cnfutures_sector"
+    assert tree["tree"][0]["title"] == "cnfutures_sector"
     assert tree["tree"][0]["source_ids"] == tree["source_ids"]
     assert tree["tree"][0]["origin"] == "server"
     assert uncategorized_tree["category_id"] == ""
@@ -2816,15 +2816,15 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=day_night"
-            "&category=sector",
+            f"{base_url}/api/catalog/tree?category=cnfutures_day_night"
+            "&category=cnfutures_sector",
             headers=headers,
         )) as response:
             value = json.loads(response.read())
 
-    assert value["category_ids"] == ["day_night", "sector"]
+    assert value["category_ids"] == ["cnfutures_day_night", "cnfutures_sector"]
     assert value["tree"] == [{"title": "日夜盘"}, {"title": "行业"}]
-    assert calls[0][0] == ["day_night", "sector"]
+    assert calls[0][0] == ["cnfutures_day_night", "cnfutures_sector"]
     assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 
@@ -2887,7 +2887,9 @@ def test_catalog_exposes_only_base_category_dimensions() -> None:
     from server.modules.shared.price_services import available_product_categories
 
     categories = available_product_categories()
-    assert {item["id"] for item in categories} == {"day_night", "sector"}
+    assert {item["id"] for item in categories} == {
+        "cnfutures_day_night", "cnfutures_sector",
+    }
 
 
 def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> None:
@@ -2924,11 +2926,12 @@ def test_local_bundle_filters_real_product_tree_without_a_service_port() -> None
     source_ids = available_source_ids()
     assert "Local" in source_ids
     tree = ClientStateService.product_tree(
-        "day_night_x_sector", ("Local",),
+        "cnfutures_day_night×cnfutures_sector", ("Local",),
     )
 
     assert tree
-    assert tree[0]["title"] == "Product"
+    assert tree[0]["title"] == "中国期货日夜盘×中国期货行业"
+    assert tree[0]["key"] == "ProductCategory/cnfutures_day_night×cnfutures_sector"
 
 
 def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:
@@ -3000,6 +3003,8 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             categories = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-create.js") as response:
             create_script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-detail.js") as response:
+            detail_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
@@ -3036,13 +3041,22 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "window.FTProductCategories" in categories
     assert '"新增分类"' in categories
     assert '"新增乘积分类"' in categories
-    assert "FTProductCategoryCreate.open" in categories
+    assert "FTProductCategoryOverlay.choose" in categories
+    assert 'context.t("分类 ID")' in categories
+    assert 'context.t("来源/所有者")' in categories
+    assert 'context.t("Label 数")' in categories
+    assert 'context.t("父分类")' in categories
+    assert 'context.t("路径数")' not in categories
+    assert "FTProductCategoryCreate.open" not in categories
     assert "split(/\\r?\\n/)" in create_script
     assert "从产品树选择" in create_script
     assert "loadProductTree" in create_script
     assert "leafOnly: true" in create_script
     assert "product-category-create-layout" in create_script
-    assert "DELETE" in categories
+    assert "selectionReadOnly" in detail_script
+    assert "从父分类更新内容" in detail_script
+    assert "parent_category_ids" in detail_script
+    assert "DELETE" in detail_script
     assert "window.FTProductCategoryOverlay" in overlay
     assert "创建乘积分类" in overlay
     assert "选择两个已有分类" in overlay

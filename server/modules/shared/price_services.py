@@ -47,30 +47,45 @@ def cached_product_tree() -> CategoryTree:
     return build_product_tree()
 
 
+CN_FUTURES_DAY_NIGHT_CATEGORY_ID = "cnfutures_day_night"
+CN_FUTURES_SECTOR_CATEGORY_ID = "cnfutures_sector"
+CN_FUTURES_COMPOSITE_CATEGORY_ID = (
+    f"{CN_FUTURES_DAY_NIGHT_CATEGORY_ID}×{CN_FUTURES_SECTOR_CATEGORY_ID}"
+)
+
+
 _BASE_PRODUCT_CATEGORY_DEFINITIONS = (
     {
-        "id": "day_night",
-        "alias": "日夜盘",
-        "title_zh": "日夜盘",
+        "id": CN_FUTURES_DAY_NIGHT_CATEGORY_ID,
+        "alias": "中国期货日夜盘",
+        "title_zh": "中国期货日夜盘",
         "source_ids": ("Local",),
-        "dimensions": ("day_night",),
+        "dimensions": (CN_FUTURES_DAY_NIGHT_CATEGORY_ID,),
         "composable": True,
         "is_composite": False,
+        "kind": "source",
+        "owner_ref": "source",
+        "source_managed": True,
+        "items": (),
     },
     {
-        "id": "sector",
-        "alias": "行业",
-        "title_zh": "行业",
+        "id": CN_FUTURES_SECTOR_CATEGORY_ID,
+        "alias": "中国期货行业",
+        "title_zh": "中国期货行业",
         "source_ids": ("Local",),
-        "dimensions": ("sector",),
+        "dimensions": (CN_FUTURES_SECTOR_CATEGORY_ID,),
         "composable": True,
         "is_composite": False,
+        "kind": "source",
+        "owner_ref": "source",
+        "source_managed": True,
+        "items": (),
     },
 )
 
 _BASE_PRODUCT_CATEGORY_TYPES = {
-    "day_night": CNFuturesDayNightTimeCategory,
-    "sector": CNFuturesSectorCategory,
+    CN_FUTURES_DAY_NIGHT_CATEGORY_ID: CNFuturesDayNightTimeCategory,
+    CN_FUTURES_SECTOR_CATEGORY_ID: CNFuturesSectorCategory,
 }
 
 
@@ -81,6 +96,7 @@ def available_product_categories() -> list[dict[str, Any]]:
             item,
             dimensions=list(item["dimensions"]),
             source_ids=list(item.get("source_ids") or []),
+            items=list(item.get("items") or []),
         )
         for item in _BASE_PRODUCT_CATEGORY_DEFINITIONS
     ]
@@ -91,20 +107,10 @@ def normalize_product_category_id(category_id: str | None) -> str:
     raw = str(category_id or "").strip().lower()
     if not raw:
         raise ValueError("未选择产品分类")
-    aliases = {
-        "day-night": "day_night",
-        "daynight": "day_night",
-        "日夜盘": "day_night",
-        "行业": "sector",
-    }
-    normalized = aliases.get(raw, raw)
-    if "×" in normalized:
-        parts = tuple(aliases.get(part.strip(), part.strip()) for part in normalized.split("×"))
-    else:
-        parts = _split_product_category_id(
-            normalized,
-            tuple(_BASE_PRODUCT_CATEGORY_TYPES),
-        )
+    parts = _split_product_category_id(
+        raw,
+        tuple(_BASE_PRODUCT_CATEGORY_TYPES),
+    )
     if parts is None or len(set(parts)) != len(parts):
         raise ValueError(f"不支持的产品分类: {category_id}")
     requested = set(parts)
@@ -115,7 +121,7 @@ def normalize_product_category_id(category_id: str | None) -> str:
     )
     if set(canonical) != requested:
         raise ValueError(f"不支持的产品分类: {category_id}")
-    return "_x_".join(canonical)
+    return "×".join(canonical)
 
 
 def _split_product_category_id(
@@ -125,7 +131,7 @@ def _split_product_category_id(
     if value in base_ids:
         return (value,)
     for category_ref in sorted(base_ids, key=len, reverse=True):
-        prefix = f"{category_ref}_x_"
+        prefix = f"{category_ref}×"
         if value.startswith(prefix):
             remainder = _split_product_category_id(value[len(prefix):], base_ids)
             if remainder is not None:

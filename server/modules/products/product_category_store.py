@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import re
 import time
-from hashlib import sha1
 from typing import Any
 
 from tools.data.account_manage import (
@@ -13,30 +11,62 @@ from tools.data.account_manage import (
 )
 from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
 
-
-_CATEGORY_NAME = re.compile(r"[^/\\\r\n]{1,120}")
+from server.modules.products.product_category_definition import (
+    canonical_category_reference as _canonical_category_reference,
+    category_id as _category_id,
+    category_name as _category_name,
+    category_view as _category_view,
+    composite_category_id as _composite_category_id,
+    load_source_category_overrides as _load_source_category_overrides,
+    migrate_owned_category_id,
+    migrate_owned_category_path,
+    migrate_legacy_category_id,
+    migrate_legacy_category_path,
+    migrate_owned_definition as _migrate_owned_definition,
+    new_user_category_id as _new_user_category_id,
+    normalize_definition as _normalize_definition,
+    normalize_composite_label_updates as _normalize_composite_label_updates,
+    normalize_items as _normalize_items,
+    validate_generated_items_unchanged as _validate_generated_items_unchanged,
+    save_source_category_override as _save_source_category_override,
+    shared_source_ids as _shared_source_ids,
+    source_category_definitions as _source_category_definitions,
+    source_category_items as _source_category_items,
+)
 
 
 def list_product_categories(username: str) -> list[dict[str, Any]]:
     """Return source categories followed by categories owned by ``username``."""
     from server.modules.shared.price_services import available_product_categories
 
+    overrides = _load_source_category_overrides()
     source = []
     for item in available_product_categories():
         value = dict(item)
-        value.update({
-            "kind": "source",
-            "owner_ref": "source",
-            "source_managed": True,
-            "items": list(value.get("items") or []),
-        })
-        source.append(value)
+        override = overrides.get(str(value.get("id") or ""))
+        if override:
+            value.update({
+                key: override[key]
+                for key in ("alias", "title_zh")
+                if override.get(key)
+            })
+        value["items"] = _source_category_items(value["id"])
+        source.append(_category_view(
+            value, kind="source", owner_ref="source", source_managed=True,
+        ))
     owned = []
-    for item in load_product_categories(username):
-        value = _normalize_definition(item)
-        value["owner_ref"] = f"user:{username}"
-        value["source_managed"] = False
-        owned.append(value)
+    raw_owned = load_product_categories(username)
+    migrated_owned = []
+    for item in raw_owned:
+        migrated = _migrate_owned_definition(item, username)
+        value = _normalize_definition(migrated)
+        migrated_owned.append(dict(value))
+        owned.append(_category_view(
+            value, kind="user", owner_ref=f"user:{username}",
+            source_managed=False,
+        ))
+    if migrated_owned != raw_owned:
+        save_product_categories(username, migrated_owned)
     return source + owned
 
 
@@ -56,9 +86,12 @@ def create_product_category(
     username: str,
     name: str,
     items: list[dict[str, Any]],
+    category_id: str | None = None,
 ) -> dict[str, Any]:
     title = _category_name(name)
     normalized_items = _normalize_items(items)
+    if any(item.get("label") == "Others" for item in normalized_items):
+        raise ValueError("Others 标签由系统自动生成，不能由客户端新增")
     from server.modules.products.product_category_paths import canonicalize_product_paths
 
     normalized_items = [
@@ -76,8 +109,11 @@ def create_product_category(
         for item in list_product_categories(username)
     ):
         raise ValueError("产品分类名称已存在")
+    if category_id not in (None, ""):
+        raise ValueError("产品分类 ID 由服务器生成，不能由客户端指定")
+    requested_id = _new_user_category_id(username)
     category = _normalize_definition({
-        "id": f"category_{sha1(f'{username}:{time.time_ns()}'.encode()).hexdigest()[:16]}",
+        "id": requested_id,
         "alias": title,
         "title_zh": title,
         "dimensions": [],
@@ -100,15 +136,19 @@ def create_product_category_composition(
 ) -> dict[str, Any]:
     if not isinstance(category_ids, list):
         raise ValueError("category_ids 必须是字符串数组")
+    available = list_product_categories(username)
+    known_ids = {str(item.get("id") or "") for item in available}
     selected = list(dict.fromkeys(
-        str(value or "").strip() for value in category_ids
+        str(value).strip() if str(value).strip() in known_ids
+        else _canonical_category_reference(value)
+        for value in category_ids
         if str(value or "").strip()
     ))
     if len(selected) != 2:
         raise ValueError("请选择两个不同的分类")
     definitions = {
         str(item.get("id") or ""): item
-        for item in list_product_categories(username)
+        for item in available
     }
     parents = [definitions.get(value) for value in selected]
     if any(item is None for item in parents):
@@ -116,14 +156,12 @@ def create_product_category_composition(
     if any(not item.get("composable", True) for item in parents if item):
         raise ValueError("所选分类不能参与乘积")
 
-    # Provider categories already have a canonical tree implementation.  Keep
-    # that stable ID so the tree renderer can use it; custom compositions use
-    # a content-derived ID and retain their parent references.
-    composite_id = _source_composite_id(selected)
-    if composite_id is None:
-        composite_id = "category_" + sha1(
-            "×".join(sorted(selected)).encode("utf-8")
-        ).hexdigest()[:16]
+    # The two parent IDs are the identity of a composition.  This keeps the
+    # object shared with ordinary categories and makes reversed selections
+    # resolve to the same row instead of creating a duplicate random ID.
+    selected = sorted(selected)
+    parents = [definitions.get(value) for value in selected]
+    composite_id = _composite_category_id(selected)
     if any(str(item.get("id") or "") == composite_id for item in load_product_categories(username)):
         raise ValueError("该乘积分类已存在")
     labels = [
@@ -134,6 +172,8 @@ def create_product_category_composition(
     for item in parents:
         dimensions.extend(item.get("dimensions") or [item.get("id")])
     source_ids = _shared_source_ids(parents)
+    from server.modules.products.product_category_paths import compose_category_items
+
     category = _normalize_definition({
         "id": composite_id,
         "alias": "×".join(labels),
@@ -143,7 +183,10 @@ def create_product_category_composition(
         "composable": True,
         "is_composite": True,
         "parent_category_ids": selected,
-        "items": _compose_items(parents),
+        # Store the resolved intersection now.  Parent IDs below are
+        # provenance and are used only when the explicit refresh action is
+        # requested later.
+        "items": compose_category_items(selected, username),
         "created_at": time.time(),
         "updated_at": time.time(),
     })
@@ -154,6 +197,42 @@ def create_product_category_composition(
         item for item in list_product_categories(username)
         if item.get("id") == composite_id
     )
+
+
+def refresh_product_category_composition(
+    username: str,
+    category_id: str,
+) -> dict[str, Any] | None:
+    """Re-resolve and persist a composition from its current parent IDs."""
+    raw = str(category_id or "").strip()
+    target = get_product_category(username, raw)
+    wanted = raw if target is not None else _canonical_category_reference(raw)
+    target = target or get_product_category(username, wanted)
+    if target is None:
+        return None
+    if not target.get("is_composite"):
+        raise ValueError("只有乘积分类可以从父分类更新内容")
+    parents = [
+        str(value).strip()
+        for value in target.get("parent_category_ids") or []
+        if str(value).strip()
+    ]
+    if len(parents) != 2:
+        raise ValueError("产品乘积分类缺少两个父分类")
+    from server.modules.products.product_category_paths import compose_category_items
+
+    categories = load_product_categories(username)
+    refreshed_items = compose_category_items(parents, username)
+    for index, item in enumerate(categories):
+        if str(item.get("id") or "") != wanted:
+            continue
+        updated = dict(item)
+        updated["items"] = refreshed_items
+        updated["updated_at"] = time.time()
+        categories[index] = _normalize_definition(updated)
+        save_product_categories(username, categories)
+        return get_product_category(username, wanted)
+    return None
 
 
 def delete_product_category(username: str, category_id: str) -> bool:
@@ -167,111 +246,111 @@ def delete_product_category(username: str, category_id: str) -> bool:
     return True
 
 
-def _source_composite_id(category_ids: list[str]) -> str | None:
-    source_ids = {"day_night", "sector"}
-    if not set(category_ids).issubset(source_ids):
+def update_product_category(
+    username: str,
+    category_id: str,
+    name: str,
+    items: list[dict[str, Any]] | None = None,
+    *,
+    new_category_id: str | None = None,
+    is_super_admin: bool = False,
+) -> dict[str, Any] | None:
+    """Update a category while protecting stable product-group references."""
+    raw = str(category_id or "").strip()
+    target = get_product_category(username, raw)
+    wanted = raw if target is not None else _canonical_category_reference(raw)
+    target = target or get_product_category(username, wanted)
+    if target is None:
         return None
-    order = ("day_night", "sector")
-    return "_x_".join(item for item in order if item in set(category_ids))
+    title = _category_name(name)
+    requested_id = _category_id(new_category_id or wanted)
+    if requested_id != wanted:
+        raise ValueError("产品分类 ID 由服务器生成且不可修改")
 
+    if target.get("source_managed"):
+        if not is_super_admin:
+            raise PermissionError("只有超级管理员可以修改数据源产品分类")
+        if requested_id != wanted:
+            raise ValueError("数据源产品分类 ID 属于固定数据源契约，不能修改")
+        _save_source_category_override(wanted, title)
+        return get_product_category(username, wanted)
 
-def _compose_items(parents: list[dict[str, Any] | None]) -> list[dict[str, Any]]:
-    """Intersect explicit path sets for user-owned category compositions."""
-    if len(parents) != 2 or any(not item or not item.get("items") for item in parents):
-        return []
-    left, right = (parents[0].get("items") or []), (parents[1].get("items") or [])
-    result = []
-    for left_item in left:
-        for right_item in right:
-            paths = []
-            for left_path in left_item.get("paths") or []:
-                for right_path in right_item.get("paths") or []:
-                    if left_path == right_path:
-                        paths.append(left_path)
-                    elif left_path.startswith(f"{right_path}/"):
-                        paths.append(left_path)
-                    elif right_path.startswith(f"{left_path}/"):
-                        paths.append(right_path)
-            if paths:
-                result.append({
-                    "label": f"({left_item.get('label')}×{right_item.get('label')})",
-                    "paths": list(dict.fromkeys(paths)),
-                })
-    return result
+    categories = load_product_categories(username)
+    if target.get("is_composite"):
+        current_items = _normalize_definition(target).get("items") or []
+        if items is not None:
+            updated_items = _normalize_composite_label_updates(items, current_items)
+            from server.modules.products.product_category_paths import (
+                regenerate_generated_others,
+            )
+            updated_items = regenerate_generated_others(updated_items)
+        else:
+            updated_items = current_items
+        current_title = str(
+            target.get("title_zh") or target.get("alias") or wanted
+        ).strip()
+        if title != current_title:
+            raise ValueError("乘积分类标题由父分类生成，只能修改条目标题")
+        for index, item in enumerate(categories):
+            if str(item.get("id") or "") != wanted:
+                continue
+            updated = dict(item)
+            updated["items"] = updated_items
+            updated["updated_at"] = time.time()
+            categories[index] = _normalize_definition(updated)
+            save_product_categories(username, categories)
+            return get_product_category(username, wanted)
+        return None
+    if any(
+        str(item.get("id") or "") != wanted
+        and str(item.get("title_zh") or item.get("alias") or "").strip() == title
+        for item in list_product_categories(username)
+    ):
+        raise ValueError("产品分类名称已存在")
+    if any(
+        str(item.get("id") or "") == requested_id
+        and str(item.get("id") or "") != wanted
+        for item in categories
+    ) or any(
+        str(item.get("id") or "") == requested_id
+        for item in _source_category_definitions()
+    ):
+        raise ValueError("产品分类 ID 已存在")
 
+    normalized_items = None
+    if items is not None and not target.get("is_composite"):
+        normalized_items = _normalize_items(items)
+        from server.modules.products.product_category_paths import (
+            canonicalize_product_paths,
+        )
 
-def _category_name(value: object) -> str:
-    title = str(value or "").strip()
-    if not _CATEGORY_NAME.fullmatch(title):
-        raise ValueError("产品分类名称不能为空，且不能包含路径分隔符")
-    return title
+        normalized_items = [
+            {
+                **item,
+                "paths": canonicalize_product_paths(
+                    item["paths"], username=username,
+                ),
+            }
+            for item in normalized_items
+        ]
+        current_items = _normalize_definition(target).get("items") or []
+        _validate_generated_items_unchanged(current_items, normalized_items)
+        from server.modules.products.product_category_paths import (
+            regenerate_generated_others,
+        )
+        normalized_items = regenerate_generated_others(normalized_items)
 
-
-def _normalize_items(value: object) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not value:
-        raise ValueError("产品分类至少需要一个条目")
-    result = []
-    labels = set()
-    for raw in value:
-        if not isinstance(raw, dict):
-            raise ValueError("产品分类条目格式无效")
-        label = str(raw.get("label") or raw.get("title") or "").strip()
-        paths = raw.get("paths")
-        if isinstance(paths, str):
-            paths = paths.splitlines()
-        if not label or label in labels:
-            raise ValueError("产品分类条目标签不能为空且不能重复")
-        if not isinstance(paths, list):
-            raise ValueError("产品路径必须按行填写")
-        normalized_paths = list(dict.fromkeys(
-            str(path).strip() for path in paths if str(path).strip()
-        ))
-        if not normalized_paths:
-            raise ValueError(f"分类条目“{label}”至少需要一条产品路径")
-        labels.add(label)
-        result.append({"label": label, "paths": normalized_paths})
-    return result
-
-
-def _normalize_definition(value: dict[str, Any]) -> dict[str, Any]:
-    result = dict(value)
-    result["id"] = str(result.get("id") or "").strip()
-    result["alias"] = str(result.get("alias") or result.get("title_zh") or result["id"])
-    result["title_zh"] = str(result.get("title_zh") or result["alias"])
-    result["dimensions"] = list(dict.fromkeys(
-        str(item).strip() for item in result.get("dimensions") or []
-        if str(item).strip()
-    ))
-    result["source_ids"] = list(dict.fromkeys(
-        str(item).strip() for item in result.get("source_ids") or []
-        if str(item).strip()
-    ))
-    result["parent_category_ids"] = list(dict.fromkeys(
-        str(item).strip() for item in result.get("parent_category_ids") or []
-        if str(item).strip()
-    ))
-    result["items"] = _normalize_items(result["items"]) if result.get("items") else []
-    result["composable"] = bool(result.get("composable", True))
-    result["is_composite"] = bool(result.get("is_composite", False))
-    return result
-
-
-def _shared_source_ids(parents: list[dict[str, Any] | None]) -> list[str]:
-    """Return source identities shared by every parent category.
-
-    A source identity is a data-source bundle, not a server identity.  The
-    federated catalog separately records all online servers that provide the
-    same bundle.
-    """
-    sets = [
-        {
-            str(value).strip()
-            for value in item.get("source_ids") or []
-            if str(value).strip()
-        }
-        for item in parents
-        if item is not None
-    ]
-    if not sets:
-        return []
-    return sorted(set.intersection(*sets))
+    for index, item in enumerate(categories):
+        if str(item.get("id") or "") != wanted:
+            continue
+        updated = dict(item)
+        updated["id"] = requested_id
+        updated["alias"] = title
+        updated["title_zh"] = title
+        updated["updated_at"] = time.time()
+        if normalized_items is not None:
+            updated["items"] = normalized_items
+        categories[index] = _normalize_definition(updated)
+        save_product_categories(username, categories)
+        return get_product_category(username, requested_id)
+    return None

@@ -12,7 +12,11 @@ from server.modules.products.product_category_paths import (
     canonicalize_product_paths,
     infer_category_ids,
 )
-from server.modules.products.product_category_store import list_product_categories
+from server.modules.products.product_category_store import (
+    list_product_categories,
+    migrate_owned_category_id,
+    migrate_owned_category_path,
+)
 from tools.products.product_path_selection import ProductPathSelection
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
@@ -34,14 +38,22 @@ def load_product_groups(username: str) -> list:
         if "id" not in group:
             group["id"] = _legacy_group_id(group.get("name"))
             dirty = True
-        category_ids = _category_ids(group.get("category_ids"))
+        category_ids = [
+            migrate_owned_category_id(username, value)
+            for value in _category_ids(group.get("category_ids"))
+        ]
+        raw_paths = [
+            migrate_owned_category_path(username, value)
+            for value in group.get("paths", [])
+            if isinstance(value, str) and value.strip()
+        ]
         if not category_ids:
-            inferred = infer_category_ids(group.get("paths"), username=username)
+            inferred = infer_category_ids(raw_paths, username=username)
             if inferred:
                 category_ids = inferred
         try:
             canonical_paths = canonicalize_product_paths(
-                group.get("paths"),
+                raw_paths,
                 category_ids=category_ids,
                 username=username,
             )
@@ -49,7 +61,7 @@ def load_product_groups(username: str) -> list:
             # Keep a legacy row readable while reporting its unresolved paths;
             # new writes fail instead of silently storing a category path.
             canonical_paths = [
-                str(path).strip() for path in group.get("paths", [])
+                str(path).strip() for path in raw_paths
                 if isinstance(path, str) and path.strip()
             ]
         paths_changed = group.get("paths") != canonical_paths
