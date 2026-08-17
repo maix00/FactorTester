@@ -47,7 +47,8 @@ def project_product_groups(
         value["factor_refs"] = _subject_refs(subjects, "factor")
         value["factor_set_refs"] = _subject_refs(subjects, "factor_set")
         for key in (
-            "paths", "product_names", "description", "category_ids",
+            "paths", "selection_paths", "path_bindings", "product_names", "description",
+            "category_ids",
         ):
             if key in definition:
                 value[key] = definition[key]
