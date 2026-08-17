@@ -212,6 +212,35 @@
     };
   }
 
+  function rejectProductGroupWrite(context, source) {
+    const message = !context.session
+      ? context.t("访客模式只能查看产品组")
+      : source === "local"
+        ? context.t("本地产品组不可直接编辑")
+        : context.t("产品组不可编辑");
+    if (typeof window.alert === "function") window.alert(message);
+    else context.showNotice?.(message, true);
+  }
+
+  function productGroupManagementActions(context, source) {
+    const actions = document.createElement("div");
+    actions.className = "product-category-management-actions product-group-management-actions";
+    // Keep the create affordance visible on the same catalog surface as the
+    // category actions. A visitor can see the catalog, but cannot write.
+    const showWriteActions = !context.session || source !== "local";
+    const canWrite = source === "server" && Boolean(context.session);
+    if (showWriteActions) {
+      actions.append(FTUI.actionButton(context.t("新增产品组"), () => {
+        if (!canWrite) {
+          rejectProductGroupWrite(context, source);
+          return;
+        }
+        context.navigate(pathFor("/products/group/new", source));
+      }, {variant: "primary"}));
+    }
+    return actions;
+  }
+
   async function list(context, page = "products") {
     const source = sourceOf();
     if (page === "categories") {
@@ -238,13 +267,6 @@
       list(context, page);
     }, context.t("刷新"));
     context.toolbar.append(search, refresh);
-    if (page === "groups" && context.session) {
-      context.toolbar.append(context.button(
-        context.t("新增产品组"),
-        () => context.navigate(pathFor("/products/group/new", source)),
-        context.t("新增产品组"),
-      ));
-    }
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     let value;
     try {
@@ -261,6 +283,9 @@
     const root = document.createElement("div");
     root.className = "library-page";
     root.append(sourceSummary(context, source));
+    if (page === "groups") {
+      root.append(productGroupManagementActions(context, source));
+    }
     const results = document.createElement("div");
     results.className = "library-results";
     root.append(results);
