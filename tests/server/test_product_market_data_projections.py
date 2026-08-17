@@ -34,3 +34,52 @@ def test_product_price_rows_keeps_open_interest_from_provider_alias() -> None:
 
     assert has_open_interest is True
     assert [row["open_interest"] for row in rows] == [80.0, 90.0]
+
+
+def test_manager_product_fields_resolves_contracts_for_independent_detail_tabs(
+    monkeypatch,
+) -> None:
+    from server.manager.services.client_state import ClientStateService
+    from server.modules.shared import price_services
+    from server.services import product_catalog_projection
+
+    class Parent:
+        name = "A.DCE"
+
+    class Contract:
+        name = "DCE|A|2501"
+        parent_product = Parent()
+
+    monkeypatch.setattr(price_services, "cached_products", lambda: ())
+    monkeypatch.setattr(
+        price_services, "find_contract_product", lambda value: Contract(),
+    )
+    monkeypatch.setattr(
+        price_services, "find_product", lambda products, value: None,
+    )
+    monkeypatch.setattr(
+        price_services, "product_public_fields",
+        lambda value: {"contract_uid": {"value": value.name}},
+    )
+    monkeypatch.setattr(
+        product_catalog_projection,
+        "catalog_product_records",
+        lambda: ({
+            "name": "A.DCE",
+            "source_ids": ["PublicSource"],
+            "available_source_ids": ["PublicSource"],
+        },),
+    )
+    monkeypatch.setattr(
+        product_catalog_projection,
+        "catalog_product_description",
+        lambda product, name: "A产品",
+    )
+
+    value = ClientStateService.product_fields("DCE|A|2501")
+
+    assert value["product_type"] == "contract"
+    assert value["name"] == "DCE|A|2501"
+    assert value["parent_product"] == "A.DCE"
+    assert value["source_ids"] == ["PublicSource"]
+    assert value["fields"]["contract_uid"]["value"] == "DCE|A|2501"

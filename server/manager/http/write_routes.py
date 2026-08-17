@@ -106,7 +106,7 @@ class WriteRoutesMixin:
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/public-research/sync":
-            if not self._is_loopback_client():
+            if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
             try:
@@ -123,7 +123,7 @@ class WriteRoutesMixin:
             json_response(self, {"success": True, **value})
             return
         if self.path == "/api/public-research/publish":
-            if not self._is_loopback_client():
+            if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
             try:
@@ -190,7 +190,7 @@ class WriteRoutesMixin:
             })
             return
         if self.path == "/api/public-research/revoke":
-            if not self._is_loopback_client():
+            if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
             try:

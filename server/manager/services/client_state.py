@@ -956,10 +956,14 @@ class ClientStateService:
     def product_fields(name: str) -> dict[str, Any] | None:
         from server.modules.shared.price_services import (
             cached_products,
+            find_contract_product,
             find_product,
             product_public_fields,
         )
-        from server.services.product_catalog_projection import catalog_product_records
+        from server.services.product_catalog_projection import (
+            catalog_product_description,
+            catalog_product_records,
+        )
 
         wanted = str(name or "")
         record = next(
@@ -969,11 +973,47 @@ class ClientStateService:
             ),
             None,
         )
-        if record is None:
-            return None
-        product = find_product(cached_products(), str(record["name"]))
+        product = (
+            find_product(cached_products(), str(record["name"]))
+            if record is not None else None
+        )
         if product is None:
-            return None
+            contract = find_contract_product(wanted)
+            if contract is None:
+                return None
+            contract_name = str(
+                getattr(contract, "name", "")
+                or getattr(contract, "alias", "")
+                or wanted
+            )
+            parent = getattr(contract, "parent_product", None)
+            if callable(parent):
+                parent = parent()
+            parent_name = str(getattr(parent, "name", "") or "")
+            description = catalog_product_description(contract, contract_name)
+            parent_record = next(
+                (
+                    item for item in catalog_product_records()
+                    if item.get("name") == parent_name
+                ),
+                None,
+            )
+            return {
+                "name": contract_name,
+                "desc": description,
+                "description": description,
+                "code": contract_name,
+                "exchange": "",
+                "product_type": "contract",
+                "product_ref": f"contract:{contract_name}",
+                "product_path": "",
+                "source_ids": list((parent_record or {}).get("source_ids") or []),
+                "available_source_ids": list(
+                    (parent_record or {}).get("available_source_ids") or []
+                ),
+                "parent_product": parent_name,
+                "fields": product_public_fields(contract),
+            }
         record["fields"] = product_public_fields(product)
         return record
 

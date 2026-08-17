@@ -288,6 +288,30 @@ def test_configured_docker_gateway_forwards_one_canonical_client_address(
     }
 
 
+def test_configured_local_docker_gateway_accepts_factor_client(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_LOCAL_CLIENT_CIDRS", "172.18.0.1/32")
+    state = manager.ManagerState(tmp_path, "python", server_id="local")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.18.0.1", 51234)
+    handler.headers = {"X-FactorTester-Client": "cli"}
+
+    assert handler._is_local_ftclient()
+
+    handler.headers = {}
+    assert not handler._is_local_ftclient()
+
+    handler.client_address = ("172.18.0.9", 51234)
+    handler.headers = {"X-FactorTester-Client": "cli"}
+    assert not handler._is_local_ftclient()
+
+    state.public_server = True
+    handler.client_address = ("172.18.0.1", 51234)
+    assert not handler._is_local_ftclient()
+
+
 def test_untrusted_docker_gateway_cannot_spoof_forwarded_metadata(
     tmp_path,
 ) -> None:
@@ -843,9 +867,9 @@ def test_manager_account_jobs_use_one_shared_service_projection(
     assert payload["scope"] == "mine"
     assert payload["total"] == 2
     assert [job["job_id"] for job in payload["jobs"]] == [
-        "job-8141", "job-8176",
+        "job-8176", "job-8141",
     ]
-    assert [job["port"] for job in payload["jobs"]] == [8141, 8176]
+    assert [job["port"] for job in payload["jobs"]] == [8176, 8141]
     assert calls == [(
         8141, "/api/jobs?scope=mine&limit=20&page=1", "user@1",
     )]
@@ -1074,7 +1098,12 @@ def test_public_research_index_and_chapter_routes_are_bounded(tmp_path):
 
 
 def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
-    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        data_root=tmp_path,
+        session_db_path=tmp_path / "manager.sqlite",
+    )
     projection = {
         "schema_version": 2,
         "report_id": "report-public-route",
