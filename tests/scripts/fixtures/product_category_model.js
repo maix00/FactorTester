@@ -20,8 +20,10 @@ const sources = [
 assert.deepEqual(model.availableSourceIDs(sources), ["ServerDAY1", "ServerMIN1"]);
 
 const definitions = [
-  {id: "cnfutures_day_night", title_zh: "中国期货日夜盘", composable: true},
-  {id: "cnfutures_sector", title_zh: "中国期货行业", composable: true},
+  {id: "cnfutures_day_night", title_zh: "中国期货日夜盘", composable: true,
+    product_paths: ["Product/Futures/CNFutures"]},
+  {id: "cnfutures_sector", title_zh: "中国期货行业", composable: true,
+    product_paths: ["Product/Futures/CNFutures"]},
   {id: "exchange", title_zh: "交易所", composable: true},
 ];
 const dayNightSector = model.multiply(definitions, [
@@ -59,5 +61,13 @@ assert.strictEqual(
 assert.strictEqual(
   model.treeNodeInitiallyOpen({key: "Product/Futures/CNFutures"}, 1),
   false,
+);
+assert.deepEqual(
+  model.sourceIDsForPaths(["Product/Futures"], definitions),
+  [],
+);
+assert.deepEqual(
+  model.sourceIDsForPaths(["Product/Futures/CNFutures/_products/SI.GFE"], definitions),
+  ["cnfutures_day_night", "cnfutures_sector"],
 );
 console.log("ok");

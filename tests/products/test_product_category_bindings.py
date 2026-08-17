@@ -11,8 +11,10 @@ from server.modules.products.product_category_paths import (
     infer_category_ids,
     regenerate_generated_others,
 )
+from server.services.product_catalog_projection import source_ids_for_product_paths
 from server.modules.products.product_category_definition import (
     normalize_composite_label_updates,
+    source_category_items,
 )
 from server.modules.products.product_category_store import (
     create_product_category,
@@ -124,6 +126,33 @@ def test_user_category_and_composite_are_persisted_and_resolvable(
         isinstance(value, dict) and value.get("$OBJECTS$")
         for value in category_node.values()
     )
+
+
+def test_classifier_node_infers_the_server_data_source_bundle(
+    monkeypatch, tmp_path,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "account.sqlite")
+    ensure_account_manager_sqlite_store()
+
+    assert source_ids_for_product_paths(["Product/Futures"]) == ()
+    assert source_ids_for_product_paths(["Product/Futures/CNFutures"]) == ("Local",)
+    assert source_ids_for_product_paths(
+        ["Product/Futures/CNFutures"],
+        [{"id": "user:bundle", "product_paths": ["Product/Futures/CNFutures"]}],
+    ) == ("user:bundle",)
+    category = create_product_category(
+        "alice", "TestA", [{
+            "label": "CNFutures",
+            "paths": ["Product/Futures/CNFutures"],
+        }],
+    )
+
+    assert category["source_ids"] == ["Local"]
+    assert category["items"][0]["paths"] == ["Product/Futures/CNFutures"]
+    assert product_category_store.get_product_category(
+        "alice", category["id"],
+    )["source_ids"] == ["Local"]
 
 
 def test_composite_paths_are_a_stored_snapshot_until_explicit_refresh(
@@ -264,6 +293,39 @@ def test_source_categories_keep_fixed_ids_titles_and_label_ids(
         f"{SECTOR_ID}_{index}"
         for index in range(1, len(sector["items"]) + 1)
     ]
+
+
+def test_source_category_items_store_concrete_positive_paths() -> None:
+    for category_id in (DAY_NIGHT_ID, SECTOR_ID):
+        items = source_category_items(category_id)
+        assert items
+        paths = [path for item in items for path in item["paths"]]
+        assert paths
+        assert all(path.startswith("Product/") for path in paths)
+        assert all("/_products/" in path for path in paths)
+        assert all(not path.startswith("-") for path in paths)
+        assert all("ProductCategory/" not in path for path in paths)
+        assert all("/日夜盘/" not in path and "/行业/" not in path for path in paths)
+
+
+def test_product_category_rejects_signed_or_category_qualified_paths(
+    monkeypatch, tmp_path,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "account.sqlite")
+    ensure_account_manager_sqlite_store()
+    with pytest.raises(ValueError, match="正产品路径"):
+        create_product_category(
+            "alice", "负路径分类", [{"label": "日盘", "paths": [
+                "-Product/Futures/CNFutures/_products/SI.GFE",
+            ]}],
+        )
+    with pytest.raises(ValueError, match="不能引用"):
+        create_product_category(
+            "alice", "引用分类", [{"label": "日盘", "paths": [
+                f"ProductCategory/{DAY_NIGHT_ID}/Product/Futures/CNFutures/_products/SI.GFE",
+            ]}],
+        )
 
 
 def test_generated_others_is_read_only_and_rebuilt_on_save() -> None:

@@ -299,6 +299,69 @@ def catalog_product_records() -> tuple[dict[str, Any], ...]:
     return tuple(sorted(rows, key=lambda row: (row["product_path"], row["name"])))
 
 
+def source_ids_for_product_paths(
+    paths: Iterable[str] | None,
+    source_descriptors: Iterable[Mapping[str, Any]] | None = None,
+) -> tuple[str, ...]:
+    """Infer source bundles from declared classifier path namespaces.
+
+    ``Product/Futures/CNFutures`` is already the correct persisted path.  This
+    helper only compares it with each source descriptor's declared
+    ``product_paths``; it never expands the node into individual products.
+    Passing ``source_descriptors`` lets an embedded client use the same
+    resolver for user-owned manifests.  When omitted, the server registry is
+    used.
+    """
+    requested_values = []
+    for value in paths or ():
+        normalized = _category_free_path(value)
+        if normalized and normalized not in requested_values:
+            requested_values.append(normalized)
+    requested = tuple(requested_values)
+    if not requested:
+        return ()
+    descriptors = tuple(
+        source_descriptors
+        if source_descriptors is not None else product_source_descriptors()
+    )
+    matched: set[str] = set()
+    for descriptor in descriptors:
+        source_id = str(
+            descriptor.get("id") or descriptor.get("source_id") or ""
+        ).strip()
+        declared_values = []
+        for value in descriptor.get("product_paths") or ():
+            normalized = _category_free_path(value)
+            if normalized and normalized not in declared_values:
+                declared_values.append(normalized)
+        declared_paths = tuple(declared_values)
+        if source_id and any(
+            _paths_overlap(path, declared)
+            for path in requested
+            for declared in declared_paths
+        ):
+            matched.add(source_id)
+    return tuple(sorted(matched))
+
+
+def _category_free_path(value: object) -> str:
+    path = str(value or "").strip().lstrip("-").strip().strip("/")
+    parts = path.split("/") if path else []
+    if len(parts) >= 3 and parts[0] == "ProductCategory":
+        return "/".join(parts[2:]).strip("/")
+    return path
+
+
+def _paths_overlap(requested: str, declared: str) -> bool:
+    """Return whether a requested node is provided by a declared source node.
+
+    Matching is intentionally directional.  A source declaring
+    ``Product/Futures/CNFutures`` provides that node and its descendants, but
+    it does not provide the hard-coded backend parent ``Product/Futures``.
+    """
+    return requested == declared or requested.startswith(declared + "/")
+
+
 def clear_product_catalog_projection_cache() -> None:
     """Invalidate projections after a source registry or cache refresh."""
     product_source_descriptors.cache_clear()

@@ -61,12 +61,8 @@
       ? categoryPayload.categories : [];
     const sources = Array.isArray(sourcePayload.sources) ? sourcePayload.sources : [];
     const sourceIDs = FTProductCategoryModel.availableSourceIDs(sources);
-    const treePayload = await context.api(queryPath(
-      paths.tree, state.categoryID, sourceIDs,
-    ));
     return {
       categories, paths, sourceIDs,
-      tree: treePayload.tree || treePayload,
     };
   }
 
@@ -80,6 +76,12 @@
         selectedCategory: state.categoryID,
         selectable: true,
         selectedPaths: state.selectedPaths,
+        loadTree: async () => {
+          const treePayload = await context.api(queryPath(
+            value.paths.tree, state.categoryID, value.sourceIDs,
+          ));
+          return treePayload.tree || treePayload;
+        },
         onSelectionChange: selected => {
           state.selectedPaths = FTProductTree.minimalPaths(selected);
           updateSummary();
@@ -95,7 +97,7 @@
           updateSummary();
         },
       };
-      await FTProductTree.render(context, mount, value.tree, options);
+      await FTProductTree.render(context, mount, null, options);
       updateSummary();
     } catch (error) {
       mount.replaceChildren(FTUI.empty(
