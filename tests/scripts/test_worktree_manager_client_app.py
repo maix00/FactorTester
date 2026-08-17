@@ -3058,8 +3058,11 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "FTProductCategoryDetails.render" in create_script
     assert "显示产品树" in label_editor
     assert "隐藏产品树" in label_editor
-    assert "loadProductTree" in detail_script
+    assert "loadSources" in detail_script
     assert "leafOnly: true" in detail_script
+    assert "helpers.loadTree" in detail_script
+    assert "[], selectedSourceIDs" in detail_script
+    assert 'query.append("category", category.id)' not in detail_script
     assert "product-category-inline-tree" in label_editor
     detail_surface = detail_script + detail_layout + label_editor
     assert "selectionReadOnly" in detail_surface
