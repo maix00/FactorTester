@@ -73,15 +73,23 @@ class AccountAdministrationService:
 
     @staticmethod
     def safe_account(account: Mapping[str, Any]) -> dict[str, Any]:
-        return {
-            key: account.get(key)
-            for key in (
-                "username", "alias", "role", "is_admin", "is_developer",
-                "organization_id", "organization_name", "level_id",
-                "parent_username", "active", "created_at", "updated_at",
+        result: dict[str, Any] = {}
+        for key in (
+            "username", "alias", "role", "is_admin", "is_developer",
+            "organization_id", "organization_name", "level_id",
+            "parent_username", "active", "created_at", "updated_at",
+        ):
+            if key not in account:
+                continue
+            result[key] = AccountAdministrationService._json_value(
+                account.get(key)
             )
-            if key in account
-        }
+        return result
+
+    @staticmethod
+    def _json_value(value: Any) -> Any:
+        """Convert database temporal values before passing them to json.dumps."""
+        return value.isoformat() if hasattr(value, "isoformat") else value
 
     def create_user(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         alias = validate_alias(payload.get("alias"))
@@ -287,7 +295,10 @@ class AccountAdministrationService:
 
     def _organizations(self) -> list[dict[str, Any]]:
         organizations = [
-            normalize_organization(dict(item))
+            {
+                key: self._json_value(value)
+                for key, value in normalize_organization(dict(item)).items()
+            }
             for item in self.store.load_organizations()
         ]
         if not any(item.get("id") == DEFAULT_ORGANIZATION_ID for item in organizations):
@@ -299,10 +310,17 @@ class AccountAdministrationService:
         return organizations
 
     def _levels(self, organizations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return ensure_root_levels(
+        levels = ensure_root_levels(
             normalize_levels([dict(item) for item in self.store.load_levels()]),
             organizations,
         )
+        return [
+            {
+                key: self._json_value(value)
+                for key, value in level.items()
+            }
+            for level in levels
+        ]
 
     @staticmethod
     def _organization(organizations: list[dict[str, Any]], organization_id: str) -> dict[str, Any] | None:
