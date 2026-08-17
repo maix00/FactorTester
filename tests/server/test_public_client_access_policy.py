@@ -156,6 +156,10 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
         "https://101.133.144.27:7998",
     )
+    monkeypatch.setenv(
+        "FACTORTESTER_PUBLIC_VISITOR_ORIGINS",
+        "https://eloquence-drizzly-fencing.ngrok-free.dev",
+    )
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
     monkeypatch.setattr(state, "worktrees", lambda: [])
     opener = build_opener(_NoRedirect())
@@ -180,6 +184,8 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         )) as response:
             compliance = response.read().decode("utf-8")
         assert 'class="visitor-entry"' in compliance
+        assert "device-bridge" not in compliance
+        assert "eloquence-drizzly-fencing.ngrok-free.dev" not in compliance
 
         try:
             opener.open(Request(
