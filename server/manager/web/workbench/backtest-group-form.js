@@ -48,27 +48,32 @@
     form.append(field(context.t("名称"), name));
 
     let productGroup;
+    let productGroupRef = "";
     let factor;
+    let factorRefs = [];
     let splitCount;
     let groupIndex;
     let allGroups;
     if (!derived) {
-      productGroup = select(state.groups, item => FTTestProducts.groupID(item), item => (
-        FTTestProducts.groupLabel(item)
-      ));
-      productGroup.value = defaults.product_path_selection_id
+      productGroupRef = defaults.product_path_selection_id
         || FTTestProducts.groupID(defaults.product_path_selection)
         || state.groupRef || "";
-      factor = editor.mode === "base"
-        ? factorChecklist(context, state.factors, defaults.factorAlias || selectedFactorAlias(state))
-        : select(state.factors, factorAlias, factorAlias);
-      if (editor.mode !== "base") factor.value = defaults.factorAlias || selectedFactorAlias(state);
+      productGroup = groupPicker(context, state, productGroupRef, value => {
+        productGroupRef = value[0] || "";
+      });
+      const selectedFactors = editor.mode === "base"
+        ? selectedFactorAliases(state, defaults)
+        : [defaults.factorAlias || selectedFactorAlias(state)].filter(Boolean);
+      factorRefs = selectedFactors;
+      factor = factorPicker(context, state, factorRefs, editor.mode === "base", values => {
+        factorRefs = values;
+      });
       splitCount = input("number", defaults.splitCount || state.values.split_count || 5);
       splitCount.min = "1"; splitCount.step = "1";
       groupIndex = input("number", defaults.groupIndex || state.values.group_index || 1);
       groupIndex.min = "1"; groupIndex.step = "1";
       const structure = document.createElement("div");
-      structure.className = "backtest-group-form-grid";
+      structure.className = "backtest-group-form-rows";
       structure.append(
         field(context.t("产品组"), productGroup), field(
           context.t(editor.mode === "base" ? "因子（可多选）" : "因子"), factor,
@@ -116,10 +121,10 @@
         const parsedOverrides = overrides.value();
         const productMask = mask.value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
         if (editor.mode === "base") {
-          const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroup.value);
+          const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroupRef);
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
-            factorAliases: factor.selectedAliases(), splitCount: splitCount.value,
+            factorAliases: factorRefs, splitCount: splitCount.value,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
           });
         } else if (editor.mode === "edit") {
@@ -130,11 +135,11 @@
             productMask,
           };
           if (!derived) {
-            const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroup.value);
+            const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroupRef);
             Object.assign(patch, {
               product_path_selection: FTTestProducts.projection(group),
-              product_path_selection_id: productGroup.value,
-              factorAlias: factor.value,
+              product_path_selection_id: productGroupRef,
+              factorAlias: factorRefs[0] || "",
               splitCount: splitCount.value,
               groupIndex: groupIndex.value,
             });
@@ -151,29 +156,61 @@
   }
 
   function renderLongShort(context, state, editor, form, onFinish) {
+    const current = editor.strategyID
+      ? state.analysis.ls_configs.find(item => item.id === editor.strategyID) : null;
     const groups = model().rootsAndChildren(state).map(item => item.group);
-    const longGroup = select(groups, item => item.id, model().groupLabel);
-    const shortGroup = select(groups, item => item.id, model().groupLabel);
-    longGroup.value = editor.groupIDs?.[0] || "";
-    shortGroup.value = editor.groupIDs?.[1] || "";
+    let longGroupRef = editor.groupIDs?.[0] || current?.longGroupId || "";
+    let shortGroupRef = editor.groupIDs?.[1] || current?.shortGroupId || "";
+    const longGroup = strategyGroupPicker(context, state, groups, longGroupRef, values => {
+      longGroupRef = values[0] || "";
+    });
+    const shortGroup = strategyGroupPicker(context, state, groups, shortGroupRef, values => {
+      shortGroupRef = values[0] || "";
+    });
     const name = input("text", "");
+    name.value = current?.name || editor.name || "";
     name.placeholder = context.t("组合名称（留空自动生成）");
     const grid = document.createElement("div");
-    grid.className = "backtest-group-form-grid";
+    grid.className = "backtest-group-form-rows";
     grid.append(
       field(context.t("多头组"), longGroup),
       field(context.t("空头组"), shortGroup),
       field(context.t("名称"), name),
     );
     const swap = context.button(context.t("交换多空"), () => {
-      const value = longGroup.value; longGroup.value = shortGroup.value; shortGroup.value = value;
+      const value = longGroupRef; longGroupRef = shortGroupRef; shortGroupRef = value;
+      longGroup.setValues([longGroupRef]); shortGroup.setValues([shortGroupRef]);
     });
     swap.type = "button";
     grid.append(swap);
     form.append(grid);
+    const overrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: state.values,
+      overrides: model().registeredOverrides(current, state.manifest),
+    });
+    const overrideDetails = document.createElement("details");
+    const overrideSummary = document.createElement("summary");
+    overrideSummary.textContent = context.t("Long-Short 覆盖设置");
+    overrideDetails.append(overrideSummary, field(
+      context.t("覆盖字段"), overrides, context.t("未设置字段继承统一策略"),
+    ));
+    form.append(overrideDetails);
     appendActions(context, form, () => {
       try {
-        model().addLongShort(state, longGroup.value, shortGroup.value, name.value);
+        const parsedOverrides = overrides.value();
+        if (current) {
+          const previous = model().registeredOverrides(current, state.manifest);
+          const cleared = Object.fromEntries(Object.keys(previous).map(key => [key, undefined]));
+          model().updateLongShort(state, current.id, {
+            ...cleared, ...parsedOverrides,
+            name: name.value.trim() || current.name,
+            longGroupId: longGroupRef, shortGroupId: shortGroupRef,
+          });
+        } else {
+          model().addLongShort(
+            state, longGroupRef, shortGroupRef, name.value, parsedOverrides,
+          );
+        }
         onFinish();
       } catch (error) { showError(form, error.message); }
     }, onFinish);
@@ -197,11 +234,13 @@
   }
 
   function field(label, control, help = "") {
-    const root = document.createElement("label");
-    const title = document.createElement("b"); title.textContent = label;
-    root.append(title, control);
-    if (help) { const copy = document.createElement("small"); copy.textContent = help; root.append(copy); }
-    return root;
+    // Shared object pickers expose their DOM control as `.element` while
+    // retaining imperative helpers such as `setValues` on the wrapper. Keep
+    // the wrapper for callers that need those helpers, but only mount the DOM
+    // element in the field row. Without this normalization, opening an add or
+    // edit form attempts to append the picker wrapper itself and the browser
+    // aborts the render, which looks like the Add button did nothing.
+    return FTTestFieldRow.create(label, control?.element || control, help);
   }
 
   function input(type, value) {
@@ -211,47 +250,97 @@
     return control;
   }
 
-  function select(values, valueFor, labelFor) {
-    const control = document.createElement("select");
-    const empty = document.createElement("option"); empty.value = ""; empty.textContent = "—";
-    control.append(empty);
-    for (const value of values || []) {
-      const option = document.createElement("option");
-      option.value = String(valueFor(value) || "");
-      option.textContent = String(labelFor(value) || option.value);
-      control.append(option);
-    }
-    return control;
+  function groupPicker(context, state, selected, onChange) {
+    const saveGroup = value => {
+      const id = FTTestProducts.groupID(value);
+      if (!id) return;
+      const index = state.groups.findIndex(item => FTTestProducts.groupID(item) === id);
+      if (index >= 0) state.groups[index] = {...state.groups[index], ...value};
+      else state.groups.push(value);
+      onChange?.([id]);
+    };
+    return FTTestObjectPicker.create(context, {
+      title: context.t("产品组"),
+      items: state.groups.map(item => ({
+        value: FTTestProducts.groupID(item),
+        label: FTTestProducts.groupLabel(item),
+        description: item.description || item.desc || FTTestProducts.groupLabel(item),
+        source_managed: item.source_managed === true,
+      })).filter(item => item.value),
+      selected: selected ? [selected] : [], multi: false, name: "backtest-product-group",
+      onCreate: context.session ? () => void FTTestObjectEditorOverlay.open(context, {
+        kind: "product_group", mode: "create", ref: "new", onSaved: saveGroup,
+      }) : null,
+      createLabel: context.t("新建产品组"), onChange,
+      itemActions: item => {
+        const group = state.groups.find(value => FTTestProducts.groupID(value) === item.value);
+        if (!context.session || !group || group.source_managed) return [];
+        return [editAction(context, "product_group", item.value, saveGroup)];
+      },
+    });
   }
 
-  function factorChecklist(context, values, selected = "") {
-    const root = document.createElement("div");
-    root.className = "backtest-factor-checklist";
-    const selectedAliases = new Set(selected ? [selected] : []);
-    for (const factor of values || []) {
-      const alias = factorAlias(factor);
-      if (!alias) continue;
-      const label = document.createElement("label");
-      const input = document.createElement("input"); input.type = "checkbox";
-      input.checked = selectedAliases.has(alias);
-      const copy = document.createElement("span"); copy.textContent = alias;
-      label.append(input, copy); root.append(label);
-    }
-    root.selectedAliases = () => [...root.querySelectorAll("label")]
-      .filter(label => label.querySelector("input")?.checked)
-      .map(label => label.querySelector("span")?.textContent || "")
-      .filter(Boolean);
-    const actions = document.createElement("div");
-    actions.className = "backtest-factor-checklist-actions";
-    const all = context.button(context.t("全选"), () => {
-      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = true; });
+  function strategyGroupPicker(context, state, groups, selected, onChange) {
+    return FTTestObjectPicker.create(context, {
+      title: context.t("分组"),
+      items: groups.map(item => ({
+        value: item.id, label: model().groupLabel(item),
+        description: item.parentId ? context.t("派生组") : context.t("基础组"),
+      })).filter(item => item.value),
+      selected: selected ? [selected] : [], multi: false,
+      name: `backtest-strategy-group-${Date.now()}`, onChange,
     });
-    const clear = context.button(context.t("清空"), () => {
-      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+  }
+
+  function factorPicker(context, state, selected, multi, onChange) {
+    const saveFactor = value => {
+      if (!value) return;
+      const alias = factorAlias(value);
+      const index = (state.factors || []).findIndex(item => factorAlias(item) === alias);
+      if (index >= 0) state.factors[index] = {...state.factors[index], ...value};
+      else state.factors.push(value);
+      onChange?.(multi ? [alias] : [alias]);
+    };
+    return FTTestObjectPicker.create(context, {
+      title: context.t("因子"),
+      items: (state.factors || []).map(item => {
+        const alias = factorAlias(item);
+        return {
+          value: alias, label: alias,
+          description: item.description || item.desc || item.family || alias,
+        };
+      }).filter(item => item.value),
+      selected, multi, name: `backtest-factors-${multi ? "multi" : "single"}`,
+      onCreate: context.session ? () => void FTTestObjectEditorOverlay.open(context, {
+        kind: "factor", mode: "create", ref: "new", onSaved: saveFactor,
+      }) : null,
+      createLabel: context.t("新建因子"), onChange,
+      itemActions: item => {
+        const factor = (state.factors || []).find(value => factorAlias(value) === item.value);
+        const ref = factor?.factor_alias || factor?.alias || factor?.id || item.value;
+        if (!context.session || !factor?.can_edit || factor.is_public) return [];
+        return [editAction(context, "factor", ref, saveFactor)];
+      },
     });
-    all.type = "button"; clear.type = "button";
-    actions.append(all, clear); root.prepend(actions);
-    return root;
+  }
+
+  function editAction(context, kind, ref, onSaved) {
+    return {
+      label: context.t("编辑"), title: context.t("在当前浮层编辑"),
+      buttonClass: "secondary",
+      onClick: event => {
+        event?.preventDefault();
+        void FTTestObjectEditorOverlay.open(context, {
+          kind, mode: "edit", ref, onSaved,
+        });
+      },
+    };
+  }
+
+  function selectedFactorAliases(state, defaults) {
+    const values = defaults.factorAliases || defaults.factor_aliases;
+    if (Array.isArray(values) && values.length) return values.map(String).filter(Boolean);
+    return [defaults.factorAlias || selectedFactorAlias(state)].filter(Boolean);
   }
 
   function factorAlias(value) {
@@ -265,7 +354,7 @@
   function titleFor(context, mode) {
     return context.t({
       base: "新增分组", derived: "派生组", clone: "复制为派生组",
-      edit: "编辑分组", rename: "重命名策略", ls: "创建 Long-Short 组合",
+      edit: "编辑分组", rename: "重命名策略", ls: "Long-Short 组合",
     }[mode] || "分组");
   }
 

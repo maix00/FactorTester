@@ -81,11 +81,11 @@
     render();
   }
 
-  async function factorDetail(context, targetRef) {
+  async function factorDetail(context, targetRef, mode = "view") {
     context.activeNav("factors");
     const data = await load(context);
     if (!current(context)) return;
-    return FTFactorDetails.factorDetail(context, data, targetRef, nativeRequest);
+    return FTFactorDetails.factorDetail(context, data, targetRef, mode, nativeRequest);
   }
 
   async function familyDetail(context, targetRef) {

@@ -3,7 +3,7 @@
     "id", "name", "parentId", "product_path_selection",
     "product_path_selection_id", "factorAlias", "splitCount", "groupIndex",
     "isAllGroups", "productMask", "needsRegenerate",
-    "batchId",
+    "batchId", "override_mounted_tabs",
   ]);
   let sequence = 0;
 
@@ -140,7 +140,8 @@
     const index = state.analysis.groups.findIndex(group => group.id === id);
     if (index < 0) throw new Error("group not found");
     const current = state.analysis.groups[index];
-    const next = {...current, ...patch, needsRegenerate: true};
+    const next = mergePatch(current, patch);
+    next.needsRegenerate = true;
     if (Object.prototype.hasOwnProperty.call(patch, "name")) {
       next.name = uniqueName(state, String(patch.name || "").trim(), id);
     }
@@ -156,7 +157,7 @@
     return next;
   }
 
-  function addLongShort(state, longID, shortID, name = "") {
+  function addLongShort(state, longID, shortID, name = "", overrides = {}) {
     initialize(state);
     if (longID === shortID || !find(state, longID) || !find(state, shortID)) {
       throw new Error("two different groups are required");
@@ -177,9 +178,32 @@
       useCloseToday: null,
       needsRegenerate: true,
       metadata: {},
+      override_mounted_tabs: [],
+      ...explicitOverrides(overrides),
     };
     state.analysis.ls_configs.push(item);
     return item;
+  }
+
+  function updateLongShort(state, id, patch = {}) {
+    initialize(state);
+    const index = state.analysis.ls_configs.findIndex(item => item.id === id);
+    if (index < 0) throw new Error("Long-Short 组合不存在");
+    const current = state.analysis.ls_configs[index];
+    const longID = patch.longGroupId ?? current.longGroupId;
+    const shortID = patch.shortGroupId ?? current.shortGroupId;
+    if (longID === shortID || !find(state, longID) || !find(state, shortID)) {
+      throw new Error("两个不同的分组是必需的");
+    }
+    const next = mergePatch(current, {
+      ...patch, longGroupId: longID, shortGroupId: shortID,
+    });
+    if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+      next.name = uniqueName(state, String(patch.name || "").trim(), id);
+    }
+    next.needsRegenerate = true;
+    state.analysis.ls_configs[index] = next;
+    return next;
   }
 
   function renameGroup(state, id, name) {
@@ -279,9 +303,17 @@
 
   function registeredOverrides(group, manifest) {
     const keys = new Set(Object.keys(manifest?.defaults || {}));
-    return Object.fromEntries(Object.entries(group || {}).filter(([key]) => (
-      keys.has(key) && !structuralKeys.has(key)
+    return Object.fromEntries(Object.entries(group || {}).filter(([key, value]) => (
+      keys.has(key) && !structuralKeys.has(key) && value !== undefined
     )));
+  }
+
+  function mergePatch(current, patch = {}) {
+    const next = {...current};
+    for (const [key, value] of Object.entries(patch || {})) {
+      if (value === undefined) delete next[key]; else next[key] = value;
+    }
+    return next;
   }
 
   function explicitOverrides(value) {
@@ -307,6 +339,6 @@
     registeredOverrides, removeLongShort, removeSelected, removeSelectedLongShort,
     groupBatches, renameGroup, renameLongShort, rootsAndChildren, selected,
     selectedLongShort, selectionID, toggle, toggleLongShort, updateGroup,
-    swapLongShort,
+    swapLongShort, updateLongShort,
   });
 })();

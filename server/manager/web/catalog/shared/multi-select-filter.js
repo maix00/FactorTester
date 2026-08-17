@@ -25,6 +25,7 @@
           item?.description ?? item?.desc ?? item?.title ?? item?.label ?? value,
         ).trim(),
         exclusive: item?.exclusive === true,
+        disabled: item?.disabled === true,
       }];
     });
   }
@@ -52,15 +53,23 @@
   }
 
   function create(context, options = {}) {
-    const items = normalizeItems(options.items);
+    const controlDisabled = typeof options.disabled === "function"
+      ? false : Boolean(options.disabled);
+    const items = normalizeItems(options.items).map(item => ({
+      ...item,
+      disabled: item.disabled || (typeof options.disabled === "function"
+        ? Boolean(options.disabled(item)) : Boolean(options.disabled)),
+    }));
+    const multi = options.multi !== false;
     let selected = normalizeSelected(options.selected ?? [], items);
+    if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
 
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
       .filter(Boolean).join(" ");
     const heading = document.createElement("div");
     heading.className = "ft-multi-select-heading";
-    if (options.title) {
+    if (options.title && options.compact !== true) {
       const title = document.createElement("h2");
       title.textContent = options.title;
       heading.append(title);
@@ -68,12 +77,38 @@
     const selectedLabel = document.createElement("span");
     selectedLabel.className = "ft-multi-select-selection";
     heading.append(selectedLabel);
-    section.append(heading);
+    const headingActions = document.createElement("div");
+    headingActions.className = "ft-multi-select-heading-actions";
+    const declaredActions = [
+      ...(Array.isArray(options.actions) ? options.actions : []),
+      ...(options.createAction ? [options.createAction] : []),
+    ].filter(action => action && action.label);
+    for (const action of declaredActions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = ["ft-multi-select-heading-action", action.buttonClass || ""]
+        .filter(Boolean).join(" ");
+      button.textContent = action.label;
+      if (action.title) button.title = action.title;
+      button.disabled = typeof action.disabled === "function"
+        ? Boolean(action.disabled()) : Boolean(action.disabled);
+      button.addEventListener("click", event => action.onClick?.(event));
+      headingActions.append(button);
+    }
+    if (headingActions.childElementCount) heading.append(headingActions);
+    if (options.compact !== true || headingActions.childElementCount) {
+      if (options.compact === true) heading.classList.add("is-compact");
+      section.append(heading);
+    }
 
     const dropdown = document.createElement("details");
     dropdown.className = "ft-multi-select-dropdown";
     const summary = document.createElement("summary");
     summary.className = "ft-multi-select-summary";
+    if (controlDisabled) {
+      summary.classList.add("is-disabled");
+      summary.setAttribute("aria-disabled", "true");
+    }
     summary.setAttribute("aria-label", options.title || translate(context, "筛选"));
     const summaryText = document.createElement("span");
     summaryText.className = "ft-multi-select-summary-text";
@@ -108,6 +143,9 @@
     if (typeof options.onApply === "function") menu.append(actions);
     dropdown.append(summary, menu);
     section.append(dropdown);
+    const selectionPreview = document.createElement("div");
+    selectionPreview.className = "ft-multi-select-selection-preview";
+    if (options.compact === true) section.append(selectionPreview);
 
     let applying = false;
 
@@ -121,7 +159,7 @@
 
     function selectedFirst(values) {
       const selectedSet = new Set(selected);
-      if (search.value.trim()) return values;
+      if (String(search.value || "").trim()) return values;
       return [...values].sort((left, right) => {
         const leftSelected = selectedSet.has(left.value) ? 0 : 1;
         const rightSelected = selectedSet.has(right.value) ? 0 : 1;
@@ -141,11 +179,13 @@
 
     function render() {
       const labels = labelsFor();
-      const summaryValue = labels.length === 1 && itemFor(selected[0])?.exclusive
-        ? labels[0] : countLabel(context, labels.length);
+      const summaryValue = labels.length ? countLabel(context, labels.length) : "";
       summaryText.textContent = summaryValue || translate(context, "未筛选");
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
+      selectionPreview.textContent = labels.length
+        ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}` : "";
+      selectionPreview.hidden = !labels.length;
       summary.title = labels.join("、");
       note.textContent = labels.length
         ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
@@ -156,12 +196,15 @@
         row.className = "ft-multi-select-option";
         if (selected.includes(item.value)) row.classList.add("is-selected");
         if (item.exclusive) row.classList.add("is-exclusive");
+        if (item.disabled) row.classList.add("is-disabled");
         row.title = item.description;
         row.setAttribute("aria-label", `${item.label}：${item.description}`);
         const input = document.createElement("input");
-        input.type = "checkbox";
+        input.type = multi ? "checkbox" : "radio";
+        if (!multi) input.name = options.name || "ft-single-select";
         input.value = item.value;
         input.checked = selected.includes(item.value);
+        input.disabled = item.disabled;
         input.dataset.filterValue = item.value;
         const label = document.createElement("span");
         label.className = "ft-multi-select-option-label";
@@ -172,9 +215,40 @@
         info.title = item.description;
         info.setAttribute("aria-label", item.description);
         row.append(input, label, info);
+        if (item.exclusive) {
+          const badge = document.createElement("span");
+          badge.className = "ft-multi-select-exclusive-badge";
+          badge.textContent = translate(context, "排他项", "排他");
+          row.append(badge);
+        }
+        const itemActions = typeof options.itemActions === "function"
+          ? options.itemActions(item) : [];
+        const actionHost = document.createElement("span");
+        actionHost.className = "ft-multi-select-option-actions";
+        for (const action of (Array.isArray(itemActions) ? itemActions : [])) {
+          if (!action?.label) continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = ["ft-multi-select-option-action", action.buttonClass || ""]
+            .filter(Boolean).join(" ");
+          button.textContent = action.label;
+          button.title = action.title || action.label;
+          button.disabled = typeof action.disabled === "function"
+            ? Boolean(action.disabled()) : Boolean(action.disabled);
+          button.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            action.onClick?.(event, item);
+          });
+          actionHost.append(button);
+        }
+        if (actionHost.childElementCount) row.append(actionHost);
         input.addEventListener("change", () => {
+          if (item.disabled) return;
           if (input.checked) {
-            selected = item.exclusive
+            selected = !multi
+              ? [item.value]
+              : item.exclusive
               ? [item.value]
               : [...selected.filter(value => !itemFor(value)?.exclusive), item.value];
           } else {
@@ -193,6 +267,12 @@
       search.focus();
     });
     search.addEventListener("input", render);
+    if (controlDisabled) {
+      summary.addEventListener("click", event => {
+        event.preventDefault();
+        dropdown.open = false;
+      });
+    }
 
     if (typeof options.onApply === "function") {
       const apply = document.createElement("button");
@@ -220,14 +300,27 @@
     return Object.freeze({
       element: section,
       dropdown,
+      summary,
       menu,
       optionList,
       search,
       clear,
       render,
       get values() { return [...selected]; },
+      get multi() { return multi; },
       setValues(values) {
         selected = normalizeSelected(values, items);
+        if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
+        render();
+      },
+      setItems(nextItems) {
+        items.splice(0, items.length, ...normalizeItems(nextItems).map(item => ({
+          ...item,
+          disabled: item.disabled || (typeof options.disabled === "function"
+            ? Boolean(options.disabled(item)) : controlDisabled),
+        })));
+        selected = normalizeSelected(selected, items);
+        if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
         render();
       },
     });

@@ -22,10 +22,15 @@
       selected: state => FTBacktestGroupModel.selectedLongShort(state),
       removeSelected: state => FTBacktestGroupModel.removeSelectedLongShort(state),
       actions: Object.freeze({
+        create: (_state, _selected) => ({mode: "ls"}),
+        edit: (_state, selected) => ({mode: "ls", strategyID: selected[0]?.id}),
         rename: (_state, selected) => ({
           mode: "rename", strategyKind: "long_short", strategyID: selected[0]?.id,
         }),
-        swap: (_state, selected) => ({strategyKind: "long_short", strategyID: selected[0]?.id}),
+        swap: (state, selected) => {
+          const id = selected[0]?.id;
+          if (id) FTBacktestGroupModel.swapLongShort(state, id);
+        },
       }),
     }),
   });
@@ -102,7 +107,7 @@
       description: `${batch.items.length} ${context.t("个策略")}`,
       selected: batch.items.every(item => state.selectedBacktestGroupIDs.includes(item.group.id)),
       expanded: batchExpanded(state, batch.key),
-      chips: groupChips(context, state, batch.root),
+      chips: null,
       items: batch.items.map(item => ({
         key: item.group.id,
         // The strategy name is the only user-facing label; its id remains the
@@ -111,7 +116,7 @@
         detail: groupDetail(context, item.group),
         depth: item.depth,
         selected: state.selectedBacktestGroupIDs.includes(item.group.id),
-        chips: groupChips(context, state, item.group),
+        content: groupChips(context, state, item.group, refresh),
         actions: rowActions(context, state, surface, item.group, refresh),
       })),
     }));
@@ -149,17 +154,20 @@
       context, title: context.t("Long-Short 组合"), count: `${values.length} ${context.t("项")}`,
       selection: selectionType(surface) === "radio" ? "single" : "multi",
       batchSelection: false,
-      showConfig: false,
+      showConfig: true,
+      showConfigOpen: state.backtestGroupConfigOpen === true,
       items: values.map(item => ({
       key: item.id, label: item.name || item.id,
         detail: `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`,
         selected: state.selectedBacktestLongShortIDs.includes(item.id),
+        content: groupChips(context, state, item, refresh),
         actions: rowActions(context, state, surface, item, refresh),
       })),
       onToggle: (item, checked) => {
         FTBacktestGroupModel.toggleLongShort(state, item.key, checked, surface.selection);
         refresh();
       },
+      onToggleConfig: open => { state.backtestGroupConfigOpen = open; refresh(); },
     });
   }
 
@@ -233,15 +241,42 @@
     return `${context.t("基础组")} · ${group.groupIndex || 1}/${group.splitCount || 1}`;
   }
 
-  function groupChips(context, state, group) {
-    if (!state.backtestGroupConfigOpen || !window.FTTestSettingChips) return null;
-    const node = FTTestSettingChips.render({
-      manifest: state.manifest, values: group, context,
-      mountedTabs: [], includeRun: false, includeEmpty: false,
+  function groupChips(context, state, group, refresh) {
+    if (!state.backtestGroupConfigOpen || !window.FTBacktestGroupOverrides) return null;
+    const host = document.createElement("section");
+    host.className = "backtest-strategy-settings";
+    const title = document.createElement("strong");
+    title.textContent = context.t("本策略设置（覆盖统一设置）");
+    const note = document.createElement("small");
+    note.textContent = context.t("未启用覆盖的字段继承回测上方统一策略");
+    host.append(title, note);
+    const overrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: state.values,
+      overrides: FTBacktestGroupModel.registeredOverrides(group, state.manifest),
       groupBy: "tab",
-      sources: FTTestContentAdapters.chipSources(state, group),
+      manageTabs: true,
+      mountedTabs: Array.isArray(group.override_mounted_tabs)
+        ? group.override_mounted_tabs : [],
+      onMountedTabsChange: tabs => {
+        group.override_mounted_tabs = tabs;
+      },
+      onChange: values => {
+        const previous = FTBacktestGroupModel.registeredOverrides(group, state.manifest);
+        const cleared = Object.fromEntries(Object.keys(previous).map(key => [key, undefined]));
+        const patch = {
+          ...cleared, ...values,
+          override_mounted_tabs: group.override_mounted_tabs || [],
+        };
+        if (state.analysis.ls_configs?.some(item => item.id === group.id)) {
+          FTBacktestGroupModel.updateLongShort(state, group.id, patch);
+        } else {
+          FTBacktestGroupModel.updateGroup(state, group.id, patch);
+        }
+        refresh?.();
+      },
     });
-    return node.children.length ? node : null;
+    host.append(overrides);
+    return host;
   }
 
   function rowActions(context, state, surface, item, refresh) {

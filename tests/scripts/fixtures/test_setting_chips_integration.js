@@ -37,7 +37,8 @@ for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
   for (const name of [
     "FTSettingRules", "FTTestSettingChips", "FTTabChipContent",
-    "FTTestContentAdapters", "FTTestSettings",
+    "FTTestContentAdapters", "FTTestSettings", "FTMultiSelectFilter",
+    "FTTestObjectPicker", "FTTestChoicePicker", "FTTestFieldRow",
   ]) {
     if (window[name]) global[name] = window[name];
   }

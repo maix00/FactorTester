@@ -262,8 +262,8 @@
     context.content.replaceChildren(root);
   }
 
-  async function groupDetail(context, target, helpers) {
-    return window.FTProductGroupDetail.render(context, target, helpers);
+  async function groupDetail(context, target, helpers, mode = "") {
+    return window.FTProductGroupDetail.render(context, target, helpers, mode);
   }
 
   function unavailableContractDetail(context, targetRef, helpers, displayTitle = targetRef) {

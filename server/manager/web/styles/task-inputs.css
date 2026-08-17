@@ -100,7 +100,7 @@
 .test-workbench .backtest-group-host { padding: 0; }
 .test-workbench .backtest-group-panel { padding: 8px; }
 .test-workbench .backtest-group-form { gap: 7px; padding: 9px; border-radius: 10px; }
-.test-workbench .backtest-group-form-grid { gap: 7px; }
+.test-workbench .backtest-group-form-rows { gap: 0; }
 .test-workbench .backtest-group-form input:not([type="checkbox"]),
 .test-workbench .backtest-group-form select,
 .test-workbench .backtest-group-form textarea { padding: 5px 8px; }
@@ -116,9 +116,6 @@
   .content:has(> .test-workbench) { padding: 16px 18px 24px; }
 }
 .test-workbench .test-run-panel { gap: 7px; padding: 9px; }
-.factor-family-picker-row { padding: 7px 9px; }
-.test-product-group-creator { gap: 8px; padding: 11px; }
-.test-product-group-tree { padding: 7px; }
 .job-detail { gap: 9px; max-width: 1280px; }
 .job-detail .job-progress { padding: 8px 10px; }
 .job-detail .job-section { gap: 5px; }

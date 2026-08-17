@@ -1,6 +1,6 @@
 (() => {
   function categoryID(value) {
-    return value?.name || value?.id || value?.label || "";
+    return value?.id || value?.name || value?.label || "";
   }
 
   async function initialize(context, state) {
@@ -26,8 +26,7 @@
   }
 
   function setCategory(state, category) {
-    const id = categoryID(category);
-    state.values.category = state.values.category === id ? "" : id;
+    state.values.category = categoryID(category);
   }
 
   function setEnabled(state, category, enabled) {
@@ -37,56 +36,108 @@
     }
   }
 
+  function openEditor(context, mode, ref, onSaved) {
+    return FTTestObjectEditorOverlay.open(context, {
+      kind: "category", mode, ref, onSaved,
+    });
+  }
+
+  function upsertCategory(state, category) {
+    const id = categoryID(category);
+    if (!id) return null;
+    const rows = candidates(state);
+    const index = rows.findIndex(value => categoryID(value) === id);
+    if (index >= 0) rows[index] = {...rows[index], ...category};
+    else rows.push(category);
+    state.values.category_candidates = rows;
+    return rows[index >= 0 ? index : rows.length - 1];
+  }
+
+  function editAction(context, category, onSaved) {
+    if (!context.session || !category || category.source_managed) return null;
+    const id = categoryID(category);
+    if (!id) return null;
+    return {
+      label: context.t("编辑"),
+      title: context.t("在当前浮层编辑产品分类"),
+      buttonClass: "secondary",
+      onClick: event => {
+        event?.preventDefault();
+        void openEditor(context, "edit", id, onSaved);
+      },
+    };
+  }
+
   function panel(context, state, refresh) {
     if (state.kind !== "ic") return null;
-    const root = document.createElement("fieldset");
-    root.className = "test-category-selector test-object-field";
-    const legend = document.createElement("legend");
-    legend.textContent = context.t("分类");
-    const note = document.createElement("small");
-    note.textContent = context.t("用于分组 IC；选择一个默认分类，并可停用不参与候选的分类");
-    const list = document.createElement("div");
-    list.className = "test-category-list";
-    for (const category of candidates(state)) {
-      const row = document.createElement("div");
-      row.className = "test-category-row";
-      const selected = document.createElement("input");
-      selected.type = "radio";
-      selected.name = "ic-category";
-      selected.checked = state.values.category === categoryID(category);
-      selected.disabled = category.enabled === false;
-      selected.addEventListener("click", () => {
-        setCategory(state, category);
-        refresh();
-      });
-      const copy = document.createElement("span");
-      const title = document.createElement("b");
-      title.textContent = categoryID(category);
-      const detail = document.createElement("small");
-      const members = Array.isArray(category.categories) ? category.categories.join("、") : "";
-      detail.textContent = [category.source || context.t("数据源"), members]
-        .filter(Boolean).join(" · ");
-      copy.append(title, detail);
-      const toggle = context.button(
-        category.enabled === false ? context.t("已停用") : context.t("已启用"),
-        () => {
-          setEnabled(state, category, category.enabled === false);
-          refresh();
-        },
-      );
-      toggle.className = category.enabled === false ? "is-disabled" : "is-enabled";
-      row.append(selected, copy, toggle);
-      list.append(row);
-    }
-    if (!list.childElementCount) {
-      list.append(FTUI.empty(context.t("暂无分类"), context.t("当前数据源没有声明分类")));
-    }
-    root.append(legend, note, list);
+    const items = candidates(state).map(category => ({
+      value: categoryID(category),
+      label: category.title_zh || category.alias || categoryID(category),
+      description: [
+        category.source || context.t("数据源"),
+        Array.isArray(category.categories) ? category.categories.join("、") : "",
+      ].filter(Boolean).join(" · "),
+      disabled: category.enabled === false,
+      source_managed: category.source_managed === true,
+    })).filter(item => item.value);
+    const savedCategory = value => {
+      const category = upsertCategory(state, value);
+      if (!category) return;
+      setCategory(state, category);
+      refresh?.();
+    };
+    const picker = FTTestObjectPicker.create(context, {
+      title: context.t("分类"),
+      note: context.t("选择一个分类用于 IC；分类由数据源或用户产品分类提供"),
+      items,
+      selected: state.values.category ? [state.values.category] : [],
+      multi: false,
+      compact: true,
+      name: "ic-category",
+      onCreate: context.session
+        ? () => void openEditor(context, "create", "new", savedCategory)
+        : null,
+      createLabel: context.t("新建产品分类"),
+      itemActions: item => {
+        const category = candidates(state).find(value => categoryID(value) === item.value);
+        const actions = [];
+        const edit = editAction(context, category, savedCategory);
+        if (edit) actions.push(edit);
+        if (category) {
+          actions.push({
+            label: category.enabled === false ? context.t("启用") : context.t("停用"),
+            title: context.t("切换此分类是否参与候选"),
+            buttonClass: "secondary",
+            onClick: event => {
+              event?.preventDefault();
+              setEnabled(state, category, category.enabled === false);
+              refresh?.();
+            },
+          });
+        }
+        return actions;
+      },
+      onChange: values => {
+        const value = values[0] || "";
+        const category = candidates(state).find(item => categoryID(item) === value);
+        if (category) setCategory(state, category); else state.values.category = "";
+        refresh?.();
+      },
+    });
+    const root = FTTestFieldRow.create(
+      context.t("分类"), picker.element,
+      context.t("选择一个分类用于 IC；分类由数据源或用户产品分类提供"),
+      {className: "test-category-selector"},
+    );
+    const control = root.querySelector(".test-field-row-control");
+    if (!items.length) control.append(FTUI.empty(
+      context.t("暂无分类"), context.t("当前数据源没有声明分类"),
+    ));
     if (state.categoryError) {
       const error = document.createElement("small");
       error.className = "test-product-warning";
       error.textContent = state.categoryError;
-      root.append(error);
+      control.append(error);
     }
     return root;
   }

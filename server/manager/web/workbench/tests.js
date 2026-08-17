@@ -15,7 +15,63 @@
     context.setHeading(context.t(definition.title), context.t("测试"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取测试设置…")));
     const state = await loadState(context, kind, options);
+    applyTabReturn(state, context);
     render(context, state);
+  }
+
+  function applyTabReturn(state, context) {
+    const result = window.FTTabReturn?.consume(context.tabID);
+    if (!result) return;
+    const key = result.kind === "factor" ? "factors"
+      : result.kind === "product_group" ? "products"
+      : result.kind === "category" ? "categories" : "";
+    if (!key) return;
+    state.pendingTabReturn = {key, ref: String(result.ref || "")};
+    if (state.lazy?.[key]?.status === "ready") applyPendingSelection(state, key);
+    else if (state.lazy?.[key]) state.lazy[key].status = "idle";
+  }
+
+  function applyPendingSelection(state, key) {
+    const pending = state.pendingTabReturn;
+    if (!pending || pending.key !== key || !pending.ref) return false;
+    let applied = false;
+    if (key === "products") {
+      const group = state.groups.find(item => FTTestProducts.groupID(item) === pending.ref
+        || String(item.id || "") === pending.ref
+        || String(item.name || "") === pending.ref);
+      if (group) {
+        FTTestProducts.selectNew(state, group);
+        applied = true;
+      }
+    } else if (key === "factors") {
+      const factor = state.factors.find(item => (
+        FTTestFactorSelection.factorID(item) === pending.ref
+        || FTTestFactorSelection.factorAlias(item) === pending.ref
+        || String(item.id || "") === pending.ref
+      ));
+      if (factor) {
+        FTTestFactorSelection.addCandidate(state, factor);
+        applied = true;
+      }
+    } else if (key === "categories") {
+      const category = (state.values?.category_candidates || []).find(item => (
+        FTTestCategories.categoryID(item) === pending.ref
+        || String(item.id || "") === pending.ref
+      ));
+      if (category) {
+        state.values.category = FTTestCategories.categoryID(category);
+        applied = true;
+      }
+    }
+    if (!applied && state.lazy?.[key]?.status === "ready") {
+      // A newly saved object may not be present in the cached catalog yet.
+      // Re-open the lazy source once so the independent editor can return a
+      // real object instead of leaving the picker silently unselected.
+      state.lazy[key].status = "idle";
+      if (key === "categories") state.values.category_candidates = [];
+    }
+    if (applied) delete state.pendingTabReturn;
+    return applied;
   }
 
   function initialRunValues(manifest) {
@@ -300,6 +356,7 @@
       state.factors = FTTestState.mergeByID(state.factors, value.factors);
       state.families = FTTestState.mergeByID(state.families, value.families);
       await FTTestFactors.initialize(context, state);
+      applyPendingSelection(state, key);
       return;
     }
     if (key === "products") {
@@ -312,11 +369,13 @@
       state.groups = FTTestState.mergeByID(selected, catalog);
       FTTestProducts.synchronize(state);
       if (state.kind === "backtest") FTBacktestGroups.initialize(state);
+      applyPendingSelection(state, key);
       return;
     }
     if (key === "categories") {
       await FTTestLazyCode.loadGroup("workbench-products");
       await FTTestCategories.initialize(context, state);
+      applyPendingSelection(state, key);
       return;
     }
     if (key === "templates") {
@@ -503,6 +562,7 @@
 
   window.FTTests = {
     applyBacktestDerivedPrefill,
+    applyPendingSelection,
     ensureOutputCapabilities: async (context, state, refresh) => {
       await FTTestLazyCode.loadGroup("output-choice");
       return ensureLazyKey(context, state, "outputs", refresh);

@@ -214,13 +214,16 @@
       "catalog/product-price-panel.js",
       "catalog/details.js"
     ],
-    "workbench-core": [
-      "workbench/setting-rules.js",
-      "workbench/test-lazy-code.js",
-      "workbench/templates/actions.js",
-      "workbench/test-state.js",
-      "workbench/tests.js"
-    ],
+  "workbench-core": [
+    "workbench/setting-rules.js",
+    "workbench/test-lazy-code.js",
+    "workbench/templates/actions.js",
+    "workbench/test-object-picker.js",
+    "workbench/test-object-editor-overlay.js",
+    "workbench/test-field-row.js",
+    "workbench/test-state.js",
+    "workbench/tests.js"
+  ],
     "workbench-input-state": [
       "workbench/test-input-state.js"
     ],
@@ -283,7 +286,6 @@
       "workbench/test-source-upload.js"
     ],
     "workbench-products": [
-      "workbench/product-group-creator.js",
       "workbench/test-products.js",
       "workbench/test-categories.js"
     ],
@@ -318,6 +320,7 @@
       "app/route-dispatch.js",
       "app/tab-view-cache.js",
       "app/tabs.js",
+      "app/tab-return.js",
       "app/visitor-device.js",
       "app/auth.js",
       "app/runtime.js",
@@ -413,6 +416,9 @@
     "workbench/test-input-state.js",
     "workbench/test-configuration-compiler.js",
     "workbench/test-lazy-code.js",
+    "workbench/test-object-picker.js",
+    "workbench/test-object-editor-overlay.js",
+    "workbench/test-field-row.js",
     "workbench/test-control-loader.js",
     "workbench/test-state.js",
     "workbench/ic-configuration.js",
@@ -434,7 +440,6 @@
     "workbench/test-factor-editor.js",
     "workbench/test-factor-candidates.js",
     "workbench/test-factors.js",
-    "workbench/product-group-creator.js",
     "workbench/test-products.js",
     "workbench/test-categories.js",
     "workbench/backtest-group-batches.js",
@@ -466,6 +471,7 @@
     "app/route-dispatch.js",
     "app/tab-view-cache.js",
     "app/tabs.js",
+    "app/tab-return.js",
     "app/visitor-device.js",
     "app/auth.js",
     "app/runtime.js",

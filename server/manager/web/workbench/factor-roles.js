@@ -44,30 +44,34 @@
       .filter(item => item.alias);
     const bindings = normalize(options.value);
     for (const role of visibleRoles(field, values)) {
-      const row = document.createElement("label");
-      const label = document.createElement("span");
-      label.textContent = context.t(roleLabels[role] || role);
-      const select = document.createElement("select");
-      const primary = document.createElement("option");
-      primary.value = "";
-      primary.textContent = context.t("使用主因子");
-      select.append(primary);
-      for (const candidate of candidates) {
-        const option = document.createElement("option");
-        option.value = candidate.alias;
-        option.textContent = candidate.label;
-        select.append(option);
-      }
-      select.value = bindings[role] || "";
-      select.disabled = Boolean(disabled);
-      select.addEventListener("change", () => {
-        const next = {...bindings};
-        if (select.value) next[role] = select.value;
-        else delete next[role];
-        onChange(next);
+      const label = context.t(roleLabels[role] || role);
+      const picker = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker",
+        compact: true,
+        name: `factor-role-${role}`,
+        multi: false,
+        disabled,
+        items: [
+          {
+            value: "",
+            label: context.t("使用主因子"),
+            description: context.t("不为此角色设置单独因子"),
+          },
+          ...candidates.map(candidate => ({
+            value: candidate.alias,
+            label: candidate.label,
+            description: candidate.label,
+          })),
+        ],
+        selected: [bindings[role] || ""],
+        onChange: values => {
+          const next = {...bindings};
+          if (values[0]) next[role] = values[0];
+          else delete next[role];
+          onChange(next);
+        },
       });
-      row.append(label, select);
-      root.append(row);
+      root.append(FTTestFieldRow.create(label, picker.element));
     }
     if (!root.childElementCount) {
       root.append(FTUI.empty(context.t("当前策略没有可绑定角色"), ""));

@@ -56,16 +56,8 @@
   }
 
   function row(context, state, item, refresh) {
-    const root = document.createElement("div");
-    root.className = "test-setting-row";
-    const copy = document.createElement("span");
-    const label = document.createElement("b"); label.textContent = context.t(item.label);
-    copy.append(label);
-    if (item.help_text) {
-      const hint = context.t(item.help_text);
-      root.title = hint;
-      root.setAttribute("aria-label", `${label.textContent}: ${hint}`);
-    }
+    const label = context.t(item.label);
+    const hint = item.help_text ? context.t(item.help_text) : "";
     const fieldValue = controlField(item);
     const manifest = {defaults: {[item.key]: fieldValue}};
     const editor = item.value_descriptor?.editor || "input";
@@ -86,29 +78,39 @@
         },
         false,
       );
-    root.append(copy, control);
+    const root = FTTestFieldRow.create(label, control, hint, {title: hint});
+    if (hint) root.setAttribute("aria-label", `${label}: ${hint}`);
     return root;
   }
 
   function runtimeServerControl(context, state, refresh, item) {
-    const control = document.createElement("select");
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = context.t("选择提供运行代码的服务器…");
-    control.append(placeholder);
-    const appendServers = () => {
-      (Array.isArray(state.runtimeServers) ? state.runtimeServers : [])
+    const serverItems = () => [
+      {
+        value: "",
+        label: context.t("选择提供运行代码的服务器…"),
+        description: context.t("使用当前服务器的默认运行代码包"),
+      },
+      ...(Array.isArray(state.runtimeServers) ? state.runtimeServers : [])
         .filter(server => server && server.server_id)
-        .forEach(server => {
-          const option = document.createElement("option");
-          option.value = String(server.server_id);
-          option.textContent = `${server.server_id} · ${server.endpoint || ""}`;
-          control.append(option);
-        });
-      control.value = String(state.runValues[item.key] || item.default || "");
-    };
-    if (Array.isArray(state.runtimeServers)) appendServers();
-    control.addEventListener("focus", async () => {
+        .map(server => ({
+          value: String(server.server_id),
+          label: `${server.server_id} · ${server.endpoint || ""}`,
+          description: server.endpoint || server.server_id,
+        })),
+    ];
+    const picker = FTTestChoicePicker.create(context, {
+      className: "test-choice-picker",
+      compact: true,
+      name: `runtime-server-${item.key}`,
+      multi: false,
+      items: serverItems(),
+      selected: [String(state.runValues[item.key] || item.default || "")],
+      onChange: values => {
+        state.runValues[item.key] = values[0] || "";
+        refresh?.();
+      },
+    });
+    const loadServers = async () => {
       if (state.runtimeServersLoaded || state.runtimeServersLoading) return;
       state.runtimeServersLoading = true;
       try {
@@ -125,12 +127,12 @@
         state.runtimeServersLoading = false;
         refresh?.();
       }
-    }, {once: true});
-    control.addEventListener("change", () => {
-      state.runValues[item.key] = control.value;
-      refresh?.();
+    };
+    picker.summary.addEventListener("click", () => { void loadServers(); });
+    picker.dropdown.addEventListener("toggle", () => {
+      if (picker.dropdown.open) void loadServers();
     });
-    return control;
+    return picker.element;
   }
 
   function runtimeBundleControl(context, state, refresh, item) {
@@ -157,37 +159,52 @@
   }
 
   function profileControl(context, state, refresh, item) {
-    const control = document.createElement("select");
-    const user = document.createElement("option");
-    user.value = "";
-    user.textContent = context.t("用户本人（不绑定 Profile）");
-    control.append(user);
+    const items = [{
+      value: "",
+      label: context.t("用户本人（不绑定 Profile）"),
+      description: context.t("以当前用户身份提交任务"),
+    }];
     if (!state.profilesLoaded) {
-      const deferred = document.createElement("option");
-      deferred.value = "";
-      deferred.textContent = context.t("点击后读取其他提交身份…");
-      deferred.disabled = true;
-      control.append(deferred);
-      control.addEventListener("focus", () => {
-        window.FTTests?.ensureProfiles?.(context, state, refresh);
-        refresh?.();
-      }, {once: true});
+      items.push({
+        value: "__profiles_loading__",
+        label: context.t("点击后读取其他提交身份…"),
+        description: context.t("打开选择器后读取当前用户的研究身份"),
+        disabled: true,
+      });
     }
     (Array.isArray(state.profiles) ? state.profiles : []).forEach(profile => {
       const profileID = String(profile.profile_id || "").trim();
       if (!profileID) return;
-      const option = document.createElement("option");
-      option.value = `profile:${profileID}`;
       const displayName = String(profile.display_name || profileID);
-      option.textContent = `${displayName}（${profileID}）`;
-      control.append(option);
+      items.push({
+        value: `profile:${profileID}`,
+        label: `${displayName}（${profileID}）`,
+        description: profile.description || profileID,
+      });
     });
-    control.value = String(state.runValues[item.key] || item.default || "");
-    control.addEventListener("change", () => {
-      state.runValues[item.key] = control.value;
+    const picker = FTTestChoicePicker.create(context, {
+      className: "test-choice-picker",
+      compact: true,
+      name: `run-profile-${item.key}`,
+      multi: false,
+      items,
+      selected: [String(state.runValues[item.key] || item.default || "")],
+      onChange: values => {
+        state.runValues[item.key] = values[0] === "__profiles_loading__"
+          ? "" : (values[0] || "");
+        refresh?.();
+      },
+    });
+    const loadProfiles = () => {
+      if (state.profilesLoaded) return;
+      window.FTTests?.ensureProfiles?.(context, state, refresh);
       refresh?.();
+    };
+    picker.summary.addEventListener("click", loadProfiles);
+    picker.dropdown.addEventListener("toggle", () => {
+      if (picker.dropdown.open) loadProfiles();
     });
-    return control;
+    return picker.element;
   }
 
   function panel(context, state, refresh) {

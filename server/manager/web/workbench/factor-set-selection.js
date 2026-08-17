@@ -65,18 +65,56 @@
     if (!fieldDescriptor(state)) return null;
     const root = document.createElement("section");
     root.className = "test-factor-set-panel";
-    const heading = document.createElement("div");
-    const copy = document.createElement("span");
-    const title = document.createElement("b"); title.textContent = context.t("因子集合");
-    const help = document.createElement("small");
-    help.textContent = context.t("选择冻结集合并展开为具体因子候选");
-    copy.append(title, help);
-    const choose = context.button(context.t("选择因子集合"), () => (
-      openPicker(context, state, refresh)
+    const items = (state.factorSetCatalog?.items || []).map(item => ({
+      value: item.target_ref,
+      label: item.title_zh || item.set_id || item.target_ref,
+      description: item.description_zh
+        || `${item.member_count || 0} ${context.t("个因子")} · ${context.t(
+          item.visibility === "local" ? "本地" : "服务器",
+        )}`,
+    })).filter(item => item.value);
+    const updateSelection = async values => {
+      const requested = new Set(values);
+      const current = selections(state);
+      const removed = current.filter(item => !requested.has(item.target_ref));
+      const added = items.filter(item => requested.has(item.value)
+        && !current.some(value => value.target_ref === item.value));
+      state.factorSetCatalog.busy = true;
+      refresh?.();
+      try {
+        for (const item of removed) {
+          FTTestFactorSelection.detachFactorSet(state, item.target_ref);
+          FTTestInputState.detachFactorSet(state, item.target_ref);
+          state.factorSetCatalog.runInputs.delete(item.target_ref);
+        }
+        setSelections(state, current.filter(item => requested.has(item.target_ref)));
+        for (const item of added) {
+          const source = state.factorSetCatalog.items.find(value => (
+            value.target_ref === item.value
+          ));
+          if (source) await selectSet(context, state, source);
+        }
+      } catch (error) {
+        state.factorSetCatalog.error = error.message || String(error);
+      } finally {
+        state.factorSetCatalog.busy = false;
+        refresh?.();
+      }
+    };
+    const picker = FTTestObjectPicker.create(context, {
+      title: context.t("因子集合"),
+      note: context.t("选择冻结集合并展开为具体因子候选"),
+      className: "test-factor-set-picker",
+      compact: true,
+      name: "test-factor-sets",
+      items,
+      selected: selections(state).map(item => item.target_ref),
+      onChange: values => { void updateSelection(values); },
+    });
+    root.append(FTTestFieldRow.create(
+      context.t("因子集合"), picker.element,
+      context.t("选择冻结集合并展开为具体因子候选"),
     ));
-    heading.append(copy, choose); root.append(heading);
-    const selected = selections(state);
-    if (selected.length) root.append(selectedList(context, state, selected, refresh));
     if (state.factorSetCatalog?.error) {
       const error = document.createElement("p");
       error.className = "form-error"; error.textContent = state.factorSetCatalog.error;
@@ -85,100 +123,19 @@
     return root;
   }
 
-  function selectedList(context, state, values, refresh) {
-    const list = document.createElement("div");
-    list.className = "test-factor-set-selected";
-    for (const value of values) {
-      const row = document.createElement("div");
-      const copy = document.createElement("span");
-      const name = document.createElement("b");
-      name.textContent = value.title_zh || value.set_id || value.target_ref;
-      const note = document.createElement("small");
-      note.textContent = `${Number(value.member_count || 0)} ${context.t("个因子")}`;
-      copy.append(name, note);
-      const remove = context.button(context.t("移除"), () => {
-        FTTestFactorSelection.detachFactorSet(state, value.target_ref);
-        FTTestInputState.detachFactorSet(state, value.target_ref);
-        state.factorSetCatalog.runInputs.delete(value.target_ref);
-        setSelections(state, selections(state).filter(item => (
-          item.target_ref !== value.target_ref
-        )));
-        refresh();
-      });
-      row.append(copy, remove); list.append(row);
-    }
-    return list;
-  }
-
-  function openPicker(context, state, refresh) {
-    const dialog = document.createElement("dialog");
-    dialog.className = "factor-family-picker-dialog";
-    const card = document.createElement("section");
-    card.className = "dialog-card wide factor-family-picker";
-    const title = document.createElement("h2"); title.textContent = context.t("选择因子集合");
-    const search = document.createElement("input");
-    search.type = "search"; search.placeholder = context.t("搜索集合名称或说明");
-    const list = document.createElement("div"); list.className = "factor-family-picker-list";
-    const render = () => renderRows(context, state, list, search.value, dialog, refresh);
-    search.addEventListener("input", render);
-    const actions = document.createElement("div"); actions.className = "dialog-actions";
-    actions.append(FTUI.actionButton(context.t("取消"), () => dialog.close(), {
-      variant: "secondary",
-    }));
-    card.append(title, search, list, actions); dialog.append(card);
-    dialog.addEventListener("close", () => dialog.remove(), {once: true});
-    document.body.append(dialog); dialog.showModal(); render(); search.focus();
-  }
-
-  function renderRows(context, state, mount, query, dialog, refresh) {
-    const needle = String(query || "").trim().toLocaleLowerCase();
-    const selected = new Set(selections(state).map(item => item.target_ref));
-    const items = (state.factorSetCatalog?.items || []).filter(item => (
-      !needle || JSON.stringify(item).toLocaleLowerCase().includes(needle)
-    ));
-    if (!items.length) {
-      mount.replaceChildren(FTUI.empty(context.t("没有匹配的因子集合"), ""));
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    for (const item of items) {
-      const row = document.createElement("button"); row.type = "button";
-      row.className = `factor-family-picker-row${selected.has(item.target_ref) ? " selected" : ""}`;
-      const copy = document.createElement("span");
-      const name = document.createElement("b");
-      name.textContent = item.title_zh || item.set_id || item.target_ref;
-      const note = document.createElement("small");
-      note.textContent = item.description_zh || `${item.member_count || 0} ${context.t("个因子")}`;
-      const source = document.createElement("span"); source.className = "factor-family-source";
-      source.textContent = context.t(item.visibility === "local" ? "本地" : "服务器");
-      copy.append(name, note); row.append(copy, source);
-      row.addEventListener("click", async () => {
-        if (!selected.has(item.target_ref)) await selectSet(context, state, item);
-        dialog.close(); refresh();
-      });
-      fragment.append(row);
-    }
-    mount.replaceChildren(fragment);
-  }
-
   async function selectSet(context, state, item) {
-    state.factorSetCatalog.busy = true;
-    try {
-      const members = await loadMembers(context, state, item);
-      const priorRef = state.factorRef;
-      const priorFactor = state.values.factor;
-      for (const reference of members) {
-        const factor = factorFromReference(reference, item.target_ref);
-        if (!factor) throw new Error(context.t("因子集合包含无法解析的冻结因子"));
-        FTTestFactorSelection.addCandidate(state, factor);
-      }
-      if (state.kind !== "ic" && priorRef) {
-        state.factorRef = priorRef; state.values.factor = priorFactor;
-      }
-      setSelections(state, [...selections(state), summary(item)]);
-    } finally {
-      state.factorSetCatalog.busy = false;
+    const members = await loadMembers(context, state, item);
+    const priorRef = state.factorRef;
+    const priorFactor = state.values.factor;
+    for (const reference of members) {
+      const factor = factorFromReference(reference, item.target_ref);
+      if (!factor) throw new Error(context.t("因子集合包含无法解析的冻结因子"));
+      FTTestFactorSelection.addCandidate(state, factor);
     }
+    if (state.kind !== "ic" && priorRef) {
+      state.factorRef = priorRef; state.values.factor = priorFactor;
+    }
+    setSelections(state, [...selections(state), summary(item)]);
   }
 
   async function loadMembers(context, state, item) {

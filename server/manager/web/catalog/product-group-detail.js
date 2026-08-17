@@ -3,8 +3,8 @@
     return context.isCurrent?.() !== false;
   }
 
-  function modeOf(target) {
-    const requested = new URLSearchParams(location.search).get("mode");
+  function modeOf(target, requestedMode = "") {
+    const requested = requestedMode || new URLSearchParams(location.search).get("mode");
     if (target === "new") return "create";
     return requested === "edit" ? "edit" : "view";
   }
@@ -37,29 +37,25 @@
       ? context.t("请选择一个或多个产品分类；正路径和负路径将在这些分类下解析")
       : context.t("产品组的路径在绑定的产品分类下解析");
     section.append(note);
-    const list = document.createElement("div");
-    list.className = "product-group-category-options";
-    (categories || []).forEach(category => {
-      const label = document.createElement("label");
-      label.className = "product-group-category-option";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = category.id;
-      input.checked = selected.has(category.id);
-      input.disabled = !editable;
-      input.addEventListener("change", () => {
-        if (input.checked) selected.add(input.value);
-        else selected.delete(input.value);
-        onChange?.();
-      });
-      label.append(input, document.createTextNode(categoryTitle(category, context)));
-      label.title = category.id;
-      list.append(label);
+    const picker = FTMultiSelectFilter.create(context, {
+      title: context.t("绑定的产品分类"),
+      items: (categories || []).map(category => ({
+        value: category.id,
+        label: categoryTitle(category, context),
+        description: category.id,
+      })),
+      selected: [...selected],
+      multi: true,
+      disabled: !editable,
+      onChange: values => {
+        selected.clear(); values.forEach(value => selected.add(value)); onChange?.();
+      },
     });
-    if (!list.childElementCount) {
-      list.append(FTUI.empty(context.t("暂无可用产品分类"), ""));
+    if (!(categories || []).length) {
+      section.append(FTUI.empty(context.t("暂无可用产品分类"), ""));
+    } else {
+      section.append(picker.element);
     }
-    section.append(list);
     return section;
   }
 
@@ -138,11 +134,11 @@
     return FTCatalogDetailUI.action(context, label, handler, variant);
   }
 
-  async function render(context, target, helpers) {
+  async function render(context, target, helpers, requestedMode = "") {
     context.content.__ftProductGroupCleanup?.();
     delete context.content.__ftProductGroupCleanup;
     const source = helpers.sourceOf();
-    const mode = modeOf(target);
+    const mode = modeOf(target, requestedMode);
     context.activeNav("products");
     helpers.catalogSwitch(context, "groups", source);
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品组…")));
@@ -303,6 +299,14 @@
             creating ? endpoint(source) : endpoint(source, groupPath(group)),
             {method: creating ? "POST" : "PUT", body: JSON.stringify(payload)},
           );
+          if (context.onSaved) {
+            context.onSaved(value.group || value);
+            return;
+          }
+          if (FTTabReturn.returnToSource(context, {
+            kind: "product_group",
+            ref: String(value.group?.group_ref || value.group?.id || ""),
+          })) return;
           if (creating) {
             context.closeTab?.(context.tabID);
             context.navigate(helpers.pathFor(

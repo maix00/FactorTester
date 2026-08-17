@@ -500,7 +500,7 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_surface(SettingsSurface(
         "long_short", "Long-Short", TabMountPoint.GROUP_SETTINGS, kind="list", order=30,
-        selection="single", run_mode="run_all", editable=False,
+        selection="single", run_mode="run_all", editable=True,
         item_label="Long-Short 组合", content_adapter="backtest_long_short",
     ))
     # 分组列表支持的 flow（声明元数据；行为仍由前端 GT.modes 提供）。
@@ -517,6 +517,9 @@ def group_test_settings() -> ApplicationSettings:
         SurfaceFlow("groups", "delete", "删除", "delete", order=50, min_selected=1,
                     button_class="btn-outline-danger"),
         SurfaceFlow("long_short", "rename_long_short", "重命名", "rename", order=5,
+                    min_selected=1, max_selected=1),
+        SurfaceFlow("long_short", "add_long_short", "新增 Long-Short 组合", "create", order=1),
+        SurfaceFlow("long_short", "edit_long_short", "编辑", "edit", order=4,
                     min_selected=1, max_selected=1),
         SurfaceFlow("long_short", "swap_long_short", "交换多空", "swap", order=6,
                     min_selected=1, max_selected=1),

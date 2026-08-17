@@ -24,7 +24,7 @@
       );
       return root;
     }
-    const source = document.createElement("div"); source.className = "test-factor-source-grid";
+    const source = document.createElement("div"); source.className = "test-factor-source-rows";
     source.append(
       FTTestFactorEditor.selectField(
         context.t("所有者"), catalog.owners.map(item => ({
@@ -37,7 +37,7 @@
           catalog.selectedFamilyName = "";
           await FTTestFactorCatalog.update(context, state, refresh,
             () => FTTestFactorCatalog.loadRevisions(state));
-        },
+        }, context,
       ),
       FTTestFactorEditor.selectField(
         context.t("Git commit"), catalog.revisions.map(item => ({
@@ -48,7 +48,7 @@
           catalog.selectedFamilyName = "";
           await FTTestFactorCatalog.update(context, state, refresh,
             () => FTTestFactorCatalog.loadFamilies(state));
-        },
+        }, context,
       ),
       FTTestFactorEditor.familyChooser(context, state, refresh),
     );

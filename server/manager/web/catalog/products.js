@@ -496,8 +496,8 @@
   async function productDetail(context, target) {
     return window.FTProductDetails.productDetail(context, target, detailHelpers());
   }
-  async function groupDetail(context, target) {
-    return window.FTProductDetails.groupDetail(context, target, detailHelpers());
+  async function groupDetail(context, target, mode = "") {
+    return window.FTProductDetails.groupDetail(context, target, detailHelpers(), mode);
   }
   async function referenceDetail(context, kind, targetRef) {
     return window.FTProductDetails.referenceDetail(context, kind, targetRef, detailHelpers());

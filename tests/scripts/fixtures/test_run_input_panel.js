@@ -9,10 +9,21 @@ class Element {
     this.listeners = {};
     this.attributes = {};
     this.textContent = "";
+    this.value = "";
+    this.checked = false;
+    this.disabled = false;
+    this.hidden = false;
+    this.open = false;
+    this.dataset = {};
     this.multiple = false;
     this.accept = "";
+    this.className = "";
+    this.classList = {add: (...names) => {
+      this.className = `${this.className} ${names.join(" ")}`.trim();
+    }};
   }
   append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = [...children]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
@@ -30,9 +41,16 @@ global.FTTestInputState = {
   removeStrategy() {},
 };
 
-vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
-  filename: process.argv[2],
-});
+for (const path of process.argv.slice(2)) {
+  vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
+  if (window.FTMultiSelectFilter) {
+    global.FTMultiSelectFilter = window.FTMultiSelectFilter;
+  }
+  if (window.FTTestObjectPicker) {
+    global.FTTestObjectPicker = window.FTTestObjectPicker;
+    global.FTTestChoicePicker = window.FTTestChoicePicker;
+  }
+}
 
 const context = {
   t: value => value,
@@ -66,14 +84,21 @@ const panel = window.FTTestSourceUpload.strategyPanel(context, state, () => {}, 
   ],
 });
 assert.deepEqual(
-  findAll(panel, node => node.tagName === "button").map(node => node.textContent),
+  findAll(panel, node => node.tagName === "button" && node.textContent !== "×")
+    .map(node => node.textContent),
   ["自定义策略源码", "自定义依赖"],
 );
-const pickers = findAll(panel, node => node.tagName === "input");
+const pickers = findAll(panel, node => node.tagName === "input" && node.accept);
 assert.deepEqual(pickers.map(node => [node.accept, node.multiple]), [
   [".hook", false], [".cfg", true],
 ]);
-assert.equal(findAll(panel, node => node.tagName === "option")[0].textContent, "自定义用途");
+assert.deepEqual(
+  findAll(panel, node => node.tagName === "span"
+    && node.className === "ft-multi-select-option-label"
+    && node.textContent !== "×")
+    .map(node => node.textContent),
+  ["自定义用途"],
+);
 
 const populated = window.FTTestSourceUpload.strategyPanel(context, {
   transientStrategySources: [{path: "hooks/risk.hook", source_code: "allow = true"}],

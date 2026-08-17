@@ -31,23 +31,21 @@
   }
 
   function settingRow(key, field, manifest, values, context, options) {
-    const row = document.createElement("div");
-    row.className = "test-setting-row";
-    const copy = document.createElement("span");
     const label = document.createElement("b");
     label.textContent = field.label || key;
-    copy.append(label);
     const editable = FTSettingRules.isEditable(field, values);
     const hints = [field.help_text];
     if (!editable && Object.keys(field.rules?.editable_if || {}).length) {
       hints.push(context.t("当前模式使用自动值"));
     }
     const hint = hints.filter(Boolean).join("\n");
-    if (hint) {
-      row.title = hint;
-      row.setAttribute("aria-label", `${label.textContent}: ${hint}`);
-    }
-    row.append(copy, inputFor(key, field, manifest, values, context, options, !editable));
+    const row = FTTestFieldRow.create(
+      label.textContent,
+      inputFor(key, field, manifest, values, context, options, !editable),
+      hint,
+      {title: hint},
+    );
+    if (hint) row.setAttribute("aria-label", `${label.textContent}: ${hint}`);
     return row;
   }
 
@@ -108,16 +106,24 @@
       return control;
     }
     if (descriptor?.value_type === "enum" && descriptor.options?.length) {
-      control = document.createElement("select");
       const disabledValues = FTSettingRules.disabledValues(field, values);
-      for (const option of descriptor.options) {
-        const item = document.createElement("option");
-        item.value = String(option.value ?? "");
-        item.textContent = option.label || item.value;
-        item.disabled = disabledValues.has(item.value);
-        control.append(item);
-      }
-      control.value = String(value ?? "");
+      const picker = FTTestChoicePicker.create(context, {
+        className: "test-choice-picker",
+        compact: true,
+        name: `test-setting-${key}`,
+        multi: false,
+        items: descriptor.options.map(option => ({
+          value: String(option.value ?? ""),
+          label: option.label || String(option.value ?? ""),
+          description: option.description || option.help_text || option.label
+            || String(option.value ?? ""),
+          disabled: disabledValues.has(String(option.value ?? "")),
+        })),
+        selected: [String(value ?? "")],
+        disabled,
+        onChange: next => commit(key, field, manifest, values, next[0] ?? "", options),
+      });
+      return picker.element;
     } else if (
       descriptor?.editor === "json"
       || descriptor?.value_type === "object"

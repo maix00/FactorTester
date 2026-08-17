@@ -1471,7 +1471,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/test-factor-candidates.js",
             "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
-            "workbench/product-group-creator.js",
+            "workbench/test-object-picker.js",
+            "workbench/test-object-editor-overlay.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
             "workbench/backtest-group-model.js",
@@ -1525,25 +1526,17 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'nativeList("revisions"' in factor_catalog
     assert 'nativeList("families"' in factor_catalog
     assert 'nativeRequest("instantiate"' in factor_editor
-    assert "FTFactorFamilyPicker.open" in factor_editor
+    assert "FTTestChoicePicker.create" in factor_editor
     assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
     assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
     assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
     assert "restoreFrozenSelections(state)" in factor_catalog
     assert "window.FTTestFactorCandidates" in factor_candidates
     assert "selectedProjections" in scripts["test-products.js"]
-    assert "FTProductGroupCreator.open" in scripts["test-products.js"]
-    assert 'context.t("构建产品路径候选")' in scripts["test-products.js"]
-    assert 'input.type = state.kind === "ic" ? "checkbox" : "radio"' in scripts[
-        "test-products.js"
-    ]
-    creator = scripts["product-group-creator.js"]
-    assert '"/api/catalog/product-groups"' in creator
-    assert '"/api/client/product_tree"' in creator
-    assert '"/api/catalog/tree"' in creator
-    assert "FTProductTree.render" in creator
-    assert "loadTree: async" in creator
-    assert "textarea" not in creator
+    assert "FTTestObjectEditorOverlay.open" in scripts["test-products.js"]
+    assert "FTTestObjectPicker.create" in scripts["test-products.js"]
+    assert "FTTestObjectPicker" in scripts["test-object-picker.js"]
+    assert "FTTestObjectEditorOverlay" in scripts["test-object-editor-overlay.js"]
     assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
     assert "window.FTTestConfigurationCompiler" in scripts[

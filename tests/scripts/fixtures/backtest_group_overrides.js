@@ -41,6 +41,16 @@ global.FTTabChipContent = window.FTTabChipContent;
 global.FTTestSettings = {controlFor: (_key, _field, _manifest, _values, _context, _options, disabled) => {
   const control = new Element("control"); control.disabled = disabled; return control;
 }};
+global.FTTestFieldRow = {
+  create(label, control, help = "", options = {}) {
+    const row = new Element("div");
+    row.className = `test-setting-row ${options.className || ""}`.trim();
+    const copy = new Element("span"); copy.textContent = label;
+    if (help) copy.help = help;
+    row.append(copy, control);
+    return row;
+  },
+};
 
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-group-overrides.js",
@@ -109,7 +119,7 @@ const view = api.render({
 });
 assert.deepEqual(view.value(), {});
 const firstRow = view.children[1].children[0].children[0].children[0];
-const firstToggle = firstRow.children[0];
+const firstToggle = firstRow.children[1].children[0];
 assert.equal(firstToggle.checked, false);
 firstToggle.checked = true;
 firstToggle.listeners.change();
