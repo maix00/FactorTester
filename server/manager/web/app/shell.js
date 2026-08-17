@@ -119,6 +119,12 @@
         state.modules = FTNavigation.fallbackModulesForSession(state.session);
         state.modulesError = error;
       }
+      const moduleByID = new Map(state.modules.map(item => [item.id, item]));
+      state.tabs.forEach(tab => {
+        const module = moduleByID.get(tab.id);
+        if (module) tab.title = t(module.title_key || module.title);
+        else if (tab.id === "settings") tab.title = t("设置");
+      });
       const nav = document.querySelector("#module-nav");
       const railModules = state.modules.filter(item => item.sidebarVisible);
       nav.replaceChildren(...railModules.map(item => {

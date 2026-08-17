@@ -97,6 +97,13 @@
         return null;
       }
       return activate(key, notify);
+  }
+
+    function multiSelect(context, options = {}) {
+      if (!window.FTMultiSelectFilter?.create) {
+        throw new Error("共享多选筛选器尚未加载");
+      }
+      return window.FTMultiSelectFilter.create(context, options);
     }
 
     // `null` is an intentional closed state.  Other callers may omit the
@@ -104,10 +111,19 @@
     if (options.activeKey !== null) activate(options.activeKey, false);
     return Object.freeze({
       bar, host, activate, close, toggle,
+      multiSelect,
       get activeKey() { return activeKey; },
       entries,
     });
   }
 
-  window.FTTabChipContent = Object.freeze({create});
+  window.FTTabChipContent = Object.freeze({
+    create,
+    multiSelect(context, options = {}) {
+      if (!window.FTMultiSelectFilter?.create) {
+        throw new Error("共享多选筛选器尚未加载");
+      }
+      return window.FTMultiSelectFilter.create(context, options);
+    },
+  });
 })();

@@ -18,6 +18,7 @@
 
   async function productDetail(context, target, helpers) {
     const source = helpers.sourceOf();
+    const query = new URLSearchParams(location.search);
     context.activeNav("products");
     const value = await helpers.load(context, source);
     if (!current(context)) return;
@@ -42,7 +43,16 @@
       unavailableProductDetail(context, membership, source, helpers);
       return;
     }
-    if (!product) return referenceDetail(context, "product", target, helpers);
+    if (!product) {
+      // This is already the product route.  Do not fall back to the generic
+      // report-reference resolver: a missing catalog mapping should be
+      // immediate and explicit rather than showing an unbounded resolving UI.
+      unavailableProductDetail(context, {
+        display_name: pathLeaf || rawTarget,
+        product_ref: rawTarget,
+      }, source, helpers);
+      return;
+    }
     context.setHeading(product.name || product.code, product.desc || context.t("产品详情"));
     helpers.catalogSwitch(context, "products", source);
     context.updateActiveTab?.({title: product.name || product.code});
@@ -66,15 +76,31 @@
     term.append(termMount); root.append(term);
     context.content.replaceChildren(root);
     const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
+    const selectedContractUID = String(query.get("contract") || "").trim();
+    const selectedContractName = String(query.get("contract_label") || "").trim();
+    const selectedContractHasData = String(query.get("contract_has_data") || "");
     const contractsEndpoint = source === "local"
       ? "/api/client/product_contracts" : "/api/catalog/contracts";
-    const pricePanelPromise = window.FTProductPricePanel?.render
-      ? window.FTProductPricePanel.render(context, priceMount, {
-          product, source,
-          startDate: start.toISOString().slice(0, 10),
-          endDate: end.toISOString().slice(0, 10),
-        })
-      : Promise.resolve();
+    let pricePanelPromise;
+    if (selectedContractUID && selectedContractHasData === "0") {
+      priceMount.replaceChildren(FTUI.empty(
+        context.t("无此产品信息"), context.t("该合约没有可用的数据"),
+      ));
+      pricePanelPromise = Promise.resolve();
+    } else {
+      pricePanelPromise = window.FTProductPricePanel?.render
+        ? window.FTProductPricePanel.render(context, priceMount, {
+            product, source, contractUID: selectedContractUID,
+            contractName: selectedContractName,
+            startDate: selectedContractUID
+              ? query.get("contract_start") || ""
+              : start.toISOString().slice(0, 10),
+            endDate: selectedContractUID
+              ? query.get("contract_end") || ""
+              : end.toISOString().slice(0, 10),
+          })
+        : Promise.resolve();
+    }
     const contractsRequest = context.api(
       `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
     ).catch(() => ({}));
@@ -105,10 +131,22 @@
       );
       [...table.body.rows].forEach((row, index) => {
         row.dataset.href = "true";
-        row.addEventListener("click", () => context.navigate(helpers.pathFor(
-          `/products/contract/${encodeURIComponent(contractRows[index].uid || contractRows[index].contract || "")}`,
-          source,
-        )));
+        row.addEventListener("click", () => {
+          const item = contractRows[index];
+          const target = contractRows[index].uid || contractRows[index].contract || "";
+          const query = new URLSearchParams({
+            product: product.name || "",
+            contract: target,
+            contract_label: item.contract || item.uid || "",
+            contract_has_data: item.has_data ? "1" : "0",
+            contract_start: item.start || item.start_date || "",
+            contract_end: item.end || item.end_date || "",
+          });
+          context.navigate(helpers.pathFor(
+            `/products/product/${encodeURIComponent(product.name)}?${query}`,
+            source,
+          ));
+        });
       });
       termMount.replaceChildren(table.shell);
     }
@@ -141,9 +179,9 @@
     return window.FTProductGroupDetail.render(context, target, helpers);
   }
 
-  function unavailableContractDetail(context, targetRef, helpers) {
+  function unavailableContractDetail(context, targetRef, helpers, displayTitle = targetRef) {
     const source = helpers.sourceOf();
-    const title = String(targetRef || context.t("合约详情"));
+    const title = String(displayTitle || context.t("合约详情"));
     context.setHeading(title, context.t("合约详情"));
     helpers.catalogSwitch(context, "products", source);
     context.updateActiveTab?.({title});
@@ -153,7 +191,7 @@
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")],
       [
-        [context.t("合约"), title],
+        [context.t("合约"), targetRef || title],
         [context.t("状态"), context.t("无此产品信息")],
       ],
     ).shell);
@@ -166,43 +204,40 @@
 
   async function referenceDetail(context, kind, targetRef, helpers) {
     context.activeNav("products");
-    context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
     if (kind === "contract" || kind === "continuous-contract") {
-      try {
-        const priceEndpoint = helpers.sourceOf() === "local"
-          ? "/api/client/product_prices" : "/api/catalog/prices";
-        const payload = await context.api(priceEndpoint, {
-          method: "POST",
-          body: JSON.stringify({contract_uid: targetRef, freq: "DAY1", adjusted: false}),
-        });
-        if (!current(context)) return;
-        if (payload.success !== false && Array.isArray(payload.data) && payload.data.length) {
-          context.setHeading(payload.contract_name || targetRef, context.t("合约详情"));
-          helpers.catalogSwitch(context, "products", helpers.sourceOf());
-          context.updateActiveTab?.({title: payload.contract_name || targetRef});
-          const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
-          root.append(FTUI.table(
-            [context.t("字段"), context.t("值")],
-            [[context.t("合约"), targetRef], [context.t("频率"), payload.freq || ""],
-             [context.t("数据源"), payload.data_source || ""], [context.t("数据点"), payload.count || (payload.data || []).length]],
-          ).shell);
-          const chart = document.createElement("section"); chart.className = "product-price-section";
-          chart.append(Object.assign(document.createElement("h2"), {textContent: context.t("价格曲线")}));
-          const chartMount = document.createElement("div");
-          if (window.FTPriceChart?.render && Array.isArray(payload.data)) {
-            FTPriceChart.render(context, chartMount, payload);
-          } else chartMount.append(FTUI.empty(context.t("价格曲线暂不可用"), ""));
-          chart.append(chartMount); root.append(chart);
-          context.content.replaceChildren(root); return;
-        }
-      } catch (_) {
-        if (!current(context)) return;
+      const query = new URLSearchParams(location.search);
+      const title = query.get("label") || targetRef;
+      if (query.get("has_data") === "0") {
+        unavailableContractDetail(context, targetRef, helpers, title);
+        return;
       }
-      if (current(context)) {
-        unavailableContractDetail(context, targetRef, helpers);
+      context.setHeading(title, context.t("合约详情"));
+      helpers.catalogSwitch(context, "products", helpers.sourceOf());
+      context.updateActiveTab?.({title});
+      const root = document.createElement("div");
+      root.className = "detail-stack product-detail-page";
+      root.append(helpers.sourceSummary(context, helpers.sourceOf()));
+      const priceMount = document.createElement("div");
+      priceMount.className = "product-price-panel-mount";
+      root.append(priceMount);
+      context.content.replaceChildren(root);
+      if (window.FTProductPricePanel?.render) {
+        await FTProductPricePanel.render(context, priceMount, {
+          source: helpers.sourceOf(),
+          contractUID: targetRef,
+          contractName: title,
+          startDate: query.get("start_date") || "",
+          endDate: query.get("end_date") || "",
+          dataSource: query.get("data_source") || "",
+        });
+      } else {
+        priceMount.replaceChildren(FTUI.empty(
+          context.t("价格曲线暂不可用"), context.t("价格面板尚未加载"),
+        ));
       }
       return;
     }
+    context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
     const payload = await context.api(context.servicePath(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`));
     if (!current(context)) return;
     const reference = payload.reference || payload.data?.reference || {};

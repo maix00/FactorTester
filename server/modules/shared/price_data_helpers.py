@@ -8,6 +8,43 @@ import numpy as np
 import pandas as pd
 
 
+_OPEN_INTEREST_ALIASES = frozenset({
+    "openinterest",
+    "oi",
+    "position",
+    "positioninterest",
+    "hold",
+    "持仓量",
+})
+
+
+def _normalized_column_name(value: object) -> str:
+    """Normalize provider column spellings without changing the source frame."""
+    return "".join(
+        character for character in str(value or "").strip().lower()
+        if character.isalnum()
+    )
+
+
+def open_interest_column(columns) -> str | None:
+    """Return the actual open-interest column exposed by a provider.
+
+    Product views normally expose ``OPEN_INTEREST`` after applying their
+    ``DataColumn`` mapping, while contract files and third-party providers may
+    keep ``open_interest``, ``OI``, ``hold`` or a localized spelling.  The
+    projection must preserve the provider's actual column name so callers can
+    read it without mutating the input frame.
+    """
+    values = [str(getattr(column, "name", column)) for column in columns]
+    for value in values:
+        if value == "OPEN_INTEREST":
+            return value
+    for value in values:
+        if _normalized_column_name(value) in _OPEN_INTEREST_ALIASES:
+            return value
+    return None
+
+
 def to_epoch_ms(
     ts: pd.Timestamp,
     timezone: str = 'Asia/Shanghai',
@@ -51,4 +88,3 @@ def format_price_row(row, time_col: str, o_col: str, h_col: str, l_col: str, c_c
     if oi_col:
         entry['open_interest'] = row_value_as_float(row, oi_col, 0)
     return entry
-

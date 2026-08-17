@@ -158,6 +158,8 @@
   async function render(context, mount, options = {}) {
     const source = options.source || "server";
     const product = options.product || {};
+    const contractUID = String(options.contractUID || "").trim();
+    const targetName = contractUID || String(product.name || "").trim();
     const state = {
       ...priceStateFromLocation(),
       ...(options.dataSource ? {dataSource: options.dataSource} : {}),
@@ -185,7 +187,7 @@
       metadataMount.replaceChildren(FTUI.loading(context.t("正在读取数据能力…")));
       chartMount.replaceChildren(FTUI.loading(context.t("正在读取价格曲线…")));
       const payload = {
-        product_name: product.name,
+        ...(contractUID ? {contract_uid: contractUID} : {product_name: product.name}),
         adjusted: Boolean(state.adjusted),
         start_date: options.startDate || null,
         end_date: options.endDate || null,
@@ -197,13 +199,15 @@
           body: JSON.stringify(payload),
         });
         if (!current(context) || requestIDForLoad !== requestID) return;
-        if (value?.success === false) throw new Error(value.error || "request failed");
+        if (value?.success === false) {
+          throw new Error(value.error || context.t("请求失败"));
+        }
         controls.apply(value || {});
         metadataMount.replaceChildren(metadata(context, value || {}));
         if (window.FTPriceChart?.render && Array.isArray(value?.data)) {
           FTPriceChart.render(context, chartMount, {
             ...value,
-            product: value.product || product.name,
+            product: value.contract_name || value.product || options.contractName || targetName,
             desc: value.desc || product.desc,
           });
         } else {

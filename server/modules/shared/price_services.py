@@ -332,11 +332,14 @@ def find_contract_product(contract_uid):
 def contract_data_path_for(
     contract_uid: str,
     contract_product: Any | None = None,
+    data_source: str | None = None,
 ) -> str:
-    """Resolve a contract file through its data source before legacy fallback."""
+    """Resolve a contract file through its selected source before fallback."""
     product = contract_product or find_contract_product(contract_uid)
     if product is not None:
         for source in DataSource.available_for_product(product):
+            if data_source and str(getattr(source, 'key', '') or '') != str(data_source):
+                continue
             try:
                 path = str(source.get_path(product) or '')
             except (OSError, RuntimeError, TypeError, ValueError):

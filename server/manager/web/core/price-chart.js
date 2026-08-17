@@ -85,6 +85,58 @@
     return Number.isFinite(numeric) ? numeric : null;
   }
 
+  function tooltipNumber(value) {
+    return Number.isFinite(Number(value)) ? Number(value).toLocaleString(
+      undefined, {maximumFractionDigits: 6},
+    ) : "—";
+  }
+
+  function pointLabel(context, label, value) {
+    const translated = context?.t?.(label) || label;
+    return `${translated}: <b>${tooltipNumber(value)}</b>`;
+  }
+
+  function ohlcPointFormatter(context) {
+    return function() {
+      return [
+        pointLabel(context, "开盘价", this.open),
+        pointLabel(context, "最高价", this.high),
+        pointLabel(context, "最低价", this.low),
+        pointLabel(context, "收盘价", this.close),
+      ].join("<br/>");
+    };
+  }
+
+  function scalarPointFormatter(context, label) {
+    return function() { return pointLabel(context, label, this.y); };
+  }
+
+  function localeTag(context) {
+    const documentLocale = typeof document !== "undefined"
+      ? document.documentElement?.lang : "";
+    const value = String(
+      context?.locale || documentLocale || context?.languagePreference || "zh-Hans",
+    ).toLowerCase();
+    return value.startsWith("en") ? "en-US" : "zh-CN";
+  }
+
+  function dateLabelFormatter(context) {
+    const locale = localeTag(context);
+    return function() {
+      const timestamp = Number(this.value);
+      if (!Number.isFinite(timestamp)) return String(this.value ?? "");
+      const span = Number(this.axis?.max) - Number(this.axis?.min);
+      const options = Number.isFinite(span) && span <= 3 * 86400000
+        ? {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}
+        : {year: "numeric", month: "short", day: "numeric"};
+      try {
+        return new Intl.DateTimeFormat(locale, options).format(new Date(timestamp));
+      } catch (_) {
+        return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
+      }
+    };
+  }
+
   function optionsOf(context, payload, bars) {
     const t = value => context?.t?.(value) || value;
     const hasOI = bars.some(item => item.openInterest !== null);
@@ -103,11 +155,13 @@
         data: bars.map(item => [item.timestamp, item.open, item.high, item.low, item.close]),
         color: "#e14d5b", upColor: "#18a572", lineColor: "#e14d5b",
         upLineColor: "#18a572", dataGrouping: {groupAll: true},
+        tooltip: {pointFormatter: ohlcPointFormatter(context)},
       },
       {
         type: "column", name: t("成交量"), yAxis: 1,
         data: bars.map(item => [item.timestamp, item.volume]),
         color: "#8aa4c8", dataGrouping: {approximation: "sum", groupAll: true},
+        tooltip: {pointFormatter: scalarPointFormatter(context, "成交量")},
       },
     ];
     if (hasOI) {
@@ -117,6 +171,7 @@
         data: bars.map(item => [item.timestamp, item.openInterest]),
         color: "#af52de", lineWidth: 1.4,
         dataGrouping: {approximation: "average", groupAll: true},
+        tooltip: {pointFormatter: scalarPointFormatter(context, "持仓量")},
       });
     }
     return {
@@ -139,7 +194,10 @@
           {type: "all", text: t("全部")},
         ],
       },
-      xAxis: {type: "datetime", ordinal: true},
+      xAxis: {
+        type: "datetime", ordinal: true,
+        labels: {formatter: dateLabelFormatter(context)},
+      },
       yAxis,
       tooltip: {shared: true, split: false, valueDecimals: 2},
       navigator: {enabled: true},
@@ -164,5 +222,8 @@
     return node;
   }
 
-  window.FTPriceChart = Object.freeze({barsOf, render, timestampOf});
+  window.FTPriceChart = Object.freeze({
+    barsOf, dateLabelFormatter, ohlcPointFormatter, render,
+    scalarPointFormatter, timestampOf,
+  });
 })();

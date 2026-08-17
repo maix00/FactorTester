@@ -14,7 +14,9 @@
     for (const source of sourceOrder(preferred)) {
       try {
         const payload = await operation(source);
-        if (payload?.success === false) throw new Error(payload.error || "request failed");
+        if (payload?.success === false) {
+          throw new Error(payload.error || context.t("请求失败"));
+        }
         return {payload: payload || {}, source};
       } catch (error) {
         errors.push(error);

@@ -60,11 +60,13 @@
     return tabs;
   }
 
-  function render(context, data, mount, {page, query, groupRef, scope = "public"}) {
+  function render(context, data, mount, {
+    page, query, groupRefs = ["*"], scope = "public",
+  }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, query, scope);
     }
-    return renderSubjects(context, data, mount, {page, query, groupRef});
+    return renderSubjects(context, data, mount, {page, query, groupRefs});
   }
 
   function renderFamilies(context, data, mount, query, scope) {
@@ -148,15 +150,18 @@
     return "暂无公共因子家族";
   }
 
-  function renderSubjects(context, data, mount, {page, query, groupRef}) {
+  function renderSubjects(context, data, mount, {page, query, groupRefs}) {
     const names = model().productGroupNames(data.groups);
     const bySubject = model().subjectGroups(data.groups);
     const kind = page === "sets" ? "factor-set" : "factor";
     const values = kind === "factor-set" ? data.sets : data.factors;
+    const selectedGroups = Array.isArray(groupRefs) ? groupRefs : ["*"];
+    const allGroups = selectedGroups.includes("*") || !selectedGroups.length;
     const items = values.map(value => ({kind, value})).filter(item => {
       const refs = model().productGroupRefs(item, bySubject);
-      const groupMatches = groupRef === "*"
-        || (groupRef === "" ? refs.length === 0 : refs.includes(groupRef));
+      const groupMatches = allGroups || selectedGroups.some(groupRef => (
+        groupRef === "" ? refs.length === 0 : refs.includes(groupRef)
+      ));
       const labels = model().groupLabels(
         item, names, bySubject, context.t("未绑定产品组"),
       );

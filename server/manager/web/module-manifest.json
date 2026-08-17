@@ -34,7 +34,7 @@
     "job-detail-backtest": ["job-detail-core", "report", "charts"],
     "catalog": ["catalog-core", "charts"],
     "workbench-core": [],
-    "workbench-settings": ["workbench-core"],
+    "workbench-settings": ["workbench-core", "catalog-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
     "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
     "workbench-factor-controls": ["workbench-core"],
@@ -118,6 +118,7 @@
       "catalog/factor-model.js",
       "catalog/product-category-model.js",
       "catalog/product-list-table.js",
+      "catalog/shared/multi-select-filter.js",
       "catalog/product-tree.js"
     ],
     "output-choice": [
@@ -328,6 +329,7 @@
     "core/icons.js",
     "core/price-chart.js",
     "core/market-data.js",
+    "catalog/shared/multi-select-filter.js",
     "jobs/list-format.js",
     "jobs/page-tabs.js",
     "jobs/test-types.js",

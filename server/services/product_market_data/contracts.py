@@ -7,7 +7,10 @@ from typing import Any, Mapping, cast
 
 import pandas as pd
 
-from server.modules.shared.price_data_helpers import format_price_row
+from server.modules.shared.price_data_helpers import (
+    format_price_row,
+    open_interest_column,
+)
 from server.modules.shared.price_services import (
     available_freq_names_for_product,
     available_sources_for_product,
@@ -81,7 +84,21 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         available_sources_for_product(contract_product)
         if contract_product else []
     )
-    contract_file = contract_data_path_for(contract_uid, contract_product)
+    requested_source = str(payload.get("data_source") or "").strip()
+    available_source_ids = {
+        str(item.get("alias") or "").strip()
+        for item in available_sources
+        if str(item.get("alias") or "").strip()
+    }
+    if requested_source and requested_source not in available_source_ids:
+        raise ProductMarketDataError(
+            f"合约不提供所选数据源: {requested_source}", 400,
+        )
+    contract_file = contract_data_path_for(
+        contract_uid,
+        contract_product,
+        data_source=requested_source or None,
+    )
     if not Path(contract_file).is_file():
         raise ProductMarketDataError(
             f"合约数据不存在: {contract_uid}", 404,
@@ -95,6 +112,8 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     if price_frame.empty:
         raise ProductMarketDataError("合约数据为空", 404)
 
+    source_oi_column = open_interest_column(price_frame.columns)
+
     from tools.data.types import DataFreq
 
     try:
@@ -106,16 +125,18 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     daily = frequency.is_day_multiple()
     if daily:
         price_frame["trading_day"] = pd.to_datetime(price_frame["trading_day"])
+        aggregation = {
+            "open": ("open_price", "first"),
+            "high": ("highest_price", "max"),
+            "low": ("lowest_price", "min"),
+            "close": ("close_price", "last"),
+            "volume": ("volume", "sum"),
+        }
+        if source_oi_column:
+            aggregation["open_interest"] = (source_oi_column, "last")
         price_frame = (
             price_frame.groupby("trading_day")
-            .agg(
-                open=("open_price", "first"),
-                high=("highest_price", "max"),
-                low=("lowest_price", "min"),
-                close=("close_price", "last"),
-                volume=("volume", "sum"),
-                open_interest=("open_interest", "last"),
-            )
+            .agg(**aggregation)
             .reset_index()
             .rename(columns={"trading_day": "time_idx"})
         )
@@ -147,7 +168,8 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     if price_frame.empty:
         raise ProductMarketDataError("指定范围内无合约价格数据", 404)
 
-    has_open_interest = "open_interest" in price_frame.columns
+    oi_column = open_interest_column(price_frame.columns)
+    has_open_interest = oi_column is not None
     timezone = getattr(contract_product, "timezone", None) or "Asia/Shanghai"
     rows = [
         format_price_row(
@@ -158,7 +180,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
             l_col=columns[2],
             c_col=columns[3],
             v_col=columns[4],
-            oi_col="open_interest" if has_open_interest else None,
+            oi_col=oi_column,
             freq_is_daily=daily,
             timezone=timezone,
         )
@@ -178,7 +200,9 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         "supports_adjusted": False,
         "supports_term_structure": False,
         "freq": frequency.name,
-        "data_source": available_sources[0]["alias"] if available_sources else "",
+        "data_source": requested_source or (
+            available_sources[0]["alias"] if available_sources else ""
+        ),
         "available_sources": available_sources,
         "available_freqs": available_freqs,
         "count": len(rows),

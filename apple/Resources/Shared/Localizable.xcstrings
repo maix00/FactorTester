@@ -288,6 +288,9 @@
     "价格曲线暂不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Price chart unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"价格曲线暂不可用"}}}},
     "数据能力读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to load data capabilities"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"数据能力读取失败"}}}},
     "价格曲线读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to load price chart"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"价格曲线读取失败"}}}},
+    "请求失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Request failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请求失败"}}}},
+    "交互式行情图组件未加载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Interactive market chart component is not loaded"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"交互式行情图组件未加载"}}}},
+    "无数据" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No data"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无数据"}}}},
     "合约详情" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Contract details"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"合约详情"}}}},
     "前复权乘法" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Forward-adjustment multiplier"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"前复权乘法"}}}},
     "前复权加法" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Forward-adjustment additive"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"前复权加法"}}}},
@@ -13040,7 +13043,22 @@
     "研究附件大小校验失败。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment size verification failed."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件大小校验失败。"}}}},
     "研究附件完整性校验失败。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research attachment integrity verification failed."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究附件完整性校验失败。"}}}},
     "附件传输授权失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Attachment transfer authorization failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"附件传输授权失败"}}}},
-    "重新布局" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Re-layout"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"重新布局"}}}}
+    "重新布局" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Re-layout"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"重新布局"}}}},
+    "已选 %lld 个" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Selected %lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已选 %lld 个"}}}},
+    "筛选" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Filter"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"筛选"}}}},
+    "搜索…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索…"}}}},
+    "清除搜索" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Clear search"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"清除搜索"}}}},
+    "尚未选择" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Nothing selected"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"尚未选择"}}}},
+    "未筛选" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No filter"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未筛选"}}}},
+    "搜索产品分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search product categories"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索产品分类"}}}},
+    "显示所有产品组绑定状态的因子" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Show factors with any product-group binding state"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"显示所有产品组绑定状态的因子"}}}},
+    "只显示没有绑定产品组的因子" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Show only factors without a product group"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"只显示没有绑定产品组的因子"}}}},
+    "使用未绑定任何产品分类的本级产品列表" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Use this level's product list without a bound category"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用未绑定任何产品分类的本级产品列表"}}}},
+    "开盘价" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"开盘价"}}}},
+    "最高价" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"High"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"最高价"}}}},
+    "最低价" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Low"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"最低价"}}}},
+    "收盘价" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Close"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"收盘价"}}}},
+    "持仓量" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open interest"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"持仓量"}}}}
   },
   "version" : "1.0"
 }

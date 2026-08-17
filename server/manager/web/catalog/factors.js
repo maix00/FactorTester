@@ -50,7 +50,7 @@
     let group = null;
     if (page !== "families") {
       group = FTFactorGroupFilter.create(
-        context, data.groups, "*", () => render(),
+        context, data.groups, ["*"], () => render(),
       );
       root.append(group.element);
     }
@@ -75,7 +75,7 @@
       page,
       scope: familyScope,
       query: search.value.trim().toLowerCase(),
-      groupRef: group?.value ?? "*",
+      groupRefs: group?.values ?? ["*"],
     });
     search.addEventListener("input", render);
     render();
