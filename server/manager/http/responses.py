@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypeAlias
+
+
+HeaderValue: TypeAlias = str | list[str] | tuple[str, ...]
 
 
 def json_response(
@@ -11,7 +14,7 @@ def json_response(
     payload: dict[str, Any],
     status: int = 200,
     *,
-    headers: dict[str, str] | None = None,
+    headers: dict[str, HeaderValue] | None = None,
 ) -> None:
     """Write a JSON response while preserving Manager session refreshes.
 
@@ -24,7 +27,11 @@ def json_response(
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     for key, value in response_headers.items():
-        handler.send_header(key, value)
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                handler.send_header(key, str(item))
+        else:
+            handler.send_header(key, value)
     if "Set-Cookie" not in response_headers:
         token = getattr(handler, "_bearer_token", lambda: "")()
         state = getattr(handler, "state", None)

@@ -31,7 +31,14 @@ DEVICE_SESSION_HANDOFF_TTL_SECONDS = 120
 
 class SessionStateMixin:
     """Own account sessions without coupling them to HTTP transport."""
-    def login(self, username: str, password: str) -> tuple[str, str, str]:
+    def login(
+        self,
+        username: str,
+        password: str,
+        *,
+        authentication: str = "password",
+        origin: str = "",
+    ) -> tuple[str, str, str]:
         if self.control_store is None:
             # Keep the legacy helper's two-argument seam for local clients and
             # tests that replace the SQLite authenticator.
@@ -63,6 +70,8 @@ class SessionStateMixin:
             principal,
             role,
             alias=self._alias_for_principal(principal),
+            authentication=authentication,
+            origin=origin,
         )
 
     def login_device(
@@ -102,6 +111,81 @@ class SessionStateMixin:
              if str(item.get("username") or "") == principal),
             None,
         )
+
+    def public_visitor_login_account(
+        self,
+        username: str,
+    ) -> dict[str, object] | None:
+        """Resolve one ordinary allowlisted account for visitor login.
+
+        Visitor login is intentionally narrower than normal Manager login:
+        the submitted identifier must resolve to exactly one account, that
+        account must be named by the deployment allowlist, and its effective
+        role must be the ordinary ``user`` role.  References are compared
+        case-sensitively so an alias cannot silently resolve to another
+        account.  An empty or invalid allowlist fails closed.
+        """
+        value = str(username or "").strip()
+        allowlist = tuple(
+            str(item or "").strip()
+            for item in getattr(self, "public_visitor_login_allowlist", ())
+            if str(item or "").strip()
+        )
+        if not value or not allowlist:
+            return None
+
+        accounts = self._public_visitor_accounts()
+        candidates = [
+            dict(account)
+            for account in accounts
+            if value in self._account_login_references(account)
+            and any(
+                reference in self._account_login_references(account)
+                for reference in allowlist
+            )
+        ]
+        if len(candidates) != 1:
+            # This includes duplicate aliases and role changes made after a
+            # deployment allowlist was written.  Do not reveal which account
+            # caused the ambiguity to an unauthenticated visitor.
+            return None
+        account = candidates[0]
+        from server.manager.domain.accounts import account_role
+
+        if (
+            not bool(account.get("active", True))
+            or bool(account.get("is_admin"))
+            or account_role(account) != "user"
+        ):
+            return None
+        return account
+
+    def _public_visitor_accounts(self) -> list[dict[str, object]]:
+        """Read the account authority, falling back to existing local SQLite."""
+        if self.control_store is not None:
+            try:
+                return [dict(item) for item in self.control_store.load_accounts()]
+            except ControlDatabaseError:
+                # Public visitor login must retain the same local-account
+                # outage behavior as normal password login.
+                pass
+        return [dict(item) for item in LocalAccountStore().load_accounts()]
+
+    @staticmethod
+    def _account_login_references(account: dict[str, object]) -> tuple[str, ...]:
+        """Return exact canonical, organization+alias, and alias references."""
+        references: list[str] = []
+        for value in (account.get("username"), account.get("alias")):
+            normalized = str(value or "").strip()
+            if normalized and normalized not in references:
+                references.append(normalized)
+        organization = str(account.get("organization_id") or "").strip()
+        alias = str(account.get("alias") or "").strip()
+        if organization and alias:
+            organization_alias = f"{organization}@{alias}"
+            if organization_alias not in references:
+                references.append(organization_alias)
+        return tuple(references)
 
     @staticmethod
     def _account_for_principal_from(
@@ -380,7 +464,7 @@ class SessionStateMixin:
             authentication = str(value[3] or "")
             session_origin = str(value[4] or "").strip().rstrip("/")
         return (
-            authentication in {"device", "device-handoff"}
+            authentication in {"device", "device-handoff", "visitor-password"}
             and session_origin == expected_origin
         )
 

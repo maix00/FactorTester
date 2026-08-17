@@ -115,6 +115,30 @@ def configured_visitor_origins(raw: str | None = None) -> tuple[str, ...]:
     return tuple(origins)
 
 
+def configured_public_visitor_login_allowlist(
+    raw: str | None = None,
+) -> tuple[str, ...]:
+    """Return the case-sensitive account references allowed from visitors.
+
+    The value is deliberately an explicit deployment setting rather than a
+    built-in username.  Each item may be a canonical username, an
+    ``organization@alias`` reference, or an alias.  Resolution against the
+    current account rows happens in the session state, so a stale or
+    ambiguous alias never authorizes a login.
+    """
+    value = raw
+    if value is None:
+        import os
+
+        value = os.environ.get("FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST", "")
+    references: list[str] = []
+    for item in str(value or "").split(","):
+        reference = str(item or "").strip()
+        if reference and reference not in references:
+            references.append(reference)
+    return tuple(references)
+
+
 def configured_manager_endpoint(raw: str | None = None) -> str:
     """Return the configured Manager target used after visitor entry."""
     value = raw
@@ -387,6 +411,16 @@ def visitor_cookie(token: str, *, secure: bool = True) -> str:
     secure_flag = " Secure;" if secure else ""
     return (
         f"{VISITOR_COOKIE}={token}; Max-Age={VISITOR_SESSION_TTL_SECONDS};"
+        f" HttpOnly; SameSite=Lax;{secure_flag} Path=/"
+    )
+
+
+def clear_visitor_cookie(*, secure: bool = True) -> str:
+    """Expire the anonymous visitor capability after account login."""
+    secure_flag = " Secure;" if secure else ""
+    return (
+        f"{VISITOR_COOKIE}=; Max-Age=0;"
+        " Expires=Thu, 01 Jan 1970 00:00:00 GMT;"
         f" HttpOnly; SameSite=Lax;{secure_flag} Path=/"
     )
 
