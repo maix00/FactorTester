@@ -266,8 +266,11 @@ class ClientSourceCatalog:
 def _source_descriptor(manifest: LocalSourceManifest) -> dict[str, Any]:
     available = set(manifest.availability["available_product_refs"])
     modes = [dict(member["data_mode"]) for member in manifest.members]
+    product_paths = sorted({item.class_path for item in manifest.products})
     return {
         "id": manifest.source_id,
+        "family_id": manifest.source_id,
+        "family_name": manifest.source_name,
         "source_ref": f"data-source:local:{manifest.source_id}",
         "source_name": manifest.source_name,
         "source_kind": "local",
@@ -283,7 +286,32 @@ def _source_descriptor(manifest: LocalSourceManifest) -> dict[str, Any]:
                 "timezone": member["timezone"],
                 "time_columns": dict(member["time_columns"]),
                 "data_columns": dict(member["data_columns"]),
-                "product_count": len(available),
+                "dimensions": {
+                    key: member["data_mode"].get(key)
+                    for key in (
+                        "sampling_mode", "frequency", "data_kind",
+                        "market_depth", "delivery_mode",
+                    )
+                },
+                "data_modes": [dict(member["data_mode"])],
+                "product_paths": product_paths,
+                "availability": {
+                    "status": "ready" if any(
+                        product.product_ref in available
+                        for product in manifest.products
+                    ) else "empty",
+                    "product_count": sum(
+                        product.product_ref in available
+                        for product in manifest.products
+                    ),
+                    "frequency_names": [
+                        str(member["data_mode"].get("frequency") or "")
+                    ] if member["data_mode"].get("frequency") else [],
+                },
+                "product_count": sum(
+                    product.product_ref in available
+                    for product in manifest.products
+                ),
                 "catalog_product_count": len(manifest.products),
             }
             for member in manifest.members

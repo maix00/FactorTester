@@ -291,10 +291,60 @@ def category_view(
 ) -> dict[str, Any]:
     """Return one JSON-ready category object for every category origin."""
     result = normalize_definition(value)
+    composite = bool(result.get("is_composite"))
+    if source_managed:
+        editability = {
+            "category_title": "super_admin",
+            "category_id": False,
+            "label_title": False,
+            "label_id": False,
+            "label_paths": False,
+            "label_add": False,
+            "label_remove": False,
+            "delete": False,
+            "refresh": False,
+        }
+    elif composite:
+        editability = {
+            "category_title": False,
+            "category_id": False,
+            "label_title": True,
+            "label_id": False,
+            "label_paths": False,
+            "label_add": False,
+            "label_remove": False,
+            "delete": True,
+            "refresh": True,
+        }
+    else:
+        editability = {
+            "category_title": True,
+            "category_id": False,
+            "label_title": True,
+            "label_id": False,
+            "label_paths": True,
+            "label_add": True,
+            "label_remove": True,
+            "delete": True,
+            "refresh": False,
+        }
+    items = []
+    for item in result.get("items") or []:
+        value = dict(item)
+        generated = is_generated_label(value)
+        value["editability"] = {
+            "title": bool(editability["label_title"] and not generated),
+            "id": False,
+            "paths": bool(editability["label_paths"] and not generated),
+            "remove": bool(editability["label_remove"] and not generated),
+        }
+        items.append(value)
+    result["items"] = items
     result.update({
         "kind": kind,
         "owner_ref": owner_ref,
         "source_managed": bool(source_managed),
+        "editability": editability,
     })
     return result
 

@@ -2601,6 +2601,10 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
             script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/catalog/source-list.js") as response:
             source_script = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/catalog/source-family-detail.js"
+        ) as response:
+            source_family_script = response.read().decode("utf-8")
 
     assert '["sources", "数据源"]' in script
     assert '["products", "产品"]' in script
@@ -2632,6 +2636,11 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'FTProductCategoryModel.availableSourceIDs' in script
     assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
+    assert 'let selectedIDs = FTProductTree.categorySelectionValues' in script
+    assert 'selectedIDs = FTProductTree.categorySelectionValues' in script
+    assert 'await renderTree()' in script
+    assert 'descriptors.find(([, item])' in source_family_script
+    assert 'const descriptor = entry?.[1]' in source_family_script
 
 
 def test_product_catalog_lazy_page_forwards_search_and_paging(
@@ -2931,8 +2940,22 @@ def test_local_bundle_filters_real_product_tree_without_a_service_port() -> None
     )
 
     assert tree
-    assert tree[0]["title"] == "中国期货日夜盘×中国期货行业"
-    assert tree[0]["key"] == "ProductCategory/cnfutures_day_night×cnfutures_sector"
+    assert tree[0]["title"] == "Product"
+    assert tree[0]["key"] == "Product"
+    nodes = list(_walk_product_nodes(tree))
+    assert not any(
+        node["key"].startswith("ProductCategory/") for node in nodes
+    )
+    assert any(
+        "/ProductCategory/cnfutures_day_night×cnfutures_sector" in node["key"]
+        for node in nodes
+    )
+
+
+def _walk_product_nodes(nodes):
+    for node in nodes:
+        yield node
+        yield from _walk_product_nodes(node.get("children") or [])
 
 
 def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:
@@ -3076,7 +3099,7 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     assert "mode === \"edit\"" in detail_layout
     assert "mode === \"view\"" not in detail_layout
     assert "ProductCategory/" in detail_surface
-    assert "removable: labelsEditable && !composite" in detail_layout
+    assert "policy.label_remove" in detail_layout
     assert "removable: options.removable === true" in label_editor
     assert "/products/categories?updated=" in detail_script
     assert "window.FTProductCategoryOverlay" in overlay

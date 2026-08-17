@@ -89,6 +89,10 @@
         case "product-sources": return guarded(
           context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productSources, route,
         );
+        case "product-source-family": return guarded(
+          context(routeToken), {nav: "products", title: "数据源族", allowVisitor: true},
+          pages.productSourceFamily, route.id,
+        );
         case "product-groups": return guarded(
           context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroups, route,
         );

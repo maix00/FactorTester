@@ -19,6 +19,65 @@ from server.manager.http.gateway import GatewayResponse
 from server.manager.state.models import Worktree
 
 
+def _merge_source_values(first: object, second: object) -> list[str]:
+    values: list[str] = []
+    for collection in (first, second):
+        if not isinstance(collection, (list, tuple, set)):
+            continue
+        for value in collection:
+            text = str(value or "").strip()
+            if text and text not in values:
+                values.append(text)
+    return values
+
+
+def _merge_source_objects(
+    first: object,
+    second: object,
+    *,
+    key_fields: tuple[str, ...],
+) -> list[dict[str, object]]:
+    merged: dict[str, dict[str, object]] = {}
+    for collection in (first, second):
+        if not isinstance(collection, (list, tuple)):
+            continue
+        for value in collection:
+            if not isinstance(value, dict):
+                continue
+            key = next(
+                (str(value.get(field) or "").strip() for field in key_fields
+                 if str(value.get(field) or "").strip()),
+                "",
+            )
+            if not key:
+                continue
+            merged[key] = {**merged.get(key, {}), **value}
+    return list(merged.values())
+
+
+def _merge_source_members(first: object, second: object) -> list[dict[str, object]]:
+    return _merge_source_objects(first, second, key_fields=("id", "key", "label"))
+
+
+def _merge_source_availability(first: object, second: object) -> dict[str, object]:
+    left = first if isinstance(first, dict) else {}
+    right = second if isinstance(second, dict) else {}
+    status = "ready" if "ready" in {left.get("status"), right.get("status")} \
+        else str(left.get("status") or right.get("status") or "")
+    return {
+        **left,
+        **right,
+        "status": status,
+        "product_count": max(
+            int(left.get("product_count") or 0),
+            int(right.get("product_count") or 0),
+        ),
+        "frequency_names": _merge_source_values(
+            left.get("frequency_names"), right.get("frequency_names"),
+        ),
+    }
+
+
 class RoutingStateMixin:
     """Project local and peer capabilities into deterministic service routes."""
     def _revision_for_path(self, path: Path | None = None) -> str:
@@ -346,11 +405,34 @@ class RoutingStateMixin:
                 })
                 if source_id not in local_by_id:
                     for key in (
-                        "provider_kind", "members", "frequencies",
-                        "availability", "catalog_product_count",
+                        "provider_kind", "frequencies",
                     ):
                         if key in summary:
                             base[key] = summary[key]
+                base["members"] = _merge_source_members(
+                    base.get("members"), summary.get("members"),
+                )
+                base["product_paths"] = _merge_source_values(
+                    base.get("product_paths"), summary.get("product_paths"),
+                )
+                base["categories"] = _merge_source_objects(
+                    base.get("categories"), summary.get("categories"),
+                    key_fields=("id", "title_zh", "title"),
+                )
+                base["data_modes"] = _merge_source_objects(
+                    base.get("data_modes"), summary.get("data_modes"),
+                    key_fields=("id", "frequency", "title_zh"),
+                )
+                base["frequencies"] = _merge_source_values(
+                    base.get("frequencies"), summary.get("frequencies"),
+                )
+                base["catalog_product_count"] = max(
+                    int(base.get("catalog_product_count") or 0),
+                    int(summary.get("catalog_product_count") or 0),
+                )
+                base["availability"] = _merge_source_availability(
+                    base.get("availability"), summary.get("availability"),
+                )
                 base.setdefault("server_providers", []).append(
                     self._source_provider(
                         route,
@@ -373,7 +455,12 @@ class RoutingStateMixin:
                     str(item.get("server_id") or ""),
                 ),
             )
-            source["server_provided"] = any(
+            # ``server_provided`` describes ownership of the current
+            # Manager's catalog, not the liveness of an execution route.
+            # A local source remains a server-provided source while its
+            # worker/data port is stopped; availability and provider rows
+            # carry the independent online state.
+            source["server_provided"] = bool(source.get("server_provided")) or any(
                 bool(item.get("online")) for item in providers
             )
         return sorted(
