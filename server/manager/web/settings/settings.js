@@ -8,10 +8,7 @@
     ["updates", "客户端更新", "arrow.down.circle"],
   ];
 
-  function visibleSections(context) {
-    if (context.session?.role !== "super_admin") return sections;
-    return [sections[0], ["user-management", "用户与机构", "person.2"], ...sections.slice(1)];
-  }
+  function visibleSections() { return sections; }
 
   function current(context) {
     return context.isRouteCurrent?.() !== false;
@@ -22,7 +19,7 @@
     const shell = document.createElement("div"); shell.className = "settings-hub";
     const sidebar = document.createElement("nav"); sidebar.className = "settings-sidebar";
     const body = document.createElement("div"); body.className = "settings-content";
-    visibleSections(context).forEach(([id, title, symbol]) => {
+    visibleSections().forEach(([id, title, symbol]) => {
       const button = document.createElement("button");
       button.className = id === selected ? "active" : "";
       button.innerHTML = '<span class="settings-sidebar-icon"></span><span></span>';
@@ -43,9 +40,6 @@
       return window.FTSettingsControlDatabase.show(context, body);
     }
     if (selected === "devices") return window.FTSettingsDevices.show(context, body);
-    if (selected === "user-management") {
-      return window.FTSettingsUserManagement.show(context, body);
-    }
     if (selected === "workspace") return workspace(context, body);
     if (selected === "language") return language(context, body);
     return updates(context, body);

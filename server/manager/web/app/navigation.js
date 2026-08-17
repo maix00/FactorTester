@@ -274,7 +274,14 @@
     }
     if (parts[0] === "profiles") return {kind: "profiles"};
     if (parts[0] === "settings") return {kind: "settings", section: parts[1] || "account"};
-    if (parts[0] === "manager") return {kind: "manager"};
+    if (parts[0] === "manager") {
+      const section = new URLSearchParams(search).get("section") || "services";
+      return {
+        kind: "manager",
+        section: ["services", "allowlist", "devices"].includes(section)
+          ? section : "services",
+      };
+    }
     return {kind: "unknown"};
   }
 

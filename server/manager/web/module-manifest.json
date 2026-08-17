@@ -49,7 +49,8 @@
     "workbench-products": ["workbench-core", "catalog-core"],
     "workbench-backtest": ["workbench-settings", "workbench-settings-controls"],
     "workbench-templates": ["workbench-core"],
-    "settings": ["core"]
+    "settings": ["core"],
+    "manager": ["core"]
   },
   "control_groups": {
     "ic_horizon_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
@@ -90,7 +91,7 @@
     "profile": ["profile"],
     "profiles": ["profile"],
     "settings": ["settings"],
-    "manager": ["settings"]
+    "manager": ["manager"]
   },
   "external_styles": [
     "katex/katex.min.css"
@@ -303,9 +304,12 @@
     ],
     "settings": [
       "settings/settings.js",
-      "settings/user-management.js",
       "settings/devices.js",
-      "settings/control-database.js",
+      "settings/control-database.js"
+    ],
+    "manager": [
+      "manager/access-control-table.js",
+      "manager/access-control.js",
       "settings/manager.js"
     ],
     "app": [
@@ -451,9 +455,10 @@
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",
-    "settings/user-management.js",
     "settings/devices.js",
     "settings/control-database.js",
+    "manager/access-control-table.js",
+    "manager/access-control.js",
     "settings/manager.js",
     "app/navigation.js",
     "app/route-dispatch.js",

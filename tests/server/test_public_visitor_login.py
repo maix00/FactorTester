@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from urllib.request import Request, urlopen
 
 from server.manager import runtime as manager
+from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.visitor_access import (
     configured_public_visitor_login_allowlist,
 )
@@ -147,6 +148,87 @@ def test_public_visitor_password_login_clears_visitor_and_binds_origin(
     assert not state.session_allows_device_origin(
         session_token, "https://another.example"
     )
+
+
+def test_allowlisted_admin_visitor_login_keeps_full_role_and_ignores_stale_cookie(
+    tmp_path, monkeypatch,
+) -> None:
+    """A stale anonymous cookie must not hide an authenticated admin session."""
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    monkeypatch.setattr(manager, "control_store_from_env", lambda *_args: None)
+    monkeypatch.setattr(
+        LocalAccountStore,
+        "sync_pending",
+        lambda _self, _store: {"synced": 0, "rejected": 0},
+    )
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.control_store = _AccountStore(_accounts())
+    state.public_visitor_login_allowlist = ("MaxJJW",)
+    visitor_token = state.visitor_access.issue_session(
+        "https://101.133.144.27:7998",
+    )
+
+    with _running_manager(state) as base_url:
+        response = urlopen(Request(
+            f"{base_url}/auth/login",
+            data=json.dumps({
+                "username": "MaxJJW",
+                "password": "administrator-password",
+            }).encode(),
+            headers=_headers(cookie=f"ft-manager-visitor={visitor_token}"),
+            method="POST",
+        ))
+        payload = json.loads(response.read())
+        cookies = response.headers.get_all("Set-Cookie") or []
+
+    assert payload["success"] is True
+    assert payload["username"] == "GTHT@MaxJJW@392452984564"
+    assert payload["alias"] == "MaxJJW"
+    assert payload["role"] == "super_admin"
+    assert payload["capabilities"]["manager"] is True
+    assert payload["visitor_login"] is True
+    session_cookie = next(
+        item for item in cookies if item.startswith("ft-manager-session=")
+    )
+    session_token = session_cookie.split("=", 1)[1].split(";", 1)[0]
+    assert any(
+        item.startswith("ft-manager-visitor=; Max-Age=0;")
+        for item in cookies
+    )
+
+    class _Probe(RequestSecurityMixin):
+        def __init__(self, token: str, cookie: str) -> None:
+            self.state = state
+            self._token = token
+            self.client_address = ("127.0.0.1", 0)
+            self.headers = {
+                "Host": "101.133.144.27:7998",
+                "X-Forwarded-Proto": "https",
+                "Cookie": cookie,
+            }
+
+        def _bearer_token(self) -> str:
+            return self._token
+
+        def _cookie_value(self, name: str) -> str:
+            prefix = f"{name}="
+            for item in self.headers.get("Cookie", "").split(";"):
+                value = item.strip()
+                if value.startswith(prefix):
+                    return value[len(prefix):]
+            return ""
+
+    authenticated = _Probe(
+        session_token,
+        f"ft-manager-visitor={visitor_token}",
+    )
+    assert authenticated._visitor_mode() is None
+
+    state.logout(session_token)
+    anonymous = _Probe("", f"ft-manager-visitor={visitor_token}")
+    assert anonymous._visitor_mode() is not None
 
 
 def test_public_visitor_relationship_sets_test_a_as_max_parent() -> None:

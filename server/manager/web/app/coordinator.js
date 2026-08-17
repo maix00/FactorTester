@@ -388,7 +388,9 @@
       profile: (pageContext, id) => FTProfiles.detail(pageContext, id),
       profiles: pageContext => FTProfiles.list(pageContext),
       settings: (pageContext, section) => FTSettings.show(pageContext, section),
-      manager: pageContext => FTManager.show(pageContext),
+      manager: (pageContext, route) => FTManager.show(
+        pageContext, route?.section || "services",
+      ),
     },
   });
 
