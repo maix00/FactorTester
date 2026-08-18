@@ -70,6 +70,7 @@ class NewTransfer:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    content_type: str = "application/octet-stream"
     object_kind: str = "job_artifact"
     object_id: str = ""
 
@@ -93,6 +94,7 @@ class TransferRecord:
     created_at: float
     updated_at: float
     expires_at: float
+    content_type: str = "application/octet-stream"
     object_kind: str = "job_artifact"
     object_id: str = ""
 

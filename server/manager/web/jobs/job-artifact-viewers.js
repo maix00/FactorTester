@@ -18,7 +18,14 @@
     const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();
     const viewer = String(options.declaration?.viewer || "").toLowerCase();
     if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename)) {
-      return image(context, target, await response.blob(), type || "image/*");
+      const raw = await response.blob();
+      // Older transfer Attempts and non-updated peer data planes may still
+      // label the byte stream as application/octet-stream. Rebuild the Blob
+      // with the signed artifact metadata before creating an image URL.
+      const mediaType = type || raw.type || "image/*";
+      const blob = raw.type === mediaType
+        ? raw : new Blob([raw], {type: mediaType});
+      return image(context, target, blob, mediaType);
     }
     const body = await response.text();
     if (viewer.includes("price") || viewer.includes("kline") || viewer.includes("ohlcv")) {

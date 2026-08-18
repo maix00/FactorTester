@@ -49,6 +49,11 @@ class TransferAccessStateMixin:
             expected_sha256=str(
                 artifact.get("content_hash") or ""
             ).strip().lower(),
+            content_type=str(
+                artifact.get("content_type")
+                or artifact.get("media_type")
+                or "application/octet-stream"
+            ),
             idempotency_key=idempotency_key,
             job_id=job_id,
             artifact_name=str(artifact.get("name") or "").strip(),
@@ -66,6 +71,7 @@ class TransferAccessStateMixin:
         expected_size: int,
         expected_sha256: str,
         idempotency_key: str,
+        content_type: str = "application/octet-stream",
         job_id: str = "",
         artifact_name: str = "",
         now: float | None = None,
@@ -86,6 +92,7 @@ class TransferAccessStateMixin:
                 expected_size=int(expected_size),
                 expected_sha256=str(expected_sha256 or "").strip().lower(),
                 expires_at=expiry,
+                content_type=str(content_type or "application/octet-stream"),
                 object_kind=str(object_kind or "").strip(),
                 object_id=str(object_id or "").strip(),
             ),
@@ -104,6 +111,7 @@ class TransferAccessStateMixin:
             "expires_at": access.expires_at,
             "resume_offset": access.resume_offset,
             "expected_size": access.expected_size,
+            "content_type": str(content_type or "application/octet-stream"),
         }
 
     def prepare_submission_upload(
@@ -116,6 +124,7 @@ class TransferAccessStateMixin:
         expected_size: int,
         expected_sha256: str,
         idempotency_key: str,
+        content_type: str = "application/octet-stream",
         now: float | None = None,
         ttl: float = 15 * 60,
     ) -> dict[str, object]:
@@ -134,6 +143,7 @@ class TransferAccessStateMixin:
                 expected_size=int(expected_size),
                 expected_sha256=str(expected_sha256 or "").strip().lower(),
                 expires_at=expiry,
+                content_type=str(content_type or "application/octet-stream"),
                 object_kind="job_submission",
                 object_id=f"{job_id}:{str(name or '').strip()}",
             ),
@@ -152,6 +162,7 @@ class TransferAccessStateMixin:
             "expires_at": access.expires_at,
             "resume_offset": access.resume_offset,
             "expected_size": access.expected_size,
+            "content_type": str(content_type or "application/octet-stream"),
         }
 
     def prepare_object_upload(
@@ -186,6 +197,7 @@ class TransferAccessStateMixin:
                 expected_size=int(expected_size),
                 expected_sha256=str(expected_sha256 or "").strip().lower(),
                 expires_at=expiry,
+                content_type=str(content_type or "application/octet-stream"),
                 object_kind=str(object_kind or "").strip(),
                 object_id=str(object_id or "").strip(),
             ),
@@ -204,8 +216,8 @@ class TransferAccessStateMixin:
             "expires_at": access.expires_at,
             "resume_offset": access.resume_offset,
             "expected_size": access.expected_size,
-            "filename": safe_name,
             "content_type": str(content_type or "application/octet-stream"),
+            "filename": safe_name,
         }
 
     def transfer_access_status(

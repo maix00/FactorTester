@@ -91,17 +91,18 @@ def _insert_transfer(connection, value: TransferRecord) -> None:
             transfer_id, idempotency_key, operation, status, principal,
             request_owner_manager_id, source_server_id, destination_server_id,
             storage_server_id, job_id, artifact_name, expected_size,
-            expected_sha256, attempt, created_at, updated_at, expires_at,
-            object_kind, object_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            expected_sha256, content_type, attempt, created_at, updated_at,
+            expires_at, object_kind, object_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             value.transfer_id, value.idempotency_key, value.operation.value,
             value.status.value, value.principal, value.request_owner_manager_id,
             value.source_server_id, value.destination_server_id,
             value.storage_server_id, value.job_id, value.artifact_name,
-            value.expected_size, value.expected_sha256, value.attempt,
-            value.created_at, value.updated_at, value.expires_at,
+            value.expected_size, value.expected_sha256, value.content_type,
+            value.attempt, value.created_at, value.updated_at,
+            value.expires_at,
             value.object_kind, value.object_id,
         ),
     )
@@ -138,7 +139,7 @@ def _same_transfer(row, value: TransferRecord) -> bool:
     fields = (
         "idempotency_key", "principal", "request_owner_manager_id",
         "source_server_id", "destination_server_id", "storage_server_id",
-        "job_id", "artifact_name", "expected_sha256",
+        "job_id", "artifact_name", "expected_sha256", "content_type",
     )
     return (
         str(row["operation"]) == value.operation.value

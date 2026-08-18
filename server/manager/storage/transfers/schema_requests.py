@@ -22,6 +22,7 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
             artifact_name TEXT NOT NULL DEFAULT '',
             expected_size INTEGER NOT NULL,
             expected_sha256 TEXT NOT NULL DEFAULT '',
+            content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
             attempt INTEGER NOT NULL DEFAULT 0,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
@@ -55,4 +56,8 @@ def ensure_request_schema(connection: sqlite3.Connection) -> None:
     if "object_id" not in columns:
         connection.execute(
             "ALTER TABLE transfer_requests ADD COLUMN object_id TEXT NOT NULL DEFAULT ''"
+        )
+    if "content_type" not in columns:
+        connection.execute(
+            "ALTER TABLE transfer_requests ADD COLUMN content_type TEXT NOT NULL DEFAULT 'application/octet-stream'"
         )
