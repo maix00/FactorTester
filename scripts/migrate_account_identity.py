@@ -38,6 +38,7 @@ from server.manager.storage.identity_migration import (
     choose_canonical_username,
     migrate_local_device_json,
     migrate_local_session_json,
+    migrate_manager_state_identity,
     postgres_identity_plan,
     sqlite_identity_plan,
     user_root_identity_plan,
@@ -374,6 +375,13 @@ def _apply(args: argparse.Namespace, plan: dict[str, object]) -> None:
         )
         state_counts[str(path)] = migration(
             path,
+            old_username=str(plan["old_username"]),
+            new_username=str(plan["new_username"]),
+        )
+    for state_root in args.state_root:
+        root = state_root.expanduser().resolve()
+        state_counts[str(root)] = migrate_manager_state_identity(
+            root,
             old_username=str(plan["old_username"]),
             new_username=str(plan["new_username"]),
         )

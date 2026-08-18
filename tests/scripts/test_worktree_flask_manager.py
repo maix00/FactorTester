@@ -2371,6 +2371,37 @@ def test_federation_attachment_allows_automatic_port_discovery(
     assert "artifact_endpoint" not in started[0]
 
 
+def test_federation_attachment_repairs_stale_wireguard_public_endpoint(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="feat",
+        server_id="local-feat",
+    )
+    state.manager_public_endpoint = "http://192.168.1.10:7998"
+    started = []
+    monkeypatch.setattr(
+        state,
+        "start_federation_announcer",
+        lambda **kwargs: started.append(kwargs),
+    )
+
+    result = state.update_federation_config({
+        "enabled": True,
+        "bootstrap_url": "http://10.77.0.2:17998/api/federation/register",
+        "public_endpoint": "http://10.77.0.3:7998",
+        "registration_token": "registration-token",
+        "ports": [],
+    })
+
+    assert result["config"]["public_endpoint"] == (
+        "http://192.168.1.10:7998"
+    )
+    assert started[0]["endpoint"] == "http://192.168.1.10:7998"
+
+
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
     detached = tmp_path / ".workspace" / "manager-sources" / "detached"
     detached.mkdir(parents=True)
