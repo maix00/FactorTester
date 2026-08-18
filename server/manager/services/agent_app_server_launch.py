@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlsplit
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_provider_health import (
@@ -35,6 +36,7 @@ class AgentAppServerLaunch:
         provider: Mapping[str, object],
         codex_binary: str,
         factor_tester_cli: str = "",
+        proxy_url: str = "",
     ) -> None:
         self.runtime = runtime
         self.provider = dict(provider)
@@ -43,6 +45,7 @@ class AgentAppServerLaunch:
         self.factor_tester_cli = configured_cli or str(
             shutil.which("factortester") or ""
         )
+        self.proxy_url = str(proxy_url or "").strip()
 
     @staticmethod
     def _executable(value: str, label: str) -> str:
@@ -59,7 +62,14 @@ class AgentAppServerLaunch:
             "FactorTester CLI",
         )
         try:
-            provider = AgentProviderHealth.test(self.provider)
+            provider = (
+                AgentProviderHealth.test(
+                    self.provider,
+                    proxy_url=self.proxy_url,
+                )
+                if self.proxy_url
+                else AgentProviderHealth.test(self.provider)
+            )
         except AgentProviderHealthError as exc:
             raise AgentAppServerError(
                 f"Agent provider preflight failed: {exc}"
@@ -129,6 +139,8 @@ class AgentAppServerLaunch:
         ):
             environment.pop(key, None)
         environment["FACTORTESTER_AGENT_TOKEN"] = secret
+        if self.proxy_url:
+            self._set_proxy_environment(environment)
         cli = str(self.factor_tester_cli or "").strip()
         if cli:
             cli_path = Path(cli).expanduser()
@@ -139,3 +151,27 @@ class AgentAppServerLaunch:
                 ]).rstrip(os.pathsep)
             environment["FACTORTESTER_CLI"] = cli
         return environment
+
+    def _set_proxy_environment(self, environment: dict[str, str]) -> None:
+        """Scope the optional proxy to the Profile app-server child."""
+        for key in (
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "all_proxy",
+        ):
+            environment[key] = self.proxy_url
+        bypass = {
+            "127.0.0.1", "localhost", "::1",
+            "10.77.0.0/16", "10.79.0.0/16", "172.30.0.0/16",
+        }
+        for key in (
+            "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+            "FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT",
+        ):
+            hostname = urlsplit(str(environment.get(key) or "")).hostname
+            if hostname:
+                bypass.add(hostname)
+        existing = str(environment.get("NO_PROXY") or environment.get("no_proxy") or "")
+        bypass.update(item.strip() for item in existing.split(",") if item.strip())
+        value = ",".join(sorted(bypass))
+        environment["NO_PROXY"] = value
+        environment["no_proxy"] = value

@@ -5,6 +5,7 @@ ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
 ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -31,6 +32,15 @@ COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
 RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
     && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         -r /tmp/requirements-public-linux.txt
+
+# Pin the upstream Mihomo binary in the image. The Manager never publishes
+# its controller or mixed proxy ports; both remain loopback-only.
+COPY deploy/docker/factortester-public/mihomo-linux-amd64-v1.19.30.gz /tmp/mihomo.gz
+RUN set -eu; \
+    echo "${MIHOMO_ARCHIVE_SHA256}  /tmp/mihomo.gz" | sha256sum --check --status; \
+    gzip -dc /tmp/mihomo.gz > /usr/local/bin/mihomo; \
+    chmod 0555 /usr/local/bin/mihomo; \
+    rm -f /tmp/mihomo.gz
 
 ARG FACTORTESTER_REVISION
 RUN set -eu; \

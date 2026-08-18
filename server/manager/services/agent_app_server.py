@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
@@ -18,9 +18,11 @@ class AgentAppServerSupervisor:
         profile_service: AgentProfileService,
         *,
         codex_binary: str = "codex",
+        proxy_url_provider: Callable[[], str] | None = None,
     ) -> None:
         self.profile_service = profile_service
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
+        self.proxy_url_provider = proxy_url_provider
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
         self._lock = threading.RLock()
 
@@ -45,6 +47,7 @@ class AgentAppServerSupervisor:
                 runtime=context["skill_runtime"],
                 provider=context["provider"],
                 codex_binary=self.codex_binary,
+                proxy_url=self._proxy_url(),
             )
             try:
                 session.start()
@@ -109,6 +112,14 @@ class AgentAppServerSupervisor:
             self._sessions.clear()
         for session in sessions:
             session.stop()
+
+    def _proxy_url(self) -> str:
+        if self.proxy_url_provider is None:
+            return ""
+        try:
+            return str(self.proxy_url_provider() or "").strip()
+        except Exception:
+            return ""
 
 
 __all__ = ["AgentAppServerError", "AgentAppServerSupervisor"]

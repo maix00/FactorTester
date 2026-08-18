@@ -47,6 +47,7 @@ from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
+from server.manager.http.mihomo_routes import MihomoDashboardRoutesMixin
 from server.manager.http.research_graph_catalog_routes import (
     ResearchGraphCatalogRoutesMixin,
 )
@@ -81,6 +82,7 @@ from server.manager.domain.federation import (
 )
 from server.manager.services.test_authoring import TestAuthoringService
 from server.manager.services.research_graph_catalog import ResearchGraphCatalog
+from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.server_access import configured_management_access
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
@@ -294,6 +296,7 @@ class ManagerState(
         self.service_intents = ServiceIntentStore(
             self.state_root / "desired-services.json",
         )
+        self.mihomo = MihomoSupervisor(self.state_root)
         self.capability_path = self.state_root / "manager-capability.key"
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
         self.release_root = self.state_root / "client-releases"
@@ -400,6 +403,7 @@ class ManagerState(
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,
             codex_binary=os.environ.get("FACTORTESTER_CODEX_BINARY", "codex"),
+            proxy_url_provider=self.mihomo.proxy_url,
         )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,
@@ -493,6 +497,7 @@ class Handler(
     AuthenticationRoutesMixin,
     ClientReleaseRoutesMixin,
     ManagerIdentityRoutesMixin,
+    MihomoDashboardRoutesMixin,
     CoreGetRoutesMixin,
     BaseHTTPRequestHandler,
 ):
