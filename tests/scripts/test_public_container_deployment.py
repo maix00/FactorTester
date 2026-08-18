@@ -84,6 +84,31 @@ def test_public_image_includes_runtime_localizations_and_git() -> None:
     assert re.search(r"(?m)^\s+git \\?$", dockerfile)
 
 
+def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    compose = _compose()["services"]["factortester-public"]
+    args = compose["build"]["args"]
+
+    assert "nodejs" not in dockerfile
+    assert "npm install" not in dockerfile
+    assert "ARG CODEX_VERSION=0.147.0" in dockerfile
+    assert "ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org" in dockerfile
+    assert "codex-${CODEX_VERSION}-${codex_platform}.tgz" in dockerfile
+    assert "codex_sha512=" in dockerfile
+    assert "Codex platform package integrity check failed" in dockerfile
+    assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
+    assert "python -m pip install" in dockerfile
+    assert "/opt/factortester/app/tools/cli" in dockerfile
+    assert "rm -f /usr/local/bin/factortester-manager" in dockerfile
+    assert "test -x /usr/local/bin/factortester" in dockerfile
+    assert args["CODEX_VERSION"] == "${FACTORTESTER_CODEX_VERSION:-0.147.0}"
+    assert args["CODEX_NPM_REGISTRY"] == (
+        "${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}"
+    )
+
+
 def test_public_manager_can_import_vendored_research_contracts() -> None:
     entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(
         encoding="utf-8",
