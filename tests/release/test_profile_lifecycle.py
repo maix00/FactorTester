@@ -75,7 +75,19 @@ def test_cli_create_deactivate_and_legacy_purge_are_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import tools.cli.commands.client_profile as command_module
+
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        command_module,
+        "_sync_profile",
+        lambda _profile, *, manager_url="": {
+            "status": "pending",
+            "synced": False,
+            "pending": True,
+            "manager_url": manager_url,
+        },
+    )
     client_root = tmp_path / "support"
     release_profile = tmp_path / "release.json"
     release_profile.write_text(json.dumps({
