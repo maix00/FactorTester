@@ -644,10 +644,35 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     source = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
 
     assert "FTMultiSelectFilter.create" in source
+    assert "function sharedPicker" in source
     assert "function familyPicker" in source
     assert "FTTestFieldRow.create" in source
     assert "FTFactorDetailShared.parameterEditor" in source
+    assert "factor-editor-source-metadata" in source
     assert "test-factor-family-row" not in source
+
+
+def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column() -> None:
+    source = (WEB_ROOT / "workbench" / "test-factor-candidate-sources.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert "test-factor-candidate-heading-row" in source
+    assert "test-factor-candidate-source-row" not in source
+    assert source.count("FTTestFieldRow.create(") >= 3
+
+
+def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contract() -> None:
+    tabs = (WEB_ROOT / "workbench" / "strategy-editor-tabs.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "workbench.css").read_text(encoding="utf-8")
+
+    assert "outer_pre_mounted_tabs" in tabs
+    assert "includeEmpty: true" in tabs
+    assert ".strategy-editor-chip-row" in styles
+    assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
+    assert ".test-object-editor-overlay-mount > .detail-stack" in styles
 
 
 def test_test_settings_paints_registered_rows_before_lazy_adapter_catalogs() -> None:

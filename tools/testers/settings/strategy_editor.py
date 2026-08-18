@@ -56,6 +56,10 @@ def _contract(*, application: str) -> dict[str, Any]:
         "schema_version": 2,
         "editor": "nested_strategy",
         "application": application,
+        # Keep the pre-mounted set explicit.  Clients must not infer it from
+        # whichever fields happen to be visible in the current manifest.
+        "outer_pre_mounted_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
+        "pre_mounted_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
         "inner_default_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
         "inner_manual_tabs": [dict(item) for item in _INNER_MANUAL_TABS],
         "outer_scope_tabs": {

@@ -4,14 +4,22 @@
   }
 
   function defaultKeys(state) {
-    return (state?.manifest?.strategy_editor?.inner_default_tabs || [])
+    const contract = state?.manifest?.strategy_editor || {};
+    return (
+      contract.outer_pre_mounted_tabs
+      || contract.pre_mounted_tabs
+      || contract.inner_default_tabs
+      || []
+    )
       .map(item => item.key).filter(Boolean);
   }
 
   function eligibleOverrideTabs(state) {
-    const outerOnly = new Set(state?.manifest?.strategy_editor?.outer_only_tabs || []);
+    const contract = state?.manifest?.strategy_editor || {};
+    const outerOnly = new Set(contract.outer_only_tabs || []);
+    const preMounted = new Set(defaultKeys(state));
     const registered = (state?.manifest?.tab_lists?.["group-settings"] || []).filter(tab => {
-      if (outerOnly.has(tab.key)) return false;
+      if (outerOnly.has(tab.key) || preMounted.has(tab.key)) return false;
       return Object.entries(state?.manifest?.defaults || {}).some(([key, field]) => (
         field.tab_key === tab.key
         && field.scope_policy === "overridable"
@@ -19,8 +27,8 @@
         && (!window.FTSettingRules || FTSettingRules.isVisible(field, state.values || {}))
       ));
     });
-    const manual = (state?.manifest?.strategy_editor?.inner_manual_tabs || []).filter(tab => (
-      !outerOnly.has(tab.key) && tab.mount_policy === "manual"
+    const manual = (contract.inner_manual_tabs || []).filter(tab => (
+      !outerOnly.has(tab.key) && !preMounted.has(tab.key) && tab.mount_policy === "manual"
     ));
     const seen = new Set(registered.map(tab => tab.key));
     return [...registered, ...manual.filter(tab => !seen.has(tab.key))];
@@ -43,7 +51,14 @@
       const panel = document.createElement("div");
       panel.className = "strategy-editor-tab-manager";
       const note = document.createElement("small");
-      note.textContent = context.t("默认挂载分组、因子执行和产品组；其他覆盖设置可手动挂载");
+      const defaultLabels = defaultKeys(state).map(key => {
+        const tab = (state.manifest.tab_lists?.["group-settings"] || [])
+          .find(item => item.key === key)
+          || (state.manifest.strategy_editor?.inner_default_tabs || [])
+            .find(item => item.key === key);
+        return context.t(tab?.label || key);
+      });
+      note.textContent = `${context.t("预挂载")}${defaultLabels.join("、")}；${context.t("其他覆盖设置可手动挂载")}`;
       panel.append(note);
       eligibleOverrideTabs(state).forEach(tab => {
         const row = document.createElement("label");
@@ -125,6 +140,7 @@
         context,
         mountedTabs: [...mounted],
         includeUnregistered: true,
+        includeEmpty: true,
         sources: typeof chipSources === "function" ? chipSources() : (chipSources || {}),
         groupBy: "tab",
         onOpen: key => {

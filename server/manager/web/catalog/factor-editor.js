@@ -33,8 +33,18 @@
     });
   }
 
+  // The catalog page and the workbench overlay must use the same selector.
+  // The workbench wrapper only adds create/edit actions when it is available;
+  // the catalog module still works standalone with the shared base control.
+  function sharedPicker(context, options) {
+    if (window.FTTestObjectPicker?.create) {
+      return FTTestObjectPicker.create(context, options);
+    }
+    return FTMultiSelectFilter.create(context, options);
+  }
+
   function sourceModePicker(context, state, redraw) {
-    const picker = window.FTMultiSelectFilter.create(context, {
+    const picker = sharedPicker(context, {
       compact: true,
       name: "factor-source-mode",
       multi: false,
@@ -62,7 +72,7 @@
   }
 
   function familyPicker(context, data, state, redraw) {
-    const picker = window.FTMultiSelectFilter.create(context, {
+    const picker = sharedPicker(context, {
       compact: true,
       name: "factor-family-source",
       title: context.t("因子家族"),
@@ -177,6 +187,39 @@
       }));
     }
     return root;
+  }
+
+  function sourceMetadata(context, state) {
+    const family = state.family || state.inspection || {};
+    const loaded = state.loaded || {};
+    const owner = loaded.factor_owner_ref || loaded.owner_ref
+      || family.factor_owner_ref || family.owner_ref
+      || family.owner_alias || "";
+    const familyValue = loaded.factor_family_ref || loaded.family_ref
+      || family.factor_family_ref || family.family_ref || familyAlias(family);
+    const commit = loaded.factor_git_commit || loaded.git_commit
+      || family.factor_git_commit || family.git_commit || "";
+    if (!owner && !familyValue && !commit && !state.family && !state.inspection) {
+      return null;
+    }
+    const root = document.createElement("section");
+    root.className = "factor-editor-source-metadata";
+    const version = commit
+      ? `${context.t("历史源码版本")} · ${commit}`
+      : context.t("当前因子家族最新源码");
+    root.append(
+      field(context.t("因子所有者"), readOnlyValue(owner || context.t("未设置"))),
+      field(context.t("因子家族引用"), readOnlyValue(familyValue || context.t("未设置"))),
+      field(context.t("源码版本"), readOnlyValue(version)),
+    );
+    return root;
+  }
+
+  function readOnlyValue(value) {
+    const output = document.createElement("span");
+    output.className = "factor-editor-readonly-value";
+    output.textContent = value;
+    return output;
   }
 
   function readInput(wrapper) {
@@ -323,6 +366,8 @@
       } else {
         sourceMount.append(sourceControls(context, state, redraw));
       }
+      const metadata = sourceMetadata(context, state);
+      if (metadata) sourceMount.append(metadata);
       parameterMount.replaceChildren();
       const editor = parameterEditor(context, state);
       if (editor) {
@@ -381,11 +426,19 @@
     if (window.FTTestFieldRow?.create) {
       return FTTestFieldRow.create(labelText, input);
     }
-    const label = document.createElement("label");
-    label.className = "test-object-field";
+    const row = document.createElement("div");
+    row.className = "test-setting-row test-field-row";
+    const copy = document.createElement("span");
+    const heading = document.createElement("span");
+    heading.className = "test-field-row-heading";
     const title = document.createElement("b"); title.textContent = labelText;
-    label.append(title, input);
-    return label;
+    heading.append(title);
+    copy.append(heading);
+    const value = document.createElement("div");
+    value.className = "test-field-row-control";
+    value.append(input);
+    row.append(copy, value);
+    return row;
   }
 
   window.FTFactorEditor = Object.freeze({render});
