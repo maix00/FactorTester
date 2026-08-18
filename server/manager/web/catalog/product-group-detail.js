@@ -154,8 +154,18 @@
     }
     const categoryPayload = await helpers.loadCategories(context, source);
     if (!current(context)) return;
-    const categories = Array.isArray(categoryPayload.categories)
-      ? categoryPayload.categories : [];
+    const categories = [...(Array.isArray(categoryPayload.categories)
+      ? categoryPayload.categories : [])];
+    // A test editor may create a category in its mounted Category tab before
+    // opening this overlay.  Keep that temporary catalog available to the
+    // product-tree picker without writing it a second time or hiding it
+    // behind the server catalog cache.
+    const transientCategories = context.testState?.values?.category_candidates;
+    for (const category of transientCategories || []) {
+      const id = String(category?.id || category?.category_id || "").trim();
+      if (!id || categories.some(item => String(item?.id || "") === id)) continue;
+      categories.push({...category, id});
+    }
     const title = group?.name || (mode === "create"
       ? context.t("新增产品组") : target);
     context.setHeading(title, context.t("产品组"));

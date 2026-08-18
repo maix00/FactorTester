@@ -18,6 +18,10 @@ from tools.testers.settings.applications import (
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
 )
+from tools.testers._shared.category import (
+    CATEGORY_CANDIDATE_KEYS,
+    CATEGORY_SELECTION_KEYS,
+)
 from tools.testers._shared.factor import FACTOR_SOURCE_KEYS
 from tools.testers._shared.template import register_test_template_base
 from tools.testers._shared.run_inputs import register_run_inputs_base
@@ -38,6 +42,8 @@ def register_group_test_settings(app: Any) -> None:
         *FACTOR_SELECTION_KEYS,
         *FACTOR_SOURCE_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
+        *CATEGORY_CANDIDATE_KEYS,
+        *CATEGORY_SELECTION_KEYS,
     )
     register_test_template_base(app)
     register_run_inputs_base(app)
@@ -47,6 +53,7 @@ def register_group_test_settings(app: Any) -> None:
     for module in (
         SettingModule("execution_engine", "执行引擎", "backtest", 10),
         SettingModule("factor_execution", "因子执行", "factor", 20),
+        SettingModule("category_grouping", "分类分组", "product", 25),
         SettingModule("product_selection", "品种/路径选择", "product", 30),
         SettingModule("market_data_source", "数据源", "market_data", 35),
         SettingModule("market_data_frequency", "数据频率", "market_data", 36),
@@ -83,6 +90,8 @@ def register_group_test_settings(app: Any) -> None:
         SettingModule("accounting", "记账", "accounting", 180),
     ):
         app.register_module(module)
+
+    _register_category_selection(app)
 
     # ── ChipDefinitions ─────────────────────────────────────
     for chip in (
@@ -154,7 +163,10 @@ def _register_sections(app: Any) -> None:
         app.register_settings_section(section)
     for section, tabs in {
         "authoring": ("test_template",),
-        "scope": ("factor", "product_path_selection", "data_source", "frequency", "time"),
+        "scope": (
+            "factor", "category", "product_path_selection", "data_source",
+            "frequency", "time",
+        ),
         "portfolio": (
             "target_allocation", "rebalance_trigger", "position_policy",
             "term_carry_strategy", "group_strategy", "strategy_book",
@@ -168,3 +180,25 @@ def _register_sections(app: Any) -> None:
     }.items():
         for tab in tabs:
             app.set_tab_section(tab, section)
+
+
+def _register_category_selection(app: Any) -> None:
+    """Make the category catalog available to backtest product-group editors.
+
+    Categories are authoring inputs for product-group path resolution rather
+    than a hidden special case inside the product-group picker.  The tab is
+    deliberately not mounted by default; a user can mount it before creating
+    a product group in the same test workspace.
+    """
+    from tools.testers._shared.category import (
+        register_category_candidate_list_base,
+        register_category_selection_base,
+    )
+    from tools.testers.settings.contracts import SettingTab, TabMountPoint
+
+    app.register_tab(SettingTab(
+        "category", "分类", (TabMountPoint.LOCAL_SETTINGS,), "custom", 15,
+        content_adapter="category_selection",
+    ))
+    register_category_candidate_list_base(app)
+    register_category_selection_base(app)

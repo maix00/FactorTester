@@ -113,6 +113,30 @@ def _normalise_acting_profile_ref(value: object) -> str:
     return f"profile:{raw}"
 
 
+def _normalise_custom_strategy_scope(data: dict) -> dict:
+    """Normalize nested custom-strategy fields before they enter a RunSpec."""
+    raw = data.get("custom_strategy_scope")
+    scope = raw if isinstance(raw, dict) else {}
+    overrides = data.get("custom_strategy_overrides", scope.get("overrides", {}))
+    if not isinstance(overrides, dict):
+        raise _RunRequestError("custom_strategy_overrides must be an object")
+    mounted = data.get("custom_strategy_mounted_tabs", scope.get("mounted_tabs", []))
+    if not isinstance(mounted, list):
+        raise _RunRequestError("custom_strategy_mounted_tabs must be an array")
+    product_mask = data.get(
+        "custom_strategy_product_mask", scope.get("product_mask", []),
+    )
+    if not isinstance(product_mask, list):
+        raise _RunRequestError("custom_strategy_product_mask must be an array")
+    return {
+        "overrides": deepcopy(overrides),
+        "mounted_tabs": list(dict.fromkeys(str(item) for item in mounted if str(item))),
+        "product_mask": list(dict.fromkeys(
+            str(item).strip() for item in product_mask if str(item).strip()
+        )),
+    }
+
+
 def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     task_name = _normalise_task_name(
         data.get("task_name") if "task_name" in data else data.get("name")
@@ -200,6 +224,7 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
             "transient strategy sources require a matching strategy_specs entry",
             details={"code": "orphan_transient_strategy_sources"},
         )
+    custom_strategy_scope = _normalise_custom_strategy_scope(data)
     try:
         run_input_dependencies = validate_run_input_dependencies(
             data.get("run_input_dependencies"), analyses=analyses,
@@ -386,6 +411,7 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     if strategy_plan:
         run_spec["strategy_specs"] = deepcopy(strategy_plan)
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
+    run_spec["custom_strategy_scope"] = deepcopy(custom_strategy_scope)
     run_spec["strategy_source_policy"] = (
         {
             "mode": "transient_run_source",
@@ -463,6 +489,7 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         "transient_strategy_sources": transient_strategy_sources,
         "strategy_specs": strategy_plan,
         "strategy_plan": strategy_plan,
+        "custom_strategy_scope": custom_strategy_scope,
         "run_input_dependencies": run_input_dependencies,
     }
 
@@ -573,6 +600,9 @@ def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
                 "output_requests": output_requests,
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
+                "custom_strategy_scope": deepcopy(
+                    prepared.get("custom_strategy_scope") or {}
+                ),
             }
             plan = build_execution_plan(kind, payload)
             plans.append(plan)
@@ -1130,6 +1160,9 @@ def submit_research_run():
                 "factor_refs": dict(run_spec.get("factor_refs") or {}),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
+                "custom_strategy_scope": deepcopy(
+                    prepared.get("custom_strategy_scope") or {}
+                ),
                 "transient_factor_source_scope_id": str(
                     transient_scope.get("scope_id") or ""
                 ),
@@ -1248,6 +1281,9 @@ def preview_research_run():
         "output_requests": list(prepared["output_requests"]),
         "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
         "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),
+        "custom_strategy_scope": deepcopy(
+            prepared.get("custom_strategy_scope") or {}
+        ),
         "strategy_source_policy": deepcopy(
             run_spec.get("strategy_source_policy") or {}
         ),

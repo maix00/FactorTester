@@ -21,6 +21,10 @@ vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
 );
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/factor-detail-shared.js", "utf8"),
+  {filename: "factor-detail-shared.js"},
+);
 global.FTUI = window.FTUI = {
   fieldRows(value) { return Object.entries(value || {}); },
   loading(label) { const item = new Element(); item.textContent = label; return item; },

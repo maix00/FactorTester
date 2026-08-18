@@ -437,9 +437,16 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
     factor_aliases: set[str] = set()
     for group in backtest.get("groups") or []:
         if isinstance(group, dict):
-            alias = str(group.get("factorAlias") or group.get("factor_alias") or "").strip()
-            if alias:
-                factor_aliases.add(alias)
+            candidates = group.get("factorAliases")
+            if candidates is None:
+                candidates = group.get("factor_aliases")
+            if candidates is None:
+                candidates = [group.get("factorAlias") or group.get("factor_alias")]
+            if not isinstance(candidates, list):
+                candidates = [candidates]
+            factor_aliases.update(
+                str(alias).strip() for alias in candidates if str(alias or "").strip()
+            )
     for candidate in source.get("factor_candidates") or []:
         if isinstance(candidate, dict):
             alias = str(candidate.get("alias") or "").strip()

@@ -132,7 +132,10 @@
     for (const reference of members) {
       const factor = factorFromReference(reference, item.target_ref);
       if (!factor) throw new Error(context.t("因子集合包含无法解析的冻结因子"));
-      FTTestFactorSelection.addCandidate(state, factor);
+      // A factor set builds the outer candidate pool.  It must not turn the
+      // last expanded member into a second manual selection; the scalar
+      // primary factor is synchronized automatically by the shared selector.
+      FTTestFactorSelection.addCandidate(state, factor, {select: false});
     }
     if (state.kind !== "ic" && priorRef) {
       state.factorRef = priorRef; state.values.factor = priorFactor;

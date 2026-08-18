@@ -485,6 +485,8 @@ def group_test_settings() -> ApplicationSettings:
     # and non-module SettingDefinitions) — moved to tools/testers/backtest/settings.py.
     from tools.testers.backtest.settings import register_group_test_settings
     register_group_test_settings(app)
+    from tools.testers.settings.strategy_editor import register_strategy_editor_contract
+    register_strategy_editor_contract(app)
 
     # Module-owned settings (fee, slippage, liquidity, margin) — from
     # each ExecutableModule's setting_definitions classvar.
@@ -513,11 +515,9 @@ def group_test_settings() -> ApplicationSettings:
                     form_tab="add-derived", min_selected=1, max_selected=1),
         SurfaceFlow("groups", "create_ls", "创建 Long-Short 组合", "compose", order=20,
                     min_selected=2, max_selected=2),
-        SurfaceFlow("groups", "clone", "复制为派生组", "clone", order=30,
-                    form_tab="add-derived", min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "edit", "编辑", "edit", order=40, min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "rename", "重命名", "rename", order=45, min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "delete", "删除", "delete", order=50, min_selected=1,
+        SurfaceFlow("groups", "edit", "编辑", "edit", order=30, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "rename", "重命名", "rename", order=35, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "delete", "删除", "delete", order=40, min_selected=1,
                     button_class="btn-outline-danger"),
         SurfaceFlow("long_short", "rename_long_short", "重命名", "rename", order=5,
                     min_selected=1, max_selected=1),
@@ -537,6 +537,8 @@ def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
     from tools.testers.ic_test.settings import register_ic_test_settings
     register_ic_test_settings(app)
+    from tools.testers.settings.strategy_editor import register_strategy_editor_contract
+    register_strategy_editor_contract(app)
     register_run_fields(app, backtest=False)
 
     return app

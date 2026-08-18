@@ -44,4 +44,14 @@ const familyState = {
   factorCatalog: {selectedFamily: null},
 };
 assert.equal(selection.selectedFamily(familyState).family, "Momentum");
+const backtestState = {
+  kind: "backtest", factorRef: "", factors: [],
+  values: {factor_candidates: [], factor: ""},
+};
+selection.addCandidate(backtestState, first, {select: false});
+selection.addCandidate(backtestState, second, {select: false});
+assert.equal(backtestState.values.factor, "One",
+  "outer backtest primary factor is selected automatically from the pool");
+selection.removeCandidate(backtestState, first);
+assert.equal(backtestState.values.factor, "Two");
 console.log("ok");

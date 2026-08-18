@@ -21,10 +21,38 @@
     };
   }
 
+  function sourceDescription(context, state, factor) {
+    const refs = [...new Set((factor?.factor_set_refs || []).filter(Boolean))];
+    const selectedSets = state?.values?.factor_set_selections || [];
+    const setNames = refs.map(ref => {
+      const item = selectedSets.find(value => value?.target_ref === ref);
+      return item?.title_zh || item?.set_id || ref;
+    });
+    let source = "";
+    if (setNames.length) {
+      source = `${context.t("因子集合")}: ${setNames.join("、")}`;
+    } else if (factor?.source_kind === "transient" || factor?.source_origin === "transient") {
+      source = context.t("现场新建/临时因子");
+    } else if (factor?.source_kind === "factor_set") {
+      source = context.t("因子集合");
+    } else {
+      source = context.t("因子库");
+    }
+    return [
+      source,
+      factor?.owner_ref || factor?.owner_alias || "",
+      factor?.git_commit ? factor.git_commit.slice(0, 10) : "",
+    ].filter(Boolean).join(" · ");
+  }
+
   function list(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidates";
     const rows = FTTestFactorSelection.candidates(state);
+    // In a backtest the outer factor tab only constructs the candidate pool.
+    // Selection belongs to a nested strategy, so this page is deliberately
+    // read-only and exposes the legacy primary factor as an automatic value.
+    if (state.kind !== "ic") return outerSummary(context, state, rows);
     const savedFactor = value => {
       if (!value) return;
       FTTestFactorSelection.addCandidate(state, value);
@@ -38,12 +66,7 @@
       items: rows.map(factor => ({
         value: FTTestFactorSelection.factorID(factor),
         label: factor.factor_alias || factor.alias || factor.factor_ref,
-        description: [
-          factor.owner_ref || factor.owner_alias || "",
-          factor.source_kind === "transient"
-            ? context.t("任务临时输入")
-            : factor.git_commit ? factor.git_commit.slice(0, 10) : context.t("服务器登记"),
-        ].filter(Boolean).join(" · "),
+        description: sourceDescription(context, state, factor),
         factor,
       })).filter(item => item.value),
       selected: FTTestFactorSelection.selectedIDs(state),
@@ -51,7 +74,11 @@
       compact: true,
       name: `test-factors-${state.kind}`,
       onCreate: context.session
-        ? () => void openEditor(context, "create", "new", savedFactor)
+        ? () => void (
+          window.FTStrategyEditorFactorOverlay?.open
+            ? FTStrategyEditorFactorOverlay.open(context, state, savedFactor)
+            : openEditor(context, "create", "new", savedFactor)
+        )
         : null,
       createLabel: context.t("新建因子"),
       itemActions: item => {
@@ -94,5 +121,44 @@
     return root;
   }
 
-  window.FTTestFactorCandidates = Object.freeze({list});
+  function outerSummary(context, state, rows) {
+    FTTestFactorSelection.autoSelectPrimary?.(state);
+    const root = document.createElement("div");
+    root.className = "test-factor-candidates test-factor-candidates-summary";
+    const list = document.createElement("ul");
+    list.className = "test-factor-candidate-summary-list";
+    rows.forEach(factor => {
+      const item = document.createElement("li");
+      const label = document.createElement("strong");
+      label.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
+      const description = document.createElement("small");
+      description.textContent = sourceDescription(context, state, factor);
+      item.append(label, description);
+      list.append(item);
+    });
+    const candidateHelp = window.FTTestFieldHelp?.forField?.(
+      state.manifest, "factor_candidates", context,
+    ) || "";
+    root.append(FTTestFieldRow.create(
+      context.t("因子候选"), rows.length ? list : FTUI.empty(
+        context.t("暂无因子候选"), context.t("选择因子家族并填写参数后添加"),
+      ), candidateHelp,
+    ));
+    const primary = FTTestFactorSelection.selectedFactor(state);
+    const factorField = window.FTTestFieldHelp?.field?.(state.manifest, "factor");
+    const primaryLabel = factorField?.serialization?.outer_selection_label
+      || factorField?.label || context.t("因子");
+    const primaryValue = document.createElement("span");
+    primaryValue.className = "test-factor-primary-value";
+    primaryValue.textContent = primary
+      ? FTTestFactorSelection.factorAlias(primary)
+      : context.t("未设置");
+    root.append(FTTestFieldRow.create(
+      primaryLabel, primaryValue,
+      window.FTTestFieldHelp?.forField?.(state.manifest, "factor", context) || "",
+    ));
+    return root;
+  }
+
+  window.FTTestFactorCandidates = Object.freeze({list, sourceDescription});
 })();

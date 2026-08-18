@@ -20,23 +20,39 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
 const state = {analysis: {}, selectedBacktestGroupIDs: []};
 const created = window.FTBacktestGroupModel.addBaseBatch(state, {
   product_path_selection: {id: "metals", name: "金属"},
-  factorAliases: ["ROC", "SgCCS", "ROC"],
+  factorAliases: ["ROC"],
   splitCount: 3,
   groupIndex: 1,
   allGroups: true,
 });
 
-assert.equal(created.length, 6);
+assert.equal(created.length, 3);
 assert.deepEqual(created.map(item => item.factorAlias), [
-  "ROC", "ROC", "ROC", "SgCCS", "SgCCS", "SgCCS",
+  "ROC", "ROC", "ROC",
+]);
+assert.deepEqual(created.map(item => item.factorAliases), [
+  ["ROC"], ["ROC"], ["ROC"],
 ]);
 assert.deepEqual(created.map(item => item.name), created.map(item => (
   `${item.batchId}/${item.id}`
 )));
 const deprecatedDisplayKey = ["short", "Alias"].join("");
 assert.ok(created.every(item => !Object.prototype.hasOwnProperty.call(item, deprecatedDisplayKey)));
-assert.equal(new Set(created.map(item => item.id)).size, 6);
+assert.equal(new Set(created.map(item => item.id)).size, 3);
 assert.equal(new Set(created.map(item => item.batchId)).size, 1);
+assert.throws(() => window.FTBacktestGroupModel.addBaseBatch(state, {
+  product_path_selection: {id: "metals", name: "金属"},
+  factorAliases: ["ROC", "SgCCS"], splitCount: 1, groupIndex: 1,
+}), /组合方式/);
+const combined = window.FTBacktestGroupModel.addBaseBatch(state, {
+  product_path_selection: {id: "metals", name: "金属"},
+  factorAliases: ["ROC", "SgCCS"], factor_combination_mode: "future",
+  splitCount: 1, groupIndex: 1,
+});
+assert.equal(combined.length, 1);
+assert.deepEqual(combined[0].factorAliases, ["ROC", "SgCCS"]);
+assert.equal(combined[0].factorAlias, "ROC");
+assert.equal(combined[0].factor_combination_mode, "future");
 const repeated = window.FTBacktestGroupModel.addBaseBatch(state, {
   product_path_selection: {id: "metals", name: "金属"},
   factorAlias: "ROC", splitCount: 3, groupIndex: 1, allGroups: true,
@@ -48,7 +64,7 @@ const derived = window.FTBacktestGroupModel.addDerived(state, created[0].id);
 assert.notEqual(derived.batchId, created[0].batchId);
 assert.equal(derived.name, `${derived.batchId}/${derived.id}`);
 const longShort = window.FTBacktestGroupModel.addLongShort(
-  state, created[0].id, created[3].id, "多空组合", {fee_mode: "custom"},
+  state, created[0].id, created[1].id, "多空组合", {fee_mode: "custom"},
 );
 assert.equal(longShort.name, "多空组合");
 const updatedLongShort = window.FTBacktestGroupModel.updateLongShort(state, longShort.id, {
@@ -62,6 +78,7 @@ assert.deepEqual(window.FTBacktestGroupModel.registeredOverrides(
 ), {engine_mode: "custom"});
 const batches = window.FTBacktestGroupModel.groupBatches(state);
 assert.equal(batches.length, 3);
+assert.equal(batches[0].items.find(item => item.group.id === derived.id).depth, 1);
 assert.deepEqual(batches.map(item => item.order), [1, 2, 3]);
 const legacy = {analysis: {groups: [
   {id: "old-a", factorAlias: "ROC", product_path_selection_id: "metals", splitCount: 3},

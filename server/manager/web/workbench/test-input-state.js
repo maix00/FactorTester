@@ -10,6 +10,11 @@
     if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
     if (!Array.isArray(state.strategyInspections)) state.strategyInspections = [];
     if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
+    if (!state.customStrategyOverrides || typeof state.customStrategyOverrides !== "object") {
+      state.customStrategyOverrides = {};
+    }
+    if (!Array.isArray(state.customStrategyMountedTabs)) state.customStrategyMountedTabs = [];
+    if (!Array.isArray(state.customStrategyProductMask)) state.customStrategyProductMask = [];
     state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
     return state;
   }
@@ -183,12 +188,22 @@
 
   function requestBody(state) {
     initialize(state);
-    return {
+    const result = {
       transient_factor_sources: clone(state.transientFactorSources),
       transient_strategy_sources: clone(state.transientStrategySources),
       strategy_specs: clone(state.strategySpecs),
       run_input_dependencies: clone(state.runInputDependencies),
     };
+    if (Object.keys(state.customStrategyOverrides).length) {
+      result.custom_strategy_overrides = clone(state.customStrategyOverrides);
+    }
+    if (state.customStrategyMountedTabs.length) {
+      result.custom_strategy_mounted_tabs = [...state.customStrategyMountedTabs];
+    }
+    if (state.customStrategyProductMask.length) {
+      result.custom_strategy_product_mask = [...state.customStrategyProductMask];
+    }
+    return result;
   }
 
   function counts(state) {

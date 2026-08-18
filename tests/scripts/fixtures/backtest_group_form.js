@@ -24,6 +24,11 @@ class Element {
     }
   }
 
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this[name] = value; }
   querySelector() { return null; }
@@ -40,6 +45,9 @@ global.FTTestFieldRow = {
 };
 global.FTTestObjectPicker = {
   create: () => ({element: new Element("picker"), setValues: () => {}}),
+};
+global.FTTestChoicePicker = {
+  create: () => ({element: new Element("choice"), values: []}),
 };
 global.FTTestObjectEditorOverlay = {open: async () => {}};
 global.FTBacktestGroupOverrides = {
@@ -80,6 +88,11 @@ window.FTBacktestGroupModel = global.FTBacktestGroupModel;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-group-form.js",
 });
+if (process.argv[3]) {
+  vm.runInThisContext(fs.readFileSync(process.argv[3], "utf8"), {
+    filename: "strategy-editor-pickers.js",
+  });
+}
 
 const context = {
   session: null,

@@ -146,7 +146,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "test_template", "engine", "factor", "product_path_selection", "data_source", "frequency",
+        "test_template", "engine", "category", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "term_carry_strategy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "run_inputs", "calendar",
@@ -204,6 +204,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["factor_role_bindings"]["execution_policy"] == (
         "include"
     )
+    assert index["defaults"]["factor_role_bindings"]["serialization"]["visible_when"] == {
+        "min_items": {"factor_candidates": 2},
+    }
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert [section["key"] for section in index["settings_sections"]] == [
         "authoring", "scope", "portfolio", "execution", "risk", "inputs",
@@ -390,7 +393,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         if field.public and not field.label
     ]
     assert missing_public_labels == []
-    assert set(index["defaults"]) - {"setting_template"} <= executable_public_fields
+    assert set(index["defaults"]) - {
+        "setting_template", "category_candidates", "category",
+    } <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["rules"]["default_if"]["engine_mode"]["basic"] == "none"
@@ -783,6 +788,8 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "factor_git_commit",
         "factor_family_ref",
         "factor_params",
+        "category_candidates",
+        "category",
     ]
 
 
@@ -1266,3 +1273,63 @@ def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() ->
         field.get("value_descriptor", {}).get("options")
         for field in tab["defaults"].values()
     )
+
+
+def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
+    expected = ["__strategy__", "factor", "product_path_selection"]
+    for application_name in ("group_test", "ic_test"):
+        contract = backtest_setting_registry.get(application_name).manifest()["strategy_editor"]
+        assert [item["key"] for item in contract["inner_default_tabs"]] == expected
+        assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
+            "factor_selections", "factor",
+        ]
+        assert contract["outer_scope_tabs"]["factor"]["scope_fields"] == [
+            "factor_candidates",
+        ]
+        inner_factor = contract["inner_factor_fields"]
+        assert inner_factor["candidate_selection"]["cardinality"] == "many"
+        assert inner_factor["candidate_selection"]["filter_only_when_outer_mounted"] is True
+        assert inner_factor["combination_mode"]["key"] == "factor_combination_mode"
+        assert inner_factor["combination_mode"]["options"] == []
+        assert inner_factor["combination_mode"]["required_when"] == {
+            "min_items": {"factor_candidates": 2},
+        }
+        assert inner_factor["shared_overridable_fields"] == [
+            "factor_role_bindings", "factor_mode", "warmup_mode", "warmup_window",
+        ]
+        scoped = contract["scoped_fields"]
+        assert scoped["factor_candidates"]["outer"]["selection_mode"] == (
+            "build_candidate_pool"
+        )
+        assert scoped["factor_candidates"]["inner"]["selection_mode"] == (
+            "filter_or_build_candidates"
+        )
+        assert scoped["factor_candidates"]["inner"]["source_when_outer_mounted"] == (
+            "outer_candidate_pool"
+        )
+        assert scoped["factor"]["outer"]["resolution"] == {
+            "kind": "automatic",
+            "source": "factor_candidates",
+            "resolver": "primary_item",
+        }
+        assert scoped["factor_role_bindings"]["outer"]["visible_when"] == {
+            "min_items": {"factor_candidates": 2},
+        }
+        assert scoped["factor_role_bindings"]["inner"]["visible_when"] == {
+            "min_items": {"factor_candidates": 2},
+        }
+        assert scoped["warmup_window"]["inner"]["visible_when"] == {
+            "field_values": {"warmup_mode": ["fixed"]},
+        }
+        assert scoped["product_path_candidates"]["inner"][
+            "source_when_outer_unmounted"
+        ] == "visible_product_group_catalog"
+        index = backtest_setting_registry.get(application_name).manifest()
+        if "factor" in index["defaults"]:
+            assert index["defaults"]["factor"]["serialization"]["resolution"] == {
+                "kind": "automatic",
+                "source": "factor_candidates",
+                "resolver": "primary_item",
+                "editable": False,
+            }
+        assert "time" in contract["outer_only_tabs"]

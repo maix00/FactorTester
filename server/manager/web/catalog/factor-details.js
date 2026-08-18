@@ -29,7 +29,7 @@
     context.updateActiveTab?.({title: factor.factor_alias || context.t("因子详情")});
     const root = document.createElement("div");
     root.className = "detail-stack";
-    appendSummary(context, root, factor);
+    root.append(window.FTFactorDetailShared.summary(context, factor));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
     ).shell);
@@ -81,7 +81,22 @@
     source.required = true;
     source.placeholder = context.t("填写继承 FactorFamily 的 Python 类源码");
     source.value = loaded.source_code || "";
-    form.append(name, chineseName, description, category, field(context.t("Python 源码"), source));
+    const parameterValues = Object.fromEntries((loaded.params || []).map(parameter => [
+      parameter.alias || parameter.name,
+      parameter.value ?? parameter.default_value ?? "",
+    ]));
+    const parameterEditor = loaded.params?.length
+      ? window.FTFactorDetailShared.parameterEditor(context, loaded.params, parameterValues)
+      : null;
+    form.append(
+      name, chineseName, description, category,
+      window.FTFactorDetailShared.summary(context, loaded),
+      ...(parameterEditor ? [
+        Object.assign(document.createElement("h3"), {textContent: context.t("参数")}),
+        parameterEditor.root,
+      ] : []),
+      field(context.t("Python 源码"), source),
+    );
     const status = document.createElement("small");
     status.className = "form-error";
     const actions = document.createElement("div");
@@ -116,8 +131,14 @@
         });
         const saved = value.factor || {};
         const ref = saved.name || saved.id || factorID;
+        if (parameterEditor && Object.keys(parameterEditor.values).length) {
+          await saveParameterConfig(context, ref, parameterEditor.values);
+        }
         if (context.onSaved) {
-          context.onSaved({...saved, factor_alias: saved.factor_alias || ref, name: saved.name || ref});
+          context.onSaved({
+            ...saved, params: parameterEditor?.values || {},
+            factor_alias: saved.factor_alias || ref, name: saved.name || ref,
+          });
           return;
         }
         if (FTTabReturn.returnToSource(context, {kind: "factor", ref})) return;
@@ -194,27 +215,6 @@
     };
   }
 
-  function appendSummary(context, root, value) {
-    const expression = model().factorExpression(value);
-    if (!expression && !value.description) return;
-    const summary = document.createElement("section");
-    summary.className = "factor-family-summary";
-    if (value.description) {
-      const description = document.createElement("p");
-      description.textContent = value.description;
-      summary.append(description);
-    }
-    if (expression && window.katex) {
-      const heading = document.createElement("h3");
-      heading.textContent = context.t("FactorExpr 公式");
-      const formula = document.createElement("div");
-      formula.className = "factor-family-formula display-math";
-      katex.render(expression, formula, {displayMode: true, throwOnError: false});
-      summary.append(heading, formula);
-    }
-    root.append(summary);
-  }
-
   async function familyDetail(context, data, targetRef) {
     const family = data.families.find(item => item.family_ref === targetRef);
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
@@ -222,7 +222,7 @@
     context.updateActiveTab?.({title: model().familyName(family)});
     const root = document.createElement("div");
     root.className = "detail-stack";
-    appendSummary(context, root, family);
+    root.append(window.FTFactorDetailShared.summary(context, family));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(family),
     ).shell);
@@ -242,6 +242,13 @@
     );
     root.append(view.shell);
     context.content.replaceChildren(root);
+  }
+
+  async function saveParameterConfig(context, factorFamily, values) {
+    await context.api(`/custom-factors/api/factor-library-configs/${encodeURIComponent(factorFamily)}`, {
+      method: "PUT",
+      body: JSON.stringify({params_list: [values]}),
+    });
   }
 
   async function setDetail(context, data, targetRef, nativeRequest) {

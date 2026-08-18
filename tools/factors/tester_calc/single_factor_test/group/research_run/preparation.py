@@ -18,6 +18,11 @@ from .settings import (
     resolve_long_short_strategy_settings,
     resolve_run_datetimes,
 )
+from .strategy_plan_runtime import (
+    apply_custom_strategy_overrides,
+    strategy_aliases_for_plan,
+    strategy_plan_from_payload,
+)
 
 
 def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
@@ -122,6 +127,22 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     if not resolved_settings_by_alias:
         raise ValueError("没有有效的分组配置")
 
+    strategy_plan = strategy_plan_from_payload(payload)
+    custom_scope = payload.get("custom_strategy_scope")
+    if not isinstance(custom_scope, dict):
+        custom_scope = {}
+    if strategy_plan:
+        aliases = strategy_aliases_for_plan(
+            strategy_plan, list(resolved_settings_by_alias),
+        )
+        apply_custom_strategy_overrides(
+            resolved_settings_by_alias,
+            strategy_plan,
+            aliases,
+            overrides=custom_scope.get("overrides"),
+            product_mask=custom_scope.get("product_mask"),
+        )
+
     all_products: list[Any] = []
     seen_products: set[Any] = set()
     for selection in selection_cache.values():
@@ -148,4 +169,5 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
         "factor_mode": factor_mode,
         "start_dt": start_dt,
         "end_dt": end_dt,
+        "custom_strategy_scope": deepcopy(custom_scope),
     }

@@ -27,10 +27,16 @@
       // Remove deprecated display-only aliases without making them part of
       // the authoring or execution schema again.
       removeDeprecatedDisplayMetadata(group);
+      if (!Array.isArray(group.override_mounted_tabs)) {
+        group.override_mounted_tabs = ["__strategy__", "factor", "product_path_selection"];
+      }
       if (!group.name) group.name = defaultName(group.batchId, group.id);
     });
     state.analysis.ls_configs.forEach(item => {
       removeDeprecatedDisplayMetadata(item);
+      if (!Array.isArray(item.override_mounted_tabs)) {
+        item.override_mounted_tabs = ["__strategy__", "factor", "product_path_selection"];
+      }
       if (!item.batchId) item.batchId = `batch:${item.id || "long-short"}`;
       if (!item.name) item.name = defaultName(item.batchId, item.id);
     });
@@ -106,9 +112,11 @@
     }
     for (const item of rootsAndChildren(state)) {
       const root = roots.get(item.group.id) || item.group;
-      // This is the authoring event for the concrete strategy, not an
-      // execution partition. Runtime execution still uses one frozen config.
-      const key = item.group.batchId || root.batchId || `batch:${root.id}`;
+      // The visible list is a hierarchy: descendants stay beneath their root
+      // strategy even though each authoring event retains its own batchId for
+      // execution metadata. Runtime execution still uses each item's frozen
+      // config and does not depend on this presentation grouping.
+      const key = root.batchId || item.group.batchId || `batch:${root.id}`;
       if (!batches.has(key)) {
         batches.set(key, {key, root, order: batches.size + 1, items: []});
       }
