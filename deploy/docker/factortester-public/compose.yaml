@@ -13,6 +13,8 @@ services:
         FACTORTESTER_UID: ${FACTORTESTER_UID:-1000}
         FACTORTESTER_GID: ${FACTORTESTER_GID:-1000}
         PIP_INDEX_URL: ${FACTORTESTER_PIP_INDEX_URL:-https://pypi.org/simple}
+        CODEX_VERSION: ${FACTORTESTER_CODEX_VERSION:-0.147.0}
+        CODEX_NPM_REGISTRY: ${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}
     cap_add:
       - NET_ADMIN
     devices:
