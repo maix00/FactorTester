@@ -120,19 +120,15 @@ def _next_global_job_cursor(
 
 
 def _subordinate_users(owner: str) -> list[dict[str, str]]:
-    """Return accounts the current user may explicitly inspect."""
+    """Return the current user's direct account descendants."""
     from tools.data.account_manage import (
-        can_manage_user_account,
-        load_accounts,
-        normalize_accounts,
+        direct_subordinate_accounts_for,
     )
 
     result = []
-    for account in normalize_accounts(load_accounts()):
+    for account in direct_subordinate_accounts_for(owner):
         username = str(account.get("username") or "")
-        if not username or username == owner:
-            continue
-        if not can_manage_user_account(owner, username):
+        if not username:
             continue
         alias = str(account.get("alias") or "").strip()
         result.append({
