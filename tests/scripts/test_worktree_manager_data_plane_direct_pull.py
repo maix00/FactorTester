@@ -58,7 +58,9 @@ def _node(
 
 
 @contextmanager
-def _direct_download(tmp_path, raw: bytes):
+def _direct_download(
+    tmp_path, raw: bytes, *, content_type: str = "application/octet-stream",
+):
     source_db = tmp_path / "source.sqlite"
     requester_db = tmp_path / "requester.sqlite"
     source_file = tmp_path / "source.bin"
@@ -92,6 +94,7 @@ def _direct_download(tmp_path, raw: bytes):
                 expected_size=len(raw),
                 expected_sha256=hashlib.sha256(raw).hexdigest(),
                 expires_at=now + 600,
+                content_type=content_type,
             ),
             endpoints={
                 "node-a": _node("node-a", source_endpoint, 1, now=now),
@@ -181,3 +184,17 @@ def test_direct_pull_forwards_unsatisfied_range(tmp_path) -> None:
 
     assert denied.value.code == 416
     assert denied.value.headers["Content-Range"] == f"bytes */{len(raw)}"
+
+
+def test_direct_pull_preserves_svg_media_type(tmp_path) -> None:
+    raw = b'<svg xmlns="http://www.w3.org/2000/svg"><title>curve</title></svg>'
+    with _direct_download(
+        tmp_path, raw, content_type="image/svg+xml",
+    ) as (endpoint, access, _runtime):
+        with urlopen(Request(
+            endpoint + access.path,
+            headers={"Authorization": f"Bearer {access.bearer}"},
+        )) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "image/svg+xml"
+            assert response.read() == raw

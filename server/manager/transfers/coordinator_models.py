@@ -17,6 +17,7 @@ class DownloadRequest:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    content_type: str = "application/octet-stream"
     object_kind: str = "job_artifact"
     object_id: str = ""
 
@@ -31,6 +32,7 @@ class UploadRequest:
     expected_size: int
     expected_sha256: str
     expires_at: float
+    content_type: str = "application/octet-stream"
     object_kind: str = "job_submission"
     object_id: str = ""
 

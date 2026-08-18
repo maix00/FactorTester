@@ -30,7 +30,7 @@ def _running(server):
 def test_manager_issues_public_7997_capability_for_local_artifact(
     tmp_path, monkeypatch,
 ) -> None:
-    raw = b"local artifact through explicit transfer access"
+    raw = b'<svg xmlns="http://www.w3.org/2000/svg"><title>curve</title></svg>'
     digest = hashlib.sha256(raw).hexdigest()
     origin = tmp_path / "result.bin"
     origin.write_bytes(raw)
@@ -75,7 +75,7 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
             "artifacts": [{
                 "name": "result.bin",
                 "file_name": "result.bin",
-                "content_type": "application/octet-stream",
+                "content_type": "image/svg+xml",
                 "size_bytes": len(raw),
                 "content_hash": digest,
                 "state": "active",
@@ -117,6 +117,7 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
             },
         )) as response:
             assert response.status == 200
+            assert response.headers["Content-Type"] == "image/svg+xml"
             assert response.read() == raw
 
 

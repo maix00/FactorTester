@@ -55,8 +55,9 @@ class TransferStore(TransferDatabase):
                     request_owner_manager_id,
                     source_server_id, destination_server_id, storage_server_id,
                     job_id, artifact_name, expected_size, expected_sha256,
-                    created_at, updated_at, expires_at, object_kind, object_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    content_type, created_at, updated_at, expires_at,
+                    object_kind, object_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     transfer_id, normalized.idempotency_key,
@@ -66,8 +67,9 @@ class TransferStore(TransferDatabase):
                     normalized.destination_server_id,
                     normalized.storage_server_id, normalized.job_id,
                     normalized.artifact_name, normalized.expected_size,
-                    normalized.expected_sha256, current, current,
-                    normalized.expires_at, normalized.object_kind,
+                    normalized.expected_sha256, normalized.content_type,
+                    current, current, normalized.expires_at,
+                    normalized.object_kind,
                     normalized.object_id,
                 ),
             )

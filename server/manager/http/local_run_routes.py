@@ -76,6 +76,11 @@ class ClientLocalRunRoutesMixin:
                     name=name,
                     expected_size=expected_size,
                     expected_sha256=expected_sha256,
+                    content_type=str(
+                        artifact.get("content_type")
+                        or artifact.get("media_type")
+                        or "application/octet-stream"
+                    ),
                     idempotency_key=str(
                         self.headers.get("Idempotency-Key")
                         or f"local-run-upload:{job_id}:{name}:{expected_sha256}"

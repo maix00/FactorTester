@@ -70,7 +70,10 @@ def serve_local_file(
         handler.end_headers()
         return
     handler.send_response(206 if selected.partial else 200)
-    handler.send_header("Content-Type", "application/octet-stream")
+    handler.send_header(
+        "Content-Type",
+        context.transfer.content_type or "application/octet-stream",
+    )
     handler.send_header("Content-Length", str(selected.length))
     handler.send_header("Accept-Ranges", "bytes")
     if selected.partial:
