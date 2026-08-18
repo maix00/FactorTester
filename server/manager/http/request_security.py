@@ -27,6 +27,8 @@ from server.manager.http.visitor_access import (
     target_visitor_url,
     visitor_cookie,
 )
+from server.manager.network_endpoints import client_endpoint_for_port
+from server.manager.services.network_info import local_internal_addresses
 
 
 MANAGER_ACTION_PATHS = frozenset({
@@ -310,6 +312,70 @@ class RequestSecurityMixin:
             scheme=scheme,
             host=self.headers.get("Host", ""),
         )
+
+    def _client_data_endpoint_for_request(self) -> str:
+        """Return the browser-reachable sibling of this Manager request.
+
+        Control requests and byte transfers intentionally use separate ports,
+        but they must use the same client-visible host.  In particular, never
+        return a WireGuard address to a browser that opened the Manager via
+        loopback or a LAN address.
+        """
+        config = getattr(self.state, "data_plane_process_config", None)
+        if config is None:
+            return ""
+        configured = str(config.client_data_endpoint or "").strip().rstrip("/")
+        if not configured:
+            return ""
+        requested = self._request_origin()
+        try:
+            requested_host = str(urlsplit(requested).hostname or "").lower()
+            configured_control_host = str(
+                urlsplit(config.client_control_endpoint).hostname or ""
+            ).lower()
+            configured_data_host = str(
+                urlsplit(configured).hostname or ""
+            ).lower()
+        except ValueError:
+            return configured
+        if not requested_host:
+            return configured
+        allowed_hosts = {
+            configured_control_host,
+            configured_data_host,
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }
+        if not getattr(self.state, "public_server", False):
+            allowed_hosts.update(
+                str(value).strip().lower()
+                for value in local_internal_addresses()
+                if str(value).strip()
+            )
+        if requested_host not in allowed_hosts:
+            return configured
+        try:
+            return client_endpoint_for_port(
+                requested,
+                int(config.client_port),
+                name="client data endpoint",
+            )
+        except ValueError:
+            return configured
+
+    def _rewrite_client_data_access(self, access):
+        """Keep a 7997 ticket on the same host as its 7998 issuer."""
+        if not isinstance(access, dict):
+            return access
+        endpoint = self._client_data_endpoint_for_request()
+        path = str(access.get("path") or "")
+        if not endpoint or not path.startswith("/"):
+            return access
+        rewritten = dict(access)
+        rewritten["data_endpoint"] = endpoint
+        rewritten["url"] = endpoint.rstrip("/") + path
+        return rewritten
 
     def _visitor_mode(self) -> VisitorMode | None:
         """Return the public anonymous capability set for this origin.

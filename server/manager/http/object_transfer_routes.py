@@ -68,14 +68,16 @@ class ObjectTransferRoutesMixin:
                 self.headers.get("Idempotency-Key")
                 or f"research-download:{object_kind}:{object_id}:{expected_sha256}"
             ).strip()
-            access = self.state.prepare_object_download(
-                principal=principal,
-                storage_server_id=storage_server_id,
-                object_kind=object_kind,
-                object_id=object_id,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-                idempotency_key=idempotency,
+            access = self._rewrite_client_data_access(
+                self.state.prepare_object_download(
+                    principal=principal,
+                    storage_server_id=storage_server_id,
+                    object_kind=object_kind,
+                    object_id=object_id,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    idempotency_key=idempotency,
+                )
             )
         except NodeUnavailable as exc:
             json_response(self, {
@@ -159,19 +161,21 @@ class ObjectTransferRoutesMixin:
                 self.headers.get("Idempotency-Key")
                 or f"research-upload:{expected_object_id}:{expected_sha256}"
             ).strip()
-            access = self.state.prepare_object_upload(
-                principal=owner,
-                storage_server_id=storage_server_id,
-                object_kind=object_kind,
-                object_id=expected_object_id,
-                filename=filename,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-                idempotency_key=idempotency,
-                content_type=str(
-                    payload.get("content_type") or descriptor.get("content_type")
-                    or "application/octet-stream"
-                ),
+            access = self._rewrite_client_data_access(
+                self.state.prepare_object_upload(
+                    principal=owner,
+                    storage_server_id=storage_server_id,
+                    object_kind=object_kind,
+                    object_id=expected_object_id,
+                    filename=filename,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    idempotency_key=idempotency,
+                    content_type=str(
+                        payload.get("content_type") or descriptor.get("content_type")
+                        or "application/octet-stream"
+                    ),
+                )
             )
         except NodeUnavailable as exc:
             json_response(self, {

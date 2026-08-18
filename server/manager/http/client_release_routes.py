@@ -52,18 +52,20 @@ class ClientReleaseRoutesMixin:
             principal = str(
                 (session or {}).get("username") or "manager"
             ).strip()
-            access = self.state.prepare_object_upload(
-                principal=principal,
-                storage_server_id=self.state.server_id,
-                object_kind=TransferObjectKind.CLIENT_RELEASE.value,
-                object_id=f"beta:{version}:{build}:{package_sha256}",
-                filename="client-beta-release.zip",
-                expected_size=package_size,
-                expected_sha256=package_sha256,
-                idempotency_key=(
-                    f"client-release:beta:{version}:{build}:{package_sha256}"
-                ),
-                content_type="application/zip",
+            access = self._rewrite_client_data_access(
+                self.state.prepare_object_upload(
+                    principal=principal,
+                    storage_server_id=self.state.server_id,
+                    object_kind=TransferObjectKind.CLIENT_RELEASE.value,
+                    object_id=f"beta:{version}:{build}:{package_sha256}",
+                    filename="client-beta-release.zip",
+                    expected_size=package_size,
+                    expected_sha256=package_sha256,
+                    idempotency_key=(
+                        f"client-release:beta:{version}:{build}:{package_sha256}"
+                    ),
+                    content_type="application/zip",
+                )
             )
         except (TypeError, ValueError, KeyError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)

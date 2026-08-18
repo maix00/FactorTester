@@ -8,8 +8,8 @@
     return "";
   }
 
-  async function capabilities(context, portQuery) {
-    const payload = await context.api(`/api/jobs/artifact-capabilities${portQuery}`);
+  async function capabilities(context, serverQuery = "") {
+    const payload = await context.api(`/api/jobs/artifact-capabilities${serverQuery}`);
     return Array.isArray(payload.outputs) ? payload.outputs : [];
   }
 
@@ -42,6 +42,7 @@
       ])],
       "after_run",
     );
+    const executionQuery = options.executionQuery || options.portQuery || "";
     const status = document.createElement("span");
     status.className = "output-generation-status";
     const generate = context.button(context.t("生成所选结果"), async () => {
@@ -53,7 +54,7 @@
       status.textContent = context.t("正在生成…");
       try {
         await context.api(
-          `/api/jobs/${encodeURIComponent(options.jobID)}/artifacts/generate${options.portQuery}`,
+          `/api/jobs/${encodeURIComponent(options.jobID)}/artifacts/generate${executionQuery}`,
           {method: "POST", body: JSON.stringify({output_requests: selected})},
         );
         status.textContent = context.t("已生成，正在刷新任务详情…");

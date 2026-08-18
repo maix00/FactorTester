@@ -24,8 +24,8 @@
       || names.has("ic_quantile_portfolio_statistics_data");
   }
 
-  function artifactPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
+  function artifactPath(jobID, artifact, artifactQuery) {
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
   }
 
   function configurationPayload(configuration) {
@@ -51,12 +51,18 @@
     return `/factor-series?${params.toString()}`;
   }
 
-  async function payloads(context, artifacts, jobID, portQuery) {
+  async function payloads(context, artifacts, jobID, artifactQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
-      const response = await FTJobArtifacts.fetch(
-        context, artifactPath(jobID, artifact, portQuery),
-      );
-      return [artifact.name, JSON.parse(await response.text())];
+      try {
+        const response = await FTJobArtifacts.fetch(
+          context, artifactPath(jobID, artifact, artifactQuery),
+        );
+        return [artifact.name, JSON.parse(await response.text())];
+      } catch (error) {
+        throw new Error(
+          `${String(artifact.name || "IC 数据")}: ${error?.message || error}`,
+        );
+      }
     }));
     return Object.fromEntries(pairs);
   }
@@ -347,7 +353,8 @@
     queueMicrotask(async () => {
       try {
         const rawModel = window.FTICResultModel.build(await payloads(
-          context, options.artifacts, options.jobID, options.portQuery,
+          context, options.artifacts, options.jobID,
+          options.artifactQuery || "",
         ));
         const factorOrder = rawModel.factors.map(item => item.key);
         renderLoaded(context, target, {

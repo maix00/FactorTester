@@ -22,6 +22,13 @@ through Manager 7998.
 display address. This prevents the home page from advertising Docker bridge or
 loopback addresses that another LAN device cannot use.
 
+`FACTORTESTER_MANAGER_PUBLIC_ENDPOINT` and
+`FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT` are also client-facing addresses. Set
+them to the host/LAN address that Web and Swift clients can reach on 7998 and
+7997. Do not set either value to `FACTORTESTER_FEDERATION_LOCAL_ADDRESS`:
+that WireGuard address is reserved for Manager-to-Manager control and peer
+data, and is not reachable from ordinary clients.
+
 ## Local setup
 
 1. Copy `server.env.example` to

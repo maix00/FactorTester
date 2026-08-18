@@ -18,14 +18,14 @@
       || Boolean(summary?.metrics && Object.keys(summary.metrics).length);
   }
 
-  function artifactPath(jobID, artifact, portQuery) {
-    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
+  function artifactPath(jobID, artifact, artifactQuery) {
+    return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
   }
 
-  async function loadPayloads(context, artifacts, jobID, portQuery) {
+  async function loadPayloads(context, artifacts, jobID, artifactQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
       const response = await FTJobArtifacts.fetch(
-        context, artifactPath(jobID, artifact, portQuery),
+        context, artifactPath(jobID, artifact, artifactQuery),
       );
       return [artifact.name, JSON.parse(await response.text())];
     }));
@@ -289,7 +289,10 @@
     queueMicrotask(async () => {
       try {
         const model = window.FTBacktestResultModel.build(
-          await loadPayloads(context, options.artifacts, options.jobID, options.portQuery),
+          await loadPayloads(
+            context, options.artifacts, options.jobID,
+            options.artifactQuery || "",
+          ),
           options.resultSummary || {},
         );
         renderLoaded(context, target, {

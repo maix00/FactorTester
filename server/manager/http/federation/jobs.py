@@ -33,8 +33,11 @@ class FederationJobRoutesMixin:
                 raise ValueError("requester_server_id must identify a peer")
             if not principal:
                 raise ValueError("principal is required")
-            if scope not in {"mine", "server"}:
-                raise ValueError("scope must be mine or server")
+            if scope not in {"mine", "subordinates", "server"}:
+                raise ValueError("scope must be mine, subordinates, or server")
+            username = str(payload.get("username") or "").strip()
+            if scope == "subordinates" and not username:
+                raise ValueError("username is required for subordinate jobs")
             if page < 1 or not 1 <= limit <= 100:
                 raise ValueError("page or limit is invalid")
             if scope == "server":
@@ -45,13 +48,16 @@ class FederationJobRoutesMixin:
                     _allow_federation=False,
                 )
             else:
-                value = self.state.aggregate_account_jobs(
-                    principal=principal,
-                    scope="mine",
-                    page=page,
-                    limit=limit,
-                    _allow_federation=False,
-                )
+                account_query = {
+                    "principal": principal,
+                    "scope": scope,
+                    "page": page,
+                    "limit": limit,
+                    "_allow_federation": False,
+                }
+                if username:
+                    account_query["username"] = username
+                value = self.state.aggregate_account_jobs(**account_query)
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return

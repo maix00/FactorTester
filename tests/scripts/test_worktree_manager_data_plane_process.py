@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from server.manager import runtime as manager
 from server.manager.storage.control_db import CONTROL_DATABASE_ENV
+from server.manager.state.data_plane_process import _client_origins
 
 
 class _Process:
@@ -85,3 +86,26 @@ def test_peer_data_listener_requires_explicit_wireguard_host(tmp_path) -> None:
         assert "WireGuard" in str(exc) or "private" in str(exc)
     else:  # pragma: no cover - interface isolation invariant
         raise AssertionError("wildcard peer data listener was accepted")
+
+
+def test_local_client_data_plane_allows_loopback_and_lan_manager_origins(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_LAN_ADDRESSES", "10.98.181.217")
+
+    origins = _client_origins(
+        "http://10.98.181.217:7998",
+        public_server=False,
+    )
+
+    assert origins[0] == "http://10.98.181.217:7998"
+    assert "http://127.0.0.1:7998" in origins
+    assert "http://localhost:7998" in origins
+    assert "http://10.98.181.217:7998" in origins
+
+
+def test_public_client_data_plane_keeps_only_configured_origin() -> None:
+    assert _client_origins(
+        "https://203.0.113.10:7998",
+        public_server=True,
+    ) == ("https://203.0.113.10:7998",)

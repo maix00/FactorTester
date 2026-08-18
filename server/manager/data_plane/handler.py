@@ -145,6 +145,14 @@ class ClientDataPlaneHandler(_DataPlaneHandler):
             "Access-Control-Allow-Headers",
             "Authorization, Content-Type, Range",
         )
+        if str(
+            self.headers.get("Access-Control-Request-Private-Network") or ""
+        ).strip().lower() == "true":
+            # Chromium/WebKit may send this preflight when a page opened from
+            # loopback reaches the host's private LAN 7997 address.  The
+            # origin has already passed the explicit allow-list check above;
+            # acknowledge only that requested private-network transition.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Content-Length", "0")
         self.end_headers()

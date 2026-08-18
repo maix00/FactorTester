@@ -112,14 +112,22 @@ class JobProjectionStateMixin:
     def has_federated_servers(self) -> bool:
         return bool(self.federation_registry.servers(include_offline=True))
 
-    def federated_job_routes(self) -> list[ServiceRoute]:
-        """Return all currently routable service targets for a fan-out query."""
+    def federated_job_routes(
+        self, *, allow_partial: bool = False,
+    ) -> list[ServiceRoute]:
+        """Return service targets for a bounded fan-out query.
+
+        Direct execution and transfer routing still use the strict default:
+        an explicitly registered offline target is an error.  Read-only list
+        projections may opt into a partial result so one stopped worktree does
+        not hold every online server's task list hostage.
+        """
         routes = self.service_routes(include_offline=True)
         offline = [
             route for route in routes
             if (route.remote or route.port == self.fixed_port) and not route.online
         ]
-        if offline:
+        if offline and not allow_partial:
             names = ", ".join(
                 f"{route.server_id}:{route.port}" for route in offline
             )
@@ -230,23 +238,50 @@ class JobProjectionStateMixin:
         limit: int,
         page: int = 1,
         username: str = "",
+        allow_partial: bool = False,
     ) -> list[dict[str, object]]:
         query = {"scope": scope, "limit": str(max(1, min(100, int(limit))))}
         if scope == "subordinates" and username:
             query["username"] = username
         path = "/api/jobs?" + urlencode(query)
         combined: dict[str, dict[str, object]] = {}
-        for route in self.federated_job_routes():
-            value = self.route_json(route, path=path, principal=principal)
-            for item in self._annotate_route_jobs(route, value):
-                job_id = str(item.get("job_id") or "").strip()
-                if not job_id:
+        routes = self.federated_job_routes(allow_partial=allow_partial)
+
+        def query_route(route: ServiceRoute) -> tuple[ServiceRoute, dict[str, object]]:
+            return route, self.route_json(route, path=path, principal=principal)
+
+        # A federated list is a read-only fan-out.  Serially waiting for every
+        # local port and peer made the page latency equal to the sum of all
+        # nodes' response times.  Keep the strict route-selection semantics,
+        # but query the selected sources concurrently.
+        with ThreadPoolExecutor(max_workers=min(len(routes), 8) or 1) as pool:
+            futures = {
+                pool.submit(query_route, route): route for route in routes
+            }
+            for future in as_completed(futures):
+                route = futures[future]
+                try:
+                    _route, value = future.result()
+                except (ConnectionError, OSError, TypeError, ValueError):
+                    if not allow_partial:
+                        raise
                     continue
-                current = combined.get(job_id)
-                if current is None or str(item.get("updated_at") or "") >= str(
-                    current.get("updated_at") or ""
-                ):
-                    combined[job_id] = item
+                for item in self._annotate_route_jobs(route, value):
+                    job_id = str(item.get("job_id") or "").strip()
+                    if not job_id:
+                        continue
+                    # Jobs are normally unique per source, but retain the
+                    # newest projection if an old index leaks a duplicate.
+                    key = (
+                        str(item.get("server_id") or route.server_id),
+                        int(item.get("port") or route.port),
+                        job_id,
+                    )
+                    current = combined.get(key)
+                    if current is None or str(item.get("updated_at") or "") >= str(
+                        current.get("updated_at") or ""
+                    ):
+                        combined[key] = item
         return sorted(
             combined.values(),
             key=lambda item: (
@@ -337,27 +372,32 @@ class JobProjectionStateMixin:
     ) -> dict[str, object]:
         cache_principal = str(username or principal).strip()
         bounded = max(1, min(100, int(limit)))
-        cached = self.job_index.page(
-            cache_principal, page=max(1, int(page)), limit=bounded,
+        requested_page = max(1, int(page))
+        cache_key = (
+            "federated-account", str(principal), str(scope), cache_principal,
+            requested_page, bounded,
         )
-        if cached["jobs"] or self._has_control_sync_snapshot():
-            return {
-                **cached,
-                "success": True,
-                "scope": scope,
-                "sync_mode": "projection",
-            }
+        cached = self._cross_server_cache_get(cache_key)
+        if cached is not None:
+            cached["sync_mode"] = "cache"
+            return cached
+        # Fetch enough rows from every source to assemble a global page.  Each
+        # source is queried from page one; slicing each source's page before
+        # merging would make page two empty as soon as jobs are split across
+        # Managers.
+        source_limit = min(100, bounded * requested_page)
         jobs = self._federated_job_projection(
             principal=principal,
             scope=scope,
             username=username,
-            limit=limit,
+            limit=source_limit,
+            page=1,
+            allow_partial=True,
         )
         self.job_index.upsert(cache_principal, jobs, emit_events=False)
-        requested_page = max(1, int(page))
         start = (requested_page - 1) * bounded
         page_jobs = jobs[start:start + bounded]
-        return {
+        return self._cross_server_cache_put(cache_key, {
             "success": True,
             "scope": scope,
             "jobs": page_jobs,
@@ -367,8 +407,8 @@ class JobProjectionStateMixin:
             "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
             "has_more": start + len(page_jobs) < len(jobs),
             "next_cursor": None,
-            "sync_mode": "fanout_bootstrap",
-        }
+            "sync_mode": "on_demand",
+        })
 
     def _has_control_sync_snapshot(self) -> bool:
         status = self.federation_sync.status()
@@ -596,6 +636,7 @@ class JobProjectionStateMixin:
         page: int = 1,
         limit: int = 20,
         source_scope: str = "mine",
+        username: str = "",
     ) -> dict[str, object]:
         """Fan out a bounded read when the cross-server tab is opened.
 
@@ -606,12 +647,21 @@ class JobProjectionStateMixin:
         """
         bounded = min(100, max(1, int(limit)))
         requested_page = max(1, int(page))
-        source_limit = bounded
+        # Every source contributes to one globally ordered list.  Fetch from
+        # page one with enough rows to assemble the requested global page;
+        # asking each source for page N and then slicing the merged result
+        # would skip rows whenever the sources have different lengths.
+        source_limit = min(100, bounded * requested_page)
         source_scope = str(source_scope or "mine").strip().lower()
-        if source_scope not in {"mine", "server"}:
-            raise ValueError("cross-server source scope must be mine or server")
+        username = str(username or "").strip()
+        if source_scope not in {"mine", "subordinates", "server"}:
+            raise ValueError(
+                "cross-server source scope must be mine, subordinates, or server"
+            )
+        if source_scope == "subordinates" and not username:
+            raise ValueError("username is required for subordinate jobs")
         cache_key = (
-            str(principal), source_scope, requested_page, bounded,
+            str(principal), source_scope, username, requested_page, bounded,
         )
         cached = self._cross_server_cache_get(cache_key)
         if cached is not None:
@@ -630,13 +680,16 @@ class JobProjectionStateMixin:
                     _allow_federation=False,
                 )
             else:
-                local_payload = self.aggregate_account_jobs(
-                    principal=principal,
-                    scope="mine",
-                    page=requested_page,
-                    limit=source_limit,
-                    _allow_federation=False,
-                )
+                account_query = {
+                    "principal": principal,
+                    "scope": source_scope,
+                    "page": 1,
+                    "limit": source_limit,
+                    "_allow_federation": False,
+                }
+                if username:
+                    account_query["username"] = username
+                local_payload = self.aggregate_account_jobs(**account_query)
             local_jobs: list[dict[str, object]] = []
             for item in local_payload.get("jobs") or []:
                 if not isinstance(item, dict):
@@ -680,8 +733,9 @@ class JobProjectionStateMixin:
                 requester_server_id=self.server_id,
                 principal=principal,
                 scope=source_scope,
-                page=requested_page if source_scope == "mine" else 1,
+                page=1,
                 limit=source_limit,
+                username=username,
             )
 
         if peer_routes:

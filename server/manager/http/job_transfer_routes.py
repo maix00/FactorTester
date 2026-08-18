@@ -57,7 +57,8 @@ class JobTransferRoutesMixin:
             idempotency = str(
                 self.headers.get("Idempotency-Key") or secrets.token_hex(16)
             ).strip()
-            access = self.state.prepare_submission_upload(
+            access = self._rewrite_client_data_access(
+                self.state.prepare_submission_upload(
                 principal=principal,
                 storage_server_id=storage_server_id,
                 job_id=job_id,
@@ -65,6 +66,7 @@ class JobTransferRoutesMixin:
                 expected_size=int(payload.get("size_bytes")),
                 expected_sha256=str(payload.get("sha256") or ""),
                 idempotency_key=idempotency,
+                )
             )
         except NodeUnavailable as exc:
             json_response(self, {
@@ -174,16 +176,18 @@ class JobTransferRoutesMixin:
                 )
                 return True
             try:
-                access = self.state.prepare_object_download(
-                    principal=principal,
-                    storage_server_id=self.state.server_id,
-                    object_kind="local_run_artifact",
-                    object_id=f"{job_id}:{name}",
-                    expected_size=int(artifact.get("size_bytes") or 0),
-                    expected_sha256=str(artifact.get("content_hash") or "").strip().lower(),
-                    idempotency_key=idempotency,
-                    job_id=job_id,
-                    artifact_name=name,
+                access = self._rewrite_client_data_access(
+                    self.state.prepare_object_download(
+                        principal=principal,
+                        storage_server_id=self.state.server_id,
+                        object_kind="local_run_artifact",
+                        object_id=f"{job_id}:{name}",
+                        expected_size=int(artifact.get("size_bytes") or 0),
+                        expected_sha256=str(artifact.get("content_hash") or "").strip().lower(),
+                        idempotency_key=idempotency,
+                        job_id=job_id,
+                        artifact_name=name,
+                    )
                 )
             except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
@@ -201,7 +205,11 @@ class JobTransferRoutesMixin:
             })
             return True
         try:
-            routes = self._job_routes(parsed, principal)
+            routes = self._job_routes(
+                parsed,
+                principal,
+                for_artifact_storage=True,
+            )
             selected = self._artifact_metadata(
                 routes,
                 job_id=job_id,
@@ -216,12 +224,14 @@ class JobTransferRoutesMixin:
                 and str(artifact.get("artifact_role") or "output") == "input"
             ):
                 raise PermissionError("登录后才能查看运行输入")
-            access = self.state.prepare_artifact_download(
-                principal=principal,
-                storage_server_id=route.server_id,
-                job_id=job_id,
-                artifact=artifact,
-                idempotency_key=idempotency,
+            access = self._rewrite_client_data_access(
+                self.state.prepare_artifact_download(
+                    principal=principal,
+                    storage_server_id=route.server_id,
+                    job_id=job_id,
+                    artifact=artifact,
+                    idempotency_key=idempotency,
+                )
             )
         except NodeUnavailable as exc:
             json_response(
@@ -298,11 +308,17 @@ class JobTransferRoutesMixin:
             for artifact in payload.get("artifacts") or []:
                 if not isinstance(artifact, dict):
                     continue
-                if (
-                    str(artifact.get("name") or "") == name
-                    and str(artifact.get("state") or "") == "active"
-                ):
-                    return route, artifact
+                artifact_name = str(artifact.get("name") or "").strip()
+                file_name = str(artifact.get("file_name") or "").strip()
+                if name not in {artifact_name, file_name}:
+                    continue
+                if str(artifact.get("state") or "") != "active":
+                    continue
+                # ``name`` is the immutable API identity.  ``file_name`` is
+                # only the download/display name; accepting it here keeps
+                # older declarations and clients readable without making it
+                # the transfer object ID.
+                return route, {**artifact, "name": artifact_name or name}
         return None
 
 

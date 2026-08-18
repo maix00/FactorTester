@@ -11,7 +11,11 @@
     const inputs = loaded.taskDetail.input_artifacts || [];
     const artifact = inputs.find(item => item.name === inputName && item.state === "active");
     if (!artifact) throw new Error(context.t("运行输入不存在或已经清除"));
-    const path = artifactPath(jobID, artifact.name, loaded.portQuery);
+    const path = artifactPath(
+      jobID,
+      artifact.name,
+      loaded.artifactQuery || "",
+    );
     const response = await FTJobArtifacts.fetch(context, path);
     const source = await response.text();
     if (context.isRouteCurrent?.() === false) return;
@@ -40,9 +44,9 @@
     context.content.replaceChildren(root);
   }
 
-  function artifactPath(jobID, name, portQuery) {
+  function artifactPath(jobID, name, artifactQuery) {
     return `/api/jobs/${encodeURIComponent(jobID)}`
-      + `/artifacts/${encodeURIComponent(name)}${portQuery}`;
+      + `/artifacts/${encodeURIComponent(name)}${artifactQuery}`;
   }
 
   function metadata(context, artifact, jobID, port, taskDetail) {

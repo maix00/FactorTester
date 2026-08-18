@@ -139,3 +139,79 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_cross_server_subordinate_jobs_forward_user_and_global_page(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "subordinate-repo",
+        "python",
+        server_role="feat",
+        server_id="local-feat",
+        state_root=tmp_path / "subordinate-state",
+    )
+    remote = _registration("remote-main", latency_ms=8, load=1)
+    state.federation_registry.register(remote)
+    route = state.federation_registry.find(
+        server_id="remote-main", port=8000,
+    )
+    monkeypatch.setattr(state, "_federation_manager_routes", lambda: [route])
+    local_calls = []
+
+    def local_jobs(**kwargs):
+        local_calls.append(kwargs)
+        return {
+            "jobs": [{
+                "job_id": "local-subordinate-job",
+                "port": 8141,
+                "updated_at": "2026-08-12T00:02:00Z",
+            }],
+            "total": 1,
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
+
+    class Gateway:
+        def query_jobs(self, route, **kwargs):
+            assert route.server_id == "remote-main"
+            assert kwargs == {
+                "requester_server_id": "local-feat",
+                "principal": "alice",
+                "scope": "subordinates",
+                "page": 1,
+                "limit": 40,
+                "username": "bob",
+            }
+            return {
+                "jobs": [{
+                    "job_id": "remote-subordinate-job",
+                    "port": 8000,
+                    "updated_at": "2026-08-12T00:03:00Z",
+                }],
+                "total": 1,
+                "has_more": False,
+            }
+
+    state.federation_gateway = Gateway()
+    payload = state.aggregate_cross_server_jobs(
+        principal="alice",
+        source_scope="subordinates",
+        username="bob",
+        page=2,
+        limit=20,
+    )
+
+    assert local_calls == [{
+        "principal": "alice",
+        "scope": "subordinates",
+        "username": "bob",
+        "page": 1,
+        "limit": 40,
+        "_allow_federation": False,
+    }]
+    assert payload["page"] == 2
+    assert payload["jobs"] == []
+    assert payload["total"] == 2
+    assert payload["total_pages"] == 1

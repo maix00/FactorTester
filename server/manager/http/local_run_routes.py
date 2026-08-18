@@ -68,17 +68,19 @@ class ClientLocalRunRoutesMixin:
                 artifact.get("content_hash") or ""
             ).strip().lower():
                 raise ValueError("local artifact hash does not match projection")
-            access = self.state.prepare_submission_upload(
-                principal=str(session["username"]),
-                storage_server_id=self.state.server_id,
-                job_id=job_id,
-                name=name,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-                idempotency_key=str(
-                    self.headers.get("Idempotency-Key")
-                    or f"local-run-upload:{job_id}:{name}:{expected_sha256}"
-                ),
+            access = self._rewrite_client_data_access(
+                self.state.prepare_submission_upload(
+                    principal=str(session["username"]),
+                    storage_server_id=self.state.server_id,
+                    job_id=job_id,
+                    name=name,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    idempotency_key=str(
+                        self.headers.get("Idempotency-Key")
+                        or f"local-run-upload:{job_id}:{name}:{expected_sha256}"
+                    ),
+                )
             )
         except KeyError as exc:
             json_response(self, {"success": False, "error": str(exc).strip("'")}, 404)

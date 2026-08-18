@@ -96,6 +96,19 @@ const staticIC = window.FTJobArtifacts.declarationArtifact({
 ]);
 assert.equal(staticIC.name, "ic_series_report");
 
+const legacyFilenameDeclaration = window.FTJobArtifacts.declarationArtifact({
+  name: "ic_series", presentation: "chart", viewer: "line_chart",
+  artifacts: ["ic_series_report.svg", "ic_series_data.json"],
+}, [
+  {name: "ic_series_report", file_name: "ic_series_report.svg", content_type: "image/svg+xml"},
+  {name: "ic_series_data", file_name: "ic_series_data.json", content_type: "application/json"},
+]);
+assert.equal(
+  legacyFilenameDeclaration.name,
+  "ic_series_report",
+  "file_name declarations must resolve to the canonical artifact name",
+);
+
 const oldEquityWithoutData = window.FTJobArtifacts.declarationArtifact({
   name: "equity_curve", presentation: "chart", viewer: "equity_curve",
   artifacts: ["equity_curve_report", "equity_curve_data", "equity_curve_receipt"],

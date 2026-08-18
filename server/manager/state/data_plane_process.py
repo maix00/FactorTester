@@ -17,6 +17,7 @@ from server.manager.network_endpoints import (
     server_endpoints,
     validate_client_endpoint,
 )
+from server.manager.services.network_info import local_internal_addresses
 from server.manager.storage.control_db import CONTROL_DATABASE_ENV
 
 
@@ -167,9 +168,12 @@ class DataPlaneProcessStateMixin:
             ),
             "--release-origin",
             str(config.client_control_endpoint),
-            "--allowed-origin",
-            _origin(config.client_control_endpoint),
         ]
+        for origin in _client_origins(
+            config.client_control_endpoint,
+            public_server=bool(getattr(self, "public_server", False)),
+        ):
+            command.extend(["--allowed-origin", origin])
         if config.overlay_bind_address:
             command.extend([
                 "--overlay-bind-address",
@@ -223,3 +227,32 @@ __all__ = ["DataPlaneProcessConfig", "DataPlaneProcessStateMixin"]
 def _origin(endpoint: str) -> str:
     parsed = urlsplit(endpoint)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _client_origins(endpoint: str, *, public_server: bool) -> tuple[str, ...]:
+    """Return browser origins allowed to use this Manager's 7997 endpoint.
+
+    The capability URL is intentionally a client-facing endpoint, while the
+    data process also listens on the server's WireGuard address for peer
+    traffic.  Local Docker clients may open 7998 as ``127.0.0.1`` or
+    ``localhost`` while the configured 7997 URL uses the host LAN address;
+    those are legitimate same-machine origins and need explicit CORS
+    permission.  Public deployments keep the allow-list to their configured
+    public Manager origin.
+    """
+    primary = _origin(endpoint)
+    origins = [primary]
+    if public_server:
+        return tuple(origins)
+    parsed = urlsplit(endpoint)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    hosts = {"127.0.0.1", "localhost", "[::1]"}
+    hosts.update(local_internal_addresses())
+    for host in sorted(hosts):
+        rendered = host
+        if ":" in host and not host.startswith("["):
+            rendered = f"[{host}]"
+        candidate = f"{parsed.scheme}://{rendered}:{port}"
+        if candidate not in origins:
+            origins.append(candidate)
+    return tuple(origins)

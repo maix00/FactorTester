@@ -180,6 +180,7 @@ class JobProxyRoutesMixin:
         *,
         port: int | None = None,
         route: ServiceRoute | None = None,
+        include_route_identity: bool = False,
     ) -> None:
         selected_port = int(route.port if route is not None else (port or 0))
         body = response.body
@@ -188,6 +189,16 @@ class JobProxyRoutesMixin:
             try:
                 value = response.json_object()
                 value.setdefault("port", selected_port)
+                # The service response is intentionally unchanged at the
+                # execution layer, but the Manager must tell the browser
+                # which federated node answered.  Artifact reads use this
+                # server identity only; their data-plane route is 7997 and
+                # must never inherit the test worker's execution port.
+                if include_route_identity and route is not None:
+                    value.setdefault("server_id", route.server_id)
+                    value.setdefault("execution_server_id", route.server_id)
+                    value.setdefault("execution_port", selected_port)
+                    value.setdefault("storage_server_id", route.server_id)
                 body = json.dumps(value, ensure_ascii=False).encode("utf-8")
                 content_type = "application/json; charset=utf-8"
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
@@ -209,16 +220,60 @@ class JobProxyRoutesMixin:
         self.end_headers()
         self.wfile.write(body)
 
-    def _job_routes(self, parsed, principal: str | None = None) -> list[ServiceRoute]:
-        """Resolve job origins, using peer Managers when federation is active."""
+    def _job_routes(
+        self,
+        parsed,
+        principal: str | None = None,
+        *,
+        for_artifact_storage: bool = False,
+    ) -> list[ServiceRoute]:
+        """Resolve execution or storage origins for a Job request.
+
+        A Job's execution identity is ``server_id + port``.  Retained
+        artifacts have a different identity: ``storage_server_id``.  The
+        latter is deliberately resolved at server scope, so a stopped
+        worktree port cannot make an otherwise retained artifact unavailable.
+        """
         query = parse_qs(parsed.query, keep_blank_values=True)
         raw_port = str(query.get("port", [""])[0] or "").strip()
         if raw_port and not raw_port.isdigit():
             raise ValueError("port must be an integer")
-        port = int(raw_port) if raw_port else None
+        port = int(raw_port) if raw_port and not for_artifact_storage else None
         server_id = str(query.get("server_id", [""])[0] or "").strip()
-        branch = str(query.get("branch", [""])[0] or "").strip()
-        feature = str(query.get("feature", [""])[0] or "").strip()
+        branch = (
+            str(query.get("branch", [""])[0] or "").strip()
+            if not for_artifact_storage else ""
+        )
+        feature = (
+            str(query.get("feature", [""])[0] or "").strip()
+            if not for_artifact_storage else ""
+        )
+        if for_artifact_storage:
+            routes = self.state.service_routes(include_offline=True)
+            if server_id:
+                routes = [item for item in routes if item.server_id == server_id]
+            online = [item for item in routes if item.online]
+            if online:
+                return sorted(online, key=self.state.route_selection_key)
+            if not routes:
+                # Keep the lightweight Manager/unit-test seam where a caller
+                # supplies a route resolver without populating the registry.
+                # The resolver still receives no execution-port constraint.
+                if not server_id:
+                    legacy_ports = self._job_ports(parsed, principal)
+                    if legacy_ports:
+                        return [
+                            self.state._local_route(port=value, online=True)
+                            for value in legacy_ports
+                        ]
+                fallback = self.state.route_for(server_id=server_id)
+                return [fallback]
+            if server_id:
+                raise TargetUnavailable(
+                    f"storage server {server_id} is offline or unavailable"
+                )
+            if routes:
+                raise TargetUnavailable("all storage servers are offline")
         explicit = bool(server_id or branch or feature or port is not None)
         has_peers = bool(
             self.state.federation_registry.servers(include_offline=True)
@@ -368,7 +423,12 @@ class JobProxyRoutesMixin:
                 ),
             }
         try:
-            routes = self._job_routes(parsed, principal)
+            if suffix in {"/result", "/artifacts"}:
+                routes = self._job_routes(
+                    parsed, principal, for_artifact_storage=True,
+                )
+            else:
+                routes = self._job_routes(parsed, principal)
         except TargetUnavailable as exc:
             json_response(self, {"success": False, "error": str(exc)}, 503)
             return True
@@ -390,7 +450,11 @@ class JobProxyRoutesMixin:
             last_response = (route, response)
             if response.status == 404:
                 continue
-            self._send_gateway_response(response, route=route)
+            self._send_gateway_response(
+                response,
+                route=route,
+                include_route_identity=suffix in {"", "/result", "/artifacts"},
+            )
             return True
         if last_response is not None:
             self._send_gateway_response(
