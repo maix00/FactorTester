@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import json
 
 from click.testing import CliRunner
 
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release import profile_sync
 
 
 def test_profile_sync_command_keeps_local_success_distinct_from_pending_pg(
@@ -21,8 +21,6 @@ def test_profile_sync_command_keeps_local_success_distinct_from_pending_pg(
         workspace_root=tmp_path / "workspace",
         principal_ref="user1",
     ))
-
-    module = importlib.import_module("tools.cli.commands.client_profile")
 
     class OfflineClient:
         def __init__(self, _session):
@@ -40,7 +38,10 @@ def test_profile_sync_command_keeps_local_success_distinct_from_pending_pg(
                 "reason": "control database is unavailable",
             }
 
-    monkeypatch.setattr(module, "FactorTesterClient", OfflineClient)
+    # ``client_profile`` delegates to the extracted release-layer sync
+    # module; patch the dependency where that module resolves it.
+    monkeypatch.setattr(profile_sync.ManagerCredentialStore, "read", lambda _self: "")
+    monkeypatch.setattr(profile_sync, "FactorTesterClient", OfflineClient)
     result = CliRunner().invoke(client_profile, ["sync", "maxa"])
 
     assert result.exit_code == 0, result.output
