@@ -160,4 +160,10 @@ tabs.navigate("/products/product/D.DCE");
 const coldSession = state.tabSessions.get(first);
 assert(coldSession.view?.coldKey);
 assert.strictEqual(coldSession.view.content, undefined);
+
+// Session changes invalidate the fixed home entry as well as opened tabs;
+// home is intentionally not stored in state.tabs in the real shell.
+state.activeTabID = "home";
+tabs.discardViews();
+assert.strictEqual(state.tabSessions.get("home").view, null);
 console.log("ok");

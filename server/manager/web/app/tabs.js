@@ -239,7 +239,12 @@
       // Authentication and language changes alter both page data and the
       // module list.  Cached DOM from the previous session must not be
       // restored after that boundary.
-      state.tabs.forEach(tab => viewCache.discardView(tab.id));
+      const tabIDs = new Set([
+        "home",
+        ...state.tabs.map(tab => tab.id),
+        ...state.tabSessions.keys(),
+      ]);
+      tabIDs.forEach(tabID => viewCache.discardView(tabID));
     }
 
     function initializeTabs() {

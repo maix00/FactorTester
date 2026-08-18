@@ -1171,6 +1171,7 @@ def test_embedded_authentication_uses_the_native_session_store() -> None:
     assert "async function refreshAfterSessionChange()" in coordinator
     assert "tabs?.discardViews?.();" in coordinator
     assert "function discardViews()" in tabs
+    assert '"home"' in tabs
 
 
 def test_route_dispatch_contract() -> None:
