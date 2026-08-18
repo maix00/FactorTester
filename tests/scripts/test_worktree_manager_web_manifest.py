@@ -660,6 +660,9 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "test-factor-candidate-heading-row" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3
+    assert source.index("FTTestFactorSets.control") < source.rindex(
+        'context.t("因子候选"), FTTestFactorCandidates.summaryControl',
+    )
 
 
 def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contract() -> None:
@@ -671,6 +674,7 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "outer_pre_mounted_tabs" in tabs
     assert "includeEmpty: true" in tabs
     assert ".strategy-editor-chip-row" in styles
+    assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
     assert ".test-object-editor-overlay-mount > .detail-stack" in styles
 

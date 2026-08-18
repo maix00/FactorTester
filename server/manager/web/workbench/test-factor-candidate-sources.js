@@ -150,13 +150,6 @@
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    root.append(FTTestFieldRow.create(
-      context.t("因子候选"), FTTestFactorCandidates.summaryControl(context, state),
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_candidates", context,
-      ) || "",
-      {className: "test-factor-candidate-heading-row"},
-    ));
     const sets = FTTestFactorSets.control(context, state, refresh);
     if (sets) root.append(FTTestFieldRow.create(
       context.t("因子集合"), sets,
@@ -165,6 +158,16 @@
       ) || "",
     ));
     root.append(directControl(context, state, refresh));
+    // factor_candidates is derived from the two rows above.  Keep this row
+    // last so the empty-state copy “从上方…添加” always describes the DOM
+    // order, including after lazy candidate catalogs finish loading.
+    root.append(FTTestFieldRow.create(
+      context.t("因子候选"), FTTestFactorCandidates.summaryControl(context, state),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_candidates", context,
+      ) || "",
+      {className: "test-factor-candidate-heading-row"},
+    ));
     return root;
   }
 
