@@ -1259,6 +1259,9 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
     for application_name in ("group_test", "ic_test"):
         contract = backtest_setting_registry.get(application_name).manifest()["strategy_editor"]
         assert [item["key"] for item in contract["inner_default_tabs"]] == expected
+        assert [item["key"] for item in contract["outer_pre_mounted_tabs"]] == expected
+        assert [item["key"] for item in contract["pre_mounted_tabs"]] == expected
+        assert not set(expected).intersection(contract["outer_only_tabs"])
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
             "factor_selections", "factor",
         ]

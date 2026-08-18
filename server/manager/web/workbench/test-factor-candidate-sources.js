@@ -148,24 +148,24 @@
   }
 
   function panel(context, state, refresh) {
-    const body = document.createElement("div");
-    body.className = "test-factor-candidate-sources";
+    const root = document.createElement("div");
+    root.className = "test-factor-candidate-sources";
+    root.append(FTTestFieldRow.create(
+      context.t("因子候选"), FTTestFactorCandidates.summaryControl(context, state),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_candidates", context,
+      ) || "",
+      {className: "test-factor-candidate-heading-row"},
+    ));
     const sets = FTTestFactorSets.control(context, state, refresh);
-    if (sets) body.append(FTTestFieldRow.create(
+    if (sets) root.append(FTTestFieldRow.create(
       context.t("因子集合"), sets,
       window.FTTestFieldHelp?.forField?.(
         state.manifest, "factor_set_selections", context,
       ) || "",
     ));
-    body.append(directControl(context, state, refresh));
-    body.append(FTTestFactorCandidates.summaryControl(context, state));
-    return FTTestFieldRow.create(
-      context.t("因子候选"), body,
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_candidates", context,
-      ) || "",
-      {className: "test-factor-candidate-source-row"},
-    );
+    root.append(directControl(context, state, refresh));
+    return root;
   }
 
   window.FTTestFactorCandidateSources = Object.freeze({panel, selections, syncCandidates});

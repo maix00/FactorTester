@@ -230,6 +230,10 @@
       renderOverrides: ({tab}) => overrideEditor?.panel(tab) || fallbackOverrides,
     }) : null;
     renderFactorPanel();
+    // The tab surface is created before the lazy factor panel paints.  Refresh
+    // once after that first paint so inherited/default chips are visible on
+    // the initial render instead of only after the user changes a field.
+    editorTabs?.refreshChips();
     if (editorTabs) form.append(scopeNote, editorTabs);
     else form.append(scopeNote, field(context.t("产品组"), productGroup),
       factorHost, structure, field(context.t("覆盖字段"), fallbackOverrides));
