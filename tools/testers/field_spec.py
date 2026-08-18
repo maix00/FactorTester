@@ -319,6 +319,7 @@ def infer_value_descriptor(
                 item_type="reference" if is_many else "",
                 option_source=option_source,
                 resolver=resolver,
+                options=normalized_options,
             )
         return ValueDescriptor(
             "enum",
@@ -335,6 +336,7 @@ def infer_value_descriptor(
                 item_type="reference" if is_many else "",
                 option_source=option_source or f"catalog.{kind or 'selection'}",
                 resolver=resolver,
+                options=normalized_options,
             )
         duration = _duration_format(default)
         if duration:

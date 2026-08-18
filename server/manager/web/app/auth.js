@@ -33,7 +33,7 @@
       state.token = "";
       state.session = null;
       nativeAuthentication("logout");
-      await context.loadModules();
+      await context.refreshAfterSessionChange();
       await FTSettings.show(context.appContext(), "account");
     }
 
@@ -84,9 +84,7 @@
         }
         nativeAuthentication("session-updated");
         document.querySelector("#login-dialog").close();
-        await context.loadLanguage();
-        await context.loadModules();
-        await context.renderRoute();
+        await context.refreshAfterSessionChange();
         if (visitorDeviceError) {
           context.showNotice?.(
             context.t("白名单浏览器设备自动登记失败，本次登录仍然有效"), true,
@@ -122,9 +120,7 @@
         localStorage.setItem("ft-session", result.token);
         nativeAuthentication("session-updated");
         document.querySelector("#login-dialog").close();
-        await context.loadLanguage();
-        await context.loadModules();
-        await context.renderRoute();
+        await context.refreshAfterSessionChange();
       } catch (error) {
         const field = document.querySelector("#register-error");
         field.hidden = false; field.textContent = error.message;

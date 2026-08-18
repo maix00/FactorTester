@@ -120,6 +120,16 @@
     });
   }
 
+  async function refreshAfterSessionChange() {
+    // Invalidate any in-flight page work before replacing the session.  The
+    // old request must not paint visitor/anonymous content after login.
+    activeRouteToken += 1;
+    tabs?.discardViews?.();
+    await loadLanguage();
+    await loadModules();
+    await renderRoute();
+  }
+
   function homeNetworkRow(label, value) {
     const row = document.createElement("div");
     row.className = "home-network-row";
@@ -328,6 +338,7 @@
 
   const auth = FTAuth.bind({
     state, api, t, loadLanguage, loadModules, renderRoute, appContext, navigate,
+    refreshAfterSessionChange,
     renderReport: publicationID => report(publicationID),
   });
   const openLogin = auth.openLogin;

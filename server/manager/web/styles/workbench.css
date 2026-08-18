@@ -109,9 +109,6 @@
 .test-run-result-hint { margin: 0; color: var(--muted); font-size: 13px; }
 .test-run-inline-results > .job-section { margin: 0; padding: 0; border: 0; }
 .test-run-options { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.test-run-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
-.test-run-advanced > summary { cursor: pointer; color: var(--muted); font-weight: 650; }
-.test-run-advanced[open] > summary { margin-bottom: 4px; }
 .test-product-selection-summary { color: var(--text) !important; font-weight: 650; }
 .test-object-editor-dialog { width: min(980px, calc(100vw - 32px)); max-width: none; }
 .test-object-editor-overlay { width: auto; max-height: calc(100vh - 32px); overflow: auto; }

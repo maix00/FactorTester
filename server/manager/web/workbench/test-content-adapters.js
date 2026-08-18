@@ -50,6 +50,10 @@
     return typeof descriptor(tab)?.render === "function";
   }
 
+  function supports(tab) {
+    return Boolean(descriptor(tab));
+  }
+
   function render(tab, options) {
     const adapter = descriptor(tab);
     if (!adapter) throw new Error(`未实现的测试内容适配器: ${name(tab)}`);
@@ -108,6 +112,6 @@
   }
 
   window.FTTestContentAdapters = Object.freeze({
-    chipSources, hasContent, lazyKey, name, render,
+    chipSources, hasContent, lazyKey, name, render, supports,
   });
 })();

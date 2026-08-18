@@ -366,8 +366,11 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
 
     registered = sorted({
         field["value_descriptor"]["editor"]
-        for application in ("ic_test", "group_test")
-        for field in backtest_setting_registry.get(application).manifest()["defaults"].values()
+        for application in backtest_setting_registry._applications
+        for field in [
+            *backtest_setting_registry.get(application).manifest(client="web")["defaults"].values(),
+            *backtest_setting_registry.get(application).manifest(client="swift")["run_fields"],
+        ]
     })
     expected = tmp_path / "registered-controls.json"
     expected.write_text(json.dumps(registered), encoding="utf-8")
@@ -378,6 +381,31 @@ def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> 
     ]
     result = subprocess.run(
         ["node", str(fixture), *(str(path) for path in modules), str(expected)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_every_backend_tab_adapter_is_registered_in_the_web_renderer(tmp_path) -> None:
+    import subprocess
+
+    from tools.testers.settings import backtest_setting_registry
+
+    adapters = sorted({
+        tab["content_adapter"]
+        for application in backtest_setting_registry._applications
+        for mount_tabs in backtest_setting_registry.get(application).manifest(
+            client="web"
+        )["tab_lists"].values()
+        for tab in mount_tabs
+    })
+    expected = tmp_path / "registered-tab-adapters.json"
+    expected.write_text(json.dumps(adapters), encoding="utf-8")
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_mount_adapter_contract.js"
+    module = WEB_ROOT / "workbench" / "test-content-adapters.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module), str(expected)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -666,7 +694,6 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     ]
     assert set(manifest["groups"]["workbench-run"]) == {
         "workbench/test-run-fields.js",
-        "workbench/test-outputs.js",
     }
     assert manifest["groups"]["workbench-run-batch"] == [
         "workbench/run-batch/model.js",
@@ -762,10 +789,6 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     )
     assert "if (window.FTTestSettingChips)" in settings_source
     assert "ensureSettingsChipsCode" in source
-    output_source = (WEB_ROOT / "workbench" / "test-outputs.js").read_text(
-        encoding="utf-8",
-    )
-    assert "if (!window.FTOutputChoices)" in output_source
     lazy_code = (WEB_ROOT / "workbench" / "test-lazy-code.js").read_text(
         encoding="utf-8",
     )
@@ -1027,9 +1050,6 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     output_choices = (WEB_ROOT / "core" / "output-choices.js").read_text(
         encoding="utf-8"
     )
-    test_outputs = (WEB_ROOT / "workbench" / "test-outputs.js").read_text(
-        encoding="utf-8"
-    )
     generation = (WEB_ROOT / "jobs" / "generation.js").read_text(encoding="utf-8")
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
@@ -1060,9 +1080,12 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "选择要挂载到测试配置的设置" not in settings
     assert "test-setting-help" not in settings
     assert "test-setting-help" not in run_fields
+    assert "诊断选项" not in run_fields
+    assert "FTTestOutputs" not in run_fields
+    assert "FTTestSettings.controlFor" in run_fields
     assert "tab-chip-description" not in tab_content
     assert "fieldValueSelector" in output_choices
-    assert "FTOutputChoices.fieldValueSelector" in test_outputs
+    assert "FTMultiSelectFilter.create" in output_choices
     assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
@@ -1138,10 +1161,16 @@ def test_home_renders_server_provided_network_addresses() -> None:
 
 def test_embedded_authentication_uses_the_native_session_store() -> None:
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
+    tabs = (WEB_ROOT / "app" / "tabs.js").read_text(encoding="utf-8")
 
     assert "factorTesterAuthentication" in auth
     assert 'nativeAuthentication("logout")' in auth
     assert 'nativeAuthentication("session-updated")' in auth
+    assert "context.refreshAfterSessionChange()" in auth
+    assert "async function refreshAfterSessionChange()" in coordinator
+    assert "tabs?.discardViews?.();" in coordinator
+    assert "function discardViews()" in tabs
 
 
 def test_route_dispatch_contract() -> None:

@@ -101,6 +101,9 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
     assert ic_fields["retention_mode"]["template_policy"] == "exclude"
     assert ic_fields["output_requests"]["freeze_target"] == "run_spec.output_requests"
     assert ic_fields["output_requests"]["template_policy"] == "include"
+    assert ic_fields["output_requests"]["value_descriptor"]["editor"] == "output_picker"
+    assert ic_fields["output_requests"]["value_descriptor"]["cardinality"] == "many"
+    assert ic_fields["output_requests"]["placement"] == "outputs"
     assert backtest_fields["step_mode"]["freeze_target"] == "run_spec.step_mode"
     assert backtest_fields["performance_profile"]["freeze_target"] == (
         "job.job_spec.performance_profile"
@@ -115,6 +118,23 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         field["template_policy"] == "exclude"
         for key, field in backtest_fields.items()
         if key != "output_requests"
+    )
+
+
+def test_every_mountable_tab_audits_every_registered_field() -> None:
+    """Do not let a lazy tab or adapter-managed field bypass the contract."""
+    for client in ("web", "swift"):
+        errors = backtest_setting_registry.audit_mounts(client=client)
+        assert errors == [], "\n".join(errors)
+
+    single = backtest_setting_registry.get("single_factor_page").manifest()
+    tabs = {
+        tab["key"]: tab
+        for tab in single["tab_lists"]["local-settings"]
+    }
+    assert tabs["factors"]["content_adapter"] == "factor_selection"
+    assert tabs["product_path_selection"]["content_adapter"] == (
+        "product_path_selection"
     )
 
 
