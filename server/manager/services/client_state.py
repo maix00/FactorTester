@@ -14,12 +14,17 @@ from tools.cli.release.user_layout import (
     default_user_profile_root,
     default_user_root,
 )
+from tools.cli.release.local_profile_contracts import validate_local_identifier
 from server.manager.services.profile_projection import (
     ProfileProjectionCache,
     control_profile_projection,
     safe_profile_value,
 )
 from server.manager.storage.control_db import ControlDatabaseError
+
+
+class ProfileAlreadyExistsError(ValueError):
+    """Raised when an owner already has the requested Profile identifier."""
 
 
 def _catalog_exchange(product: object, name: str) -> str:
@@ -267,6 +272,66 @@ class ClientStateService:
         if self.profile_cache is not None:
             self.profile_cache.mark_synced(owner, profile_id)
         return self._profile_sync_receipt(owner, projected, synced=True)
+
+    def create_profile(
+        self,
+        principal: str,
+        *,
+        profile_id: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        """Create a minimal server Profile without importing client state.
+
+        The Manager owns the initial server-side projection.  Runtime binding,
+        workspace creation, provider selection, and Agent claiming remain
+        explicit follow-up operations on the Profile detail page.
+        """
+        owner = str(principal or "").strip()
+        if not owner:
+            raise ValueError("profile principal is required")
+        identifier = validate_local_identifier(profile_id, "profile_id")
+        label = str(display_name or "").strip()
+        if not label:
+            raise ValueError("display_name is required")
+
+        if any(
+            str(item.get("profile_id") or "") == identifier
+            for item in self.profiles(owner, include_local_paths=False)
+        ):
+            raise ProfileAlreadyExistsError(
+                f"profile already exists: {identifier}"
+            )
+
+        # A central lookup closes the duplicate race when PostgreSQL is
+        # reachable.  If it is unavailable, the local cache remains the
+        # authoritative creation surface and sync_profile reports pending.
+        if self.control_store is not None:
+            try:
+                central_rows = self.control_store.list_profiles(owner)
+            except (
+                AttributeError, ControlDatabaseError, ConnectionError, OSError,
+                RuntimeError, TypeError, ValueError,
+            ):
+                central_rows = []
+            if any(
+                str(row.get("profile_id") or "") == identifier
+                for row in central_rows
+                if isinstance(row, dict)
+            ):
+                raise ProfileAlreadyExistsError(
+                    f"profile already exists: {identifier}"
+                )
+
+        return self.sync_profile(owner, {
+            "schema_version": 9,
+            "profile_id": identifier,
+            "status": "active",
+            "display_name": label,
+            "runtime_kind": "server",
+            "workspaces": [],
+            "agents": [],
+            "research_records": [],
+        })
 
     def _flush_profile_cache(self, principal: str) -> None:
         if self.control_store is None or self.profile_cache is None:

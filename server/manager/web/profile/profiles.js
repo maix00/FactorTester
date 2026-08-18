@@ -21,13 +21,19 @@
     const payload = await context.api("/api/client/profiles");
     if (!current(context)) return;
     cached = payload.profiles || [];
+    const create = context.button(
+      "+", () => openCreate(context, options),
+      context.t("创建独立 Profile"),
+    );
+    create.className = "primary";
+    context.toolbar.append(create);
     if (!embedded) {
       context.toolbar.append(context.button("↻", () => list(context, options), context.t("刷新")));
     }
     if (!cached.length) {
       context.content.replaceChildren(FTUI.empty(
         context.t("尚无已注册研究身份"),
-        context.t("请使用 CLI 注册智能体研究身份"),
+        context.t("尚无已注册 Profile。可在下方创建，注册完成后会立即显示。"),
       ));
       return;
     }
@@ -114,6 +120,124 @@
       item.current_node || item.node_id, item.checkpoint_ref,
     ])));
     context.content.replaceChildren(root);
+  }
+
+  function formField(context, label, control) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const title = document.createElement("b");
+    title.textContent = context.t(label);
+    const value = document.createElement("div");
+    value.className = "settings-value";
+    value.append(control);
+    row.append(title, value);
+    return row;
+  }
+
+  async function openCreate(context, options = {}) {
+    const embedded = Boolean(options.embedded);
+    const dialog = document.createElement("dialog");
+    dialog.className = "profile-create-dialog";
+    dialog.dataset.ftTabID = context.tabID || "";
+    const card = document.createElement("form");
+    card.method = "dialog";
+    card.className = "dialog-card profile-create-card";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("创建独立 Profile");
+    const note = document.createElement("p");
+    note.className = "settings-muted";
+    note.textContent = context.t(
+      "Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。",
+    );
+    const profileID = document.createElement("input");
+    profileID.className = "inline-setting";
+    profileID.type = "text";
+    profileID.required = true;
+    profileID.autocomplete = "off";
+    profileID.autocapitalize = "off";
+    profileID.spellcheck = false;
+    profileID.placeholder = "maxc";
+    const displayName = document.createElement("input");
+    displayName.className = "inline-setting";
+    displayName.type = "text";
+    displayName.required = true;
+    displayName.autocomplete = "off";
+    displayName.placeholder = "MaxC";
+    const runtime = document.createElement("span");
+    runtime.className = "settings-muted";
+    runtime.textContent = context.t("服务器运行");
+    const status = document.createElement("p");
+    status.className = "settings-muted";
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = context.t("取消");
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "primary";
+    save.textContent = context.t("保存 Profile");
+    actions.append(cancel, save);
+    card.append(
+      heading, note,
+      formField(context, "标识", profileID),
+      formField(context, "显示名称", displayName),
+      formField(context, "运行方式", runtime),
+      actions, status,
+    );
+    dialog.append(card);
+    document.body.append(dialog);
+    const close = () => {
+      if (dialog.open) dialog.close();
+      dialog.remove();
+    };
+    cancel.addEventListener("click", close);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    dialog.showModal();
+    card.addEventListener("submit", async event => {
+      event.preventDefault();
+      const identifier = profileID.value.trim();
+      const label = displayName.value.trim();
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(identifier) || !label) {
+        status.textContent = context.t(
+          "Profile 标识只能使用小写字母、数字、点、下划线或短横线；显示名称不能为空",
+        );
+        return;
+      }
+      save.disabled = true;
+      cancel.disabled = true;
+      status.textContent = context.t("正在保存…");
+      try {
+        const receipt = await context.api("/api/client/profiles/create", {
+          method: "POST",
+          body: JSON.stringify({profile_id: identifier, display_name: label}),
+        });
+        const refreshed = await context.api("/api/client/profiles");
+        if (!current(context)) {
+          close();
+          return;
+        }
+        cached = refreshed.profiles || [];
+        close();
+        if (receipt.pending) {
+          context.showNotice(context.t(
+            "研究身份已在本地创建，等待中央数据库同步",
+          ));
+        }
+        context.navigate(
+          embedded
+            ? `/research?section=profiles&profile=${encodeURIComponent(identifier)}`
+            : `/profiles/${encodeURIComponent(identifier)}`,
+        );
+      } catch (error) {
+        status.textContent = error.status === 409
+          ? context.t("该研究身份标识已经存在")
+          : (error.message || context.t("保存失败"));
+        save.disabled = false;
+        cancel.disabled = false;
+      }
+    });
   }
 
   function runtimeLabel(context, runtime) {

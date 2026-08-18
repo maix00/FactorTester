@@ -1057,6 +1057,88 @@ def test_profile_sync_endpoint_reports_local_pending_state_on_postgres_outage(
     assert "workspace_root" not in value["profile"]
 
 
+def test_profile_create_endpoint_registers_minimal_server_projection(
+    tmp_path,
+) -> None:
+    from server.manager.services.profile_projection import ProfileProjectionCache
+
+    state = authenticated_state(tmp_path)
+    state.client_state.control_store = None
+    state.client_state.client_root = tmp_path / "client"
+    state.client_state.profile_cache = ProfileProjectionCache(
+        tmp_path / "profile-cache",
+    )
+    state.client_state.account_domain_sync = None
+    state.federated_public_data = None
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/client/profiles/create",
+            data=json.dumps({
+                "profile_id": "maxc",
+                "display_name": "MaxC",
+            }).encode(),
+            method="POST",
+            headers=headers,
+        )) as response:
+            created_status = response.status
+            created = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/client/profiles",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            listed = json.loads(response.read())
+
+    assert created_status == 201
+    assert created["success"] is True
+    assert created["status"] == "pending"
+    assert created["profile"]["profile_id"] == "maxc"
+    assert created["profile"]["display_name"] == "MaxC"
+    assert created["profile"]["runtime_kind"] == "server"
+    assert "workspace_root" not in created["profile"]
+    assert listed["profiles"][0]["profile_id"] == "maxc"
+
+
+def test_profile_create_endpoint_rejects_duplicate_identifier(tmp_path) -> None:
+    from server.manager.services.profile_projection import ProfileProjectionCache
+
+    state = authenticated_state(tmp_path)
+    state.client_state.control_store = None
+    state.client_state.client_root = tmp_path / "client"
+    state.client_state.profile_cache = ProfileProjectionCache(
+        tmp_path / "profile-cache",
+    )
+    state.client_state.account_domain_sync = None
+    state.federated_public_data = None
+    state.client_state.create_profile(
+        "user@1", profile_id="maxc", display_name="MaxC",
+    )
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+
+    with running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(Request(
+                f"{base_url}/api/client/profiles/create",
+                data=json.dumps({
+                    "profile_id": "maxc",
+                    "display_name": "Another MaxC",
+                }).encode(),
+                method="POST",
+                headers=headers,
+            ))
+
+    assert raised.value.code == 409
+    value = json.loads(raised.value.read())
+    assert "profile already exists" in value["error"]
+
+
 def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     headers = {
@@ -2486,7 +2568,9 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
     assert "/api/client/profile-claims" in scripts["profiles"]
     assert 'const embedded = Boolean(options.embedded)' in scripts["profiles"]
     assert '尚无已注册研究身份' in scripts["profiles"]
-    assert '请使用 CLI 注册智能体研究身份' in scripts["profiles"]
+    assert '尚无已注册 Profile。可在下方创建，注册完成后会立即显示。' in scripts["profiles"]
+    assert 'context.api("/api/client/profiles/create"' in scripts["profiles"]
+    assert '创建独立 Profile' in scripts["profiles"]
     assert '/research?section=profiles&profile=${profileID}' in scripts["profiles"]
     assert "const payload = await context.api(\"/api/client/workspace\")" in scripts["settings"]
     assert "if (!current(context)) return;" in scripts["catalog_details"]
