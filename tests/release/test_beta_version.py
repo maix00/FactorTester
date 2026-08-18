@@ -164,6 +164,9 @@ def test_publish_transaction_resolves_auto_identity_before_build(
     )
     monkeypatch.setattr(publish, "REPO", repo)
     monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
+    # The test's temporary release root is the complete discovery scope;
+    # ignore any locally installed FTClient.app on the developer machine.
+    monkeypatch.setattr(publish, "read_installed_beta_release", lambda *_args: None)
     captured: dict[str, object] = {}
 
     def fake_release_client(**options):
