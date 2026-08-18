@@ -67,6 +67,10 @@ assert.deepStrictEqual(
 view.options.children[0].children[0].checked = true;
 view.options.children[0].children[0].listeners.change();
 assert.strictEqual(view.value, "product-group:night");
+assert.deepStrictEqual(changes, []);
+const save = find(view.element, item => item.className === "primary ft-multi-select-apply");
+assert.ok(save);
+save.listeners.click();
 assert.deepStrictEqual(changes, [["product-group:night"]]);
 view.clear.listeners.click();
 assert.strictEqual(rowLabel(view.options.children[0]), "夜盘期货");
@@ -82,5 +86,15 @@ assert.deepStrictEqual(view.values, ["*"]);
 function tags(node) {
   return [node.tagName, ...(node.children || []).flatMap(tags)];
 }
+
+function find(node, predicate) {
+  if (predicate(node)) return node;
+  for (const child of node.children || []) {
+    const result = find(child, predicate);
+    if (result) return result;
+  }
+  return null;
+}
+
 assert.ok(!tags(view.element).includes("SELECT"));
 console.log("ok");
