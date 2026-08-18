@@ -47,7 +47,10 @@
     "workbench-run-submit": ["workbench-run", "workbench-compiler"],
     "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
     "workbench-products": ["workbench-core", "catalog-core"],
-    "workbench-backtest": ["workbench-settings", "workbench-settings-controls"],
+    "workbench-backtest": [
+      "workbench-settings", "workbench-settings-controls",
+      "workbench-products", "workbench-factors"
+    ],
     "workbench-templates": ["workbench-core"],
     "settings": ["core"],
     "manager": ["core"]

@@ -758,6 +758,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
     assert manifest["group_dependencies"]["workbench-backtest"] == [
         "workbench-settings", "workbench-settings-controls",
+        "workbench-products", "workbench-factors",
     ]
     assert manifest["group_dependencies"]["workbench-run-submit"] == [
         "workbench-run", "workbench-compiler",
