@@ -122,6 +122,47 @@ def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch)
     assert "secret-token" not in str(error.value)
 
 
+def test_provider_test_uses_manager_mihomo_proxy(tmp_path, monkeypatch):
+    observed = {}
+
+    def fake_test(provider, *, proxy_url=""):
+        observed["proxy_url"] = proxy_url
+        return {
+            "status": "ok",
+            "provider_id": provider.get("provider_id", ""),
+            "protocol": provider["protocol"],
+            "base_url": provider["base_url"],
+            "default_model": provider["default_model"],
+            "model_available": True,
+        }
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fake_test)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+        proxy_url_provider=lambda: "http://127.0.0.1:7890",
+    )
+
+    result = service.test_provider(
+        PRINCIPAL,
+        {
+            "label": "OpenAI",
+            "runtime_kind": "server",
+            "protocol": "openai_compatible",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "research-model",
+            "token": "secret-token",
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert observed["proxy_url"] == "http://127.0.0.1:7890"
+
+
 def test_unimplemented_codex_protocol_cannot_be_saved(tmp_path):
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",

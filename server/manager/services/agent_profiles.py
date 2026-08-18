@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,11 +42,13 @@ class AgentProfileService:
         server_id: str,
         skill_source_root=None,
         skill_manifest_path=None,
+        proxy_url_provider: Callable[[], str] | None = None,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
             raise ValueError("server_id is required")
         self.data_root = data_root
+        self.proxy_url_provider = proxy_url_provider
         self.runtime_store = ProfileRuntimeStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
         source_root = skill_source_root
@@ -58,6 +61,15 @@ class AgentProfileService:
             manifest = Path(source_root) / manifest
         self.skill_catalog = AgentSkillCatalog(source_root, manifest)
         self.skill_store = AgentSkillStore(db_path)
+
+    def _proxy_url(self) -> str:
+        """Return the optional Manager-local proxy without failing closed."""
+        if self.proxy_url_provider is None:
+            return ""
+        try:
+            return str(self.proxy_url_provider() or "").strip()
+        except Exception:
+            return ""
 
     @staticmethod
     def _profile_id(profile: dict[str, Any]) -> str:
@@ -363,6 +375,9 @@ class AgentProfileService:
             payload,
             default_server_id=self.server_id,
         )
+        proxy_url = self._proxy_url()
+        if proxy_url:
+            return AgentProviderHealth.test(candidate, proxy_url=proxy_url)
         return AgentProviderHealth.test(candidate)
 
     def delete_provider(self, principal: str, provider_id: str) -> bool:
