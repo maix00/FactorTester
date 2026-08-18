@@ -388,6 +388,12 @@ class ManagerState(
             provider_key_path=self.state_root / "agent-provider.key",
             data_root=self.data_root,
             server_id=self.server_id,
+            skill_source_root=self.runtime_source_root,
+            skill_manifest_path=self.runtime_source_root
+            / "server"
+            / "manager"
+            / "skills"
+            / "catalog.json",
         )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,

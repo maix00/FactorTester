@@ -93,6 +93,13 @@
       cached = payload.profiles || [];
       await detail(context, profileID, options);
     }));
+    if (window.FTAgentSkills?.render) {
+      root.append(await window.FTAgentSkills.render(context, profile, async () => {
+        const payload = await context.api("/api/client/profiles");
+        cached = payload.profiles || [];
+        await detail(context, profileID, options);
+      }));
+    }
     root.append(section(context, "Agents", ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], (profile.agents || []).map(item => [
       item.agent_id, item.role, item.status, item.next_action,
     ])));

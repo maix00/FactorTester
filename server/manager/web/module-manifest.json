@@ -301,6 +301,7 @@
       "workbench/test-templates.js"
     ],
     "profile": [
+      "profile/agent-skills.js",
       "profile/profiles.js",
       "profile/agent-models.js"
     ],
@@ -458,6 +459,7 @@
     "workbench/test-run-batch.js",
     "workbench/run-batch/actions.js",
     "workbench/tests.js",
+    "profile/agent-skills.js",
     "profile/profiles.js",
     "profile/agent-models.js",
     "settings/settings.js",

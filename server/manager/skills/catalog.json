@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "factortester-research",
+      "label": "FactorTester 研究",
+      "description": "通过 FactorTester CLI 进行因子研究、研究图推进、证据和报告工作。",
+      "version": "1",
+      "path": "skills/cli-anything-factortester-research",
+      "runtime_kinds": ["server"],
+      "audience": "profile",
+      "enabled": true
+    },
+    {
+      "id": "research-obligation-cycle",
+      "label": "研究义务周期",
+      "description": "在研究图要求时处理研究义务、试验计划和证据审查。",
+      "version": "1",
+      "path": "skills/research-obligation-cycle",
+      "runtime_kinds": ["server"],
+      "audience": "profile",
+      "enabled": true
+    },
+    {
+      "id": "factortester-manager-maintenance",
+      "label": "FactorTester Manager Maintenance",
+      "description": "服务器维护和 Manager 运维能力，仅供管理员使用。",
+      "version": "1",
+      "path": "server/skills/factortester-server-maintenance",
+      "runtime_kinds": ["server"],
+      "audience": "manager_only",
+      "enabled": true
+    }
+  ]
+}

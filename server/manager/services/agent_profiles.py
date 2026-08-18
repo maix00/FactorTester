@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from server.manager.services.agent_workspace import (
     ensure_server_profile_workspace,
     profile_workspace_relative_path,
 )
+from server.manager.services.agent_skill_catalog import (
+    AgentSkillCatalog,
+    AgentSkillCatalogError,
+)
 from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
 )
+from server.manager.storage.agent_skill_store import AgentSkillStore
 from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
     ProfileRuntimeError,
@@ -29,6 +35,8 @@ class AgentProfileService:
         provider_key_path,
         data_root,
         server_id: str,
+        skill_source_root=None,
+        skill_manifest_path=None,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
@@ -36,6 +44,16 @@ class AgentProfileService:
         self.data_root = data_root
         self.runtime_store = ProfileRuntimeStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
+        source_root = skill_source_root
+        if source_root is None:
+            source_root = Path(__file__).resolve().parents[3]
+        manifest = skill_manifest_path
+        if manifest is None:
+            manifest = Path(source_root) / "server" / "manager" / "skills" / "catalog.json"
+        elif not Path(manifest).is_absolute():
+            manifest = Path(source_root) / manifest
+        self.skill_catalog = AgentSkillCatalog(source_root, manifest)
+        self.skill_store = AgentSkillStore(db_path)
 
     @staticmethod
     def _profile_id(profile: dict[str, Any]) -> str:
@@ -154,6 +172,81 @@ class AgentProfileService:
             server_id=self.server_id if runtime_kind == "server" else None,
         )
 
+    def available_skills(self, *, runtime_kind: str = "server") -> list[dict[str, Any]]:
+        return self.skill_catalog.public_definitions(runtime_kind)
+
+    def profile_skills(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        definitions = self.skill_catalog.definitions(runtime_kind)
+        selected = set(self.skill_store.selected(principal, profile_id))
+        return {
+            "profile_id": profile_id,
+            "runtime_kind": runtime_kind,
+            "skills": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"path", "relative_path"}
+                }
+                | {"selected": item["skill_id"] in selected}
+                for item in definitions
+            ],
+        }
+
+    def selected_skill_bindings(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return selected Skill paths for the future app-server supervisor."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("Profile runtime is not configured")
+        definitions = {
+            item["skill_id"]: item
+            for item in self.skill_catalog.definitions(str(runtime["runtime_kind"]))
+        }
+        return [
+            definitions[skill_id]
+            for skill_id in self.skill_store.selected(principal, profile_id)
+            if skill_id in definitions
+        ]
+
+    def set_profile_skills(
+        self,
+        principal: str,
+        profile_id: str,
+        skill_ids: list[str],
+    ) -> dict[str, Any]:
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+        if self.runtime_store.active_claim(principal, profile_id) is not None:
+            raise ProfileRuntimeError(
+                "release the active Agent before changing Profile Skills"
+            )
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        definitions = {
+            item["skill_id"]: item
+            for item in self.skill_catalog.definitions(runtime_kind)
+        }
+        requested = sorted({str(value or "").strip() for value in skill_ids if str(value or "").strip()})
+        unknown = [skill_id for skill_id in requested if skill_id not in definitions]
+        if unknown:
+            raise AgentSkillCatalogError(
+                "Skill is not installed or is not available to this runtime: "
+                + ", ".join(unknown)
+            )
+        selected = self.skill_store.replace(principal, profile_id, requested)
+        return self.profile_skills(principal, profile_id) | {"selected_skill_ids": selected}
+
     def save_provider(
         self,
         principal: str,
@@ -216,6 +309,10 @@ class AgentProfileService:
         return {
             "runtime": runtime,
             "claim": self._public_claim(claim),
+            "selected_skill_ids": [
+                item["skill_id"]
+                for item in self.selected_skill_bindings(principal, profile_id)
+            ],
         }
 
     def heartbeat(self, principal: str, claim_id: str, agent_id: str) -> dict[str, Any]:

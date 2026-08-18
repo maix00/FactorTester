@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from server.manager.http.responses import json_response
+from server.manager.services.agent_skill_catalog import AgentSkillCatalogError
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.storage.agent_provider_store import ProviderStoreError
 from server.manager.storage.profile_runtime_store import (
@@ -70,6 +71,50 @@ class AgentRoutesMixin:
         )
 
     def _get_agent_routes(self, parsed) -> bool:
+        if parsed.path == "/api/client/agent-skills":
+            session = self._agent_session()
+            if session is None:
+                return True
+            try:
+                runtime_kind = parse_qs(
+                    parsed.query, keep_blank_values=True,
+                ).get("runtime_kind", ["server"])[0].strip() or "server"
+                skills = self._agent_service().available_skills(
+                    runtime_kind=runtime_kind,
+                )
+            except sqlite3.Error:
+                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                return True
+            except (AgentSkillCatalogError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return True
+            json_response(
+                self,
+                {"success": True, "runtime_kind": runtime_kind, "skills": skills},
+            )
+            return True
+
+        if parsed.path == "/api/client/profile-skills":
+            session = self._agent_session()
+            if session is None:
+                return True
+            try:
+                principal = self._agent_principal(session)
+                profile_id = parse_qs(
+                    parsed.query, keep_blank_values=True,
+                ).get("profile_id", [""])[0].strip()
+                if not self._profile_exists(principal, profile_id):
+                    raise ProfileRuntimeError("Profile does not belong to current account")
+                value = self._agent_service().profile_skills(principal, profile_id)
+            except sqlite3.Error:
+                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                return True
+            except (AgentSkillCatalogError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return True
+            json_response(self, {"success": True, **value})
+            return True
+
         if parsed.path == "/api/client/agent-models":
             session = self._agent_session()
             if session is None:
@@ -137,6 +182,7 @@ class AgentRoutesMixin:
     def _post_agent_routes(self, parsed) -> bool:
         if parsed.path not in {
             "/api/client/agent-models",
+            "/api/client/profile-skills",
             "/api/client/profile-runtime",
             "/api/client/profile-claims",
             "/api/client/profile-claims/heartbeat",
@@ -153,6 +199,21 @@ class AgentRoutesMixin:
             if parsed.path == "/api/client/agent-models":
                 provider = service.save_provider(principal, payload)
                 json_response(self, {"success": True, "provider": provider}, 201)
+                return True
+
+            if parsed.path == "/api/client/profile-skills":
+                profile_id = str(payload.get("profile_id") or "").strip()
+                if not self._profile_exists(principal, profile_id):
+                    raise ProfileRuntimeError("Profile does not belong to current account")
+                skill_ids = payload.get("skill_ids")
+                if not isinstance(skill_ids, list):
+                    raise AgentSkillCatalogError("skill_ids must be a list")
+                value = service.set_profile_skills(
+                    principal,
+                    profile_id,
+                    [str(item) for item in skill_ids],
+                )
+                json_response(self, {"success": True, **value})
                 return True
 
             if parsed.path == "/api/client/profile-runtime":
@@ -241,7 +302,7 @@ class AgentRoutesMixin:
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return True
-        except (ProviderStoreError, ProfileRuntimeError, RuntimeError, TypeError, ValueError) as exc:
+        except (AgentSkillCatalogError, ProviderStoreError, ProfileRuntimeError, RuntimeError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return True
 
