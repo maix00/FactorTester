@@ -45,6 +45,8 @@ from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
+from server.manager.http.agent_routes import AgentRoutesMixin
+from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.research_graph_catalog_routes import (
     ResearchGraphCatalogRoutesMixin,
 )
@@ -53,6 +55,8 @@ from server.manager.http.write_routes import WriteRoutesMixin
 from server.manager.http.auth_routes import AuthenticationRoutesMixin
 from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
+from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.federated_public_data import (
     FederatedPublicDataService,
 )
@@ -381,6 +385,22 @@ class ManagerState(
             profile_cache_root=self.state_root / "profile-cache",
             account_domain_sync=self.account_domain_sync,
         )
+        self.agent_profiles = AgentProfileService(
+            db_path=self.sessions_db_path,
+            provider_key_path=self.state_root / "agent-provider.key",
+            data_root=self.data_root,
+            server_id=self.server_id,
+            skill_source_root=self.runtime_source_root,
+            skill_manifest_path=self.runtime_source_root
+            / "server"
+            / "manager"
+            / "skills"
+            / "catalog.json",
+        )
+        self.agent_app_server = AgentAppServerSupervisor(
+            self.agent_profiles,
+            codex_binary=os.environ.get("FACTORTESTER_CODEX_BINARY", "codex"),
+        )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,
             registry=self.federation_registry,
@@ -465,6 +485,8 @@ class Handler(
     ObjectTransferRoutesMixin,
     TransferMetricsRoutesMixin,
     JobListRoutesMixin,
+    AgentAppServerRoutesMixin,
+    AgentRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,
     WriteRoutesMixin,

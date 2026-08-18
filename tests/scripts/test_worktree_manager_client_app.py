@@ -1894,6 +1894,7 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
         item["id"] for item in user_modules["research"]["children"]
     } == {
         "research.local", "research.shared", "research.graph", "research.profiles",
+        "research.agent-models",
     }
     assert "admin_users" not in user_modules
     assert not {"manager", "sqlite_web"} & set(org_modules)
@@ -2478,6 +2479,8 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
     for script in scripts.values():
         assert "context.isRouteCurrent?.() !== false" in script
     assert "const payload = await context.api(\"/api/client/profiles\")" in scripts["profiles"]
+    assert "runtime_kind" in scripts["profiles"]
+    assert "/api/client/profile-claims" in scripts["profiles"]
     assert 'const embedded = Boolean(options.embedded)' in scripts["profiles"]
     assert '尚无已注册研究身份' in scripts["profiles"]
     assert '请使用 CLI 注册智能体研究身份' in scripts["profiles"]
@@ -2509,6 +2512,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert '["local", "本地研究"]' in workspaces
     assert '["shared", "共享研究"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
+    assert '["agent-models", "智能体模型"]' in workspaces
+    assert 'FTAgentModels.list' in workspaces
     assert "FTResearchLocal.render(context, body, embedded)" in workspaces
     assert "FTResearchShared.render(context, body, embedded)" in workspaces
     assert "FTResearchGraph.render(context, body)" in workspaces

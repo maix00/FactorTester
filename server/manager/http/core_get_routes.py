@@ -278,6 +278,8 @@ class CoreGetRoutesMixin:
             self._get_entry_routes,
             self._get_transfer_access_status,
             self._get_job_list_routes,
+            self._get_agent_app_routes,
+            self._get_agent_routes,
             self._get_client_research_routes,
             self._get_public_research_routes,
             self._get_session_and_shell_routes,

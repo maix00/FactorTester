@@ -47,11 +47,12 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
             profile_service = getattr(self.state, "federated_public_data", None)
             if profile_service is None:
                 profile_service = self.state.client_state
-            json_response(self, {
-                "profiles": profile_service.profiles(
-                    str(session["username"]),
-                ),
-            })
+            principal = str(session["username"])
+            profiles = profile_service.profiles(principal)
+            agent_service = getattr(self.state, "agent_profiles", None)
+            if agent_service is not None:
+                profiles = agent_service.enrich(principal, profiles)
+            json_response(self, {"profiles": profiles})
             return True
         if parsed.path == "/api/client/workspace":
             session = self._session()

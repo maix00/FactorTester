@@ -54,6 +54,10 @@ class WriteRoutesMixin:
             return
         if not self._public_login_gate(parsed, method="POST"):
             return
+        if self._post_agent_app_routes(parsed):
+            return
+        if self._post_agent_routes(parsed):
+            return
         if self._post_client_research_routes(parsed):
             return
         if parsed.path == "/api/device/challenge":
@@ -364,6 +368,8 @@ class WriteRoutesMixin:
             return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="DELETE"):
+            return
+        if self._delete_agent_routes(parsed):
             return
         if self._proxy_job_request(parsed, method="DELETE"):
             return
