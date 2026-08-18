@@ -217,6 +217,18 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    import tools.cli.commands.client_profile as command_module
+
+    monkeypatch.setattr(
+        command_module,
+        "_sync_profile",
+        lambda _profile, *, manager_url="": {
+            "status": "pending",
+            "synced": False,
+            "pending": True,
+            "manager_url": manager_url,
+        },
+    )
     runner = CliRunner()
 
     result = runner.invoke(cli, [
@@ -464,6 +476,8 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import tools.cli.commands.client_profile as command_module
+
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -495,6 +509,16 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
                 "factors": [{"factor_alias": "SgCCS"}],
             },
             "projection_hash": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_sync_profile",
+        lambda _profile, *, manager_url="": {
+            "status": "pending",
+            "synced": False,
+            "pending": True,
+            "manager_url": manager_url,
         },
     )
     runner = CliRunner()
@@ -724,6 +748,8 @@ def test_bootstrap_does_not_rebind_existing_profile_to_new_principal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import tools.cli.commands.client_profile as command_module
+
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
     active = {"username": "18717974771"}
@@ -742,6 +768,16 @@ def test_bootstrap_does_not_rebind_existing_profile_to_new_principal(
                 "factors": [],
             },
             "projection_hash": owner_ref.zfill(64)[-64:],
+        },
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_sync_profile",
+        lambda _profile, *, manager_url="": {
+            "status": "pending",
+            "synced": False,
+            "pending": True,
+            "manager_url": manager_url,
         },
     )
     runner = CliRunner()

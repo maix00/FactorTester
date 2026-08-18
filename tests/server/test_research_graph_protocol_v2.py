@@ -136,7 +136,7 @@ def test_server_rejects_schema_v2_graph_embedded_runtime_budget() -> None:
 
     with pytest.raises(
         ValueError,
-        match="schema-v2 Graph must not embed agent_packet_budget",
+        match="removed runtime packet settings",
     ):
         validate_graph(graph)
 

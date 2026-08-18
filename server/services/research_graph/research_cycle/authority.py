@@ -144,6 +144,8 @@ def _proposer_id(proposal: dict[str, Any]) -> str:
 
 
 def _require_proposer(row: dict[str, Any]) -> None:
+    if row["status"] != "settled":
+        raise ValueError("research cycle proposer execution must be settled")
     if row["actor_role"] not in _PROPOSER_ROLES:
         raise ValueError("research cycle proposer execution has invalid role")
     if row["authority_scope"] != _RESEARCH_SCOPE:
@@ -151,6 +153,8 @@ def _require_proposer(row: dict[str, Any]) -> None:
 
 
 def _require_reviewer(row: dict[str, Any], *, task_ref: str) -> None:
+    if row["status"] != "settled":
+        raise ValueError("independent reviewer execution must be settled")
     if row["actor_role"] != _REVIEWER_ROLE:
         raise ValueError("independent reviewer execution has invalid role")
     if row["authority_scope"] != _RESEARCH_SCOPE:

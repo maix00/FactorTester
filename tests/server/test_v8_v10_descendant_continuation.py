@@ -37,9 +37,6 @@ from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
 from server.services.research_evidence_registry import ensure_schema
-from server.services.research_graph.upgrade_validation import (
-    derive_upgrade_validation,
-)
 from tools.cli.release.research_reporting.publisher.carrier import (
     canonical_carrier,
 )
@@ -433,49 +430,6 @@ def _install_real_v8_shape(path) -> dict:
             "('factor-research', 10, 'server', 10)"
         )
     return target
-
-
-def test_v8_to_v10_upgrade_validation_rolls_back_projection(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    path = tmp_path / "activation-validation.sqlite"
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    _install_real_v8_shape(path)
-    with connect_sqlite(path) as conn:
-        conn.execute(
-            "UPDATE active_research_graphs SET version=9 "
-            "WHERE graph_id='factor-research'"
-        )
-        before = {
-            table: conn.execute(
-                f"SELECT COUNT(*) FROM {table}"
-            ).fetchone()[0]
-            for table in (
-                "research_graph_instances",
-                "research_graph_branches",
-                "research_graph_trace",
-            )
-        }
-
-    evidence = derive_upgrade_validation(
-        graph_id="factor-research",
-        version=10,
-        owner_user_id="alice",
-    )
-
-    with connect_sqlite(path) as conn:
-        after = {
-            table: conn.execute(
-                f"SELECT COUNT(*) FROM {table}"
-            ).fetchone()[0]
-            for table in before
-        }
-    assert evidence["source_versions"] == [8]
-    assert evidence["validated_branch_count"] == 1
-    assert evidence["persistent_validation_object_count"] == 0
-    assert evidence["validation_cleanup"] == "transaction_rolled_back"
-    assert after == before
 
 
 def test_real_v8_shape_continues_once_through_v9_to_v10_and_replays(

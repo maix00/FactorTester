@@ -69,6 +69,14 @@ release transport are not Manager CLI commands. Select an explicitly
 authorized operator tool only after reading the target declaration. The Skill
 does not publish a fixed host, port, profile, script, or tunnel mapping.
 
+## Docker/WireGuard/SSH deployment
+
+Docker/WireGuard/SSH deployment is an operator-side maintenance case, not a
+Manager application command. Use the infrastructure reference for the
+declared container, peer, local `2222` SSH transport, and public `7998`/`7997`
+surfaces; verify the resulting FactorTester health endpoints after any
+authorized rollout.
+
 ## Runtime maintenance loop
 
 1. Read `server/AGENTS.md` and the relevant reference for the case.
