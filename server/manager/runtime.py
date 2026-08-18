@@ -399,6 +399,7 @@ class ManagerState(
             / "manager"
             / "skills"
             / "catalog.json",
+            proxy_url_provider=self.mihomo.proxy_url,
         )
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,
