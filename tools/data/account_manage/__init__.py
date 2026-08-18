@@ -424,6 +424,48 @@ def direct_child_accounts_for(username: str | None) -> list:
     return [account for account in accounts if account.get('parent_username') == username]
 
 
+def direct_subordinate_accounts_for(username: str | None) -> list:
+    """Return only the active, same-organization first-level children.
+
+    ``visible_accounts_for`` answers a different question: which accounts a
+    user may see or administer under organization/level permissions.  It must
+    not be used for a UI scope named "subordinates", because it includes
+    same-level peers and, for a super admin, every account.  The hierarchy
+    picker is based only on the persisted ``parent_username`` relation and
+    returns direct children, not all descendants.
+    """
+    owner = str(username or '').strip()
+    if not owner:
+        return []
+    with accounts_lock:
+        accounts = normalize_accounts(load_accounts())
+    current = next(
+        (account for account in accounts if account.get('username') == owner),
+        None,
+    )
+    if current is None:
+        return []
+    organization_id = (
+        current.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    )
+    result = [
+        account
+        for account in accounts
+        if account.get('active', True) is not False
+        and (
+            account.get('organization_id') or DEFAULT_ORGANIZATION_ID
+        ) == organization_id
+        and str(account.get('parent_username') or '').strip() == owner
+    ]
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get('alias') or item.get('username') or '').lower(),
+            str(item.get('username') or ''),
+        ),
+    )
+
+
 def can_manage_user_account(current_username: str | None, target_username: str | None) -> bool:
     if not current_username or not target_username or current_username == target_username:
         return False

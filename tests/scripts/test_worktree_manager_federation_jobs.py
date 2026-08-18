@@ -85,6 +85,57 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
     assert gateway.calls[0]["limit"] == 20
 
 
+def test_cross_server_jobs_query_local_and_peer_sources_concurrently(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "parallel-repo",
+        "python",
+        server_role="feat",
+        server_id="local-feat",
+        state_root=tmp_path / "parallel-state",
+    )
+    state.federation_registry.register(
+        _registration("remote-main", latency_ms=8, load=1),
+    )
+    route = state.federation_registry.find(
+        server_id="remote-main", port=8000,
+    )
+    monkeypatch.setattr(state, "_federation_manager_routes", lambda: [route])
+    local_started = threading.Event()
+    peer_started = threading.Event()
+
+    def local_jobs(**_kwargs):
+        local_started.set()
+        assert peer_started.wait(timeout=0.5), "peer query was not started in parallel"
+        return {
+            "jobs": [{"job_id": "local-job", "updated_at": 1.0}],
+            "total": 1,
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
+
+    class Gateway:
+        def query_jobs(self, _route, **_kwargs):
+            peer_started.set()
+            assert local_started.wait(timeout=0.5), "local query was not started in parallel"
+            return {
+                "jobs": [{"job_id": "remote-job", "updated_at": 2.0}],
+                "total": 1,
+                "has_more": False,
+            }
+
+    state.federation_gateway = Gateway()
+    payload = state.aggregate_cross_server_jobs(
+        principal="alice", source_scope="mine", limit=20,
+    )
+
+    assert [item["job_id"] for item in payload["jobs"]] == [
+        "remote-job", "local-job",
+    ]
+
+
 def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(
         tmp_path / "query-repo",

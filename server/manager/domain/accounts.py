@@ -54,11 +54,11 @@ def authenticate_user(
 
 
 def manager_subordinate_users(owner: str) -> list[dict[str, str]]:
-    """Return account choices without asking a service port to enumerate."""
-    from tools.data.account_manage import visible_accounts_for
+    """Return direct account children without querying a service port."""
+    from tools.data.account_manage import direct_subordinate_accounts_for
 
     result: list[dict[str, str]] = []
-    for account in visible_accounts_for(owner, include_self=False):
+    for account in direct_subordinate_accounts_for(owner):
         username = str(account.get("username") or "").strip()
         if not username:
             continue
