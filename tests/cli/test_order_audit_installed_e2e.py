@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import hashlib
 import os
-import shutil
 import subprocess
+import sys
 import threading
 from contextlib import contextmanager
 
@@ -79,9 +79,9 @@ def order_audit_server():
         thread.join(timeout=5)
 
 
-def run_cli(executable: str, args: list[str], env: dict[str, str]):
+def run_cli(command: list[str], args: list[str], env: dict[str, str]):
     return subprocess.run(
-        [executable, *args],
+        [*command, *args],
         env=env,
         capture_output=True,
         text=True,
@@ -90,21 +90,23 @@ def run_cli(executable: str, args: list[str], env: dict[str, str]):
 
 
 def test_installed_cli_reads_order_audit_over_real_http(tmp_path):
-    executable = shutil.which("factortester")
-    assert executable, "install factortester into the active test environment"
+    # The supported client distribution is App-managed; a system-wide
+    # ``factortester`` executable is intentionally not required.  Exercise
+    # the same client entrypoint from the current checkout instead.
+    command = [sys.executable, "-m", "tools.cli.app"]
     env = {
         **os.environ,
         "FACTORTESTER_HOME": str(tmp_path / "factortester-home"),
     }
     with order_audit_server() as base_url:
-        run_cli(executable, ["configure", "--base-url", base_url], env)
+        run_cli(command, ["configure", "--base-url", base_url], env)
         run_cli(
-            executable,
+            command,
             ["login", "--username", "alice", "--password", "pw"],
             env,
         )
         result = run_cli(
-            executable, ["job", "orders", "job-1", "--json"], env,
+            command, ["job", "orders", "job-1", "--json"], env,
         )
 
     payload = json.loads(result.stdout)

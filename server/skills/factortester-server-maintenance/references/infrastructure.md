@@ -35,6 +35,11 @@ The Manager CLI remains an application client. Its `jobs`, `artifacts`,
 FactorTester API. They do not operate the host or choose an infrastructure
 transport.
 
+The operator wrapper validates real Docker, Git, SSH, and FactorTester
+backends; it is not a mock implementation. Do not create a duplicate
+`cli-anything-factortester-server` harness merely to wrap those existing
+commands.
+
 ## FactorTester application planes
 
 The server identity response is authoritative for the client-visible
@@ -50,6 +55,22 @@ Do not expose an execution service merely because it is running. Do not send
 artifact bytes through a control request when the server has issued a data
 capability. Validate the selected server, Job, artifact name, size, expiry,
 content hash, and transfer result.
+
+The deployment declaration may advertise these protocol surfaces explicitly;
+the labels are not permission to open a host firewall or to guess an endpoint:
+
+| Surface | Declared transport | Boundary |
+|---|---|---|
+| client control | TCP 7998 | Web, Swift, and CLI Manager access |
+| client data | TCP 7997 | capability-authorized object bytes |
+| peer control | TCP 17998 | WireGuard-only Manager federation |
+| peer data | TCP 17997 | WireGuard-only peer byte stream |
+| FactorTester tunnel | UDP 51820 | deployment-owned WireGuard identity |
+| PostgreSQL tunnel | UDP 51821 | separate database WireGuard identity |
+
+The public client needs only 7998 and 7997. The peer surfaces remain private
+to the overlay and must not be security-group ingress. The local operator SSH
+forward may use local `2222`; it is not a public FactorTester port.
 
 ## Node and database identity
 
@@ -98,6 +119,9 @@ the Manager's application-level `services` command for the former. Use the
 declared operator workflow for the latter, with explicit authorization and a
 rollback plan.
 
+Never use `docker system prune`, delete named PostgreSQL volumes, or remove a
+release image/worktree outside the declared retention operation.
+
 ## Release and rollback
 
 The public server must not fetch source from an unapproved remote. An
@@ -118,7 +142,8 @@ previous release and retain the database volume and external backup.
 - A healthy tunnel process does not prove a peer handshake or application
   health; verify each layer independently.
 - Missing or expired peer metadata returns an explicit node-unavailable result.
-  Never fall back to a guessed endpoint or unrelated application port.
+  The application error is `node_unreachable`; never fall back to a guessed
+  endpoint or unrelated application port.
 - A PostgreSQL outage must not turn PostgreSQL into the artifact transfer
   queue or stop already-authorized local application behavior.
 - Manager sessions, browser sessions, short-lived data capabilities, and peer

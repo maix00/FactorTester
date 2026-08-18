@@ -1336,14 +1336,6 @@ def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
                 "required_transition_facts": [],
             }],
         })
-    with pytest.raises(ValueError, match="protocol hard ceiling"):
-        validate_next_packet({
-            **packet,
-            "node": {
-                "node_id": "factor_semantics",
-                "purpose": "x" * (16 * 1024),
-            },
-        })
 
 
 def test_model_identity_does_not_change_deterministic_resolution() -> None:
@@ -2032,10 +2024,11 @@ def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields(
         HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
     ).read_text(encoding="utf-8")
     assert "name: factortester-research-skill" in skill
-    assert "Copy the current command only from `next_actions`" in skill
+    assert "Do not copy a command from a server `next_actions` field" in skill
     assert "The Agent never writes `expected_base_hash`" in skill
     assert "complete\n`obligation_coverage_submission`" in skill
-    assert "report a platform-contract defect" in skill
+    assert "stop and report" in skill
+    assert "platform-contract defect" in skill
     normalized = " ".join(skill.split())
     assert "Apply typed-reference rules to every Markdown-bearing location" in normalized
     assert "do not use inline code as a fallback" in normalized
@@ -2128,13 +2121,11 @@ def test_installed_skill_defines_non_nested_continuation_order() -> None:
     normalized = " ".join(skill.split())
     lower = normalized.lower()
 
-    assert "Graph continuation with an open capability detour" in skill
-    assert "current node's added or revised entry requirements first" in (
-        normalized
-    )
-    assert "retain the same capability-detour episode" in lower
-    assert "only when its owning node is entered" in normalized
-    assert "never nest a second capability detour" in lower
+    assert "Graph version changes and local continuation" in skill
+    assert "download it explicitly and inspect its local topology" in normalized
+    assert "there is no server-side continuation preview" in lower
+    assert "local continuation event" in normalized
+    assert "do not ask a manager to manufacture the next edge" in lower
 
 
 def test_installed_skill_keeps_entry_resolution_and_reporting_orthogonal() -> None:

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import secrets
-import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
 
 from server.manager.domain.organization_scope import canonical_username
+from tools.data.sqlite.db import connect_sqlite
 
 
 SQLITE_USER_REFERENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -87,7 +87,7 @@ def choose_canonical_username(
 
 
 def sqlite_integrity_check(path: str | Path) -> None:
-    with sqlite3.connect(Path(path).expanduser().resolve()) as connection:
+    with connect_sqlite(Path(path).expanduser().resolve(), readonly=True) as connection:
         result = connection.execute("PRAGMA integrity_check").fetchone()
     if not result or str(result[0]).lower() != "ok":
         raise RuntimeError(f"SQLite integrity check failed: {result!r}")
@@ -98,8 +98,8 @@ def backup_sqlite(source: str | Path, destination: str | Path) -> None:
     source_path = Path(source).expanduser().resolve()
     destination_path = Path(destination).expanduser().resolve()
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source_path) as source_connection:
-        with sqlite3.connect(destination_path) as destination_connection:
+    with connect_sqlite(source_path, readonly=True) as source_connection:
+        with connect_sqlite(destination_path) as destination_connection:
             source_connection.backup(destination_connection)
             destination_connection.commit()
     sqlite_integrity_check(destination_path)

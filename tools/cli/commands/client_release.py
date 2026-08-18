@@ -22,7 +22,6 @@ from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
 from tools.cli.release.app_update_control import dispatch_app_update, read_status
 from tools.cli.release.client_release_bundle import inspect_client_release_bundle
-from tools.cli.release.client_release_targets import build_target_beta_package
 from tools.cli.manager.client import ManagerClient
 from tools.cli.manager.config import (
     ManagerConfig,
@@ -268,6 +267,14 @@ def upload_release(
     if package_path is not None and len(targets) > 1:
         raise click.ClickException(
             "向多个目标发布时必须使用 --release-dir，以便为每个 URL 重签 manifest"
+        )
+    if release_directory is not None:
+        # Retargeting a release is an operator-only path.  Keep its publisher
+        # helpers out of the regular client import graph so the bundled wheel
+        # runs outside the source checkout without the server-side scripts
+        # package.
+        from tools.cli.release.client_release_targets import (
+            build_target_beta_package,
         )
     trusted_public_key = Path(str(
         files("tools.cli.release").joinpath("trusted-beta-release-public.pem")

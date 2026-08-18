@@ -10,6 +10,7 @@ from server.manager.storage.identity_migration_common import (
     SYSTEM_OWNER_VALUES,
     sqlite_integrity_check,
 )
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _sqlite_tables(connection: sqlite3.Connection) -> set[str]:
@@ -38,8 +39,7 @@ def sqlite_identity_plan(
 ) -> dict[str, object]:
     """Return row counts and identity checks without writing the database."""
     database = Path(path).expanduser().resolve()
-    with sqlite3.connect(database) as connection:
-        connection.row_factory = sqlite3.Row
+    with connect_sqlite(database) as connection:
         accounts = [dict(row) for row in connection.execute(
             "SELECT username, alias, organization_id FROM accounts ORDER BY username"
         ).fetchall()]
@@ -110,8 +110,7 @@ def apply_sqlite_identity_migration(
     """Rename the target and remove all other account-owned SQLite rows."""
     database = Path(path).expanduser().resolve()
     counts = {"renamed_references": 0, "deleted_references": 0}
-    with sqlite3.connect(database) as connection:
-        connection.row_factory = sqlite3.Row
+    with connect_sqlite(database) as connection:
         connection.execute("BEGIN IMMEDIATE")
         accounts = [dict(row) for row in connection.execute(
             "SELECT username FROM accounts ORDER BY username"

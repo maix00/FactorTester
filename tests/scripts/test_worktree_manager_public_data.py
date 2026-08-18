@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from server.manager.domain.federation import ServiceRoute
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.federated_public_data import (
@@ -133,8 +135,14 @@ def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     service = ClientStateService(
         tmp_path / "missing-client-root",
         control_store=ControlStore(),
+        profile_cache_root=tmp_path / "profile-cache",
     )
-    profiles = service.profiles("alice", include_local_paths=False)
+    profiles = []
+    deadline = time.monotonic() + 1.0
+    while not profiles and time.monotonic() < deadline:
+        profiles = service.profiles("alice", include_local_paths=False)
+        if not profiles:
+            time.sleep(0.01)
 
     assert profiles[0]["profile_id"] == "maxa"
     assert profiles[0]["research_records"] == [{"record_id": "r1"}]
