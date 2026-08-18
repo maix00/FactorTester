@@ -144,10 +144,11 @@
     };
     factor = factorPicker(
       context, state, factorRefs, candidateDescriptor.cardinality === "many", values => {
-        factorRefs = values;
+      factorRefs = values;
         innerScopeValues.factor_candidates = selectedCandidateValues();
         renderFactorPanel();
         overrideEditor?.refresh();
+        editorTabs?.refreshChips();
       }, factorItems, !factorScopeBlocked && (
         factorScope.source === "outer"
           ? candidateDescriptor.allow_inline_create_when_outer_mounted === true
@@ -193,6 +194,7 @@
       context, manifest: state.manifest, inheritedValues: innerScopeValues,
       state, initial: initialOverrides,
       mountedTabs: current?.override_mounted_tabs || [],
+      onChange: () => editorTabs?.refreshChips(),
     });
     const scopeNote = document.createElement("small");
     scopeNote.className = "backtest-group-scope-note";
@@ -210,10 +212,14 @@
       context, manifest: state.manifest, inheritedValues: innerScopeValues,
       overrides: initialOverrides, onlyTabs: ["factor"], scopeSide: "inner",
     });
-    const editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
+    let editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
       context, state,
       mountedTabs: current?.override_mounted_tabs || [],
       onMountedTabsChange: tabs => overrideEditor?.setMountedTabs(tabs),
+      chipValues: () => ({
+        ...innerScopeValues,
+        ...(overrideEditor?.value?.() || {}),
+      }),
       renderStructure: () => structure,
       renderFactor: () => { renderFactorPanel(); return factorHost; },
       renderProduct: () => field(context.t("产品组"), productGroup),

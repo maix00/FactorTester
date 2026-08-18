@@ -22,7 +22,7 @@ from tools.testers._shared.category import (
     CATEGORY_CANDIDATE_KEYS,
     CATEGORY_SELECTION_KEYS,
 )
-from tools.testers._shared.factor import FACTOR_SOURCE_KEYS
+from tools.testers._shared.factor import FACTOR_SOURCE_SELECTION_KEYS
 from tools.testers._shared.template import register_test_template_base
 from tools.testers._shared.run_inputs import register_run_inputs_base
 
@@ -40,7 +40,7 @@ def register_group_test_settings(app: Any) -> None:
         *PRODUCT_PATH_SELECTION_KEYS,
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SELECTION_KEYS,
-        *FACTOR_SOURCE_KEYS,
+        *FACTOR_SOURCE_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
         *CATEGORY_SELECTION_KEYS,

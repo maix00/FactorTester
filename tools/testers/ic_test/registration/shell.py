@@ -8,7 +8,7 @@ from tools.testers._shared import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTIONS_KEYS,
     FACTOR_SET_SELECTION_KEYS,
-    FACTOR_SOURCE_KEYS,
+    FACTOR_SOURCE_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,
     PRODUCT_PATH_CANDIDATE_KEYS,
     PRODUCT_PATH_SELECTIONS_KEYS,
@@ -19,14 +19,13 @@ from tools.testers._shared import (
     register_factor_execution_base,
     register_factor_selections_base,
     register_factor_set_selections_base,
-    register_factor_source_base,
+    register_factor_source_selections_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
     register_product_path_selections_base,
     register_run_window_base,
     register_test_template_base,
 )
-from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     ChipDefinition,
     SettingModule,
@@ -55,7 +54,7 @@ def _register_global_keys(app: ApplicationSettings) -> None:
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTIONS_KEYS,
-        *FACTOR_SOURCE_KEYS,
+        *FACTOR_SOURCE_SELECTION_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
         *CATEGORY_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
@@ -124,7 +123,6 @@ def _register_tabs(app: ApplicationSettings) -> None:
         SettingTab(
             "factor", "因子执行", local, "settings-grid", 10, local,
             content_adapter="factor_selection",
-            content_options=factor_source_content_options(),
         ),
         SettingTab(
             "category", "分类", local, "custom", 15,
@@ -174,9 +172,9 @@ def _register_chips(app: ApplicationSettings) -> None:
 
 def _register_shared_inputs(app: ApplicationSettings) -> None:
     register_factor_execution_base(app)
-    register_factor_source_base(app)
     register_factor_candidate_list_base(app)
     register_factor_set_selections_base(app)
+    register_factor_source_selections_base(app)
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selections_base(app)

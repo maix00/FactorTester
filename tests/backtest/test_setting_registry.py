@@ -168,16 +168,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [
         item["kind"] for item in tabs["run_inputs"]["content_options"]["inputs"]
     ] == ["strategy_source", "strategy_spec", "run_dependency"]
-    assert tabs["factor"]["content_options"]["inputs"][0] == {
-        "kind": "factor_source",
-        "label": "上传临时因子源码",
-        "description": "上传阶段不进入因子库；提交后作为任务输入保留，清空任务文件时一并删除",
-        "accept": ".py,text/x-python",
-        "extensions": (".py",),
-        "multiple": False,
-        "inspect_endpoint": "/custom-factors/api/validate",
-        "path_prefix": "custom_factors",
-    }
+    assert tabs["factor"].get("content_options") == {}
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
@@ -191,11 +182,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "authoring_only"
     )
     for key in (
-        "factor_owner_ref",
-        "factor_git_commit",
-        "factor_family_ref",
-        "factor_params",
         "factor_candidates",
+        "factor_source_selections",
         "factor",
         "product_path_candidates",
         "product_path_selection",
@@ -430,11 +418,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     }
     for key in (
         "setting_template",
-        "factor_owner_ref",
-        "factor_git_commit",
-        "factor_family_ref",
-        "factor_params",
         "factor_candidates",
+        "factor_source_selections",
         "factor_selections",
         "category_candidates",
         "product_path_candidates",
@@ -446,15 +431,14 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert [
         key for key in (
             "factor_owner_ref", "factor_git_commit", "factor_family_ref",
-            "factor_params", "factor_candidates", "factor_selections",
+            "factor_params", "factor_candidates", "factor_source_selections",
+            "factor_selections",
         ) if key in index["defaults"]
-    ] == [
-        "factor_owner_ref", "factor_git_commit", "factor_family_ref",
-        "factor_params", "factor_candidates", "factor_selections",
-    ]
-    assert index["defaults"]["factor_candidates"]["serialization"]["owner_field"] == (
-        "factor_owner_ref"
-    )
+    ] == ["factor_candidates", "factor_source_selections", "factor_selections"]
+    item_fields = index["defaults"]["factor_candidates"]["serialization"]["item_fields"]
+    assert {
+        "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
+    }.issubset(item_fields)
     assert index["default_mounted_tabs"] == {
         "local-settings": ["test_template", "factor", "product_path_selection"],
         "group-settings": [],
@@ -466,9 +450,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert tabs["product_path_selection"]["content_adapter"] == (
         "product_path_selection"
     )
-    assert tabs["factor"]["content_options"]["inputs"][0]["kind"] == (
-        "factor_source"
-    )
+    assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
     assert chips["factor_alias"]["source_adapter"] == "selected_factors"
     assert chips["product_path_selection"]["source_adapter"] == (
@@ -782,12 +764,9 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "factor_candidates",
         "factor_set_selections",
         "factor",
+        "factor_source_selections",
         "data_source",
         "frequency",
-        "factor_owner_ref",
-        "factor_git_commit",
-        "factor_family_ref",
-        "factor_params",
         "category_candidates",
         "category",
     ]

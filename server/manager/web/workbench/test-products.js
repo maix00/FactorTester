@@ -148,6 +148,8 @@
       items,
       selected: state.kind === "ic" ? state.groupRefs : [state.groupRef],
       multi: state.kind === "ic",
+      loading: state.lazy?.products?.status === "loading",
+      loadingText: context.t("正在读取产品组候选…"),
       compact: true,
       name: `test-product-groups-${state.kind}`,
       onCreate: context.session

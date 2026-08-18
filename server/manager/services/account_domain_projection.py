@@ -69,6 +69,14 @@ def factor_rows_from_sync(
                 "factor_alias": factor_alias,
                 "factor_family_alias": family_alias,
                 "factor_family_name": family_name,
+                "factor_owner_ref": str(
+                    payload.get("factor_owner_ref")
+                    or row.get("principal")
+                    or principal
+                ),
+                "factor_family_ref": str(
+                    payload.get("factor_family_ref") or family_alias
+                ),
                 "chinese_name": str(payload.get("chinese_name") or ""),
                 "description": str(payload.get("description") or ""),
                 "math_expr": str(payload.get("math_expr") or ""),
@@ -76,6 +84,7 @@ def factor_rows_from_sync(
                 "factor_kind": "registered",
                 "source": "custom",
                 "params": [value],
+                "factor_params": [value],
                 "owner_username": str(row.get("principal") or principal),
                 "owner_alias": _owner_alias(
                     str(row.get("principal") or principal),
@@ -90,6 +99,8 @@ def factor_rows_from_sync(
                 ),
                 "updated_at": payload.get("updated_at") or row.get("updated_at") or "",
                 "product_group": scope,
+                **({"factor_git_commit": str(payload["factor_git_commit"])}
+                   if payload.get("factor_git_commit") else {}),
             })
     return result
 

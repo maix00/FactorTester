@@ -148,6 +148,8 @@
   function tabPanel(item, manifest, values, context, options) {
     const panel = document.createElement("div");
     panel.className = "test-settings-tab-content";
+    const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
+    const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
     if (!fields()) {
       const load = options.settingsFieldsLoadState?.();
       panel.append(load?.status === "error"
@@ -157,40 +159,19 @@
         )
         : FTUI.loading(context.t("正在读取设置控件…")));
       if (load?.status !== "error") options.ensureSettingsFieldsCode?.();
+      if (lazyKey && lazyState?.status !== "ready") options.ensureTab?.(item.tab);
       return panel;
     }
     if (item.fields.length && options.ensureSettingsTab
       && !options.settingsTabReady?.(item.tab.key)) {
-      const load = options.settingsTabLoadState?.(item.tab.key);
-      if (load?.status === "error") {
-        panel.append(FTUI.empty(
-          context.t("读取设置字段失败"), load.error || context.t("请重试"),
-        ));
-      } else {
-        panel.append(FTUI.loading(context.t("正在读取此设置字段…")));
-      }
+      // The summary already contains the registered field descriptors needed
+      // for the first paint.  The tab endpoint only fills in heavyweight
+      // metadata (help/ranges), so it must not be a rendering barrier.
       options.ensureSettingsTab(item.tab.key);
-      return panel;
     }
-    const lazyKey = FTTestContentAdapters.lazyKey(item.tab);
-    const lazyState = lazyKey ? options.lazyState?.(lazyKey) : null;
-    if (lazyKey && lazyState?.status !== "ready") {
-      if (lazyState?.status === "error") {
-        panel.append(FTUI.empty(
-          context.t("读取失败"), lazyState.error || context.t("请重试"),
-        ));
-      } else {
-        panel.append(FTUI.loading(context.t("正在读取此设置…")));
-      }
-      options.ensureTab?.(item.tab);
-    } else {
-      const adapted = FTTestContentAdapters.render(item.tab, {
-        context, state: options.state, refresh: options.refresh,
-        tab: item.tab,
-        actions: options.actions || {},
-      });
-      if (adapted) panel.append(adapted);
-    }
+
+    // Registered rows are the stable shell of every settings tab.  Draw them
+    // before asking a content adapter to fetch any catalog candidates.
     if (item.fields.length) {
       const rows = document.createElement("div");
       rows.className = "test-setting-rows";
@@ -198,6 +179,24 @@
         rows.append(fields().settingRow(key, field, manifest, values, context, options));
       });
       panel.append(rows);
+    }
+
+    const adapterReady = FTTestContentAdapters.isReady?.(item.tab) !== false;
+    if (adapterReady && FTTestContentAdapters.hasContent(item.tab)) {
+      const adapted = FTTestContentAdapters.render(item.tab, {
+        context, state: options.state, refresh: options.refresh,
+        tab: item.tab,
+        actions: options.actions || {},
+      });
+      if (adapted) panel.append(adapted);
+    } else if (FTTestContentAdapters.hasContent(item.tab)) {
+      // This is only a code-loading fallback.  Catalog values are loaded by
+      // the adapter after its shell is present, rather than hiding the rows.
+      panel.append(FTUI.loading(context.t("正在读取设置控件…")));
+    }
+
+    if (lazyKey && lazyState?.status !== "ready" && lazyState?.status !== "error") {
+      options.ensureTab?.(item.tab);
     }
     return panel;
   }

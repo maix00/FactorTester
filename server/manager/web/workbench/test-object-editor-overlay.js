@@ -3,9 +3,10 @@
     factor: {
       title: "因子",
       load: "catalog",
-      render: (context, ref, mode, options) => options?.inlineEditor
-        ? FTStrategyEditorFactorOverlay.render(context, ref, mode, options)
-        : FTFactors.factorDetail(context, ref, mode),
+      // The embedded editor is deliberately the catalog component itself.
+      // The overlay context supplies its mount and onSaved callback, so the
+      // catalog create/edit/view behavior is identical to the left-nav tab.
+      render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
     },
     product_group: {
       title: "产品组",

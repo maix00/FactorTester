@@ -6,6 +6,7 @@ from tools.testers._shared import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
+    FACTOR_SOURCE_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,
     PRODUCT_PATH_CANDIDATE_KEYS,
     PRODUCT_PATH_SELECTION_KEYS,
@@ -13,12 +14,12 @@ from tools.testers._shared import (
     register_factor_candidate_list_base,
     register_factor_set_selections_base,
     register_factor_selection_base,
+    register_factor_source_selections_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
     register_product_path_selection_base,
     register_run_window_base,
 )
-from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     SettingModule,
     SettingTab,
@@ -36,6 +37,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTION_KEYS,
+        *FACTOR_SOURCE_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
     )
     for module in (
@@ -77,7 +79,6 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
             60,
             (TabMountPoint.LOCAL_SETTINGS,),
             content_adapter="factor_selection",
-            content_options=factor_source_content_options(),
         ),
     ):
         app.register_tab(tab)
@@ -87,4 +88,5 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     register_market_data_base(app, include_price_type=True)
     register_factor_candidate_list_base(app)
     register_factor_set_selections_base(app)
+    register_factor_source_selections_base(app)
     register_factor_selection_base(app)

@@ -3,7 +3,7 @@
 
   async function factorDetail(context, data, targetRef, mode = "view", nativeRequest) {
     if (mode === "create" || mode === "edit") {
-      return factorEditor(context, data, targetRef, mode);
+      return FTFactorEditor.render(context, data, targetRef, mode);
     }
     let factor = data.factors.find(item => item.factor_ref === targetRef);
     const frozen = factor ? null : model().decodeFrozenFactorRef(targetRef);
@@ -13,6 +13,10 @@
     if (!factor) factor = projectedFactor(data.factors, frozen);
     if (factor && frozen) factor = frozenProjection(factor, frozen);
     if (!factor) factor = await localFactor(frozen, nativeRequest);
+    factor = model().withSourceMetadata(factor);
+    factor.factor_source_version = factor.factor_git_commit
+      ? `历史源码版本 · ${factor.factor_git_commit}`
+      : "当前因子家族最新源码";
     context.setHeading(factor.factor_alias || context.t("因子详情"), model().familyName(factor));
     const factorRef = factor.factor_ref || targetRef;
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
@@ -45,128 +49,6 @@
     context.content.replaceChildren(root);
   }
 
-  async function factorEditor(context, data, targetRef, mode) {
-    if (!context.session) throw new Error(context.t("登录后才能编辑因子"));
-    let factor = data.factors.find(item => item.factor_ref === targetRef
-      || item.factor_alias === targetRef || item.id === targetRef);
-    const factorID = factor?.factor_alias || factor?.id || targetRef;
-    if (mode === "edit" && !factorID) throw new Error(context.t("因子不存在"));
-    let loaded = factor ? {...factor} : {};
-    if (mode === "edit") {
-      const value = await context.api(
-        `/custom-factors/api/get/${encodeURIComponent(factorID)}`,
-      );
-      loaded = {...loaded, ...(value.factor || {})};
-    }
-    context.setHeading(
-      mode === "create" ? context.t("新增因子") : loaded.factor_alias || loaded.name || factorID,
-      context.t("因子详情"),
-    );
-    context.updateActiveTab?.({
-      title: mode === "create" ? context.t("新增因子") : loaded.factor_alias || loaded.name || factorID,
-    });
-    const form = document.createElement("form");
-    form.className = "detail-stack factor-editor-form";
-    const title = document.createElement("h2");
-    title.textContent = mode === "create" ? context.t("新增因子") : context.t("编辑因子");
-    form.append(title);
-    const name = textField(context, "因子类名", loaded.name || loaded.factor_alias || "", {
-      readOnly: mode === "edit", required: true,
-    });
-    const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
-    const description = textField(context, "说明", loaded.description || "");
-    const category = textField(context, "分类", loaded.category || "自编");
-    const source = document.createElement("textarea");
-    source.rows = 16;
-    source.required = true;
-    source.placeholder = context.t("填写继承 FactorFamily 的 Python 类源码");
-    source.value = loaded.source_code || "";
-    const parameterValues = Object.fromEntries((loaded.params || []).map(parameter => [
-      parameter.alias || parameter.name,
-      parameter.value ?? parameter.default_value ?? "",
-    ]));
-    const parameterEditor = loaded.params?.length
-      ? window.FTFactorDetailShared.parameterEditor(context, loaded.params, parameterValues)
-      : null;
-    form.append(
-      name, chineseName, description, category,
-      window.FTFactorDetailShared.summary(context, loaded),
-      ...(parameterEditor ? [
-        Object.assign(document.createElement("h3"), {textContent: context.t("参数")}),
-        parameterEditor.root,
-      ] : []),
-      field(context.t("Python 源码"), source),
-    );
-    const status = document.createElement("small");
-    status.className = "form-error";
-    const actions = document.createElement("div");
-    actions.className = "detail-actions";
-    const cancel = context.button(context.t("取消"), () => {
-      if (!FTTabReturn.returnToSource(context)) {
-        context.closeTab?.(context.tabID);
-        context.navigate("/factors");
-      }
-    });
-    cancel.type = "button";
-    const save = context.button(context.t("保存"), () => form.requestSubmit());
-    save.type = "button"; save.className = "primary";
-    actions.append(cancel, save);
-    form.append(status, actions);
-    context.content.replaceChildren(form);
-    form.addEventListener("submit", async event => {
-      event.preventDefault();
-      save.disabled = true; status.textContent = "";
-      try {
-        const payload = {
-          source_code: source.value,
-          chinese_name: chineseName.querySelector("input").value.trim(),
-          description: description.querySelector("input").value.trim(),
-          category: category.querySelector("input").value.trim(),
-        };
-        const endpoint = mode === "create"
-          ? "/custom-factors/api/create"
-          : `/custom-factors/api/update/${encodeURIComponent(factorID)}`;
-        const value = await context.api(endpoint, {
-          method: "POST", body: JSON.stringify(payload),
-        });
-        const saved = value.factor || {};
-        const ref = saved.name || saved.id || factorID;
-        if (parameterEditor && Object.keys(parameterEditor.values).length) {
-          await saveParameterConfig(context, ref, parameterEditor.values);
-        }
-        if (context.onSaved) {
-          context.onSaved({
-            ...saved, params: parameterEditor?.values || {},
-            factor_alias: saved.factor_alias || ref, name: saved.name || ref,
-          });
-          return;
-        }
-        if (FTTabReturn.returnToSource(context, {kind: "factor", ref})) return;
-        context.closeTab?.(context.tabID);
-        context.navigate(`/factors?updated=${Date.now()}`);
-      } catch (error) {
-        status.textContent = error.message || context.t("因子保存失败");
-        save.disabled = false;
-      }
-    });
-  }
-
-  function textField(context, labelText, value, options = {}) {
-    const input = document.createElement("input");
-    input.value = value || "";
-    input.readOnly = options.readOnly === true;
-    input.required = options.required === true;
-    return field(labelText, input);
-  }
-
-  function field(labelText, input) {
-    const label = document.createElement("label");
-    label.className = "test-object-field";
-    const title = document.createElement("b"); title.textContent = labelText;
-    label.append(title, input);
-    return label;
-  }
-
   function projectedFactor(factors, frozen) {
     const candidates = (Array.isArray(factors) ? factors : []).filter(item => (
       item.factor_alias === frozen.alias
@@ -183,6 +65,10 @@
     return {
       ...factor,
       factor_ref: frozen.factorRef,
+      factor_owner_ref: frozen.ownerRef,
+      factor_family_ref: frozen.family,
+      factor_git_commit: frozen.gitCommit,
+      factor_params: frozen.params,
       git_commit: frozen.gitCommit,
       git_blob: frozen.gitBlob,
       relative_path: frozen.relativePath,
@@ -205,6 +91,10 @@
       factor_alias: frozen.alias,
       factor_family_alias: frozen.family,
       factor_family_name: frozen.family,
+      factor_owner_ref: frozen.ownerRef,
+      factor_family_ref: frozen.family,
+      factor_git_commit: frozen.gitCommit,
+      factor_params: frozen.params,
       owner_alias: frozen.ownerRef,
       owner_ref: frozen.ownerRef,
       git_commit: frozen.gitCommit,
@@ -242,13 +132,6 @@
     );
     root.append(view.shell);
     context.content.replaceChildren(root);
-  }
-
-  async function saveParameterConfig(context, factorFamily, values) {
-    await context.api(`/custom-factors/api/factor-library-configs/${encodeURIComponent(factorFamily)}`, {
-      method: "PUT",
-      body: JSON.stringify({params_list: [values]}),
-    });
   }
 
   async function setDetail(context, data, targetRef, nativeRequest) {

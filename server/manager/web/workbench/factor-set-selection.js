@@ -61,10 +61,10 @@
     }
   }
 
-  function panel(context, state, refresh) {
+  function control(context, state, refresh) {
     if (!fieldDescriptor(state)) return null;
-    const root = document.createElement("section");
-    root.className = "test-factor-set-panel";
+    const root = document.createElement("div");
+    root.className = "test-factor-set-control";
     const items = (state.factorSetCatalog?.items || []).map(item => ({
       value: item.target_ref,
       label: item.title_zh || item.set_id || item.target_ref,
@@ -109,20 +109,28 @@
       name: "test-factor-sets",
       items,
       selected: selections(state).map(item => item.target_ref),
+      loading: state.lazy?.factors?.status === "loading" && !items.length,
+      loadingText: context.t("正在读取因子集合…"),
       onChange: values => { void updateSelection(values); },
     });
-    root.append(FTTestFieldRow.create(
-      context.t("因子集合"), picker.element,
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_set_selections", context,
-      ) || "",
-    ));
+    root.append(picker.element);
     if (state.factorSetCatalog?.error) {
       const error = document.createElement("p");
       error.className = "form-error"; error.textContent = state.factorSetCatalog.error;
       root.append(error);
     }
     return root;
+  }
+
+  function panel(context, state, refresh) {
+    const value = control(context, state, refresh);
+    if (!value) return null;
+    return FTTestFieldRow.create(
+      context.t("因子集合"), value,
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_set_selections", context,
+      ) || "",
+    );
   }
 
   async function selectSet(context, state, item) {
@@ -241,6 +249,6 @@
   }
 
   window.FTTestFactorSets = Object.freeze({
-    descriptors, initialize, panel, prepare, selections,
+    control, descriptors, initialize, panel, prepare, selections,
   });
 })();

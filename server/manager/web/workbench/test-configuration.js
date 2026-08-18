@@ -47,18 +47,27 @@
   }
 
   function factorRecord(factor, family) {
+    const metadata = window.FTFactorModel?.sourceMetadata?.(factor) || {};
+    const ownerRef = metadata.factor_owner_ref || factor.owner_ref || "";
+    const familyRef = metadata.factor_family_ref || factor.family_ref
+      || factor.factor_family_ref || family?.family_ref || "";
+    const params = metadata.factor_params ?? factor.params ?? {};
+    const commit = metadata.factor_git_commit || factor.git_commit || "";
     return {
       alias: factor.factor_alias || factor.alias || factor.name,
       factor_family_alias: family?.factor_family_alias || family?.alias || family?.family
         || factor.factor_family_alias || factor.family_alias
         || factor.factor_alias || factor.alias,
       factor_ref: factor.factor_ref || factor.target_ref || "",
-      family_ref: factor.family_ref || factor.factor_family_ref
-        || family?.family_ref || "",
-      owner_ref: factor.owner_ref || "",
-      git_commit: factor.git_commit || "",
+      family_ref: familyRef,
+      owner_ref: ownerRef,
+      git_commit: commit,
       git_blob: factor.git_blob || "",
-      params: factor.params || {},
+      params,
+      factor_owner_ref: ownerRef,
+      factor_family_ref: familyRef,
+      factor_params: params,
+      ...(commit ? {factor_git_commit: commit} : {}),
       ...(factor.source_kind === "transient" ? {
         source_kind: "transient",
         transient_factor_id: factor.transient_factor_id || "",
