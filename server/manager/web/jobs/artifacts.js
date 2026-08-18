@@ -75,8 +75,15 @@
         const link = document.createElement("a");
         link.href = "#";
         link.textContent = item.file_name || item.name;
-        link.addEventListener("click", event => {
-          event.preventDefault(); onOpen(item);
+        link.addEventListener("click", async event => {
+          event.preventDefault();
+          try {
+            await onOpen(item);
+          } catch (error) {
+            context.showNotice?.(
+              error?.message || String(error), true,
+            );
+          }
         });
         file.append(link);
       } else {
