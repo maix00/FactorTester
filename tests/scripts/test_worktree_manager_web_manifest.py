@@ -867,9 +867,44 @@ def test_backtest_group_forms_mount_shared_picker_elements() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_form.js"
     source = WEB_ROOT / "workbench" / "backtest-group-form.js"
+    pickers = WEB_ROOT / "workbench" / "strategy-editor-pickers.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source), str(pickers)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_nested_strategy_editor_respects_outer_scope_and_inner_mount_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
+    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
     result = subprocess.run(
         ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_backend_nested_scope_contract_is_renderable_by_web_resolver(tmp_path) -> None:
+    import json
+    import subprocess
+
+    from tools.testers.settings import backtest_setting_registry
+
+    manifest_path = tmp_path / "group-test-manifest.json"
+    manifest_path.write_text(
+        json.dumps(backtest_setting_registry.get("group_test").manifest()),
+        encoding="utf-8",
+    )
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
+    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source), str(manifest_path)],
+        cwd=ROOT, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
@@ -1029,7 +1064,9 @@ def test_backtest_group_form_uses_registered_override_editor() -> None:
     )
 
     assert "FTBacktestGroupOverrides.render" in form
-    assert "overrides.value()" in form
+    assert "FTStrategyEditorOverrides" in form
+    assert "overrideEditor?.value?.()" in form
+    assert "fallbackOverrides.value()" in form
     assert "parseObject(overrides.value" not in form
 
 

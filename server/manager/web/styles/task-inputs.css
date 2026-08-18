@@ -78,6 +78,7 @@
 .test-input-toolbar { padding: 3px 0; }
 .test-input-toolbar small, .test-input-empty { color: var(--muted); }
 .test-input-actions { justify-content: flex-end; }
+.test-custom-strategy-source-shell { display: grid; gap: 8px; min-width: 0; }
 .test-input-toolbar button, .test-input-actions button { min-height: 28px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; color: inherit; background: var(--soft); }
 .test-input-actions select { min-height: 28px; max-width: 136px; padding: 3px 24px 3px 7px; border: 1px solid var(--line); border-radius: 7px; color: inherit; background: var(--soft); }
 .test-input-previews { display: grid; gap: 4px; min-width: 0; }

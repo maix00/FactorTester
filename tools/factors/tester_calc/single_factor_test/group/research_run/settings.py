@@ -255,6 +255,27 @@ def _strip_implicit_auto_ledger_defaults(
             settings.pop(key, None)
 
 
+def _factor_aliases_from_group(group: dict[str, Any]) -> list[str]:
+    raw = group.get("factorAliases")
+    if raw is None:
+        raw = group.get("factor_aliases")
+    if raw is None:
+        raw = [group.get("factorAlias") or group.get("factor_alias")]
+    if not isinstance(raw, list):
+        raw = [raw]
+    return list(dict.fromkeys(
+        str(value).strip() for value in raw if str(value or "").strip()
+    ))
+
+
+def _factor_combination_mode(group: dict[str, Any]) -> str:
+    return str(
+        group.get("factor_combination_mode")
+        or group.get("factorCombinationMode")
+        or ""
+    ).strip()
+
+
 def resolve_group_strategy_settings(
     group: dict,
     *,
@@ -307,7 +328,19 @@ def resolve_group_strategy_settings(
     if product_list:
         group_settings["product_mask_names"] = tuple(product_list)
 
-    factor_alias = str(group.get("factorAlias", ""))
+    factor_aliases = _factor_aliases_from_group(group)
+    factor_combination_mode = _factor_combination_mode(group)
+    if not factor_aliases:
+        raise ValueError(
+            f"缺少因子候选: group={group.get('name') or group_id}"
+        )
+    if len(factor_aliases) > 1 and not factor_combination_mode:
+        raise ValueError(
+            f"多个因子候选需要组合方式: group={group.get('name') or group_id}"
+        )
+    factor_alias = factor_aliases[0]
+    group_settings["factor_aliases"] = tuple(factor_aliases)
+    group_settings["factor_combination_mode"] = factor_combination_mode
     group_settings["factor"] = resolve_factor(
         factor_alias,
         data=data,
@@ -419,6 +452,9 @@ def resolve_long_short_strategy_settings(
     )
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
+    product_list = _product_list_from_group_payload(config)
+    if product_list:
+        settings["product_mask_names"] = tuple(product_list)
     _strip_implicit_auto_ledger_defaults(
         settings,
         local_settings=local_settings or {},

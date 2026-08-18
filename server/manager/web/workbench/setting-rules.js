@@ -21,8 +21,22 @@
     });
   }
 
+  function collectionVisibilityMatches(field, values) {
+    const visibility = field?.serialization?.visible_when || {};
+    const minimums = visibility.min_items || {};
+    return Object.entries(minimums).every(([key, minimum]) => {
+      const value = values?.[key];
+      const size = Array.isArray(value)
+        ? value.length
+        : value && typeof value === "object" ? Object.keys(value).length
+        : value == null || value === "" ? 0 : 1;
+      return size >= Number(minimum || 0);
+    });
+  }
+
   function isVisible(field, values) {
-    return conditionsMatch(rulesFor(field).visible_if, values);
+    return conditionsMatch(rulesFor(field).visible_if, values)
+      && collectionVisibilityMatches(field, values);
   }
 
   function isEditable(field, values) {

@@ -86,8 +86,10 @@
     const select = selection(options, item, false);
     const copy = document.createElement("span");
     copy.className = "strategy-list-item-copy";
-    const name = document.createElement("b");
-    name.textContent = item.label || item.key;
+    const name = item.editableName
+      ? inlineName(item, options)
+      : document.createElement("b");
+    if (!item.editableName) name.textContent = item.label || item.key;
     copy.append(name);
     if (item.detail) {
       const detail = document.createElement("small");
@@ -99,6 +101,43 @@
     if (item.actions) row.append(actions(item.actions, options));
     if (item.content) row.append(item.content);
     return row;
+  }
+
+  function inlineName(item, options) {
+    const input = document.createElement("input");
+    input.className = "strategy-list-name-input";
+    input.type = "text";
+    input.value = item.label || item.key;
+    input.title = tx(options, "直接编辑策略名称，按 Enter 或离开输入框保存");
+    input.setAttribute("aria-label", tx(options, "策略名称"));
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        input.value = item.label || item.key;
+        input.blur();
+      }
+    });
+    input.addEventListener("change", () => {
+      const next = input.value.trim();
+      if (!next || next === String(item.label || item.key).trim()) {
+        input.value = item.label || item.key;
+        return;
+      }
+      try {
+        const accepted = item.onRename?.(next);
+        if (accepted === false) input.value = item.label || item.key;
+      } catch (error) {
+        input.value = item.label || item.key;
+        input.setCustomValidity(error.message || tx(options, "策略名称保存失败"));
+        input.reportValidity?.();
+        input.setCustomValidity("");
+      }
+    });
+    return input;
   }
 
   function selection(options, item, batch) {

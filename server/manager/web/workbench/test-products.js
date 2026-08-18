@@ -82,9 +82,9 @@
     setSelected(state, group, true);
   }
 
-  function openEditor(context, mode, ref, onSaved) {
+  function openEditor(context, mode, ref, onSaved, testState = null) {
     return FTTestObjectEditorOverlay.open(context, {
-      kind: "product_group", mode, ref, onSaved,
+      kind: "product_group", mode, ref, onSaved, testState,
     });
   }
 
@@ -151,7 +151,7 @@
       compact: true,
       name: `test-product-groups-${state.kind}`,
       onCreate: context.session
-        ? () => void openEditor(context, "create", "new", savedGroup)
+        ? () => void openEditor(context, "create", "new", savedGroup, state)
         : null,
       createLabel: context.t("新建产品组"),
       itemActions: item => {

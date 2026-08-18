@@ -32,21 +32,21 @@
     );
   }
 
-  function familyContent(context, state, refresh, sourceInput) {
+  function familyContent(context, state, refresh, sourceInput, options = {}) {
     const entry = state.factorCatalog.selectedFamilyEntry;
     if (!entry) return FTUI.empty(
       context.t("尚未选择因子家族"), context.t("搜索公共因子库或本地 Git 修订"),
     );
     if (entry.sourceKind === "public") {
-      return registeredFactorPanel(context, state, entry, refresh);
+      return registeredFactorPanel(context, state, entry, refresh, options);
     }
     const family = FTTestFactorSelection.selectedFamily(state);
     return family
-      ? parameterEditor(context, state, family, refresh, sourceInput)
+      ? parameterEditor(context, state, family, refresh, sourceInput, options)
       : document.createElement("div");
   }
 
-  function registeredFactorPanel(context, state, family, refresh) {
+  function registeredFactorPanel(context, state, family, refresh, options = {}) {
     const factors = FTFactorFamilyPicker.familyFactors(family, state.factors);
     if (!factors.length) {
       return FTUI.empty(context.t("该家族暂无可用因子"), "");
@@ -55,12 +55,14 @@
     const selected = FTTestFactorSelection.candidates(state)
       .filter(factor => ids.includes(FTTestFactorSelection.factorID(factor)))
       .map(factor => FTTestFactorSelection.factorID(factor));
-    const selectedValues = state.kind === "ic" ? selected : selected.slice(-1);
+    const selectedValues = selected;
     const picker = FTTestChoicePicker.create(context, {
       className: "test-choice-picker test-public-factor-picker",
       compact: true,
       name: "test-public-factors",
-      multi: state.kind === "ic",
+      // Backtest's outer field constructs the candidate pool, so selecting
+      // several family members is authoring one pool, not creating batches.
+      multi: true,
       items: factors.map(factor => ({
         value: FTTestFactorSelection.factorID(factor),
         label: FTTestFactorSelection.factorAlias(factor),
@@ -73,25 +75,41 @@
         for (const factor of factors) {
           const id = FTTestFactorSelection.factorID(factor);
           const exists = selectedValues.includes(id);
-          if (requested.has(id) && !exists) FTTestFactorSelection.addCandidate(state, factor);
+          if (requested.has(id) && !exists) {
+            FTTestFactorSelection.addCandidate(state, factor, {
+              select: state.kind === "ic",
+            });
+            options.onCreated?.(factor);
+          }
           if (!requested.has(id) && exists) FTTestFactorSelection.removeCandidate(state, factor);
         }
         refresh?.();
       },
     });
-    return FTTestFieldRow.create(
-      context.t("公共因子"), picker.element,
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest,
-        state.kind === "ic" ? ["factor_selections", "factor"] : ["factor", "factor_selections"],
-        context,
-      ) || "",
+    const root = document.createElement("section");
+    root.className = "test-factor-registered-panel";
+    root.append(
+      window.FTFactorDetailShared?.summary?.(context, family)
+        || document.createDocumentFragment(),
+      FTTestFieldRow.create(
+        context.t("公共因子"), picker.element,
+        window.FTTestFieldHelp?.forField?.(
+          state.manifest,
+          state.kind === "ic" ? ["factor_selections", "factor"] : ["factor", "factor_selections"],
+          context,
+        ) || "",
+      ),
     );
+    return root;
   }
 
-  function parameterEditor(context, state, family, refresh, sourceInput) {
+  function parameterEditor(context, state, family, refresh, sourceInput, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-parameters";
+    root.append(
+      window.FTFactorDetailShared?.summary?.(context, family)
+        || document.createDocumentFragment(),
+    );
     for (const parameter of family.params || []) {
       const control = parameterControl(
         parameter, state.values.factor_params || {}, context,
@@ -112,7 +130,10 @@
             family: family.family,
             params: state.values.factor_params || {},
           });
-        FTTestFactorSelection.addCandidate(state, value);
+        FTTestFactorSelection.addCandidate(state, value, {
+          select: state.kind === "ic",
+        });
+        options.onCreated?.(value);
       });
     });
     add.disabled = state.factorCatalog.selectedFamilyEntry?.sourceKind !== "transient"

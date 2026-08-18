@@ -7,7 +7,6 @@
       actions: Object.freeze({
         create: (_state, _selected) => ({mode: "base"}),
         derive: (_state, selected) => ({mode: "derived", parentID: selected[0]?.id}),
-        clone: (_state, selected) => ({mode: "clone", parentID: selected[0]?.id}),
         edit: (_state, selected) => ({mode: "edit", groupID: selected[0]?.id}),
         rename: (_state, selected) => ({
           mode: "rename", strategyKind: "group", strategyID: selected[0]?.id,
@@ -115,6 +114,12 @@
         label: item.group.name || FTBacktestGroupModel.groupLabel(item.group),
         detail: groupDetail(context, item.group),
         depth: item.depth,
+        editableName: true,
+        onRename: name => {
+          model().renameGroup(state, item.group.id, name);
+          refresh();
+          return true;
+        },
         selected: state.selectedBacktestGroupIDs.includes(item.group.id),
         content: groupChips(context, state, item.group, refresh),
         actions: rowActions(context, state, surface, item.group, refresh),
@@ -157,8 +162,13 @@
       showConfig: true,
       showConfigOpen: state.backtestGroupConfigOpen === true,
       items: values.map(item => ({
-      key: item.id, label: item.name || item.id,
+        key: item.id, label: item.name || item.id, editableName: true,
         detail: `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`,
+        onRename: name => {
+          model().renameLongShort(state, item.id, name);
+          refresh();
+          return true;
+        },
         selected: state.selectedBacktestLongShortIDs.includes(item.id),
         content: groupChips(context, state, item, refresh),
         actions: rowActions(context, state, surface, item, refresh),
@@ -186,6 +196,19 @@
     if (!action) throw new Error(`内容适配器不支持操作: ${flow.kind}`);
     state.backtestGroupEditor = action(state, selected, flow);
     refresh();
+    // The editor is intentionally lightweight on first paint, but its
+    // fallback scope is the same visible catalog used by the factor/product
+    // tabs. Load those catalogs after opening the editor so a cold workspace
+    // does not present an empty candidate list or block the UI.
+    const loaders = [];
+    if (flow.kind === "create" || flow.kind === "derive" || flow.kind === "edit") {
+      loaders.push(window.FTTests?.ensureProductsForExecution?.(context, state, refresh));
+      loaders.push(window.FTTests?.ensureFactorsForExecution?.(context, state, refresh));
+    }
+    if (loaders.some(Boolean)) void Promise.all(loaders).then(refresh).catch(error => {
+      state.backtestGroupCatalogError = error.message || String(error);
+      refresh();
+    });
   }
 
   function flows(state, surfaceKey) {

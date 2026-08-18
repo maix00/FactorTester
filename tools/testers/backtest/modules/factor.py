@@ -154,6 +154,14 @@ class FactorModule(ExecutableModule):
                 "display_order": 20,
                 "candidate_field": "factor_candidates",
                 "shared_page_field": "factor",
+                "outer_selection_mode": "automatic_primary",
+                "outer_selection_label": "选中因子",
+                "resolution": {
+                    "kind": "automatic",
+                    "source": "factor_candidates",
+                    "resolver": "primary_item",
+                    "editable": False,
+                },
                 "id_keys": ("alias", "name", "factor_alias"),
                 "label_keys": ("alias", "name", "label"),
             },
@@ -168,10 +176,14 @@ class FactorModule(ExecutableModule):
             tab_label="因子执行",
             tab_order=20,
             tab_content_adapter="factor_selection",
-            help_text="按策略意图绑定 ranking、screen、entry、exit、sizing；未绑定角色显式使用主因子。",
+            help_text=(
+                "仅在已有至少两个可绑定因子候选时显示；按策略意图绑定"
+                " ranking、screen、entry、exit、sizing，未绑定角色使用主因子。"
+            ),
             serialization={
                 "kind": "factor_role_bindings",
                 "candidate_field": "factor_candidates",
+                "visible_when": {"min_items": {"factor_candidates": 2}},
                 "allowed_roles": ("ranking", "screen", "entry", "exit", "sizing"),
                 "roles_by_strategy_kind": {
                     "group": ("ranking", "screen", "sizing"),

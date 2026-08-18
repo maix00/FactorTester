@@ -3,7 +3,9 @@
     factor: {
       title: "因子",
       load: "catalog",
-      render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
+      render: (context, ref, mode, options) => options?.inlineEditor
+        ? FTStrategyEditorFactorOverlay.render(context, ref, mode, options)
+        : FTFactors.factorDetail(context, ref, mode),
     },
     product_group: {
       title: "产品组",
@@ -25,7 +27,7 @@
     if (dialog.open) dialog.close(); else dialog.remove();
   }
 
-  function editorContext(context, mount, closeOverlay, onSaved) {
+  function editorContext(context, mount, closeOverlay, onSaved, options = {}) {
     const toolbar = document.createElement("div");
     return {
       ...context,
@@ -37,6 +39,7 @@
       navigate: () => closeOverlay(),
       closeTab: () => closeOverlay(),
       onSaved,
+      testState: options.testState || null,
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
     };
   }
@@ -82,7 +85,7 @@
       options.onSaved?.(value);
       finish(value);
     };
-    const proxy = editorContext(context, mount, () => finish(null), saved);
+    const proxy = editorContext(context, mount, () => finish(null), saved, options);
     closeButton.addEventListener("click", () => finish(null));
     dialog.addEventListener("close", () => {
       if (!state.closed) {
@@ -98,7 +101,7 @@
     try {
       await window.FTStaticLoader?.loadGroups?.([definition.load]);
       if (state.closed) return promise;
-      await definition.render(proxy, options.ref || "new", mode);
+      await definition.render(proxy, options.ref || "new", mode, options);
     } catch (error) {
       if (!state.closed) {
         mount.replaceChildren(FTUI.empty(

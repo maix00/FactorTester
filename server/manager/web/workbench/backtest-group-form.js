@@ -40,90 +40,223 @@
   function renderGroup(context, state, editor, form, onFinish) {
     const current = editor.groupID ? model().find(state, editor.groupID) : null;
     const parent = editor.parentID ? model().find(state, editor.parentID) : null;
-    const derived = editor.mode === "derived" || editor.mode === "clone" || current?.parentId;
+    const derived = editor.mode === "derived" || current?.parentId;
     const defaults = current || parent || {};
-    const name = input("text", current?.name || editor.name || (editor.mode === "clone"
-      ? `${model().groupLabel(parent)} ${context.t("副本")}` : ""));
+    const name = input("text", current?.name || editor.name || "");
     name.placeholder = context.t("组名称");
     form.append(field(context.t("名称"), name));
 
-    let productGroup;
     let productGroupRef = "";
-    let factor;
     let factorRefs = [];
     let splitCount;
     let groupIndex;
     let allGroups;
-    if (!derived) {
-      productGroupRef = defaults.product_path_selection_id
-        || FTTestProducts.groupID(defaults.product_path_selection)
-        || state.groupRef || "";
-      productGroup = groupPicker(context, state, productGroupRef, value => {
-        productGroupRef = value[0] || "";
-      });
-      const selectedFactors = editor.mode === "base"
-        ? selectedFactorAliases(state, defaults)
-        : [defaults.factorAlias || selectedFactorAlias(state)].filter(Boolean);
-      factorRefs = selectedFactors;
-      factor = factorPicker(context, state, factorRefs, editor.mode === "base", values => {
-        factorRefs = values;
-      });
-      splitCount = input("number", defaults.splitCount || state.values.split_count || 5);
-      splitCount.min = "1"; splitCount.step = "1";
-      groupIndex = input("number", defaults.groupIndex || state.values.group_index || 1);
-      groupIndex.min = "1"; groupIndex.step = "1";
-      const structure = document.createElement("div");
-      structure.className = "backtest-group-form-rows";
-      structure.append(
-        field(context.t("产品组"), productGroup), field(
-          context.t(editor.mode === "base" ? "因子（可多选）" : "因子"), factor,
-        ),
-        field(context.t("分组数"), splitCount), field(context.t("分组序号"), groupIndex),
-      );
-      form.append(structure);
-      if (editor.mode === "base") {
-        allGroups = input("checkbox", false);
-        allGroups.addEventListener("change", () => { groupIndex.disabled = allGroups.checked; });
-        form.append(field(context.t("一次建立全部分组"), allGroups));
+    let productMask = productMaskValues(
+      editor.productMask !== undefined ? editor.productMask : defaults.productMask,
+    );
+    const productScope = window.FTStrategyEditorScope?.scope(
+      state, "product_path_selection",
+    ) || {items: state.groups || [], ready: true, required: false};
+    const factorScope = window.FTStrategyEditorScope?.scope(state, "factor")
+      || {items: state.factors || [], ready: true, required: false};
+    const productScopeBlocked = productScope.required && !productScope.ready;
+    const factorScopeBlocked = factorScope.required && !factorScope.ready;
+    productGroupRef = defaults.product_path_selection_id
+      || productGroupID(defaults.product_path_selection)
+      || (!productScopeBlocked && productScope.ready && productScope.source === "outer"
+        ? FTStrategyEditorScope.itemID("product_path_selection", productScope.items[0])
+        : productScopeBlocked ? "" : state.groupRef || "");
+    const productItems = productScopeBlocked ? []
+      : (productScope.items?.length ? productScope.items : state.groups || []);
+    const factorItems = factorScopeBlocked ? []
+      : (factorScope.items?.length ? factorScope.items : state.factors || []);
+    const innerScopeValues = {...state.values};
+    const innerFactorFields = state.manifest?.strategy_editor?.inner_factor_fields || {};
+    const scopedCandidate = window.FTStrategyEditorScope?.scopedField?.(
+      state, "factor_candidates", "inner",
+    );
+    const scopedCombination = window.FTStrategyEditorScope?.scopedField?.(
+      state, "factor_combination_mode", "inner",
+    );
+    const candidateDescriptor = scopedCandidate
+      || innerFactorFields.candidate_selection || {};
+    const combinationDescriptor = scopedCombination
+      || innerFactorFields.combination_mode || {};
+    const combinationItems = choiceItems(combinationDescriptor);
+    let factorCombinationMode = String(
+      defaults.factor_combination_mode || defaults.factorCombinationMode || "",
+    );
+    const selectedCandidateValues = () => factorItems.filter(item => (
+      factorRefs.includes(factorAlias(item))
+    ));
+    innerScopeValues.factor_candidates = selectedCandidateValues();
+    const productGroup = groupPicker(context, state, productGroupRef, value => {
+      productGroupRef = value[0] || "";
+    }, productItems, !productScopeBlocked);
+    const storedFactors = selectedFactorAliases(state, defaults);
+    const hasStoredFactors = Boolean(
+      (Array.isArray(defaults.factorAliases) && defaults.factorAliases.length)
+      || defaults.factorAlias,
+    );
+    const selectedFactors = factorScopeBlocked ? []
+      : factorScope.source === "outer" && editor.mode === "base"
+      && !hasStoredFactors
+      ? factorScope.items.map(item => factorAlias(item)).filter(Boolean)
+      : storedFactors;
+    factorRefs = selectedFactors;
+    innerScopeValues.factor_candidates = selectedCandidateValues();
+    let overrideEditor;
+    let fallbackOverrides;
+    let fallbackFactorOverrides;
+    let factor;
+    let combinationPicker;
+    const factorHost = document.createElement("div");
+    factorHost.className = "backtest-group-factor-panel";
+    const renderFactorPanel = () => {
+      const children = [field(
+        candidateDescriptor.label || context.t("因子候选"),
+        factor,
+        candidateDescriptor.help_text || "",
+      )];
+      const combinationVisible = window.FTStrategyEditorScope?.fieldVisible?.(
+        state, "factor_combination_mode", "inner", innerScopeValues,
+      ) ?? factorRefs.length > 1;
+      if (combinationVisible) {
+        const combinationHelp = combinationDescriptor.help_text
+          || context.t("多个因子候选需要一种组合方式");
+        children.push(field(
+          combinationDescriptor.label || context.t("组合方式"),
+          combinationPicker,
+          combinationHelp,
+        ));
+        if (!combinationItems.length) {
+          const empty = document.createElement("small");
+          empty.className = "backtest-group-empty-combination-mode";
+          empty.textContent = context.t("当前没有可用组合方式，暂不能提交多个因子候选");
+          children[children.length - 1].querySelector(
+            ".test-field-row-control",
+          )?.append(empty);
+        }
       }
-    } else {
+      if (overrideEditor) children.push(overrideEditor.panel({key: "factor"}));
+      else if (fallbackFactorOverrides) children.push(fallbackFactorOverrides);
+      factorHost.replaceChildren(...children);
+    };
+    factor = factorPicker(
+      context, state, factorRefs, candidateDescriptor.cardinality === "many", values => {
+        factorRefs = values;
+        innerScopeValues.factor_candidates = selectedCandidateValues();
+        renderFactorPanel();
+        overrideEditor?.refresh();
+      }, factorItems, !factorScopeBlocked && (
+        factorScope.source === "outer"
+          ? candidateDescriptor.allow_inline_create_when_outer_mounted === true
+          : candidateDescriptor.allow_inline_create_when_outer_unmounted !== false
+      ),
+    );
+    combinationPicker = FTTestChoicePicker.create(context, {
+      className: "test-choice-picker test-factor-combination-picker",
+      compact: true,
+      name: "backtest-factor-combination-mode",
+      multi: false,
+      disabled: combinationItems.length === 0,
+      items: combinationItems,
+      selected: factorCombinationMode ? [factorCombinationMode] : [],
+      onChange: values => { factorCombinationMode = values[0] || ""; },
+    });
+    splitCount = input("number", defaults.splitCount || state.values.split_count || 5);
+    splitCount.min = "1"; splitCount.step = "1";
+    groupIndex = input("number", defaults.groupIndex || state.values.group_index || 1);
+    groupIndex.min = "1"; groupIndex.step = "1";
+
+    const structure = document.createElement("div");
+    structure.className = "backtest-group-form-rows";
+    if (derived) {
       const parentLine = document.createElement("p");
       parentLine.className = "backtest-group-parent";
       parentLine.textContent = `${context.t("父组")}: ${model().groupLabel(parent || model().find(state, current?.parentId))}`;
-      form.append(parentLine);
+      structure.append(parentLine);
+    }
+    structure.append(
+      field(context.t("分组数"), splitCount), field(context.t("分组序号"), groupIndex),
+    );
+    if (editor.mode === "base") {
+      allGroups = input("checkbox", false);
+      allGroups.addEventListener("change", () => { groupIndex.disabled = allGroups.checked; });
+      structure.append(field(context.t("一次建立全部分组"), allGroups));
     }
 
-    const mask = document.createElement("textarea");
-    mask.rows = 3;
-    mask.placeholder = context.t("每行一个产品代码；留空继承父组或产品组");
-    const requestedMask = Array.isArray(editor.productMask)
-      ? Object.fromEntries(editor.productMask.map(item => [item, true])) : null;
-    mask.value = Object.entries(requestedMask || current?.productMask || defaults.productMask || {})
-      .filter(([, enabled]) => enabled).map(([key]) => key).join("\n");
-    form.append(field(context.t("品种筛选"), mask));
-
-    const overrides = FTBacktestGroupOverrides.render({
-      context, manifest: state.manifest, inheritedValues: state.values,
-      overrides: model().registeredOverrides(
-        current || (editor.mode === "clone" ? parent : {}), state.manifest,
-      ),
+    const initialOverrides = model().registeredOverrides(
+      current || {}, state.manifest,
+    );
+    overrideEditor = window.FTStrategyEditorOverrides?.create?.({
+      context, manifest: state.manifest, inheritedValues: innerScopeValues,
+      state, initial: initialOverrides,
+      mountedTabs: current?.override_mounted_tabs || [],
     });
-    const overrideDetails = document.createElement("details");
-    const overrideSummary = document.createElement("summary");
-    overrideSummary.textContent = context.t("逐组设置覆盖");
-    overrideDetails.append(overrideSummary, field(context.t("覆盖字段"), overrides));
-    form.append(overrideDetails);
+    const scopeNote = document.createElement("small");
+    scopeNote.className = "backtest-group-scope-note";
+    const scopeErrors = window.FTStrategyEditorScope?.validate(state) || [];
+    scopeNote.textContent = scopeErrors.length
+      ? scopeErrors.map(item => context.t(item.message)).join("；")
+      : context.t("因子和产品组候选范围按外层设置或当前可见目录确定");
+    if (scopeErrors.length) scopeNote.classList.add("error");
+
+    fallbackOverrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: innerScopeValues,
+      overrides: initialOverrides, scopeSide: "inner",
+    });
+    fallbackFactorOverrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: innerScopeValues,
+      overrides: initialOverrides, onlyTabs: ["factor"], scopeSide: "inner",
+    });
+    const editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
+      context, state,
+      mountedTabs: current?.override_mounted_tabs || [],
+      onMountedTabsChange: tabs => overrideEditor?.setMountedTabs(tabs),
+      renderStructure: () => structure,
+      renderFactor: () => { renderFactorPanel(); return factorHost; },
+      renderProduct: () => field(context.t("产品组"), productGroup),
+      renderProductFilter: () => window.FTStrategyEditorProductFilter?.render(
+        context, state, productMask,
+        values => { productMask = [...new Set((values || []).map(String).filter(Boolean))]; },
+      ) || document.createElement("div"),
+      renderOverrides: ({tab}) => overrideEditor?.panel(tab) || fallbackOverrides,
+    }) : null;
+    renderFactorPanel();
+    if (editorTabs) form.append(scopeNote, editorTabs);
+    else form.append(scopeNote, field(context.t("产品组"), productGroup),
+      factorHost, structure, field(context.t("覆盖字段"), fallbackOverrides));
 
     appendActions(context, form, async () => {
       try {
-        const parsedOverrides = overrides.value();
-        const productMask = mask.value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
+        const errors = window.FTStrategyEditorScope?.validate(state) || [];
+        if (errors.length) throw new Error(errors.map(item => context.t(item.message)).join("；"));
+        const requiresCombination = window.FTStrategyEditorScope?.fieldRequired?.(
+          state, "factor_combination_mode", "inner", innerScopeValues,
+        ) ?? factorRefs.length > 1;
+        if (requiresCombination) {
+          if (!combinationItems.length) {
+            throw new Error(context.t("当前没有可用组合方式，不能提交多个因子候选"));
+          }
+          if (!factorCombinationMode) {
+            throw new Error(context.t("请选择组合方式"));
+          }
+        } else {
+          factorCombinationMode = "";
+        }
+        const parsedOverrides = overrideEditor?.value?.() || fallbackOverrides.value();
         if (editor.mode === "base") {
-          const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroupRef);
+          const group = productItems.find(item => productGroupID(item) === productGroupRef)
+            || state.groups.find(item => productGroupID(item) === productGroupRef);
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
             factorAliases: factorRefs, splitCount: splitCount.value,
+            factor_combination_mode: factorCombinationMode,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
+            productMask,
+            overrides: parsedOverrides,
+            override_mounted_tabs: editorTabs?.value?.().mountedTabs,
           });
         } else if (editor.mode === "edit") {
           const previousOverrides = model().registeredOverrides(current, state.manifest);
@@ -132,20 +265,34 @@
             ...cleared, ...parsedOverrides, name: name.value.trim() || current.name,
             productMask,
           };
-          if (!derived) {
-            const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroupRef);
-            Object.assign(patch, {
-              product_path_selection: FTTestProducts.projection(group),
-              product_path_selection_id: productGroupRef,
-              factorAlias: factorRefs[0] || "",
-              splitCount: splitCount.value,
-              groupIndex: groupIndex.value,
-            });
-          }
+          const group = productItems.find(item => productGroupID(item) === productGroupRef)
+            || state.groups.find(item => productGroupID(item) === productGroupRef);
+          Object.assign(patch, {
+            product_path_selection: productProjection(group || productGroupRef),
+            product_path_selection_id: productGroupRef,
+            factorAlias: factorRefs[0] || "",
+            factorAliases: factorRefs,
+            factor_combination_mode: factorCombinationMode,
+            splitCount: splitCount.value,
+            groupIndex: groupIndex.value,
+            override_mounted_tabs: editorTabs?.value?.().mountedTabs,
+          });
           model().updateGroup(state, current.id, patch);
         } else {
+          const selectedGroup = productItems.find(item => productGroupID(item) === productGroupRef);
+          const productPatch = productGroupRef ? {
+            product_path_selection: productProjection(selectedGroup || productGroupRef),
+            product_path_selection_id: productGroupRef,
+          } : {};
           model().addDerived(state, parent.id, {
             name: name.value.trim(), productMask, overrides: parsedOverrides,
+            ...productPatch,
+            factorAlias: factorRefs[0] || "",
+            factorAliases: factorRefs,
+            factor_combination_mode: factorCombinationMode,
+            splitCount: splitCount.value,
+            groupIndex: groupIndex.value,
+            override_mounted_tabs: editorTabs?.value?.().mountedTabs,
           });
         }
         onFinish();
@@ -181,19 +328,42 @@
     });
     swap.type = "button";
     grid.append(swap);
-    form.append(grid);
-    const overrides = FTBacktestGroupOverrides.render({
+    const structure = document.createElement("div");
+    structure.className = "backtest-long-short-structure";
+    let productMask = productMaskValues(current?.productMask);
+    structure.append(grid);
+    const initialOverrides = model().registeredOverrides(current, state.manifest);
+    const overrideEditor = window.FTStrategyEditorOverrides?.create?.({
       context, manifest: state.manifest, inheritedValues: state.values,
-      overrides: model().registeredOverrides(current, state.manifest),
+      state, initial: initialOverrides,
+      mountedTabs: current?.override_mounted_tabs || [],
     });
-    const overrideDetails = document.createElement("details");
-    const overrideSummary = document.createElement("summary");
-    overrideSummary.textContent = context.t("Long-Short 覆盖设置");
-    overrideDetails.append(overrideSummary, field(context.t("覆盖字段"), overrides));
-    form.append(overrideDetails);
+    const fallbackOverrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: state.values,
+      overrides: initialOverrides, scopeSide: "inner",
+    });
+    const editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
+      context, state,
+      mountedTabs: current?.override_mounted_tabs || [],
+      onMountedTabsChange: tabs => overrideEditor?.setMountedTabs(tabs),
+      renderStructure: () => structure,
+      renderFactor: () => scopeSummary(context, state, "factor"),
+      renderProduct: () => scopeSummary(context, state, "product_path_selection"),
+      renderProductFilter: () => window.FTStrategyEditorProductFilter?.render(
+        context, state, productMask,
+        values => { productMask = [...new Set((values || []).map(String).filter(Boolean))]; },
+      ) || document.createElement("div"),
+      renderOverrides: ({tab}) => overrideEditor?.panel(tab) || fallbackOverrides,
+    }) : null;
+    if (editorTabs) form.append(editorTabs);
+    else form.append(structure, field(context.t("覆盖字段"), fallbackOverrides));
     appendActions(context, form, () => {
       try {
-        const parsedOverrides = overrides.value();
+        const scopeErrors = window.FTStrategyEditorScope?.validate(state) || [];
+        if (scopeErrors.length) {
+          throw new Error(scopeErrors.map(item => context.t(item.message)).join("；"));
+        }
+        const parsedOverrides = overrideEditor?.value?.() || fallbackOverrides.value();
         if (current) {
           const previous = model().registeredOverrides(current, state.manifest);
           const cleared = Object.fromEntries(Object.keys(previous).map(key => [key, undefined]));
@@ -201,10 +371,16 @@
             ...cleared, ...parsedOverrides,
             name: name.value.trim() || current.name,
             longGroupId: longGroupRef, shortGroupId: shortGroupRef,
+            productMask,
+            override_mounted_tabs: editorTabs?.value?.().mountedTabs,
           });
         } else {
           model().addLongShort(
-            state, longGroupRef, shortGroupRef, name.value, parsedOverrides,
+            state, longGroupRef, shortGroupRef, name.value, {
+              ...parsedOverrides,
+              productMask,
+              override_mounted_tabs: editorTabs?.value?.().mountedTabs,
+            },
           );
         }
         onFinish();
@@ -246,112 +422,54 @@
     return control;
   }
 
-  function groupPicker(context, state, selected, onChange) {
-    const saveGroup = value => {
-      const id = FTTestProducts.groupID(value);
-      if (!id) return;
-      const index = state.groups.findIndex(item => FTTestProducts.groupID(item) === id);
-      if (index >= 0) state.groups[index] = {...state.groups[index], ...value};
-      else state.groups.push(value);
-      onChange?.([id]);
-    };
-    return FTTestObjectPicker.create(context, {
-      title: context.t("产品组"),
-      items: state.groups.map(item => ({
-        value: FTTestProducts.groupID(item),
-        label: FTTestProducts.groupLabel(item),
-        description: item.description || item.desc || FTTestProducts.groupLabel(item),
-        source_managed: item.source_managed === true,
-      })).filter(item => item.value),
-      selected: selected ? [selected] : [], multi: false, name: "backtest-product-group",
-      onCreate: context.session ? () => void FTTestObjectEditorOverlay.open(context, {
-        kind: "product_group", mode: "create", ref: "new", onSaved: saveGroup,
-      }) : null,
-      createLabel: context.t("新建产品组"), onChange,
-      itemActions: item => {
-        const group = state.groups.find(value => FTTestProducts.groupID(value) === item.value);
-        if (!context.session || !group || group.source_managed) return [];
-        return [editAction(context, "product_group", item.value, saveGroup)];
-      },
-    });
+  function pickerTools() {
+    if (!window.FTStrategyEditorPickers) {
+      throw new Error("策略编辑器候选控件尚未加载");
+    }
+    return window.FTStrategyEditorPickers;
   }
 
-  function strategyGroupPicker(context, state, groups, selected, onChange) {
-    return FTTestObjectPicker.create(context, {
-      title: context.t("分组"),
-      items: groups.map(item => ({
-        value: item.id, label: model().groupLabel(item),
-        description: item.parentId ? context.t("派生组") : context.t("基础组"),
-      })).filter(item => item.value),
-      selected: selected ? [selected] : [], multi: false,
-      name: `backtest-strategy-group-${Date.now()}`, onChange,
-    });
+  function groupPicker(...args) { return pickerTools().groupPicker(...args); }
+  function strategyGroupPicker(...args) { return pickerTools().strategyGroupPicker(...args); }
+  function factorPicker(...args) { return pickerTools().factorPicker(...args); }
+  function selectedFactorAliases(...args) {
+    return pickerTools().selectedFactorAliases(...args);
   }
-
-  function factorPicker(context, state, selected, multi, onChange) {
-    const saveFactor = value => {
-      if (!value) return;
-      const alias = factorAlias(value);
-      const index = (state.factors || []).findIndex(item => factorAlias(item) === alias);
-      if (index >= 0) state.factors[index] = {...state.factors[index], ...value};
-      else state.factors.push(value);
-      onChange?.(multi ? [alias] : [alias]);
-    };
-    return FTTestObjectPicker.create(context, {
-      title: context.t("因子"),
-      items: (state.factors || []).map(item => {
-        const alias = factorAlias(item);
-        return {
-          value: alias, label: alias,
-          description: item.description || item.desc || item.family || alias,
-        };
-      }).filter(item => item.value),
-      selected, multi, name: `backtest-factors-${multi ? "multi" : "single"}`,
-      onCreate: context.session ? () => void FTTestObjectEditorOverlay.open(context, {
-        kind: "factor", mode: "create", ref: "new", onSaved: saveFactor,
-      }) : null,
-      createLabel: context.t("新建因子"), onChange,
-      itemActions: item => {
-        const factor = (state.factors || []).find(value => factorAlias(value) === item.value);
-        const ref = factor?.factor_alias || factor?.alias || factor?.id || item.value;
-        if (!context.session || !factor?.can_edit || factor.is_public) return [];
-        return [editAction(context, "factor", ref, saveFactor)];
-      },
-    });
+  function selectedFactorAlias(...args) { return pickerTools().selectedFactorAlias(...args); }
+  function factorAlias(...args) { return pickerTools().factorAlias(...args); }
+  function choiceItems(descriptor) {
+    const raw = Array.isArray(descriptor?.options) ? descriptor.options : [];
+    return raw.map(item => Array.isArray(item)
+      ? {value: String(item[0] ?? ""), label: String(item[1] ?? item[0] ?? "")}
+      : {
+        ...item,
+        value: String(item?.value ?? ""),
+        label: item?.label || String(item?.value ?? ""),
+      }).filter(item => item.value);
   }
-
-  function editAction(context, kind, ref, onSaved) {
-    return {
-      label: context.t("编辑"), title: context.t("在当前浮层编辑"),
-      buttonClass: "secondary",
-      onClick: event => {
-        event?.preventDefault();
-        void FTTestObjectEditorOverlay.open(context, {
-          kind, mode: "edit", ref, onSaved,
-        });
-      },
-    };
-  }
-
-  function selectedFactorAliases(state, defaults) {
-    const values = defaults.factorAliases || defaults.factor_aliases;
-    if (Array.isArray(values) && values.length) return values.map(String).filter(Boolean);
-    return [defaults.factorAlias || selectedFactorAlias(state)].filter(Boolean);
-  }
-
-  function factorAlias(value) {
-    return value?.factor_alias || value?.alias || value?.name || "";
-  }
-
-  function selectedFactorAlias(state) {
-    return factorAlias(FTTestFactors.selectedFactor(state));
+  function productGroupID(...args) { return pickerTools().productGroupID(...args); }
+  function productGroupLabel(...args) { return pickerTools().productGroupLabel(...args); }
+  function productProjection(...args) { return pickerTools().productProjection(...args); }
+  function scopeSummary(context, state, kind) {
+    return window.FTStrategyEditorScope.summary(context, state, kind);
   }
 
   function titleFor(context, mode) {
     return context.t({
-      base: "新增分组", derived: "派生组", clone: "复制为派生组",
+      base: "新增分组", derived: "派生组",
       edit: "编辑分组", rename: "重命名策略", ls: "Long-Short 组合",
     }[mode] || "分组");
+  }
+
+  function productMaskValues(value) {
+    if (typeof model().productMaskValues === "function") {
+      return model().productMaskValues(value);
+    }
+    if (Array.isArray(value)) return [...new Set(value.map(String).filter(Boolean))];
+    if (!value || typeof value !== "object") return [];
+    return Object.entries(value)
+      .filter(([, enabled]) => enabled)
+      .map(([key]) => key);
   }
 
   window.FTBacktestGroupForm = Object.freeze({render});

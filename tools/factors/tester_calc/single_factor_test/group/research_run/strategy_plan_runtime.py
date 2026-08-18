@@ -49,7 +49,31 @@ def activate_strategy_plan(settings_by_alias: dict[str, dict[str, Any]], plan: l
         resolved[alias]["strategy_kind"] = kind
         resolved[alias]["strategy_intent_mode"] = kind
         resolved[alias]["_strategy_plan"] = dict(spec)
-    return resolved
+    return apply_custom_strategy_overrides(resolved, plan, aliases)
+
+
+def apply_custom_strategy_overrides(
+    settings_by_alias: dict[str, dict[str, Any]],
+    plan: list[dict[str, Any]],
+    aliases: dict[int, str],
+    *,
+    overrides: dict[str, Any] | None = None,
+    product_mask: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Apply the nested custom-strategy scope without widening other strategies."""
+    normalized_overrides = dict(overrides or {})
+    normalized_products = tuple(
+        dict.fromkeys(str(value).strip() for value in (product_mask or ()) if str(value).strip())
+    )
+    for index, spec in enumerate(plan):
+        if str(spec.get("strategy_kind") or "custom") != "custom":
+            continue
+        alias = aliases[index]
+        resolved = settings_by_alias[alias]
+        resolved.update(normalized_overrides)
+        if normalized_products:
+            resolved["product_mask_names"] = normalized_products
+    return settings_by_alias
 
 
 def validate_strategy_plan_capabilities(payload: dict[str, Any], plan: list[dict[str, Any]], objects: dict[str, Strategy]) -> None:

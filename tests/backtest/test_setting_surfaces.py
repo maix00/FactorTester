@@ -50,7 +50,7 @@ def test_ic_declares_single_select_select_then_run_list() -> None:
 def test_group_test_flows_declared_with_selection_gating() -> None:
     flows = _flows("group_test")
     assert set(flows) == {
-        "add_group", "create_derived", "create_ls", "clone", "edit", "delete",
+        "add_group", "create_derived", "create_ls", "edit", "delete",
         "rename", "rename_long_short", "add_long_short", "edit_long_short",
         "swap_long_short", "delete_long_short",
     }
@@ -58,7 +58,6 @@ def test_group_test_flows_declared_with_selection_gating() -> None:
     assert flows["add_group"]["kind"] == "create"
     assert flows["create_derived"]["kind"] == "derive"
     assert flows["create_ls"]["kind"] == "compose"
-    assert flows["clone"]["kind"] == "clone"
     assert flows["rename"]["kind"] == "rename"
     assert flows["rename_long_short"]["kind"] == "rename"
     assert flows["add_long_short"]["kind"] == "create"
@@ -70,9 +69,6 @@ def test_group_test_flows_declared_with_selection_gating() -> None:
     assert flows["add_group"]["min_selected"] is None
     assert (flows["create_derived"]["min_selected"], flows["create_derived"]["max_selected"]) == (1, 1)
     assert (flows["create_ls"]["min_selected"], flows["create_ls"]["max_selected"]) == (2, 2)
-    # clone is now editable-before-save like derive: single-selection, opens the derived form
-    assert (flows["clone"]["min_selected"], flows["clone"]["max_selected"]) == (1, 1)
-    assert flows["clone"]["form_tab"] == "add-derived"
     assert flows["create_derived"]["form_tab"] == "add-derived"
     assert flows["delete"]["min_selected"] == 1 and flows["delete"]["max_selected"] is None
     assert flows["delete_long_short"]["surface"] == "long_short"

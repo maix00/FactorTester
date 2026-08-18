@@ -41,6 +41,10 @@ const manifest = {defaults: {
   fee_custom_product_fields: {
     value: [], serialization: {storage_key: "custom_product_fields"},
   },
+  factor_candidates: {value: []},
+  factor_role_bindings: {
+    value: {}, serialization: {visible_when: {min_items: {factor_candidates: 2}}},
+  },
 }};
 
 const rules = window.FTSettingRules;
@@ -89,6 +93,13 @@ rules.setValue(manifest, values, "margin_mode", manifest.defaults.margin_mode, "
 rules.setValue(manifest, values, "engine_mode", manifest.defaults.engine_mode, "auto");
 assert.equal(values.margin_mode, "fixed", "a manual field must not be overwritten");
 assert.equal(rules.isVisible(manifest.defaults.fixed_margin_ratio, values), true);
+assert.equal(
+  rules.isVisible(manifest.defaults.factor_role_bindings, values),
+  false,
+  "factor roles stay hidden until multiple factor candidates exist",
+);
+values.factor_candidates = [{alias: "A"}, {alias: "B"}];
+assert.equal(rules.isVisible(manifest.defaults.factor_role_bindings, values), true);
 
 rules.setValue(manifest, values, "engine", manifest.defaults.engine, "zipline");
 assert.deepEqual([...rules.disabledValues(manifest.defaults.margin_mode, values)], ["exact"]);
