@@ -87,15 +87,21 @@
     context.toolbar.replaceChildren(
       FTTestPageTabs.render(context, "tasks"),
       scopeTabs(context, state),
-      context.button("↻", () => list(context, null, scope), context.t("刷新任务列表")),
+      context.button(
+        "↻", () => list(context, null, scope, {forceRefresh: true}),
+        context.t("刷新任务列表"),
+      ),
     );
   }
 
-  async function fetchPage(context, state, scope, targetPage) {
+  async function fetchPage(context, state, scope, targetPage, options = {}) {
     const page = Math.max(1, Math.min(1000, Number(targetPage) || 1));
     const scoped = state.byScope[scope];
     if (!scoped) throw new Error(context.t("不支持的任务范围"));
     if (scope !== "server") {
+      if (!options.forceRefresh && scoped.pages[page]) {
+        return {...scoped.pages[page], page};
+      }
       const query = new URLSearchParams({
         scope, limit: String(pageSize), page: String(page),
       });
@@ -197,7 +203,9 @@
     return root;
   }
 
-  async function list(context, requestedPage = null, requestedScope = null) {
+  async function list(
+    context, requestedPage = null, requestedScope = null, options = {},
+  ) {
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
@@ -211,23 +219,28 @@
     state.activeScope = scope;
     const scoped = state.byScope[scope];
     installScopeToolbar(context, state, scope);
-    // A module revisit and a scope switch are explicit refreshes.  Do not
-    // reuse an anonymous public page after login, or an older first page when
-    // new jobs have arrived since the last visit.
-    if (requestedPage == null) {
+    // Keep a populated scope when navigating away and back.  The old code
+    // discarded it before every request, turning every tab switch into a
+    // cold federation fan-out.  The toolbar remains the explicit refresh
+    // control and clears the cached page through this flag.
+    if (options.forceRefresh) {
       Object.assign(scoped, freshScopeState());
     }
     const requested = Math.max(1, Math.min(1000, Number(requestedPage == null ? 1 : requestedPage) || 1));
     let payload;
     try {
-      payload = await fetchPage(context, state, scope, requested);
+      payload = await fetchPage(
+        context, state, scope, requested, options,
+      );
     } catch (error) {
       if (!isCurrent()) return;
       const root = document.createElement("div"); root.className = "jobs-page";
       if (scope === "server") root.append(publicScopeNote(context));
       const failure = FTUI.empty(context.t("任务列表读取失败"), text(error.message || error));
       failure.append(context.button(
-        context.t("重试"), () => list(context, null, scope), context.t("重新读取任务列表"),
+        context.t("重试"),
+        () => list(context, null, scope, {forceRefresh: true}),
+        context.t("重新读取任务列表"),
       ));
       if (scope === "subordinates") {
         root.append(userPicker(context, scoped, {users: scoped.users}));
@@ -274,7 +287,7 @@
       return;
     }
    const result = FTUI.table([context.t("任务"), context.t("服务器"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物"), context.t("提交物")], jobs.map(job => [
-      taskCell(job, context), serverLabel(job, context), jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), artifactCell(job, "output", context), artifactCell(job, "input", context),
+      taskCell(job, context), serverLabel(job, context), jobPort(job.execution_port) || jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), artifactCell(job, "output", context), artifactCell(job, "input", context),
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
@@ -282,7 +295,10 @@
       const serverID = String(
         job.execution_server_id || job.server_id || "",
       ).trim();
-      const target = serverID && serverID !== "local"
+      // The storage owner is always part of the detail route.  Even a
+      // legacy-looking local server id must be preserved so a stopped worker
+      // port cannot become the artifact lookup authority.
+      const target = serverID
         ? "?server_id=" + encodeURIComponent(serverID) : "";
       const path = port
         ? `/jobs/${port}/${encodeURIComponent(job.job_id)}${target}`

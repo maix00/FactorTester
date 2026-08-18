@@ -7,6 +7,7 @@
     item.job = loaded.job;
     item.port = Number(loaded.resolvedPort || item.port || 0);
     item.portQuery = loaded.portQuery || (item.port ? `?port=${item.port}` : "");
+    item.artifactQuery = loaded.artifactQuery || item.artifactQuery || "";
     item.phase = String(loaded.job?.status || item.phase || "submitted");
     item.resultError = "";
     return item;
@@ -75,7 +76,9 @@
     const payload = item.detailPayload || {};
     const artifacts = (task.artifacts || []).filter(entry => entry.state === "active");
     const options = {
-      artifacts, jobID: item.jobID, portQuery: item.portQuery || "",
+      artifacts, jobID: item.jobID,
+      portQuery: item.portQuery || "",
+      artifactQuery: item.artifactQuery || "",
       configuration: task.configuration || {}, productGroupRef: item.groupID || "",
     };
     if (state.kind === "ic") return window.FTICResults?.section(context, options);

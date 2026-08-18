@@ -90,7 +90,8 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
     with _running(data_server), _running(manager_server) as manager_endpoint:
         access_request = Request(
             manager_endpoint
-            + "/api/jobs/job-1/artifacts/result.bin/access?port=8141",
+            # The stale worker port must not affect retained-artifact access.
+            + "/api/jobs/job-1/artifacts/result.bin/access?port=9999",
             data=b"",
             method="POST",
             headers={
@@ -117,6 +118,58 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
         )) as response:
             assert response.status == 200
             assert response.read() == raw
+
+
+def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "detail-repo",
+        "python",
+        server_id="requesting-manager",
+        state_root=tmp_path / "detail-state",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "alice", "user", float("inf"),
+    )
+    route = ServiceRoute(
+        server_id="remote-main",
+        role="main",
+        branch="main",
+        revision="remote-revision",
+        port=8000,
+        remote=True,
+        online=True,
+    )
+    monkeypatch.setattr(
+        manager.Handler,
+        "_job_routes",
+        lambda _handler, _parsed, _principal: [route],
+    )
+    monkeypatch.setattr(
+        state,
+        "route_request",
+        lambda *_args, **_kwargs: manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"task_detail":{"job":{"job_id":"job-1"}}}',
+            content_type="application/json",
+        ),
+    )
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        request = Request(
+            endpoint + "/api/jobs/job-1",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+
+    assert value["server_id"] == "remote-main"
+    assert value["execution_server_id"] == "remote-main"
+    assert value["execution_port"] == 8000
+    assert value["storage_server_id"] == "remote-main"
 
 
 def test_public_artifact_transfer_access_requires_manager_session(tmp_path) -> None:

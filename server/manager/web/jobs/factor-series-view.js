@@ -15,7 +15,7 @@
     const artifact = artifactOf(options.artifacts);
     if (!artifact) throw new Error(context.t("因子序列结果未被完整保留"));
     const path = `/api/jobs/${encodeURIComponent(options.jobID)}`
-      + `/artifacts/${encodeURIComponent(artifact.name)}${options.portQuery}`;
+      + `/artifacts/${encodeURIComponent(artifact.name)}${options.artifactQuery || ""}`;
     const response = await FTJobArtifacts.fetch(context, path);
     return window.FTFactorSeriesModel.build(JSON.parse(await response.text()));
   }

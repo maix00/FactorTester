@@ -118,21 +118,22 @@
     return result.shell;
   }
 
-  async function clearArtifacts(context, portQuery, jobID) {
-   await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${portQuery}`, {method: "DELETE"});
-    const params = new URLSearchParams(portQuery.slice(1));
-    const port = Number(params.get("port") || 0);
-    return window.FTJobs.detail(context, port, jobID, params.get("server_id") || "");
+  async function clearArtifacts(context, artifactQuery, jobID) {
+   await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${artifactQuery}`, {method: "DELETE"});
+    const params = new URLSearchParams(artifactQuery.slice(1));
+    return window.FTJobs.detail(
+      context, 0, jobID, params.get("server_id") || "",
+    );
   }
 
-  async function downloadAllArtifacts(context, artifacts, jobID, portQuery) {
+  async function downloadAllArtifacts(context, artifacts, jobID, artifactQuery) {
     let directory = null;
     if (window.showDirectoryPicker) {
       directory = await window.showDirectoryPicker({mode: "readwrite"});
     }
     for (const artifact of artifacts) {
       const fileName = artifact.file_name || artifact.name;
-      const path = `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
+      const path = `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
       if (!directory) {
         await saveBlob(context, path, fileName);
         continue;
@@ -169,7 +170,7 @@
 
   function declarationArtifact(declaration, artifacts) {
     const names = declaration.artifacts || [];
-    const named = names.map(name => artifacts.find(item => item.name === name)).filter(Boolean);
+    const named = names.map(name => artifactReference(artifacts, name)).filter(Boolean);
     const viewer = String(declaration.viewer || "").toLowerCase();
     const interactiveChart = declaration.presentation === "chart"
       && window.FTJobHighcharts?.supports(declaration);
@@ -200,14 +201,26 @@
     if (!primary) return [];
     const names = new Set(declaration.artifacts || []);
     const fallback = declaration.presentation === "chart"
-      ? artifacts.find(item => item !== primary && names.has(item.name)
+      ? artifacts.find(item => item !== primary && [...names].some(name => (
+        artifactReference([item], name)
+      ))
         && isImageArtifact(item)) : null;
     return fallback ? [primary, fallback] : [primary];
   }
 
+  function artifactReference(artifacts, reference) {
+    const target = String(reference || "");
+    return (artifacts || []).find(item => (
+      String(item?.name || "") === target
+      || String(item?.file_name || "") === target
+    )) || null;
+  }
+
   function effectiveDeclarations(declarations, artifacts, context) {
     const result = [...declarations];
-    const declared = new Set(result.flatMap(item => item.artifacts || []));
+    const declared = new Set(result.flatMap(item => item.artifacts || []).map(reference => (
+      artifactReference(artifacts, reference)?.name || reference
+    )));
     artifacts.filter(item => item.state === "active").forEach(item => {
       const type = artifactContentType(item);
       if (!isImageArtifact(item, type) || declared.has(item.name)) return;
@@ -237,7 +250,7 @@
     return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename);
   }
 
-  function lazyArtifactPreview(context, declaration, artifacts, jobID, portQuery) {
+  function lazyArtifactPreview(context, declaration, artifacts, jobID, artifactQuery) {
     const target = document.createElement("div");
     target.className = "artifact-preview";
     const details = collapsible(declaration.label || declaration.name, target);
@@ -257,7 +270,7 @@
         for (let index = 0; index < artifacts.length; index += 1) {
           try {
             await FTJobArtifactViewers.mount(context, target, {
-              declaration, artifact: artifacts[index], jobID, portQuery,
+              declaration, artifact: artifacts[index], jobID, artifactQuery,
             });
             loaded = true;
             return;

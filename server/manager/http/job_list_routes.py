@@ -233,11 +233,15 @@ class JobListRoutesMixin:
                 return True
             try:
                 if scope == "mine":
-                    payload = self.state.aggregate_account_jobs(
+                    # Account history is a federation-wide view too.  The
+                    # cross-server aggregator queries each Manager's local
+                    # SQLite projection in parallel and keeps the source
+                    # identity needed for detail/artifact routing.
+                    payload = self.state.aggregate_cross_server_jobs(
                         principal=principal,
-                        scope=scope,
                         page=requested_page,
                         limit=limit,
+                        source_scope="mine",
                     )
                     projection = getattr(self.state, "local_run_projection", None)
                     if projection is not None:
@@ -275,12 +279,12 @@ class JobListRoutesMixin:
                             "success": False, "error": "无权查看该下级用户任务",
                         }, 403)
                         return True
-                    payload = self.state.aggregate_account_jobs(
+                    payload = self.state.aggregate_cross_server_jobs(
                         principal=principal,
-                        scope=scope,
-                        username=requested_user,
                         page=requested_page,
                         limit=limit,
+                        source_scope="subordinates",
+                        username=requested_user,
                     )
                     projection = getattr(self.state, "local_run_projection", None)
                     if projection is not None:

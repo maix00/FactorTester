@@ -40,21 +40,24 @@
   }
 
   function resultSections(context, job, taskDetail, payload, activeArtifacts,
-    results, jobID, portQuery) {
+    results, jobID, artifactQuery, executionQuery) {
     const content = document.createDocumentFragment();
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
+      artifacts: activeArtifacts, jobID, artifactQuery,
+      portQuery: executionQuery, jobKind: job.kind,
       configuration: taskDetail.configuration || {},
       resultSummary: results || payload.result_summary || {},
     });
     if (factorSeries) content.append(factorSeries);
     const icResults = window.FTICResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery,
+      artifacts: activeArtifacts, jobID, artifactQuery,
+      portQuery: executionQuery,
       configuration: taskDetail.configuration || {},
     });
     if (icResults) content.append(icResults);
     const backtestResults = window.FTBacktestResults?.section(context, {
-      artifacts: activeArtifacts, jobID, portQuery,
+      artifacts: activeArtifacts, jobID, artifactQuery,
+      portQuery: executionQuery,
       configuration: taskDetail.configuration || {},
       resultSummary: payload.result_summary || taskDetail.results?.summary || {},
       job,
@@ -176,14 +179,17 @@
         || "",
     ).trim();
     const candidates = [
-      port,
       job?.execution_port,
       taskDetail?.execution_port,
       payload?.execution_port,
-      job?.server_context?.port,
       payload?.port,
+      job?.server_context?.port,
       job?.port,
       taskDetail?.port,
+      // The URL may contain the historical execution port.  It is only a
+      // last resort: a terminal Job can be read through another live sibling
+      // service after its original worktree has stopped.
+      port,
     ];
     const targetPort = candidates
       .map(value => jobPort(value))
@@ -193,14 +199,14 @@
 
   async function fetchDetail(context, port, jobID, serverID = "") {
     const selectedPort = jobPort(port);
-    let portQuery = routeQuery(selectedPort, serverID);
+    let executionQuery = routeQuery(selectedPort, serverID);
     let payload;
     try {
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${executionQuery}`);
     } catch (error) {
       if (!selectedPort) throw error;
-      portQuery = routeQuery(null, serverID);
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+      executionQuery = routeQuery(null, serverID);
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${executionQuery}`);
     }
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
@@ -208,10 +214,18 @@
       selectedPort, serverID, payload, taskDetail, job,
     );
     const resolvedPort = target.port;
+    const resolvedExecutionQuery = routeQuery(resolvedPort, target.serverID);
+    // Artifact storage is owned by the server, not by the worker port that
+    // happened to execute the Job.  Keep this query server-only so a stopped
+    // worktree cannot break 7997 reads for a retained artifact.
+    const artifactQuery = routeQuery(null, target.serverID);
     return {
       payload, taskDetail, job, resolvedPort,
       serverID: target.serverID,
-      portQuery: routeQuery(resolvedPort, target.serverID),
+      executionQuery: resolvedExecutionQuery,
+      artifactQuery,
+      // Backward-compatible name for callers that issue execution actions.
+      portQuery: resolvedExecutionQuery,
     };
   }
 
@@ -225,7 +239,7 @@
     if (!isCurrent()) return;
     const {
       payload, taskDetail, job, resolvedPort, serverID: resolvedServerID,
-      portQuery,
+      executionQuery, artifactQuery, portQuery,
     } = loaded;
     const localRun = Boolean(
       payload.local_run || taskDetail.local_run
@@ -253,8 +267,8 @@
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
     });
     if (!localRun && artifacts.some(item => item.state === "active") && context.session) {
-      context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部任务文件")));
-      context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空任务文件")));
+      context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, artifactQuery), context.t("下载全部任务文件")));
+      context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, artifactQuery, jobID), context.t("清空任务文件")));
     }
     const root = document.createElement("div"); root.className = "job-detail";
     const progress = FTJobProgress.progressView(context, job.status);
@@ -310,7 +324,7 @@
       );
       if (previewArtifacts.length) {
         root.append(FTJobArtifacts.lazyArtifactPreview(
-          context, declaration, previewArtifacts, jobID, portQuery,
+          context, declaration, previewArtifacts, jobID, artifactQuery,
         ));
       }
     });
@@ -352,7 +366,8 @@
       loadResultGroup(job, activeArtifacts, results).then(() => {
         if (!isCurrent()) return;
         resultHost.replaceChildren(resultSections(
-          context, job, taskDetail, payload, activeArtifacts, results, jobID, portQuery,
+          context, job, taskDetail, payload, activeArtifacts, results, jobID,
+          artifactQuery, executionQuery,
         ));
       }).catch(error => {
         if (isCurrent()) resultHost.replaceChildren(FTUI.empty(
@@ -365,16 +380,17 @@
         let capabilities = [];
         let capabilityError = "";
         try {
-          capabilities = await FTJobGeneration.capabilities(context, portQuery);
+          capabilities = await FTJobGeneration.capabilities(context, artifactQuery);
         } catch (error) { capabilityError = error.message; }
         if (!isCurrent()) return;
         generationHost.replaceChildren(FTJobGeneration.panel(context, {
-          capabilities, error: capabilityError, jobID, portQuery,
+          capabilities, error: capabilityError, jobID,
+          portQuery: executionQuery, executionQuery, artifactQuery,
           taskDetail, payload, onGenerated: detailPage,
         }));
       })();
     }
-    if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, portQuery, progress);
+    if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, executionQuery, progress);
 
     async function detailPage() {
       return window.FTJobs.detail(
@@ -402,7 +418,7 @@
           || context.showMessage?.(loginMessage);
       }
       const path = `/api/jobs/${encodeURIComponent(jobID)}`
-        + `/artifacts/${encodeURIComponent(item.name)}${portQuery}`;
+        + `/artifacts/${encodeURIComponent(item.name)}${artifactQuery}`;
       return FTJobArtifacts.saveBlob(
         context, path, item.file_name || item.name,
       );
