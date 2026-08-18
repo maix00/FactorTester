@@ -402,6 +402,7 @@ def single_factor_page_settings() -> ApplicationSettings:
             "custom",
             20,
             # 默认隐藏：加载模板后若含因子设置再懒挂载（见 main_page_settings_panel）。
+            content_adapter="factor_selection",
         ),
         SettingTab(
             "product_path_selection",
@@ -409,6 +410,7 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             30,
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "data_source",

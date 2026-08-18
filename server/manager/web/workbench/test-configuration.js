@@ -120,7 +120,7 @@
       factor_ref: state.factorRef,
       product_group_ref: FTTestProducts.groupID(group),
       product_group_refs: state.groupRefs,
-      output_requests: FTTestOutputs.selection(state),
+      output_requests: FTTestRunFields.selection(state),
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
     };

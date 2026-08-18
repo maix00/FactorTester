@@ -18,6 +18,7 @@ from .contracts import (
     SurfaceFlow,
     TabMountPoint,
 )
+from .audit import audit_application_mounts
 
 
 @dataclass(slots=True)
@@ -316,6 +317,17 @@ class ApplicationSettings:
         )
         return manifest
 
+    def audit_mounts(self, *, client: str = "web") -> list[str]:
+        """Audit every registered field reachable from every mounted tab.
+
+        This is intentionally a registry-level contract rather than a test of
+        whichever tab happened to be opened in a browser.  A field can be
+        lazy-mounted, adapter-managed, or only present on Swift, so each
+        manifest projection is checked independently before it reaches a
+        client.
+        """
+        return audit_application_mounts(self, client=client)
+
 
 class BacktestSettingRegistry:
     def __init__(self) -> None:
@@ -342,3 +354,11 @@ class BacktestSettingRegistry:
                     ordered.append(key)
                 counts[key] = counts.get(key, 0) + 1
         return [key for key in ordered if counts.get(key, 0) >= 2]
+
+    def audit_mounts(self, *, client: str = "web") -> list[str]:
+        """Return field/tab contract violations for every application."""
+        return [
+            error
+            for application in self._applications.values()
+            for error in application.audit_mounts(client=client)
+        ]

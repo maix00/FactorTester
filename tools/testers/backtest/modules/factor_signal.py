@@ -155,11 +155,19 @@ class FactorSignalModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "signal_freq": FieldDefinition(
-            public=True, label="信号频率", editor="select", default="1d", tab="frequency",
+            # Signal frequency is an arbitrary duration (for example 5m or
+            # 1d), not a finite enum.  Register it as a typed duration input
+            # so the shared field renderer does not silently turn an empty
+            # select into a text box.
+            public=True, label="信号频率", editor="text", default="1d", tab="frequency",
             chip_template="信号频率: {value}", tab_label="数据频率", tab_order=36,
         ),
         "basepoint": FieldDefinition(
             public=True, label="信号点", editor="select", default="last", tab="frequency",
+            options=(
+                ("last", "最后一个可见点"),
+                ("first", "第一个可见点"),
+            ),
             chip_template="信号点: {value}", tab_label="数据频率", tab_order=36,
         ),
         "daily_basepoint": FieldDefinition(

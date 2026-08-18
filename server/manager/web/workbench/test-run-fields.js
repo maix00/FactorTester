@@ -55,110 +55,37 @@
     };
   }
 
-  function row(context, state, item, refresh) {
-    const label = context.t(item.label);
-    const hint = item.help_text ? context.t(item.help_text) : "";
-    const fieldValue = controlField(item);
-    const manifest = {defaults: {[item.key]: fieldValue}};
-    const editor = item.value_descriptor?.editor || "input";
-    const control = editor === "server_picker"
-      ? runtimeServerControl(context, state, refresh, item)
-      : editor === "runtime_bundle_picker"
-        ? runtimeBundleControl(context, state, refresh, item)
-        : editor === "profile"
-      ? profileControl(context, state, refresh, item)
-      : FTTestSettings.controlFor(
-        item.key, fieldValue, manifest, state.runValues, context,
-        {
-          onCommit: ({key, value}) => { state.runValues[key] = value; },
-          refresh,
-          ensureControl: field => window.FTTests?.ensureControl?.(
-            context, state, field, refresh,
-          ),
-        },
-        false,
-      );
-    const root = FTTestFieldRow.create(label, control, hint, {title: hint});
-    if (hint) root.setAttribute("aria-label", `${label}: ${hint}`);
-    return root;
+  function outputItems(context, state) {
+    const definitions = window.FTOutputChoices?.available?.(
+      state.outputCapabilities, state.kind,
+    ) || [];
+    if (!definitions.length && !state.outputCapabilitiesLoaded) {
+      return [{
+        value: "__outputs_loading__",
+        label: context.t("打开后读取可选输出…"),
+        description: context.t("打开选择器后读取本次测试可用的结果与生成物"),
+        disabled: true,
+      }];
+    }
+    return definitions.map(definition => {
+      const formats = (definition.formats || [])
+        .map(value => String(value).toUpperCase());
+      const sources = (definition.required_sources || []).map(value => (
+        context.t(value?.label || value?.name || value)
+      ));
+      const sourceNote = sources.length
+        ? `${context.t("需保留")}：${sources.join("、")}`
+        : "";
+      return {
+        value: definition.name,
+        label: context.t(definition.label || definition.name),
+        description: [formats.join(" / "), sourceNote]
+          .filter(Boolean).join(" · "),
+      };
+    });
   }
 
-  function runtimeServerControl(context, state, refresh, item) {
-    const serverItems = () => [
-      {
-        value: "",
-        label: context.t("选择提供运行代码的服务器…"),
-        description: context.t("使用当前服务器的默认运行代码包"),
-      },
-      ...(Array.isArray(state.runtimeServers) ? state.runtimeServers : [])
-        .filter(server => server && server.server_id)
-        .map(server => ({
-          value: String(server.server_id),
-          label: `${server.server_id} · ${server.endpoint || ""}`,
-          description: server.endpoint || server.server_id,
-        })),
-    ];
-    const picker = FTTestChoicePicker.create(context, {
-      className: "test-choice-picker",
-      compact: true,
-      name: `runtime-server-${item.key}`,
-      multi: false,
-      items: serverItems(),
-      selected: [String(state.runValues[item.key] || item.default || "")],
-      onChange: values => {
-        state.runValues[item.key] = values[0] || "";
-        refresh?.();
-      },
-    });
-    const loadServers = async () => {
-      if (state.runtimeServersLoaded || state.runtimeServersLoading) return;
-      state.runtimeServersLoading = true;
-      try {
-        const value = await context.api("/api/federation/servers");
-        state.runtimeServers = [
-          ...(Array.isArray(value.servers) ? value.servers : []),
-          ...(Array.isArray(value.local_targets) ? value.local_targets : []),
-        ];
-        state.runtimeServersLoaded = true;
-        appendServers();
-      } catch (error) {
-        context.showNotice?.(error.message, true);
-      } finally {
-        state.runtimeServersLoading = false;
-        refresh?.();
-      }
-    };
-    picker.summary.addEventListener("click", () => { void loadServers(); });
-    picker.dropdown.addEventListener("toggle", () => {
-      if (picker.dropdown.open) void loadServers();
-    });
-    return picker.element;
-  }
-
-  function runtimeBundleControl(context, state, refresh, item) {
-    const control = document.createElement("input");
-    control.type = "text";
-    control.className = "inline-setting";
-    control.placeholder = context.t("留空使用服务器默认运行代码包");
-    control.value = String(state.runValues[item.key] || item.default || "");
-    control.addEventListener("change", () => {
-      state.runValues[item.key] = control.value.trim();
-      refresh?.();
-    });
-    return control;
-  }
-
-  function rows(context, state, items, refresh) {
-    const root = document.createElement("div"); root.className = "test-setting-rows";
-    items.forEach(item => {
-      const field = controlField(item);
-      const visible = FTSettingRules.isVisible(field, state.runValues || {});
-      if (visible) root.append(row(context, state, item, refresh));
-    });
-    return root;
-  }
-
-  function profileControl(context, state, refresh, item) {
+  function profileItems(context, state) {
     const items = [{
       value: "",
       label: context.t("用户本人（不绑定 Profile）"),
@@ -167,7 +94,7 @@
     if (!state.profilesLoaded) {
       items.push({
         value: "__profiles_loading__",
-        label: context.t("点击后读取其他提交身份…"),
+        label: context.t("打开后读取其他提交身份…"),
         description: context.t("打开选择器后读取当前用户的研究身份"),
         disabled: true,
       });
@@ -182,29 +109,120 @@
         description: profile.description || profileID,
       });
     });
-    const picker = FTTestChoicePicker.create(context, {
-      className: "test-choice-picker",
-      compact: true,
-      name: `run-profile-${item.key}`,
-      multi: false,
-      items,
-      selected: [String(state.runValues[item.key] || item.default || "")],
-      onChange: values => {
-        state.runValues[item.key] = values[0] === "__profiles_loading__"
-          ? "" : (values[0] || "");
-        refresh?.();
+    return items;
+  }
+
+  function runtimeServerItems(context, state, item) {
+    return [
+      {
+        value: "",
+        label: context.t("选择提供运行代码的服务器…"),
+        description: context.t("使用当前服务器的默认运行代码包"),
       },
-    });
-    const loadProfiles = () => {
-      if (state.profilesLoaded) return;
-      window.FTTests?.ensureProfiles?.(context, state, refresh);
+      ...(Array.isArray(state.runtimeServers) ? state.runtimeServers : [])
+        .filter(server => server && server.server_id)
+        .map(server => ({
+          value: String(server.server_id),
+          label: `${server.server_id} · ${server.endpoint || ""}`,
+          description: server.endpoint || server.server_id,
+        })),
+    ];
+  }
+
+  function runValueFor(item, state) {
+    return item.placement === "outputs"
+      ? (Array.isArray(state.outputRequests) ? state.outputRequests : [])
+      : state.runValues?.[item.key];
+  }
+
+  function fieldOptions(context, state, item, refresh) {
+    const editor = item.value_descriptor?.editor;
+    if (editor === "output_picker") {
+      return {
+        choiceItems: outputItems(context, state),
+        choiceOnOpen: () => window.FTTests?.ensureOutputCapabilities?.(
+          context, state, refresh,
+        ),
+      };
+    }
+    if (editor === "profile") {
+      return {
+        choiceItems: profileItems(context, state),
+        choiceOnOpen: () => {
+          window.FTTests?.ensureProfiles?.(context, state, refresh);
+        },
+      };
+    }
+    if (editor === "server_picker") {
+      return {
+        choiceItems: runtimeServerItems(context, state, item),
+        choiceOnOpen: () => loadRuntimeServers(context, state, refresh),
+      };
+    }
+    return {};
+  }
+
+  async function loadRuntimeServers(context, state, refresh) {
+    if (state.runtimeServersLoaded || state.runtimeServersLoading) return;
+    state.runtimeServersLoading = true;
+    refresh?.();
+    try {
+      const value = await context.api("/api/federation/servers");
+      state.runtimeServers = [
+        ...(Array.isArray(value.servers) ? value.servers : []),
+        ...(Array.isArray(value.local_targets) ? value.local_targets : []),
+      ];
+      state.runtimeServersLoaded = true;
+    } catch (error) {
+      context.showNotice?.(error.message, true);
+    } finally {
+      state.runtimeServersLoading = false;
       refresh?.();
+    }
+  }
+
+  function row(context, state, item, refresh) {
+    const label = context.t(item.label);
+    const hint = item.help_text ? context.t(item.help_text) : "";
+    const fieldDefinition = controlField(item);
+    const values = {
+      ...(state.runValues || {}),
+      ...(item.placement === "outputs"
+        ? {[item.key]: runValueFor(item, state)} : {}),
     };
-    picker.summary.addEventListener("click", loadProfiles);
-    picker.dropdown.addEventListener("toggle", () => {
-      if (picker.dropdown.open) loadProfiles();
+    const manifest = {defaults: {[item.key]: fieldDefinition}};
+    const control = FTTestSettings.controlFor(
+      item.key, fieldDefinition, manifest, values, context,
+      {
+        ...fieldOptions(context, state, item, refresh),
+        onCommit: ({key, value}) => {
+          if (item.placement === "outputs") {
+            state.outputRequests = Array.isArray(value) ? [...value] : [];
+            state.outputRequestsExplicit = true;
+          } else {
+            state.runValues[key] = value;
+          }
+        },
+        refresh,
+        ensureControl: field => window.FTTests?.ensureControl?.(
+          context, state, field, refresh,
+        ),
+      },
+      false,
+    );
+    const root = FTTestFieldRow.create(label, control, hint, {title: hint});
+    if (hint) root.setAttribute("aria-label", `${label}: ${hint}`);
+    return root;
+  }
+
+  function rows(context, state, items, refresh) {
+    const root = document.createElement("div"); root.className = "test-setting-rows";
+    items.forEach(item => {
+      const field = controlField(item);
+      const visible = FTSettingRules.isVisible(field, state.runValues || {});
+      if (visible) root.append(row(context, state, item, refresh));
     });
-    return picker.element;
+    return root;
   }
 
   function panel(context, state, refresh) {
@@ -216,32 +234,18 @@
       "这些字段只作用于本次提交；提交后会冻结到 Job 和 RunSpec，不写入可复用测试模板",
     );
     root.append(note);
-    const standard = [
-      ...forPlacement(state.manifest, "run_identity"),
-      ...forPlacement(state.manifest, "run_options"),
-    ].sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
-    if (standard.length) {
-      const standardRows = rows(context, state, standard, refresh);
-      standardRows.classList?.add?.("test-run-field-rows");
-      root.append(standardRows);
-    }
-    const advanced = forPlacement(state.manifest, "advanced_run_options");
-    if (advanced.length) {
-      const details = document.createElement("details");
-      details.className = "test-run-advanced";
-      const summary = document.createElement("summary");
-      summary.textContent = context.t("诊断选项");
-      details.append(summary, rows(context, state, advanced, refresh));
-      root.append(details);
-    }
-    const output = forPlacement(state.manifest, "outputs")[0];
-    if (output && typeof window.FTTestOutputs?.content === "function") {
-      root.append(window.FTTestOutputs.content(context, state, refresh));
-    }
+    const fields = definitions(state.manifest)
+      .filter(item => item.placement !== "global_settings");
+    if (fields.length) root.append(rows(context, state, fields, refresh));
     return root;
   }
 
+  function selection(state) {
+    return Array.isArray(state.outputRequests) ? [...state.outputRequests] : [];
+  }
+
   window.FTTestRunFields = Object.freeze({
-    definitions, field, forPlacement, initialValues, panel, render: panel, requestBody,
+    definitions, field, forPlacement, initialValues, panel, render: panel,
+    requestBody, selection,
   });
 })();
