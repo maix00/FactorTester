@@ -91,7 +91,8 @@
     "profile": ["profile"],
     "profiles": ["profile"],
     "settings": ["settings"],
-    "manager": ["manager"]
+    "manager": ["manager"],
+    "mihomo": ["manager"]
   },
   "external_styles": [
     "katex/katex.min.css"
@@ -315,7 +316,8 @@
       "manager/access-control-table.js",
       "manager/access-control.js",
       "manager/accounts.js",
-      "settings/manager.js"
+      "settings/manager.js",
+      "manager/mihomo.js"
     ],
     "app": [
       "app/navigation.js",
@@ -471,6 +473,7 @@
     "manager/access-control.js",
     "manager/accounts.js",
     "settings/manager.js",
+    "manager/mihomo.js",
     "app/navigation.js",
     "app/route-dispatch.js",
     "app/tab-view-cache.js",

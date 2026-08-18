@@ -28,6 +28,13 @@
           }
           return pages.remoteModule?.(route, routeToken);
         }
+        case "mihomo": {
+          const pageContext = context(routeToken);
+          pageContext.activeNav?.("mihomo");
+          pageContext.setHeading?.(t("Mihomo Dashboard"), "Mihomo");
+          if (requireLogin()) return undefined;
+          return pages.mihomo?.(pageContext);
+        }
         // The server task feed is intentionally public.  The jobs page
         // selects the public server scope when there is no session and lets
         // the API decide which rows/details are visible.  Guarding it here

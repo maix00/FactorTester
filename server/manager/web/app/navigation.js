@@ -121,6 +121,7 @@
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品", title_key: "产品", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
     {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
     {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
     {id: "settings", title: "设置", title_key: "设置", path: "/settings/account", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
@@ -207,6 +208,7 @@
     }
     if (parts[0] === "docs") return {kind: "remote-module", module: "docs"};
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
+    if (parts[0] === "mihomo") return {kind: "mihomo"};
     if (parts[0] === "ic-test") return {kind: "ic-test"};
     if (parts[0] === "backtest") return {kind: "backtest"};
     if (parts[0] === "factor-series") {

@@ -325,3 +325,4 @@ class ProcessStateMixin:
         self.processes.clear()
         self.stop_data_plane()
         self.stop_vibe()
+        self.mihomo.close()

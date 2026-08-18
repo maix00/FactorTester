@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 
 class AgentProviderHealthError(ValueError):
@@ -23,6 +23,7 @@ class AgentProviderHealth:
         provider: Mapping[str, object],
         *,
         timeout: float = 10.0,
+        proxy_url: str = "",
     ) -> dict[str, Any]:
         protocol = str(provider.get("protocol") or "").strip()
         if protocol != "openai_compatible":
@@ -46,7 +47,16 @@ class AgentProviderHealth:
             method="GET",
         )
         try:
-            with urlopen(request, timeout=max(1.0, float(timeout))) as response:
+            opener = (
+                build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+                if str(proxy_url or "").strip() else None
+            )
+            response_context = (
+                opener.open(request, timeout=max(1.0, float(timeout)))
+                if opener is not None
+                else urlopen(request, timeout=max(1.0, float(timeout)))
+            )
+            with response_context as response:
                 body = response.read(cls.MAX_RESPONSE_BYTES + 1)
                 status = int(getattr(response, "status", 200) or 200)
         except HTTPError as exc:

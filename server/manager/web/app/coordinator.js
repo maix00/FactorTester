@@ -270,7 +270,7 @@
   // discover that the handler will return "登录后继续".
   const protectedRouteKinds = new Set([
     "factor-sets", "factor-set",
-    "profile", "profiles", "manager",
+    "profile", "profiles", "manager", "mihomo",
   ]);
 
   async function renderRoute() {
@@ -403,6 +403,7 @@
       manager: (pageContext, route) => FTManager.show(
         pageContext, route?.section || "services",
       ),
+      mihomo: pageContext => FTMihomo.show(pageContext),
     },
   });
 

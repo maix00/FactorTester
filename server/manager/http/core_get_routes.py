@@ -53,6 +53,8 @@ class CoreGetRoutesMixin:
             return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
+        if self._mihomo_get(parsed):
+            return True
         if self._get_transfer_metrics(parsed):
             return True
         if parsed.path == "/api/devices":
@@ -231,7 +233,7 @@ class CoreGetRoutesMixin:
             "/", "/research", "/jobs", "/factors", "/products",
             "/profiles", "/settings", "/manager", "/research-graphs",
             "/ic-test", "/backtest", "/test-templates", "/sqlite-web",
-            "/sqlite-web/",
+            "/sqlite-web/", "/mihomo",
         }
         if (
             parsed.path in shell_paths

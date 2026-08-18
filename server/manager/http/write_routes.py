@@ -54,6 +54,8 @@ class WriteRoutesMixin:
             return
         if not self._public_login_gate(parsed, method="POST"):
             return
+        if self._mihomo_write(parsed, "POST"):
+            return
         if self._post_agent_app_routes(parsed):
             return
         if self._post_agent_routes(parsed):
@@ -335,6 +337,8 @@ class WriteRoutesMixin:
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="PATCH"):
             return
+        if self._mihomo_write(parsed, "PATCH"):
+            return
         if self._proxy_service_write(parsed, method="PATCH"):
             return
         self.send_error(404)
@@ -344,6 +348,8 @@ class WriteRoutesMixin:
             return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="PUT"):
+            return
+        if self._mihomo_write(parsed, "PUT"):
             return
         if parsed.path == "/api/control-database/config":
             self._update_control_database_config()
@@ -368,6 +374,8 @@ class WriteRoutesMixin:
             return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="DELETE"):
+            return
+        if self._mihomo_write(parsed, "DELETE"):
             return
         if self._delete_agent_routes(parsed):
             return
