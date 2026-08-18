@@ -985,6 +985,22 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_settings_picker_can_escape_the_tab_content_boundary() -> None:
+    settings_css = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
+        encoding="utf-8"
+    )
+    task_css = (WEB_ROOT / "styles" / "task-inputs.css").read_text(
+        encoding="utf-8"
+    )
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert ".backend-settings-shell.has-open-multi-select" in settings_css
+    assert ".test-workbench .test-settings-shell.has-open-multi-select" in task_css
+    assert 'shell.classList.toggle("has-open-multi-select"' in picker
+
+
 def test_backtest_group_form_uses_registered_override_editor() -> None:
     form = (WEB_ROOT / "workbench" / "backtest-group-form.js").read_text(
         encoding="utf-8"

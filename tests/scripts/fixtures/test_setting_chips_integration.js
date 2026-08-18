@@ -185,6 +185,17 @@ assert.ok(advancedChip, "conditional fields should have a chooser chip");
 assert.equal(advancedChip.children[1].textContent, "N/A",
   "a hidden conditional field must be shown as N/A in + 设置");
 
+const describedField = FTTestFieldRow.create(
+  "开始日期", new Element("input"), "设置样本开始日期",
+);
+const describedCopy = describedField.children[0];
+assert.equal(describedCopy.children.length, 1,
+  "field help must not occupy a permanent explanation row");
+const describedHeading = describedCopy.children[0];
+assert.equal(describedHeading.className, "test-field-row-heading");
+assert.equal(describedHeading.children[1].textContent, "?");
+assert.equal(describedHeading.children[1].title, "设置样本开始日期");
+
 const updated = render("SgCCS 5m", () => {});
 const updatedGroup = updated.children[1].children[1].children.find(
   item => item.className === "backend-settings-chip-group",
