@@ -39,6 +39,9 @@ RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrad
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a
 # second Node runtime and the existing Python dependency layer stays cached.
+ARG CODEX_VERSION=0.147.0
+ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org
+ARG TARGETARCH
 RUN set -eu; \
     case "${TARGETARCH}" in \
         amd64) \
@@ -105,7 +108,7 @@ COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
 COPY deploy/docker/factortester-public/start-fixed-service.py \
     /usr/local/bin/start-fixed-service
 RUN set -eu; \
-    python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+    python -m pip install --no-cache-dir --no-deps --index-url "${PIP_INDEX_URL}" \
         /opt/factortester/app/tools/cli; \
     rm -f /usr/local/bin/factortester-manager; \
     test -x /usr/local/bin/factortester; \
