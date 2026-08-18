@@ -6,6 +6,8 @@ services:
     build:
       context: ../../..
       dockerfile: deploy/docker/factortester-public/FactorTester.Dockerfile
+      cache_from:
+        - ${FACTORTESTER_PUBLIC_CACHE_FROM:-}
       args:
         DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
         DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}
