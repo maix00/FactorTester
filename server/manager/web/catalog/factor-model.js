@@ -97,6 +97,29 @@
     return "";
   }
 
+  function sourceMetadata(value) {
+    const item = value || {};
+    const owner = item.factor_owner_ref || item.owner_ref
+      || item.owner_username || item.profile_id || "";
+    const family = item.factor_family_ref || item.family_ref
+      || item.factor_family_alias || item.family || "";
+    const params = item.factor_params ?? item.params ?? [];
+    const result = {
+      factor_owner_ref: owner,
+      factor_family_ref: family,
+      factor_params: params,
+    };
+    const commit = item.factor_git_commit || item.git_commit || "";
+    // An absent commit means the current/latest family source.  Do not write
+    // an empty marker: presence of this field is the historical-source bit.
+    if (commit) result.factor_git_commit = commit;
+    return result;
+  }
+
+  function withSourceMetadata(value) {
+    return {...(value || {}), ...sourceMetadata(value)};
+  }
+
   function owner(value) {
     return value.owner_alias || value.owner_username || value.profile_id || "";
   }
@@ -166,6 +189,8 @@
     decodeFrozenFactorRef,
     description,
     factorExpression,
+    sourceMetadata,
+    withSourceMetadata,
     familyName,
     groupLabels,
     groupRef,

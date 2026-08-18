@@ -62,9 +62,11 @@ def _contract(*, application: str) -> dict[str, Any]:
             "factor": {
                 "mounted_tab": "factor",
                 "candidate_fields": ["factor_candidates"],
+                "source_fields": [
+                    "factor_source_selections", "factor_set_selections",
+                ],
                 "scope_fields": ["factor_candidates"],
                 "selection_fields": ["factor_selections", "factor"],
-                "family_fields": ["factor_family_ref"],
                 "set_fields": ["factor_set_selections"],
                 "candidate_kind": "factor",
             },
@@ -90,19 +92,51 @@ def _contract(*, application: str) -> dict[str, Any]:
         ],
         "manual_inner_tabs": True,
         "inner_override_scope": "overridable",
-        # This is the reusable, client-neutral contract.  Keep the legacy
-        # ``inner_factor_fields`` projection below while existing clients
-        # migrate; both projections are produced from this same declaration.
+        # This is the reusable, client-neutral contract consumed by Web,
+        # Swift and CLI clients.  Factor-family authoring is intentionally
+        # not a task field; it lives only inside the factor-create overlay.
         "scoped_fields": scoped_fields,
         "factor_scope": {
             "selection_kind": "factor",
             "family_kind": "factor_family",
             "inline_create": True,
-            "inner_hide_fields": [
-                "factor_set_selections",
-                "factor_set",
-                "factor_family_ref",
+        },
+        "factor_candidate_sources": {
+            "outer": [
+                {
+                    "key": "factor_set_selections",
+                    "label": "因子集合",
+                    "editor": "shared_object_multi_select",
+                    "cardinality": "many",
+                    "derived_field": "factor_candidates",
+                    "item_fields": [
+                        "factor_ref", "factor_alias", "factor_owner_ref",
+                        "factor_git_commit", "factor_family_ref", "factor_params",
+                        "owner_ref", "git_commit",
+                        "git_blob", "relative_path", "factor_family_alias", "family_ref",
+                        "params", "source_kind", "transient_factor_id",
+                    ],
+                },
+                {
+                    "key": "factor_source_selections",
+                    "label": "因子",
+                    "editor": "shared_object_multi_select",
+                    "cardinality": "many",
+                    "derived_field": "factor_candidates",
+                    "item_fields": [
+                        "factor_ref", "factor_alias", "factor_owner_ref",
+                        "factor_git_commit", "factor_family_ref", "factor_params",
+                        "owner_ref", "git_commit",
+                        "git_blob", "relative_path", "factor_family_alias", "family_ref",
+                        "params", "source_kind", "transient_factor_id",
+                    ],
+                },
             ],
+            "inner": {
+                "source": "factor_candidates",
+                "editor": "shared_object_multi_select",
+                "selection_mode": "filter",
+            },
         },
         # The outer factor tab builds this pool.  A nested strategy never
         # edits the pool itself: it selects one or more members from it.  The

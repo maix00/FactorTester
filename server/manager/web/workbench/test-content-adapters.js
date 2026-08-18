@@ -1,8 +1,13 @@
 (() => {
+  function moduleReady(name) {
+    return Boolean(window[name] || globalThis[name]);
+  }
+
   const adapters = Object.freeze({
     settings: Object.freeze({}),
     test_templates: Object.freeze({
       lazyKey: "templates",
+      ready: () => moduleReady("FTTestTemplates"),
       render: options => FTTestTemplates.panel(
         options.context,
         options.state.templates,
@@ -12,6 +17,7 @@
     }),
     factor_selection: Object.freeze({
       lazyKey: "factors",
+      ready: () => moduleReady("FTTestFactors"),
       render: options => FTTestFactors.panel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
@@ -19,18 +25,21 @@
     }),
     product_path_selection: Object.freeze({
       lazyKey: "products",
+      ready: () => moduleReady("FTTestProducts"),
       render: options => FTTestProducts.panel(
         options.context, options.state, options.refresh,
       ),
     }),
     category_selection: Object.freeze({
       lazyKey: "categories",
+      ready: () => moduleReady("FTTestCategories"),
       render: options => FTTestCategories.panel(
         options.context, options.state, options.refresh,
       ),
     }),
     run_inputs: Object.freeze({
       lazyKey: "run_inputs",
+      ready: () => moduleReady("FTTestSourceUpload"),
       render: options => FTTestSourceUpload.strategyPanel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
@@ -62,6 +71,11 @@
 
   function lazyKey(tab) {
     return descriptor(tab)?.lazyKey || "";
+  }
+
+  function isReady(tab) {
+    const adapter = descriptor(tab);
+    return !adapter || typeof adapter.ready !== "function" || adapter.ready();
   }
 
   function chipSources(state, item = null) {
@@ -112,6 +126,6 @@
   }
 
   window.FTTestContentAdapters = Object.freeze({
-    chipSources, hasContent, lazyKey, name, render, supports,
+    chipSources, hasContent, isReady, lazyKey, name, render, supports,
   });
 })();

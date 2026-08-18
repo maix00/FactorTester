@@ -6,108 +6,19 @@ Used by: single_factor_page, group_test, ic_test, factor_evaluation,
 
 from __future__ import annotations
 
-from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingOption
+from tools.testers.settings.contracts import (
+    ScopePolicy,
+    SettingDefinition,
+    SettingOption,
+    TabMountPoint,
+)
 from tools.testers.settings.registry import ApplicationSettings
 
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 FACTOR_SET_SELECTION_KEYS = ("factor_set_selections",)
 FACTOR_SELECTION_KEYS = ("factor",)
 FACTOR_SELECTIONS_KEYS = ("factor_selections",)
-FACTOR_SOURCE_KEYS = (
-    "factor_owner_ref",
-    "factor_git_commit",
-    "factor_family_ref",
-    "factor_params",
-)
-
-
-def register_factor_source_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "factor",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    """Register the immutable owner/revision/family candidate builder."""
-    app.register_setting(SettingDefinition(
-        "factor_owner_ref",
-        "因子所有者",
-        tab,
-        "custom",
-        "",
-        scope_policy,
-        module="factor_execution",
-        chip_template="因子所有者: {value}",
-        adapter_managed=True,
-        show_chip=False,
-        execution_policy="authoring_only",
-        help_text="选择用户或 Profile 已注册的因子工作区",
-        serialization={
-            "kind": "factor_owner_selection",
-            "display_order": 1,
-            "catalog_command": "client catalog owner list",
-        },
-    ))
-    app.register_setting(SettingDefinition(
-        "factor_git_commit",
-        "Git commit",
-        tab,
-        "custom",
-        "",
-        scope_policy,
-        module="factor_execution",
-        chip_template="Git commit: {value}",
-        adapter_managed=True,
-        show_chip=False,
-        execution_policy="authoring_only",
-        help_text="冻结所选所有者因子工作区的精确提交",
-        serialization={
-            "kind": "factor_revision_selection",
-            "display_order": 2,
-            "owner_field": "factor_owner_ref",
-            "catalog_command": "client catalog revision list",
-        },
-    ))
-    app.register_setting(SettingDefinition(
-        "factor_family_ref",
-        "因子家族",
-        tab,
-        "custom",
-        "",
-        scope_policy,
-        module="factor_execution",
-        chip_template="因子家族: {value}",
-        adapter_managed=True,
-        show_chip=False,
-        execution_policy="authoring_only",
-        help_text="只显示所选 owner 与 Git commit 中可加载的因子家族",
-        serialization={
-            "kind": "factor_family_selection",
-            "display_order": 3,
-            "owner_field": "factor_owner_ref",
-            "revision_field": "factor_git_commit",
-            "catalog_command": "client catalog family list",
-        },
-    ))
-    app.register_setting(SettingDefinition(
-        "factor_params",
-        "因子参数",
-        tab,
-        "custom",
-        {},
-        scope_policy,
-        module="factor_execution",
-        adapter_managed=True,
-        show_chip=False,
-        execution_policy="authoring_only",
-        help_text="按因子家族参数定义生成一个冻结的具体因子候选",
-        serialization={
-            "kind": "factor_parameter_values",
-            "display_order": 4,
-            "family_field": "factor_family_ref",
-            "candidate_field": "factor_candidates",
-            "catalog_command": "client catalog factor instantiate",
-        },
-    ))
+FACTOR_SOURCE_SELECTION_KEYS = ("factor_source_selections",)
 
 
 def register_factor_execution_base(
@@ -188,6 +99,7 @@ def register_factor_candidate_list_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子候选: {value}",
+        tab_default_mount_points=(TabMountPoint.LOCAL_SETTINGS,),
         adapter_managed=True,
         show_chip=False,
         execution_policy="authoring_only",
@@ -196,12 +108,15 @@ def register_factor_candidate_list_base(
             "kind": "factor_candidate_list",
             "display_order": 10,
             "item_kind": "factor",
-            "owner_field": "factor_owner_ref",
-            "revision_field": "factor_git_commit",
-            "family_field": "factor_family_ref",
-            "params_field": "factor_params",
             "shared_page_field": "factor_candidates",
             "selection_field": "factor",
+            "item_fields": (
+                "factor_ref", "factor_alias", "factor_owner_ref",
+                "factor_git_commit", "factor_family_ref", "factor_params",
+                "owner_ref", "git_commit", "git_blob", "relative_path",
+                "factor_family_alias", "family_ref", "params", "source_kind",
+                "transient_factor_id",
+            ),
             "factor_library_source": "user_factor_library_overview",
             "fallback_policy": (
                 "copy_page_candidates",
@@ -213,6 +128,53 @@ def register_factor_candidate_list_base(
                 "page": "page_candidates_only",
                 "module": "module_candidates_only",
             },
+        },
+    ))
+
+
+def register_factor_source_selections_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    """Register the direct-factor source of the derived candidate pool.
+
+    ``factor_candidates`` is the derived pool consumed by a test.  Direct
+    factors must remain distinguishable from members expanded from a factor
+    set, otherwise removing one source can silently remove a candidate that
+    still belongs to another source.
+    """
+    app.register_setting(SettingDefinition(
+        "factor_source_selections",
+        "因子来源",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
+        help_text="从可见因子库多选直接来源；因子候选由直接因子与因子集合展开得到。",
+        serialization={
+            "kind": "factor_source_selection_list",
+            "display_order": 12,
+            "multi": True,
+            "candidate_field": "factor_candidates",
+            "set_source_field": "factor_set_selections",
+            "selection_field": "factor_selections",
+            "source_kind": "factor",
+            "catalog_source": "visible_factor_catalog",
+            "allow_inline_create": True,
+            "item_fields": (
+                "factor_ref", "factor_alias", "factor_owner_ref",
+                "factor_git_commit", "factor_family_ref", "factor_params",
+                "owner_ref", "git_commit", "git_blob", "relative_path",
+                "factor_family_alias", "family_ref", "params", "source_kind",
+                "transient_factor_id",
+            ),
         },
     ))
 

@@ -441,6 +441,11 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["job"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
+    assert manifest["route_groups"]["ic-test"] == ["workbench-test-ui"]
+    assert manifest["route_groups"]["backtest"] == [
+        "workbench-test-ui", "workbench-backtest",
+    ]
+    assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert manifest["route_groups"]["product-categories"] == ["catalog"]
     assert manifest["group_dependencies"]["research"] == ["report", "profile"]
@@ -635,20 +640,28 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     assert result.stdout.strip() == "ok"
 
 
-def test_factor_family_picker_uses_the_shared_left_right_field_row() -> None:
-    import subprocess
+def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
+    source = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
 
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_factor_family_field_row.js"
-    files = [
-        WEB_ROOT / "workbench" / "test-field-row.js",
-        WEB_ROOT / "workbench" / "test-factor-editor.js",
-    ]
-    result = subprocess.run(
-        ["node", str(fixture), *(str(path) for path in files)], cwd=ROOT,
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
+    assert "FTMultiSelectFilter.create" in source
+    assert "function familyPicker" in source
+    assert "FTTestFieldRow.create" in source
+    assert "FTFactorDetailShared.parameterEditor" in source
+    assert "test-factor-family-row" not in source
+
+
+def test_test_settings_paints_registered_rows_before_lazy_adapter_catalogs() -> None:
+    source = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
+    panel = source.split("function tabPanel", 1)[1].split(
+        "function settingsManager", 1,
+    )[0]
+
+    assert panel.index('const lazyKey = FTTestContentAdapters.lazyKey(item.tab);') \
+        < panel.index("if (!fields())")
+    assert panel.index("if (item.fields.length) {") \
+        < panel.index("const adapterReady")
+    assert "正在读取此设置…" not in panel
+    assert "options.ensureTab?.(item.tab)" in panel
 
 
 def test_test_workbench_recovers_ready_settings_loader_before_first_paint() -> None:
@@ -664,7 +677,7 @@ def test_test_workbench_recovers_ready_settings_loader_before_first_paint() -> N
     assert result.stdout.strip() == "ok"
 
 
-def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
+def test_test_workbench_defers_catalog_data_until_needed() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
     source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     template_actions = (WEB_ROOT / "workbench" / "templates" / "actions.js").read_text(
@@ -704,6 +717,13 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     ]
     assert manifest["group_dependencies"]["workbench-settings-chips"] == [
         "workbench-settings",
+    ]
+    assert manifest["group_dependencies"]["workbench-test-ui"] == [
+        "workbench-settings", "workbench-settings-fields",
+        "workbench-settings-chips", "workbench-ic-controls",
+        "workbench-factor-controls", "workbench-product-controls",
+        "workbench-factors", "workbench-products", "workbench-templates",
+        "workbench-run",
     ]
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",

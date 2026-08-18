@@ -210,6 +210,6 @@ FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {t: value => value},
   activeTab: "factor", mountedTabs: ["factor"],
   lazyState: () => ({status: "idle"}), ensureTab: () => {},
 });
-assert.equal(factorPanelCalls, callsBeforeLazyRender,
-  "an idle tab must not execute its adapter code");
+assert.equal(factorPanelCalls, callsBeforeLazyRender + 1,
+  "an idle tab should render its adapter shell before loading candidates");
 console.log("ok");

@@ -114,7 +114,7 @@
     );
     if (!rows.length) {
       control.querySelector(".test-field-row-control").append(FTUI.empty(
-        context.t("暂无因子候选"), context.t("选择因子家族并填写参数后添加"),
+        context.t("暂无因子候选"), context.t("从上方因子集合或因子来源添加"),
       ));
     }
     root.append(control);
@@ -125,24 +125,11 @@
     FTTestFactorSelection.autoSelectPrimary?.(state);
     const root = document.createElement("div");
     root.className = "test-factor-candidates test-factor-candidates-summary";
-    const list = document.createElement("ul");
-    list.className = "test-factor-candidate-summary-list";
-    rows.forEach(factor => {
-      const item = document.createElement("li");
-      const label = document.createElement("strong");
-      label.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
-      const description = document.createElement("small");
-      description.textContent = sourceDescription(context, state, factor);
-      item.append(label, description);
-      list.append(item);
-    });
     const candidateHelp = window.FTTestFieldHelp?.forField?.(
       state.manifest, "factor_candidates", context,
     ) || "";
     root.append(FTTestFieldRow.create(
-      context.t("因子候选"), rows.length ? list : FTUI.empty(
-        context.t("暂无因子候选"), context.t("选择因子家族并填写参数后添加"),
-      ), candidateHelp,
+      context.t("因子候选"), summaryControl(context, state, rows), candidateHelp,
     ));
     const primary = FTTestFactorSelection.selectedFactor(state);
     const factorField = window.FTTestFieldHelp?.field?.(state.manifest, "factor");
@@ -160,5 +147,29 @@
     return root;
   }
 
-  window.FTTestFactorCandidates = Object.freeze({list, sourceDescription});
+  function summaryControl(context, state, rows = FTTestFactorSelection.candidates(state)) {
+    const root = document.createElement("div");
+    root.className = "test-factor-candidate-summary-control";
+    if (!rows.length) {
+      root.append(FTUI.empty(
+        context.t("暂无因子候选"), context.t("从上方因子集合或因子来源添加"),
+      ));
+      return root;
+    }
+    const list = document.createElement("ul");
+    list.className = "test-factor-candidate-summary-list";
+    rows.forEach(factor => {
+      const item = document.createElement("li");
+      const label = document.createElement("strong");
+      label.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
+      const description = document.createElement("small");
+      description.textContent = sourceDescription(context, state, factor);
+      item.append(label, description);
+      list.append(item);
+    });
+    root.append(list);
+    return root;
+  }
+
+  window.FTTestFactorCandidates = Object.freeze({list, sourceDescription, summaryControl});
 })();
