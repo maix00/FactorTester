@@ -6,7 +6,10 @@ import sqlite3
 import json
 import threading
 from contextlib import contextmanager
+from types import SimpleNamespace
 from urllib.request import Request, urlopen
+
+import pytest
 
 from server.manager import runtime as manager
 from server.manager.data_plane.context import DataPlaneRuntime
@@ -26,6 +29,9 @@ from server.manager.objects.adapters.public_research import PublicResearchOrigin
 from server.manager.objects.adapters.public_research_destination import (
     PublicResearchDestinationAdapter,
 )
+from server.manager.objects.adapters.profile_workspace import (
+    ProfileWorkspaceOriginAdapter,
+)
 from server.manager.objects.origin import ObjectOriginRegistry
 from tools.cli.release.research_reporting.public_research.library import (
     PublicResearchLibrary,
@@ -41,6 +47,7 @@ from server.services.federated_factor_sources import (
     source_free_context,
     source_transfer_manifest,
 )
+from server.manager.services.agent_workspace import ensure_server_profile_workspace
 
 
 @contextmanager
@@ -200,6 +207,33 @@ def test_public_research_destination_promotes_verified_upload(tmp_path) -> None:
         f"attachment:sha256:{digest}",
         "alice",
     )[0] == raw
+
+
+def test_profile_workspace_origin_adapter_resolves_safe_file_and_rejects_symlink(
+    tmp_path,
+) -> None:
+    root = ensure_server_profile_workspace(
+        tmp_path / "data", "GTHT@MaxJJW@1234", "profile-main",
+    )
+    file_path = root / "research" / "notes.txt"
+    file_path.write_text("workspace note", encoding="utf-8")
+    transfer = SimpleNamespace(
+        principal="GTHT@MaxJJW@1234",
+        object_id="profile-main/research/notes.txt",
+        expected_size=file_path.stat().st_size,
+    )
+
+    adapter = ProfileWorkspaceOriginAdapter(data_root=tmp_path / "data")
+    assert adapter(transfer) == file_path
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    link = root / "research" / "outside.txt"
+    link.symlink_to(outside)
+    transfer.object_id = "profile-main/research/outside.txt"
+    transfer.expected_size = outside.stat().st_size
+    with pytest.raises(ValueError, match="symlinks"):
+        adapter(transfer)
 
 
 def test_manager_object_ticket_and_7997_upload_promote_research_attachment(

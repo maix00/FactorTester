@@ -17,6 +17,9 @@ from server.manager.services.agent_skill_runtime import (
     AgentSkillRuntimeError,
 )
 from server.manager.services.agent_workspace import profile_workspace_relative_path
+from server.manager.services.profile_workspace_browser import (
+    ProfileWorkspaceBrowser,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -236,6 +239,80 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
         service.set_profile_skills(PRINCIPAL, PROFILE_ID, ["manager-admin"])
 
 
+def test_server_runtime_binding_and_empty_claim_do_not_require_skill_files(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=tmp_path / "image-without-skills",
+    )
+
+    runtime = service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    workspace = tmp_path / "data" / runtime["workspace_relpath"]
+    assert (workspace / "research").is_dir()
+    assert service.selected_skill_bindings(PRINCIPAL, PROFILE_ID) == []
+
+    provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "server provider",
+            "runtime_kind": "server",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "token",
+        },
+    )
+    claim = service.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        provider_id=provider["provider_id"],
+        agent_id="agent-a",
+    )
+    assert claim["selected_skill_ids"] == []
+
+
+def test_profile_workspace_browser_hides_sensitive_paths_and_hashes_files(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    runtime = service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    workspace = tmp_path / "data" / runtime["workspace_relpath"]
+    (workspace / "research" / "notes.txt").write_text("hello", encoding="utf-8")
+    (workspace / "research" / ".env").write_text("secret", encoding="utf-8")
+    (workspace / ".codex").mkdir()
+
+    browser = ProfileWorkspaceBrowser(
+        data_root=tmp_path / "data",
+        runtime_store=service.runtime_store,
+        server_id="public-1",
+    )
+    root = browser.list(PRINCIPAL, PROFILE_ID)
+    assert {item["name"] for item in root["entries"]} == {
+        "factor-worktree", "strategy-worktree", "research", "reports", "manifests",
+    }
+    research = browser.list(PRINCIPAL, PROFILE_ID, "research")
+    assert [item["name"] for item in research["entries"]] == ["notes.txt"]
+    metadata = browser.file_metadata(PRINCIPAL, PROFILE_ID, "research/notes.txt")
+    assert metadata["size_bytes"] == 5
+    assert metadata["sha256"] == (
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    )
+
+
 class _Handler(AgentRoutesMixin):
     def __init__(self, service, *, payload=None):
         self.state = SimpleNamespace(
@@ -303,6 +380,37 @@ def test_profile_skill_routes_read_and_replace_selection(tmp_path):
     assert _body(handler)["selected_skill_ids"] == ["factortester-research"]
 
 
+def test_profile_workspace_route_lists_only_safe_entries(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    runtime = service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    workspace = tmp_path / "data" / runtime["workspace_relpath"]
+    (workspace / "research" / "notes.txt").write_text("hello", encoding="utf-8")
+
+    handler = _Handler(service)
+    assert handler._get_agent_routes(urlparse(
+        f"/api/client/profile-workspace?profile_id={PROFILE_ID}&path=research",
+    )) is True
+    payload = _body(handler)
+    assert payload["path"] == "research"
+    assert payload["entries"] == [{
+        "name": "notes.txt",
+        "path": "research/notes.txt",
+        "kind": "file",
+        "size_bytes": 5,
+        "downloadable": True,
+    }]
+
+
 def test_profile_module_loads_skill_selector_after_manifest_entry():
     manifest = json.loads(
         (REPO_ROOT / "server/manager/web/module-manifest.json").read_text(
@@ -310,6 +418,8 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         )
     )
     profile_scripts = manifest["groups"]["profile"]
+    assert "profile/workspace-browser.js" in manifest["scripts"]
+    assert "profile/workspace-browser.js" in profile_scripts
     assert profile_scripts.index("profile/agent-skills.js") < profile_scripts.index(
         "profile/profiles.js"
     )
