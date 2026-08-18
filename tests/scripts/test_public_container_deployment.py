@@ -224,6 +224,9 @@ def test_public_compose_exposes_reproducible_package_mirror_inputs() -> None:
         assert "DEBIAN_MIRROR" in args
         assert "DEBIAN_SECURITY_MIRROR" in args
     assert "PIP_INDEX_URL" in app_args
+    assert "FACTORTESTER_PUBLIC_CACHE_FROM" in (
+        services["factortester-public"]["build"]["cache_from"][0]
+    )
     assert "DEBIAN_BOOTSTRAP_MIRROR" in database_args
     assert "DEBIAN_BOOTSTRAP_SECURITY_MIRROR" in database_args
 
@@ -352,6 +355,8 @@ def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
     assert "factortester-public-postgresql-control-1" not in activate
     assert "docker system prune" not in publish
     assert "docker system prune" not in activate
+    assert "FACTORTESTER_PUBLIC_CACHE_FROM" in activate
+    assert "factortester-public:$old_revision" in activate
     assert activate.index(" backup") < activate.index("restart-app")
     assert activate.index("restart-app") < activate.index(" verify")
     assert "101.133.144.27" not in publish

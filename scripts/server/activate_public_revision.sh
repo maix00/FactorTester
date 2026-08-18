@@ -129,12 +129,23 @@ sudo sed -i \
 sudo chmod 0600 "$next_env"
 
 public_script="$release_path/scripts/server/factortester_public_container.sh"
-sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
-  bash "$public_script" build factortester-public
-
 old_revision="$(
   sudo sed -n 's/^FACTORTESTER_REVISION=//p' "$production_env" | head -n 1
 )"
+[[ "$old_revision" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "Current production revision is invalid: $old_revision" >&2
+  exit 1
+}
+if sudo grep -q '^FACTORTESTER_PUBLIC_CACHE_FROM=' "$next_env"; then
+  sudo sed -i \
+    "s|^FACTORTESTER_PUBLIC_CACHE_FROM=.*|FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision|" \
+    "$next_env"
+else
+  echo "FACTORTESTER_PUBLIC_CACHE_FROM=factortester-public:$old_revision" \
+    | sudo tee -a "$next_env" >/dev/null
+fi
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  bash "$public_script" build factortester-public
 postgres_before="$(
   sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
     bash "$public_script" container-id postgresql-control
