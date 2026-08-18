@@ -189,6 +189,31 @@ def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -
     assert "product_group_refs" not in payload["factors"][0]
     assert "product_group_names" not in payload["factors"][0]
     assert "product_groups" not in payload
+    assert payload["factors"][0]["factor_owner_ref"] == "alice"
+    assert payload["factors"][0]["factor_family_ref"]
+    assert payload["factors"][0]["factor_params"] == payload["factors"][0]["params"]
+    assert "factor_git_commit" not in payload["factors"][0]
+
+
+def test_factor_projection_preserves_historical_source_marker_per_factor() -> None:
+    payload = build_client_library_projection({
+        "factors": [{
+            "factor_alias": "Momentum|window:20",
+            "factor_family_alias": "Momentum",
+            "owner_username": "alice",
+            "factor_owner_ref": "profile:alice",
+            "factor_family_ref": "family:momentum",
+            "factor_git_commit": "a" * 40,
+            "params": [{"alias": "window", "value": "20"}],
+            "source": "custom",
+        }],
+    }, principal="alice")
+
+    factor = payload["factors"][0]
+    assert factor["factor_owner_ref"] == "profile:alice"
+    assert factor["factor_family_ref"] == "family:momentum"
+    assert factor["factor_params"] == factor["params"]
+    assert factor["factor_git_commit"] == "a" * 40
 
 
 def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> None:

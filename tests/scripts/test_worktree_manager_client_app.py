@@ -1549,11 +1549,12 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             + manifest.get("initial_external_scripts", [])
         )
         for relative in (
-            "workbench/test-settings.js", "workbench/test-setting-fields.js",
-            "workbench/test-factors.js",
-            "workbench/test-factor-catalog.js", "workbench/test-factor-editor.js",
-            "workbench/test-factor-candidates.js",
-            "workbench/factor-family-picker.js",
+                "workbench/test-settings.js", "workbench/test-setting-fields.js",
+                "workbench/test-factors.js",
+                "workbench/test-factor-candidates.js",
+                "workbench/test-factor-candidate-sources.js",
+                "catalog/factor-editor.js",
+                "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/test-object-picker.js",
             "workbench/test-object-editor-overlay.js",
@@ -1604,18 +1605,11 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTabChipContent.create" in scripts["test-settings.js"]
     assert "FTTestContentAdapters.render" in scripts["test-settings.js"]
     assert "externalTabs" not in scripts["test-settings.js"]
-    factor_catalog = scripts["test-factor-catalog.js"]
-    factor_editor = scripts["test-factor-editor.js"]
     factor_candidates = scripts["test-factor-candidates.js"]
-    assert 'nativeList("owners")' in factor_catalog
-    assert 'nativeList("revisions"' in factor_catalog
-    assert 'nativeList("families"' in factor_catalog
-    assert 'nativeRequest("instantiate"' in factor_editor
-    assert "FTTestChoicePicker.create" in factor_editor
     assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
     assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
     assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
-    assert "restoreFrozenSelections(state)" in factor_catalog
+    assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "window.FTTestFactorCandidates" in factor_candidates
     assert "selectedProjections" in scripts["test-products.js"]
     assert "FTTestObjectEditorOverlay.open" in scripts["test-products.js"]
@@ -1641,10 +1635,19 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTestContentAdapters.chipSources(state)" in scripts["tests.js"]
     assert "externalTabs" not in scripts["tests.js"]
     assert "selectionPanel" not in scripts["tests.js"]
-    assert "factor_owner_ref" in scripts["test-factors.js"]
-    assert "factor_git_commit" in scripts["test-factors.js"]
-    assert "factor_family_ref" in scripts["test-factors.js"]
-    assert "factor_params" in scripts["test-factors.js"]
+    assert "factor_owner_ref" not in scripts["test-factors.js"]
+    assert "factor_git_commit" not in scripts["test-factors.js"]
+    assert "factor_family_ref" not in scripts["test-factors.js"]
+    assert "factor_params" not in scripts["test-factors.js"]
+    assert "window.FTTestFactorCandidateSources" in scripts[
+        "test-factor-candidate-sources.js"
+    ]
+    assert "FTFactors.factorDetail" in scripts[
+        "test-object-editor-overlay.js"
+    ]
+    assert "FTFactorDetailShared.parameterEditor" in scripts[
+        "factor-editor.js"
+    ]
     assert "setting_template" not in scripts["tests.js"]
     assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
     assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]

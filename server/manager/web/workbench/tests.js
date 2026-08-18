@@ -339,6 +339,10 @@
     if (record.status === "error") return Promise.resolve();
     record.status = "loading";
     record.error = "";
+    // Repaint immediately so the already-rendered field row can expose the
+    // picker-local loading state while the catalog request is in flight.
+    // The field layout never waits for this promise.
+    refresh?.();
     record.promise = loadLazyState(context, state, key)
       .then(() => { record.status = "ready"; refresh?.(); })
       .catch(error => {

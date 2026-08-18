@@ -59,7 +59,9 @@
 .backtest-group-form .ft-multi-select-summary { width: 100%; box-sizing: border-box; }
 .strategy-editor-tabs { display: grid; gap: 8px; min-width: 0; }
 .strategy-editor-tab-bar { align-items: center; min-width: 0; overflow-x: auto; }
-.strategy-editor-tab-host { min-width: 0; padding: 8px 0 0; }
+.strategy-editor-chip-row { min-width: 0; margin: 0 8px; }
+.strategy-editor-tab-host { min-width: 0; padding: 8px 10px 0; }
+.backtest-group-form > .strategy-editor-tabs { margin-inline: 6px; }
 .strategy-editor-tab-manager { display: grid; gap: 7px; }
 .strategy-editor-tab-manager > small, .strategy-editor-tab-option { color: var(--muted); }
 .strategy-editor-tab-option { display: flex; align-items: center; gap: 7px; padding: 5px 0; cursor: pointer; }

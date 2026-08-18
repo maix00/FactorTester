@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.run_input_contracts import factor_source_content_options
 
 
 class FactorModule(ExecutableModule):
@@ -20,77 +19,19 @@ class FactorModule(ExecutableModule):
     # and result-cache lifecycle. The runtime must not replace it with an
     # execution-specific wrapper.
     factor: ClassVar[FieldRef[Any]] = FieldRef("factor")
-    factor_owner_ref: ClassVar[FieldRef[str]] = FieldRef("factor_owner_ref")
-    factor_git_commit: ClassVar[FieldRef[str]] = FieldRef("factor_git_commit")
-    factor_family_ref: ClassVar[FieldRef[str]] = FieldRef("factor_family_ref")
-    factor_params: ClassVar[FieldRef[dict[str, Any]]] = FieldRef("factor_params")
     factor_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_candidates")
+    factor_source_selections: ClassVar[FieldRef[list[Any]]] = FieldRef(
+        "factor_source_selections"
+    )
     factor_set_selections: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_set_selections")
     factor_role_bindings: ClassVar[FieldRef[Any]] = FieldRef("factor_role_bindings")
     factor_role_values: ClassVar[FieldRef[Any]] = FieldRef("factor_role_values")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "factor_owner_ref": FieldDefinition(
-            public=True, label="因子所有者", default="", editor="custom",
-            tab="factor", chip_template="因子所有者: {value}",
-            tab_label="因子执行", tab_order=20,
-            tab_default_mount_points=("local-settings",),
-            tab_content_adapter="factor_selection",
-            tab_content_options=factor_source_content_options(),
-            adapter_managed=True, show_chip=False,
-            execution_policy="authoring_only",
-            help_text="选择用户或 Profile 已注册的因子工作区",
-            serialization={
-                "kind": "factor_owner_selection", "display_order": 1,
-                "catalog_command": "client catalog owner list",
-            },
-        ),
-        "factor_git_commit": FieldDefinition(
-            public=True, label="Git commit", default="", editor="custom",
-            tab="factor", chip_template="Git commit: {value}",
-            tab_label="因子执行", tab_order=20,
-            tab_content_adapter="factor_selection",
-            adapter_managed=True, show_chip=False,
-            execution_policy="authoring_only",
-            help_text="冻结所选所有者因子工作区的精确提交",
-            serialization={
-                "kind": "factor_revision_selection", "display_order": 2,
-                "owner_field": "factor_owner_ref",
-                "catalog_command": "client catalog revision list",
-            },
-        ),
-        "factor_family_ref": FieldDefinition(
-            public=True, label="因子家族", default="", editor="custom",
-            tab="factor", chip_template="因子家族: {value}",
-            tab_label="因子执行", tab_order=20,
-            tab_content_adapter="factor_selection",
-            adapter_managed=True, show_chip=False,
-            execution_policy="authoring_only",
-            help_text="只显示所选 owner 与 Git commit 中可加载的因子家族",
-            serialization={
-                "kind": "factor_family_selection", "display_order": 3,
-                "owner_field": "factor_owner_ref",
-                "revision_field": "factor_git_commit",
-                "catalog_command": "client catalog family list",
-            },
-        ),
-        "factor_params": FieldDefinition(
-            public=True, label="因子参数", default={}, editor="custom",
-            tab="factor", tab_label="因子执行", tab_order=20,
-            tab_content_adapter="factor_selection",
-            adapter_managed=True, show_chip=False,
-            execution_policy="authoring_only",
-            help_text="按因子家族参数定义生成一个冻结的具体因子候选",
-            serialization={
-                "kind": "factor_parameter_values", "display_order": 4,
-                "family_field": "factor_family_ref",
-                "candidate_field": "factor_candidates",
-                "catalog_command": "client catalog factor instantiate",
-            },
-        ),
         "factor_candidates": FieldDefinition(
             public=True, label="因子候选", default=[], editor="custom", tab="factor",
             chip_template="因子候选: {value}", tab_label="因子执行", tab_order=20,
+            tab_default_mount_points=("local-settings",),
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
             execution_policy="authoring_only",
@@ -99,12 +40,15 @@ class FactorModule(ExecutableModule):
                 "kind": "factor_candidate_list",
                 "display_order": 10,
                 "item_kind": "factor",
-                "owner_field": "factor_owner_ref",
-                "revision_field": "factor_git_commit",
-                "family_field": "factor_family_ref",
-                "params_field": "factor_params",
                 "shared_page_field": "factor_candidates",
                 "selection_field": "factor",
+                "item_fields": (
+                    "factor_ref", "factor_alias", "factor_owner_ref",
+                    "factor_git_commit", "factor_family_ref", "factor_params",
+                    "owner_ref", "git_commit", "git_blob", "relative_path",
+                    "factor_family_alias", "family_ref", "params", "source_kind",
+                    "transient_factor_id",
+                ),
                 "factor_library_source": "user_factor_library_overview",
                 "fallback_policy": (
                     "copy_page_candidates",
@@ -116,6 +60,32 @@ class FactorModule(ExecutableModule):
                     "page": "page_candidates_only",
                     "module": "module_candidates_only",
                 },
+            },
+        ),
+        "factor_source_selections": FieldDefinition(
+            public=True, label="因子来源", default=[], editor="custom", tab="factor",
+            chip_template="因子: {value}", tab_label="因子执行", tab_order=20,
+            tab_content_adapter="factor_selection",
+            adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
+            help_text="从可见因子库多选直接来源；因子候选由直接因子与因子集合展开得到。",
+            serialization={
+                "kind": "factor_source_selection_list",
+                "display_order": 12,
+                "multi": True,
+                "candidate_field": "factor_candidates",
+                "set_source_field": "factor_set_selections",
+                "selection_field": "factor_selections",
+                "source_kind": "factor",
+                "catalog_source": "visible_factor_catalog",
+                "allow_inline_create": True,
+                "item_fields": (
+                    "factor_ref", "factor_alias", "factor_owner_ref",
+                    "factor_git_commit", "factor_family_ref", "factor_params",
+                    "owner_ref", "git_commit", "git_blob", "relative_path",
+                    "factor_family_alias", "family_ref", "params", "source_kind",
+                    "transient_factor_id",
+                ),
             },
         ),
         "factor_set_selections": FieldDefinition(

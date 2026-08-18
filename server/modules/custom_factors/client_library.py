@@ -203,16 +203,22 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
 
 def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
     owner = _safe_text(item.get("owner_username"))
+    owner_ref = _safe_text(
+        item.get("factor_owner_ref") or item.get("owner_ref") or owner
+    )
     family_alias = _safe_text(
         item.get("factor_family_alias")
         or item.get("factor_family_name")
     )
+    family_ref = _safe_text(
+        item.get("factor_family_ref") or item.get("family_ref")
+    ) or _ref("factor-family", owner, family_alias)
     factor_alias = _safe_text(item.get("factor_alias"))
     kind = str(item.get("source") or "").strip().lower()
     if kind not in {"custom", "public"}:
         kind = "registered"
     params = _params(item.get("params"))
-    return {
+    result = {
         "factor_ref": _ref(
             "factor",
             owner,
@@ -230,6 +236,9 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "category": _safe_text(item.get("category")),
         "factor_kind": kind,
         "params": params,
+        "factor_owner_ref": owner_ref,
+        "factor_family_ref": family_ref,
+        "factor_params": params,
         "params_count": len(params),
         "owner_username": owner,
         "owner_alias": _safe_text(item.get("owner_alias") or owner),
@@ -238,6 +247,12 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         ),
         "updated_at": _safe_text(item.get("updated_at")),
     }
+    commit = _safe_text(item.get("factor_git_commit") or item.get("git_commit"))
+    if commit:
+        # A present commit means this factor is pinned to a historical family
+        # source. Do not serialize an empty marker for current/latest factors.
+        result["factor_git_commit"] = commit
+    return result
 
 
 def _params(value: Any) -> list[dict[str, Any]]:

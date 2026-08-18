@@ -9,13 +9,13 @@ from .factor import (
     FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
     FACTOR_SELECTIONS_KEYS,
-    FACTOR_SOURCE_KEYS,
+    FACTOR_SOURCE_SELECTION_KEYS,
     register_factor_candidate_list_base,
     register_factor_set_selections_base,
     register_factor_execution_base,
-    register_factor_source_base,
     register_factor_selection_base,
     register_factor_selections_base,
+    register_factor_source_selections_base,
 )
 from .product_path import (
     PRODUCT_PATH_CANDIDATE_KEYS,

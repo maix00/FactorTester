@@ -1,70 +1,19 @@
 (() => {
-  function prepare(state) { FTTestFactorCatalog.prepare(state); }
+  function prepare(state) {
+    state.values.factor_candidates = FTTestFactorSelection.candidates(state);
+    FTTestFactorSelection.restoreFrozenSelections(state);
+    FTTestFactorSelection.syncSelection(state);
+    FTTestFactorSets.prepare(state);
+  }
 
   async function initialize(context, state) {
-    await FTTestFactorCatalog.initialize(context, state);
+    prepare(state);
+    await FTTestFactorSets.initialize(context, state);
   }
 
-  function fieldRows(className, ...rows) {
-    const root = document.createElement("div");
-    root.className = `test-setting-rows ${className}`;
-    root.append(...rows.filter(Boolean));
-    return root;
-  }
-
-  function panel(context, state, refresh, contentOptions = {}) {
+  function panel(context, state, refresh, _contentOptions = {}) {
     const root = document.createElement("div"); root.className = "test-factor-builder";
-    const catalog = state.factorCatalog;
-    const sourceInput = (contentOptions.inputs || [])
-      .find(item => item.kind === "factor_source");
-    const setPanel = FTTestFactorSets.panel(context, state, refresh);
-    if (setPanel) root.append(setPanel);
-    if (sourceInput) root.append(FTTestSourceUpload.factorControls(
-      context, state, refresh,
-      entry => FTTestFactorCatalog.selectFamily(context, state, entry, refresh), sourceInput,
-    ));
-    if (!catalog.native) {
-      root.append(fieldRows("test-factor-setting-rows",
-        FTTestFactorEditor.familyChooser(context, state, refresh),
-      ));
-      root.append(FTTestFactorEditor.familyContent(
-        context, state, refresh, sourceInput,
-      ));
-      root.append(FTTestFactorCandidates.list(context, state, refresh));
-      return root;
-    }
-    const source = fieldRows("test-factor-source-rows",
-      FTTestFactorEditor.selectField(
-        context.t("所有者"), catalog.owners.map(item => ({
-          value: item.owner_ref,
-          label: item.display_name || item.title_zh || item.profile_name || item.owner_ref,
-        })), state.values.factor_owner_ref, async value => {
-          state.values.factor_owner_ref = value;
-          state.values.factor_git_commit = ""; state.values.factor_family_ref = "";
-          state.values.factor_params = {}; catalog.selectedFamilyEntry = null;
-          catalog.selectedFamilyName = "";
-          await FTTestFactorCatalog.update(context, state, refresh,
-            () => FTTestFactorCatalog.loadRevisions(state));
-        }, context,
-      ),
-      FTTestFactorEditor.selectField(
-        context.t("Git commit"), catalog.revisions.map(item => ({
-          value: item.git_commit, label: `${item.git_commit.slice(0, 10)} · ${item.subject || ""}`,
-        })), state.values.factor_git_commit, async value => {
-          state.values.factor_git_commit = value; state.values.factor_family_ref = "";
-          state.values.factor_params = {}; catalog.selectedFamilyEntry = null;
-          catalog.selectedFamilyName = "";
-          await FTTestFactorCatalog.update(context, state, refresh,
-            () => FTTestFactorCatalog.loadFamilies(state));
-        }, context,
-      ),
-      FTTestFactorEditor.familyChooser(context, state, refresh),
-    );
-    root.append(source);
-    root.append(FTTestFactorEditor.familyContent(context, state, refresh, sourceInput));
-    if (catalog.busy) root.append(FTUI.loading(context.t("正在读取因子工作区…")));
-    if (catalog.error) root.append(FTTestFactorEditor.errorText(catalog.error));
-    root.append(FTTestFactorCandidates.list(context, state, refresh));
+    root.append(FTTestFactorCandidateSources.panel(context, state, refresh));
     return root;
   }
 

@@ -51,6 +51,13 @@
     ],
     "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
     "workbench-products": ["workbench-core", "catalog-core"],
+    "workbench-test-ui": [
+      "workbench-settings", "workbench-settings-fields",
+      "workbench-settings-chips", "workbench-ic-controls",
+      "workbench-factor-controls", "workbench-product-controls",
+      "workbench-factors", "workbench-products", "workbench-templates",
+      "workbench-run"
+    ],
     "workbench-backtest": [
       "workbench-settings", "workbench-settings-controls",
       "workbench-products", "workbench-factors"
@@ -75,9 +82,9 @@
     "job": ["job-detail-core"],
     "job-configuration": ["job-detail-core"],
     "job-input": ["job-detail-input"],
-    "ic-test": ["workbench-core"],
-    "backtest": ["workbench-core"],
-    "factor-evaluation": ["workbench-core"],
+    "ic-test": ["workbench-test-ui"],
+    "backtest": ["workbench-test-ui", "workbench-backtest"],
+    "factor-evaluation": ["workbench-test-ui"],
     "factor-series": ["workbench-core"],
     "test-template": ["workbench-templates"],
     "factor-families": ["catalog"],
@@ -206,6 +213,7 @@
     "catalog": [
       "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
+      "catalog/factor-editor.js",
       "catalog/factor-details.js",
       "catalog/factors.js",
       "catalog/product-category-overlay.js",
@@ -288,10 +296,9 @@
       "workbench/factor-selection.js",
       "workbench/factor-set-selection.js",
       "workbench/factor-family-picker.js",
-      "workbench/test-factor-catalog.js",
-      "workbench/test-factor-editor.js",
       "workbench/strategy-editor-factor-overlay.js",
       "workbench/test-factor-candidates.js",
+      "workbench/test-factor-candidate-sources.js",
       "workbench/test-factors.js"
     ],
     "workbench-source-inputs": [
@@ -417,6 +424,7 @@
     "catalog/factor-detail-shared.js",
     "catalog/factor-group-filter.js",
     "catalog/factor-list.js",
+    "catalog/factor-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
     "catalog/product-category-model.js",
@@ -467,11 +475,10 @@
     "workbench/factor-set-selection.js",
     "workbench/factor-family-picker.js",
     "workbench/test-source-upload.js",
-    "workbench/test-factor-catalog.js",
-    "workbench/test-factor-editor.js",
     "workbench/strategy-editor-factor-overlay.js",
     "workbench/strategy-editor-custom-source.js",
     "workbench/test-factor-candidates.js",
+    "workbench/test-factor-candidate-sources.js",
     "workbench/test-factors.js",
     "workbench/test-products.js",
     "workbench/test-categories.js",

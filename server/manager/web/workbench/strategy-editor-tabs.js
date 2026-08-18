@@ -30,13 +30,14 @@
     const {
       context, state, mountedTabs: requested = [], onMountedTabsChange,
       onActivate, renderStructure, renderFactor, renderProduct,
-      renderProductFilter, renderOverrides,
+      renderProductFilter, renderOverrides, chipValues, chipSources,
     } = options;
     const root = document.createElement("section");
     root.className = "strategy-editor-tabs";
     let mounted = unique([...defaultKeys(state), ...requested]);
     let activeKey = "";
     let tabset = null;
+    let chipHost = null;
 
     const manager = () => {
       const panel = document.createElement("div");
@@ -108,10 +109,42 @@
         hostClass: "backend-settings-host strategy-editor-tab-host",
         onActivate: key => { activeKey = key; onActivate?.(key); },
       });
-      root.append(tabset.bar, tabset.host);
+      chipHost = renderChips();
+      root.append(tabset.bar);
+      if (chipHost?.children.length) root.append(chipHost);
+      root.append(tabset.host);
+    }
+
+    function renderChips() {
+      if (!window.FTTestSettingChips?.render) return null;
+      const values = typeof chipValues === "function"
+        ? chipValues() : (chipValues || state.values || {});
+      const row = FTTestSettingChips.render({
+        manifest: state.manifest,
+        values,
+        context,
+        mountedTabs: [...mounted],
+        includeUnregistered: true,
+        sources: typeof chipSources === "function" ? chipSources() : (chipSources || {}),
+        groupBy: "tab",
+        onOpen: key => {
+          if (tabset?.entries.has(key)) tabset.activate(key);
+        },
+      });
+      row.classList.add("strategy-editor-chip-row");
+      return row;
+    }
+
+    function refreshChips() {
+      if (!chipHost) return;
+      const next = renderChips();
+      if (!next) { chipHost.remove(); chipHost = null; return; }
+      chipHost.replaceWith(next);
+      chipHost = next;
     }
 
     root.value = () => ({mountedTabs: [...mounted], activeKey});
+    root.refreshChips = refreshChips;
     redraw();
     return root;
   }
