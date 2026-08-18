@@ -13294,7 +13294,11 @@
     "一个研究身份只能由一个客户端或一个服务器 Agent 认领；Agent 直接使用该 Profile 的正式工作区，不创建临时副本。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A Profile can be claimed by only one client or server Agent; the Agent uses the Profile's canonical workspace directly and creates no temporary copy."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"一个研究身份只能由一个客户端或一个服务器 Agent 认领；Agent 直接使用该 Profile 的正式工作区，不创建临时副本。"}}}},
     "智能体运行" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Agent runtime"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"智能体运行"}}}},
     "请先保存模型服务" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Save a model provider first"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先保存模型服务"}}}},
-    "模型服务读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to read model providers"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"模型服务读取失败"}}}}
+    "模型服务读取失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to read model providers"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"模型服务读取失败"}}}},
+    "OpenAI Responses API" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"OpenAI Responses API"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"OpenAI Responses API"}}}},
+    "正在测试连接…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Testing connection…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在测试连接…"}}}},
+    "连接成功：模型可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Connection succeeded: model is available"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"连接成功：模型可用"}}}},
+    "连接测试失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Connection test failed"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"连接测试失败"}}}}
   },
   "version" : "1.0"
 }

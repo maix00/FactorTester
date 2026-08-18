@@ -9,12 +9,18 @@ from urllib.parse import urlparse
 
 import pytest
 
+import server.manager.services.agent_provider_health as provider_health_module
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.agent_app_server_errors import AgentAppServerError
+from server.manager.services.agent_provider_health import (
+    AgentProviderHealth,
+    AgentProviderHealthError,
+)
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_workspace import profile_workspace_relative_path
+from server.manager.storage.agent_provider_store import ProviderStoreError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +53,101 @@ for raw in sys.stdin:
     return str(path)
 
 
-def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path):
+def _fake_factor_tester(path: Path) -> str:
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(path, 0o700)
+    return str(path)
+
+
+def _provider_health_ok(provider):
+    return {
+        "status": "ok",
+        "provider_id": provider.get("provider_id", ""),
+        "protocol": "openai_compatible",
+        "base_url": provider["base_url"],
+        "default_model": provider["default_model"],
+        "model_available": True,
+    }
+
+
+class _ModelResponse:
+    status = 200
+
+    def __init__(self, payload):
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, _limit):
+        return self._payload
+
+
+def test_openai_provider_health_checks_model_without_returning_secret(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "https://api.openai.com/v1/models"
+        assert request.headers["Authorization"] == "Bearer secret-token"
+        assert timeout == 10.0
+        return _ModelResponse({"data": [{"id": "research-model"}]})
+
+    monkeypatch.setattr(provider_health_module, "urlopen", fake_urlopen)
+    result = AgentProviderHealth.test({
+        "provider_id": "provider-1",
+        "protocol": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "research-model",
+        "secret": "secret-token",
+    })
+    assert result["model_available"] is True
+    assert "secret-token" not in json.dumps(result)
+
+
+def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch):
+    def fake_urlopen(request, timeout):
+        raise provider_health_module.HTTPError(
+            request.full_url, 401, "unauthorized", {}, None,
+        )
+
+    monkeypatch.setattr(provider_health_module, "urlopen", fake_urlopen)
+    with pytest.raises(AgentProviderHealthError, match="HTTP 401") as error:
+        AgentProviderHealth.test({
+            "protocol": "openai_compatible",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "research-model",
+            "secret": "secret-token",
+        })
+    assert "secret-token" not in str(error.value)
+
+
+def test_unimplemented_codex_protocol_cannot_be_saved(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    with pytest.raises(ProviderStoreError, match="unsupported"):
+        service.save_provider(
+            PRINCIPAL,
+            {
+                "label": "old codex",
+                "runtime_kind": "server",
+                "protocol": "codex",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "token": "secret-token",
+            },
+        )
+
+
+def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "provider.key",
@@ -140,6 +240,7 @@ class _AppHandler(AgentAppServerRoutesMixin, AgentRoutesMixin):
     def __init__(self, service, supervisor, payload=None):
         self.state = SimpleNamespace(
             agent_app_server=supervisor,
+            agent_profiles=service,
             server_id="public-1",
             client_state=SimpleNamespace(profiles=lambda _principal: [{
                 "profile_id": PROFILE_ID,
@@ -174,7 +275,9 @@ def _response(handler):
     return json.loads(raw[:content_length].decode("utf-8"))
 
 
-def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_path):
+def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     service = AgentProfileService(
         db_path=tmp_path / "manager.sqlite",
         provider_key_path=tmp_path / "provider.key",
@@ -224,3 +327,111 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     )
     assert _response(handler)["status"]["running"] is True
     supervisor.stop_all()
+
+
+def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    handler = _AppHandler(service, None, {
+        "label": "temporary provider",
+        "runtime_kind": "server",
+        "protocol": "openai_compatible",
+        "base_url": "https://api.example.test/v1",
+        "default_model": "research-model",
+        "token": "secret-must-not-return",
+    })
+    assert handler._post_agent_routes(urlparse("/api/client/agent-models/test"))
+    payload = _response(handler)
+    assert payload["success"] is True
+    assert payload["test"]["model_available"] is True
+    assert "secret-must-not-return" not in json.dumps(payload)
+
+
+def test_provider_preflight_failure_blocks_process_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
+
+    def reject(_provider):
+        raise AgentProviderHealthError("provider rejected the connection (HTTP 401)")
+
+    monkeypatch.setattr(AgentProviderHealth, "test", reject)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "rejected provider",
+            "runtime_kind": "server",
+            "protocol": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "server-secret-token",
+        },
+    )
+    service.claim(PRINCIPAL, PROFILE_ID, provider_id=provider["provider_id"])
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+    )
+
+    with pytest.raises(AgentAppServerError, match="provider preflight failed"):
+        supervisor.start(PRINCIPAL, PROFILE_ID)
+    assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False
+
+
+def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
+    monkeypatch.delenv("FACTORTESTER_CLI", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "provider",
+            "runtime_kind": "server",
+            "protocol": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "server-secret-token",
+        },
+    )
+    service.claim(PRINCIPAL, PROFILE_ID, provider_id=provider["provider_id"])
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+    )
+
+    with pytest.raises(AgentAppServerError, match="FactorTester CLI"):
+        supervisor.start(PRINCIPAL, PROFILE_ID)
+    assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False

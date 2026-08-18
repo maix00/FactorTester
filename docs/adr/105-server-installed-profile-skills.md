@@ -57,6 +57,19 @@ Manager's server catalog.
    `shell_environment_policy.ignore_default_excludes = false` is also set so
    the provider token is removed from shell-tool environments even though the
    app-server itself receives it through its private child environment.
+8. The first provider adapter is the OpenAI Responses-compatible wire
+   contract. The existing Provider form remains the only API-key entry point;
+   the API key is encrypted in Manager-local SQLite and is never returned by
+   the list or connection-test routes. A connection test performs an
+   authenticated, read-only `GET /models` request and verifies that the
+   configured default model is present. The provider protocol field remains an
+   extension seam for later adapters, but unsupported protocol values are
+   rejected rather than treated as OpenAI.
+9. A claimed server Profile Agent is started only after a local executable
+   preflight for both Codex and the FactorTester CLI, followed by the provider
+   health check. The FactorTester CLI path is supplied by `FACTORTESTER_CLI`
+   or the installed `factortester` command and is added to the child process
+   environment; a failed preflight prevents Codex from being spawned.
 
 ## Consequences
 
@@ -67,3 +80,7 @@ Manager's server catalog.
   policy.
 - Client Profiles keep their own app-managed Skill set and show no server Skill
   selection controls.
+- An API-key or model outage is reported when the user tests the Provider and
+  again before a new Agent process starts; no secret is included in either
+  response. Future providers can add an adapter without changing Profile claim
+  or workspace isolation semantics.

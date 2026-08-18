@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
+from server.manager.services.agent_provider_health import (
+    AgentProviderHealth,
+    AgentProviderHealthError,
+)
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
 
 
@@ -29,10 +34,41 @@ class AgentAppServerLaunch:
         runtime: AgentSkillRuntime,
         provider: Mapping[str, object],
         codex_binary: str,
+        factor_tester_cli: str = "",
     ) -> None:
         self.runtime = runtime
         self.provider = dict(provider)
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
+        configured_cli = str(factor_tester_cli or os.environ.get("FACTORTESTER_CLI") or "").strip()
+        self.factor_tester_cli = configured_cli or str(
+            shutil.which("factortester") or ""
+        )
+
+    @staticmethod
+    def _executable(value: str, label: str) -> str:
+        resolved = shutil.which(str(value or "").strip())
+        if not resolved:
+            raise AgentAppServerError(f"{label} executable is unavailable")
+        return resolved
+
+    def preflight(self) -> dict[str, object]:
+        """Validate all local and remote prerequisites before spawning Codex."""
+        codex = self._executable(self.codex_binary, "Codex")
+        factor_tester = self._executable(
+            self.factor_tester_cli,
+            "FactorTester CLI",
+        )
+        try:
+            provider = AgentProviderHealth.test(self.provider)
+        except AgentProviderHealthError as exc:
+            raise AgentAppServerError(
+                f"Agent provider preflight failed: {exc}"
+            ) from exc
+        return {
+            "codex": codex,
+            "factor_tester_cli": factor_tester,
+            "provider": provider,
+        }
 
     def write_provider_config(self) -> None:
         model = str(self.provider.get("default_model") or "").strip()
@@ -93,4 +129,13 @@ class AgentAppServerLaunch:
         ):
             environment.pop(key, None)
         environment["FACTORTESTER_AGENT_TOKEN"] = secret
+        cli = str(self.factor_tester_cli or "").strip()
+        if cli:
+            cli_path = Path(cli).expanduser()
+            if cli_path.parent != Path("."):
+                environment["PATH"] = os.pathsep.join([
+                    str(cli_path.parent),
+                    environment.get("PATH", ""),
+                ]).rstrip(os.pathsep)
+            environment["FACTORTESTER_CLI"] = cli
         return environment

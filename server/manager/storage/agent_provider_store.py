@@ -25,7 +25,10 @@ from tools.data.sqlite.db import connect_sqlite
 
 PROVIDER_TABLE = "manager_agent_provider_connections"
 SUPPORTED_RUNTIME_KINDS = frozenset({"client", "server"})
-SUPPORTED_PROTOCOLS = frozenset({"codex", "openai_compatible"})
+# ``openai_compatible`` describes the wire contract consumed by the current
+# Codex app-server configuration.  Account login is not a provider protocol;
+# it is a separate authentication flow and is intentionally not accepted here.
+SUPPORTED_PROTOCOLS = frozenset({"openai_compatible"})
 
 
 class ProviderStoreError(ValueError):
@@ -212,6 +215,88 @@ class AgentProviderStore:
                 raise ProviderStoreError("provider token cannot be decrypted") from exc
         return value
 
+    def candidate(
+        self,
+        principal: str,
+        payload: dict[str, object],
+        *,
+        default_server_id: str = "",
+    ) -> dict[str, Any]:
+        """Validate a provider without writing it to SQLite.
+
+        This is used by the connection test so an API Key can be checked before
+        the user commits the Provider record.  The returned mapping contains a
+        private ``secret`` value for the immediate health check only.
+        """
+        owner = self._text(principal, "principal")
+        if not isinstance(payload, dict):
+            raise ProviderStoreError("provider must be an object")
+        provider_id = str(payload.get("provider_id") or "").strip()
+        previous = None
+        if provider_id:
+            with self._connection() as db:
+                previous = db.execute(
+                    f"SELECT * FROM {PROVIDER_TABLE} WHERE provider_id = ?",
+                    (provider_id,),
+                ).fetchone()
+            if previous is not None and str(previous["principal"]) != owner:
+                raise ProviderStoreError("provider does not belong to current account")
+        runtime_kind = self.validate_runtime_kind(
+            payload.get("runtime_kind")
+            or (previous["runtime_kind"] if previous is not None else "server")
+        )
+        server_id = str(
+            payload.get("server_id")
+            or (previous["server_id"] if previous is not None else "")
+            or default_server_id
+        ).strip()
+        if runtime_kind == "server" and not server_id:
+            raise ProviderStoreError("server provider requires server_id")
+        if runtime_kind == "client":
+            server_id = ""
+        label = self._text(
+            payload.get("label")
+            or (previous["label"] if previous is not None else ""),
+            "label",
+        )
+        protocol = self.validate_protocol(
+            payload.get("protocol")
+            or (previous["protocol"] if previous is not None else "openai_compatible")
+        )
+        base_url = self.validate_base_url(
+            payload.get("base_url")
+            or (previous["base_url"] if previous is not None else ""),
+            runtime_kind=runtime_kind,
+        )
+        default_model = self._text(
+            payload.get("default_model")
+            or (previous["default_model"] if previous is not None else ""),
+            "default_model",
+            required=False,
+        )
+        secret = str(payload.get("token") or "").strip()
+        if not secret and previous is not None:
+            try:
+                secret = self._cipher.decrypt(
+                    bytes(previous["secret_blob"] or b""),
+                ).decode("utf-8")
+            except (InvalidToken, UnicodeDecodeError) as exc:
+                raise ProviderStoreError("provider token cannot be decrypted") from exc
+        if not secret:
+            raise ProviderStoreError("token is required")
+        return {
+            "provider_id": provider_id,
+            "principal": owner,
+            "runtime_kind": runtime_kind,
+            "server_id": server_id,
+            "label": label,
+            "protocol": protocol,
+            "base_url": base_url,
+            "default_model": default_model,
+            "secret": secret,
+            "previous": previous,
+        }
+
     def save(
         self,
         principal: str,
@@ -219,39 +304,24 @@ class AgentProviderStore:
         *,
         default_server_id: str = "",
     ) -> dict[str, Any]:
-        owner = self._text(principal, "principal")
-        if not isinstance(payload, dict):
-            raise ProviderStoreError("provider must be an object")
-        provider_id = str(payload.get("provider_id") or "").strip()
-        runtime_kind = self.validate_runtime_kind(payload.get("runtime_kind") or "server")
-        server_id = str(payload.get("server_id") or default_server_id or "").strip()
-        if runtime_kind == "server" and not server_id:
-            raise ProviderStoreError("server provider requires server_id")
-        if runtime_kind == "client":
-            server_id = ""
-        label = self._text(payload.get("label"), "label")
-        protocol = self.validate_protocol(payload.get("protocol") or "openai_compatible")
-        base_url = self.validate_base_url(payload.get("base_url"), runtime_kind=runtime_kind)
-        default_model = self._text(payload.get("default_model"), "default_model", required=False)
-        secret = str(payload.get("token") or "")
+        candidate = self.candidate(
+            principal,
+            payload,
+            default_server_id=default_server_id,
+        )
+        owner = candidate["principal"]
+        provider_id = candidate["provider_id"] or "provider_" + secrets.token_urlsafe(9)
+        runtime_kind = candidate["runtime_kind"]
+        server_id = candidate["server_id"]
+        label = candidate["label"]
+        protocol = candidate["protocol"]
+        base_url = candidate["base_url"]
+        default_model = candidate["default_model"]
+        secret = candidate["secret"]
+        previous = candidate["previous"]
         now = time.time()
         with self._connection() as db:
-            previous = None
-            if provider_id:
-                previous = db.execute(
-                    f"SELECT * FROM {PROVIDER_TABLE} WHERE provider_id = ?",
-                    (provider_id,),
-                ).fetchone()
-                if previous is not None and str(previous["principal"]) != owner:
-                    raise ProviderStoreError("provider does not belong to current account")
-            else:
-                provider_id = "provider_" + secrets.token_urlsafe(9)
-            if not secret and previous is None:
-                raise ProviderStoreError("token is required for a new provider")
-            if secret:
-                secret_blob = self._cipher.encrypt(secret.encode("utf-8"))
-            else:
-                secret_blob = bytes(previous["secret_blob"] or b"")
+            secret_blob = self._cipher.encrypt(secret.encode("utf-8"))
             db.execute(
                 f"""INSERT INTO {PROVIDER_TABLE} (
                     provider_id, principal, runtime_kind, server_id, label,

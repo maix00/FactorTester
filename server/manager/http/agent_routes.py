@@ -182,6 +182,7 @@ class AgentRoutesMixin:
     def _post_agent_routes(self, parsed) -> bool:
         if parsed.path not in {
             "/api/client/agent-models",
+            "/api/client/agent-models/test",
             "/api/client/profile-skills",
             "/api/client/profile-runtime",
             "/api/client/profile-claims",
@@ -196,6 +197,11 @@ class AgentRoutesMixin:
             principal = self._agent_principal(session)
             payload = self._json_body(128 * 1024)
             service = self._agent_service()
+            if parsed.path == "/api/client/agent-models/test":
+                result = service.test_provider(principal, payload)
+                json_response(self, {"success": True, "test": result})
+                return True
+
             if parsed.path == "/api/client/agent-models":
                 provider = service.save_provider(principal, payload)
                 json_response(self, {"success": True, "provider": provider}, 201)

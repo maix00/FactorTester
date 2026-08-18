@@ -52,6 +52,7 @@ class AgentAppServerSession:
         with self._lock:
             if self.ready and self.process is not None and self.process.is_running():
                 return
+            self.launch.preflight()
             self.launch.write_provider_config()
             process = AgentAppServerProcess(
                 command=self.launch.command(),

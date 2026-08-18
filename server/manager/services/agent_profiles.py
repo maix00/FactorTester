@@ -14,6 +14,9 @@ from server.manager.services.agent_skill_catalog import (
     AgentSkillCatalogError,
 )
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.agent_provider_health import (
+    AgentProviderHealth,
+)
 from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
@@ -339,6 +342,28 @@ class AgentProfileService:
             payload,
             default_server_id=self.server_id,
         )
+
+    def test_provider(
+        self,
+        principal: str,
+        payload: dict[str, object],
+    ) -> dict[str, Any]:
+        """Test a Provider API key without persisting or returning its secret."""
+        if not isinstance(payload, dict):
+            raise ProviderStoreError("provider must be an object")
+        runtime = str(payload.get("runtime_kind") or "server").strip()
+        if runtime == "server":
+            payload = {**payload, "server_id": self.server_id}
+        elif runtime == "client" and self.server_id != "local":
+            raise ProviderStoreError(
+                "client provider credentials must be tested by the client runtime"
+            )
+        candidate = self.provider_store.candidate(
+            principal,
+            payload,
+            default_server_id=self.server_id,
+        )
+        return AgentProviderHealth.test(candidate)
 
     def delete_provider(self, principal: str, provider_id: str) -> bool:
         for claim in self.runtime_store.claims(principal):

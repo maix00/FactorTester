@@ -55,6 +55,7 @@
     view.token.value = "";
     view.token.placeholder = "";
     view.heading.textContent = view.context.t("新增模型服务");
+    view.test.textContent = view.context.t("测试连接");
     view.save.textContent = view.context.t("保存模型服务");
     view.cancel.hidden = true;
   }
@@ -74,8 +75,7 @@
       {value: "client", label: context.t("客户端运行")},
     ]);
     const protocol = select([
-      {value: "openai_compatible", label: "OpenAI-compatible"},
-      {value: "codex", label: "Codex"},
+      {value: "openai_compatible", label: context.t("OpenAI Responses API")},
     ]);
     const baseURL = input("url");
     baseURL.required = true;
@@ -88,6 +88,10 @@
     save.className = "primary";
     save.type = "button";
     save.textContent = context.t("保存模型服务");
+    const test = document.createElement("button");
+    test.className = "secondary";
+    test.type = "button";
+    test.textContent = context.t("测试连接");
     const cancel = document.createElement("button");
     cancel.className = "secondary";
     cancel.classList.add("agent-model-cancel");
@@ -97,7 +101,7 @@
     cancel.onclick = () => resetForm(view);
     const actions = document.createElement("div");
     actions.className = "settings-inline-actions";
-    actions.append(save, cancel);
+    actions.append(test, save, cancel);
     section.append(
       heading,
       field(context, "服务名称", label),
@@ -112,27 +116,56 @@
 
     const view = {
       context, heading, label, runtime, protocol, baseURL, model, token,
-      save, cancel,
+      test, save, cancel,
     };
-    save.onclick = async () => {
+    function providerPayload() {
+      return {
+        provider_id: editingID,
+        label: label.value.trim(),
+        runtime_kind: runtime.value,
+        protocol: protocol.value,
+        base_url: baseURL.value.trim(),
+        default_model: model.value.trim(),
+        token: token.value,
+      };
+    }
+    function validate() {
       if (!label.value.trim() || !baseURL.value.trim() || !model.value.trim()) {
         status.textContent = context.t("请填写服务名称、API 地址和默认模型");
-        return;
+        return false;
       }
+      return true;
+    }
+    test.onclick = async () => {
+      if (!validate()) return;
+      test.disabled = true;
       save.disabled = true;
+      status.textContent = context.t("正在测试连接…");
+      try {
+        const result = await context.api("/api/client/agent-models/test", {
+          method: "POST",
+          body: JSON.stringify(providerPayload()),
+        });
+        status.textContent = context.t("连接成功：模型可用");
+        if (result?.test?.default_model) {
+          status.textContent += ` · ${result.test.default_model}`;
+        }
+      } catch (error) {
+        status.textContent = error.message || context.t("连接测试失败");
+      } finally {
+        test.disabled = false;
+        save.disabled = false;
+      }
+    };
+    save.onclick = async () => {
+      if (!validate()) return;
+      save.disabled = true;
+      test.disabled = true;
       status.textContent = context.t("正在保存…");
       try {
         await context.api("/api/client/agent-models", {
           method: "POST",
-          body: JSON.stringify({
-            provider_id: editingID,
-            label: label.value.trim(),
-            runtime_kind: runtime.value,
-            protocol: protocol.value,
-            base_url: baseURL.value.trim(),
-            default_model: model.value.trim(),
-            token: token.value,
-          }),
+          body: JSON.stringify(providerPayload()),
         });
         resetForm(view);
         context.showNotice(context.t("模型服务已保存"));
@@ -141,6 +174,7 @@
         status.textContent = error.message || context.t("保存失败");
       } finally {
         save.disabled = false;
+        test.disabled = false;
       }
     };
     return {section, view};
