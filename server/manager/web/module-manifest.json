@@ -256,8 +256,7 @@
       "workbench/custom-product-overrides.js"
     ],
     "workbench-run": [
-      "workbench/test-run-fields.js",
-      "workbench/test-outputs.js"
+      "workbench/test-run-fields.js"
     ],
     "workbench-run-batch": [
       "workbench/run-batch/model.js",
@@ -452,7 +451,6 @@
     "workbench/test-templates.js",
     "workbench/test-content-adapters.js",
     "workbench/test-run-fields.js",
-    "workbench/test-outputs.js",
     "workbench/run-batch/model.js",
     "workbench/test-run-summary.js",
     "workbench/test-run-results.js",

@@ -14,50 +14,35 @@
     return [...new Set(requested.filter(item => allowed.has(item)))];
   }
 
-  function fieldValueSelector(context, definitions, selected, update) {
-    const shell = document.createElement("div");
-    shell.className = "shared-field-value-selector";
-    shell.append(choices(context, definitions, selected, update));
-    return shell;
+  function choiceItem(context, definition) {
+    const formats = (definition.formats || [])
+      .map(value => String(value).toUpperCase());
+    const sources = (definition.required_sources || []).map(value => (
+      context.t(value?.label || value?.name || value)
+    ));
+    const sourceNote = sources.length
+      ? `${context.t("需保留")}：${sources.join("、")}`
+      : "";
+    return {
+      value: definition.name,
+      label: context.t(definition.label || definition.name),
+      description: [formats.join(" / "), sourceNote].filter(Boolean).join(" · "),
+    };
   }
 
-  function choices(context, definitions, selected, update) {
-    const grid = document.createElement("div");
-    grid.className = "output-choice-grid";
-    const active = new Set(selected || []);
-    definitions.forEach(definition => {
-      const row = document.createElement("label");
-      row.className = "output-choice";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = active.has(definition.name);
-      const copy = document.createElement("span");
-      const title = document.createElement("b");
-      title.textContent = context.t(definition.label || definition.name);
-      const detail = document.createElement("small");
-      const formats = (definition.formats || []).map(value => String(value).toUpperCase());
-      const sources = (definition.required_sources || []).map(value => (
-        context.t(value.label || value.name)
-      ));
-      const sourceNote = sources.length
-        ? `${context.t("需保留")}：${sources.join("、")}`
-        : "";
-      detail.textContent = [formats.join(" / "), sourceNote]
-        .filter(Boolean)
-        .join(" · ");
-      copy.append(title, detail);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) active.add(definition.name);
-        else active.delete(definition.name);
-        update([...active]);
-      });
-      row.append(checkbox, copy);
-      grid.append(row);
+  function fieldValueSelector(context, definitions, selected, update) {
+    const filter = FTMultiSelectFilter.create(context, {
+      className: "shared-field-value-selector",
+      title: context.t("结果与生成物"),
+      items: definitions.map(definition => choiceItem(context, definition)),
+      selected: Array.isArray(selected) ? selected : [],
+      multi: true,
+      onChange: values => update([...values]),
     });
-    return grid;
+    return filter.element;
   }
 
   window.FTOutputChoices = Object.freeze({
-    available, choices, fieldValueSelector, initialSelection,
+    available, fieldValueSelector, initialSelection,
   });
 })();

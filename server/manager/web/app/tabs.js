@@ -235,6 +235,13 @@
       if (tab) { Object.assign(tab, fields); renderOpenedTabs(); }
     }
 
+    function discardViews() {
+      // Authentication and language changes alter both page data and the
+      // module list.  Cached DOM from the previous session must not be
+      // restored after that boundary.
+      state.tabs.forEach(tab => viewCache.discardView(tab.id));
+    }
+
     function initializeTabs() {
       state.tabs = state.modules
         .filter(item => item.pinned && item.id !== "settings")
@@ -260,7 +267,8 @@
     return {
       ...viewCache,
       renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
-      updateActiveTab, initializeTabs, currentTabContext, detailTabIDForPath,
+      updateActiveTab, discardViews, initializeTabs, currentTabContext,
+      detailTabIDForPath,
     };
   }
 

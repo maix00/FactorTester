@@ -67,6 +67,13 @@ class CashPoolModule(ExecutableModule):
         ),
         "base_currency": FieldDefinition(
             public=True, label="币种", editor="select", default="CNY", tab="capital",
+            options=(
+                ("CNY", "人民币（CNY）"),
+                ("USD", "美元（USD）"),
+                ("HKD", "港币（HKD）"),
+                ("JPY", "日元（JPY）"),
+                ("EUR", "欧元（EUR）"),
+            ),
             chip_template="币种: {value}", tab_label="资金", tab_order=50,
         ),
         "currency_conversion_fee_rate": FieldDefinition(

@@ -49,8 +49,10 @@ const multi = window.FTMultiSelectFilter.create({t: value => value}, {
   multi: false,
 });
 assert.deepEqual(multi.values, ["a"]);
+assert.equal(multi.summary.children[0].textContent, "A");
 const bInput = multi.optionList.children[1].children[0];
 bInput.checked = true;
 bInput.listeners.change();
 assert.deepEqual(multi.values, ["b"]);
+assert.equal(multi.summary.children[0].textContent, "B");
 console.log("ok");

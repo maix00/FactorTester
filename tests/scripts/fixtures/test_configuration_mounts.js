@@ -21,7 +21,7 @@ global.FTTestConfigurationCompiler = {
   sanitizeExecutionPayload: (_manifest, payload) => structuredClone(payload),
   factorSubjects: () => [{alias: "ROC", factor_ref: "factor:v1:roc"}],
 };
-global.FTTestOutputs = {selection: () => [{name: "ic_statistics_data"}]};
+global.FTTestRunFields = {selection: () => [{name: "ic_statistics_data"}]};
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/ic-configuration.js", "utf8",
 ), {filename: "ic-configuration.js"});

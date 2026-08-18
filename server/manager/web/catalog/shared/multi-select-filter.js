@@ -179,7 +179,9 @@
 
     function render() {
       const labels = labelsFor();
-      const summaryValue = labels.length ? countLabel(context, labels.length) : "";
+      const summaryValue = labels.length
+        ? (multi ? countLabel(context, labels.length) : labels[0])
+        : "";
       summaryText.textContent = summaryValue || translate(context, "未筛选");
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
@@ -267,6 +269,9 @@
       search.focus();
     });
     search.addEventListener("input", render);
+    dropdown.addEventListener("toggle", () => {
+      if (dropdown.open && !controlDisabled) options.onOpen?.();
+    });
     if (controlDisabled) {
       summary.addEventListener("click", event => {
         event.preventDefault();

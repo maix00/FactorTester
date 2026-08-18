@@ -1,7 +1,8 @@
 (() => {
   const supportedEditors = Object.freeze([
     "input", "boolean", "json", "catalog", "select", "date", "time",
-    "service_port", "profile", "output_picker", "custom_product_overrides",
+    "service_port", "profile", "server_picker", "runtime_bundle_picker",
+    "output_picker", "custom_product_overrides",
     "factor_role_bindings", "ic_decay_grid", "ic_delay_grid", "ic_horizon_grid",
   ]);
   const supportedEditorSet = new Set(supportedEditors);
@@ -28,6 +29,49 @@
     if (typeof options.onPatch === "function") options.onPatch(patch);
     else FTSettingRules.patchValues(manifest, values, patch);
     options.refresh?.();
+  }
+
+  function choiceItems(descriptor, options) {
+    if (Array.isArray(options.choiceItems)) return options.choiceItems;
+    return Array.isArray(descriptor?.options) ? descriptor.options : [];
+  }
+
+  function isChoiceField(descriptor, items) {
+    const editor = String(descriptor?.editor || "");
+    return ["output_picker", "profile", "server_picker"].includes(editor)
+      || (editor === "catalog" && items.length > 0)
+      || (editor === "select" && items.length > 0)
+      || (descriptor?.cardinality === "many" && items.length > 0);
+  }
+
+  function choiceControl(key, field, descriptor, manifest, values, context, options, disabled, value) {
+    const items = choiceItems(descriptor, options);
+    if (!isChoiceField(descriptor, items)) return null;
+    const multi = descriptor.cardinality === "many";
+    const disabledValues = FTSettingRules.disabledValues?.(field, values) || new Set();
+    const picker = FTTestChoicePicker.create(context, {
+      className: "test-choice-picker",
+      compact: true,
+      name: `test-setting-${key}`,
+      multi,
+      items: items.map(option => ({
+        ...option,
+        value: String(option.value ?? ""),
+        label: option.label || String(option.value ?? ""),
+        description: option.description || option.help_text || option.label
+          || String(option.value ?? ""),
+        disabled: option.disabled || disabledValues.has(String(option.value ?? "")),
+      })),
+      selected: multi
+        ? (Array.isArray(value) ? value : [])
+        : [String(value ?? "")],
+      disabled,
+      onOpen: options.choiceOnOpen,
+      onChange: next => commit(
+        key, field, manifest, values, multi ? next : (next[0] ?? ""), options,
+      ),
+    });
+    return picker.element;
   }
 
   function settingRow(key, field, manifest, values, context, options) {
@@ -94,6 +138,10 @@
         onPatch: patch => commitPatch(manifest, values, patch, options),
       });
     }
+    const choice = choiceControl(
+      key, field, descriptor, manifest, values, context, options, disabled, value,
+    );
+    if (choice) return choice;
     let control;
     if (descriptor?.value_type === "boolean") {
       control = document.createElement("input");
@@ -105,26 +153,7 @@
       });
       return control;
     }
-    if (descriptor?.value_type === "enum" && descriptor.options?.length) {
-      const disabledValues = FTSettingRules.disabledValues(field, values);
-      const picker = FTTestChoicePicker.create(context, {
-        className: "test-choice-picker",
-        compact: true,
-        name: `test-setting-${key}`,
-        multi: false,
-        items: descriptor.options.map(option => ({
-          value: String(option.value ?? ""),
-          label: option.label || String(option.value ?? ""),
-          description: option.description || option.help_text || option.label
-            || String(option.value ?? ""),
-          disabled: disabledValues.has(String(option.value ?? "")),
-        })),
-        selected: [String(value ?? "")],
-        disabled,
-        onChange: next => commit(key, field, manifest, values, next[0] ?? "", options),
-      });
-      return picker.element;
-    } else if (
+    if (
       descriptor?.editor === "json"
       || descriptor?.value_type === "object"
       || descriptor?.value_type === "array"

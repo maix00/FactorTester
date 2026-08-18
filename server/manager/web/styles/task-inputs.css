@@ -33,7 +33,6 @@
 .test-workbench .test-run-field-rows { display: grid; grid-template-columns: minmax(0, 1fr); }
 .test-workbench .test-run-field-rows .test-setting-row { grid-column: 1 / -1; }
 .test-workbench .test-run-settings-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.test-workbench .test-run-settings-content .test-output-content { padding-top: 8px; border-top: 1px solid var(--line); }
 .test-workbench .test-settings-shell > .backend-settings-tab-bar { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--soft); }
 .test-workbench .test-settings-shell > .backend-settings-tab-bar button { display: inline-flex; align-items: center; min-width: 0; min-height: 29px; padding: 0 9px; text-align: center; white-space: nowrap; }
 .test-workbench .test-settings-shell .tab-chip-label { overflow: hidden; text-overflow: ellipsis; }
@@ -68,10 +67,7 @@
 .test-workbench .test-factor-source-grid,
 .test-workbench .test-factor-parameters { gap: 7px; }
 .test-workbench .test-template-section { gap: 6px; }
-.test-workbench .test-run-options,
-.test-workbench .test-output-panel { padding: 8px 10px; border-radius: 9px; }
-.test-workbench .output-choice-grid { gap: 5px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-.test-workbench .output-choice { gap: 7px; padding: 6px 8px; border-radius: 7px; }
+.test-workbench .test-run-options { padding: 8px 10px; border-radius: 9px; }
 .test-workbench .test-object-field { gap: 4px; }
 .test-workbench .empty { padding: 26px 14px; }
 .test-workbench .empty h2 { margin: 0 0 4px; font-size: 14px; }
