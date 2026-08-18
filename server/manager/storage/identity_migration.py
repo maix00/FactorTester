@@ -29,6 +29,9 @@ from server.manager.storage.identity_migration_sqlite import (
     apply_sqlite_identity_migration,
     sqlite_identity_plan,
 )
+from server.manager.storage.identity_migration_state import (
+    migrate_manager_state_identity,
+)
 
 __all__ = [
     "POSTGRES_USER_REFERENCES",
@@ -43,6 +46,7 @@ __all__ = [
     "cursor_rows_as_dicts",
     "migrate_local_device_json",
     "migrate_local_session_json",
+    "migrate_manager_state_identity",
     "postgres_identity_plan",
     "sqlite_identity_plan",
     "sqlite_integrity_check",

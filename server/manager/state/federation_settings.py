@@ -7,9 +7,45 @@ from server.manager.services.network_info import (
     public_manager_targets,
     server_network_info as build_server_network_info,
 )
+from server.manager.network_endpoints import validate_client_endpoint
 
 
 class FederationSettingsStateMixin:
+    def _runtime_manager_endpoint(self) -> str:
+        """Return the endpoint configured for this Manager's client plane.
+
+        The federation settings file is persistent user configuration, but
+        its advertised endpoint must never diverge from the endpoint on which
+        this process actually serves client traffic.  In particular, a
+        WireGuard-only 17998 address is not a valid public/client endpoint.
+        """
+        value = str(
+            getattr(self, "manager_public_endpoint", "") or ""
+        ).strip()
+        if not value:
+            return ""
+        return validate_client_endpoint(
+            value,
+            name="runtime Manager client endpoint",
+        )
+
+    def _reconcile_federation_endpoint(
+        self,
+        candidate: dict[str, object],
+    ) -> dict[str, object]:
+        """Repair stale persisted endpoint data before starting federation."""
+        runtime_endpoint = self._runtime_manager_endpoint()
+        if not runtime_endpoint:
+            return candidate
+        configured = str(candidate.get("public_endpoint") or "").strip().rstrip("/")
+        if configured == runtime_endpoint:
+            return candidate
+        # ``public_endpoint`` is an advertisement, not an independent
+        # listener.  Align it with the process endpoint so a stale settings
+        # file cannot disable registration or sign a WireGuard address as a
+        # client route.  This also repairs old deployments on restart.
+        return {**candidate, "public_endpoint": runtime_endpoint}
+
     def start_federation_sync(self) -> None:
         """Start event synchronization over the existing 7998 control plane."""
         self.federation_sync.start()
@@ -77,6 +113,7 @@ class FederationSettingsStateMixin:
 
     def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
         candidate = self.federation_config_store.merged(payload)
+        candidate = self._reconcile_federation_endpoint(candidate)
         enabled = bool(candidate.get("enabled"))
         selected = {int(item) for item in candidate.get("ports") or []}
         available = {
