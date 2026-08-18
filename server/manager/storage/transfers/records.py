@@ -11,6 +11,7 @@ from server.manager.transfers.models import (
     TransferStatus,
 )
 from server.manager.objects.models import TransferObjectKind, legacy_object_kind
+from server.manager.transfers.media_types import normalize_content_type
 
 
 def required(value: object, *, field: str) -> str:
@@ -37,6 +38,7 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
     expires_at = float(request.expires_at)
     if expires_at <= now:
         raise ValueError("transfer request expiry must be in the future")
+    content_type = normalize_content_type(request.content_type)
     object_kind = TransferObjectKind(request.object_kind or legacy_object_kind(
         request.job_id, request.artifact_name,
     )).value
@@ -65,6 +67,7 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
         expected_size=expected_size,
         expected_sha256=expected_sha256,
         expires_at=expires_at,
+        content_type=content_type,
         object_kind=object_kind,
         object_id=object_id,
     )
@@ -89,6 +92,9 @@ def transfer_record(row: sqlite3.Row) -> TransferRecord:
         created_at=float(row["created_at"]),
         updated_at=float(row["updated_at"]),
         expires_at=float(row["expires_at"]),
+        content_type=normalize_content_type(
+            row["content_type"] if "content_type" in row.keys() else ""
+        ),
         object_kind=str(row["object_kind"] or legacy_object_kind(
             str(row["job_id"]), str(row["artifact_name"]),
         ).value),
@@ -111,6 +117,9 @@ def same_request(row: sqlite3.Row, request: NewTransfer) -> bool:
         and str(row["artifact_name"]) == request.artifact_name
         and int(row["expected_size"]) == request.expected_size
         and str(row["expected_sha256"]) == request.expected_sha256
+        and normalize_content_type(
+            row["content_type"] if "content_type" in row.keys() else ""
+        ) == request.content_type
         and str(row["object_kind"] or legacy_object_kind(
             str(row["job_id"]), str(row["artifact_name"]),
         ).value) == request.object_kind

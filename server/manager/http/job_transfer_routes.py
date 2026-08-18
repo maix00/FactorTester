@@ -65,6 +65,9 @@ class JobTransferRoutesMixin:
                 name=name,
                 expected_size=int(payload.get("size_bytes")),
                 expected_sha256=str(payload.get("sha256") or ""),
+                content_type=str(
+                    payload.get("content_type") or "application/octet-stream"
+                ),
                 idempotency_key=idempotency,
                 )
             )
@@ -184,6 +187,11 @@ class JobTransferRoutesMixin:
                         object_id=f"{job_id}:{name}",
                         expected_size=int(artifact.get("size_bytes") or 0),
                         expected_sha256=str(artifact.get("content_hash") or "").strip().lower(),
+                        content_type=str(
+                            artifact.get("content_type")
+                            or artifact.get("media_type")
+                            or "application/octet-stream"
+                        ),
                         idempotency_key=idempotency,
                         job_id=job_id,
                         artifact_name=name,

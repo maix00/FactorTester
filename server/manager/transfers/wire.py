@@ -13,6 +13,7 @@ from server.manager.transfers.models import (
     TransferRecord,
     TransferStatus,
 )
+from server.manager.transfers.media_types import normalize_content_type
 
 
 def transfer_context_payload(
@@ -57,6 +58,9 @@ def parse_transfer_context(
             **transfer_value | {
                 "operation": TransferOperation(transfer_value["operation"]),
                 "status": TransferStatus(transfer_value["status"]),
+                "content_type": normalize_content_type(
+                    transfer_value.get("content_type")
+                ),
             }
         )
         attempt = TransferAttemptRecord(

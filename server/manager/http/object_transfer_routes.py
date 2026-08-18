@@ -77,6 +77,11 @@ class ObjectTransferRoutesMixin:
                     expected_size=expected_size,
                     expected_sha256=expected_sha256,
                     idempotency_key=idempotency,
+                    content_type=str(
+                        metadata.get("content_type")
+                        or metadata.get("media_type")
+                        or "application/octet-stream"
+                    ),
                 )
             )
         except NodeUnavailable as exc:
