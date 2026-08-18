@@ -267,13 +267,18 @@ def rename_factor_source(
                 time.time(),
             ),
         )
-        _enqueue_source_metadata(
-            source_kind, owner_username, old_factor_id, "", "", deleted=True,
-        )
-        _enqueue_source_metadata(
-            source_kind, owner_username, new_factor_id, new_factor_name,
-            normalize_factor_source_code(str(row["source_code"] or "")),
-        )
+        source_code = normalize_factor_source_code(str(row["source_code"] or ""))
+    # The outbox uses a second connection to the same SQLite database.  It
+    # must run after this write transaction is closed; otherwise SQLite keeps
+    # the rename transaction open and the nested outbox write raises
+    # ``database is locked``.
+    _enqueue_source_metadata(
+        source_kind, owner_username, old_factor_id, "", "", deleted=True,
+    )
+    _enqueue_source_metadata(
+        source_kind, owner_username, new_factor_id, new_factor_name,
+        source_code,
+    )
     return str(Settings.CACHE_DB_PATH)
 
 
