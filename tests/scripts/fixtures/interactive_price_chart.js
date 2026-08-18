@@ -59,6 +59,10 @@ assert.ok(tooltip.includes("开盘价"));
 assert.ok(tooltip.includes("最高价"));
 assert.ok(tooltip.includes("最低价"));
 assert.ok(tooltip.includes("收盘价"));
+const volumeTooltip = captured.options.series[1].tooltip.pointFormatter.call({y: 100});
+const openInterestTooltip = captured.options.series[2].tooltip.pointFormatter.call({y: 80});
+assert.ok(volumeTooltip.endsWith("<br/>"));
+assert.ok(openInterestTooltip.endsWith("<br/>"));
 const localized = context.FTPriceChart.render({
   locale: "en",
   t(value) {
