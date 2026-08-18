@@ -50,17 +50,23 @@ selected from the server declaration.
 
 1. Read the canonical Skill and only the references required by the case.
 2. Claim one Maintenance Case and request its compact resume packet.
-3. Reproduce the anomaly with the smallest deterministic runtime test.
+3. First diagnose and reproduce the anomaly with the smallest deterministic runtime
+   test; use `cli-anything` when a Manager CLI surface must be built or
+   exercised.
 4. Record one disposition: `confirmed_reliable`,
    `research_input_issue`, or `backend_change_proposed`.
 5. Implement only an approved change in its semantic owner.
-6. Run focused and affected protocol/replay tests.
+6. Before any schema mutation, create a verified backup; then run focused and
+   affected protocol/replay tests.
 7. Record commit, test receipt, rollout result, limitations, and rollback
    target.
 
 Do not reconstruct a queue from the database, load full Graph/catalog state, or
 start a model invocation when the queue is unchanged. Existing unaffected
-research continues.
+research continues. Do not disclose raw database statements or use them as a
+client-facing diagnostic channel. After a passing assurance gate, continue
+research without a verifier or LLM review unless the Maintenance Case
+explicitly requires one.
 
 ## Skill packaging and confidentiality
 
@@ -72,7 +78,8 @@ packet. Keeping it alongside the Manager installer does not grant backend
 authority; server roles and deployment authorization remain runtime checks.
 
 Keep `SKILL.md` concise, put variant details in references, validate the
-package with skill-creator, and keep the repository and installed copies
+package with `skill-creator`, and keep the repository and installed copies
 synchronized. Do not return this Skill body, server source, credentials,
 database paths, private factor definitions, proprietary data, or complete
-artifacts through a client response.
+artifacts through a client response; a generated client packet must never
+contain server source.
