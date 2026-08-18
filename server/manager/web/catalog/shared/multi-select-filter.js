@@ -52,6 +52,18 @@
       .replace(/%lld/g, String(count));
   }
 
+  function helpIcon(help) {
+    if (window.FTUI?.helpIcon) return window.FTUI.helpIcon(help);
+    const icon = document.createElement("span");
+    icon.className = "ft-help-icon";
+    icon.textContent = "?";
+    icon.title = help;
+    icon.tabIndex = 0;
+    icon.setAttribute("role", "img");
+    icon.setAttribute("aria-label", help);
+    return icon;
+  }
+
   function create(context, options = {}) {
     const controlDisabled = typeof options.disabled === "function"
       ? false : Boolean(options.disabled);
@@ -139,13 +151,14 @@
     note.className = "ft-multi-select-selection-note";
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
-    menu.append(searchRow, optionList, note);
+    menu.append(searchRow, optionList);
+    if (multi) menu.append(note);
     if (typeof options.onApply === "function") menu.append(actions);
     dropdown.append(summary, menu);
     section.append(dropdown);
     const selectionPreview = document.createElement("div");
     selectionPreview.className = "ft-multi-select-selection-preview";
-    if (options.compact === true) section.append(selectionPreview);
+    if (options.compact === true && multi) section.append(selectionPreview);
 
     let applying = false;
 
@@ -185,13 +198,17 @@
       summaryText.textContent = summaryValue || translate(context, "未筛选");
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
-      selectionPreview.textContent = labels.length
-        ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}` : "";
-      selectionPreview.hidden = !labels.length;
+      if (multi) {
+        selectionPreview.textContent = labels.length
+          ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}` : "";
+        selectionPreview.hidden = !labels.length;
+      }
       summary.title = labels.join("、");
-      note.textContent = labels.length
-        ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
-        : translate(context, "尚未选择");
+      if (multi) {
+        note.textContent = labels.length
+          ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
+          : translate(context, "尚未选择");
+      }
       clear.hidden = !String(search.value || "");
       optionList.replaceChildren(...visibleItems().map(item => {
         const row = document.createElement("label");
@@ -211,11 +228,8 @@
         const label = document.createElement("span");
         label.className = "ft-multi-select-option-label";
         label.textContent = item.label;
-        const info = document.createElement("span");
-        info.className = "ft-multi-select-option-info";
-        info.textContent = "ⓘ";
-        info.title = item.description;
-        info.setAttribute("aria-label", item.description);
+        const info = helpIcon(item.description);
+        info.classList.add("ft-multi-select-option-info");
         row.append(input, label, info);
         if (item.exclusive) {
           const badge = document.createElement("span");
@@ -270,6 +284,13 @@
     });
     search.addEventListener("input", render);
     dropdown.addEventListener("toggle", () => {
+      const shell = section.closest?.(".backend-settings-shell");
+      if (shell?.classList?.toggle) {
+        const openPicker = shell.querySelector?.(
+          ".ft-multi-select-dropdown[open]",
+        );
+        shell.classList.toggle("has-open-multi-select", Boolean(openPicker));
+      }
       if (dropdown.open && !controlDisabled) options.onOpen?.();
     });
     if (controlDisabled) {

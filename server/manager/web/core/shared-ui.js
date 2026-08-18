@@ -69,8 +69,20 @@
     return button;
   }
 
+  function helpIcon(help) {
+    const label = text(help).trim();
+    const icon = document.createElement("span");
+    icon.className = "ft-help-icon";
+    icon.textContent = "?";
+    icon.title = label;
+    icon.tabIndex = 0;
+    icon.setAttribute("role", "img");
+    icon.setAttribute("aria-label", label);
+    return icon;
+  }
+
   window.FTUI = {
-    actionButton, appendRow, code, empty, fieldRows, formatDate, loading,
+    actionButton, appendRow, code, empty, fieldRows, formatDate, helpIcon, loading,
     table, text,
   };
 })();

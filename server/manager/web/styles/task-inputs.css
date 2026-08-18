@@ -26,6 +26,7 @@
 .test-workbench .test-settings-manager { gap: 7px; padding: 8px 0 10px; }
 .test-workbench .test-settings-manager-list > label { min-height: 0; padding: 2px 0; }
 .test-workbench .test-settings-shell { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+.test-workbench .test-settings-shell.has-open-multi-select { overflow: visible; }
 .test-workbench .test-settings-current { display: grid; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
 .test-workbench .test-settings-current > strong { font-size: 12px; }
 .test-workbench .test-settings-current .backend-settings-chip-row { padding: 0; border: 0; background: transparent; }

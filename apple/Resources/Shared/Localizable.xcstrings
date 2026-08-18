@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "Mihomo Dashboard" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mihomo Dashboard"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Mihomo 控制面板"}}}},
+    "Mihomo Dashboard 不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mihomo Dashboard is unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Mihomo 控制面板不可用"}}}},
+    "打开官方 Mihomo Dashboard" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open the official Mihomo Dashboard"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开官方 Mihomo 控制面板"}}}},
     "客户端设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Client settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"客户端设置"}}}},
     "用户与机构" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Users and organizations"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"用户与机构"}}}},
     "管理用户、机构、层级和研究权限；中央 PostgreSQL 是权威数据源，Manager SQLite 仅保留离线登录镜像。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Manage users, organizations, hierarchy, and research permissions; central PostgreSQL is authoritative and Manager SQLite keeps only the offline-login mirror."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"管理用户、机构、层级和研究权限；中央 PostgreSQL 是权威数据源，Manager SQLite 仅保留离线登录镜像。"}}}},

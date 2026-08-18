@@ -6,6 +6,7 @@
   background: var(--panel);
   overflow: hidden;
 }
+.backend-settings-shell.has-open-multi-select { overflow: visible; }
 .backend-settings-tab-bar {
   display: flex;
   gap: 6px;
@@ -95,6 +96,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row:last-child { border-bottom: 0; }
 .test-setting-row > span { display: grid; gap: 2px; min-width: 0; }
+.test-field-row-heading { display: inline-flex; align-items: center; gap: 5px; min-width: 0; width: fit-content; }
 .test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
 .factor-role-bindings { display: grid; gap: 6px; min-width: 0; }
 .factor-role-bindings > label { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 8px; align-items: center; }

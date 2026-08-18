@@ -17,6 +17,10 @@ class Element {
   setAttribute(name, value) { this[name] = String(value); }
 }
 
+function descendants(root) {
+  return [root, ...root.children.flatMap(descendants)];
+}
+
 global.window = {};
 global.document = {createElement: tag => new Element(tag)};
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
@@ -47,6 +51,7 @@ const multi = window.FTMultiSelectFilter.create({t: value => value}, {
   items: [{value: "a", label: "A"}, {value: "b", label: "B"}],
   selected: ["a"],
   multi: false,
+  compact: true,
 });
 assert.deepEqual(multi.values, ["a"]);
 assert.equal(multi.summary.children[0].textContent, "A");
@@ -55,4 +60,15 @@ bInput.checked = true;
 bInput.listeners.change();
 assert.deepEqual(multi.values, ["b"]);
 assert.equal(multi.summary.children[0].textContent, "B");
+assert.equal(descendants(multi.element).some(item => (
+  item.className === "ft-multi-select-selection-note"
+)), false, "single choice must not render a redundant selected note");
+assert.equal(descendants(multi.element).some(item => (
+  item.className === "ft-multi-select-selection-preview"
+)), false, "compact single choice must not render a redundant selected preview");
+const optionHelp = descendants(multi.optionList).find(item => (
+  String(item.className).includes("ft-help-icon")
+));
+assert.ok(optionHelp, "choice descriptions should use the shared help icon");
+assert.equal(optionHelp.textContent, "?");
 console.log("ok");

@@ -172,7 +172,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-option.is-exclusive .ft-multi-select-option-label { font-weight: 700; }
 .ft-multi-select-exclusive-badge { border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: 999px; padding: 1px 5px; color: var(--accent); background: var(--panel); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .ft-multi-select-option-label { min-width: 0; overflow-wrap: anywhere; }
-.ft-multi-select-option-info { color: var(--muted); font-size: 12px; cursor: help; }
+.ft-help-icon { display: inline-grid; place-items: center; flex: 0 0 auto; width: 14px; height: 14px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1; cursor: help; }
+.ft-help-icon:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+.ft-multi-select-option-info { color: var(--muted); }
+.ft-multi-select-dropdown[open] { z-index: 40; }
 .ft-multi-select-selection-note { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .ft-multi-select-actions { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--line); }
 .ft-multi-select-apply { padding: 5px 10px; }
