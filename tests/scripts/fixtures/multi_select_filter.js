@@ -71,4 +71,47 @@ const optionHelp = descendants(multi.optionList).find(item => (
 ));
 assert.ok(optionHelp, "choice descriptions should use the shared help icon");
 assert.equal(optionHelp.textContent, "?");
-console.log("ok");
+
+(async () => {
+  const multiChanges = [];
+  const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [
+      {value: "a", label: "A"},
+      {value: "b", label: "B"},
+      {value: "c", label: "C"},
+    ],
+    selected: ["a"],
+    onChange: values => multiChanges.push(values),
+  });
+  const cInput = multiSave.optionList.children[2].children[0];
+  cInput.checked = true;
+  cInput.listeners.change();
+  assert.deepEqual(multiSave.values, ["a", "c"]);
+  assert.deepEqual(multiChanges, [], "multi-select changes stay draft until saved");
+  const saveButton = descendants(multiSave.element).find(item => (
+    item.className === "primary ft-multi-select-apply"
+  ));
+  assert.ok(saveButton, "multi-select must expose a save action");
+  await saveButton.listeners.click();
+  assert.deepEqual(multiChanges, [["a", "c"]]);
+  assert.equal(multiSave.dropdown.open, false);
+
+  const cancel = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "a", label: "A"}, {value: "b", label: "B"}],
+    selected: ["a"],
+    onChange: values => multiChanges.push(values),
+  });
+  cancel.dropdown.open = true;
+  const cancelB = cancel.optionList.children[1].children[0];
+  cancelB.checked = true;
+  cancelB.listeners.change();
+  assert.deepEqual(cancel.values, ["a", "b"]);
+  cancel.dropdown.open = false;
+  cancel.dropdown.listeners.toggle();
+  assert.deepEqual(cancel.values, ["a"], "closing without saving discards the draft");
+  assert.deepEqual(multiChanges, [["a", "c"]]);
+  console.log("ok");
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

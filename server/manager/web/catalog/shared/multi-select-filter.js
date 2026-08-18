@@ -75,6 +75,7 @@
     const multi = options.multi !== false;
     let selected = normalizeSelected(options.selected ?? [], items);
     if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
+    let committedSelected = [...selected];
 
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
@@ -153,7 +154,7 @@
     actions.className = "ft-multi-select-actions";
     menu.append(searchRow, optionList);
     if (multi) menu.append(note);
-    if (typeof options.onApply === "function") menu.append(actions);
+    if (multi || typeof options.onApply === "function") menu.append(actions);
     dropdown.append(summary, menu);
     section.append(dropdown);
     const selectionPreview = document.createElement("div");
@@ -271,7 +272,11 @@
             selected = selected.filter(value => value !== item.value);
           }
           render();
-          options.onChange?.([...selected]);
+          if (!multi) {
+            committedSelected = [...selected];
+            options.onChange?.([...selected]);
+            dropdown.open = false;
+          }
         });
         return row;
       }));
@@ -292,6 +297,10 @@
         shell.classList.toggle("has-open-multi-select", Boolean(openPicker));
       }
       if (dropdown.open && !controlDisabled) options.onOpen?.();
+      if (!dropdown.open && multi && !applying) {
+        selected = [...committedSelected];
+        render();
+      }
     });
     if (controlDisabled) {
       summary.addEventListener("click", event => {
@@ -300,17 +309,26 @@
       });
     }
 
-    if (typeof options.onApply === "function") {
+    if (multi || typeof options.onApply === "function") {
       const apply = document.createElement("button");
       apply.type = "button";
       apply.className = "primary ft-multi-select-apply";
-      apply.textContent = options.applyLabel || translate(context, "应用");
+      apply.textContent = options.applyLabel
+        || translate(context, "保存", "保存");
+      apply.disabled = controlDisabled;
       apply.addEventListener("click", async () => {
-        if (applying) return;
+        if (applying || controlDisabled) return;
         applying = true;
         apply.disabled = true;
         try {
-          await options.onApply([...selected]);
+          let result;
+          if (typeof options.onApply === "function") {
+            result = options.onApply([...selected]);
+          } else {
+            result = options.onChange?.([...selected]);
+          }
+          if (result && typeof result.then === "function") await result;
+          committedSelected = [...selected];
           dropdown.open = false;
         } catch (error) {
           context.showNotice?.(error.message || translate(context, "应用失败"), true);
@@ -337,6 +355,7 @@
       setValues(values) {
         selected = normalizeSelected(values, items);
         if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
+        committedSelected = [...selected];
         render();
       },
       setItems(nextItems) {
@@ -347,6 +366,7 @@
         })));
         selected = normalizeSelected(selected, items);
         if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
+        committedSelected = [...selected];
         render();
       },
     });

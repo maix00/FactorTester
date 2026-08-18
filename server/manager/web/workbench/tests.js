@@ -508,7 +508,8 @@
       }
     }
     if (window.FTTestRunBatch) {
-      root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
+      const runBatch = FTTestRunBatch.render(context, state, () => render(context, state));
+      if (runBatch) root.append(runBatch);
     } else {
       const runBatchCode = state.runBatchCode || {};
       root.append(runBatchCode.status === "error"
