@@ -69,6 +69,7 @@ const context = {
     }
     return {
       port: 8141,
+      server_id: "public-1",
       run: {run_id: `run-${index}`, run_spec_hash: `${"b".repeat(63)}${index}`},
       jobs: [{job_id: `job-${index}`}],
     };
@@ -132,13 +133,13 @@ const backtest = {
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
   assert.equal(state.activeRunGroupID, "night");
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141, 8141]);
-  assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1");
+  assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["all"]);
   await batch.runAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].jobID, "job-3");
-  assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3");
+  assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3?server_id=public-1");
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(requests.at(-1).body.retention_mode, "summary");
   assert.deepEqual(requests.at(-1).body.output_requests, ["equity_curve"]);

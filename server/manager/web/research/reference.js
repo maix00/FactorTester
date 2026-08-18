@@ -48,7 +48,7 @@
     return String(target).slice(prefix.length);
   }
 
-  function pathFor(kind, target) {
+  function pathFor(kind, target, serverID = "") {
     kind = normalizeKind(kind);
     const value = String(target || "");
     if (kind === "evidence" && value.startsWith("evidence:")) {
@@ -60,7 +60,11 @@
     }
     if (kind === "run-spec") {
       const digest = digestFor(kind, value);
-      return digest ? `/api/run-specs/${encodeURIComponent(digest)}` : "";
+      if (!digest) return "";
+      const endpoint = `/api/run-specs/${encodeURIComponent(digest)}`;
+      return serverID
+        ? `${endpoint}?server_id=${encodeURIComponent(serverID)}`
+        : endpoint;
     }
     if (kind === "run" && value.startsWith("run:")) {
       return `/api/runs/${encodeURIComponent(value.slice("run:".length))}`;
@@ -68,11 +72,12 @@
     return "";
   }
 
-  function routeFor(kind, target, label = "") {
+  function routeFor(kind, target, label = "", serverID = "") {
     const query = new URLSearchParams({
       kind: normalizeKind(kind), target: String(target || ""),
     });
     if (label) query.set("label", String(label));
+    if (serverID) query.set("server_id", String(serverID));
     return `/reference?${query.toString()}`;
   }
 
@@ -146,8 +151,8 @@
     return {presentation, header};
   }
 
-  async function loadObject(kind, target, context) {
-    const endpoint = pathFor(kind, target);
+  async function loadObject(kind, target, context, serverID = "") {
+    const endpoint = pathFor(kind, target, serverID);
     if (!endpoint) return {value: null, endpoint: ""};
     try {
       return {value: unwrap(kind, await context.api(endpoint)), endpoint};
@@ -163,13 +168,16 @@
     const kind = normalizeKind(input.kind);
     const target = String(input.target || "");
     const label = String(input.label || "");
+    const serverID = String(
+      input.serverID || new URLSearchParams(location.search).get("server_id") || "",
+    ).trim();
     const {content, t} = context;
     context.activeNav("");
     const heading = objectTitle(kind, target, label, t);
     context.setHeading(heading, t("引用详情"));
     context.updateActiveTab({title: heading});
     content.replaceChildren(FTUI.loading(t("正在读取引用详情…")));
-    const loaded = await loadObject(kind, target, context);
+    const loaded = await loadObject(kind, target, context, serverID);
     const value = loaded.value;
     const {presentation, header} = headerFor(kind, heading, t);
     const root = document.createElement("div");

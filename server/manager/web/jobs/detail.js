@@ -146,15 +146,22 @@
     return anchor;
   }
 
-  function runSpecReference(taskDetail, job, context) {
+  function runSpecReference(taskDetail, job, context, serverID = "") {
     const hash = String(job.run_spec_hash || taskDetail.run_spec_hash
       || taskDetail.configuration?.run_spec_hash || "");
     if (!/^(?:sha256:)?[a-f0-9]{64}$/i.test(hash)) return null;
     const target = `runspec:sha256:${hash.replace(/^sha256:/i, "")}`;
+    const targetServerID = String(
+      serverID || job.execution_server_id || job.server_id
+        || taskDetail.execution_server_id || taskDetail.server_id || "",
+    ).trim();
     return {
       title: context.t("查看运行配置"),
       target,
-      path: FTReferencePage.routeFor("run-spec", target, context.t("运行配置")),
+      serverID: targetServerID,
+      path: FTReferencePage.routeFor(
+        "run-spec", target, context.t("运行配置"), targetServerID,
+      ),
     };
   }
 
@@ -259,9 +266,9 @@
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
-    const runSpec = runSpecReference(taskDetail, job, context);
+    const runSpec = runSpecReference(taskDetail, job, context, resolvedServerID);
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
-      FTRunSpecView.open(context, runSpec.target);
+      FTRunSpecView.open(context, runSpec.target, runSpec.serverID);
     }, runSpec.title));
     if (!localRun) FTJobActions.install(context, {
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
@@ -435,7 +442,7 @@
     const loaded = await fetchDetail(context, port, jobID, serverID);
     if (!isCurrent()) return;
     const {taskDetail, job} = loaded;
-    const runSpec = runSpecReference(taskDetail, job, context);
+    const runSpec = runSpecReference(taskDetail, job, context, loaded.serverID);
     if (!runSpec) {
       context.content.replaceChildren(FTUI.empty(
         context.t("无法读取运行配置"), context.t("任务没有绑定运行配置"),
@@ -444,6 +451,7 @@
     }
     return FTReferencePage.render(context, {
       kind: "run-spec", target: runSpec.target, label: context.t("运行配置"),
+      serverID: runSpec.serverID,
     });
   }
 

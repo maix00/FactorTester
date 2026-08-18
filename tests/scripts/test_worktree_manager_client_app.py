@@ -639,6 +639,8 @@ def test_run_submission_skips_route_without_data_capability(
             value = json.loads(response.read())
 
     assert value["success"] is True
+    assert value["server_id"] == "far-with-data"
+    assert value["execution_server_id"] == "far-with-data"
     assert response.headers["X-FactorTester-Service-Server"] == "far-with-data"
     assert calls == [
         ("near-no-data", "/api/runs/capability-preview"),
@@ -1484,6 +1486,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/test-templates.js", "workbench/test-content-adapters.js",
             "workbench/templates/actions.js",
             "workbench/test-run-results.js",
+            "workbench/test-run-progress.js",
             "workbench/run-batch/model.js",
             "workbench/test-run-batch.js",
             "workbench/run-batch/actions.js",

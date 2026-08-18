@@ -38,7 +38,7 @@
     view.label.textContent = `${phase}${count}${percent == null ? "" : ` · ${percent.toFixed(1)}%`}`;
   }
 
-  async function watchProgress(context, jobID, portQuery, view) {
+  async function watchProgress(context, jobID, portQuery, view, options = {}) {
     const controller = new AbortController();
     progressAbort = controller;
     try {
@@ -56,11 +56,17 @@
           const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:"))
             .map(line => line.slice(5).trim()).join("\n");
           if (!data) return;
-          try { updateProgress(view, JSON.parse(data)); } catch (_) {}
+          try {
+            const payload = JSON.parse(data);
+            updateProgress(view, payload);
+            options.onPayload?.(payload);
+          } catch (_) {}
         });
       }
     } catch (error) {
       if (error.name !== "AbortError") view.label.textContent = context.t("实时进度暂不可用");
+    } finally {
+      options.onComplete?.();
     }
   }
 

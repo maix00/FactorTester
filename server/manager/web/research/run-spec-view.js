@@ -102,14 +102,18 @@
     return /^[a-f0-9]{64}$/i.test(result) ? result.toLowerCase() : "";
   }
 
-  async function load(context, target) {
+  async function load(context, target, serverID = "") {
     const hash = digest(target);
     if (!hash) throw new Error(context.t("运行配置引用无效"));
-    const payload = await context.api(`/api/run-specs/${encodeURIComponent(hash)}`);
+    const suffix = serverID
+      ? `?server_id=${encodeURIComponent(serverID)}` : "";
+    const payload = await context.api(
+      `/api/run-specs/${encodeURIComponent(hash)}${suffix}`,
+    );
     return payload?.run_spec || payload;
   }
 
-  function open(context, target) {
+  function open(context, target, serverID = "") {
     const dialog = document.createElement("dialog");
     dialog.className = "run-spec-dialog";
     const card = document.createElement("article");
@@ -130,7 +134,7 @@
     const independent = FTUI.actionButton(context.t("在独立页面打开"), () => {
       dialog.close();
       context.navigate(FTReferencePage.routeFor(
-        "run-spec", target, context.t("运行配置"),
+        "run-spec", target, context.t("运行配置"), serverID,
       ));
     });
     header.append(copy, independent);
@@ -147,7 +151,7 @@
     dialog.append(card);
     document.body.append(dialog);
     dialog.showModal();
-    load(context, target).then(value => {
+    load(context, target, serverID).then(value => {
       body.replaceChildren(render(context, value));
     }).catch(error => {
       body.replaceChildren(FTUI.empty(

@@ -511,21 +511,10 @@
       root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     } else {
       const runBatchCode = state.runBatchCode || {};
-      if (FTTestLazyCode.hasSelectedProductPaths(state)) {
-        root.append(runBatchCode.status === "error"
-          ? FTUI.empty(context.t("读取任务代码失败"), runBatchCode.error)
-          : FTUI.loading(context.t("正在读取产品路径任务代码…")));
-        ensureRunBatchCode(context, state, () => render(context, state));
-      } else {
-        const deferred = document.createElement("section");
-        deferred.className = "test-run-batch test-code-deferred-panel";
-        const title = document.createElement("strong");
-        title.textContent = context.t("产品路径任务");
-        const note = document.createElement("small");
-        note.textContent = context.t("选择产品路径后加载任务代码");
-        deferred.append(title, note);
-        root.append(deferred);
-      }
+      root.append(runBatchCode.status === "error"
+        ? FTUI.empty(context.t("读取任务代码失败"), runBatchCode.error)
+        : FTUI.loading(context.t("正在读取产品路径任务代码…")));
+      ensureRunBatchCode(context, state, () => render(context, state));
     }
     context.content.replaceChildren(root);
   }
