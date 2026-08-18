@@ -77,6 +77,44 @@ def test_api_endpoint_requires_running_process(tmp_path: Path) -> None:
         supervisor.api_endpoint()
 
 
+def test_start_waits_for_mixed_proxy_listener(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source.yaml"
+    source.write_text("proxies: []\n", encoding="utf-8")
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.returncode = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    process = FakeProcess()
+    monkeypatch.setattr(
+        "server.manager.services.mihomo_supervisor.subprocess.Popen",
+        lambda *args, **kwargs: process,
+    )
+    supervisor = MihomoSupervisor(
+        tmp_path / "state",
+        binary="/bin/sh",
+        source_config=str(source),
+    )
+    monkeypatch.setattr(supervisor, "_version", lambda: "v1.19.30")
+    readiness = iter((False, True))
+    monkeypatch.setattr(supervisor, "_proxy_ready", lambda: next(readiness))
+
+    value = supervisor.start()
+
+    assert value["running"] is True
+    assert value["version"] == "v1.19.30"
+    supervisor.stop()
+
+
 def test_mihomo_module_is_super_admin_only() -> None:
     assert not any(item["id"] == "mihomo" for item in navigation_modules(None))
     modules = navigation_modules({"role": "super_admin"})

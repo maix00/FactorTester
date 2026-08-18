@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -89,7 +90,7 @@ class MihomoSupervisor:
             while time.monotonic() < deadline:
                 if self._process.poll() is not None:
                     raise MihomoError("Mihomo exited during startup")
-                if self._version():
+                if self._version() and self._proxy_ready():
                     self._state.update({"enabled": True, "last_error": ""})
                     self._save_state()
                     return self.status()
@@ -144,6 +145,17 @@ class MihomoSupervisor:
             return str(value.get("version") or "") if isinstance(value, dict) else ""
         except (OSError, URLError, ValueError, json.JSONDecodeError):
             return ""
+
+    def _proxy_ready(self) -> bool:
+        """Return whether the mixed proxy listener accepts local connections."""
+        try:
+            with socket.create_connection(
+                (self.api_host, self.proxy_port),
+                timeout=0.35,
+            ):
+                return True
+        except OSError:
+            return False
 
     def _read_state(self) -> dict[str, object]:
         try:
