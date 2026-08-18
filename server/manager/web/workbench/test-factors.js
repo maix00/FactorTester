@@ -1,5 +1,10 @@
 (() => {
   function prepare(state) {
+    // The factor UI is preloaded before the settings registry creates the
+    // editable values object.  Preparing the in-memory selector must remain
+    // safe during that first phase; the later settings initialization will
+    // replace this object and `initialize` will prepare it again.
+    state.values = state.values || {};
     state.values.factor_candidates = FTTestFactorSelection.candidates(state);
     FTTestFactorSelection.restoreFrozenSelections(state);
     FTTestFactorSelection.syncSelection(state);
