@@ -314,6 +314,7 @@
     "profile": [
       "profile/agent-skills.js",
       "profile/agent-chat.js",
+      "profile/workspace-browser.js",
       "profile/profiles.js",
       "profile/agent-models.js"
     ],
@@ -477,6 +478,7 @@
     "workbench/tests.js",
     "profile/agent-skills.js",
     "profile/agent-chat.js",
+    "profile/workspace-browser.js",
     "profile/profiles.js",
     "profile/agent-models.js",
     "settings/settings.js",

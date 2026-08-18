@@ -131,10 +131,7 @@ def test_profile_has_one_runtime_and_one_live_claim(tmp_path):
         PROFILE_ID,
     )
     workspace = tmp_path / "data" / runtime["workspace_relpath"]
-    assert {path.name for path in workspace.iterdir()} == {
-        *WORKSPACE_DIRECTORIES,
-        ".codex",
-    }
+    assert {path.name for path in workspace.iterdir()} == set(WORKSPACE_DIRECTORIES)
 
     first = service.claim(
         PRINCIPAL,
@@ -142,6 +139,7 @@ def test_profile_has_one_runtime_and_one_live_claim(tmp_path):
         provider_id=provider["provider_id"],
         agent_id="agent-a",
     )
+    assert (workspace / ".codex").is_dir()
     same_agent = service.claim(
         PRINCIPAL,
         PROFILE_ID,

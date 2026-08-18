@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 from server.manager.http.responses import json_response
 from server.manager.services.agent_skill_catalog import AgentSkillCatalogError
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.profile_workspace_browser import ProfileWorkspaceError
 from server.manager.storage.agent_provider_store import ProviderStoreError
 from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
@@ -111,6 +112,31 @@ class AgentRoutesMixin:
                 return True
             except (AgentSkillCatalogError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
+                return True
+            json_response(self, {"success": True, **value})
+            return True
+
+        if parsed.path == "/api/client/profile-workspace":
+            session = self._agent_session()
+            if session is None:
+                return True
+            try:
+                principal = self._agent_principal(session)
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                profile_id = query.get("profile_id", [""])[0].strip()
+                if not self._profile_exists(principal, profile_id):
+                    raise ProfileWorkspaceError(
+                        "Profile does not belong to current account",
+                    )
+                relative_path = query.get("path", [""])[0]
+                value = self._agent_service().profile_workspace(
+                    principal, profile_id, relative_path,
+                )
+            except sqlite3.Error:
+                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                return True
+            except (ProfileWorkspaceError, RuntimeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
             json_response(self, {"success": True, **value})
             return True

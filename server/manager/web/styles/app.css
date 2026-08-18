@@ -406,6 +406,12 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-section-tab { border: 0; border-radius: 7px; padding: 7px 14px; color: inherit; background: transparent; white-space: nowrap; }
 .research-section-tab.active { color: white; background: var(--accent); }
 .research-section-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.profile-detail-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
+.profile-detail-tab { border: 0; border-radius: 7px; padding: 7px 13px; color: inherit; background: transparent; white-space: nowrap; }
+.profile-detail-tab.active { color: white; background: var(--accent); }
+.profile-detail-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.profile-workspace-browser .table-link { border: 0; padding: 0; background: transparent; color: var(--accent); text-align: left; }
+.profile-workspace-browser .table-link:hover { text-decoration: underline; }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }
 .topbar .research-section-tab { padding: 6px 11px; }

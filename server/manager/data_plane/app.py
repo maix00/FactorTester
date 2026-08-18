@@ -17,6 +17,9 @@ from server.manager.objects.adapters.factor_source import (
     FactorSourceDestinationAdapter,
     FactorSourceOriginAdapter,
 )
+from server.manager.objects.adapters.profile_workspace import (
+    ProfileWorkspaceOriginAdapter,
+)
 from server.manager.objects.adapters.client_release import (
     ClientReleaseDestinationAdapter,
 )
@@ -68,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--research-root", default="")
     parser.add_argument("--factor-source-database", default="")
     parser.add_argument("--local-run-database", default="")
+    parser.add_argument("--profile-workspace-root", default="")
     parser.add_argument("--origin-cache-root", default="")
     parser.add_argument("--release-root", default="")
     parser.add_argument("--release-trust-root", default="")
@@ -111,6 +115,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         adapters[TransferObjectKind.LOCAL_RUN_ARTIFACT.value] = LocalRunArtifactOriginAdapter(
             database=args.local_run_database,
             submission_root=args.submission_root,
+        )
+    if args.profile_workspace_root:
+        adapters[TransferObjectKind.PROFILE_WORKSPACE.value] = ProfileWorkspaceOriginAdapter(
+            data_root=args.profile_workspace_root,
         )
     destination_adapters = {}
     if args.release_root and args.release_trust_root:

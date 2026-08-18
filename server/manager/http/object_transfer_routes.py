@@ -6,6 +6,9 @@ from server.manager.http.responses import json_response
 from server.manager.objects.models import TransferObjectKind
 from server.manager.objects.references import research_object_id
 from server.manager.services.federated_public_data import VISITOR_PRINCIPAL
+from server.manager.services.profile_workspace_browser import (
+    ProfileWorkspaceError,
+)
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
@@ -19,6 +22,9 @@ _RESEARCH_KINDS = frozenset({
     TransferObjectKind.RESEARCH_ASSET.value,
     TransferObjectKind.RESEARCH_ATTACHMENT.value,
     TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value,
+})
+_DOWNLOADABLE_KINDS = _RESEARCH_KINDS | frozenset({
+    TransferObjectKind.PROFILE_WORKSPACE.value,
 })
 
 
@@ -44,26 +50,41 @@ class ObjectTransferRoutesMixin:
         try:
             payload = self._json_body(64 * 1024)
             object_kind = str(payload.get("object_kind") or "").strip()
-            if object_kind not in _RESEARCH_KINDS:
+            if object_kind not in _DOWNLOADABLE_KINDS:
                 raise ValueError("object kind is not downloadable")
-            publication_id = str(payload.get("publication_id") or "").strip()
-            item_id = str(payload.get("item_id") or payload.get("object_id") or "").strip()
-            if not publication_id or not item_id:
-                raise ValueError("publication_id and object_id are required")
-            research = getattr(
-                self.state, "federated_public_research", self.state.public_research,
-            )
-            metadata = research.object_metadata(
-                publication_id, object_kind, item_id, viewer,
-            )
-            expected_size = int(metadata.get("size_bytes") or 0)
-            expected_sha256 = str(metadata.get("content_hash") or "").strip().lower()
-            storage_server_id = str(
-                metadata.get("storage_server_id") or self.state.server_id
-            ).strip()
-            if len(expected_sha256) != 64:
-                raise ValueError("research object metadata has no content hash")
-            object_id = research_object_id(publication_id, item_id)
+            if object_kind == TransferObjectKind.PROFILE_WORKSPACE.value:
+                if session is None:
+                    raise PermissionError("login required")
+                profile_id = str(payload.get("profile_id") or "").strip()
+                relative_path = str(payload.get("path") or "")
+                metadata = self.state.agent_profiles.profile_workspace_file(
+                    principal, profile_id, relative_path,
+                )
+                expected_size = int(metadata.get("size_bytes") or 0)
+                expected_sha256 = str(metadata.get("sha256") or "").strip().lower()
+                storage_server_id = str(
+                    metadata.get("storage_server_id") or self.state.server_id
+                ).strip()
+                object_id = str(metadata.get("object_id") or "").strip()
+            else:
+                publication_id = str(payload.get("publication_id") or "").strip()
+                item_id = str(payload.get("item_id") or payload.get("object_id") or "").strip()
+                if not publication_id or not item_id:
+                    raise ValueError("publication_id and object_id are required")
+                research = getattr(
+                    self.state, "federated_public_research", self.state.public_research,
+                )
+                metadata = research.object_metadata(
+                    publication_id, object_kind, item_id, viewer,
+                )
+                expected_size = int(metadata.get("size_bytes") or 0)
+                expected_sha256 = str(metadata.get("content_hash") or "").strip().lower()
+                storage_server_id = str(
+                    metadata.get("storage_server_id") or self.state.server_id
+                ).strip()
+                if len(expected_sha256) != 64:
+                    raise ValueError("research object metadata has no content hash")
+                object_id = research_object_id(publication_id, item_id)
             idempotency = str(
                 self.headers.get("Idempotency-Key")
                 or f"research-download:{object_kind}:{object_id}:{expected_sha256}"
@@ -97,7 +118,7 @@ class ObjectTransferRoutesMixin:
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return True
-        except (TypeError, ValueError, KeyError) as exc:
+        except (ProfileWorkspaceError, TypeError, ValueError, KeyError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 404)
             return True
         except (ConnectionError, OSError, RuntimeError) as exc:
@@ -108,7 +129,7 @@ class ObjectTransferRoutesMixin:
             "object": {
                 "object_kind": object_kind,
                 "object_id": object_id,
-                "filename": metadata.get("filename") or item_id,
+                "filename": metadata.get("filename") or metadata.get("path") or object_id,
                 "content_type": metadata.get("content_type") or "application/octet-stream",
                 "size_bytes": expected_size,
                 "sha256": expected_sha256,
