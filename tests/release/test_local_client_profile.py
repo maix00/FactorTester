@@ -217,6 +217,18 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    import tools.cli.commands.client_profile as command_module
+
+    monkeypatch.setattr(
+        command_module,
+        "_sync_profile",
+        lambda _profile, *, manager_url="": {
+            "status": "pending",
+            "synced": False,
+            "pending": True,
+            "manager_url": manager_url,
+        },
+    )
     runner = CliRunner()
 
     result = runner.invoke(cli, [
