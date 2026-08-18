@@ -670,9 +670,8 @@ class JobProjectionStateMixin:
 
         combined: list[dict[str, object]] = []
         source_status: list[dict[str, object]] = []
-        local_total = 0
-        local_more = False
-        try:
+
+        def query_local() -> tuple[dict[str, object], list[dict[str, object]]]:
             if source_scope == "server":
                 local_payload = self.aggregate_server_jobs(
                     principal=principal,
@@ -698,34 +697,13 @@ class JobProjectionStateMixin:
                     local_jobs.append(item)
                     continue
                 try:
-                    local_port = int(item.get("port") or item.get("service_port") or 0)
+                    local_port = int(
+                        item.get("port") or item.get("service_port") or 0,
+                    )
                 except (TypeError, ValueError):
                     local_port = 0
                 local_jobs.append(self._annotate_local_job(item, local_port))
-            combined.extend(local_jobs)
-            local_total = int(local_payload.get("total") or len(local_jobs))
-            local_more = bool(local_payload.get("has_more"))
-            source_status.append({
-                "server_id": self.server_id,
-                "endpoint": os.environ.get(
-                    "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
-                    "http://127.0.0.1:7998",
-                ),
-                "status": "ok" if not local_payload.get("stale") else "stale",
-                "job_count": len(local_jobs),
-                "total": local_total,
-                "has_more": local_more,
-            })
-        except (ConnectionError, OSError, TypeError, ValueError) as exc:
-            source_status.append({
-                "server_id": self.server_id,
-                "status": "error",
-                "job_count": 0,
-                "total": 0,
-                "error": str(exc),
-            })
-
-        peer_routes = self._federation_manager_routes()
+            return local_payload, local_jobs
 
         def query_peer(route: ServiceRoute) -> tuple[ServiceRoute, dict[str, object]]:
             return route, self.federation_gateway.query_jobs(
@@ -738,50 +716,84 @@ class JobProjectionStateMixin:
                 username=username,
             )
 
-        if peer_routes:
-            for route in peer_routes:
-                if not route.online:
+        peer_routes = self._federation_manager_routes()
+        for route in peer_routes:
+            if not route.online:
+                source_status.append({
+                    "server_id": route.server_id,
+                    "endpoint": route.endpoint,
+                    "status": "offline",
+                    "job_count": 0,
+                    "total": 0,
+                    "error": "registered server is offline",
+                })
+        online_peer_routes = [route for route in peer_routes if route.online]
+        # The local service request used to finish before any peer request was
+        # submitted.  A slow worktree therefore blocked every remote source
+        # even though the federation gateway could already be serving them.
+        # Submit the local and peer reads together; the persistent source
+        # status still records each result independently.
+        with ThreadPoolExecutor(
+            max_workers=min(1 + len(online_peer_routes), 8),
+        ) as pool:
+            futures = {
+                pool.submit(query_local): None,
+                **{
+                    pool.submit(query_peer, route): route
+                    for route in online_peer_routes
+                },
+            }
+            for future in as_completed(futures):
+                route = futures[future]
+                if route is None:
+                    try:
+                        local_payload, local_jobs = future.result()
+                    except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                        source_status.append({
+                            "server_id": self.server_id,
+                            "status": "error",
+                            "job_count": 0,
+                            "total": 0,
+                            "error": str(exc),
+                        })
+                        continue
+                    combined.extend(local_jobs)
                     source_status.append({
-                        "server_id": route.server_id,
-                        "endpoint": route.endpoint,
-                        "status": "offline",
+                        "server_id": self.server_id,
+                        "endpoint": os.environ.get(
+                            "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+                            "http://127.0.0.1:7998",
+                        ),
+                        "status": "ok" if not local_payload.get("stale") else "stale",
+                        "job_count": len(local_jobs),
+                        "total": int(local_payload.get("total") or len(local_jobs)),
+                        "has_more": bool(local_payload.get("has_more")),
+                    })
+                    continue
+                base_status = {
+                    "server_id": route.server_id,
+                    "endpoint": route.endpoint,
+                    "status": "ok",
+                }
+                try:
+                    _route, payload = future.result()
+                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                    source_status.append({
+                        **base_status,
+                        "status": "error",
                         "job_count": 0,
                         "total": 0,
-                        "error": "registered server is offline",
+                        "error": str(exc),
                     })
-            online_peer_routes = [route for route in peer_routes if route.online]
-            if online_peer_routes:
-                with ThreadPoolExecutor(max_workers=min(len(online_peer_routes), 8)) as pool:
-                    futures = {
-                        pool.submit(query_peer, route): route
-                        for route in online_peer_routes
-                    }
-                    for future in as_completed(futures):
-                        route = futures[future]
-                        base_status = {
-                            "server_id": route.server_id,
-                            "endpoint": route.endpoint,
-                            "status": "ok",
-                        }
-                        try:
-                            _route, payload = future.result()
-                        except (ConnectionError, OSError, TypeError, ValueError) as exc:
-                            source_status.append({
-                                **base_status,
-                                "status": "error",
-                                "job_count": 0,
-                                "total": 0,
-                                "error": str(exc),
-                            })
-                            continue
-                        jobs = self._annotate_route_jobs(route, payload)
-                        combined.extend(jobs)
-                        source_status.append({
-                            **base_status,
-                            "job_count": len(jobs),
-                            "total": int(payload.get("total") or len(jobs)),
-                            "has_more": bool(payload.get("has_more")),
-                        })
+                    continue
+                jobs = self._annotate_route_jobs(route, payload)
+                combined.extend(jobs)
+                source_status.append({
+                    **base_status,
+                    "job_count": len(jobs),
+                    "total": int(payload.get("total") or len(jobs)),
+                    "has_more": bool(payload.get("has_more")),
+                })
 
         def sort_key(item: dict[str, object]) -> tuple[object, str, str, int]:
             try:
