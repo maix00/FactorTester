@@ -37,18 +37,18 @@ class _AuthorityStore:
         self.rows = rows
         self.calls = 0
 
-    def load_invocations(
+    def load_executions(
         self,
         *,
         owner_user_id: str,
-        invocation_ids: list[str],
+        execution_ids: list[str],
     ) -> dict[str, dict]:
         self.calls += 1
         return {
-            invocation_id: self.rows[invocation_id]
-            for invocation_id in invocation_ids
-            if invocation_id in self.rows
-            and self.rows[invocation_id]["owner_user_id"] == owner_user_id
+            execution_id: self.rows[execution_id]
+            for execution_id in execution_ids
+            if execution_id in self.rows
+            and self.rows[execution_id]["owner_user_id"] == owner_user_id
         }
 
 
