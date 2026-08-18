@@ -122,6 +122,7 @@ const backtest = {
 
 (async () => {
   const batch = window.FTTestRunBatch;
+  assert.equal(batch.render(context, {...state, groups: []}, () => {}), null);
   assert.equal(actionLoaded, false, "submission code must not load with the batch view");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");

@@ -143,17 +143,9 @@
 
   function render(context, state, refresh) {
     const products = window.FTTestProducts;
-    if (!products) {
-      const root = document.createElement("section");
-      root.className = "test-run-batch test-code-deferred-panel";
-      const title = document.createElement("strong");
-      title.textContent = context.t("产品路径任务");
-      const note = document.createElement("small");
-      note.textContent = context.t("选择产品路径后加载任务代码");
-      root.append(title, note);
-      return root;
-    }
+    if (!products) return null;
     const groups = products.selectedGroups(state);
+    if (!groups.length) return null;
     const items = model().synchronize(state);
     const root = document.createElement("section"); root.className = "test-run-batch";
     const heading = document.createElement("div"); heading.className = "section-heading";
@@ -175,10 +167,6 @@
     heading.append(copy, actions); root.append(heading);
     const matrix = FTTestRunSummary?.planSummary?.(context, state);
     if (matrix) root.append(matrix);
-    if (!groups.length) {
-      root.append(FTUI.empty(context.t("尚未选择产品组"), context.t("请先在测试对象中选择产品组")));
-      return root;
-    }
     root.append(tabBar(context, state, items, refresh));
     const activeIndex = Math.max(0, items.findIndex(item => (
       item.groupID === state.activeRunGroupID
