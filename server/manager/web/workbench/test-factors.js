@@ -5,6 +5,13 @@
     await FTTestFactorCatalog.initialize(context, state);
   }
 
+  function fieldRows(className, ...rows) {
+    const root = document.createElement("div");
+    root.className = `test-setting-rows ${className}`;
+    root.append(...rows.filter(Boolean));
+    return root;
+  }
+
   function panel(context, state, refresh, contentOptions = {}) {
     const root = document.createElement("div"); root.className = "test-factor-builder";
     const catalog = state.factorCatalog;
@@ -17,15 +24,16 @@
       entry => FTTestFactorCatalog.selectFamily(context, state, entry, refresh), sourceInput,
     ));
     if (!catalog.native) {
-      root.append(
+      root.append(fieldRows("test-factor-setting-rows",
         FTTestFactorEditor.familyChooser(context, state, refresh),
-        FTTestFactorEditor.familyContent(context, state, refresh, sourceInput),
-        FTTestFactorCandidates.list(context, state, refresh),
-      );
+      ));
+      root.append(FTTestFactorEditor.familyContent(
+        context, state, refresh, sourceInput,
+      ));
+      root.append(FTTestFactorCandidates.list(context, state, refresh));
       return root;
     }
-    const source = document.createElement("div"); source.className = "test-factor-source-rows";
-    source.append(
+    const source = fieldRows("test-factor-source-rows",
       FTTestFactorEditor.selectField(
         context.t("所有者"), catalog.owners.map(item => ({
           value: item.owner_ref,
