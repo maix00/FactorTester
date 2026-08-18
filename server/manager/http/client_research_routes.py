@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, unquote
 
 from server.manager.http.local_run_routes import ClientLocalRunRoutesMixin
 from server.manager.http.responses import json_response
+from server.manager.services.client_state import ProfileAlreadyExistsError
 
 
 class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
@@ -16,7 +17,10 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
     def _post_client_research_routes(self, parsed) -> bool:
         if self._post_local_run_routes(parsed):
             return True
-        if parsed.path != "/api/client/profiles/sync":
+        if parsed.path not in {
+            "/api/client/profiles/create",
+            "/api/client/profiles/sync",
+        }:
             return False
         session = self._session()
         if session is None:
@@ -24,16 +28,30 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
             return True
         try:
             payload = self._json_body(4 * 1024 * 1024)
-            profile = payload.get("profile")
-            if not isinstance(profile, dict):
-                raise ValueError("profile must be an object")
-            receipt = self.state.client_state.sync_profile(
-                str(session["username"]), profile,
-            )
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be an object")
+            principal = str(session["username"])
+            if parsed.path == "/api/client/profiles/create":
+                receipt = self.state.client_state.create_profile(
+                    principal,
+                    profile_id=payload.get("profile_id"),
+                    display_name=payload.get("display_name"),
+                )
+            else:
+                profile = payload.get("profile")
+                if not isinstance(profile, dict):
+                    raise ValueError("profile must be an object")
+                receipt = self.state.client_state.sync_profile(
+                    principal, profile,
+                )
+        except ProfileAlreadyExistsError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 409)
+            return True
         except (TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return True
-        json_response(self, {"success": True, **receipt})
+        status = 201 if parsed.path == "/api/client/profiles/create" else 200
+        json_response(self, {"success": True, **receipt}, status)
         return True
 
     def _get_client_research_routes(self, parsed) -> bool:
