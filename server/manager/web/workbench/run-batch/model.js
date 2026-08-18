@@ -25,6 +25,7 @@
       const groupID = groupIdentity(group);
       return {
         phase: "idle", runSpecHash: "", runID: "", jobID: "", port: 0,
+        serverID: "",
         error: "", ...prior.get(groupID), groupID,
         groupLabel: FTTestProducts.groupLabel(group),
       };
@@ -43,6 +44,11 @@
   function recordPreview(item, value) {
     item.phase = "frozen";
     item.runSpecHash = String(value.run_spec_hash || "").replace(/^sha256:/, "");
+    item.port = Number(value.port || item.port || 0);
+    item.serverID = String(
+      value.server_id || value.execution_server_id || item.serverID || "",
+    ).trim();
+    item.portQuery = routeQuery(item);
     item.error = "";
     return item;
   }
@@ -57,11 +63,18 @@
       value.run?.run_spec_hash || job.run_spec_hash || item.runSpecHash || "",
     ).replace(/^sha256:/, "");
     item.port = Number(value.port || job.server_context?.port || job.port || 0);
+    item.serverID = String(
+      value.server_id || value.execution_server_id
+        || job.server_id || job.execution_server_id
+        || job.server_context?.server_id || "",
+    ).trim();
+    item.portQuery = routeQuery(item);
     item.detailPayload = null;
     item.taskDetail = null;
     item.job = null;
-    item.portQuery = "";
+    item.artifactQuery = "";
     item.resultError = "";
+    item.resultAutoRefreshStarted = false;
     item.error = "";
     return item;
   }
@@ -73,6 +86,10 @@
     item.runID = runID;
     item.jobID = "";
     item.port = 0;
+    item.serverID = "";
+    item.portQuery = "";
+    item.artifactQuery = "";
+    item.resultAutoRefreshStarted = false;
     item.runSpecHash = String(
       value.run_spec_hash || value.run?.run_spec_hash || item.runSpecHash || "",
     ).replace(/^sha256:/, "");
@@ -85,17 +102,31 @@
     if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
     const target = `runspec:sha256:${item.runSpecHash}`;
     if (window.FTReferencePage?.routeFor) {
-      return FTReferencePage.routeFor("run-spec", target, "运行配置");
+      return FTReferencePage.routeFor(
+        "run-spec", target, "运行配置", item.serverID || "",
+      );
     }
     const query = new URLSearchParams({kind: "run-spec", target, label: "运行配置"});
+    if (item.serverID) query.set("server_id", item.serverID);
     return `/reference?${query}`;
+  }
+
+  function routeQuery(item) {
+    const params = new URLSearchParams();
+    if (item?.port) params.set("port", String(item.port));
+    if (item?.serverID) params.set("server_id", String(item.serverID));
+    const value = params.toString();
+    return value ? `?${value}` : "";
   }
 
   function jobPath(item) {
     if (!item?.jobID) return "";
-    return item.port
+    const path = item.port
       ? `/jobs/${item.port}/${encodeURIComponent(item.jobID)}`
       : `/jobs/${encodeURIComponent(item.jobID)}`;
+    return item.serverID
+      ? `${path}?server_id=${encodeURIComponent(item.serverID)}`
+      : path;
   }
 
   function update(item, phase, refresh) {
@@ -106,6 +137,6 @@
 
   window.FTTestRunBatchModel = Object.freeze({
     PHASE_LABELS, groupIdentity, itemFor, jobPath, recordPreview,
-    recordSubmission, recordLocalSubmission, runSpecPath, synchronize, update,
+    recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, synchronize, update,
   });
 })();

@@ -6,6 +6,7 @@
     item.taskDetail = loaded.taskDetail;
     item.job = loaded.job;
     item.port = Number(loaded.resolvedPort || item.port || 0);
+    item.serverID = String(loaded.serverID || item.serverID || "");
     item.portQuery = loaded.portQuery || (item.port ? `?port=${item.port}` : "");
     item.artifactQuery = loaded.artifactQuery || item.artifactQuery || "";
     item.phase = String(loaded.job?.status || item.phase || "submitted");
@@ -59,7 +60,9 @@
     item.resultError = "";
     rerender?.();
     try {
-      recordDetail(item, await window.FTJobs.loadDetail(context, item.port, item.jobID));
+      recordDetail(item, await window.FTJobs.loadDetail(
+        context, item.port, item.jobID, item.serverID || "",
+      ));
       await ensureResultCode(state, item, rerender);
       return true;
     } catch (error) {
@@ -68,6 +71,10 @@
     } finally {
       item.resultLoading = false;
       rerender?.();
+      if (item.progressRefreshPending) {
+        item.progressRefreshPending = false;
+        queueMicrotask(() => refresh(context, state, item, rerender));
+      }
     }
   }
 
@@ -97,6 +104,14 @@
     const root = document.createElement("div");
     root.className = "test-run-inline-results";
     if (!item.jobID) return root;
+    const progress = window.FTTestRunProgress?.render(
+      context, state, item, rerender,
+    );
+    if (progress) root.append(progress);
+    if (!item.taskDetail && !item.resultLoading && !item.resultAutoRefreshStarted) {
+      item.resultAutoRefreshStarted = true;
+      queueMicrotask(() => refresh(context, state, item, rerender));
+    }
     const toolbar = document.createElement("div");
     toolbar.className = "test-run-result-actions";
     const reload = context.button("↻", () => refresh(context, state, item, rerender), context.t("刷新任务结果"));

@@ -163,12 +163,15 @@
     description.textContent = context.t("每个产品组冻结独立 RunSpec，并保留对应测试任务入口");
     copy.append(title, description);
     const actions = document.createElement("div"); actions.className = "test-run-batch-actions";
-    actions.append(
-      context.button(context.t("全部预览"), () => previewAll(context, state, refresh)),
-      context.button(context.t("全部运行"), () => invokeAction(
-        "runAll", [context, state, refresh],
-      )),
+    const previewAllButton = context.button(
+      context.t("全部预览"), () => previewAll(context, state, refresh),
     );
+    const runAllButton = context.button(context.t("全部运行"), () => invokeAction(
+      "runAll", [context, state, refresh],
+    ));
+    previewAllButton.disabled = !groups.length;
+    runAllButton.disabled = !groups.length;
+    actions.append(previewAllButton, runAllButton);
     heading.append(copy, actions); root.append(heading);
     const matrix = FTTestRunSummary?.planSummary?.(context, state);
     if (matrix) root.append(matrix);

@@ -66,10 +66,12 @@ results.recordDetail(item, {
   taskDetail: {artifacts: []},
   job: {status: "succeeded"},
   resolvedPort: 8141,
+  serverID: "public-1",
   portQuery: "?port=8141",
 });
 assert.equal(item.phase, "succeeded");
 assert.equal(item.port, 8141);
+assert.equal(item.serverID, "public-1");
 assert.equal(item.portQuery, "?port=8141");
 assert.deepEqual(item.detailPayload.result_summary, {ok: true});
 
