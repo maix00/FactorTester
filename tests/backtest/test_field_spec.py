@@ -49,6 +49,35 @@ def test_scalar_setting_exposes_a_typed_descriptor() -> None:
     assert setting.field_spec().to_dict()["roles"] == ["setting"]
 
 
+def test_help_metadata_is_kept_in_canonical_field_contracts() -> None:
+    setting = SettingDefinition(
+        "factor",
+        "因子",
+        "factor",
+        "select",
+        "",
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
+        help_text="选择因子",
+        info_overlay={"type": "factor_info"},
+    )
+    assert setting.field_spec().to_dict()["help_text"] == "选择因子"
+    assert setting.to_dict()["info_overlay"] == {"type": "factor_info"}
+
+    run_field = RunFieldDefinition(
+        "output",
+        "输出",
+        "select",
+        "",
+        "body",
+        "job.output",
+        "outputs",
+        help_text="选择输出",
+        info_overlay={"type": "output_info"},
+    )
+    assert run_field.field_spec().to_dict()["info_overlay"] == {"type": "output_info"}
+
+
 def test_catalog_and_grid_fields_are_not_flat_text() -> None:
     catalog = SettingDefinition(
         "product_path_selections",

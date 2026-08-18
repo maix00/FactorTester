@@ -118,6 +118,7 @@
       "core/module-loader.js",
       "core/i18n.js",
       "core/icons.js",
+      "core/help-popover.js",
       "core/shared-ui.js"
     ],
     "charts": [
@@ -222,16 +223,17 @@
       "catalog/product-price-panel.js",
       "catalog/details.js"
     ],
-  "workbench-core": [
-    "workbench/setting-rules.js",
-    "workbench/test-lazy-code.js",
-    "workbench/templates/actions.js",
-    "workbench/test-object-picker.js",
-    "workbench/test-object-editor-overlay.js",
-    "workbench/test-field-row.js",
-    "workbench/test-state.js",
-    "workbench/tests.js"
-  ],
+    "workbench-core": [
+      "workbench/setting-rules.js",
+      "workbench/test-lazy-code.js",
+      "workbench/templates/actions.js",
+      "workbench/test-object-picker.js",
+      "workbench/test-object-editor-overlay.js",
+      "workbench/test-field-row.js",
+      "workbench/test-field-help.js",
+      "workbench/test-state.js",
+      "workbench/tests.js"
+    ],
     "workbench-input-state": [
       "workbench/test-input-state.js"
     ],
@@ -349,6 +351,7 @@
     "core/module-loader.js",
     "core/i18n.js",
     "core/icons.js",
+    "core/help-popover.js",
     "core/price-chart.js",
     "core/market-data.js",
     "catalog/shared/multi-select-filter.js",
@@ -431,6 +434,7 @@
     "workbench/test-object-picker.js",
     "workbench/test-object-editor-overlay.js",
     "workbench/test-field-row.js",
+    "workbench/test-field-help.js",
     "workbench/test-control-loader.js",
     "workbench/test-state.js",
     "workbench/ic-configuration.js",

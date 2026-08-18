@@ -188,7 +188,7 @@
       return FTTestFieldRow.create(
         field.label || key,
         controlHost,
-        field.help_text || context.t("关闭时继承测试设置"),
+        window.FTTestFieldHelp?.forField?.(manifest, key, context) || "",
         {className: "backtest-group-override-row"},
       );
     };

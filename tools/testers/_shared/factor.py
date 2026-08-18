@@ -260,6 +260,7 @@ def register_factor_selection_base(
         adapter_managed=True,
         show_chip=False,
         execution_policy="authoring_only",
+        help_text="从已加载的因子候选中选择本次测试使用的因子；IC 测试可多选，回测使用单个因子。",
         info_overlay={"type": "factor_info"},
         serialization={
             "kind": "factor_selection",

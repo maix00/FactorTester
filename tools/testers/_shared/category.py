@@ -65,6 +65,7 @@ def register_category_selection_base(
         module="category_grouping",
         chip_template="分类: {value}",
         adapter_managed=True,
+        help_text="选择数据源提供的分类用于 IC 分组；分类由数据源或用户产品分类提供。",
         serialization={
             "kind": "category_selection",
             "display_order": 20,

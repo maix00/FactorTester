@@ -176,13 +176,21 @@
       },
     });
     const summary = `${context.t("已选")} ${selected.length} ${context.t("个候选")} · ${pathCount} ${context.t("条产品路径")}`;
+    const help = window.FTTestFieldHelp?.forField?.(
+      state.manifest,
+      state.kind === "ic"
+        ? ["product_path_selections", "product_path_selection"]
+        : ["product_path_selection", "product_path_selections"],
+      context,
+    ) || "";
     const root = FTTestFieldRow.create(
-      context.t("产品组"), picker.element,
-      `${context.t(state.kind === "ic"
-        ? "可多选产品组；每个候选冻结为独立 IC 任务"
-        : "选择一个产品组作为本次回测的产品范围")} · ${summary}`,
+      context.t("产品组"), picker.element, help,
       {className: "test-product-selector"},
     );
+    const summaryNote = document.createElement("small");
+    summaryNote.className = "test-product-selection-summary";
+    summaryNote.textContent = summary;
+    root.querySelector(".test-field-row-control")?.append(summaryNote);
     const unavailable = (state.groupRefs || []).filter(ref => (
       !state.groups.some(group => groupID(group) === ref)
     ));

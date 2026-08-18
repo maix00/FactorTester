@@ -183,7 +183,10 @@
 
   function row(context, state, item, refresh) {
     const label = context.t(item.label);
-    const hint = item.help_text ? context.t(item.help_text) : "";
+    const hint = window.FTTestFieldHelp?.forField
+      ? FTTestFieldHelp.forField(state.manifest, item.key, context)
+      : (item.help_text ? context.t(item.help_text) : "");
+    const hintText = typeof hint === "object" ? hint.text || "" : hint;
     const fieldDefinition = controlField(item);
     const values = {
       ...(state.runValues || {}),
@@ -210,8 +213,8 @@
       },
       false,
     );
-    const root = FTTestFieldRow.create(label, control, hint, {title: hint});
-    if (hint) root.setAttribute("aria-label", `${label}: ${hint}`);
+    const root = FTTestFieldRow.create(label, control, hint, {help: hint});
+    if (hintText) root.setAttribute("aria-label", `${label}: ${hintText}`);
     return root;
   }
 

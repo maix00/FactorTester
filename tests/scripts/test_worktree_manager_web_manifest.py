@@ -160,6 +160,20 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_help_popover_uses_click_bubble_and_overlay_modes() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "help_popover.js"
+    popover = WEB_ROOT / "core" / "help-popover.js"
+    field_help = WEB_ROOT / "workbench" / "test-field-help.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(popover), str(field_help)],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_product_category_detail_keeps_route_context_and_dynamic_tab_title() -> None:
     detail = (WEB_ROOT / "catalog" / "product-category-detail.js").read_text(
         encoding="utf-8",

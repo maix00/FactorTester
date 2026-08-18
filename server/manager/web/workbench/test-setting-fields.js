@@ -78,18 +78,19 @@
     const label = document.createElement("b");
     label.textContent = field.label || key;
     const editable = FTSettingRules.isEditable(field, values);
-    const hints = [field.help_text];
-    if (!editable && Object.keys(field.rules?.editable_if || {}).length) {
-      hints.push(context.t("当前模式使用自动值"));
-    }
-    const hint = hints.filter(Boolean).join("\n");
+    const hint = window.FTTestFieldHelp?.forField
+      ? FTTestFieldHelp.forField(manifest, key, context)
+      : (field.help_text ? context.t(field.help_text) : "");
+    const hintText = typeof hint === "object" ? hint.text || "" : hint;
+    // Help text and complex-help mode come exclusively from the backend field
+    // registration; the page does not invent a second explanation here.
     const row = FTTestFieldRow.create(
       label.textContent,
       inputFor(key, field, manifest, values, context, options, !editable),
       hint,
-      {title: hint},
+      {help: hint},
     );
-    if (hint) row.setAttribute("aria-label", `${label.textContent}: ${hint}`);
+    if (hintText) row.setAttribute("aria-label", `${label.textContent}: ${hintText}`);
     return row;
   }
 

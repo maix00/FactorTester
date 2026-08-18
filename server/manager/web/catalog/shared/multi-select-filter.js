@@ -54,12 +54,11 @@
 
   function helpIcon(help) {
     if (window.FTUI?.helpIcon) return window.FTUI.helpIcon(help);
-    const icon = document.createElement("span");
+    if (window.FTHelp?.create) return window.FTHelp.create(help);
+    const icon = document.createElement("button");
+    icon.type = "button";
     icon.className = "ft-help-icon";
     icon.textContent = "?";
-    icon.title = help;
-    icon.tabIndex = 0;
-    icon.setAttribute("role", "img");
     icon.setAttribute("aria-label", help);
     return icon;
   }
@@ -217,7 +216,6 @@
         if (selected.includes(item.value)) row.classList.add("is-selected");
         if (item.exclusive) row.classList.add("is-exclusive");
         if (item.disabled) row.classList.add("is-disabled");
-        row.title = item.description;
         row.setAttribute("aria-label", `${item.label}：${item.description}`);
         const input = document.createElement("input");
         input.type = multi ? "checkbox" : "radio";
