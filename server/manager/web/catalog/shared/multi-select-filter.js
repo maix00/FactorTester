@@ -63,7 +63,23 @@
     return icon;
   }
 
+  let outsideCloseBound = false;
+
+  function bindOutsideClose() {
+    if (outsideCloseBound
+      || typeof document === "undefined"
+      || typeof document.addEventListener !== "function") return;
+    document.addEventListener("click", event => {
+      if (event.target?.closest?.(".ft-multi-select-dropdown")) return;
+      if (typeof document.querySelectorAll !== "function") return;
+      document.querySelectorAll(".ft-multi-select-dropdown[open]")
+        .forEach(dropdown => { dropdown.open = false; });
+    });
+    outsideCloseBound = true;
+  }
+
   function create(context, options = {}) {
+    bindOutsideClose();
     const controlDisabled = typeof options.disabled === "function"
       ? false : Boolean(options.disabled);
     const items = normalizeItems(options.items).map(item => ({
