@@ -334,10 +334,14 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         "configuration_fingerprint": configuration["fingerprint"],
         "analyses": analyses,
         "retention_mode": retention_mode,
-        "step_mode": step_mode,
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    # ``step_mode`` is a backtest-only run field.  Do not put a synthetic
+    # false value into IC/evaluation RunSpecs: the registry is the closed
+    # contract for which submitted fields become executable RunSpec fields.
+    if "backtest" in analyses:
+        run_spec["step_mode"] = step_mode
     if factor_subjects:
         empty_alias_hash = hashlib.sha256(b"").hexdigest()
         alias_hashes = {

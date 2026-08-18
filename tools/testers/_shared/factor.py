@@ -115,6 +115,18 @@ def register_factor_execution_base(
     *,
     tab: str = "factor",
 ) -> None:
+    warmup_default_if = (
+        {
+            "engine_mode": {
+                "basic": "none",
+                "auto": "auto",
+                "custom": "auto",
+                "exact": "auto",
+            },
+        }
+        if "engine_mode" in app.settings
+        else {}
+    )
     app.register_setting(SettingDefinition(
         "factor_mode",
         "因子计算模式",
@@ -144,7 +156,7 @@ def register_factor_execution_base(
             SettingOption("auto", "按因子表达式自动推导"),
         ),
         chip_template="前摇窗口: {value}",
-        default_if={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+        default_if=warmup_default_if,
         help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
     ))
     app.register_setting(SettingDefinition(

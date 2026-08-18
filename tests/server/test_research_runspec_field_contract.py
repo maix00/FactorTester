@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+from flask import Flask
+import pytest
+
+import settings as Settings
+from server.modules.single_factor_test import sft_bp
+from server.services import factor_registry
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
+    factor_sources = {
+        family: f"""
+from tools.data.types import DataColumn
+from tools.factors import FactorFamily
+from tools.factors.FactorExpr import ColumnRef
+
+class {family}(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        return ColumnRef(DataColumn.CLOSE)
+"""
+        for family in ("MmRet", "MmMADevRat")
+    }
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda factor_id: factor_sources.get(str(factor_id)),
+    )
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    test_client = app.test_client()
+    with test_client.session_transaction() as session:
+        session["username"] = "alice"
+    return test_client
+
+
+def _create_workspace(client):
+    response = client.post("/api/workspaces", json={
+        "title": "RunSpec field contract",
+        "factor_families": [{"alias": "MmRet"}, {"alias": "MmMADevRat"}],
+        "factors": [
+            {"factor_family_alias": "MmRet", "alias": "MmRet|P:CA|N:10d|$F:1d"},
+            {
+                "factor_family_alias": "MmMADevRat",
+                "alias": "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
+            },
+        ],
+    })
+    assert response.status_code == 201
+    return response.get_json()["workspace"]
+
+
+def _update(client, workspace) -> None:
+    shared = dict(workspace["configuration"]["payload"]["shared"])
+    payload = {
+        "schema_version": 1,
+        "shared": shared,
+        "analyses": {
+            "ic": {"factor_configs": [{"N": "10d"}], "product_paths": ["core8_path"]},
+            "backtest": {
+                "groups": [{
+                    "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
+                    "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+                    "product_path_selection_id": "core8",
+                }],
+                "product_selections": {
+                    "core8": {"id": "core8", "selected_paths": ["core8_path"]},
+                },
+            },
+            "factor_evaluation": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
+            "factor_type_analysis": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
+        },
+        "ui": {"selected_tab": "ic"},
+    }
+    response = client.put(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration",
+        json={
+            "expected_revision": workspace["configuration"]["revision"],
+            "payload": payload,
+        },
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    workspace["configuration"] = response.get_json()["configuration"]
+
+
+def _run_control_keys(application_name: str) -> set[str]:
+    from tools.testers.settings import backtest_setting_registry
+
+    return {
+        field["freeze_target"].removeprefix("run_spec.").split(".", 1)[0]
+        for field in backtest_setting_registry.get(application_name).manifest()["run_fields"]
+        if field["freeze_target"].startswith("run_spec.")
+    }
+
+
+def test_ic_runspec_contains_exactly_its_registered_run_controls(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace)
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    run_spec = response.get_json()["run"]["run_spec"]
+    controls = {"retention_mode", "step_mode", "output_requests"}
+    assert {key for key in run_spec if key in controls} == _run_control_keys("ic_test")
+    assert "step_mode" not in run_spec
+
+
+def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace)
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    run_spec = response.get_json()["run"]["run_spec"]
+    controls = {"retention_mode", "step_mode", "output_requests"}
+    assert {key for key in run_spec if key in controls} == _run_control_keys("group_test")
+    assert run_spec["step_mode"] is False

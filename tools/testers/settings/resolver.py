@@ -35,7 +35,12 @@ def resolve_group_settings(
         values: dict[str, Any] = {}
         setting_fallbacks: list[dict[str, Any]] = []
         for key, definition in application.settings.items():
-            user_provided = key in local_values or key in overrides
+            user_provided = _effective_user_value_present(
+                definition,
+                key=key,
+                local_values=local_values,
+                overrides=overrides,
+            )
             if (
                 definition.scope_policy == ScopePolicy.GROUP_ONLY
                 and key in local_values
@@ -57,9 +62,44 @@ def resolve_group_settings(
                 else:
                     value = overrides[key]
             rules = _rules(definition)
-            if key not in local_values and key not in overrides \
-                    and engine in rules.engine_defaults:
-                value = rules.engine_defaults[engine]
+            if not user_provided:
+                conditional_default = _conditional_default(
+                    application,
+                    definition,
+                    values=values,
+                    local_values=local_values,
+                    overrides=overrides,
+                )
+                if conditional_default is not _NO_CONDITIONAL_DEFAULT:
+                    value = conditional_default
+                elif engine in rules.engine_defaults:
+                    value = rules.engine_defaults[engine]
+            elif not _conditions_match(
+                application,
+                rules.editable_if,
+                values=values,
+                local_values=local_values,
+                overrides=overrides,
+            ):
+                requested_value = value
+                value = _conditional_default(
+                    application,
+                    definition,
+                    values=values,
+                    local_values=local_values,
+                    overrides=overrides,
+                )
+                if value is _NO_CONDITIONAL_DEFAULT:
+                    value = _default(definition)
+                if requested_value != value:
+                    setting_fallbacks.append({
+                        "setting_key": definition.key,
+                        "module": definition.module,
+                        "engine": engine,
+                        "requested_value": requested_value,
+                        "applied_value": value,
+                        "reason": "non_editable_value_ignored",
+                    })
             try:
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
@@ -100,6 +140,107 @@ def resolve_group_settings(
             values["_setting_fallbacks"] = setting_fallbacks
         resolved[group_id] = values
     return resolved
+
+
+_NO_CONDITIONAL_DEFAULT = object()
+
+
+def _effective_user_value_present(
+    definition: SettingDefinition,
+    *,
+    key: str,
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+) -> bool:
+    """Return whether the selected scope supplies an effective value.
+
+    A group override for a ``LOCAL_ONLY`` field is intentionally ignored.  It
+    must therefore not suppress that field's registered conditional default.
+    """
+    if key in local_values:
+        return True
+    return key in overrides and definition.scope_policy != ScopePolicy.LOCAL_ONLY
+
+
+def _condition_value(
+    application: ApplicationSettings,
+    key: str,
+    *,
+    values: Mapping[str, Any],
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+) -> Any:
+    """Read a dependency using the same local/group precedence as settings."""
+    if key in values:
+        return values[key]
+    definition = application.settings.get(key)
+    if definition is None:
+        return None
+    if key in overrides and definition.scope_policy != ScopePolicy.LOCAL_ONLY:
+        return overrides[key]
+    if key in local_values:
+        return local_values[key]
+    return _default(definition)
+
+
+def _conditions_match(
+    application: ApplicationSettings,
+    conditions: Mapping[str, Any],
+    *,
+    values: Mapping[str, Any],
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+) -> bool:
+    """Evaluate registered conditions as an AND of dependency predicates."""
+    for dependency, allowed_values in conditions.items():
+        actual = _condition_value(
+            application,
+            dependency,
+            values=values,
+            local_values=local_values,
+            overrides=overrides,
+        )
+        allowed = (
+            allowed_values
+            if isinstance(allowed_values, (tuple, list, set, frozenset))
+            else (allowed_values,)
+        )
+        if actual not in allowed and str(actual) not in {str(item) for item in allowed}:
+            return False
+    return True
+
+
+def _conditional_default(
+    application: ApplicationSettings,
+    definition: SettingDefinition,
+    *,
+    values: Mapping[str, Any],
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+) -> Any:
+    """Resolve the first matching registered conditional default.
+
+    The registration order is the priority order.  This matters when a broad
+    engine default and a more specific profile default are both declared: the
+    field owner can put the broad rule first and the profile rule second only
+    when the latter is intended to win.  Current built-ins intentionally use
+    engine rules first, so ``basic`` remains authoritative over a profile.
+    """
+    for dependency, mapping in _rules(definition).default_if.items():
+        actual = _condition_value(
+            application,
+            dependency,
+            values=values,
+            local_values=local_values,
+            overrides=overrides,
+        )
+        if actual in mapping:
+            return mapping[actual]
+        actual_text = str(actual)
+        for expected, candidate in mapping.items():
+            if str(expected) == actual_text:
+                return candidate
+    return _NO_CONDITIONAL_DEFAULT
 
 
 def _resolve_setting_dependencies(
