@@ -5,16 +5,28 @@ const vm = require("node:vm");
 class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.listeners = {};
+    this.parentNode = null;
     this.className = ""; this.value = ""; this.checked = false;
     this.disabled = false; this.hidden = false; this.dataset = {};
     this.classList = {
       add: (...names) => { this.className = `${this.className} ${names.join(" ")}`.trim(); },
     };
   }
-  append(...nodes) { this.children.push(...nodes); }
+  append(...nodes) {
+    nodes.forEach(node => { node.parentNode = this; this.children.push(node); });
+  }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this[name] = String(value); }
+  closest(selector) {
+    let current = this;
+    while (current) {
+      if (selector === ".ft-multi-select-dropdown"
+        && String(current.className).includes("ft-multi-select-dropdown")) return current;
+      current = current.parentNode;
+    }
+    return null;
+  }
 }
 
 function descendants(root) {
@@ -22,7 +34,24 @@ function descendants(root) {
 }
 
 global.window = {};
-global.document = {createElement: tag => new Element(tag)};
+const createdElements = [];
+global.document = {
+  listeners: {},
+  createElement: tag => {
+    const element = new Element(tag);
+    createdElements.push(element);
+    return element;
+  },
+  addEventListener(name, callback) { this.listeners[name] = callback; },
+  dispatchEvent(event) { this.listeners[event.type]?.(event); },
+  querySelectorAll(selector) {
+    if (selector !== ".ft-multi-select-dropdown[open]") return [];
+    return createdElements.filter(element => (
+      String(element.className).includes("ft-multi-select-dropdown")
+      && element.open === true
+    ));
+  },
+};
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: process.argv[2],
 });
@@ -95,6 +124,11 @@ assert.equal(optionHelp.textContent, "?");
   await saveButton.listeners.click();
   assert.deepEqual(multiChanges, [["a", "c"]]);
   assert.equal(multiSave.dropdown.open, false);
+
+  multiSave.dropdown.open = true;
+  document.dispatchEvent({type: "click", target: new Element("div")});
+  assert.equal(multiSave.dropdown.open, false,
+    "clicking outside a multi-select must close the dropdown");
 
   const cancel = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [{value: "a", label: "A"}, {value: "b", label: "B"}],

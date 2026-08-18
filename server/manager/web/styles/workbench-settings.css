@@ -76,6 +76,8 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .backend-setting-chip-label { flex: 0 0 auto; color: var(--muted); }
 .backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
 .backend-settings-host { min-width: 0; padding: 8px 12px 10px; }
+.tab-chip-content-panel { min-width: 0; }
+.tab-chip-content-panel .ft-multi-select-filter { width: 100%; max-width: none; }
 .shared-field-value-selector { min-width: 0; }
 .test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
 .test-settings-manager-list { display: grid; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
