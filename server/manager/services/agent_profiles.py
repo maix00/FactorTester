@@ -1,0 +1,441 @@
+"""Profile runtime bindings, provider connections, and Agent claims."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from server.manager.services.agent_workspace import (
+    ensure_server_profile_workspace,
+    profile_workspace_relative_path,
+)
+from server.manager.services.agent_skill_catalog import (
+    AgentSkillCatalog,
+    AgentSkillCatalogError,
+)
+from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.agent_provider_health import (
+    AgentProviderHealth,
+)
+from server.manager.storage.agent_provider_store import (
+    AgentProviderStore,
+    ProviderStoreError,
+)
+from server.manager.storage.agent_skill_store import AgentSkillStore
+from server.manager.storage.profile_runtime_store import (
+    ProfileClaimConflict,
+    ProfileRuntimeError,
+    ProfileRuntimeStore,
+)
+
+
+class AgentProfileService:
+    """Coordinate the local state for one Manager's Agent-capable Profiles."""
+
+    def __init__(
+        self,
+        *,
+        db_path,
+        provider_key_path,
+        data_root,
+        server_id: str,
+        skill_source_root=None,
+        skill_manifest_path=None,
+    ) -> None:
+        self.server_id = str(server_id or "").strip()
+        if not self.server_id:
+            raise ValueError("server_id is required")
+        self.data_root = data_root
+        self.runtime_store = ProfileRuntimeStore(db_path)
+        self.provider_store = AgentProviderStore(db_path, provider_key_path)
+        source_root = skill_source_root
+        if source_root is None:
+            source_root = Path(__file__).resolve().parents[3]
+        manifest = skill_manifest_path
+        if manifest is None:
+            manifest = Path(source_root) / "server" / "manager" / "skills" / "catalog.json"
+        elif not Path(manifest).is_absolute():
+            manifest = Path(source_root) / manifest
+        self.skill_catalog = AgentSkillCatalog(source_root, manifest)
+        self.skill_store = AgentSkillStore(db_path)
+
+    @staticmethod
+    def _profile_id(profile: dict[str, Any]) -> str:
+        return str(profile.get("profile_id") or "").strip()
+
+    def _default_runtime(
+        self,
+        principal: str,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Infer legacy metadata without silently assigning a server Profile."""
+        runtime_kind = str(profile.get("runtime_kind") or "").strip()
+        execution_server_id = str(profile.get("execution_server_id") or "").strip()
+        execution_device_id = str(profile.get("execution_device_id") or "").strip()
+        server_metadata = profile.get("server")
+        if not execution_server_id and isinstance(server_metadata, dict):
+            execution_server_id = str(server_metadata.get("server_id") or "").strip()
+        if runtime_kind not in {"client", "server"}:
+            server = profile.get("server")
+            if execution_server_id or isinstance(server, dict) and server.get("server_id"):
+                runtime_kind = "server"
+            else:
+                runtime_kind = "client"
+        executor_id = execution_server_id if runtime_kind == "server" else execution_device_id
+        profile_id = self._profile_id(profile)
+        return {
+            "profile_id": profile_id,
+            "runtime_kind": runtime_kind,
+            "executor_id": executor_id,
+            "workspace_relpath": profile_workspace_relative_path(
+                principal,
+                profile_id,
+            ) if profile_id else "",
+            "configured": bool(executor_id),
+            "source": "profile",
+        }
+
+    def enrich(
+        self,
+        principal: str,
+        profiles: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        owner = str(principal or "").strip()
+        runtimes = self.runtime_store.runtimes(owner)
+        result: list[dict[str, Any]] = []
+        for original in profiles:
+            if not isinstance(original, dict):
+                continue
+            profile = dict(original)
+            profile_id = self._profile_id(profile)
+            if not profile_id:
+                continue
+            runtime = runtimes.get(profile_id) or self._default_runtime(owner, profile)
+            claim = self.runtime_store.active_claim(owner, profile_id)
+            profile["runtime"] = {
+                "profile_id": profile_id,
+                "runtime_kind": runtime.get("runtime_kind", "client"),
+                "executor_id": runtime.get("executor_id", ""),
+                "workspace_relpath": runtime.get("workspace_relpath", ""),
+                "configured": bool(runtime.get("executor_id")),
+                "server_id": self.server_id if runtime.get("runtime_kind") == "server" else "",
+            }
+            profile["active_claim"] = self._public_claim(claim)
+            result.append(profile)
+        return result
+
+    @staticmethod
+    def _public_claim(claim: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not claim:
+            return None
+        return {
+            "claim_id": claim.get("claim_id", ""),
+            "runtime_kind": claim.get("runtime_kind", ""),
+            "executor_id": claim.get("executor_id", ""),
+            "agent_id": claim.get("agent_id", ""),
+            "provider_id": claim.get("provider_id", ""),
+            "claimed_at": claim.get("claimed_at", 0),
+            "last_heartbeat_at": claim.get("last_heartbeat_at", 0),
+            "status": claim.get("status", ""),
+        }
+
+    def bind_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        runtime_kind: str,
+        executor_id: str,
+    ) -> dict[str, Any]:
+        runtime = str(runtime_kind or "").strip()
+        executor = str(executor_id or "").strip()
+        if runtime == "server" and executor != self.server_id:
+            raise ProfileRuntimeError("server Profile must be bound to this Manager")
+        if runtime == "client" and not executor:
+            raise ProfileRuntimeError("client Profile requires a device_id")
+        relative = profile_workspace_relative_path(principal, profile_id)
+        if runtime == "server":
+            workspace = ensure_server_profile_workspace(
+                self.data_root, principal, profile_id,
+            )
+            selected = (
+                self.selected_skill_bindings(principal, profile_id)
+                if self.runtime_store.runtime(principal, profile_id)
+                else []
+            )
+            AgentSkillRuntime(workspace).sync(selected)
+        return self.runtime_store.bind(
+            principal,
+            profile_id,
+            runtime_kind=runtime,
+            executor_id=executor,
+            workspace_relpath=relative,
+        )
+
+    def providers(
+        self,
+        principal: str,
+        *,
+        runtime_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.provider_store.list(
+            principal,
+            runtime_kind=runtime_kind,
+            server_id=self.server_id if runtime_kind == "server" else None,
+        )
+
+    def available_skills(self, *, runtime_kind: str = "server") -> list[dict[str, Any]]:
+        return self.skill_catalog.public_definitions(runtime_kind)
+
+    def profile_skills(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        definitions = self.skill_catalog.definitions(runtime_kind)
+        selected = set(self.skill_store.selected(principal, profile_id))
+        return {
+            "profile_id": profile_id,
+            "runtime_kind": runtime_kind,
+            "skills": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"path", "relative_path"}
+                }
+                | {"selected": item["skill_id"] in selected}
+                for item in definitions
+            ],
+        }
+
+    def selected_skill_bindings(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return selected Skill paths for the future app-server supervisor."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("Profile runtime is not configured")
+        definitions = {
+            item["skill_id"]: item
+            for item in self.skill_catalog.definitions(str(runtime["runtime_kind"]))
+        }
+        return [
+            definitions[skill_id]
+            for skill_id in self.skill_store.selected(principal, profile_id)
+            if skill_id in definitions
+        ]
+
+    def prepare_server_skill_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        bindings: list[dict[str, Any]] | None = None,
+    ) -> AgentSkillRuntime:
+        """Synchronize and return the Profile-local app-server runtime seam."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        workspace = ensure_server_profile_workspace(
+            self.data_root, principal, profile_id,
+        )
+        runtime_state = AgentSkillRuntime(workspace)
+        runtime_state.sync(
+            self.selected_skill_bindings(principal, profile_id)
+            if bindings is None else bindings,
+        )
+        return runtime_state
+
+    def server_agent_context(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Return private launch material for the Manager-owned supervisor."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        claim = self.runtime_store.active_claim(principal, profile_id)
+        if claim is None:
+            raise ProfileRuntimeError("claim the Profile before starting its Agent")
+        provider_id = str(claim.get("provider_id") or "").strip()
+        provider = self.provider_store.get(
+            principal,
+            provider_id,
+            include_secret=True,
+        )
+        if provider is None or not provider.get("enabled"):
+            raise ProviderStoreError("claimed Agent provider is unavailable")
+        if provider.get("runtime_kind") != "server":
+            raise ProviderStoreError("claimed Agent provider is not a server provider")
+        if provider.get("server_id") != self.server_id:
+            raise ProviderStoreError("claimed Agent provider belongs to another server")
+        return {
+            "runtime": runtime,
+            "claim": claim,
+            "provider": provider,
+            "skill_runtime": self.prepare_server_skill_runtime(
+                principal,
+                profile_id,
+            ),
+        }
+
+    def set_profile_skills(
+        self,
+        principal: str,
+        profile_id: str,
+        skill_ids: list[str],
+    ) -> dict[str, Any]:
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+        if self.runtime_store.active_claim(principal, profile_id) is not None:
+            raise ProfileRuntimeError(
+                "release the active Agent before changing Profile Skills"
+            )
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        definitions = {
+            item["skill_id"]: item
+            for item in self.skill_catalog.definitions(runtime_kind)
+        }
+        requested = sorted({str(value or "").strip() for value in skill_ids if str(value or "").strip()})
+        unknown = [skill_id for skill_id in requested if skill_id not in definitions]
+        if unknown:
+            raise AgentSkillCatalogError(
+                "Skill is not installed or is not available to this runtime: "
+                + ", ".join(unknown)
+            )
+        selected_bindings = [definitions[skill_id] for skill_id in requested]
+        if runtime_kind == "server":
+            self.prepare_server_skill_runtime(
+                principal,
+                profile_id,
+                bindings=selected_bindings,
+            )
+        selected = self.skill_store.replace(principal, profile_id, requested)
+        return self.profile_skills(principal, profile_id) | {"selected_skill_ids": selected}
+
+    def save_provider(
+        self,
+        principal: str,
+        payload: dict[str, object],
+    ) -> dict[str, Any]:
+        runtime = str(payload.get("runtime_kind") or "server").strip()
+        if runtime == "server":
+            payload = {**payload, "server_id": self.server_id}
+        elif runtime == "client" and self.server_id != "local":
+            raise ProviderStoreError(
+                "client provider credentials must be saved by the client runtime"
+            )
+        return self.provider_store.save(
+            principal,
+            payload,
+            default_server_id=self.server_id,
+        )
+
+    def test_provider(
+        self,
+        principal: str,
+        payload: dict[str, object],
+    ) -> dict[str, Any]:
+        """Test a Provider API key without persisting or returning its secret."""
+        if not isinstance(payload, dict):
+            raise ProviderStoreError("provider must be an object")
+        runtime = str(payload.get("runtime_kind") or "server").strip()
+        if runtime == "server":
+            payload = {**payload, "server_id": self.server_id}
+        elif runtime == "client" and self.server_id != "local":
+            raise ProviderStoreError(
+                "client provider credentials must be tested by the client runtime"
+            )
+        candidate = self.provider_store.candidate(
+            principal,
+            payload,
+            default_server_id=self.server_id,
+        )
+        return AgentProviderHealth.test(candidate)
+
+    def delete_provider(self, principal: str, provider_id: str) -> bool:
+        for claim in self.runtime_store.claims(principal):
+            if claim.get("provider_id") == provider_id:
+                raise ProviderStoreError("release the active Agent before deleting its provider")
+        return self.provider_store.delete(principal, provider_id)
+
+    def claim(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        provider_id: str = "",
+        agent_id: str = "",
+    ) -> dict[str, Any]:
+        if not str(provider_id or "").strip():
+            raise ProviderStoreError("provider_id is required to claim a Profile")
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("Profile runtime is not configured")
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        executor_id = str(runtime.get("executor_id") or "")
+        if runtime_kind == "server" and executor_id != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        if provider_id:
+            provider = self.provider_store.get(principal, provider_id)
+            if provider is None or not provider.get("enabled"):
+                raise ProviderStoreError("provider is unavailable")
+            if provider.get("runtime_kind") != runtime_kind:
+                raise ProviderStoreError("provider runtime does not match Profile runtime")
+            if runtime_kind == "server" and provider.get("server_id") != self.server_id:
+                raise ProviderStoreError("provider belongs to another server")
+        if runtime_kind == "server":
+            self.prepare_server_skill_runtime(principal, profile_id)
+        claim = self.runtime_store.claim(
+            principal,
+            profile_id,
+            runtime_kind=runtime_kind,
+            executor_id=executor_id,
+            provider_id=provider_id,
+            agent_id=agent_id,
+        )
+        return {
+            "runtime": runtime,
+            "claim": self._public_claim(claim),
+            "selected_skill_ids": [
+                item["skill_id"]
+                for item in self.selected_skill_bindings(principal, profile_id)
+            ],
+        }
+
+    def heartbeat(self, principal: str, claim_id: str, agent_id: str) -> dict[str, Any]:
+        return {"claim": self._public_claim(
+            self.runtime_store.heartbeat(principal, claim_id, agent_id=agent_id),
+        )}
+
+    def release(
+        self,
+        principal: str,
+        claim_id: str,
+        *,
+        agent_id: str = "",
+        force: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "released": self.runtime_store.release(
+                principal,
+                claim_id,
+                agent_id=agent_id,
+                force=force,
+            ),
+        }
+
+    def claims(self, principal: str) -> list[dict[str, Any]]:
+        return [self._public_claim(item) or {} for item in self.runtime_store.claims(principal)]
