@@ -126,7 +126,7 @@
     });
     const root = FTTestFieldRow.create(
       context.t("分类"), picker.element,
-      context.t("选择一个分类用于 IC；分类由数据源或用户产品分类提供"),
+      window.FTTestFieldHelp?.forField?.(state.manifest, "category", context) || "",
       {className: "test-category-selector"},
     );
     const control = root.querySelector(".test-field-row-control");

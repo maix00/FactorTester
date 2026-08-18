@@ -69,15 +69,16 @@
     return button;
   }
 
-  function helpIcon(help) {
-    const label = text(help).trim();
-    const icon = document.createElement("span");
+  function helpIcon(help, options = {}) {
+    if (window.FTHelp?.create) return window.FTHelp.create(help, options);
+    const label = help && typeof help === "object"
+      ? text(help.text || help.description || help.desc || help.body).trim()
+      : text(help).trim();
+    const icon = document.createElement("button");
+    icon.type = "button";
     icon.className = "ft-help-icon";
     icon.textContent = "?";
-    icon.title = label;
-    icon.tabIndex = 0;
-    icon.setAttribute("role", "img");
-    icon.setAttribute("aria-label", label);
+    icon.setAttribute("aria-label", options.ariaLabel || label);
     return icon;
   }
 

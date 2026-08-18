@@ -78,9 +78,11 @@
     });
     const control = FTTestFieldRow.create(
       context.t("因子"), picker.element,
-      context.t(state.kind === "ic"
-        ? "可多选因子候选；每个候选冻结为独立 IC 任务"
-        : "选择一个因子候选作为本次回测因子"),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest,
+        state.kind === "ic" ? ["factor_selections", "factor"] : ["factor", "factor_selections"],
+        context,
+      ) || "",
       {className: "test-factor-candidates"},
     );
     if (!rows.length) {

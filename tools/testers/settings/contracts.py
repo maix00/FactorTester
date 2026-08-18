@@ -140,6 +140,7 @@ class SettingDefinition:
             value=self.value_descriptor,
             label=self.label,
             help_text=self.help_text,
+            info_overlay=self.info_overlay,
             roles=frozenset(roles),
             setting=SettingRole(
                 scope_policy=self.scope_policy.value,
@@ -298,6 +299,7 @@ class RunFieldDefinition:
     order: int = 100
     options: tuple[SettingOption, ...] = ()
     help_text: str = ""
+    info_overlay: dict[str, Any] | None = None
     enabled_payload: dict[str, Any] | None = None
     _REQUEST_LOCATIONS = ("body", "query")
     _PLACEMENTS = (
@@ -353,6 +355,7 @@ class RunFieldDefinition:
             value=self.value_descriptor,
             label=self.label,
             help_text=self.help_text,
+            info_overlay=self.info_overlay,
             roles=frozenset({"run"}),
             run=RunRole(
                 request_location=self.request_location,
@@ -372,6 +375,8 @@ class RunFieldDefinition:
         value.pop("options", None)
         value["value_descriptor"] = self.value_descriptor.to_dict()
         value["rules"] = self.field_spec().run.rules.to_dict()  # type: ignore[union-attr]
+        if self.info_overlay is None:
+            value.pop("info_overlay", None)
         value.pop("client_targets", None)
         value.pop("visible_if", None)
         if self.client_targets != self._CLIENTS:

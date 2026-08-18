@@ -178,6 +178,7 @@ class FieldSpec:
     value: ValueDescriptor
     label: str = ""
     help_text: str = ""
+    info_overlay: dict[str, Any] | None = None
     roles: frozenset[str] = frozenset()
     setting: SettingRole | None = None
     runtime: RuntimeRole | None = None
@@ -202,6 +203,7 @@ class FieldSpec:
             "key": self.key,
             "label": self.label,
             "help_text": self.help_text,
+            "info_overlay": self.info_overlay,
             "value": self.value.to_dict(),
             "roles": sorted(self.roles),
             "setting": _role_dict(self.setting),

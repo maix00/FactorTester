@@ -84,7 +84,9 @@ const panel = window.FTTestSourceUpload.strategyPanel(context, state, () => {}, 
   ],
 });
 assert.deepEqual(
-  findAll(panel, node => node.tagName === "button" && node.textContent !== "×")
+  findAll(panel, node => node.tagName === "button"
+    && !node.className.split(" ").includes("ft-help-icon")
+    && node.textContent !== "×")
     .map(node => node.textContent),
   ["自定义策略源码", "自定义依赖"],
 );

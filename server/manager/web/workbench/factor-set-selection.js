@@ -113,7 +113,9 @@
     });
     root.append(FTTestFieldRow.create(
       context.t("因子集合"), picker.element,
-      context.t("选择冻结集合并展开为具体因子候选"),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_set_selections", context,
+      ) || "",
     ));
     if (state.factorSetCatalog?.error) {
       const error = document.createElement("p");

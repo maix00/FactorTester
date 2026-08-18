@@ -26,7 +26,9 @@
     });
     return FTTestFieldRow.create(
       context.t("因子家族"), picker.element,
-      context.t("搜索公共因子库、本地 Git 修订或任务临时源码"),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_family_ref", context,
+      ) || "",
     );
   }
 
@@ -79,7 +81,11 @@
     });
     return FTTestFieldRow.create(
       context.t("公共因子"), picker.element,
-      context.t("选择公共因子并加入本次测试候选"),
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest,
+        state.kind === "ic" ? ["factor_selections", "factor"] : ["factor", "factor_selections"],
+        context,
+      ) || "",
     );
   }
 

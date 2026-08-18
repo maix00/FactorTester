@@ -111,9 +111,7 @@
     const overrideDetails = document.createElement("details");
     const overrideSummary = document.createElement("summary");
     overrideSummary.textContent = context.t("逐组设置覆盖");
-    overrideDetails.append(overrideSummary, field(
-      context.t("覆盖字段"), overrides, context.t("只保存本组显式覆盖的注册字段"),
-    ));
+    overrideDetails.append(overrideSummary, field(context.t("覆盖字段"), overrides));
     form.append(overrideDetails);
 
     appendActions(context, form, async () => {
@@ -191,9 +189,7 @@
     const overrideDetails = document.createElement("details");
     const overrideSummary = document.createElement("summary");
     overrideSummary.textContent = context.t("Long-Short 覆盖设置");
-    overrideDetails.append(overrideSummary, field(
-      context.t("覆盖字段"), overrides, context.t("未设置字段继承统一策略"),
-    ));
+    overrideDetails.append(overrideSummary, field(context.t("覆盖字段"), overrides));
     form.append(overrideDetails);
     appendActions(context, form, () => {
       try {

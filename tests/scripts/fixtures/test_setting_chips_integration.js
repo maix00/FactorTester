@@ -194,7 +194,9 @@ assert.equal(describedCopy.children.length, 1,
 const describedHeading = describedCopy.children[0];
 assert.equal(describedHeading.className, "test-field-row-heading");
 assert.equal(describedHeading.children[1].textContent, "?");
-assert.equal(describedHeading.children[1].title, "设置样本开始日期");
+assert.equal(describedHeading.children[1].title, "",
+  "field help must not use hover title text");
+assert.equal(describedHeading.children[1].attributes["aria-label"], "设置样本开始日期");
 
 const updated = render("SgCCS 5m", () => {});
 const updatedGroup = updated.children[1].children[1].children.find(

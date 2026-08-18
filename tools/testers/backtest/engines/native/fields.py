@@ -132,6 +132,7 @@ class FieldDefinition:
             value=self.descriptor_for(key),
             label=self.label,
             help_text=self.help_text,
+            info_overlay=self.info_overlay,
             roles=frozenset({"runtime"}),
             runtime=RuntimeRole(
                 owner=owner,

@@ -1,14 +1,20 @@
 (() => {
   function helpIcon(help) {
     if (window.FTUI?.helpIcon) return window.FTUI.helpIcon(help);
-    const icon = document.createElement("span");
+    if (window.FTHelp?.create) return window.FTHelp.create(help);
+    const icon = document.createElement("button");
+    icon.type = "button";
     icon.className = "ft-help-icon";
     icon.textContent = "?";
-    icon.title = help;
-    icon.tabIndex = 0;
-    icon.setAttribute("role", "img");
-    icon.setAttribute("aria-label", help);
+    icon.setAttribute("aria-label", helpText(help));
     return icon;
+  }
+
+  function helpText(help) {
+    if (help && typeof help === "object") {
+      return String(help.text || help.description || help.desc || help.body || "").trim();
+    }
+    return String(help || "").trim();
   }
 
   function create(label, control, help = "", options = {}) {
@@ -21,15 +27,15 @@
     const title = document.createElement("b");
     title.textContent = label || "";
     heading.append(title);
-    const tooltip = String(options.title || help || "").trim();
-    if (tooltip) heading.append(helpIcon(tooltip));
+    const helpValue = options.help || help;
+    const tooltip = helpText(options.title || helpValue);
+    if (helpValue && (tooltip || typeof helpValue === "object")) {
+      heading.append(helpIcon(helpValue));
+    }
     copy.append(heading);
     const value = document.createElement("div");
     value.className = "test-field-row-control";
-    if (tooltip) {
-      value.title = tooltip;
-      row.setAttribute("aria-label", `${label || ""}：${tooltip}`);
-    }
+    if (tooltip) row.setAttribute("aria-label", `${label || ""}：${tooltip}`);
     value.append(control);
     row.append(copy, value);
     return row;
