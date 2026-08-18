@@ -29,12 +29,20 @@ assert.equal(
   "/api/run-specs/ghi",
 );
 assert.equal(
+  page.pathFor("run_spec", "runspec:sha256:abc", "public-1"),
+  "/api/run-specs/abc?server_id=public-1",
+);
+assert.equal(
   page.pathFor("run", "run:run-123"),
   "/api/runs/run-123",
 );
 assert.equal(
   page.routeFor("run_spec", "runspec:sha256:abc", "运行配置"),
   "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc&label=%E8%BF%90%E8%A1%8C%E9%85%8D%E7%BD%AE",
+);
+assert.equal(
+  page.routeFor("run_spec", "runspec:sha256:abc", "运行配置", "public-1"),
+  "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc&label=%E8%BF%90%E8%A1%8C%E9%85%8D%E7%BD%AE&server_id=public-1",
 );
 assert.equal(
   page.resourceEndpoint({detailFields: [

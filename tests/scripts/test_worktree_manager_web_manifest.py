@@ -459,6 +459,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert 'loadGroups?.([group])' in detail
     assert 'loadGroups?.(["job-detail"])' not in run_results
     assert 'job-detail-ic' in run_results and 'job-detail-backtest' in run_results
+    assert "FTTestRunProgress" in run_results
     assert "group_external_scripts" in loader
     assert manifest["initial_groups"] == ["core", "app"]
     initial = set(research_static._initial_scripts(manifest))
@@ -684,13 +685,13 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
     assert manifest["group_dependencies"]["workbench-run-batch"] == [
-        "workbench-run", "workbench-products",
+        "workbench-run", "workbench-products", "workbench-ic-controls",
     ]
     assert manifest["group_dependencies"]["workbench-run-batch-actions"] == [
         "workbench-run-batch", "workbench-input-state",
     ]
     assert manifest["group_dependencies"]["workbench-run-results"] == [
-        "workbench-run",
+        "workbench-run", "jobs",
     ]
     assert set(manifest["groups"]["workbench-run"]) == {
         "workbench/test-run-fields.js",
@@ -704,6 +705,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench/run-batch/actions.js",
     ]
     assert manifest["groups"]["workbench-run-results"] == [
+        "workbench/test-run-progress.js",
         "workbench/test-run-results.js",
     ]
     assert manifest["groups"]["workbench-run-submit"] == [
@@ -761,7 +763,7 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         "workbench-products", "workbench-factors",
     ]
     assert manifest["group_dependencies"]["workbench-run-submit"] == [
-        "workbench-run", "workbench-compiler",
+        "workbench-run", "workbench-compiler", "workbench-ic-controls",
     ]
     assert manifest["group_dependencies"]["workbench-ic-controls"] == [
         "workbench-core", "workbench-compiler",
@@ -802,6 +804,11 @@ def test_test_workbench_defers_catalog_and_adapter_code_until_needed() -> None:
         encoding="utf-8",
     )
     assert 'loadGroups?.(["workbench-run-results"])' in run_batch
+    progress = (WEB_ROOT / "workbench" / "test-run-progress.js").read_text(
+        encoding="utf-8",
+    )
+    assert "FTJobProgress.progressView" in progress
+    assert "FTJobProgress.watchProgress" in progress
     assert "FTTestRunSummary?.planSummary" in run_batch
     assert "ensureRunBatchActionsCode" in run_batch
     assert "context.api(" not in run_batch
@@ -1035,7 +1042,7 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
     )
 
     assert 'context.t("查看运行配置")' in detail_page
-    assert "FTRunSpecView.open(context, runSpec.target)" in detail_page
+    assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" in detail_page
     assert 'context.t("结果预览")' in detail_page
     assert "function lazyConfigurationPreview(context, configuration)" in detail_page
     assert 'context.t("运行配置摘要")' in detail_page

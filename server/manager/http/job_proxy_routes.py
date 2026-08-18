@@ -134,7 +134,11 @@ class JobProxyRoutesMixin:
                 route=route,
                 origin_server_id=self.state.server_id,
             )
-        self._send_gateway_response(response, route=route)
+        self._send_gateway_response(
+            response,
+            route=route,
+            include_route_identity=parsed.path in {"/api/runs", "/api/runs/preview"},
+        )
         return True
 
     def _visitor_run_body_allowed(self, body: bytes) -> bool:
