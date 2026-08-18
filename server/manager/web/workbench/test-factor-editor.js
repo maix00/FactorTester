@@ -29,6 +29,7 @@
       window.FTTestFieldHelp?.forField?.(
         state.manifest, "factor_family_ref", context,
       ) || "",
+      {className: "test-factor-family-row"},
     );
   }
 

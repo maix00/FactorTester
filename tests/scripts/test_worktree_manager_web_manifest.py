@@ -635,6 +635,22 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_factor_family_picker_uses_the_shared_left_right_field_row() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_factor_family_field_row.js"
+    files = [
+        WEB_ROOT / "workbench" / "test-field-row.js",
+        WEB_ROOT / "workbench" / "test-factor-editor.js",
+    ]
+    result = subprocess.run(
+        ["node", str(fixture), *(str(path) for path in files)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_workbench_recovers_ready_settings_loader_before_first_paint() -> None:
     import subprocess
 

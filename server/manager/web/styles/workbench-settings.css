@@ -95,6 +95,9 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-settings-manager-defaults .backend-setting-chip-label { flex: 0 1 auto; }
 .test-settings-manager-defaults .backend-setting-chip-value { max-width: 22rem; }
 .test-setting-rows { min-width: 0; }
+.test-factor-setting-rows,
+.test-factor-source-rows { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.test-factor-family-row { min-width: 0; }
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row:last-child { border-bottom: 0; }
 .test-setting-row > span { display: grid; gap: 2px; min-width: 0; }
