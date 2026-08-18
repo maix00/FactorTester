@@ -30,6 +30,8 @@
 .strategy-list-batch-body { display: grid; min-width: 0; }
 .strategy-list-row { display: grid; grid-template-columns: 24px 20px minmax(130px, .72fr) minmax(0, 1.28fr) auto; gap: 7px; align-items: center; min-width: 0; padding: 7px 9px 7px calc(20px + var(--strategy-depth, 0) * 20px); border-top: 1px solid var(--line); }
 .strategy-list-row.selected { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.strategy-list-name-input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; border-radius: 5px; padding: 3px 5px; color: inherit; background: transparent; font: inherit; font-weight: 650; }
+.strategy-list-name-input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); background: var(--panel); }
 .strategy-list-branch { display: flex; align-items: center; min-width: 0; color: var(--muted); }
 .strategy-list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .strategy-list-chips .backend-settings-chip-row { display: contents; }

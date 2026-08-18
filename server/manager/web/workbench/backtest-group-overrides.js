@@ -44,17 +44,21 @@
     return result;
   }
 
-  function fieldsForTab(tabKey, manifest, values) {
+  function fieldsForTab(tabKey, manifest, values, scopeSide = "") {
     return Object.entries(manifest?.defaults || {})
       .filter(([key, field]) => field.tab_key === tabKey
         && isEligible(key, field, manifest)
-        && FTSettingRules.isVisible(field, values))
+        && FTSettingRules.isVisible(field, values)
+        && (!scopeSide || !window.FTStrategyEditorScope?.fieldVisible
+          || FTStrategyEditorScope.fieldVisible(manifest, key, scopeSide, values))
+        && (!scopeSide || !window.FTStrategyEditorScope?.fieldEditable
+          || FTStrategyEditorScope.fieldEditable(manifest, key, scopeSide)))
       .sort((left, right) => Number(left[1].order || 0) - Number(right[1].order || 0));
   }
 
-  function visibleTabs(manifest, values) {
+  function visibleTabs(manifest, values, scopeSide = "") {
     return (manifest?.tab_lists?.["group-settings"] || []).filter(tab => (
-      fieldsForTab(tab.key, manifest, values).length
+      fieldsForTab(tab.key, manifest, values, scopeSide).length
     ));
   }
 
@@ -62,7 +66,7 @@
     context, manifest, inheritedValues = {}, overrides: initial = {},
     manageTabs = false, mountedTabs: requestedMountedTabs,
     onlyTabs: requestedOnlyTabs,
-    onMountedTabsChange, onChange,
+    onMountedTabsChange, onChange, scopeSide = "",
   }) {
     const root = document.createElement("div");
     root.className = "backtest-group-overrides";
@@ -79,7 +83,7 @@
 
     const redraw = () => {
       const values = effectiveValues();
-      const tabs = visibleTabs(manifest, values);
+      const tabs = visibleTabs(manifest, values, scopeSide);
       const usableTabs = manageTabs
         ? tabs.filter(tab => (mountedTabs || []).includes(tab.key))
         : onlyTabs ? tabs.filter(tab => onlyTabs.has(tab.key)) : tabs;
@@ -97,7 +101,9 @@
         label: context.t(tab.label || tab.key),
         description: tab.help_text ? context.t(tab.help_text) : "",
         panelClass: "backtest-group-override-panel",
-        render: () => settingRows(fieldsForTab(tab.key, manifest, values), values),
+        render: () => settingRows(
+          fieldsForTab(tab.key, manifest, values, scopeSide), values,
+        ),
       }));
       if (manageTabs) {
         items.push({
@@ -198,6 +204,10 @@
     };
 
     root.value = () => normalize(manifest, overrides);
+    // Nested factor candidates can change the visibility of role bindings
+    // while the override panel is already mounted.  Expose the same redraw
+    // used internally instead of rebuilding the whole strategy editor tab.
+    root.refresh = redraw;
     redraw();
     return root;
   }

@@ -29,6 +29,17 @@
       renderProduct: () => FTStrategyEditorScope.summary(
         context, state, "product_path_selection",
       ),
+      renderProductFilter: () => window.FTStrategyEditorProductFilter?.render(
+        context,
+        state,
+        state.customStrategyProductMask || [],
+        values => {
+          state.customStrategyProductMask = [...new Set(
+            (values || []).map(String).map(value => value.trim()).filter(Boolean),
+          )];
+          refresh?.();
+        },
+      ) || document.createElement("div"),
       renderOverrides: ({tab}) => overridePanel(context, state, tab, refresh),
     });
     return editor;

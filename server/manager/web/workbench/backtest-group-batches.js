@@ -112,9 +112,11 @@
     }
     for (const item of rootsAndChildren(state)) {
       const root = roots.get(item.group.id) || item.group;
-      // This is the authoring event for the concrete strategy, not an
-      // execution partition. Runtime execution still uses one frozen config.
-      const key = item.group.batchId || root.batchId || `batch:${root.id}`;
+      // The visible list is a hierarchy: descendants stay beneath their root
+      // strategy even though each authoring event retains its own batchId for
+      // execution metadata. Runtime execution still uses each item's frozen
+      // config and does not depend on this presentation grouping.
+      const key = root.batchId || item.group.batchId || `batch:${root.id}`;
       if (!batches.has(key)) {
         batches.set(key, {key, root, order: batches.size + 1, items: []});
       }

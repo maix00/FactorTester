@@ -1,7 +1,8 @@
 (() => {
   const structuralKeys = new Set([
     "id", "name", "parentId", "product_path_selection",
-    "product_path_selection_id", "factorAlias", "splitCount", "groupIndex",
+    "product_path_selection_id", "factorAlias", "factorAliases",
+    "factor_combination_mode", "factorCombinationMode", "splitCount", "groupIndex",
     "isAllGroups", "productMask", "needsRegenerate",
     "batchId", "override_mounted_tabs",
   ]);
@@ -71,6 +72,26 @@
     return group?.name || group?.id || "";
   }
 
+  function normalizedFactorAliases(draft = {}) {
+    const raw = Array.isArray(draft.factorAliases)
+      ? draft.factorAliases
+      : [draft.factorAlias];
+    return [...new Set(raw.map(value => String(value || "").trim()).filter(Boolean))];
+  }
+
+  function combinationMode(draft = {}) {
+    return String(
+      draft.factor_combination_mode || draft.factorCombinationMode || "",
+    ).trim();
+  }
+
+  function validateFactorCandidates(factorAliases, mode) {
+    if (!factorAliases.length) throw new Error("factorAlias is required");
+    if (factorAliases.length > 1 && !mode) {
+      throw new Error("多个因子候选需要组合方式");
+    }
+  }
+
   function addBaseBatch(state, draft) {
     initialize(state);
     const splitCount = positiveInteger(draft.splitCount, "splitCount");
@@ -81,11 +102,9 @@
     const selection = draft.product_path_selection;
     const selectionId = selectionID(selection);
     if (!selectionId) throw new Error("product_path_selection is required");
-    const factorAliases = [...new Set(
-      (Array.isArray(draft.factorAliases) ? draft.factorAliases : [draft.factorAlias])
-        .map(value => String(value || "").trim()).filter(Boolean),
-    )];
-    if (!factorAliases.length) throw new Error("factorAlias is required");
+    const factorAliases = normalizedFactorAliases(draft);
+    const factorCombinationMode = combinationMode(draft);
+    validateFactorCandidates(factorAliases, factorCombinationMode);
     const indexes = draft.allGroups
       ? Array.from({length: splitCount}, (_, index) => index + 1)
       : [groupIndex];
@@ -96,31 +115,31 @@
     // A batch is an authoring event, not a configuration equivalence class.
     // Repeating the same draft therefore deliberately receives a new ID.
     const batchId = FTBacktestGroupBatches.nextID(state);
-    factorAliases.forEach(factorAlias => {
-      const factorGroups = indexes.map(index => {
-        const useRequestedName = factorAliases.length === 1 && indexes.length === 1;
-        const id = identifier("bg", useRequestedName ? draft.id : "");
-        const requestedName = draft.name && useRequestedName
-          ? String(draft.name).trim() : "";
-        const name = requestedName
-          ? uniqueName(state, requestedName)
-          : FTBacktestGroupBatches.defaultName(batchId, id);
-        return {
-          id,
-          batchId,
-          name, parentId: null,
-          product_path_selection: projection(selection),
-          product_path_selection_id: selectionId,
-          factorAlias,
-          splitCount, groupIndex: index, isAllGroups: false,
-          ...overrides,
-          override_mounted_tabs: mountedTabs,
-          needsRegenerate: true,
-        };
-      });
-      state.analysis.groups.push(...factorGroups);
-      created.push(...factorGroups);
+    const factorGroups = indexes.map(index => {
+      const useRequestedName = indexes.length === 1;
+      const id = identifier("bg", useRequestedName ? draft.id : "");
+      const requestedName = draft.name && useRequestedName
+        ? String(draft.name).trim() : "";
+      const name = requestedName
+        ? uniqueName(state, requestedName)
+        : FTBacktestGroupBatches.defaultName(batchId, id);
+      return {
+        id,
+        batchId,
+        name, parentId: null,
+        product_path_selection: projection(selection),
+        product_path_selection_id: selectionId,
+        factorAlias: factorAliases[0], factorAliases: [...factorAliases],
+        factor_combination_mode: factorCombinationMode,
+        splitCount, groupIndex: index, isAllGroups: false,
+        productMask: productMaskFrom(draft.productMask),
+        ...overrides,
+        override_mounted_tabs: mountedTabs,
+        needsRegenerate: true,
+      };
     });
+    state.analysis.groups.push(...factorGroups);
+    created.push(...factorGroups);
     state.selectedBacktestGroupIDs = created.map(group => group.id);
     return created;
   }
@@ -130,6 +149,17 @@
     const parent = find(state, parentID);
     if (!parent) throw new Error("parent group is required");
     const productMask = productMaskFrom(draft.productMask);
+    const inheritedFactorAliases = normalizedFactorAliases(parent);
+    const factorAliases = normalizedFactorAliases(
+      Array.isArray(draft.factorAliases) || draft.factorAlias
+        ? draft : {factorAliases: inheritedFactorAliases},
+    );
+    const factorCombinationMode = combinationMode(
+      Object.prototype.hasOwnProperty.call(draft, "factor_combination_mode")
+        || Object.prototype.hasOwnProperty.call(draft, "factorCombinationMode")
+        ? draft : parent,
+    );
+    validateFactorCandidates(factorAliases, factorCombinationMode);
     const requestedName = String(draft.name || "").trim();
     // A derived strategy is its own authoring event. It may inherit the
     // parent's settings, but it must not be folded into the parent's batch.
@@ -147,6 +177,8 @@
       } : {}),
       ...(parent.factorAlias ? {factorAlias: parent.factorAlias} : {}),
       ...(parent.factorAliases ? {factorAliases: [...parent.factorAliases]} : {}),
+      factorAlias: factorAliases[0], factorAliases: [...factorAliases],
+      factor_combination_mode: factorCombinationMode,
       ...(parent.splitCount ? {splitCount: parent.splitCount} : {}),
       ...(parent.groupIndex ? {groupIndex: parent.groupIndex} : {}),
       ...(parent.isAllGroups !== undefined ? {isAllGroups: parent.isAllGroups} : {}),
@@ -156,8 +188,6 @@
       ...(draft.product_path_selection_id ? {
         product_path_selection_id: draft.product_path_selection_id,
       } : {}),
-      ...(draft.factorAlias ? {factorAlias: draft.factorAlias} : {}),
-      ...(Array.isArray(draft.factorAliases) ? {factorAliases: [...draft.factorAliases]} : {}),
       ...(draft.splitCount ? {splitCount: positiveInteger(draft.splitCount, "splitCount")} : {}),
       ...(draft.groupIndex ? {groupIndex: positiveInteger(draft.groupIndex, "groupIndex")} : {}),
       ...explicitOverrides(draft.overrides),
@@ -182,6 +212,12 @@
     if (index < 0) throw new Error("group not found");
     const current = state.analysis.groups[index];
     const next = mergePatch(current, patch);
+    const factorAliases = normalizedFactorAliases(next);
+    const factorCombinationMode = combinationMode(next);
+    validateFactorCandidates(factorAliases, factorCombinationMode);
+    next.factorAliases = factorAliases;
+    next.factorAlias = factorAliases[0];
+    next.factor_combination_mode = factorCombinationMode;
     next.needsRegenerate = true;
     if (Object.prototype.hasOwnProperty.call(patch, "name")) {
       next.name = uniqueName(state, String(patch.name || "").trim(), id);
@@ -219,9 +255,11 @@
       useCloseToday: null,
       needsRegenerate: true,
       metadata: {},
+      productMask: productMaskFrom(overrides.productMask),
       override_mounted_tabs: ["__strategy__", "factor", "product_path_selection"],
       ...explicitOverrides(overrides),
     };
+    item.productMask = productMaskFrom(item.productMask);
     state.analysis.ls_configs.push(item);
     return item;
   }
@@ -239,6 +277,7 @@
     const next = mergePatch(current, {
       ...patch, longGroupId: longID, shortGroupId: shortID,
     });
+    if (patch.productMask !== undefined) next.productMask = productMaskFrom(patch.productMask);
     if (Object.prototype.hasOwnProperty.call(patch, "name")) {
       next.name = uniqueName(state, String(patch.name || "").trim(), id);
     }
@@ -369,6 +408,13 @@
     return value && typeof value === "object" ? {...value} : {};
   }
 
+  function productMaskValues(value) {
+    const normalized = productMaskFrom(value);
+    return Object.entries(normalized)
+      .filter(([, enabled]) => enabled)
+      .map(([key]) => key);
+  }
+
   function positiveInteger(value, field) {
     const number = Number(value);
     if (!Number.isInteger(number) || number < 1) throw new Error(`${field} must be positive`);
@@ -380,6 +426,6 @@
     registeredOverrides, removeLongShort, removeSelected, removeSelectedLongShort,
     groupBatches, renameGroup, renameLongShort, rootsAndChildren, selected,
     selectedLongShort, selectionID, projection, toggle, toggleLongShort, updateGroup,
-    swapLongShort, updateLongShort,
+    productMaskValues, swapLongShort, updateLongShort,
   });
 })();

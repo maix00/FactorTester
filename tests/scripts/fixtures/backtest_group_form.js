@@ -24,6 +24,11 @@ class Element {
     }
   }
 
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this[name] = value; }
   querySelector() { return null; }
@@ -40,6 +45,9 @@ global.FTTestFieldRow = {
 };
 global.FTTestObjectPicker = {
   create: () => ({element: new Element("picker"), setValues: () => {}}),
+};
+global.FTTestChoicePicker = {
+  create: () => ({element: new Element("choice"), values: []}),
 };
 global.FTTestObjectEditorOverlay = {open: async () => {}};
 global.FTBacktestGroupOverrides = {

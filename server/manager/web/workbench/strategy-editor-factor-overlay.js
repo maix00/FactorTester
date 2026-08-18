@@ -97,6 +97,17 @@
       }),
     });
     const saved = response.factor || response;
+    const factorFamily = saved.factor_family_alias || saved.family || value.factor_family_alias;
+    const params = value.params && typeof value.params === "object" ? value.params : {};
+    if (factorFamily && Object.keys(params).length) {
+      await context.api(
+        `/custom-factors/api/factor-library-configs/${encodeURIComponent(factorFamily)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({params_list: [params]}),
+        },
+      );
+    }
     onSaved?.({
       ...value, ...saved,
       factor_alias: saved.factor_alias || saved.name || value.factor_alias,

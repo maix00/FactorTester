@@ -26,6 +26,20 @@
       || serialization.allowed_roles || [])];
   }
 
+  function sourceDescription(context, values, factor) {
+    const refs = [...new Set((factor?.factor_set_refs || []).filter(Boolean))];
+    const selectedSets = values?.factor_set_selections || [];
+    const names = refs.map(ref => {
+      const item = selectedSets.find(value => value?.target_ref === ref);
+      return item?.title_zh || item?.set_id || ref;
+    });
+    if (names.length) return `${context.t("因子集合")}: ${names.join("、")}`;
+    if (factor?.source_kind === "transient" || factor?.source_origin === "transient") {
+      return context.t("现场新建/临时因子");
+    }
+    return context.t("因子库");
+  }
+
   function display(value, context = null) {
     const bindings = normalize(value);
     const items = Object.entries(bindings);
@@ -40,7 +54,10 @@
     const root = document.createElement("div");
     root.className = "factor-role-bindings";
     const candidates = (values?.[field?.serialization?.candidate_field || "factor_candidates"] || [])
-      .map(item => ({alias: factorAlias(item), label: factorAlias(item)}))
+      .map(item => ({
+        alias: factorAlias(item), label: factorAlias(item),
+        description: sourceDescription(context, values, item),
+      }))
       .filter(item => item.alias);
     const bindings = normalize(options.value);
     for (const role of visibleRoles(field, values)) {
@@ -60,7 +77,7 @@
           ...candidates.map(candidate => ({
             value: candidate.alias,
             label: candidate.label,
-            description: candidate.label,
+            description: candidate.description,
           })),
         ],
         selected: [bindings[role] || ""],

@@ -3,7 +3,54 @@
   // The same resolver is used by backtest groups and IC configuration so an
   // editor cannot accidentally widen a user's visible factor/product range.
   function contract(state) {
-    return state?.manifest?.strategy_editor || {};
+    return state?.manifest?.strategy_editor || state?.strategy_editor || {};
+  }
+
+  function scopedField(stateOrManifest, key, side = "inner") {
+    const entry = contract(stateOrManifest).scoped_fields?.[key];
+    if (!entry?.[side]) return null;
+    const {outer: _outer, inner: _inner, ...base} = entry;
+    return {...base, ...entry[side], key};
+  }
+
+  function scopedFields(stateOrManifest, side = "inner") {
+    const fields = contract(stateOrManifest).scoped_fields || {};
+    return Object.fromEntries(Object.entries(fields).map(([key, value]) => [
+      key, value?.[side] || {},
+    ]));
+  }
+
+  function itemCount(value) {
+    if (Array.isArray(value)) return value.length;
+    if (value && typeof value === "object") return Object.keys(value).length;
+    return value === undefined || value === null || value === "" ? 0 : 1;
+  }
+
+  function scopeConditionsMatch(conditions, values) {
+    const fields = conditions?.field_values || {};
+    if (!Object.entries(fields).every(([key, allowed]) => {
+      const choices = Array.isArray(allowed) ? allowed : [allowed];
+      return choices.some(value => String(value) === String(values?.[key]));
+    })) return false;
+    return Object.entries(conditions?.min_items || {}).every(([key, minimum]) => (
+      itemCount(values?.[key]) >= Number(minimum || 0)
+    ));
+  }
+
+  function fieldVisible(stateOrManifest, key, side, values = {}) {
+    const descriptor = scopedField(stateOrManifest, key, side);
+    return !descriptor || scopeConditionsMatch(descriptor.visible_when, values);
+  }
+
+  function fieldRequired(stateOrManifest, key, side, values = {}) {
+    const descriptor = scopedField(stateOrManifest, key, side);
+    if (!descriptor) return null;
+    return scopeConditionsMatch(descriptor.required_when, values);
+  }
+
+  function fieldEditable(stateOrManifest, key, side) {
+    const descriptor = scopedField(stateOrManifest, key, side);
+    return !descriptor || descriptor.editable !== false;
   }
 
   function mounted(state, tabKey) {
@@ -81,7 +128,10 @@
 
   function outerValues(state, kind) {
     const rule = contract(state).outer_scope_tabs?.[kind] || {};
-    const selected = fieldValues(state, rule.selection_fields);
+    const sourceFields = rule.scope_fields || rule.candidate_fields;
+    const candidates = fieldValues(state, sourceFields);
+    const selected = candidates.length
+      ? candidates : fieldValues(state, rule.selection_fields);
     const catalog = visibleCatalog(state, kind);
     const byID = new Map(catalog.map(item => [
       String(kind === "factor" ? factorID(item) : groupID(item)), item,
@@ -159,6 +209,9 @@
       seen.add(tab.key); result.push(tab);
     };
     defaults.forEach(add);
+    for (const tab of config.inner_manual_tabs || []) {
+      if (mountedTabs.includes(tab.key)) add(tab);
+    }
     const values = state?.values || {};
     for (const tab of state?.manifest?.tab_lists?.["group-settings"] || []) {
       if (outerOnly.has(tab.key) || seen.has(tab.key)) continue;
@@ -176,6 +229,7 @@
 
   window.FTStrategyEditorScope = Object.freeze({
     contract, factorID, factorLabel, groupID, groupLabel, innerTabs,
-    itemID, itemLabel, mounted, scope, summary, validate, visibleCatalog,
+    itemID, itemLabel, mounted, scope, scopedField, scopedFields,
+    fieldVisible, fieldRequired, fieldEditable, summary, validate, visibleCatalog,
   });
 })();

@@ -889,6 +889,27 @@ def test_nested_strategy_editor_respects_outer_scope_and_inner_mount_contract() 
     assert result.stdout.strip() == "ok"
 
 
+def test_backend_nested_scope_contract_is_renderable_by_web_resolver(tmp_path) -> None:
+    import json
+    import subprocess
+
+    from tools.testers.settings import backtest_setting_registry
+
+    manifest_path = tmp_path / "group-test-manifest.json"
+    manifest_path.write_text(
+        json.dumps(backtest_setting_registry.get("group_test").manifest()),
+        encoding="utf-8",
+    )
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
+    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source), str(manifest_path)],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None:
     import subprocess
 

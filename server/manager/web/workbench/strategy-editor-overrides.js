@@ -16,7 +16,10 @@
     }
   }
 
-  function create({context, state, initial = {}, mountedTabs = [], onChange}) {
+  function create({
+    context, state, inheritedValues = state.values, initial = {},
+    mountedTabs = [], onChange, scopeSide = "inner",
+  }) {
     let values = clone(initial) || {};
     let mounted = [...new Set(mountedTabs || [])];
     const panels = new Map();
@@ -27,9 +30,10 @@
       const root = FTBacktestGroupOverrides.render({
         context,
         manifest: state.manifest,
-        inheritedValues: state.values,
+        inheritedValues,
         overrides: values,
         onlyTabs: [tab.key],
+        scopeSide,
         onChange: next => {
           values = clone(next) || {};
           onChange?.(values);
@@ -55,6 +59,7 @@
 
     return {
       panel,
+      refresh: () => panels.forEach(root => root.refresh?.()),
       setMountedTabs,
       value: () => clone(values) || {},
     };

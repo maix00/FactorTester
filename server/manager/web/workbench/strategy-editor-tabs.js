@@ -10,7 +10,7 @@
 
   function eligibleOverrideTabs(state) {
     const outerOnly = new Set(state?.manifest?.strategy_editor?.outer_only_tabs || []);
-    return (state?.manifest?.tab_lists?.["group-settings"] || []).filter(tab => {
+    const registered = (state?.manifest?.tab_lists?.["group-settings"] || []).filter(tab => {
       if (outerOnly.has(tab.key)) return false;
       return Object.entries(state?.manifest?.defaults || {}).some(([key, field]) => (
         field.tab_key === tab.key
@@ -19,12 +19,18 @@
         && (!window.FTSettingRules || FTSettingRules.isVisible(field, state.values || {}))
       ));
     });
+    const manual = (state?.manifest?.strategy_editor?.inner_manual_tabs || []).filter(tab => (
+      !outerOnly.has(tab.key) && tab.mount_policy === "manual"
+    ));
+    const seen = new Set(registered.map(tab => tab.key));
+    return [...registered, ...manual.filter(tab => !seen.has(tab.key))];
   }
 
   function create(options = {}) {
     const {
       context, state, mountedTabs: requested = [], onMountedTabsChange,
-      onActivate, renderStructure, renderFactor, renderProduct, renderOverrides,
+      onActivate, renderStructure, renderFactor, renderProduct,
+      renderProductFilter, renderOverrides,
     } = options;
     const root = document.createElement("section");
     root.className = "strategy-editor-tabs";
@@ -68,6 +74,9 @@
           if (tab.key === "factor") return renderFactor?.() || document.createElement("div");
           if (tab.key === "product_path_selection") {
             return renderProduct?.() || document.createElement("div");
+          }
+          if (tab.kind === "product_filter" || tab.key === "trading_product_filter") {
+            return renderProductFilter?.() || document.createElement("div");
           }
           return renderOverrides?.({
             tab,

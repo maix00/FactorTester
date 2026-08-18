@@ -9,7 +9,8 @@ from tools.testers.settings import backtest_setting_registry
 
 
 STRUCTURAL_GROUP_KEYS = {
-    "id", "name", "parentId", "testerId", "factorAlias", "splitCount", "groupIndex",
+    "id", "name", "parentId", "testerId", "factorAlias", "factorAliases",
+    "factor_combination_mode", "factorCombinationMode", "splitCount", "groupIndex",
     "isAllGroups", "addBatch", "needsRegenerate", "startDate", "endDate",
     "overrides", "_expanded", "productMask", "product_names", "productNames", "batchId",
     "product_path_selection", "product_path_selection_id",

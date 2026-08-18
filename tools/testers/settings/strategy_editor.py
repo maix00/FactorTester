@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .strategy_editor_scope import build_scoped_fields
+
 
 _INNER_DEFAULT_TABS = (
     {
@@ -33,16 +35,34 @@ _INNER_DEFAULT_TABS = (
 )
 
 
+_INNER_MANUAL_TABS = (
+    {
+        "key": "trading_product_filter",
+        "label": "交易产品",
+        "kind": "product_filter",
+        "mount_policy": "manual",
+        "field": "productMask",
+        "scope_policy": "overridable",
+        "independent_of": "derived_strategy",
+    },
+)
+
+
 def _contract(*, application: str) -> dict[str, Any]:
+    scoped_fields = build_scoped_fields()
+    inner_factor_candidates = scoped_fields["factor_candidates"]["inner"]
+    inner_combination = scoped_fields["factor_combination_mode"]["inner"]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "editor": "nested_strategy",
         "application": application,
         "inner_default_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
+        "inner_manual_tabs": [dict(item) for item in _INNER_MANUAL_TABS],
         "outer_scope_tabs": {
             "factor": {
                 "mounted_tab": "factor",
                 "candidate_fields": ["factor_candidates"],
+                "scope_fields": ["factor_candidates"],
                 "selection_fields": ["factor_selections", "factor"],
                 "family_fields": ["factor_family_ref"],
                 "set_fields": ["factor_set_selections"],
@@ -51,6 +71,7 @@ def _contract(*, application: str) -> dict[str, Any]:
             "product_path_selection": {
                 "mounted_tab": "product_path_selection",
                 "candidate_fields": ["product_path_candidates"],
+                "scope_fields": ["product_path_candidates"],
                 "selection_fields": [
                     "product_path_selections",
                     "product_path_selection",
@@ -69,6 +90,10 @@ def _contract(*, application: str) -> dict[str, Any]:
         ],
         "manual_inner_tabs": True,
         "inner_override_scope": "overridable",
+        # This is the reusable, client-neutral contract.  Keep the legacy
+        # ``inner_factor_fields`` projection below while existing clients
+        # migrate; both projections are produced from this same declaration.
+        "scoped_fields": scoped_fields,
         "factor_scope": {
             "selection_kind": "factor",
             "family_kind": "factor_family",
@@ -79,10 +104,49 @@ def _contract(*, application: str) -> dict[str, Any]:
                 "factor_family_ref",
             ],
         },
+        # The outer factor tab builds this pool.  A nested strategy never
+        # edits the pool itself: it selects one or more members from it.  The
+        # second field is intentionally registered here even while the
+        # registry has no combination algorithms; the UI can therefore show
+        # the empty, required field instead of inventing a client-side rule.
+        "inner_factor_fields": {
+            "candidate_selection": {
+                "key": "factor_candidates",
+                "label": "因子候选",
+                "kind": "candidate_filter",
+                "editor": "shared_object_multi_select",
+                **inner_factor_candidates,
+            },
+            "combination_mode": {
+                "key": "factor_combination_mode",
+                "label": "组合方式",
+                "kind": "factor_combination_mode",
+                "editor": inner_combination.get("editor", "select"),
+                **inner_combination,
+                "help_text": "一个候选时按单因子策略运行；多个候选需要一种组合方式。",
+            },
+            # These are registered FactorSignal fields, but the strategy
+            # editor contract makes their inner/outer availability explicit
+            # for clients that do not render the full manifest themselves.
+            "shared_overridable_fields": [
+                "factor_role_bindings",
+                "factor_mode",
+                "warmup_mode",
+                "warmup_window",
+            ],
+        },
         "product_scope": {
             "selection_kind": "product_group",
             "inline_create": True,
             "category_source": "outer_or_visible_catalog",
+        },
+        "trading_product_filter": {
+            "field": "productMask",
+            "candidate_kind": "product",
+            "editor": "shared_object_multi_select",
+            "mount_policy": "manual",
+            "independent_of": "derived_strategy",
+            "empty_value": "no_filter",
         },
         "derived_strategy": {
             "kind": "normal_strategy",

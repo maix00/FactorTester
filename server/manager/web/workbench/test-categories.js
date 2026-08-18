@@ -4,7 +4,6 @@
   }
 
   async function initialize(context, state) {
-    if (state.kind !== "ic") return;
     const existing = candidates(state);
     if (existing.length) return;
     try {
@@ -69,7 +68,6 @@
   }
 
   function panel(context, state, refresh) {
-    if (state.kind !== "ic") return null;
     const items = candidates(state).map(category => ({
       value: categoryID(category),
       label: category.title_zh || category.alias || categoryID(category),
@@ -88,7 +86,9 @@
     };
     const picker = FTTestObjectPicker.create(context, {
       title: context.t("分类"),
-      note: context.t("选择一个分类用于 IC；分类由数据源或用户产品分类提供"),
+      note: context.t(state.kind === "ic"
+        ? "选择一个分类用于 IC；分类由数据源或用户产品分类提供"
+        : "管理本次测试中新建产品组可使用的产品分类"),
       items,
       selected: state.values.category ? [state.values.category] : [],
       multi: false,

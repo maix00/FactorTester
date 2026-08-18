@@ -12,7 +12,7 @@
     return value?.factor_alias || value?.alias || value?.name || value?.factor_ref || "";
   }
 
-  function addCandidate(state, value) {
+  function addCandidate(state, value, options = {}) {
     if (!value || typeof value !== "object" || !factorID(value)) return;
     const rows = candidates(state);
     const index = rows.findIndex(item => factorID(item) === factorID(value));
@@ -36,9 +36,31 @@
       if (!selected.includes(factorID(candidate))) selected.push(factorID(candidate));
       state.values.factor_selections = rows.filter(item => selected.includes(factorID(item)));
     } else {
-      state.values.factor = factorAlias(candidate);
+      // `select: false` means “do not make this newly added row preferred”;
+      // it does not disable the automatic scalar primary selection.
+      autoSelectPrimary(state, options.select === false ? null : candidate);
     }
-    state.factorRef = factorID(candidate);
+    if (state.kind === "ic") state.factorRef = factorID(candidate);
+  }
+
+  // Backtest factor candidates form an outer, derived pool.  The legacy
+  // scalar `factor` value remains part of the RunSpec contract, so keep it
+  // synchronized automatically with the first available candidate instead
+  // of exposing a second, conflicting selection control.
+  function autoSelectPrimary(state, preferred = null) {
+    const rows = candidates(state);
+    if (!rows.length) {
+      state.values.factor = "";
+      state.factorRef = "";
+      return;
+    }
+    const preferredID = factorID(preferred);
+    const current = rows.find(item => factorID(item) === state.factorRef)
+      || rows.find(item => factorAlias(item) === state.values.factor)
+      || (preferredID ? rows.find(item => factorID(item) === preferredID) : null)
+      || rows[0];
+    state.values.factor = factorAlias(current);
+    state.factorRef = factorID(current);
   }
 
   function removeCandidate(state, factor) {
@@ -47,10 +69,11 @@
     if (state.kind === "ic") {
       state.values.factor_selections = (state.values.factor_selections || [])
         .filter(item => factorID(item) !== id);
-    } else if (state.values.factor === factorAlias(factor)) {
-      state.values.factor = "";
+    } else {
+      autoSelectPrimary(state);
     }
     if (state.factorRef === id) state.factorRef = "";
+    if (state.kind !== "ic") autoSelectPrimary(state);
   }
 
   function detachFactorSet(state, targetRef) {
@@ -66,8 +89,8 @@
     state.values.factor_candidates = rows;
     if (state.kind === "ic") {
       state.values.factor_selections = rows.filter(item => selected.has(factorID(item)));
-    } else if (!rows.some(item => factorAlias(item) === state.values.factor)) {
-      state.values.factor = "";
+    } else {
+      autoSelectPrimary(state);
     }
     syncSelection(state);
   }
@@ -79,8 +102,7 @@
       state.values.factor_selections = candidates(state).filter(item => selected.has(factorID(item)));
       state.factorRef = factorID(state.values.factor_selections[0] || {}) || "";
     } else {
-      state.values.factor = checked ? factorAlias(factor) : "";
-      state.factorRef = checked ? factorID(factor) : "";
+      autoSelectPrimary(state);
     }
   }
 
@@ -91,9 +113,7 @@
       state.values.factor_selections = rows.filter(item => wanted.has(factorID(item)));
       state.factorRef = factorID(state.values.factor_selections[0] || {}) || "";
     } else {
-      const selected = rows.find(item => wanted.has(factorID(item)));
-      state.values.factor = selected ? factorAlias(selected) : "";
-      state.factorRef = selected ? factorID(selected) : "";
+      autoSelectPrimary(state);
     }
   }
 
@@ -113,8 +133,7 @@
     if (state.kind === "ic") {
       state.factorRef = factorID((state.values.factor_selections || [])[0] || {}) || "";
     } else {
-      const alias = state.values.factor || "";
-      state.factorRef = factorID(rows.find(item => factorAlias(item) === alias) || {}) || state.factorRef;
+      autoSelectPrimary(state);
     }
   }
 
@@ -129,7 +148,8 @@
         item && typeof item === "object"
       )));
     }
-    for (const factor of restored) addCandidate(state, factor);
+    for (const factor of restored) addCandidate(state, factor, {select: false});
+    if (state.kind !== "ic") autoSelectPrimary(state);
   }
 
   function selectedFactor(state) {
@@ -159,7 +179,8 @@
   }
 
   window.FTTestFactorSelection = Object.freeze({
-    candidates, factorID, factorAlias, addCandidate, removeCandidate, detachFactorSet,
+    candidates, factorID, factorAlias, addCandidate, autoSelectPrimary,
+    removeCandidate, detachFactorSet,
     setSelected, setSelectedIDs, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,
     selectedFactor, selectedFactors, selectedFamily,

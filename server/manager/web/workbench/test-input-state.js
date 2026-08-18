@@ -14,6 +14,7 @@
       state.customStrategyOverrides = {};
     }
     if (!Array.isArray(state.customStrategyMountedTabs)) state.customStrategyMountedTabs = [];
+    if (!Array.isArray(state.customStrategyProductMask)) state.customStrategyProductMask = [];
     state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
     return state;
   }
@@ -198,6 +199,9 @@
     }
     if (state.customStrategyMountedTabs.length) {
       result.custom_strategy_mounted_tabs = [...state.customStrategyMountedTabs];
+    }
+    if (state.customStrategyProductMask.length) {
+      result.custom_strategy_product_mask = [...state.customStrategyProductMask];
     }
     return result;
   }

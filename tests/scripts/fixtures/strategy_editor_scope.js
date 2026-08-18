@@ -34,6 +34,26 @@ const state = {
           selection_fields: ["product_path_selections", "product_path_selection"],
         },
       },
+      scoped_fields: {
+        factor_candidates: {
+          label: "因子候选",
+          inner: {
+            cardinality: "many",
+            filter_only_when_outer_mounted: true,
+            source_when_outer_mounted: "outer_candidate_pool",
+          },
+        },
+        factor: {
+          outer: {
+            resolution: {
+              kind: "automatic", source: "factor_candidates", resolver: "primary_item",
+            },
+          },
+        },
+        factor_role_bindings: {
+          inner: {visible_when: {min_items: {factor_candidates: 2}}},
+        },
+      },
       inner_default_tabs: [
         {key: "__strategy__", label: "分组"},
         {key: "factor", label: "因子执行"},
@@ -51,11 +71,84 @@ const state = {
   },
 };
 
+if (process.argv[3]) {
+  state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+}
+
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].factor_ref, "outer-factor");
 assert.equal(window.FTStrategyEditorScope.scope(state, "product_path_selection").items[0].group_ref, "outer-group");
 assert.deepEqual(window.FTStrategyEditorScope.validate(state), []);
+const innerCandidates = window.FTStrategyEditorScope.scopedField(
+  state, "factor_candidates", "inner",
+);
+const outerFactor = window.FTStrategyEditorScope.scopedField(
+  state, "factor", "outer",
+);
+assert.equal(innerCandidates?.cardinality, "many");
+assert.equal(innerCandidates?.filter_only_when_outer_mounted, true);
+assert.equal(innerCandidates?.source_when_outer_mounted, "outer_candidate_pool");
+assert.equal(outerFactor?.resolution?.resolver, "primary_item");
+assert.equal(
+  window.FTStrategyEditorScope.fieldVisible(
+    state, "factor_role_bindings", "inner", {factor_candidates: [{alias: "A"}]},
+  ),
+  false,
+);
+assert.equal(
+  window.FTStrategyEditorScope.fieldVisible(
+    state, "factor_role_bindings", "inner",
+    {factor_candidates: [{alias: "A"}, {alias: "B"}]},
+  ),
+  true,
+);
+const fallbackCombinationRequired = window.FTStrategyEditorScope.fieldRequired(
+  state, "factor_combination_mode", "inner", {
+    factor_candidates: [{alias: "A"}, {alias: "B"}],
+  },
+);
+assert.equal(
+  fallbackCombinationRequired,
+  process.argv[3] ? true : null,
+  "the backend contract supplies the combination requirement when provided",
+);
+if (process.argv[3]) {
+  const combination = window.FTStrategyEditorScope.scopedField(
+    state, "factor_combination_mode", "inner",
+  );
+  assert.equal(combination?.options?.length, 0);
+  assert.equal(
+    window.FTStrategyEditorScope.fieldRequired(
+      state, "factor_combination_mode", "inner", {
+        factor_candidates: [{alias: "A"}, {alias: "B"}],
+      },
+    ),
+    true,
+  );
+  assert.equal(
+    window.FTStrategyEditorScope.fieldVisible(
+      state, "warmup_window", "inner", {warmup_mode: "fixed"},
+    ),
+    true,
+  );
+  assert.equal(
+    window.FTStrategyEditorScope.fieldVisible(
+      state, "warmup_window", "inner", {warmup_mode: "auto"},
+    ),
+    false,
+  );
+  assert.equal(
+    window.FTStrategyEditorScope.scopedField(
+      state, "product_path_candidates", "inner",
+    )?.source_when_outer_unmounted,
+    "visible_product_group_catalog",
+  );
+}
 state.values.factor = "";
 state.values.product_path_selection = "";
+assert.equal(window.FTStrategyEditorScope.validate(state).length, 0);
+state.values.factor_candidates = [];
+assert.equal(window.FTStrategyEditorScope.validate(state).length, 1);
+state.values.product_path_candidates = [];
 assert.equal(window.FTStrategyEditorScope.validate(state).length, 2);
 state.settingsMountedTabs = [];
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].factor_ref, "visible-factor");
