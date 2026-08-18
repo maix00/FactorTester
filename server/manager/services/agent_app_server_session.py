@@ -25,12 +25,14 @@ class AgentAppServerSession:
         runtime: AgentSkillRuntime,
         provider: Mapping[str, object],
         codex_binary: str,
+        proxy_url: str = "",
     ) -> None:
         self.runtime = runtime
         self.launch = AgentAppServerLaunch(
             runtime=runtime,
             provider=provider,
             codex_binary=codex_binary,
+            proxy_url=proxy_url,
         )
         self.protocol = AgentSkillProtocol(runtime)
         self.policy = AgentAppServerPolicy(runtime, self.protocol)

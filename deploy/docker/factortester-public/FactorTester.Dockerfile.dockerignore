@@ -7,6 +7,7 @@ deploy/docker/*
 !deploy/docker/factortester-public/
 !deploy/docker/factortester-public/factortester-entrypoint.sh
 !deploy/docker/factortester-public/start-fixed-service.py
+!deploy/docker/factortester-public/mihomo-linux-amd64-v1.19.30.gz
 !server/
 !server/**
 !tools/

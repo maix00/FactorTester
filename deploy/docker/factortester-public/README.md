@@ -20,6 +20,18 @@ and UDP `51821` (database tunnel). Do not open TCP `8000`, TCP `5432`, TCP
 `17998`, or TCP `17997` in the public security group. Only authorized server
 nodes receive a database-tunnel peer; Swift clients do not.
 
+## Optional Mihomo Dashboard
+
+The application image pins the upstream Mihomo binary and the official
+MetaCubeX dashboard. To enable it, place an owner-only `mihomo.yaml` in the
+configured `FACTORTESTER_MANAGER_STATE_SECRETS_DIR` before restarting the
+application container. The Manager copies it into `/state` for the
+`factortester` user and forces the controller (`9090`) and mixed proxy (`7890`)
+to `127.0.0.1`; TUN, LAN binding, and controller secrets are disabled. A
+super-admin opens the `Mihomo Dashboard` home module and starts or stops the
+process. The dashboard and its API are served through the authenticated
+Manager `7998` origin, so no additional security-group ingress is required.
+
 ## WireGuard membership authority
 
 WireGuard does not discover or distribute peers. Each server generates its
