@@ -25,6 +25,29 @@ class AgentSkillProtocol:
         }
 
     @staticmethod
+    def skills_from_response(response: Mapping[str, object]) -> list[dict[str, Any]]:
+        """Normalize the app-server's paged ``skills/list`` response."""
+        result = response.get("result")
+        if not isinstance(result, Mapping):
+            return []
+        data = result.get("data")
+        if not isinstance(data, list):
+            data = [result]
+        skills: list[dict[str, Any]] = []
+        for page in data:
+            if not isinstance(page, Mapping):
+                continue
+            values = page.get("skills")
+            if not isinstance(values, list):
+                continue
+            skills.extend(
+                dict(item)
+                for item in values
+                if isinstance(item, Mapping)
+            )
+        return skills
+
+    @staticmethod
     def _path(value: object) -> Path | None:
         text = str(value or "").strip()
         if not text:

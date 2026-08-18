@@ -251,6 +251,42 @@ class AgentProfileService:
         )
         return runtime_state
 
+    def server_agent_context(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Return private launch material for the Manager-owned supervisor."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        claim = self.runtime_store.active_claim(principal, profile_id)
+        if claim is None:
+            raise ProfileRuntimeError("claim the Profile before starting its Agent")
+        provider_id = str(claim.get("provider_id") or "").strip()
+        provider = self.provider_store.get(
+            principal,
+            provider_id,
+            include_secret=True,
+        )
+        if provider is None or not provider.get("enabled"):
+            raise ProviderStoreError("claimed Agent provider is unavailable")
+        if provider.get("runtime_kind") != "server":
+            raise ProviderStoreError("claimed Agent provider is not a server provider")
+        if provider.get("server_id") != self.server_id:
+            raise ProviderStoreError("claimed Agent provider belongs to another server")
+        return {
+            "runtime": runtime,
+            "claim": claim,
+            "provider": provider,
+            "skill_runtime": self.prepare_server_skill_runtime(
+                principal,
+                profile_id,
+            ),
+        }
+
     def set_profile_skills(
         self,
         principal: str,

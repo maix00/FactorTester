@@ -46,6 +46,7 @@ from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMix
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
+from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.research_graph_catalog_routes import (
     ResearchGraphCatalogRoutesMixin,
 )
@@ -55,6 +56,7 @@ from server.manager.http.auth_routes import AuthenticationRoutesMixin
 from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.federated_public_data import (
     FederatedPublicDataService,
 )
@@ -395,6 +397,10 @@ class ManagerState(
             / "skills"
             / "catalog.json",
         )
+        self.agent_app_server = AgentAppServerSupervisor(
+            self.agent_profiles,
+            codex_binary=os.environ.get("FACTORTESTER_CODEX_BINARY", "codex"),
+        )
         self.federated_public_data = FederatedPublicDataService(
             server_id=self.server_id,
             registry=self.federation_registry,
@@ -479,6 +485,7 @@ class Handler(
     ObjectTransferRoutesMixin,
     TransferMetricsRoutesMixin,
     JobListRoutesMixin,
+    AgentAppServerRoutesMixin,
     AgentRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

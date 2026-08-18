@@ -54,6 +54,8 @@ class WriteRoutesMixin:
             return
         if not self._public_login_gate(parsed, method="POST"):
             return
+        if self._post_agent_app_routes(parsed):
+            return
         if self._post_agent_routes(parsed):
             return
         if self._post_client_research_routes(parsed):

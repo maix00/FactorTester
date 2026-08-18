@@ -163,6 +163,9 @@ def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(
         "cwds": [str(runtime.workspace_root)],
         "forceReload": True,
     }
+    assert AgentSkillProtocol.skills_from_response({
+        "result": {"data": [{"cwd": "/tmp", "skills": [{"name": "one"}]}]},
+    }) == [{"name": "one"}]
     turn_input = protocol.turn_skill_input("factortester-research")
     assert turn_input["type"] == "skill"
     assert turn_input["name"] == "factortester-research-skill"
@@ -310,9 +313,17 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert profile_scripts.index("profile/agent-skills.js") < profile_scripts.index(
         "profile/profiles.js"
     )
+    assert profile_scripts.index("profile/agent-chat.js") < profile_scripts.index(
+        "profile/profiles.js"
+    )
     source = (
         REPO_ROOT / "server/manager/web/profile/agent-skills.js"
     ).read_text(encoding="utf-8")
     assert "/api/client/profile-skills" in source
     assert "method: \"POST\"" in source
     assert "安装任意" not in source
+    chat_source = (
+        REPO_ROOT / "server/manager/web/profile/agent-chat.js"
+    ).read_text(encoding="utf-8")
+    assert "/api/client/profile-agent/start" in chat_source
+    assert "/api/client/profile-agent/events" in chat_source

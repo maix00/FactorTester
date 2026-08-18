@@ -100,6 +100,9 @@
         await detail(context, profileID, options);
       }));
     }
+    if (window.FTAgentChat?.render) {
+      root.append(await window.FTAgentChat.render(context, profile));
+    }
     root.append(section(context, "Agents", ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], (profile.agents || []).map(item => [
       item.agent_id, item.role, item.status, item.next_action,
     ])));

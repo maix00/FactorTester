@@ -39,11 +39,24 @@ Manager's server catalog.
    Skills that were previously disabled, and refresh the list using
    `skills/config/write`. `turn/start` Skill inputs are constructed only from
    selected Skill ids.
-6. This slice provides the catalog, persistence, projection, policy helpers,
-   validation, and Profile UI. It does not itself start a Codex app-server
-   process or expose a conversation transport; that supervisor remains a
-   separate integration boundary responsible for process lifetime, provider
-   credentials, approval policy, and streaming transport.
+6. The Manager now owns the server Profile app-server supervisor and exposes a
+   narrow authenticated JSON-RPC/SSE bridge. It starts a process only after a
+   Profile has an active claim and a valid local provider, keeps one process per
+   Profile, and stops all child processes during Manager shutdown. Provider
+   tokens are passed only through the child environment; they are not written
+   to the Profile config file or returned by HTTP routes.
+7. The browser may submit prompts and selected Skill ids, but cannot submit
+   arbitrary Skill paths or arbitrary app-server methods. The supervisor
+   forces the Profile workspace as `cwd`, validates `turn/start` Skill inputs,
+   and redacts local paths and credential-shaped fields from responses/events.
+   The browser bridge accepts text input only; image/file/mention inputs and
+   per-request approval, sandbox, provider, capability-root, and permission
+   overrides are rejected. Each generated Profile config fixes execution to
+   `approval_policy = "never"`, `sandbox_mode = "workspace-write"`, and the
+   Profile workspace with outbound network access. Codex's documented
+   `shell_environment_policy.ignore_default_excludes = false` is also set so
+   the provider token is removed from shell-tool environments even though the
+   app-server itself receives it through its private child environment.
 
 ## Consequences
 

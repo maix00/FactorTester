@@ -313,6 +313,9 @@ class ProcessStateMixin:
         return "stopped"
 
     def stop_all(self) -> None:
+        agent_supervisor = getattr(self, "agent_app_server", None)
+        if agent_supervisor is not None:
+            agent_supervisor.stop_all()
         self.stop_federation_announcer()
         self.stop_federation_sync()
         for key in list(self.processes):
