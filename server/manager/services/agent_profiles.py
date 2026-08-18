@@ -15,6 +15,9 @@ from server.manager.services.agent_skill_catalog import (
     AgentSkillCatalogError,
 )
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.profile_workspace_browser import (
+    ProfileWorkspaceBrowser,
+)
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
 )
@@ -61,6 +64,11 @@ class AgentProfileService:
             manifest = Path(source_root) / manifest
         self.skill_catalog = AgentSkillCatalog(source_root, manifest)
         self.skill_store = AgentSkillStore(db_path)
+        self.workspace_browser = ProfileWorkspaceBrowser(
+            data_root=data_root,
+            runtime_store=self.runtime_store,
+            server_id=self.server_id,
+        )
 
     def _proxy_url(self) -> str:
         """Return the optional Manager-local proxy without failing closed."""
@@ -167,15 +175,15 @@ class AgentProfileService:
             raise ProfileRuntimeError("client Profile requires a device_id")
         relative = profile_workspace_relative_path(principal, profile_id)
         if runtime == "server":
-            workspace = ensure_server_profile_workspace(
+            # Runtime binding is the ownership/workspace operation.  Skill
+            # projection is deliberately performed when the Profile selects
+            # Skills or when its Agent starts.  Keeping those operations
+            # separate means a missing optional Skill cannot prevent the
+            # server workspace from being created or the runtime binding from
+            # being saved.
+            ensure_server_profile_workspace(
                 self.data_root, principal, profile_id,
             )
-            selected = (
-                self.selected_skill_bindings(principal, profile_id)
-                if self.runtime_store.runtime(principal, profile_id)
-                else []
-            )
-            AgentSkillRuntime(workspace).sync(selected)
         return self.runtime_store.bind(
             principal,
             profile_id,
@@ -198,6 +206,24 @@ class AgentProfileService:
 
     def available_skills(self, *, runtime_kind: str = "server") -> list[dict[str, Any]]:
         return self.skill_catalog.public_definitions(runtime_kind)
+
+    def profile_workspace(
+        self,
+        principal: str,
+        profile_id: str,
+        relative_path: str = "",
+    ) -> dict[str, Any]:
+        return self.workspace_browser.list(principal, profile_id, relative_path)
+
+    def profile_workspace_file(
+        self,
+        principal: str,
+        profile_id: str,
+        relative_path: str,
+    ) -> dict[str, Any]:
+        return self.workspace_browser.file_metadata(
+            principal, profile_id, relative_path,
+        )
 
     def profile_skills(
         self,
@@ -233,13 +259,20 @@ class AgentProfileService:
         runtime = self.runtime_store.runtime(principal, profile_id)
         if runtime is None:
             raise ProfileRuntimeError("Profile runtime is not configured")
+        selected_ids = self.skill_store.selected(principal, profile_id)
+        # An unconfigured Profile may legitimately have no selected Skills.
+        # Do not require the complete server catalog just to represent an
+        # empty selection; this also keeps binding/claiming resilient while a
+        # server image is being repaired.
+        if not selected_ids:
+            return []
         definitions = {
             item["skill_id"]: item
             for item in self.skill_catalog.definitions(str(runtime["runtime_kind"]))
         }
         return [
             definitions[skill_id]
-            for skill_id in self.skill_store.selected(principal, profile_id)
+            for skill_id in selected_ids
             if skill_id in definitions
         ]
 

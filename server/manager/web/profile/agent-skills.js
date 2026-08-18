@@ -105,7 +105,23 @@
       actions.append(save);
       body.append(list, actions, status);
     } catch (error) {
-      body.replaceChildren(message(context, "无法读取服务器 Skill", error.message));
+      const detail = String(error?.message || "");
+      if (detail.includes("configure the Profile runtime")
+          || detail.includes("Profile runtime is not configured")) {
+        body.replaceChildren(message(
+          context,
+          "请先绑定服务器运行位置",
+          "绑定成功后才能选择该 Profile 的服务器 Skill。",
+        ));
+      } else if (detail.includes("installed Skill is missing")) {
+        body.replaceChildren(message(
+          context,
+          "服务器镜像缺少研究 Skill",
+          "请让服务器管理员重新发布包含研究 Skill 的 FactorTester 镜像。",
+        ));
+      } else {
+        body.replaceChildren(message(context, "无法读取服务器 Skill", detail));
+      }
     }
     return root;
   }

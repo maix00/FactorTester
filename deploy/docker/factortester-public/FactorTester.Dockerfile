@@ -101,6 +101,7 @@ COPY scripts scripts
 COPY templates templates
 COPY static static
 COPY docs docs
+COPY skills skills
 COPY apple/Resources apple/Resources
 COPY settings.py start_server.py ./
 COPY deploy/docker/factortester-public/factortester-entrypoint.sh \

@@ -79,8 +79,14 @@ def test_public_image_includes_runtime_localizations_and_git() -> None:
     dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
         encoding="utf-8",
     )
+    dockerignore = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text(
+        encoding="utf-8",
+    )
 
     assert "COPY apple/Resources apple/Resources" in dockerfile
+    assert "COPY skills skills" in dockerfile
+    assert "!skills/" in dockerignore
+    assert "!skills/**" in dockerignore
     assert re.search(r"(?m)^\s+git \\?$", dockerfile)
 
 

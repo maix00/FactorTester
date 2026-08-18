@@ -84,42 +84,67 @@
     }
     const runtime = profile.runtime || {};
     const claim = profile.active_claim || null;
-    root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows({
-      profile_id: profile.profile_id, display_name: profile.display_name,
-      workspace_root: profile.workspace_root, server: profile.server?.base_url,
-      principal: profile.session_binding?.principal_ref,
-      runtime_kind: runtimeLabel(context, runtime),
-      executor_id: runtime.executor_id || context.t("未绑定"),
-      workspace_relpath: runtime.workspace_relpath || context.t("未配置"),
-      claim: claimLabel(context, claim),
-      agent_id: claim?.agent_id || context.t("无"),
-    })).shell);
-    root.append(agentActions(context, profile, async () => {
+    const selectedTab = selectedProfileTab();
+    root.append(profileTabBar(context, profileID, embedded, selectedTab));
+    const refresh = async () => {
       const payload = await context.api("/api/client/profiles");
       cached = payload.profiles || [];
       await detail(context, profileID, options);
-    }));
-    if (window.FTAgentSkills?.render) {
-      root.append(await window.FTAgentSkills.render(context, profile, async () => {
-        const payload = await context.api("/api/client/profiles");
-        cached = payload.profiles || [];
-        await detail(context, profileID, options);
-      }));
+    };
+    if (selectedTab === "overview") {
+      root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows({
+        profile_id: profile.profile_id, display_name: profile.display_name,
+        workspace_root: profile.workspace_root, server: profile.server?.base_url,
+        principal: profile.session_binding?.principal_ref,
+        runtime_kind: runtimeLabel(context, runtime),
+        executor_id: runtime.executor_id || context.t("未绑定"),
+        workspace_relpath: runtime.workspace_relpath || context.t("未配置"),
+        claim: claimLabel(context, claim),
+        agent_id: claim?.agent_id || context.t("无"),
+      })).shell);
+      root.append(section(context, "Agents", ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], (profile.agents || []).map(item => [
+        item.agent_id, item.role, item.status, item.next_action,
+      ])));
+      root.append(section(context, context.t("工作区"), [context.t("工作区"), context.t("访问模式"), context.t("所有者"), context.t("服务端引用")], (profile.workspaces || []).map(item => [
+        item.workspace_id, item.access_mode, item.owner_ref, item.server_workspace_ref,
+      ])));
+      root.append(section(context, context.t("研究记录"), [context.t("研究"), context.t("分支"), context.t("节点"), "Checkpoint"], (profile.research_records || []).map(item => [
+        item.title || item.work_package_id || item.record_id, item.branch_id,
+        item.current_node || item.node_id, item.checkpoint_ref,
+      ])));
+    } else if (selectedTab === "binding") {
+      root.append(agentActions(context, profile, refresh));
+      if (window.FTAgentSkills?.render) {
+        root.append(await window.FTAgentSkills.render(context, profile, refresh));
+      }
+    } else if (selectedTab === "session") {
+      root.append(sessionSection(context, claim));
+      if (window.FTAgentChat?.render) {
+        root.append(await window.FTAgentChat.render(context, profile));
+      }
+    } else if (window.FTProfileWorkspace?.render) {
+      root.append(window.FTProfileWorkspace.render(context, profile));
     }
-    if (window.FTAgentChat?.render) {
-      root.append(await window.FTAgentChat.render(context, profile));
-    }
-    root.append(section(context, "Agents", ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], (profile.agents || []).map(item => [
-      item.agent_id, item.role, item.status, item.next_action,
-    ])));
-    root.append(section(context, context.t("工作区"), [context.t("工作区"), context.t("访问模式"), context.t("所有者"), context.t("服务端引用")], (profile.workspaces || []).map(item => [
-      item.workspace_id, item.access_mode, item.owner_ref, item.server_workspace_ref,
-    ])));
-    root.append(section(context, context.t("研究记录"), [context.t("研究"), context.t("分支"), context.t("节点"), "Checkpoint"], (profile.research_records || []).map(item => [
-      item.title || item.work_package_id || item.record_id, item.branch_id,
-      item.current_node || item.node_id, item.checkpoint_ref,
-    ])));
     context.content.replaceChildren(root);
+  }
+
+  function sessionSection(context, claim) {
+    const rows = claim ? FTUI.fieldRows({
+      claim: claimLabel(context, claim),
+      agent_id: claim.agent_id,
+      provider_id: claim.provider_id,
+      runtime_kind: claim.runtime_kind,
+      executor_id: claim.executor_id,
+      status: claim.status,
+      claimed_at: claim.claimed_at,
+      last_heartbeat_at: claim.last_heartbeat_at,
+    }) : [];
+    return section(
+      context,
+      "Agent 会话",
+      [context.t("字段"), context.t("值")],
+      rows,
+    );
   }
 
   function formField(context, label, control) {
@@ -251,6 +276,40 @@
     return claim ? context.t("已认领") : context.t("未认领");
   }
 
+  const PROFILE_TABS = [
+    ["overview", "详情"],
+    ["binding", "运行绑定"],
+    ["session", "Agent 会话"],
+    ["workspace", "工作区"],
+  ];
+
+  function selectedProfileTab() {
+    const value = new URLSearchParams(location.search).get("profile_tab");
+    return PROFILE_TABS.some(([id]) => id === value) ? value : "overview";
+  }
+
+  function profileTabBar(context, profileID, embedded, selected) {
+    const nav = document.createElement("nav");
+    nav.className = "profile-detail-tabs";
+    nav.setAttribute("aria-label", context.t("研究身份详情"));
+    PROFILE_TABS.forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `profile-detail-tab${id === selected ? " active" : ""}`;
+      button.textContent = context.t(label);
+      button.setAttribute("aria-current", id === selected ? "page" : "false");
+      button.onclick = () => {
+        const encoded = encodeURIComponent(profileID);
+        const path = embedded
+          ? `/research?section=profiles&profile=${encoded}&profile_tab=${id}`
+          : `/profiles/${encoded}?profile_tab=${id}`;
+        context.navigate(path);
+      };
+      nav.append(button);
+    });
+    return nav;
+  }
+
   function agentActions(context, profile, refresh) {
     const root = document.createElement("section");
     root.className = "job-section profile-agent-actions";
@@ -276,8 +335,12 @@
     const bind = document.createElement("button");
     bind.className = "secondary";
     bind.textContent = context.t("绑定运行位置");
+    const status = document.createElement("p");
+    status.className = "settings-muted";
+    status.setAttribute("aria-live", "polite");
     bind.onclick = async () => {
       bind.disabled = true;
+      status.textContent = context.t("正在绑定运行位置…");
       try {
         await context.api("/api/client/profile-runtime", {
           method: "POST",
@@ -287,9 +350,12 @@
             executor_id: runtimeSelect.value === "server" ? "" : runtime.executor_id,
           }),
         });
+        status.textContent = context.t("运行位置已绑定，工作区已创建");
+        context.showNotice(context.t("运行位置绑定成功"));
         await refresh();
       } catch (error) {
-        context.showNotice(error.message, true);
+        status.textContent = error.message || context.t("运行位置绑定失败");
+        context.showNotice(status.textContent, true);
       } finally {
         bind.disabled = false;
       }
@@ -302,7 +368,7 @@
     const claimButton = document.createElement("button");
     claimButton.className = "primary";
     claimButton.textContent = claim ? context.t("释放认领") : context.t("认领 Agent");
-    claimButton.disabled = !claim;
+    claimButton.disabled = !claim && runtime.configured === false;
     const loadProviders = async () => {
       provider.replaceChildren();
       const payload = await context.api(
@@ -315,7 +381,7 @@
         option.textContent = `${item.label} · ${item.default_model}`;
         provider.append(option);
       });
-      claimButton.disabled = Boolean(claim) || !values.length;
+      claimButton.disabled = Boolean(claim) || runtime.configured === false || !values.length;
       if (!values.length && !claim) {
         const option = document.createElement("option");
         option.textContent = context.t("请先保存模型服务");
@@ -323,9 +389,15 @@
         provider.append(option);
       }
     };
-    provider.onchange = () => { claimButton.disabled = Boolean(claim) || !provider.value; };
+    provider.onchange = () => {
+      claimButton.disabled = Boolean(claim)
+        || runtime.configured === false || !provider.value;
+    };
     claimButton.onclick = async () => {
       claimButton.disabled = true;
+      status.textContent = claim
+        ? context.t("正在释放 Agent 认领…")
+        : context.t("正在认领 Agent…");
       try {
         if (claim) {
           await context.api("/api/client/profile-claims/release", {
@@ -338,14 +410,21 @@
             body: JSON.stringify({profile_id: profile.profile_id, provider_id: provider.value}),
           });
         }
+        status.textContent = claim
+          ? context.t("Agent 已释放")
+          : context.t("Agent 已认领");
+        context.showNotice(claim
+          ? context.t("Agent 认领已释放")
+          : context.t("Agent 认领成功"));
         await refresh();
       } catch (error) {
-        context.showNotice(error.message, true);
+        status.textContent = error.message || context.t("Agent 操作失败");
+        context.showNotice(status.textContent, true);
         claimButton.disabled = false;
       }
     };
     controls.append(provider, claimButton);
-    root.append(heading, note, controls);
+    root.append(heading, note, controls, status);
     if (!claim) loadProviders().catch(error => {
       const warning = document.createElement("p");
       warning.className = "settings-muted";
