@@ -43,7 +43,9 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert 'case "download"' in controller
     assert "ClientWebShellView()" in root
     assert "ClientWebShellToolbar" not in web_shell
-    assert ".toolbar" not in web_shell
+    assert ".toolbar" in web_shell
+    assert "showingServerSettings" in web_shell
+    assert "ServerSettingsView" in web_shell
     web_page = (SOURCES / "Features" / "Web" / "WebPageView.swift").read_text(
         encoding="utf-8"
     )
