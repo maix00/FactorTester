@@ -501,12 +501,16 @@ class RoutingStateMixin:
         # provide a live port without Git worktree metadata.
         if (
             port is not None
-            and not server_id
+            and server_id in {"", self.server_id, "local"}
             and not branch
             and not feature
             and int(port) in self.service_ports()
         ):
-            return self._local_route(port=int(port), online=True)
+            return self._local_route(
+                port=int(port),
+                branch=branch or self.fixed_branch,
+                online=True,
+            )
 
         if server_id or port is not None or branch or feature:
             try:

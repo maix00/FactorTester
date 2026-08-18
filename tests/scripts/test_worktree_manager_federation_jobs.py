@@ -70,6 +70,12 @@ def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
     assert [item["server_id"] for item in payload["jobs"]] == [
         "remote-main", "local-feat",
     ]
+    assert [item["execution_server_id"] for item in payload["jobs"]] == [
+        "remote-main", "local-feat",
+    ]
+    assert [item["execution_port"] for item in payload["jobs"]] == [
+        8000, 8141,
+    ]
     assert local_calls[0]["_allow_federation"] is False
 
     cached = state.aggregate_cross_server_jobs(

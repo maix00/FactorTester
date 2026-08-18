@@ -2130,6 +2130,10 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "/artifacts/archive" not in artifacts
     assert "equity_curve" in artifacts
     assert "FTJobArtifactViewers.mount" in artifacts
+    assert "job.execution_server_id || job.server_id" in jobs
+    assert "job.execution_port" in jobs
+    assert "function executionTarget" in job_detail
+    assert "context.showNotice?.(" in artifacts
     assert "priceChart" in viewers
     assert "dataTable" in viewers
     assert "tableModel" in viewers

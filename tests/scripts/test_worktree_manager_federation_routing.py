@@ -148,6 +148,28 @@ def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monke
     assert state.route_for().port == 8000
 
 
+def test_explicit_self_route_survives_missing_worktree_metadata(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="main",
+        server_id="remote-main",
+        fixed_port=8000,
+        fixed_branch="main",
+        state_root=tmp_path / "manager-state",
+    )
+    monkeypatch.setattr(state, "local_service_routes", lambda include_offline=True: [])
+    monkeypatch.setattr(state, "service_ports", lambda: [8000])
+
+    route = state.route_for(server_id="remote-main", port=8000)
+
+    assert route.server_id == "remote-main"
+    assert route.port == 8000
+    assert route.branch == "main"
+
+
 def _federated_state(tmp_path, server_id: str, octet: int):
     root = tmp_path / server_id
     root.mkdir()

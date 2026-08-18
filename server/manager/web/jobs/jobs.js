@@ -278,14 +278,16 @@
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
-      const port = jobPort(job.port);
-     const serverID = String(job.server_id || "").trim();
-     const target = serverID && serverID !== "local"
-       ? "?server_id=" + encodeURIComponent(serverID) : "";
-     const path = port
-       ? `/jobs/${port}/${encodeURIComponent(job.job_id)}${target}`
-       : `/jobs/${encodeURIComponent(job.job_id)}${target}`;
-    row.addEventListener("click", () => context.navigate(path));
+      const port = jobPort(job.execution_port) || jobPort(job.port);
+      const serverID = String(
+        job.execution_server_id || job.server_id || "",
+      ).trim();
+      const target = serverID && serverID !== "local"
+        ? "?server_id=" + encodeURIComponent(serverID) : "";
+      const path = port
+        ? `/jobs/${port}/${encodeURIComponent(job.job_id)}${target}`
+        : `/jobs/${encodeURIComponent(job.job_id)}${target}`;
+      row.addEventListener("click", () => context.navigate(path));
     });
     result.shell.classList.add("job-list-table");
     root.append(result.shell, pagination(context, scoped, scope, page, Boolean(payload.has_more), Number(payload.total_pages || 1), Number(payload.total || 0)));
