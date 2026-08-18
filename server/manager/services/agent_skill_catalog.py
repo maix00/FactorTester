@@ -11,11 +11,29 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+
 SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 class AgentSkillCatalogError(ValueError):
     """The server Skill catalog is invalid or unavailable."""
+
+
+def _frontmatter_value(skill_path: Path, key: str) -> str:
+    """Read one scalar frontmatter value without adding a YAML dependency."""
+    try:
+        lines = skill_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise AgentSkillCatalogError("installed Skill metadata is unavailable") from exc
+    if not lines or lines[0].strip() != "---":
+        return ""
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        name, separator, value = line.partition(":")
+        if separator and name.strip() == key:
+            return value.strip().strip("\"'")
+    return ""
 
 
 class AgentSkillCatalog:
@@ -81,8 +99,12 @@ class AgentSkillCatalog:
         label = str(item.get("label") or skill_id).strip()
         description = str(item.get("description") or "").strip()
         version = str(item.get("version") or "").strip()
+        skill_name = _frontmatter_value(path / "SKILL.md", "name") or skill_id
+        if not SKILL_ID_PATTERN.fullmatch(skill_name):
+            raise AgentSkillCatalogError(f"installed Skill name is invalid: {skill_name}")
         return {
             "skill_id": skill_id,
+            "name": skill_name,
             "label": label,
             "description": description,
             "version": version,

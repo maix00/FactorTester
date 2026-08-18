@@ -131,7 +131,10 @@ def test_profile_has_one_runtime_and_one_live_claim(tmp_path):
         PROFILE_ID,
     )
     workspace = tmp_path / "data" / runtime["workspace_relpath"]
-    assert {path.name for path in workspace.iterdir()} == set(WORKSPACE_DIRECTORIES)
+    assert {path.name for path in workspace.iterdir()} == {
+        *WORKSPACE_DIRECTORIES,
+        ".codex",
+    }
 
     first = service.claim(
         PRINCIPAL,

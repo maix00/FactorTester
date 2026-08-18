@@ -23,18 +23,27 @@ Manager's server catalog.
    Profile catalog route.
 3. A user can only check or uncheck the server-provided Skill ids for a server
    Profile. The selection is stored in the Manager's existing local SQLite
-   database; Skill files are not copied into a Profile workspace and are not
-   uploaded to PostgreSQL.
+   database. The Profile receives only owner-controlled symlinks under its
+   canonical `.codex/skills` directory; Skill source files are not copied into
+   a Profile or temporary Agent workspace and are not uploaded to PostgreSQL.
 4. Browser responses contain Skill metadata and selection state, but never
    local filesystem paths. The server-side Agent supervisor obtains the
    selected installed bindings through `AgentProfileService.selected_skill_bindings`
    when it starts the claimed Profile Agent. It must construct the app-server
    Skill view from that allowlist and must not expose the repository-wide Skill
    directory.
-5. The current slice provides the catalog, persistence, validation, and Profile
-   UI. It does not itself start a Codex app-server process or implement its
-   conversation transport; that supervisor remains a separate integration
-   boundary.
+5. The Profile app-server launch environment is isolated with its `.codex`
+   directory as `CODEX_HOME`, `HOME`, and the XDG config/data/state roots.
+   Before accepting turns, the supervisor must call `skills/list`, disable
+   every discovered Skill outside the selected projection, re-enable selected
+   Skills that were previously disabled, and refresh the list using
+   `skills/config/write`. `turn/start` Skill inputs are constructed only from
+   selected Skill ids.
+6. This slice provides the catalog, persistence, projection, policy helpers,
+   validation, and Profile UI. It does not itself start a Codex app-server
+   process or expose a conversation transport; that supervisor remains a
+   separate integration boundary responsible for process lifetime, provider
+   credentials, approval policy, and streaming transport.
 
 ## Consequences
 

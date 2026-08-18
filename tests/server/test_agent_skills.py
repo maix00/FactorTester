@@ -11,6 +11,11 @@ import pytest
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_skill_catalog import AgentSkillCatalog
+from server.manager.services.agent_skill_protocol import AgentSkillProtocol
+from server.manager.services.agent_skill_runtime import (
+    AgentSkillRuntime,
+    AgentSkillRuntimeError,
+)
 from server.manager.services.agent_workspace import profile_workspace_relative_path
 
 
@@ -46,6 +51,125 @@ def test_skill_catalog_supports_client_and_server_runtime_boundaries():
         "FactorTester 研究",
         "研究义务周期",
     ]
+    assert [item["name"] for item in catalog.definitions("server")] == [
+        "factortester-research-skill",
+        "research-obligation-cycle",
+    ]
+
+
+def test_profile_codex_runtime_projects_only_selected_skills(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definitions = catalog.definitions("server")
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    state = runtime.sync([definitions[0]])
+
+    projection = runtime.skills_root / "factortester-research"
+    assert projection.is_symlink()
+    assert projection.resolve() == Path(definitions[0]["path"]).resolve()
+    assert not (runtime.skills_root / "research-obligation-cycle").exists()
+    assert [item["skill_id"] for item in state["skills"]] == [
+        "factortester-research",
+    ]
+    assert runtime.command("/usr/local/bin/codex") == [
+        "/usr/local/bin/codex", "app-server", "--listen", "stdio://",
+    ]
+
+    environment = runtime.environment({"HOME": "/host/home"})
+    assert environment["CODEX_HOME"] == str(runtime.codex_home)
+    assert environment["HOME"] == str(runtime.home_root)
+    assert environment["XDG_CONFIG_HOME"] == str(runtime.config_root)
+
+
+def test_profile_codex_runtime_updates_owned_links_without_touching_unknown_files(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definitions = catalog.definitions("server")
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime.sync([definitions[0]])
+    unknown_file = runtime.skills_root / "keep-me.txt"
+    unknown_file.write_text("user data", encoding="utf-8")
+
+    runtime.sync([definitions[1]])
+    assert not (runtime.skills_root / "factortester-research").exists()
+    assert (runtime.skills_root / "research-obligation-cycle").is_symlink()
+    assert unknown_file.read_text(encoding="utf-8") == "user data"
+
+
+def test_profile_codex_runtime_rejects_projection_collision(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definition = catalog.definitions("server")[0]
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime._prepare_directories()
+    collision = runtime.skills_root / definition["skill_id"]
+    collision.write_text("not a link", encoding="utf-8")
+
+    with pytest.raises(AgentSkillRuntimeError, match="unexpected Skill projection"):
+        runtime.sync([definition])
+
+
+def test_profile_codex_runtime_refuses_unowned_skill_directory(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definition = catalog.definitions("server")[0]
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime._prepare_directories()
+    (runtime.skills_root / "unowned").mkdir()
+
+    with pytest.raises(AgentSkillRuntimeError, match="unowned Skill directory"):
+        runtime.sync([definition])
+
+
+def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definitions = catalog.definitions("server")
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime.sync([definitions[0]])
+    protocol = AgentSkillProtocol(runtime)
+    selected_path = runtime.skills_root / definitions[0]["skill_id"] / "SKILL.md"
+
+    requests = protocol.disable_unselected_requests([
+        {"name": definitions[0]["name"], "path": str(selected_path)},
+        {"name": "skill-installer", "path": str(tmp_path / "builtin/SKILL.md")},
+        {"name": "other", "path": str(tmp_path / "builtin/SKILL.md")},
+    ], first_request_id=20)
+    assert requests == [{
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "skills/config/write",
+        "params": {"path": str((tmp_path / "builtin/SKILL.md").resolve()), "enabled": False},
+    }]
+    assert protocol.enable_selected_requests([
+        {"path": str(selected_path), "enabled": False},
+    ]) == [{
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "skills/config/write",
+        "params": {"path": str(selected_path.resolve()), "enabled": True},
+    }]
+    assert protocol.skills_list_params() == {
+        "cwds": [str(runtime.workspace_root)],
+        "forceReload": True,
+    }
+    turn_input = protocol.turn_skill_input("factortester-research")
+    assert turn_input["type"] == "skill"
+    assert turn_input["name"] == "factortester-research-skill"
+    assert Path(turn_input["path"]) == selected_path
+
+    with pytest.raises(ValueError, match="not selected"):
+        protocol.turn_skill_input("research-obligation-cycle")
 
 
 def test_profile_skill_selection_is_local_and_validated(tmp_path):
@@ -80,6 +204,9 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
     bindings = service.selected_skill_bindings(PRINCIPAL, PROFILE_ID)
     assert [item["skill_id"] for item in bindings] == saved["selected_skill_ids"]
     assert all((Path(item["path"]) / "SKILL.md").is_file() for item in bindings)
+    workspace = tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
+    assert (workspace / ".codex/skills/factortester-research").is_symlink()
+    assert (workspace / ".codex/skills/research-obligation-cycle").is_symlink()
 
     provider = service.save_provider(
         PRINCIPAL,

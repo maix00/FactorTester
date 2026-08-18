@@ -13,6 +13,7 @@ from server.manager.services.agent_skill_catalog import (
     AgentSkillCatalog,
     AgentSkillCatalogError,
 )
+from server.manager.services.agent_skill_runtime import AgentSkillRuntime
 from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
@@ -151,7 +152,15 @@ class AgentProfileService:
             raise ProfileRuntimeError("client Profile requires a device_id")
         relative = profile_workspace_relative_path(principal, profile_id)
         if runtime == "server":
-            ensure_server_profile_workspace(self.data_root, principal, profile_id)
+            workspace = ensure_server_profile_workspace(
+                self.data_root, principal, profile_id,
+            )
+            selected = (
+                self.selected_skill_bindings(principal, profile_id)
+                if self.runtime_store.runtime(principal, profile_id)
+                else []
+            )
+            AgentSkillRuntime(workspace).sync(selected)
         return self.runtime_store.bind(
             principal,
             profile_id,
@@ -219,6 +228,29 @@ class AgentProfileService:
             if skill_id in definitions
         ]
 
+    def prepare_server_skill_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        bindings: list[dict[str, Any]] | None = None,
+    ) -> AgentSkillRuntime:
+        """Synchronize and return the Profile-local app-server runtime seam."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        workspace = ensure_server_profile_workspace(
+            self.data_root, principal, profile_id,
+        )
+        runtime_state = AgentSkillRuntime(workspace)
+        runtime_state.sync(
+            self.selected_skill_bindings(principal, profile_id)
+            if bindings is None else bindings,
+        )
+        return runtime_state
+
     def set_profile_skills(
         self,
         principal: str,
@@ -243,6 +275,13 @@ class AgentProfileService:
             raise AgentSkillCatalogError(
                 "Skill is not installed or is not available to this runtime: "
                 + ", ".join(unknown)
+            )
+        selected_bindings = [definitions[skill_id] for skill_id in requested]
+        if runtime_kind == "server":
+            self.prepare_server_skill_runtime(
+                principal,
+                profile_id,
+                bindings=selected_bindings,
             )
         selected = self.skill_store.replace(principal, profile_id, requested)
         return self.profile_skills(principal, profile_id) | {"selected_skill_ids": selected}
@@ -297,7 +336,7 @@ class AgentProfileService:
             if runtime_kind == "server" and provider.get("server_id") != self.server_id:
                 raise ProviderStoreError("provider belongs to another server")
         if runtime_kind == "server":
-            ensure_server_profile_workspace(self.data_root, principal, profile_id)
+            self.prepare_server_skill_runtime(principal, profile_id)
         claim = self.runtime_store.claim(
             principal,
             profile_id,
