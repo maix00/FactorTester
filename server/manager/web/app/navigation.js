@@ -89,6 +89,7 @@
         {id: "research.shared", title: "共享研究", title_key: "共享研究", path: "/research?section=shared", requiresAuth: false},
         {id: "research.graph", title: "研究图", title_key: "研究图", path: "/research?section=graph", requiresAuth: true},
         {id: "research.profiles", title: "研究身份", title_key: "研究身份", path: "/research?section=profiles", requiresAuth: true},
+        {id: "research.agent-models", title: "智能体模型", title_key: "智能体模型", path: "/research?section=agent-models", requiresAuth: true},
       ],
     },
     {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},

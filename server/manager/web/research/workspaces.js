@@ -4,6 +4,7 @@
     ["shared", "共享研究"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
+    ["agent-models", "智能体模型"],
   ];
 
   async function list(context) {
@@ -42,6 +43,8 @@
         } else {
           await FTProfiles.list(profilesContext, {embedded: true});
         }
+      } else if (selected === "agent-models") {
+        await FTAgentModels.list({...context, content: body});
       } else if (selected === "local") {
         await FTResearchLocal.render(context, body, embedded);
       } else if (selected === "graph") {

@@ -1,0 +1,244 @@
+"""Profile runtime bindings, provider connections, and Agent claims."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from server.manager.services.agent_workspace import (
+    ensure_server_profile_workspace,
+    profile_workspace_relative_path,
+)
+from server.manager.storage.agent_provider_store import (
+    AgentProviderStore,
+    ProviderStoreError,
+)
+from server.manager.storage.profile_runtime_store import (
+    ProfileClaimConflict,
+    ProfileRuntimeError,
+    ProfileRuntimeStore,
+)
+
+
+class AgentProfileService:
+    """Coordinate the local state for one Manager's Agent-capable Profiles."""
+
+    def __init__(
+        self,
+        *,
+        db_path,
+        provider_key_path,
+        data_root,
+        server_id: str,
+    ) -> None:
+        self.server_id = str(server_id or "").strip()
+        if not self.server_id:
+            raise ValueError("server_id is required")
+        self.data_root = data_root
+        self.runtime_store = ProfileRuntimeStore(db_path)
+        self.provider_store = AgentProviderStore(db_path, provider_key_path)
+
+    @staticmethod
+    def _profile_id(profile: dict[str, Any]) -> str:
+        return str(profile.get("profile_id") or "").strip()
+
+    def _default_runtime(
+        self,
+        principal: str,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Infer legacy metadata without silently assigning a server Profile."""
+        runtime_kind = str(profile.get("runtime_kind") or "").strip()
+        execution_server_id = str(profile.get("execution_server_id") or "").strip()
+        execution_device_id = str(profile.get("execution_device_id") or "").strip()
+        server_metadata = profile.get("server")
+        if not execution_server_id and isinstance(server_metadata, dict):
+            execution_server_id = str(server_metadata.get("server_id") or "").strip()
+        if runtime_kind not in {"client", "server"}:
+            server = profile.get("server")
+            if execution_server_id or isinstance(server, dict) and server.get("server_id"):
+                runtime_kind = "server"
+            else:
+                runtime_kind = "client"
+        executor_id = execution_server_id if runtime_kind == "server" else execution_device_id
+        profile_id = self._profile_id(profile)
+        return {
+            "profile_id": profile_id,
+            "runtime_kind": runtime_kind,
+            "executor_id": executor_id,
+            "workspace_relpath": profile_workspace_relative_path(
+                principal,
+                profile_id,
+            ) if profile_id else "",
+            "configured": bool(executor_id),
+            "source": "profile",
+        }
+
+    def enrich(
+        self,
+        principal: str,
+        profiles: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        owner = str(principal or "").strip()
+        runtimes = self.runtime_store.runtimes(owner)
+        result: list[dict[str, Any]] = []
+        for original in profiles:
+            if not isinstance(original, dict):
+                continue
+            profile = dict(original)
+            profile_id = self._profile_id(profile)
+            if not profile_id:
+                continue
+            runtime = runtimes.get(profile_id) or self._default_runtime(owner, profile)
+            claim = self.runtime_store.active_claim(owner, profile_id)
+            profile["runtime"] = {
+                "profile_id": profile_id,
+                "runtime_kind": runtime.get("runtime_kind", "client"),
+                "executor_id": runtime.get("executor_id", ""),
+                "workspace_relpath": runtime.get("workspace_relpath", ""),
+                "configured": bool(runtime.get("executor_id")),
+                "server_id": self.server_id if runtime.get("runtime_kind") == "server" else "",
+            }
+            profile["active_claim"] = self._public_claim(claim)
+            result.append(profile)
+        return result
+
+    @staticmethod
+    def _public_claim(claim: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not claim:
+            return None
+        return {
+            "claim_id": claim.get("claim_id", ""),
+            "runtime_kind": claim.get("runtime_kind", ""),
+            "executor_id": claim.get("executor_id", ""),
+            "agent_id": claim.get("agent_id", ""),
+            "provider_id": claim.get("provider_id", ""),
+            "claimed_at": claim.get("claimed_at", 0),
+            "last_heartbeat_at": claim.get("last_heartbeat_at", 0),
+            "status": claim.get("status", ""),
+        }
+
+    def bind_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        runtime_kind: str,
+        executor_id: str,
+    ) -> dict[str, Any]:
+        runtime = str(runtime_kind or "").strip()
+        executor = str(executor_id or "").strip()
+        if runtime == "server" and executor != self.server_id:
+            raise ProfileRuntimeError("server Profile must be bound to this Manager")
+        if runtime == "client" and not executor:
+            raise ProfileRuntimeError("client Profile requires a device_id")
+        relative = profile_workspace_relative_path(principal, profile_id)
+        if runtime == "server":
+            ensure_server_profile_workspace(self.data_root, principal, profile_id)
+        return self.runtime_store.bind(
+            principal,
+            profile_id,
+            runtime_kind=runtime,
+            executor_id=executor,
+            workspace_relpath=relative,
+        )
+
+    def providers(
+        self,
+        principal: str,
+        *,
+        runtime_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.provider_store.list(
+            principal,
+            runtime_kind=runtime_kind,
+            server_id=self.server_id if runtime_kind == "server" else None,
+        )
+
+    def save_provider(
+        self,
+        principal: str,
+        payload: dict[str, object],
+    ) -> dict[str, Any]:
+        runtime = str(payload.get("runtime_kind") or "server").strip()
+        if runtime == "server":
+            payload = {**payload, "server_id": self.server_id}
+        elif runtime == "client" and self.server_id != "local":
+            raise ProviderStoreError(
+                "client provider credentials must be saved by the client runtime"
+            )
+        return self.provider_store.save(
+            principal,
+            payload,
+            default_server_id=self.server_id,
+        )
+
+    def delete_provider(self, principal: str, provider_id: str) -> bool:
+        for claim in self.runtime_store.claims(principal):
+            if claim.get("provider_id") == provider_id:
+                raise ProviderStoreError("release the active Agent before deleting its provider")
+        return self.provider_store.delete(principal, provider_id)
+
+    def claim(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        provider_id: str = "",
+        agent_id: str = "",
+    ) -> dict[str, Any]:
+        if not str(provider_id or "").strip():
+            raise ProviderStoreError("provider_id is required to claim a Profile")
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None:
+            raise ProfileRuntimeError("Profile runtime is not configured")
+        runtime_kind = str(runtime.get("runtime_kind") or "")
+        executor_id = str(runtime.get("executor_id") or "")
+        if runtime_kind == "server" and executor_id != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        if provider_id:
+            provider = self.provider_store.get(principal, provider_id)
+            if provider is None or not provider.get("enabled"):
+                raise ProviderStoreError("provider is unavailable")
+            if provider.get("runtime_kind") != runtime_kind:
+                raise ProviderStoreError("provider runtime does not match Profile runtime")
+            if runtime_kind == "server" and provider.get("server_id") != self.server_id:
+                raise ProviderStoreError("provider belongs to another server")
+        if runtime_kind == "server":
+            ensure_server_profile_workspace(self.data_root, principal, profile_id)
+        claim = self.runtime_store.claim(
+            principal,
+            profile_id,
+            runtime_kind=runtime_kind,
+            executor_id=executor_id,
+            provider_id=provider_id,
+            agent_id=agent_id,
+        )
+        return {
+            "runtime": runtime,
+            "claim": self._public_claim(claim),
+        }
+
+    def heartbeat(self, principal: str, claim_id: str, agent_id: str) -> dict[str, Any]:
+        return {"claim": self._public_claim(
+            self.runtime_store.heartbeat(principal, claim_id, agent_id=agent_id),
+        )}
+
+    def release(
+        self,
+        principal: str,
+        claim_id: str,
+        *,
+        agent_id: str = "",
+        force: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "released": self.runtime_store.release(
+                principal,
+                claim_id,
+                agent_id=agent_id,
+                force=force,
+            ),
+        }
+
+    def claims(self, principal: str) -> list[dict[str, Any]]:
+        return [self._public_claim(item) or {} for item in self.runtime_store.claims(principal)]

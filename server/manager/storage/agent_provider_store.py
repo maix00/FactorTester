@@ -1,0 +1,291 @@
+"""Manager-local storage for user-owned Agent model providers.
+
+Provider credentials are runtime-local secrets.  They never belong in the
+PostgreSQL control plane or in a Profile projection.  The Manager stores an
+encrypted token beside its existing local SQLite state and exposes only
+non-secret metadata to the Web client.
+"""
+
+from __future__ import annotations
+
+import os
+import secrets
+import sqlite3
+import threading
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
+from urllib.parse import urlsplit
+
+from cryptography.fernet import Fernet, InvalidToken
+
+from tools.data.sqlite.db import connect_sqlite
+
+
+PROVIDER_TABLE = "manager_agent_provider_connections"
+SUPPORTED_RUNTIME_KINDS = frozenset({"client", "server"})
+SUPPORTED_PROTOCOLS = frozenset({"codex", "openai_compatible"})
+
+
+class ProviderStoreError(ValueError):
+    """A provider connection cannot be created or used safely."""
+
+
+class AgentProviderStore:
+    """Persist provider metadata and encrypted tokens in local SQLite."""
+
+    def __init__(self, db_path: str | Path, key_path: str | Path) -> None:
+        self.db_path = Path(db_path).expanduser().resolve()
+        self.key_path = Path(key_path).expanduser().resolve()
+        self._lock = threading.RLock()
+        self._cipher = Fernet(self._load_key())
+        self._initialize()
+
+    def _load_key(self) -> bytes:
+        self.key_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            key = self.key_path.read_bytes().strip()
+        except FileNotFoundError:
+            key = Fernet.generate_key()
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            try:
+                descriptor = os.open(str(self.key_path), flags, 0o600)
+            except FileExistsError:
+                key = self.key_path.read_bytes().strip()
+            else:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(key)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+        if not key:
+            raise ProviderStoreError("provider secret key is empty")
+        try:
+            Fernet(key)
+        except (TypeError, ValueError) as exc:
+            raise ProviderStoreError("provider secret key is invalid") from exc
+        try:
+            os.chmod(self.key_path, 0o600)
+        except OSError:
+            pass
+        return key
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            connection = connect_sqlite(self.db_path, timeout=5.0)
+            try:
+                with connection:
+                    yield connection
+            finally:
+                connection.close()
+
+    def _initialize(self) -> None:
+        with self._connection() as db:
+            db.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {PROVIDER_TABLE} (
+                    provider_id TEXT PRIMARY KEY,
+                    principal TEXT NOT NULL,
+                    runtime_kind TEXT NOT NULL,
+                    server_id TEXT NOT NULL DEFAULT '',
+                    label TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    default_model TEXT NOT NULL DEFAULT '',
+                    secret_blob BLOB NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            db.execute(
+                f"""CREATE INDEX IF NOT EXISTS {PROVIDER_TABLE}_owner
+                    ON {PROVIDER_TABLE}(principal, runtime_kind, server_id)"""
+            )
+
+    @staticmethod
+    def _text(value: object, field: str, *, required: bool = True) -> str:
+        result = str(value or "").strip()
+        if required and not result:
+            raise ProviderStoreError(f"{field} is required")
+        if len(result) > 512:
+            raise ProviderStoreError(f"{field} is too long")
+        return result
+
+    @classmethod
+    def validate_runtime_kind(cls, value: object) -> str:
+        runtime = cls._text(value, "runtime_kind")
+        if runtime not in SUPPORTED_RUNTIME_KINDS:
+            raise ProviderStoreError("runtime_kind is unsupported")
+        return runtime
+
+    @classmethod
+    def validate_protocol(cls, value: object) -> str:
+        protocol = cls._text(value, "protocol")
+        if protocol not in SUPPORTED_PROTOCOLS:
+            raise ProviderStoreError("provider protocol is unsupported")
+        return protocol
+
+    @classmethod
+    def validate_base_url(cls, value: object, *, runtime_kind: str) -> str:
+        base_url = cls._text(value, "base_url").rstrip("/")
+        try:
+            parsed = urlsplit(base_url)
+            port = parsed.port
+        except ValueError as exc:
+            raise ProviderStoreError("base_url is invalid") from exc
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            raise ProviderStoreError("base_url must use http or https")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ProviderStoreError("base_url must not contain credentials or fragments")
+        if port is not None and not 1 <= port <= 65535:
+            raise ProviderStoreError("base_url port is invalid")
+        hostname = parsed.hostname.lower().rstrip(".")
+        if runtime_kind == "server":
+            if parsed.scheme != "https":
+                raise ProviderStoreError("server provider base_url must use HTTPS")
+            if hostname in {"localhost", "localhost.localdomain"}:
+                raise ProviderStoreError("server provider cannot target localhost")
+        return base_url
+
+    @staticmethod
+    def _row(row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "provider_id": str(row["provider_id"] or ""),
+            "label": str(row["label"] or ""),
+            "runtime_kind": str(row["runtime_kind"] or ""),
+            "server_id": str(row["server_id"] or ""),
+            "protocol": str(row["protocol"] or ""),
+            "base_url": str(row["base_url"] or ""),
+            "default_model": str(row["default_model"] or ""),
+            "enabled": bool(row["enabled"]),
+            "token_configured": bool(row["secret_blob"]),
+            "created_at": float(row["created_at"] or 0),
+            "updated_at": float(row["updated_at"] or 0),
+        }
+        if include_secret:
+            value["secret_blob"] = bytes(row["secret_blob"] or b"")
+        return value
+
+    def list(
+        self,
+        principal: str,
+        *,
+        runtime_kind: str | None = None,
+        server_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner = self._text(principal, "principal")
+        clauses = ["principal = ?"]
+        parameters: list[object] = [owner]
+        if runtime_kind:
+            clauses.append("runtime_kind = ?")
+            parameters.append(self.validate_runtime_kind(runtime_kind))
+        if server_id:
+            clauses.append("server_id = ?")
+            parameters.append(str(server_id).strip())
+        with self._connection() as db:
+            rows = db.execute(
+                f"""SELECT * FROM {PROVIDER_TABLE}
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY enabled DESC, label COLLATE NOCASE, provider_id""",
+                parameters,
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def get(self, principal: str, provider_id: str, *, include_secret: bool = False) -> dict[str, Any] | None:
+        owner = self._text(principal, "principal")
+        identifier = self._text(provider_id, "provider_id")
+        with self._connection() as db:
+            row = db.execute(
+                f"SELECT * FROM {PROVIDER_TABLE} WHERE principal = ? AND provider_id = ?",
+                (owner, identifier),
+            ).fetchone()
+        if row is None:
+            return None
+        value = self._row(row, include_secret=include_secret)
+        if include_secret:
+            try:
+                value["secret"] = self._cipher.decrypt(value.pop("secret_blob")).decode("utf-8")
+            except (InvalidToken, UnicodeDecodeError) as exc:
+                raise ProviderStoreError("provider token cannot be decrypted") from exc
+        return value
+
+    def save(
+        self,
+        principal: str,
+        payload: dict[str, object],
+        *,
+        default_server_id: str = "",
+    ) -> dict[str, Any]:
+        owner = self._text(principal, "principal")
+        if not isinstance(payload, dict):
+            raise ProviderStoreError("provider must be an object")
+        provider_id = str(payload.get("provider_id") or "").strip()
+        runtime_kind = self.validate_runtime_kind(payload.get("runtime_kind") or "server")
+        server_id = str(payload.get("server_id") or default_server_id or "").strip()
+        if runtime_kind == "server" and not server_id:
+            raise ProviderStoreError("server provider requires server_id")
+        if runtime_kind == "client":
+            server_id = ""
+        label = self._text(payload.get("label"), "label")
+        protocol = self.validate_protocol(payload.get("protocol") or "openai_compatible")
+        base_url = self.validate_base_url(payload.get("base_url"), runtime_kind=runtime_kind)
+        default_model = self._text(payload.get("default_model"), "default_model", required=False)
+        secret = str(payload.get("token") or "")
+        now = time.time()
+        with self._connection() as db:
+            previous = None
+            if provider_id:
+                previous = db.execute(
+                    f"SELECT * FROM {PROVIDER_TABLE} WHERE provider_id = ?",
+                    (provider_id,),
+                ).fetchone()
+                if previous is not None and str(previous["principal"]) != owner:
+                    raise ProviderStoreError("provider does not belong to current account")
+            else:
+                provider_id = "provider_" + secrets.token_urlsafe(9)
+            if not secret and previous is None:
+                raise ProviderStoreError("token is required for a new provider")
+            if secret:
+                secret_blob = self._cipher.encrypt(secret.encode("utf-8"))
+            else:
+                secret_blob = bytes(previous["secret_blob"] or b"")
+            db.execute(
+                f"""INSERT INTO {PROVIDER_TABLE} (
+                    provider_id, principal, runtime_kind, server_id, label,
+                    protocol, base_url, default_model, secret_blob, enabled,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(provider_id) DO UPDATE SET
+                    runtime_kind=excluded.runtime_kind,
+                    server_id=excluded.server_id,
+                    label=excluded.label,
+                    protocol=excluded.protocol,
+                    base_url=excluded.base_url,
+                    default_model=excluded.default_model,
+                    secret_blob=excluded.secret_blob,
+                    enabled=1,
+                    updated_at=excluded.updated_at""",
+                (
+                    provider_id, owner, runtime_kind, server_id, label,
+                    protocol, base_url, default_model, secret_blob,
+                    now if previous is None else float(previous["created_at"] or now),
+                    now,
+                ),
+            )
+        result = self.get(owner, provider_id)
+        if result is None:  # pragma: no cover - guarded by the write above
+            raise ProviderStoreError("provider was not saved")
+        return result
+
+    def delete(self, principal: str, provider_id: str) -> bool:
+        owner = self._text(principal, "principal")
+        identifier = self._text(provider_id, "provider_id")
+        with self._connection() as db:
+            cursor = db.execute(
+                f"DELETE FROM {PROVIDER_TABLE} WHERE principal = ? AND provider_id = ?",
+                (owner, identifier),
+            )
+        return bool(cursor.rowcount)

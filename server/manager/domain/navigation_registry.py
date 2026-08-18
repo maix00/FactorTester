@@ -43,6 +43,15 @@ _RESEARCH_TABS = (
         "requiresAuth": True,
         "roles": [],
     },
+    {
+        "id": "research.agent-models",
+        "title": "智能体模型",
+        "title_key": "智能体模型",
+        "description_key": "管理客户端或服务器 Agent 使用的模型服务",
+        "path": "/research?section=agent-models",
+        "requiresAuth": True,
+        "roles": [],
+    },
 )
 
 _TEST_TYPE_MODULES = (
