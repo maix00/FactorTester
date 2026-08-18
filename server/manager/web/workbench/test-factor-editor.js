@@ -32,21 +32,21 @@
     );
   }
 
-  function familyContent(context, state, refresh, sourceInput) {
+  function familyContent(context, state, refresh, sourceInput, options = {}) {
     const entry = state.factorCatalog.selectedFamilyEntry;
     if (!entry) return FTUI.empty(
       context.t("尚未选择因子家族"), context.t("搜索公共因子库或本地 Git 修订"),
     );
     if (entry.sourceKind === "public") {
-      return registeredFactorPanel(context, state, entry, refresh);
+      return registeredFactorPanel(context, state, entry, refresh, options);
     }
     const family = FTTestFactorSelection.selectedFamily(state);
     return family
-      ? parameterEditor(context, state, family, refresh, sourceInput)
+      ? parameterEditor(context, state, family, refresh, sourceInput, options)
       : document.createElement("div");
   }
 
-  function registeredFactorPanel(context, state, family, refresh) {
+  function registeredFactorPanel(context, state, family, refresh, options = {}) {
     const factors = FTFactorFamilyPicker.familyFactors(family, state.factors);
     if (!factors.length) {
       return FTUI.empty(context.t("该家族暂无可用因子"), "");
@@ -73,7 +73,10 @@
         for (const factor of factors) {
           const id = FTTestFactorSelection.factorID(factor);
           const exists = selectedValues.includes(id);
-          if (requested.has(id) && !exists) FTTestFactorSelection.addCandidate(state, factor);
+          if (requested.has(id) && !exists) {
+            FTTestFactorSelection.addCandidate(state, factor);
+            options.onCreated?.(factor);
+          }
           if (!requested.has(id) && exists) FTTestFactorSelection.removeCandidate(state, factor);
         }
         refresh?.();
@@ -89,7 +92,7 @@
     );
   }
 
-  function parameterEditor(context, state, family, refresh, sourceInput) {
+  function parameterEditor(context, state, family, refresh, sourceInput, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-parameters";
     for (const parameter of family.params || []) {
@@ -113,6 +116,7 @@
             params: state.values.factor_params || {},
           });
         FTTestFactorSelection.addCandidate(state, value);
+        options.onCreated?.(value);
       });
     });
     add.disabled = state.factorCatalog.selectedFamilyEntry?.sourceKind !== "transient"

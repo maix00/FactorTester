@@ -485,6 +485,8 @@ def group_test_settings() -> ApplicationSettings:
     # and non-module SettingDefinitions) — moved to tools/testers/backtest/settings.py.
     from tools.testers.backtest.settings import register_group_test_settings
     register_group_test_settings(app)
+    from tools.testers.settings.strategy_editor import register_strategy_editor_contract
+    register_strategy_editor_contract(app)
 
     # Module-owned settings (fee, slippage, liquidity, margin) — from
     # each ExecutableModule's setting_definitions classvar.
@@ -537,6 +539,8 @@ def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
     from tools.testers.ic_test.settings import register_ic_test_settings
     register_ic_test_settings(app)
+    from tools.testers.settings.strategy_editor import register_strategy_editor_contract
+    register_strategy_editor_contract(app)
     register_run_fields(app, backtest=False)
 
     return app

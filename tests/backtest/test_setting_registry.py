@@ -1266,3 +1266,14 @@ def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() ->
         field.get("value_descriptor", {}).get("options")
         for field in tab["defaults"].values()
     )
+
+
+def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
+    expected = ["__strategy__", "factor", "product_path_selection"]
+    for application_name in ("group_test", "ic_test"):
+        contract = backtest_setting_registry.get(application_name).manifest()["strategy_editor"]
+        assert [item["key"] for item in contract["inner_default_tabs"]] == expected
+        assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
+            "factor_selections", "factor",
+        ]
+        assert "time" in contract["outer_only_tabs"]

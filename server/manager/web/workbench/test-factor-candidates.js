@@ -51,7 +51,11 @@
       compact: true,
       name: `test-factors-${state.kind}`,
       onCreate: context.session
-        ? () => void openEditor(context, "create", "new", savedFactor)
+        ? () => void (
+          window.FTStrategyEditorFactorOverlay?.open
+            ? FTStrategyEditorFactorOverlay.open(context, state, savedFactor)
+            : openEditor(context, "create", "new", savedFactor)
+        )
         : null,
       createLabel: context.t("新建因子"),
       itemActions: item => {

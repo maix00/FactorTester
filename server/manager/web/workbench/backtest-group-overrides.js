@@ -61,12 +61,15 @@
   function render({
     context, manifest, inheritedValues = {}, overrides: initial = {},
     manageTabs = false, mountedTabs: requestedMountedTabs,
+    onlyTabs: requestedOnlyTabs,
     onMountedTabsChange, onChange,
   }) {
     const root = document.createElement("div");
     root.className = "backtest-group-overrides";
     let overrides = normalize(manifest, initial);
     let activeTab = "";
+    const onlyTabs = Array.isArray(requestedOnlyTabs)
+      ? new Set(requestedOnlyTabs) : null;
     let mountedTabs = Array.isArray(requestedMountedTabs)
       ? [...requestedMountedTabs] : null;
 
@@ -78,7 +81,8 @@
       const values = effectiveValues();
       const tabs = visibleTabs(manifest, values);
       const usableTabs = manageTabs
-        ? tabs.filter(tab => (mountedTabs || []).includes(tab.key)) : tabs;
+        ? tabs.filter(tab => (mountedTabs || []).includes(tab.key))
+        : onlyTabs ? tabs.filter(tab => onlyTabs.has(tab.key)) : tabs;
       if (!usableTabs.some(tab => tab.key === activeTab)) {
         activeTab = usableTabs[0]?.key || (manageTabs ? "__manage__" : "");
       }

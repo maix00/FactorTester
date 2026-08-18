@@ -52,7 +52,19 @@
   }
 
   function selectionID(value) {
-    return FTTestProducts.groupID(value);
+    return typeof value === "string" ? value : FTTestProducts.groupID(value);
+  }
+
+  function projection(value) {
+    if (typeof value === "string") {
+      return {
+        product_path_selection_id: value,
+        product_group_template_id: value,
+        label: value,
+        selected_paths: [], paths: [],
+      };
+    }
+    return FTTestProducts.projection(value);
   }
 
   function groupLabel(group) {
@@ -78,6 +90,9 @@
       ? Array.from({length: splitCount}, (_, index) => index + 1)
       : [groupIndex];
     const created = [];
+    const overrides = explicitOverrides(draft.overrides);
+    const mountedTabs = Array.isArray(draft.override_mounted_tabs)
+      ? [...new Set(draft.override_mounted_tabs)] : ["__strategy__", "factor", "product_path_selection"];
     // A batch is an authoring event, not a configuration equivalence class.
     // Repeating the same draft therefore deliberately receives a new ID.
     const batchId = FTBacktestGroupBatches.nextID(state);
@@ -94,10 +109,12 @@
           id,
           batchId,
           name, parentId: null,
-          product_path_selection: FTTestProducts.projection(selection),
+          product_path_selection: projection(selection),
           product_path_selection_id: selectionId,
           factorAlias,
           splitCount, groupIndex: index, isAllGroups: false,
+          ...overrides,
+          override_mounted_tabs: mountedTabs,
           needsRegenerate: true,
         };
       });
@@ -122,12 +139,36 @@
       ? uniqueName(state, requestedName)
       : FTBacktestGroupBatches.defaultName(batchId, id);
     const group = {
+      ...(parent.product_path_selection ? {
+        product_path_selection: structuredClone(parent.product_path_selection),
+      } : {}),
+      ...(parent.product_path_selection_id ? {
+        product_path_selection_id: parent.product_path_selection_id,
+      } : {}),
+      ...(parent.factorAlias ? {factorAlias: parent.factorAlias} : {}),
+      ...(parent.factorAliases ? {factorAliases: [...parent.factorAliases]} : {}),
+      ...(parent.splitCount ? {splitCount: parent.splitCount} : {}),
+      ...(parent.groupIndex ? {groupIndex: parent.groupIndex} : {}),
+      ...(parent.isAllGroups !== undefined ? {isAllGroups: parent.isAllGroups} : {}),
+      ...(draft.product_path_selection ? {
+        product_path_selection: projection(draft.product_path_selection),
+      } : {}),
+      ...(draft.product_path_selection_id ? {
+        product_path_selection_id: draft.product_path_selection_id,
+      } : {}),
+      ...(draft.factorAlias ? {factorAlias: draft.factorAlias} : {}),
+      ...(Array.isArray(draft.factorAliases) ? {factorAliases: [...draft.factorAliases]} : {}),
+      ...(draft.splitCount ? {splitCount: positiveInteger(draft.splitCount, "splitCount")} : {}),
+      ...(draft.groupIndex ? {groupIndex: positiveInteger(draft.groupIndex, "groupIndex")} : {}),
       ...explicitOverrides(draft.overrides),
       id,
       batchId,
       name,
       parentId: parent.id,
       productMask,
+      override_mounted_tabs: Array.isArray(draft.override_mounted_tabs)
+        ? [...new Set(draft.override_mounted_tabs)]
+        : ["__strategy__", "factor", "product_path_selection"],
       needsRegenerate: true,
     };
     state.analysis.groups.push(group);
@@ -178,7 +219,7 @@
       useCloseToday: null,
       needsRegenerate: true,
       metadata: {},
-      override_mounted_tabs: [],
+      override_mounted_tabs: ["__strategy__", "factor", "product_path_selection"],
       ...explicitOverrides(overrides),
     };
     state.analysis.ls_configs.push(item);
@@ -338,7 +379,7 @@
     addBaseBatch, addDerived, addLongShort, find, groupLabel, initialize,
     registeredOverrides, removeLongShort, removeSelected, removeSelectedLongShort,
     groupBatches, renameGroup, renameLongShort, rootsAndChildren, selected,
-    selectedLongShort, selectionID, toggle, toggleLongShort, updateGroup,
+    selectedLongShort, selectionID, projection, toggle, toggleLongShort, updateGroup,
     swapLongShort, updateLongShort,
   });
 })();

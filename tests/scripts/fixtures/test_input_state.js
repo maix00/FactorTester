@@ -91,4 +91,10 @@ inputs.removeStrategy(state, "strategies/dynamic_hold.py");
 assert.equal(inputs.strategyInspection(state, "strategies/dynamic_hold.py"), null);
 inputs.removeDependency(state, "strategy-configs/dynamic-hold.yaml");
 assert.deepEqual(inputs.counts(state), {factors: 0, strategies: 0, dependencies: 0});
+state.customStrategyOverrides = {fee_mode: "custom"};
+state.customStrategyMountedTabs = ["__strategy__", "factor", "cost"];
+const customStrategyRequest = inputs.requestBody(state);
+assert.deepEqual(customStrategyRequest.custom_strategy_overrides, {fee_mode: "custom"});
+assert.deepEqual(customStrategyRequest.custom_strategy_mounted_tabs,
+  ["__strategy__", "factor", "cost"]);
 console.log("ok");

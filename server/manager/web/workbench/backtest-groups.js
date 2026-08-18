@@ -186,6 +186,20 @@
     if (!action) throw new Error(`内容适配器不支持操作: ${flow.kind}`);
     state.backtestGroupEditor = action(state, selected, flow);
     refresh();
+    // The editor is intentionally lightweight on first paint, but its
+    // fallback scope is the same visible catalog used by the factor/product
+    // tabs. Load those catalogs after opening the editor so a cold workspace
+    // does not present an empty candidate list or block the UI.
+    const loaders = [];
+    if (flow.kind === "create" || flow.kind === "derive"
+      || flow.kind === "clone" || flow.kind === "edit") {
+      loaders.push(window.FTTests?.ensureProductsForExecution?.(context, state, refresh));
+      loaders.push(window.FTTests?.ensureFactorsForExecution?.(context, state, refresh));
+    }
+    if (loaders.some(Boolean)) void Promise.all(loaders).then(refresh).catch(error => {
+      state.backtestGroupCatalogError = error.message || String(error);
+      refresh();
+    });
   }
 
   function flows(state, surfaceKey) {

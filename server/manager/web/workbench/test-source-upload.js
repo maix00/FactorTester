@@ -187,7 +187,12 @@
         activeKey: state.strategyTabKey || (strategyItems[0]?.key || "__new_strategy__"),
         onActivate: key => { state.strategyTabKey = key; },
       });
-      root.append(tabset.bar, tabset.host);
+      const sourceMount = document.createElement("div");
+      sourceMount.className = "test-custom-strategy-source-shell";
+      sourceMount.append(tabset.bar, tabset.host);
+      root.append(window.FTCustomStrategyEditor?.create?.(
+        context, state, sourceMount, refresh,
+      ) || sourceMount);
     } else {
       // Keep the deferred source-input module usable in isolated fixtures and
       // during a partial static-module load. The normal workbench has the

@@ -867,6 +867,20 @@ def test_backtest_group_forms_mount_shared_picker_elements() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_form.js"
     source = WEB_ROOT / "workbench" / "backtest-group-form.js"
+    pickers = WEB_ROOT / "workbench" / "strategy-editor-pickers.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source), str(pickers)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_nested_strategy_editor_respects_outer_scope_and_inner_mount_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
+    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
     result = subprocess.run(
         ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -1029,7 +1043,9 @@ def test_backtest_group_form_uses_registered_override_editor() -> None:
     )
 
     assert "FTBacktestGroupOverrides.render" in form
-    assert "overrides.value()" in form
+    assert "FTStrategyEditorOverrides" in form
+    assert "overrideEditor?.value?.()" in form
+    assert "fallbackOverrides.value()" in form
     assert "parseObject(overrides.value" not in form
 
 

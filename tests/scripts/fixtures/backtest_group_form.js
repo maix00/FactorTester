@@ -80,6 +80,11 @@ window.FTBacktestGroupModel = global.FTBacktestGroupModel;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-group-form.js",
 });
+if (process.argv[3]) {
+  vm.runInThisContext(fs.readFileSync(process.argv[3], "utf8"), {
+    filename: "strategy-editor-pickers.js",
+  });
+}
 
 const context = {
   session: null,
