@@ -105,8 +105,11 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert "codex_sha512=" in dockerfile
     assert "Codex platform package integrity check failed" in dockerfile
     assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
-    assert "python -m pip install" in dockerfile
-    assert "/opt/factortester/app/tools/cli" in dockerfile
+    assert "COPY tools tools" in dockerfile
+    assert (
+        "COPY deploy/docker/factortester-public/factortester-cli \\\n    /usr/local/bin/factortester"
+    ) in dockerfile
+    assert "python -m pip install --no-cache-dir --no-deps" not in dockerfile
     assert "rm -f /usr/local/bin/factortester-manager" in dockerfile
     assert "test -x /usr/local/bin/factortester" in dockerfile
     assert args["CODEX_VERSION"] == "${FACTORTESTER_CODEX_VERSION:-0.147.0}"
