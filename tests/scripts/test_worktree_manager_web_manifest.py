@@ -863,9 +863,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
-    assert manifest["group_dependencies"]["workbench-run-batch"] == [
-        "workbench-run", "workbench-products", "workbench-ic-controls",
-    ]
+    assert manifest["group_dependencies"]["workbench-run-batch"] == ["workbench-core"]
     assert manifest["group_dependencies"]["workbench-run-batch-actions"] == [
         "workbench-run-batch", "workbench-input-state", "workbench-run-submit",
     ]
