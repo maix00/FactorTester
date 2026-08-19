@@ -21,12 +21,14 @@ RUN sed -i \
     && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
         ca-certificates \
+        bubblewrap \
         curl \
         git \
         gosu \
         iproute2 \
         iptables \
         procps \
+        ripgrep \
         tini \
         wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
