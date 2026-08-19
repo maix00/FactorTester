@@ -176,10 +176,12 @@
       type: role,
       thread_id: conversationID,
       created_at: created,
-      content: [{type: role === "assistant_message" ? "output_text" : "input_text", text}],
+      content: [role === "assistant_message"
+        ? {type: "output_text", text, annotations: []}
+        : {type: "input_text", text}],
       ...(role === "user_message" ? {
         attachments: [], quoted_text: null, inference_options: {},
-      } : {annotations: []}),
+      } : {}),
       metadata: {profile_key: profileKey},
     };
   }
