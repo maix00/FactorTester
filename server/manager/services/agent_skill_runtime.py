@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 RUNTIME_MANIFEST_VERSION = 1
+CODEX_SYSTEM_SKILLS_DIRNAME = ".system"
+CODEX_SYSTEM_SKILLS_MARKER = ".codex-system-skills.marker"
 
 
 class AgentSkillRuntimeError(ValueError):
@@ -189,6 +191,22 @@ class AgentSkillRuntime:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
+    @staticmethod
+    def _is_codex_system_skills(path: Path) -> bool:
+        """Recognize only Codex's own managed system Skill directory.
+
+        Codex creates this directory inside ``CODEX_HOME`` on first launch.
+        It is not part of FactorTester's selected Skill projection and must
+        not be treated as an unowned user Skill.  The marker check keeps the
+        strict collision policy for arbitrary ``.system`` directories.
+        """
+        return (
+            path.name == CODEX_SYSTEM_SKILLS_DIRNAME
+            and not path.is_symlink()
+            and path.is_dir()
+            and (path / CODEX_SYSTEM_SKILLS_MARKER).is_file()
+        )
+
     def sync(self, bindings: list[Mapping[str, object]]) -> dict[str, Any]:
         """Make the Profile projection exactly match the selected bindings."""
         self._prepare_directories()
@@ -212,6 +230,8 @@ class AgentSkillRuntime:
         selected_ids = set(normalized)
         for child in self.skills_root.iterdir():
             if child.name in selected_ids:
+                continue
+            if self._is_codex_system_skills(child):
                 continue
             # Do not delete data that the user or an Agent placed here.  A
             # directory or symlink could be interpreted as another Skill, so

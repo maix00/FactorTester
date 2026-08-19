@@ -132,6 +132,40 @@ def test_profile_codex_runtime_refuses_unowned_skill_directory(tmp_path):
         runtime.sync([definition])
 
 
+def test_profile_codex_runtime_keeps_codex_system_skills_directory(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definition = catalog.definitions("server")[0]
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime._prepare_directories()
+    system_skills = runtime.skills_root / ".system"
+    system_skills.mkdir()
+    (system_skills / ".codex-system-skills.marker").write_text(
+        "codex-system-skills", encoding="utf-8",
+    )
+
+    runtime.sync([definition])
+
+    assert system_skills.is_dir()
+    assert (system_skills / ".codex-system-skills.marker").is_file()
+
+
+def test_profile_codex_runtime_rejects_unmarked_system_directory(tmp_path):
+    catalog = AgentSkillCatalog(
+        REPO_ROOT,
+        REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    definition = catalog.definitions("server")[0]
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    runtime._prepare_directories()
+    (runtime.skills_root / ".system").mkdir()
+
+    with pytest.raises(AgentSkillRuntimeError, match="unowned Skill directory"):
+        runtime.sync([definition])
+
+
 def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(tmp_path):
     catalog = AgentSkillCatalog(
         REPO_ROOT,

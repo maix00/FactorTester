@@ -233,7 +233,8 @@ class ProfileRuntimeStore:
         db.execute(
             f"""UPDATE {CLAIM_TABLE}
                 SET released_at = ?, status = 'expired'
-                WHERE released_at IS NULL AND last_heartbeat_at < ?""",
+                WHERE released_at IS NULL AND status = 'claimed'
+                  AND last_heartbeat_at < ?""",
             (now, cutoff),
         )
 
@@ -364,6 +365,41 @@ class ProfileRuntimeStore:
             cursor = db.execute(
                 f"""UPDATE {CLAIM_TABLE}
                     SET released_at = ?, status = 'released'
+                    WHERE {' AND '.join(clauses)}""",
+                [current, *parameters],
+            )
+        return bool(cursor.rowcount)
+
+    def pause(
+        self,
+        principal: str,
+        claim_id: str,
+        *,
+        agent_id: str = "",
+        force: bool = False,
+        now: float | None = None,
+    ) -> bool:
+        """Pause a Manager-owned Agent without releasing its Profile claim.
+
+        An explicit user release remains the only operation that removes
+        ownership.  A paused claim is intentionally not expired by the lease
+        sweeper; starting the same Profile resumes it and refreshes its
+        heartbeat.  This also lets a server Agent be stopped for maintenance
+        without forcing the user through the binding flow again.
+        """
+        owner = self._text(principal, "principal")
+        identifier = self._text(claim_id, "claim_id")
+        agent = self._text(agent_id, "agent_id", required=False)
+        current = float(time.time() if now is None else now)
+        clauses = ["claim_id = ?", "principal = ?", "released_at IS NULL"]
+        parameters: list[object] = [identifier, owner]
+        if not force:
+            clauses.append("agent_id = ?")
+            parameters.append(agent)
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {CLAIM_TABLE}
+                    SET status = 'stopped', last_heartbeat_at = ?
                     WHERE {' AND '.join(clauses)}""",
                 [current, *parameters],
             )
