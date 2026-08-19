@@ -156,6 +156,10 @@ def main(
     runtime_module.Handler.state.manager_public_endpoint = (
         configured_manager_endpoint(control_endpoint)
     )
+    if not runtime_module.Handler.state.agent_manager_endpoint:
+        runtime_module.Handler.state.agent_manager_endpoint = (
+            f"http://127.0.0.1:{args.port}"
+        )
     data_endpoint = str(
         args.public_data_endpoint
         or os.environ.get("FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT")

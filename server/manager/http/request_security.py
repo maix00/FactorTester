@@ -173,6 +173,11 @@ class RequestSecurityMixin:
             return False
         if self._is_direct_https_request():
             return False
+        # A server-side Profile Agent talks to the colocated Manager through
+        # loopback/Docker-private networking. Redirecting it to the public
+        # endpoint would turn an internal catalog read into paid egress.
+        if self._is_local_agent_request():
+            return False
         request_target = self.path if self.path.startswith("/") else "/"
         self.send_response(308)
         self.send_header(
@@ -195,6 +200,23 @@ class RequestSecurityMixin:
             self._is_loopback_client()
             or self._is_private_lan_client()
             or self._is_https_proxy_request()
+        )
+
+    def _is_local_agent_request(self) -> bool:
+        """Recognize a Manager-issued Profile Agent on a local network path."""
+        if self.headers.get("X-FactorTester-Agent", "").strip().lower() != "profile":
+            return False
+        if not (self._is_loopback_client() or self._is_private_lan_client()):
+            return False
+        matcher = getattr(getattr(self, "state", None), "agent_session_matches", None)
+        if not callable(matcher):
+            return False
+        return bool(
+            matcher(
+                self._bearer_token(),
+                self.headers.get("X-FactorTester-Agent-Profile", ""),
+                self.headers.get("X-FactorTester-Agent-Claim", ""),
+            )
         )
 
     def _is_swift_network_discovery_request(self) -> bool:
@@ -733,11 +755,13 @@ class RequestSecurityMixin:
             self.state.require_device_auth
             and not self._is_loopback_client()
         )
+        local_agent = self._is_local_agent_request()
         if (
             session is not None
             and self._has_secure_ui_transport()
             and (
                 not device_gate_required
+                or local_agent
                 or self.state.session_allows_device_origin(
                     self._bearer_token(),
                     self._request_origin(),

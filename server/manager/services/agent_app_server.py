@@ -26,6 +26,7 @@ class AgentAppServerSupervisor:
         self.proxy_url_provider = proxy_url_provider
         self.heartbeat_interval = max(0.1, float(heartbeat_interval))
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
+        self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
         self._lock = threading.RLock()
 
@@ -51,6 +52,9 @@ class AgentAppServerSupervisor:
                 self._sessions.pop(key, None)
                 self._stop_heartbeat(key)
                 existing.stop()
+                self.profile_service.revoke_agent_session(
+                    self._agent_session_tokens.pop(key, ""),
+                )
                 self.profile_service.pause_server_agent(*key)
             context = self.profile_service.server_agent_context(*key)
             claim = context["claim"]
@@ -62,6 +66,7 @@ class AgentAppServerSupervisor:
             session = AgentAppServerSession(
                 runtime=context["skill_runtime"],
                 provider=context["provider"],
+                factor_tester_auth=context.get("factor_tester_auth") or None,
                 codex_binary=self.codex_binary,
                 proxy_url=self._proxy_url(),
             )
@@ -69,8 +74,14 @@ class AgentAppServerSupervisor:
                 session.start()
             except Exception:
                 session.stop()
+                auth = context.get("factor_tester_auth") or {}
+                self.profile_service.revoke_agent_session(
+                    str(auth.get("token") or ""),
+                )
                 raise
             self._sessions[key] = session
+            auth = context.get("factor_tester_auth") or {}
+            self._agent_session_tokens[key] = str(auth.get("token") or "")
             self._start_heartbeat(key, claim)
             return session.status()
 
@@ -81,6 +92,9 @@ class AgentAppServerSupervisor:
             self._stop_heartbeat(key)
         if session is not None:
             session.stop()
+        self.profile_service.revoke_agent_session(
+            self._agent_session_tokens.pop(key, ""),
+        )
         self.profile_service.pause_server_agent(*key)
         return {"stopped": True, "running": False}
 
@@ -318,9 +332,14 @@ class AgentAppServerSupervisor:
             while not stop_event.wait(self.heartbeat_interval):
                 with self._lock:
                     session = self._sessions.get(key)
-                if session is None or not session.status().get("running"):
+                if session is None:
+                    return
+                if not session.status().get("running"):
                     # A crashed app-server must stop renewing its claim so the
-                    # normal lease expiry can make the Profile reclaimable.
+                    # normal lease expiry can make the Profile reclaimable.  It
+                    # must also lose its CLI capability immediately rather
+                    # than waiting for a later manual lifecycle action.
+                    self.stop(*key)
                     return
                 try:
                     self.profile_service.heartbeat(
