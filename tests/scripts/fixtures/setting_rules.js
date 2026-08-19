@@ -52,6 +52,10 @@ const values = rules.initialValues(manifest, {engine_mode: "basic"});
 assert.equal(values.accounting_mode, "Basic");
 assert.equal(values.margin_mode, "none");
 assert.equal(rules.isEditable(manifest.defaults.daily_mark_to_market_enabled, values), false);
+assert.deepEqual(
+  rules.lockingFields(manifest.defaults.daily_mark_to_market_enabled, values),
+  ["engine_mode", "accounting_mode"],
+);
 assert.equal(rules.isVisible(manifest.defaults.fixed_margin_ratio, values), false);
 assert.equal(
   rules.displayValueFor(

@@ -82,6 +82,7 @@
     bindOutsideClose();
     const controlDisabled = typeof options.disabled === "function"
       ? false : Boolean(options.disabled);
+    const disabledReason = String(options.disabledReason || "").trim();
     const items = normalizeItems(options.items).map(item => ({
       ...item,
       disabled: item.disabled || (typeof options.disabled === "function"
@@ -95,6 +96,11 @@
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
       .filter(Boolean).join(" ");
+    if (controlDisabled) {
+      section.classList.add("is-locked");
+      section.setAttribute("aria-disabled", "true");
+      if (disabledReason) section.title = disabledReason;
+    }
     const heading = document.createElement("div");
     heading.className = "ft-multi-select-heading";
     if (options.title && options.compact !== true) {
@@ -118,8 +124,8 @@
         .filter(Boolean).join(" ");
       button.textContent = action.label;
       if (action.title) button.title = action.title;
-      button.disabled = typeof action.disabled === "function"
-        ? Boolean(action.disabled()) : Boolean(action.disabled);
+      button.disabled = controlDisabled || (typeof action.disabled === "function"
+        ? Boolean(action.disabled()) : Boolean(action.disabled));
       button.addEventListener("click", event => action.onClick?.(event));
       headingActions.append(button);
     }
@@ -138,11 +144,18 @@
     if (controlDisabled) {
       summary.classList.add("is-disabled");
       summary.setAttribute("aria-disabled", "true");
+      if (disabledReason) summary.title = disabledReason;
     }
     summary.setAttribute("aria-label", options.title || translate(context, "筛选"));
     const summaryText = document.createElement("span");
     summaryText.className = "ft-multi-select-summary-text";
     summary.append(summaryText);
+    if (controlDisabled) {
+      const lockIndicator = document.createElement("span");
+      lockIndicator.className = "ft-multi-select-lock-indicator";
+      lockIndicator.textContent = translate(context, "自动确定", "自动确定");
+      summary.append(lockIndicator);
+    }
 
     const menu = document.createElement("div");
     menu.className = "ft-multi-select-menu";
@@ -229,7 +242,8 @@
           ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}` : "";
         selectionPreview.hidden = !labels.length;
       }
-      summary.title = labels.join("、");
+      summary.title = controlDisabled && disabledReason
+        ? disabledReason : labels.join("、");
       if (multi) {
         note.textContent = labels.length
           ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
@@ -274,8 +288,8 @@
             .filter(Boolean).join(" ");
           button.textContent = action.label;
           button.title = action.title || action.label;
-          button.disabled = typeof action.disabled === "function"
-            ? Boolean(action.disabled()) : Boolean(action.disabled);
+          button.disabled = controlDisabled || (typeof action.disabled === "function"
+            ? Boolean(action.disabled()) : Boolean(action.disabled));
           button.addEventListener("click", event => {
             event.preventDefault();
             event.stopPropagation();
@@ -358,7 +372,7 @@
           context.showNotice?.(error.message || translate(context, "应用失败"), true);
         } finally {
           applying = false;
-          apply.disabled = false;
+          apply.disabled = controlDisabled;
         }
       });
       actions.append(apply);

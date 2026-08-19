@@ -66,6 +66,7 @@
         ? (Array.isArray(value) ? value : [])
         : [String(value ?? "")],
       disabled,
+      disabledReason: options.disabledReason,
       onOpen: options.choiceOnOpen,
       onChange: next => commit(
         key, field, manifest, values, multi ? next : (next[0] ?? ""), options,
@@ -78,6 +79,11 @@
     const label = document.createElement("b");
     label.textContent = field.label || key;
     const editable = FTSettingRules.isEditable(field, values);
+    const lockingLabels = (FTSettingRules.lockingFields?.(field, values) || [])
+      .map(sourceKey => manifest.defaults?.[sourceKey]?.label || sourceKey);
+    const disabledReason = !editable
+      ? `${context.t("由其他字段自动确定")}：${lockingLabels.join("、") || context.t("当前设置")}`
+      : "";
     const hint = window.FTTestFieldHelp?.forField
       ? FTTestFieldHelp.forField(manifest, key, context)
       : (field.help_text ? context.t(field.help_text) : "");
@@ -86,9 +92,12 @@
     // registration; the page does not invent a second explanation here.
     const row = FTTestFieldRow.create(
       label.textContent,
-      inputFor(key, field, manifest, values, context, options, !editable),
+      inputFor(
+        key, field, manifest, values, context,
+        {...options, disabledReason}, !editable,
+      ),
       hint,
-      {help: hint},
+      {help: hint, disabled: !editable, disabledReason},
     );
     if (hintText) row.setAttribute("aria-label", `${label.textContent}: ${hintText}`);
     return row;

@@ -128,8 +128,52 @@
     });
   }
 
+  function createSettings(options = {}) {
+    const root = options.root || document.createElement(options.rootTag || "div");
+    root.className = options.rootClass
+      || "backend-settings-shell test-settings-shell";
+    const tabset = create({
+      ...options,
+      barClass: options.barClass || "backend-settings-tab-bar",
+      hostClass: options.hostClass || "backend-settings-host",
+    });
+    let current = null;
+
+    function sync() {
+      const children = [
+        tabset.bar,
+        ...(current ? [current] : []),
+        tabset.host,
+      ];
+      if (typeof root.replaceChildren === "function") root.replaceChildren(...children);
+      else {
+        root.children = [];
+        root.append(...children);
+      }
+    }
+
+    function setCurrent(content, title = "") {
+      current = null;
+      if (content) {
+        current = document.createElement("section");
+        current.className = "test-settings-current";
+        if (title) {
+          const heading = document.createElement("strong");
+          heading.textContent = title;
+          current.append(heading);
+        }
+        current.append(content);
+      }
+      sync();
+      return current;
+    }
+
+    sync();
+    return Object.freeze({root, tabset, setCurrent});
+  }
+
   window.FTTabChipContent = Object.freeze({
-    create,
+    create, createSettings,
     multiSelect(context, options = {}) {
       if (!window.FTMultiSelectFilter?.create) {
         throw new Error("共享多选筛选器尚未加载");

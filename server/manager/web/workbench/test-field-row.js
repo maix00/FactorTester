@@ -21,6 +21,10 @@
     const row = document.createElement("div");
     row.className = ["test-setting-row", "test-field-row", options.className || ""]
       .filter(Boolean).join(" ");
+    if (options.disabled) {
+      row.classList.add("is-locked");
+      row.setAttribute("aria-disabled", "true");
+    }
     const copy = document.createElement("span");
     const heading = document.createElement("span");
     heading.className = "test-field-row-heading";
@@ -33,6 +37,12 @@
       heading.append(helpIcon(helpValue));
     }
     copy.append(heading);
+    if (options.disabledReason) {
+      const lock = document.createElement("small");
+      lock.className = "test-field-row-lock";
+      lock.textContent = options.disabledReason;
+      copy.append(lock);
+    }
     const value = document.createElement("div");
     value.className = "test-field-row-control";
     if (tooltip) row.setAttribute("aria-label", `${label || ""}：${tooltip}`);

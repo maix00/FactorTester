@@ -711,7 +711,9 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
 
     assert "outer_pre_mounted_tabs" in tabs
     assert "includeEmpty: true" in tabs
-    assert ".strategy-editor-chip-row" in styles
+    assert "FTTabChipContent.createSettings" in tabs
+    assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
+    assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
     assert ".test-object-editor-overlay-mount > .detail-stack" in styles
@@ -1145,6 +1147,28 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
+    fields = (WEB_ROOT / "workbench" / "test-setting-fields.js").read_text(
+        encoding="utf-8"
+    )
+    rows = (WEB_ROOT / "workbench" / "test-field-row.js").read_text(
+        encoding="utf-8"
+    )
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+        encoding="utf-8"
+    )
+    styles = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "FTSettingRules.lockingFields" in fields
+    assert "disabledReason: options.disabledReason" in fields
+    assert 'row.classList.add("is-locked")' in rows
+    assert 'lock.className = "test-field-row-lock"' in rows
+    assert 'lockIndicator.className = "ft-multi-select-lock-indicator"' in picker
+    assert ".test-setting-row.is-locked" in styles
+
+
 def test_settings_picker_can_escape_the_tab_content_boundary() -> None:
     settings_css = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
         encoding="utf-8"
@@ -1233,7 +1257,9 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
     groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
 
-    assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
+    assert "FTTabChipContent.createSettings" in settings
+    assert "function createSettings(options = {})" in tab_content
+    assert 'current.className = "test-settings-current"' in tab_content
     assert 'bar.className = options.barClass || "backend-settings-tab-bar"' in tab_content
     assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
     assert "options.onActivate?.(key)" in tab_content
