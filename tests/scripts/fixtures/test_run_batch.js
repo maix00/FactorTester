@@ -422,8 +422,22 @@ const strategyScopedBacktest = {
   await batch.runAll(context, strategyScopedBacktest, () => {});
   assert.equal(strategyScopedBacktest.testRunBatch[0].jobID, "job-5");
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
+
+  const refreshDuringSubmission = {
+    ...strategyScopedBacktest,
+    testRunBatch: [],
+  };
+  await batch.previewAll(context, refreshDuringSubmission, () => {});
+  await batch.runAll(context, refreshDuringSubmission, () => {
+    refreshDuringSubmission.testRunBatch = refreshDuringSubmission.testRunBatch
+      .map(item => ({...item}));
+  });
+  assert.equal(refreshDuringSubmission.testRunBatch[0].jobID, "job-6",
+    "submission must publish the Job identity after a repaint replaces batch entries");
+  assert.deepEqual(batch.submittedItems(refreshDuringSubmission).map(item => item.jobID), ["job-6"],
+    "a repainted test page must retain the Job consumed by its progress/result observer");
   assert.equal(navigated, false, "submission must keep the test page visible");
-  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
+  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 6);
   assert.ok(actionsSource.includes("state.runValues?.service_port"));
   assert.ok(actionsSource.includes(
     'serviceRunPath(context, state, "/api/runs/preview")',
