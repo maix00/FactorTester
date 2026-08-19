@@ -259,7 +259,9 @@ class CoreGetRoutesMixin:
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; img-src 'self' blob: data: https:; "
-                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' https://cdn.platform.openai.com; "
+                "frame-src 'self' https://cdn.platform.openai.com; "
                 "connect-src 'self' http: https:",
             )
             self.send_header("Referrer-Policy", "no-referrer")

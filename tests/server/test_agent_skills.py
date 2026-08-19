@@ -470,4 +470,22 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         REPO_ROOT / "server/manager/web/profile/agent-chat.js"
     ).read_text(encoding="utf-8")
     assert "/api/client/profile-agent/start" in chat_source
-    assert "/api/client/profile-agent/events" in chat_source
+    assert "openai-chatkit" in chat_source
+    assert "FTProfileChatKit" in chat_source
+    protocol_source = (
+        REPO_ROOT / "server/manager/web/profile/chatkit-protocol.js"
+    ).read_text(encoding="utf-8")
+    assert "FTProfileChatKitProtocol" in protocol_source
+    adapter_source = (
+        REPO_ROOT / "server/manager/web/profile/chatkit-adapter.js"
+    ).read_text(encoding="utf-8")
+    assert "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" in adapter_source
+    assert "/api/client/profile-agent/events" in adapter_source
+    assert "FTProfileChatKitProtocol" in adapter_source
+    assert profile_scripts.index("profile/chatkit-protocol.js") < profile_scripts.index(
+        "profile/chatkit-adapter.js"
+    )
+    assert "profile/chatkit-adapter.js" in profile_scripts
+    assert profile_scripts.index("profile/chatkit-adapter.js") < profile_scripts.index(
+        "profile/agent-chat.js"
+    )

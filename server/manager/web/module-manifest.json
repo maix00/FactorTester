@@ -14,7 +14,8 @@
     "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
     "job-detail-input": ["katex/katex.min.js"],
     "catalog": ["vendor/highcharts/highstock.min.js"],
-    "research": ["vendor/cytoscape/cytoscape.min.js"]
+    "research": ["vendor/cytoscape/cytoscape.min.js"],
+    "profile": []
   },
   "group_dependencies": {
     "charts": ["core"],
@@ -328,6 +329,8 @@
     ],
     "profile": [
       "profile/agent-skills.js",
+      "profile/chatkit-protocol.js",
+      "profile/chatkit-adapter.js",
       "profile/agent-chat.js",
       "profile/workspace-browser.js",
       "profile/profiles.js",
@@ -500,6 +503,8 @@
     "workbench/run-batch/actions.js",
     "workbench/tests.js",
     "profile/agent-skills.js",
+    "profile/chatkit-protocol.js",
+    "profile/chatkit-adapter.js",
     "profile/agent-chat.js",
     "profile/workspace-browser.js",
     "profile/profiles.js",
