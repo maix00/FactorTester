@@ -55,36 +55,51 @@ def factor_rows_from_sync(
         }
         if family_name in identity_values or _looks_like_username(family_name):
             family_name = family_alias
-        params = payload.get("params_list")
-        if not isinstance(params, list):
-            params = []
-        for index, item in enumerate(params[:512]):
+        factors = payload.get("resolved_factors")
+        if not isinstance(factors, list):
+            factors = []
+        for item in factors[:512]:
             value = item if isinstance(item, dict) else {}
-            factor_alias = str(
-                value.get("alias") or value.get("factor_alias") or f"{family_alias}:{index}"
-            ).strip()
+            factor_alias = str(value.get("factor_alias") or "").strip()
             if not factor_alias:
                 continue
             result.append({
                 "factor_alias": factor_alias,
-                "factor_family_alias": family_alias,
-                "factor_family_name": family_name,
+                "factor_family_alias": str(
+                    value.get("factor_family_alias") or family_alias
+                ),
+                "factor_family_name": str(
+                    value.get("factor_family_name") or family_name
+                ),
                 "factor_owner_ref": str(
-                    payload.get("factor_owner_ref")
+                    value.get("factor_owner_ref")
+                    or payload.get("factor_owner_ref")
                     or row.get("principal")
                     or principal
                 ),
                 "factor_family_ref": str(
-                    payload.get("factor_family_ref") or family_alias
+                    value.get("factor_family_ref")
+                    or payload.get("factor_family_ref")
+                    or family_alias
                 ),
-                "chinese_name": str(payload.get("chinese_name") or ""),
-                "description": str(payload.get("description") or ""),
-                "math_expr": str(payload.get("math_expr") or ""),
-                "category": str(payload.get("category") or ""),
-                "factor_kind": "registered",
-                "source": "custom",
-                "params": [value],
-                "factor_params": [value],
+                "chinese_name": str(
+                    value.get("chinese_name") or payload.get("chinese_name") or ""
+                ),
+                "description": str(
+                    value.get("description") or payload.get("description") or ""
+                ),
+                "math_expr": str(
+                    value.get("math_expr") or payload.get("math_expr") or ""
+                ),
+                "category": str(
+                    value.get("category") or payload.get("category") or ""
+                ),
+                "factor_kind": str(value.get("factor_kind") or "registered"),
+                "source": str(value.get("source") or "custom"),
+                "params": list(value.get("params") or value.get("factor_params") or []),
+                "factor_params": list(
+                    value.get("factor_params") or value.get("params") or []
+                ),
                 "owner_username": str(row.get("principal") or principal),
                 "owner_alias": _owner_alias(
                     str(row.get("principal") or principal),
@@ -99,8 +114,8 @@ def factor_rows_from_sync(
                 ),
                 "updated_at": payload.get("updated_at") or row.get("updated_at") or "",
                 "product_group": scope,
-                **({"factor_git_commit": str(payload["factor_git_commit"])}
-                   if payload.get("factor_git_commit") else {}),
+                **({"factor_git_commit": str(value["factor_git_commit"])}
+                   if value.get("factor_git_commit") else {}),
             })
     return result
 

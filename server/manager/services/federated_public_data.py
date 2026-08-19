@@ -645,12 +645,10 @@ class FederatedPublicDataService:
         local = compose_factor_library_scopes(
             local_scopes, principal=str(principal or viewer),
         )
+        # Factor metadata is account-domain state, not live service state.
+        # Each Manager reads its SQLite mirror; waiting for every peer here
+        # makes a picker depend on peer reachability and duplicates synced rows.
         projections = [local]
-        peer_values = self._query_peers(
-            kind="catalog", operation="factors", principal=viewer,
-        )
-        for _route, response in peer_values:
-            projections.append(response)
         scoped_values = {scope: [] for scope in FAMILY_SCOPES}
         for value in projections:
             scopes = split_factor_library_scopes(
@@ -675,21 +673,6 @@ class FederatedPublicDataService:
         return dict(self._store(key, result))
 
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
-        local = self.client_state.factor_sets(principal, query)
-        merged = {
-            str(item.get("target_ref") or item.get("id") or ""): dict(item)
-            for item in local if isinstance(item, dict)
-        }
-        peer_values = self._query_peers(
-            kind="catalog", operation="factor-sets", principal=principal,
-            payload={"query": query},
-        )
-        if not peer_values:
-            return list(merged.values())
-        for _route, response in peer_values:
-            for item in response.get("items") or []:
-                if isinstance(item, dict):
-                    key = str(item.get("target_ref") or item.get("id") or "")
-                    if key:
-                        merged.setdefault(key, dict(item))
-        return list(merged.values())
+        # Immutable sets share the same account-domain mirror as factors.
+        # They must not reintroduce a peer wait after the factor list is ready.
+        return self.client_state.factor_sets(principal, query)
