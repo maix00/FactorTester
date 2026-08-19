@@ -44,8 +44,24 @@
         textContent: String(options.totalLabel?.(total) || total),
       }),
     );
-    view.shell.append(pagination);
-    return {...view, page, pageSize, total, totalPages, start};
+    // Keep the table's vertical scroll container separate from the pager.  A
+    // paged table is commonly embedded in a long page; the pager must remain
+    // visible immediately below the viewport instead of being part of the
+    // scrollable table body.
+    const shell = document.createElement("div");
+    shell.className = "shared-paged-table";
+    shell.append(view.shell, pagination);
+    return {
+      ...view,
+      shell,
+      tableShell: view.shell,
+      pagination,
+      page,
+      pageSize,
+      total,
+      totalPages,
+      start,
+    };
   }
 
   function appendRow(body, values) {
