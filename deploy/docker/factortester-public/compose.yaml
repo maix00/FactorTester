@@ -18,7 +18,16 @@ services:
         CODEX_VERSION: ${FACTORTESTER_CODEX_VERSION:-0.147.0}
         CODEX_NPM_REGISTRY: ${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}
     cap_add:
+      # These are the explicit outer-container relaxations required by the
+      # Codex secure Docker profile. Bubblewrap drops them before the Agent's
+      # command runs; PostgreSQL does not receive them.
+      - SYS_ADMIN
+      - SYS_CHROOT
+      - SETUID
+      - SETGID
+      - SYS_PTRACE
       - NET_ADMIN
+      - NET_RAW
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
@@ -84,7 +93,8 @@ services:
       - ${FACTORTESTER_FEDERATION_UDP_HOST_PORT:-51820}:51820/udp
     restart: unless-stopped
     security_opt:
-      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=unconfined
     sysctls:
       net.ipv4.ip_forward: "1"
     volumes:
