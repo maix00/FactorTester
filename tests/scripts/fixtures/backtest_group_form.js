@@ -57,10 +57,15 @@ global.FTBacktestGroupOverrides = {
     return value;
   },
 };
+let sharedProductPanels = 0;
 global.FTTestProducts = {
   groupID: value => value?.id || "",
   groupLabel: value => value?.name || value?.id || "",
   projection: value => ({id: value?.id || "", name: value?.name || ""}),
+  selectionPanel: () => {
+    sharedProductPanels += 1;
+    return new Element("shared-product-selection");
+  },
 };
 global.FTTestFactors = {
   selectedFactor: state => state.factors[0],
@@ -116,6 +121,8 @@ const state = {
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "base"}, () => {},
 ), "opening the base-group form must mount picker elements");
+assert.equal(sharedProductPanels, 1,
+  "the nested product tab must use the outer shared product selection renderer");
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "ls", groupIDs: ["g1", "g2"]}, () => {},
 ), "opening the Long-Short form must mount picker elements");

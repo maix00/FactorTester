@@ -90,9 +90,19 @@
       factorRefs.includes(factorAlias(item))
     ));
     innerScopeValues.factor_candidates = selectedCandidateValues();
-    const productGroup = groupPicker(context, state, productGroupRef, value => {
-      productGroupRef = value[0] || "";
-    }, productItems, !productScopeBlocked);
+    const renderProductPanel = () => FTTestProducts.selectionPanel(
+      context, state, () => editorTabs?.refreshChips(), {
+        groups: productItems,
+        selectedRefs: productGroupRef ? [productGroupRef] : [],
+        multi: false,
+        canCreate: !productScopeBlocked,
+        onChange: values => {
+          productGroupRef = values[0] || "";
+          innerScopeValues.product_path_selection = productGroupRef;
+          editorTabs?.refreshChips();
+        },
+      },
+    );
     const storedFactors = selectedFactorAliases(state, defaults);
     const hasStoredFactors = Boolean(
       (Array.isArray(defaults.factorAliases) && defaults.factorAliases.length)
@@ -219,7 +229,7 @@
       }),
       renderStructure: () => structure,
       renderFactor: () => { renderFactorPanel(); return factorHost; },
-      renderProduct: () => field(context.t("产品组"), productGroup),
+      renderProduct: renderProductPanel,
       renderProductFilter: () => window.FTStrategyEditorProductFilter?.render(
         context, state, productMask,
         values => { productMask = [...new Set((values || []).map(String).filter(Boolean))]; },
@@ -232,7 +242,7 @@
     // the initial render instead of only after the user changes a field.
     editorTabs?.refreshChips();
     if (editorTabs) form.append(scopeNote, editorTabs);
-    else form.append(scopeNote, field(context.t("产品组"), productGroup),
+    else form.append(scopeNote, renderProductPanel(),
       factorHost, structure, field(context.t("覆盖字段"), fallbackOverrides));
 
     appendActions(context, form, async () => {
@@ -436,7 +446,6 @@
     return window.FTStrategyEditorPickers;
   }
 
-  function groupPicker(...args) { return pickerTools().groupPicker(...args); }
   function strategyGroupPicker(...args) { return pickerTools().strategyGroupPicker(...args); }
   function factorPicker(...args) { return pickerTools().factorPicker(...args); }
   function selectedFactorAliases(...args) {

@@ -28,7 +28,7 @@ _INNER_DEFAULT_TABS = (
     },
     {
         "key": "product_path_selection",
-        "label": "产品组",
+        "label": "产品路径",
         "kind": "product_scope",
         "mount_policy": "default",
     },

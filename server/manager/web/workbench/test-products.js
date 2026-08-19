@@ -99,7 +99,7 @@
     return state.groups[index >= 0 ? index : state.groups.length - 1];
   }
 
-  function editAction(context, group, onSaved) {
+  function editAction(context, group, onSaved, state = null) {
     if (!context.session || !group) return null;
     const id = groupID(group);
     if (!id || group.source_managed) return null;
@@ -109,7 +109,7 @@
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void openEditor(context, "edit", id, onSaved, null, group);
+        void openEditor(context, "edit", id, onSaved, group.temporary ? state : null, group);
       },
     };
   }
@@ -117,16 +117,21 @@
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-product-manager";
-    root.append(candidatePanel(context, state, refresh));
+    root.append(selectionPanel(context, state, refresh));
     return root;
   }
 
-  function candidatePanel(context, state, refresh) {
-    const selected = selectedGroups(state);
+  function selectionPanel(context, state, refresh, options = {}) {
+    const groups = Array.isArray(options.groups) ? options.groups : state.groups;
+    const selectedRefs = Array.isArray(options.selectedRefs)
+      ? uniqueReferences(options.selectedRefs)
+      : (state.kind === "ic" ? state.groupRefs : [state.groupRef]).filter(Boolean);
+    const selectedSet = new Set(selectedRefs);
+    const selected = groups.filter(group => selectedSet.has(groupID(group)));
     const pathCount = selected.reduce((total, group) => (
       total + (group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0)
     ), 0);
-    const items = state.groups.map(group => ({
+    const pickerItems = () => groups.map(group => ({
       value: groupID(group),
       label: groupLabel(group),
       description: [
@@ -135,40 +140,53 @@
       ].filter(Boolean).join(" · "),
       source_managed: group.source_managed === true,
     })).filter(item => item.value);
+    let picker = null;
     const savedGroup = value => {
       const group = upsertGroup(state, value);
       if (!group) return;
-      selectNew(state, group);
-      synchronize(state);
+      if (groups !== state.groups) {
+        const index = groups.findIndex(item => groupID(item) === groupID(group));
+        if (index >= 0) groups[index] = group; else groups.push(group);
+      }
+      if (typeof options.onChange === "function") {
+        options.onChange([groupID(group)]);
+      } else {
+        selectNew(state, group);
+        synchronize(state);
+      }
+      picker?.setItems(pickerItems());
+      picker?.setValues([groupID(group)]);
       refresh?.();
     };
-    const picker = FTTestObjectPicker.create(context, {
+    picker = FTTestObjectPicker.create(context, {
       title: context.t("产品路径候选"),
       note: context.t(state.kind === "ic"
         ? "可多选产品组；每个候选冻结为独立 IC 任务"
         : "选择一个产品组作为本次回测的产品范围"),
-      items,
-      selected: state.kind === "ic" ? state.groupRefs : [state.groupRef],
-      multi: state.kind === "ic",
+      items: pickerItems(),
+      selected: selectedRefs,
+      multi: options.multi ?? (state.kind === "ic"),
       loading: state.lazy?.products?.status === "loading",
       loadingText: context.t("正在读取产品组候选…"),
       compact: true,
       name: `test-product-groups-${state.kind}`,
-      onCreate: context.session
+      onCreate: context.session && options.canCreate !== false
         ? () => void openEditor(context, "create", "new", savedGroup, state)
         : null,
       createLabel: context.t("新建产品组"),
       itemActions: item => {
         const action = editAction(
           context,
-          state.groups.find(group => groupID(group) === item.value),
-          savedGroup,
+          groups.find(group => groupID(group) === item.value),
+          savedGroup, state,
         );
         return action ? [action] : [];
       },
       onChange: values => {
         const refs = uniqueReferences(values);
-        if (state.kind === "ic") {
+        if (typeof options.onChange === "function") {
+          options.onChange(refs);
+        } else if (state.kind === "ic") {
           state.groupRefs = refs;
           state.groupRef = refs[0] || "";
         } else {
@@ -195,8 +213,8 @@
     summaryNote.className = "test-product-selection-summary";
     summaryNote.textContent = summary;
     root.querySelector(".test-field-row-control")?.append(summaryNote);
-    const unavailable = (state.groupRefs || []).filter(ref => (
-      !state.groups.some(group => groupID(group) === ref)
+    const unavailable = selectedRefs.filter(ref => (
+      !groups.some(group => groupID(group) === ref)
     ));
     if (unavailable.length) {
       const warning = document.createElement("small");
@@ -210,5 +228,6 @@
   window.FTTestProducts = Object.freeze({
     groupID, groupLabel, projection, restoreReferences, synchronize,
     selectedGroups, selectedProjections, setSelected, selectNew, panel,
+    selectionPanel,
   });
 })();

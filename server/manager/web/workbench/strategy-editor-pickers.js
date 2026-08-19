@@ -1,48 +1,6 @@
 (() => {
   const model = () => window.FTBacktestGroupModel;
 
-  function groupPicker(
-    context, state, selected, onChange, availableItems = state.groups || [], canCreate = true,
-  ) {
-    let picker;
-    const saveGroup = value => {
-      const id = productGroupID(value);
-      if (!id) return;
-      const index = state.groups.findIndex(item => FTTestProducts.groupID(item) === id);
-      const next = index >= 0 ? {...state.groups[index], ...value} : value;
-      if (index >= 0) state.groups[index] = next; else state.groups.push(next);
-      if (!availableItems.some(item => productGroupID(item) === id)) availableItems.push(next);
-      picker?.setItems(availableItems.map(item => ({
-        value: productGroupID(item), label: productGroupLabel(item),
-        description: item.description || item.desc || productGroupLabel(item),
-        source_managed: item.source_managed === true,
-      })).filter(item => item.value));
-      picker?.setValues([id]);
-      onChange?.([id]);
-    };
-    picker = FTTestObjectPicker.create(context, {
-      title: context.t("产品组"),
-      items: availableItems.map(item => ({
-        value: productGroupID(item),
-        label: productGroupLabel(item),
-        description: item.description || item.desc || productGroupLabel(item),
-        source_managed: item.source_managed === true,
-      })).filter(item => item.value),
-      selected: selected ? [selected] : [], multi: false, name: "backtest-product-group",
-      onCreate: context.session && canCreate ? () => void FTTestObjectEditorOverlay.open(context, {
-        kind: "product_group", mode: "create", ref: "new", onSaved: saveGroup,
-        testState: state, temporary: true,
-      }) : null,
-      createLabel: context.t("新建产品组"), onChange,
-      itemActions: item => {
-        const group = state.groups.find(value => productGroupID(value) === item.value);
-        if (!context.session || !group || group.source_managed) return [];
-        return [editAction(context, "product_group", item.value, saveGroup, state, group)];
-      },
-    });
-    return picker;
-  }
-
   function strategyGroupPicker(context, state, groups, selected, onChange) {
     return FTTestObjectPicker.create(context, {
       title: context.t("分组"),
@@ -164,7 +122,7 @@
   }
 
   window.FTStrategyEditorPickers = Object.freeze({
-    factorAlias, factorPicker, groupPicker, productGroupID, productGroupLabel,
+    factorAlias, factorPicker, productGroupID, productGroupLabel,
     productProjection, selectedFactorAlias, selectedFactorAliases, strategyGroupPicker,
   });
 })();
