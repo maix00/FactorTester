@@ -158,6 +158,8 @@
       items: factorItems,
       selected: factorRefs,
       multi: candidateDescriptor.cardinality === "many",
+      loading: state.lazy?.factors?.status === "loading",
+      loadingText: context.t("正在读取因子候选…"),
       canCreate: !factorScopeBlocked && (
         factorScope.source === "outer"
           ? candidateDescriptor.allow_inline_create_when_outer_mounted === true
@@ -232,6 +234,8 @@
     });
     let editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
       context, state,
+      activeKey: editor.activeTabKey || "",
+      onActivate: key => { editor.activeTabKey = key || ""; },
       mountedTabs: current?.override_mounted_tabs || [],
       onMountedTabsChange: tabs => overrideEditor?.setMountedTabs(tabs),
       chipValues: () => ({

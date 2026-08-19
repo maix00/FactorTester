@@ -725,6 +725,10 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "includeRun: false" in tabs
     assert "FTTestFactorCandidateSources?.innerPanel" in form
     assert "FTTestFactorCandidateSources.candidatePicker" in form
+    assert 'activeKey: editor.activeTabKey || ""' in form
+    assert 'onActivate: key => { editor.activeTabKey = key || ""; }' in form
+    assert 'activeKey: requestedActiveKey = ""' in tabs
+    assert "let activeKey = requestedActiveKey" in tabs
     assert "factorPicker" not in pickers
     assert "compact: true" in (
         WEB_ROOT / "workbench" / "test-factor-candidate-sources.js"

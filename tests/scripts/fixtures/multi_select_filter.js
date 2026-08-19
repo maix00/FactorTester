@@ -17,10 +17,28 @@ class Element {
     };
   }
   get childElementCount() { return this.children.length; }
-  append(...nodes) {
-    nodes.forEach(node => { node.parentNode = this; this.children.push(node); });
+  get isConnected() {
+    let current = this;
+    while (current) {
+      if (current === body) return true;
+      current = current.parentNode;
+    }
+    return false;
   }
-  replaceChildren(...nodes) { this.children = [...nodes]; }
+  append(...nodes) {
+    nodes.forEach(node => {
+      if (node.parentNode) {
+        node.parentNode.children = node.parentNode.children.filter(child => child !== node);
+      }
+      node.parentNode = this;
+      this.children.push(node);
+    });
+  }
+  replaceChildren(...nodes) {
+    this.children.forEach(node => { node.parentNode = null; });
+    this.children = [];
+    this.append(...nodes);
+  }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this[name] = String(value); }
   removeAttribute(name) { if (name === "style") this.style = {}; else delete this[name]; }
@@ -51,6 +69,11 @@ global.window = {
 };
 const createdElements = [];
 const body = new Element("body");
+let mutationObserverCallback = null;
+global.MutationObserver = class {
+  constructor(callback) { mutationObserverCallback = callback; }
+  observe() {}
+};
 global.document = {
   body,
   documentElement: {clientWidth: 1024, clientHeight: 768},
@@ -187,6 +210,30 @@ assert.equal(locked.dropdown.open, false);
     "clicking outside a multi-select must close the dropdown");
   assert.equal(multiSave.menu.parentNode, multiSave.dropdown,
     "closing restores the menu to its owning control");
+
+  const owner = new Element("div");
+  body.append(owner);
+  const orphan = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [], loading: true,
+  });
+  owner.append(orphan.element);
+  orphan.dropdown.open = true;
+  orphan.dropdown.listeners.toggle();
+  assert.equal(orphan.dropdown.open, false,
+    "a loading picker must not open an empty portaled menu");
+  const ready = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "ready", label: "Ready"}],
+  });
+  owner.append(ready.element);
+  ready.dropdown.open = true;
+  ready.dropdown.listeners.toggle();
+  assert.equal(ready.menu.parentNode, document.body);
+  owner.replaceChildren();
+  mutationObserverCallback?.();
+  assert.equal(ready.dropdown.open, false,
+    "removing a picker owner must close its portaled menu");
+  assert.equal(ready.menu.parentNode, ready.dropdown,
+    "an orphaned portaled menu must be restored outside document.body");
 
   const cancel = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [{value: "a", label: "A"}, {value: "b", label: "B"}],

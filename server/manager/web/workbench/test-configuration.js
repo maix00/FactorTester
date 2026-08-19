@@ -5,9 +5,10 @@
 
   function executionFactors(state) {
     if (state.kind !== "ic") {
-      const aliases = new Set((state.analysis?.groups || []).map(group => (
-        group?.factorAlias
-      )).filter(Boolean));
+      const aliases = new Set((state.analysis?.groups || []).flatMap(group => [
+        group?.factorAlias,
+        ...(Array.isArray(group?.factorAliases) ? group.factorAliases : []),
+      ]).filter(Boolean));
       const factors = (state.factors || []).filter(item => aliases.has(
         item.factor_alias || item.alias || item.name,
       ));
@@ -96,9 +97,9 @@
 
   async function ensureWorkspace(context, state) {
     if (state.workspace) return state.workspace;
-    const factor = selectedFactor(state);
-    if (!factor) throw new Error(context.t("请选择因子"));
     const factors = executionFactors(state);
+    const factor = factors[0] || selectedFactor(state);
+    if (!factor) throw new Error(context.t("请选择因子"));
     const families = uniqueFamilies(state, factors);
     const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
     const kindTitle = {
@@ -121,7 +122,8 @@
 
   async function save(context, state, group) {
     await ensureWorkspace(context, state);
-    const factor = selectedFactor(state);
+    const factors = executionFactors(state);
+    const factor = factors[0] || selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
     const isBacktest = state.kind === "backtest";
     const strategyGroups = Array.isArray(state.analysis?.groups)
@@ -145,7 +147,6 @@
     // Backtest still restores the optional outer catalog selection for the
     // authoring UI; it is not used to build the task's execution scope.
     FTTestProducts.synchronize(state);
-    const factors = executionFactors(state);
     const families = uniqueFamilies(state, factors);
     const configuration = state.workspace.configuration;
     const payload = structuredClone(configuration.payload || {});

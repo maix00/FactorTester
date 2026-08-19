@@ -64,6 +64,22 @@
   }
 
   let outsideCloseBound = false;
+  const portaledControls = new Set();
+  let orphanObserver = null;
+
+  function watchPortaledControl(control) {
+    portaledControls.add(control);
+    if (orphanObserver || typeof MutationObserver !== "function"
+      || !document?.documentElement) return;
+    orphanObserver = new MutationObserver(() => {
+      for (const current of [...portaledControls]) {
+        if (current.section.isConnected) continue;
+        current.close();
+        portaledControls.delete(current);
+      }
+    });
+    orphanObserver.observe(document.documentElement, {childList: true, subtree: true});
+  }
 
   function bindOutsideClose() {
     if (outsideCloseBound
@@ -80,9 +96,13 @@
 
   function create(context, options = {}) {
     bindOutsideClose();
-    const controlDisabled = typeof options.disabled === "function"
-      ? false : Boolean(options.disabled);
-    const disabledReason = String(options.disabledReason || "").trim();
+    const controlDisabled = Boolean(options.loading) || (
+      typeof options.disabled === "function" ? false : Boolean(options.disabled)
+    );
+    const disabledReason = String(
+      options.disabledReason
+      || (options.loading ? options.loadingText || translate(context, "正在读取候选…") : ""),
+    ).trim();
     const items = normalizeItems(options.items).map(item => ({
       ...item,
       disabled: item.disabled || (typeof options.disabled === "function"
@@ -239,6 +259,10 @@
       positionPortaledMenu();
       window.addEventListener?.("resize", positionPortaledMenu);
       window.addEventListener?.("scroll", positionPortaledMenu, true);
+      watchPortaledControl({section, close: () => {
+        dropdown.open = false;
+        restoreMenu();
+      }});
     }
 
     function restoreMenu() {
@@ -253,6 +277,9 @@
       menu.removeAttribute?.("style");
       dropdown.append(menu);
       menuPortaled = false;
+      for (const control of [...portaledControls]) {
+        if (control.section === section) portaledControls.delete(control);
+      }
     }
 
     function itemFor(value) {
@@ -392,6 +419,7 @@
         portalMenu();
         options.onOpen?.();
       } else {
+        if (dropdown.open && controlDisabled) dropdown.open = false;
         restoreMenu();
       }
       if (!dropdown.open && multi && !applying) {
