@@ -74,7 +74,6 @@
         ],
       },
       composer: {
-        disabled: Boolean(options.readOnly),
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
         attachments: {enabled: false},
       },
