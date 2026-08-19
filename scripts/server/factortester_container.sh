@@ -42,6 +42,7 @@ fi
 compose=(docker compose --env-file "$env_file" --file "$compose_file")
 manager_helper="$repo_root/scripts/server/local_manager_service.py"
 address_agent="$repo_root/scripts/server/host_lan_address_agent.py"
+address_agent_service="$repo_root/scripts/server/host_lan_address_service.py"
 
 env_value() {
   local key="$1"
@@ -71,65 +72,42 @@ address_agent_paths() {
   }
   printf '%s\n' \
     "$state_root/host-lan-addresses.json" \
-    "$state_root/host-lan-address-agent.pid" \
     "$state_root/host-lan-address-agent.log"
 }
 
-address_agent_pid_matches() {
-  local pid="$1"
-  local snapshot="$2"
-  local command_line
-  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
-  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  [[ "$command_line" == *"$address_agent"* && "$command_line" == *"$snapshot"* ]]
-}
-
 address_agent_start() {
-  [[ -f "$address_agent" ]] || {
-    echo "Missing host LAN address agent: $address_agent" >&2
+  [[ -f "$address_agent" && -f "$address_agent_service" ]] || {
+    echo "Missing host LAN address service files" >&2
     return 1
   }
-  local paths snapshot pid_file log_file pid python_bin interval
+  local paths snapshot log_file python_bin interval
   paths="$(address_agent_paths)"
   snapshot="$(sed -n '1p' <<<"$paths")"
-  pid_file="$(sed -n '2p' <<<"$paths")"
-  log_file="$(sed -n '3p' <<<"$paths")"
+  log_file="$(sed -n '2p' <<<"$paths")"
   mkdir -p "$(dirname "$snapshot")"
-  if [[ -f "$pid_file" ]]; then
-    pid="$(tr -dc '0-9' < "$pid_file")"
-    if address_agent_pid_matches "$pid" "$snapshot"; then
-      return 0
-    fi
-    rm -f "$pid_file"
-  fi
-  python_bin="${FACTORTESTER_MAINTENANCE_PYTHON:-python3}"
+  python_bin="$(command -v "${FACTORTESTER_MAINTENANCE_PYTHON:-python3}")"
   interval="$(deployment_value FACTORTESTER_LAN_ADDRESS_INTERVAL_SECONDS 5)"
-  nohup "$python_bin" "$address_agent" \
-    --output "$snapshot" --interval "$interval" \
-    >>"$log_file" 2>&1 &
-  pid="$!"
-  printf '%s\n' "$pid" > "$pid_file"
-  for _ in {1..20}; do
-    [[ -f "$snapshot" ]] && return 0
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  echo "Host LAN address agent did not publish a snapshot" >&2
-  return 1
+  "$python_bin" "$address_agent_service" start \
+    --agent "$address_agent" \
+    --snapshot "$snapshot" \
+    --log "$log_file" \
+    --python "$python_bin" \
+    --interval "$interval"
 }
 
 address_agent_stop() {
-  local paths snapshot pid_file pid
+  local paths snapshot log_file python_bin interval
   paths="$(address_agent_paths)"
   snapshot="$(sed -n '1p' <<<"$paths")"
-  pid_file="$(sed -n '2p' <<<"$paths")"
-  if [[ -f "$pid_file" ]]; then
-    pid="$(tr -dc '0-9' < "$pid_file")"
-    if address_agent_pid_matches "$pid" "$snapshot"; then
-      kill "$pid"
-    fi
-  fi
-  rm -f "$pid_file" "$snapshot"
+  log_file="$(sed -n '2p' <<<"$paths")"
+  python_bin="$(command -v "${FACTORTESTER_MAINTENANCE_PYTHON:-python3}")"
+  interval="$(deployment_value FACTORTESTER_LAN_ADDRESS_INTERVAL_SECONDS 5)"
+  "$python_bin" "$address_agent_service" stop \
+    --agent "$address_agent" \
+    --snapshot "$snapshot" \
+    --log "$log_file" \
+    --python "$python_bin" \
+    --interval "$interval"
 }
 
 manager_service_action() {
