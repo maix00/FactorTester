@@ -158,7 +158,7 @@
       items: factorItems,
       selected: factorRefs,
       multi: candidateDescriptor.cardinality === "many",
-      loading: state.lazy?.factors?.status === "loading",
+      loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
       canCreate: !factorScopeBlocked && (
         factorScope.source === "outer"

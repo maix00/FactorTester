@@ -701,6 +701,8 @@ def test_object_picker_places_create_action_beside_the_shared_control() -> None:
     assert 'options.actionsPlacement === "trailing"' in shared
     assert 'controlRow.className = "ft-multi-select-control-row"' in shared
     assert '(actions.length ? "trailing" : undefined)' in picker
+    assert "function lazyLoading" in picker
+    assert 'status !== "ready" && status !== "error"' in picker
     assert ".ft-multi-select-control-row > .ft-multi-select-dropdown" in styles
     assert ".ft-multi-select-trailing-actions" in styles
 
