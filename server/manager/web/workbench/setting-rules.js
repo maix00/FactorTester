@@ -43,6 +43,24 @@
     return conditionsMatch(rulesFor(field).editable_if, values);
   }
 
+  function lockingFields(field, values) {
+    if (isEditable(field, values)) return [];
+    const rules = rulesFor(field);
+    const lockedBy = [];
+    for (const [key, allowed] of Object.entries(rules.editable_if || {})) {
+      const choices = Array.isArray(allowed) ? allowed : [allowed];
+      if (!choices.some(value => String(value) === String(values?.[key]))) {
+        lockedBy.push(key);
+      }
+    }
+    for (const [key, mapping] of Object.entries(rules.default_if || {})) {
+      if (Object.prototype.hasOwnProperty.call(mapping || {}, String(values?.[key]))) {
+        lockedBy.push(key);
+      }
+    }
+    return [...new Set(lockedBy)];
+  }
+
   function engineValue(values) {
     return String(values?.engine ?? values?.engine_mode ?? "");
   }
@@ -187,7 +205,8 @@
 
   window.FTSettingRules = Object.freeze({
     initialValues, previewDefaultsForTab, setValue, resetValue, patchValues, valueFor, storageKey,
-    rulesFor, conditionsMatch, isVisible, isEditable, displayValueFor, disabledValues,
+    rulesFor, conditionsMatch, isVisible, isEditable, lockingFields,
+    displayValueFor, disabledValues,
     applyAutomaticDefaults,
   });
 })();

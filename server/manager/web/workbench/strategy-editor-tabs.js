@@ -41,10 +41,11 @@
       renderProductFilter, renderOverrides, chipValues, chipSources,
     } = options;
     const root = document.createElement("section");
-    root.className = "strategy-editor-tabs";
+    root.className = "backend-settings-shell test-settings-shell strategy-editor-tabs";
     let mounted = unique([...defaultKeys(state), ...requested]);
     let activeKey = "";
     let tabset = null;
+    let settingsShell = null;
     let chipHost = null;
 
     const manager = () => {
@@ -116,18 +117,19 @@
       const nextItems = items();
       const available = new Set(nextItems.map(item => item.key));
       activeKey = available.has(preferredKey) ? preferredKey : nextItems[0]?.key || "";
-      root.replaceChildren();
-      tabset = FTTabChipContent.create({
+      settingsShell = FTTabChipContent.createSettings({
+        root,
+        rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs",
         items: nextItems,
         activeKey,
-        barClass: "backend-settings-tab-bar strategy-editor-tab-bar",
-        hostClass: "backend-settings-host strategy-editor-tab-host",
         onActivate: key => { activeKey = key; onActivate?.(key); },
       });
+      tabset = settingsShell.tabset;
       chipHost = renderChips();
-      root.append(tabset.bar);
-      if (chipHost?.children.length) root.append(chipHost);
-      root.append(tabset.host);
+      settingsShell.setCurrent(
+        chipHost?.children.length ? chipHost : null,
+        context.t("当前选择"),
+      );
     }
 
     function renderChips() {
@@ -147,16 +149,16 @@
           if (tabset?.entries.has(key)) tabset.activate(key);
         },
       });
-      row.classList.add("strategy-editor-chip-row");
       return row;
     }
 
     function refreshChips() {
-      if (!chipHost) return;
       const next = renderChips();
-      if (!next) { chipHost.remove(); chipHost = null; return; }
-      chipHost.replaceWith(next);
       chipHost = next;
+      settingsShell?.setCurrent(
+        next?.children.length ? next : null,
+        context.t("当前选择"),
+      );
     }
 
     root.value = () => ({mountedTabs: [...mounted], activeKey});
