@@ -339,14 +339,18 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
             )
         )
         if owner != active_user and not visible_shared_factor:
-            sharing_reason = (
-                "not present in the owner's registered factor library"
-                if owner_visible
-                else f"owner {owner!r} is not accessible"
-            )
+            if owner_visible:
+                # A visible child account may have registered this family on
+                # another Manager.  Report a missing canonical source so the
+                # Manager can consult synchronized metadata and hydrate it via
+                # 7997.  The hydrator still refuses objects absent from the
+                # principal's authorized account-domain view.
+                raise ImportError(
+                    f"Cannot load factor family source for {module_name!r}"
+                )
             raise PermissionError(
                 f"Cannot load factor family {module_name!r}: "
-                f"{sharing_reason} for current user {active_user!r}"
+                f"owner {owner!r} is not accessible for current user {active_user!r}"
             )
         return "custom", owner, factor_id, f"{owner}:{factor_id}"
     # An unqualified factor reference normally resolves to the public library.
