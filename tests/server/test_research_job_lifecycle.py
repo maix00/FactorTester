@@ -1794,10 +1794,12 @@ def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monk
     assert response.status_code == 202, response.get_data(as_text=True)
     jobs = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"])
     frozen = jobs[0].job_spec["product_selections"]["owner-group"]
-    assert frozen["selected_paths"] == ["core8_path"]
+    assert frozen["paths"] == ["core8_path"]
+    assert "selected_paths" not in frozen
     assert frozen["product_group_template_id"] == "owner-group"
     run = response.get_json()["run"]
-    assert run["run_spec"]["configuration"]["analyses"]["backtest"]["product_selections"]["owner-group"] == frozen
+    assert run["run_spec"]["configuration"]["shared"]["product_selections"]["owner-group"] == frozen
+    assert "product_selections" not in run["run_spec"]["configuration"]["analyses"]["backtest"]
 
 
 def test_run_rejects_unresolvable_product_selection_before_creating_job(client, monkeypatch) -> None:
