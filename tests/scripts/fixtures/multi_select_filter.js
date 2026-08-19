@@ -118,6 +118,23 @@ assert.ok(String(trailingRow.children[1].className).includes(
   "ft-multi-select-trailing-actions",
 ));
 
+const locked = window.FTMultiSelectFilter.create({t: value => value}, {
+  items: [{value: "a", label: "A"}],
+  selected: ["a"],
+  multi: true,
+  disabled: true,
+  disabledReason: "由其他字段自动确定：执行引擎",
+});
+assert.ok(locked.element.className.includes("is-locked"));
+assert.ok(locked.summary.className.includes("is-disabled"));
+assert.equal(locked.summary.title, "由其他字段自动确定：执行引擎");
+assert.ok(descendants(locked.summary).some(item => (
+  item.className === "ft-multi-select-lock-indicator"
+)));
+locked.dropdown.open = true;
+locked.summary.listeners.click({preventDefault() {}});
+assert.equal(locked.dropdown.open, false);
+
 (async () => {
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {

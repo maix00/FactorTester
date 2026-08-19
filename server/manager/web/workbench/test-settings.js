@@ -83,11 +83,12 @@
       ? null
       : (items.some(item => item.key === options.activeTab)
         ? options.activeTab : items[0]?.key);
-    tabset = FTTabChipContent.create({
+    const settingsShell = FTTabChipContent.createSettings({
+      root,
       items, context, activeKey,
       onActivate: key => options.onTabChange?.(key),
     });
-    root.append(tabset.bar);
+    tabset = settingsShell.tabset;
     if (window.FTTestSettingChips) {
       const chips = FTTestSettingChips.render({
         manifest, values, context,
@@ -106,15 +107,9 @@
         },
       });
       if (chips.children.length) {
-        const current = document.createElement("section");
-        current.className = "test-settings-current";
-        const heading = document.createElement("strong");
-        heading.textContent = context.t("当前选择");
-        current.append(heading, chips);
-        root.append(current);
+        settingsShell.setCurrent(chips, context.t("当前选择"));
       }
     }
-    root.append(tabset.host);
     root.activate = tabKey => {
       if (!tabset.entries.has(tabKey)) return false;
       tabset.activate(tabKey);
