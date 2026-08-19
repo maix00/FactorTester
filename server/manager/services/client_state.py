@@ -827,26 +827,34 @@ class ClientStateService:
         from server.modules.custom_factors.factor_library_service import (
             build_factor_library_overview,
         )
-        from tools.data.account_manage import visible_accounts_for
+        from server.manager.services.subordinate_factor_library import (
+            direct_subordinate_accounts,
+            subordinate_factor_rows,
+        )
 
         owner_account = self._local_account(principal)
         mine = self.factor_library(principal)
-        managed_usernames = {
-            str(account.get("username") or "")
-            for account in visible_accounts_for(
-                principal, include_self=False,
-            )
-            if isinstance(account, dict) and str(account.get("username") or "")
-        }
-        subordinate_rows = []
-        for owner in sorted(managed_usernames):
-            account = self._local_account(owner)
-            subordinate_payload = build_factor_library_overview(
-                owner, include_subordinates=False,
-                account=account,
-                include_scope_catalog=False,
-            )
-            subordinate_rows.extend(subordinate_payload.get("factors") or [])
+        account_store = self.local_account_store
+        if account_store is None:
+            try:
+                from server.manager.storage.local_accounts import LocalAccountStore
+
+                account_store = LocalAccountStore()
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+                account_store = None
+        accounts = direct_subordinate_accounts(principal, account_store)
+        subordinate_rows = subordinate_factor_rows(
+            self.account_domain_sync, accounts,
+        )
+        if not subordinate_rows:
+            for account in accounts:
+                owner = str(account.get("username") or "")
+                subordinate_payload = build_factor_library_overview(
+                    owner, include_subordinates=False,
+                    account=account,
+                    include_scope_catalog=False,
+                )
+                subordinate_rows.extend(subordinate_payload.get("factors") or [])
         subordinate = build_client_library_projection({
             "factors": subordinate_rows,
             "errors": [],
