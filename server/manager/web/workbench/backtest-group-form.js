@@ -113,34 +113,30 @@
     const factorHost = document.createElement("div");
     factorHost.className = "backtest-group-factor-panel";
     const renderFactorPanel = () => {
-      const children = [field(
-        candidateDescriptor.label || context.t("因子候选"),
-        factor,
-        candidateDescriptor.help_text || "",
-      )];
       const combinationVisible = window.FTStrategyEditorScope?.fieldVisible?.(
         state, "factor_combination_mode", "inner", innerScopeValues,
       ) ?? factorRefs.length > 1;
-      if (combinationVisible) {
-        const combinationHelp = combinationDescriptor.help_text
-          || context.t("多个因子候选需要一种组合方式");
-        children.push(field(
-          combinationDescriptor.label || context.t("组合方式"),
-          combinationPicker,
-          combinationHelp,
-        ));
-        if (!combinationItems.length) {
-          const empty = document.createElement("small");
-          empty.className = "backtest-group-empty-combination-mode";
-          empty.textContent = context.t("当前没有可用组合方式，暂不能提交多个因子候选");
-          children[children.length - 1].querySelector(
-            ".test-field-row-control",
-          )?.append(empty);
-        }
-      }
-      if (overrideEditor) children.push(overrideEditor.panel({key: "factor"}));
-      else if (fallbackFactorOverrides) children.push(fallbackFactorOverrides);
-      factorHost.replaceChildren(...children);
+      const overrideContent = overrideEditor?.panel({key: "factor"})
+        || fallbackFactorOverrides;
+      const shared = window.FTTestFactorCandidateSources?.innerPanel?.(
+        context, state, () => {}, {
+          candidateControl: factor,
+          candidateLabel: candidateDescriptor.label || context.t("因子候选"),
+          candidateHelp: candidateDescriptor.help_text || "",
+          combinationVisible,
+          combinationControl: combinationPicker,
+          combinationLabel: combinationDescriptor.label || context.t("组合方式"),
+          combinationHelp: combinationDescriptor.help_text
+            || context.t("多个因子候选需要一种组合方式"),
+          combinationEmpty: !combinationItems.length
+            ? context.t("当前没有可用组合方式，暂不能提交多个因子候选") : "",
+          overrideContent,
+        },
+      );
+      factorHost.replaceChildren(shared || field(
+        candidateDescriptor.label || context.t("因子候选"), factor,
+        candidateDescriptor.help_text || "",
+      ));
     };
     factor = factorPicker(
       context, state, factorRefs, candidateDescriptor.cardinality === "many", values => {

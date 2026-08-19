@@ -662,11 +662,12 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     )
 
     assert "test-factor-candidate-heading-row" in source
+    assert "function candidateHeading" in source
+    assert "function innerPanel" in source
+    assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3
-    candidate_index = source.rindex(
-        'context.t("因子候选"), FTTestFactorCandidates.summaryControl',
-    )
+    candidate_index = source.index("function candidateHeading")
     assert candidate_index < source.index("FTTestFactorSets.control")
     assert candidate_index < source.index("FTTestFactorRoles.section")
     assert 'className: "factor-candidate-child-row"' in source
@@ -707,6 +708,12 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     tabs = (WEB_ROOT / "workbench" / "strategy-editor-tabs.js").read_text(
         encoding="utf-8",
     )
+    form = (WEB_ROOT / "workbench" / "backtest-group-form.js").read_text(
+        encoding="utf-8",
+    )
+    pickers = (WEB_ROOT / "workbench" / "strategy-editor-pickers.js").read_text(
+        encoding="utf-8",
+    )
     styles = (WEB_ROOT / "styles" / "workbench.css").read_text(encoding="utf-8")
 
     assert "outer_pre_mounted_tabs" in tabs
@@ -715,6 +722,8 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "FTTabChipContent.createSettingsManager" in tabs
     assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
     assert "includeRun: false" in tabs
+    assert "FTTestFactorCandidateSources?.innerPanel" in form
+    assert "compact: true" in pickers
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles

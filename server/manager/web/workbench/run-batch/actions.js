@@ -40,6 +40,58 @@
     };
   }
 
+  function previewName(state, group) {
+    const raw = `${state?.kind || "test"}-${group?.id || "task"}`
+      .replace(/[^a-zA-Z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 72) || "task";
+    const random = Math.random().toString(36).slice(2, 10);
+    return `run-preview-${raw}-${Date.now()}-${random}`;
+  }
+
+  async function createConfigurationSnapshot(context, state, group, configuration) {
+    const workspaceID = String(state.workspace?.workspace_id || "");
+    const configurationID = String(configuration?.configuration_id || "");
+    const revision = Number(configuration?.revision);
+    if (!workspaceID || !configurationID || !Number.isInteger(revision)) {
+      throw new Error("无法为运行配置创建不可变快照");
+    }
+    const value = await context.api(
+      `/api/workspaces/${encodeURIComponent(workspaceID)}/configuration-snapshots`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          source_workspace_id: workspaceID,
+          source_configuration_id: configurationID,
+          source_configuration_revision: revision,
+          name: previewName(state, group),
+        }),
+      },
+    );
+    const snapshot = value?.snapshot || value;
+    if (!snapshot?.snapshot_id || !Number.isInteger(Number(snapshot.snapshot_revision))) {
+      throw new Error("运行配置快照响应不完整");
+    }
+    return {
+      configuration_snapshot_id: String(snapshot.snapshot_id),
+      configuration_snapshot_revision: Number(snapshot.snapshot_revision),
+    };
+  }
+
+  async function requestForPreview(context, state, group) {
+    const configuration = await FTTestConfiguration.save(context, state, group);
+    const request = {
+      ...await runRequest(context, state),
+      configuration_revision: configuration.revision,
+    };
+    if (usesLocalRuntime(state)) return request;
+    const snapshot = await createConfigurationSnapshot(
+      context, state, group, configuration,
+    );
+    delete request.configuration_revision;
+    return {...request, ...snapshot};
+  }
+
   async function previewOne(context, state, group, refresh) {
     const item = model().itemFor(state, group);
     model().update(item, "freezing", refresh);
@@ -47,17 +99,15 @@
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       await window.FTTests?.ensureRunSubmitCode?.(context, state);
-      const configuration = await FTTestConfiguration.save(context, state, group);
-      const request = {
-        ...await runRequest(context, state),
-        configuration_revision: configuration.revision,
-      };
+      const request = await requestForPreview(context, state, group);
       const value = usesLocalRuntime(state)
         ? await localRequest("preview", request)
         : await context.api(context.servicePath("/api/runs/preview"), {
           method: "POST", body: JSON.stringify(request),
         });
-      model().recordPreview(item, value);
+      model().recordPreview(
+        item, value, request, model().inputFingerprint(state, group),
+      );
       refresh?.();
       return true;
     } catch (error) {
@@ -71,16 +121,21 @@
   async function runOne(context, state, group, refresh) {
     const item = model().itemFor(state, group);
     state.activeRunGroupID = item.groupID;
+    const reusePreview = model().previewMatches(item, state, group);
+    if (!reusePreview) model().invalidatePreview(item);
     model().update(item, "submitting", refresh);
     try {
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       await window.FTTests?.ensureRunSubmitCode?.(context, state);
-      const configuration = await FTTestConfiguration.save(context, state, group);
-      const request = {
-        ...await runRequest(context, state),
-        configuration_revision: configuration.revision,
-      };
+      const request = reusePreview
+        ? model().clone(item.previewRequest)
+        : {
+          ...await runRequest(context, state),
+          configuration_revision: (
+            await FTTestConfiguration.save(context, state, group)
+          ).revision,
+        };
       const value = usesLocalRuntime(state)
         ? await localRequest("run", request)
         : await context.api(context.servicePath("/api/runs"), {

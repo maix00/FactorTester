@@ -30,7 +30,10 @@ global.FTTestConfiguration = {
   async save(_context, state, group) {
     revision += 1;
     state.workspace = state.workspace || {workspace_id: "workspace-one"};
-    return {revision, group_id: group.id};
+    return {
+      revision, group_id: group.id,
+      configuration_id: `configuration-${revision}`,
+    };
   },
 };
 global.FTReferencePage = {
@@ -57,6 +60,7 @@ vm.runInThisContext(fs.readFileSync(
 ), {filename: "test-run-batch.js"});
 
 const requests = [];
+const previewRequests = [];
 let navigated = false;
 let openedRunSpecs = [];
 const notices = [];
@@ -77,15 +81,50 @@ const context = {
     return button;
   },
   async api(path, options) {
-    requests.push({path, body: JSON.parse(options.body)});
+    const body = JSON.parse(options.body);
+    requests.push({path, body});
+    if (path.includes("/configuration-snapshots")) {
+      const snapshotNumber = requests.filter(item => (
+        item.path.includes("/configuration-snapshots")
+      )).length;
+      return {
+        success: true,
+        snapshot: {
+          snapshot_id: `snapshot-${snapshotNumber}`,
+          snapshot_revision: 1,
+        },
+      };
+    }
     const index = requests.filter(item => item.path.endsWith("/api/runs")).length;
     if (path.endsWith("/preview")) {
-      return {run_spec_hash: `${"a".repeat(63)}${requests.length}`};
+      const hash = `${"a".repeat(63)}${requests.length}`;
+      previewRequests.push({body, hash});
+      return {
+        run_spec_hash: hash,
+        run_spec_version: 2,
+        configuration_id: "configuration-preview",
+        configuration_revision: requests.length,
+        report_projection: {run_spec: {
+          target_ref: `runspec:sha256:${hash}`,
+          alias_zh: "预览运行配置",
+          summary_zh: "预览",
+          complete_parameters: {
+            run_spec_version: 2,
+            configuration: {shared: {workspace_id: "workspace-one"}},
+            analyses: [state?.kind || "ic"],
+          },
+        }},
+      };
     }
     return {
       port: 8141,
       server_id: "public-1",
-      run: {run_id: `run-${index}`, run_spec_hash: `${"b".repeat(63)}${index}`},
+      run: {
+        run_id: `run-${index}`,
+        run_spec_hash: previewRequests.find(item => (
+          JSON.stringify(item.body) === JSON.stringify(body)
+        ))?.hash || `${"b".repeat(63)}${index}`,
+      },
       jobs: [{job_id: `job-${index}`}],
     };
   },
@@ -200,12 +239,28 @@ const strategyScopedBacktest = {
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
+
+  const nestedPreviewItem = {phase: "freezing", runSpecHash: ""};
+  batch.recordPreview(nestedPreviewItem, {
+    report_projection: {run_spec: {
+      target_ref: `runspec:sha256:${"c".repeat(64)}`,
+    }},
+  });
+  assert.equal(nestedPreviewItem.runSpecHash, "c".repeat(64),
+    "RunSpec references from the report projection must be normalized");
+  assert.throws(
+    () => batch.recordPreview({phase: "freezing", runSpecHash: ""}, {success: true}),
+    /缺少有效 RunSpec 哈希/,
+    "a successful response without a RunSpec reference must not look frozen");
+
   const frozenHeader = batch.headerActions(context, state, () => {});
   frozenHeader[0].listeners.click();
   assert.deepEqual(openedRunSpecs.map(item => item.label), ["任务 1 · 日盘", "任务 2 · 夜盘"],
     "view run configuration must open one overlay tab per task");
   assert.ok(openedRunSpecs.every(item => /^runspec:sha256:/.test(item.target)),
     "overlay tabs must use the frozen RunSpec references");
+  assert.ok(openedRunSpecs.every(item => item.value?.run_spec),
+    "preview RunSpecs must be available to the overlay without persistence");
   assert.match(frozenHeader[1].title, /全部任务/,
     "the header run action must submit the complete task batch");
 
@@ -234,6 +289,13 @@ const strategyScopedBacktest = {
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["__backtest__"]);
+  await batch.previewAll(context, backtest, () => {});
+  assert.equal(backtest.testRunBatch[0].groupLabel, "回测任务");
+  assert.match(backtest.testRunBatch[0].runSpecHash, /^[a-f0-9]{64}$/,
+    "backtest preview must persist a RunSpec before submission");
+  const backtestPreviewRequest = requests.filter(item => (
+    item.path.endsWith("/preview")
+  )).at(-1).body;
   await batch.runAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].jobID, "job-3");
   assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3?server_id=public-1");
@@ -243,7 +305,10 @@ const strategyScopedBacktest = {
   assert.equal(requests.at(-1).body.transient_strategy_sources[0].path,
     "strategies/dynamic_hold.py");
   assert.equal(requests.at(-1).body.strategy_specs[0].strategy_id, "DynamicHold");
-  assert.equal(requests[0].body.transient_factor_sources[0].factor_id,
+  assert.deepEqual(requests.at(-1).body, backtestPreviewRequest,
+    "formal submission must reuse the exact preview request");
+  assert.equal(requests.filter(item => item.path.endsWith("/preview"))[0]
+    .body.transient_factor_sources[0].factor_id,
     "UploadedMomentum");
   assert.deepEqual(batch.synchronize(factorEvaluation).map(item => item.groupID), ["all"]);
   await batch.runAll(context, factorEvaluation, () => {});
@@ -261,8 +326,10 @@ const strategyScopedBacktest = {
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
-  assert.ok(requests.slice(0, 4).every(item => item.body.retention_mode === "full"));
-  assert.ok(requests.slice(0, 4).every(item => (
+  const runRequests = requests.filter(item => item.path.endsWith("/api/runs"));
+  const icRequests = runRequests.filter(item => item.body.analyses[0] === "ic");
+  assert.ok(icRequests.every(item => item.body.retention_mode === "full"));
+  assert.ok(icRequests.every(item => (
     JSON.stringify(item.body.output_requests) === JSON.stringify(["ic_series", "ic_statistics"])
   )));
   console.log("ok");

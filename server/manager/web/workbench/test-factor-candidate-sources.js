@@ -147,22 +147,77 @@
     );
   }
 
+  function controlElement(control) {
+    return control?.element || control;
+  }
+
+  function helpFor(context, state, key) {
+    return window.FTTestFieldHelp?.forField?.(
+      state.manifest, key, context,
+    ) || "";
+  }
+
+  function candidateHeading(context, state, control, options = {}) {
+    return FTTestFieldRow.create(
+      options.label || context.t("因子候选"),
+      controlElement(control),
+      options.help || helpFor(context, state, "factor_candidates"),
+      {className: "test-factor-candidate-heading-row"},
+    );
+  }
+
+  function markInnerContent(content) {
+    if (!content) return content;
+    content.classList?.add("factor-candidate-child-content");
+    content.querySelectorAll?.(".test-setting-row")?.forEach(row => {
+      row.classList.add("factor-candidate-child-row");
+    });
+    content.querySelectorAll?.(".factor-role-section")?.forEach(section => {
+      section.classList.add("factor-candidate-child-section");
+    });
+    return content;
+  }
+
+  // The nested strategy editor uses the same candidate surface as the outer
+  // factor tab.  Only the candidate control and the optional combination
+  // control are supplied by the strategy form; row structure, help icons,
+  // hierarchy classes, and the override content wrapper stay shared here.
+  function innerPanel(context, state, _refresh, options = {}) {
+    const root = document.createElement("div");
+    root.className = "test-factor-candidate-sources test-factor-candidate-sources-inner";
+    root.append(candidateHeading(context, state, options.candidateControl, {
+      label: options.candidateLabel,
+      help: options.candidateHelp,
+    }));
+    if (options.combinationVisible && options.combinationControl) {
+      const row = FTTestFieldRow.create(
+        options.combinationLabel || context.t("组合方式"),
+        controlElement(options.combinationControl),
+        options.combinationHelp || context.t("多个因子候选需要一种组合方式"),
+        {className: "factor-candidate-child-row"},
+      );
+      if (options.combinationEmpty) {
+        const empty = document.createElement("small");
+        empty.className = "backtest-group-empty-combination-mode";
+        empty.textContent = options.combinationEmpty;
+        row.querySelector(".test-field-row-control")?.append(empty);
+      }
+      root.append(row);
+    }
+    if (options.overrideContent) root.append(markInnerContent(options.overrideContent));
+    return root;
+  }
+
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    root.append(FTTestFieldRow.create(
-      context.t("因子候选"), FTTestFactorCandidates.summaryControl(context, state),
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_candidates", context,
-      ) || "",
-      {className: "test-factor-candidate-heading-row"},
+    root.append(candidateHeading(
+      context, state, FTTestFactorCandidates.summaryControl(context, state),
     ));
     const sets = FTTestFactorSets.control(context, state, refresh);
     if (sets) root.append(FTTestFieldRow.create(
       context.t("因子集合"), sets,
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_set_selections", context,
-      ) || "",
+      helpFor(context, state, "factor_set_selections"),
       {className: "factor-candidate-child-row"},
     ));
     const direct = directControl(context, state, refresh);
@@ -192,5 +247,7 @@
     return root;
   }
 
-  window.FTTestFactorCandidateSources = Object.freeze({panel, selections, syncCandidates});
+  window.FTTestFactorCandidateSources = Object.freeze({
+    candidateHeading, innerPanel, panel, selections, syncCandidates,
+  });
 })();
