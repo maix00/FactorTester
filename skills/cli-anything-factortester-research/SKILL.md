@@ -13,11 +13,19 @@ Always invoke the installed `factortester` executable for native operations.
 Never run `python -m tools.cli.app`: that bypasses the installed launcher and
 can import stale code from the current source worktree.
 
+When this Skill runs inside a Manager-owned server Profile Agent, the Manager
+injects a short-lived local FactorTester capability and the matching 7998
+endpoint into the Agent environment. Do not run `factortester configure`,
+`factortester login`, or copy browser cookies in that context; the installed
+CLI uses the injected capability automatically. A normal client or standalone
+terminal still follows the explicit configure/login setup below.
+
 ## Current local-first boundary
 
-The Manager has no resident research Agent. Research Graph sessions, edge
-selection, evidence judgments, obligations, report authoring, and locally
-selected test execution therefore belong to the Swift/CLI client and must
+The Manager does not own the Research Graph state or decide graph transitions.
+A server Profile Agent may run the installed CLI, but Research Graph sessions,
+edge selection, evidence judgments, obligations, report authoring, and locally
+selected test execution still belong to the local research workspace and must
 continue when the Manager is offline. Download a graph YAML/version from the
 Manager when available, then use the local graph store and
 `factortester research-graph next-local` to evaluate candidate edges. Do not

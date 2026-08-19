@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import sys
 import threading
@@ -92,6 +93,73 @@ class SessionStateMixin:
             authentication="device",
             origin=origin,
         )
+
+    def issue_agent_session(
+        self,
+        principal: str,
+        profile_id: str,
+        claim_id: str,
+    ) -> dict[str, str]:
+        """Issue an ephemeral, non-admin session for one server Profile Agent."""
+        owner = str(principal or "").strip()
+        profile = str(profile_id or "").strip()
+        claim = str(claim_id or "").strip()
+        if not owner or not profile or not claim:
+            raise PermissionError("Agent session identity is incomplete")
+        token, _, _ = self._issue_session(
+            owner,
+            "user",
+            alias=self._alias_for_principal(owner),
+            authentication="agent",
+        )
+        with self._session_lock:
+            sessions = getattr(self, "_agent_sessions", None)
+            if sessions is None:
+                sessions = self._agent_sessions = {}
+            sessions[self._token_hash(token)] = {
+                "principal": owner,
+                "profile_id": profile,
+                "claim_id": claim,
+            }
+        return {
+            "token": token,
+            "principal": owner,
+            "profile_id": profile,
+            "claim_id": claim,
+        }
+
+    def agent_session_matches(
+        self,
+        token: str,
+        profile_id: str,
+        claim_id: str,
+    ) -> bool:
+        """Validate the Profile/claim headers attached by the CLI."""
+        value = str(token or "").strip()
+        if not value or self.session_authentication(value) != "agent":
+            return False
+        expected_profile = str(profile_id or "").strip()
+        expected_claim = str(claim_id or "").strip()
+        with self._session_lock:
+            record = getattr(self, "_agent_sessions", {}).get(
+                self._token_hash(value),
+            )
+        return bool(
+            record
+            and hmac.compare_digest(str(record.get("profile_id") or ""), expected_profile)
+            and hmac.compare_digest(str(record.get("claim_id") or ""), expected_claim)
+        )
+
+    def revoke_agent_session(self, token: str) -> None:
+        """Invalidate one ephemeral Agent capability and its local session."""
+        value = str(token or "").strip()
+        if not value:
+            return
+        with self._session_lock:
+            sessions = getattr(self, "_agent_sessions", None)
+            if sessions is not None:
+                sessions.pop(self._token_hash(value), None)
+        self.logout(value)
 
     def account_for_principal(self, username: str) -> dict[str, object] | None:
         principal = str(username or "").strip()
@@ -516,6 +584,9 @@ class SessionStateMixin:
         with self._session_lock:
             token_hash = self._token_hash(token)
             self._sessions.pop(token_hash, None)
+            sessions = getattr(self, "_agent_sessions", None)
+            if sessions is not None:
+                sessions.pop(token_hash, None)
             self._session_store().delete(token_hash)
 
     @staticmethod
@@ -556,12 +627,28 @@ class SessionStateMixin:
             and now - self._session_timestamp(value, 7, now)
             <= MANAGER_SESSION_IDLE_TTL_SECONDS
         }
+        sessions = getattr(self, "_agent_sessions", None)
+        if sessions is not None:
+            sessions = {
+                token_hash: value
+                for token_hash, value in sessions.items()
+                if token_hash in self._sessions
+            }
+            self._agent_sessions = sessions
 
     def _load_sessions(self) -> dict[str, tuple[object, ...]]:
-        return self._session_store().load(
+        records = self._session_store().load(
             now=time.time(),
             idle_ttl=MANAGER_SESSION_IDLE_TTL_SECONDS,
         )
+        # Agent sessions are intentionally process-bound.  The Agent child
+        # cannot outlive a Manager restart, so never resurrect its bearer from
+        # the durable ordinary-session table.
+        return {
+            token_hash: value
+            for token_hash, value in records.items()
+            if str(value[3] if len(value) >= 4 else "") != "agent"
+        }
 
     def _save_sessions(self) -> None:
         self._session_store().replace(self._sessions)

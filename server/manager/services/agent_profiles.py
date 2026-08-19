@@ -47,12 +47,18 @@ class AgentProfileService:
         skill_source_root=None,
         skill_manifest_path=None,
         proxy_url_provider: Callable[[], str] | None = None,
+        agent_session_issuer: Callable[[str, str, str], dict[str, object]] | None = None,
+        agent_session_revoker: Callable[[str], None] | None = None,
+        manager_endpoint_provider: Callable[[], str] | None = None,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
             raise ValueError("server_id is required")
         self.data_root = data_root
         self.proxy_url_provider = proxy_url_provider
+        self.agent_session_issuer = agent_session_issuer
+        self.agent_session_revoker = agent_session_revoker
+        self.manager_endpoint_provider = manager_endpoint_provider
         self.runtime_store = ProfileRuntimeStore(db_path)
         self.conversation_store = AgentConversationStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
@@ -404,15 +410,49 @@ class AgentProfileService:
             raise ProviderStoreError("claimed Agent provider is not a server provider")
         if provider.get("server_id") != self.server_id:
             raise ProviderStoreError("claimed Agent provider belongs to another server")
+        skill_runtime = self.prepare_server_skill_runtime(
+            principal,
+            profile_id,
+        )
+        factor_tester_auth: dict[str, object] = {}
+        if self.agent_session_issuer is not None:
+            endpoint = ""
+            if self.manager_endpoint_provider is not None:
+                endpoint = str(self.manager_endpoint_provider() or "").strip().rstrip("/")
+            if not endpoint:
+                raise ProfileRuntimeError(
+                    "local Manager endpoint is unavailable for the Profile Agent"
+                )
+            agent_session = self.agent_session_issuer(
+                principal,
+                profile_id,
+                str(claim.get("claim_id") or "").strip(),
+            )
+            factor_tester_auth = {
+                "base_url": endpoint,
+                "token": str(agent_session.get("token") or "").strip(),
+                "profile_id": profile_id,
+                "claim_id": str(claim.get("claim_id") or "").strip(),
+            }
+            if not factor_tester_auth["token"]:
+                raise ProfileRuntimeError(
+                    "Manager did not issue a Profile Agent session"
+                )
         return {
             "runtime": runtime,
             "claim": claim,
             "provider": provider,
-            "skill_runtime": self.prepare_server_skill_runtime(
-                principal,
-                profile_id,
-            ),
+            "factor_tester_auth": factor_tester_auth,
+            "skill_runtime": skill_runtime,
         }
+
+    def revoke_agent_session(self, token: str) -> None:
+        """Revoke one Manager-issued CLI capability after Agent shutdown."""
+        if self.agent_session_revoker is None:
+            return
+        value = str(token or "").strip()
+        if value:
+            self.agent_session_revoker(value)
 
     def set_profile_skills(
         self,

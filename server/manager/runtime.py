@@ -265,6 +265,13 @@ class ManagerState(
             configured_public_visitor_login_allowlist()
         )
         self.manager_public_endpoint = configured_manager_endpoint()
+        # Server-side Profile Agents use this endpoint for local FactorTester
+        # CLI traffic.  The app bootstrap replaces the fallback with the
+        # actual listener port, while deployments may provide a Docker service
+        # name through the environment.
+        self.agent_manager_endpoint = str(
+            os.environ.get("FACTORTESTER_MANAGER_LOCAL_ENDPOINT") or ""
+        ).strip().rstrip("/")
         # Host-management connection metadata belongs to this server's
         # colocated .settings.  The Manager only advertises the validated,
         # non-secret projection; it never infers a transport from the client.
@@ -373,6 +380,7 @@ class ManagerState(
         self._session_lock = threading.RLock()
         self._session_cleanup_at = time.time()
         self._sessions = self._load_sessions()
+        self._agent_sessions: dict[str, dict[str, str]] = {}
         self._session_cleanup_at += MANAGER_SESSION_CLEANUP_INTERVAL_SECONDS
         self.account_domain_sync = AccountDomainSyncService(
             sqlite_path=self.sessions_db_path,
@@ -400,6 +408,9 @@ class ManagerState(
             / "skills"
             / "catalog.json",
             proxy_url_provider=self.mihomo.proxy_url,
+            agent_session_issuer=self.issue_agent_session,
+            agent_session_revoker=self.revoke_agent_session,
+            manager_endpoint_provider=lambda: self.agent_manager_endpoint,
         )
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,

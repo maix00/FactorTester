@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
@@ -36,6 +36,7 @@ class AgentAppServerLaunch:
         provider: Mapping[str, object],
         codex_binary: str,
         factor_tester_cli: str = "",
+        factor_tester_auth: Mapping[str, object] | None = None,
         proxy_url: str = "",
     ) -> None:
         self.runtime = runtime
@@ -45,6 +46,10 @@ class AgentAppServerLaunch:
         self.factor_tester_cli = configured_cli or str(
             shutil.which("factortester") or ""
         )
+        self.factor_tester_auth = dict(factor_tester_auth or {})
+        codex_home = Path(getattr(self.runtime, "codex_home", "."))
+        self.factor_tester_config_path = codex_home / "factor-tester-cli.json"
+        self.factor_tester_capability_path = codex_home / "factor-tester-agent.json"
         self.proxy_url = str(proxy_url or "").strip()
 
     @staticmethod
@@ -125,6 +130,58 @@ class AgentAppServerLaunch:
     def command(self) -> list[str]:
         return self.runtime.command(self.codex_binary)
 
+    def write_factor_tester_config(self) -> None:
+        """Materialize a private local CLI config and Agent capability."""
+        if not self.factor_tester_auth:
+            return
+        base_url = str(self.factor_tester_auth.get("base_url") or "").strip().rstrip("/")
+        token = str(self.factor_tester_auth.get("token") or "").strip()
+        profile_id = str(self.factor_tester_auth.get("profile_id") or "").strip()
+        claim_id = str(self.factor_tester_auth.get("claim_id") or "").strip()
+        if not base_url or not token or not profile_id or not claim_id:
+            raise AgentAppServerError("Profile Agent FactorTester capability is incomplete")
+        self._write_private_json(
+            self.factor_tester_config_path,
+            {"base_url": base_url},
+        )
+        self._write_private_json(
+            self.factor_tester_capability_path,
+            {
+                "schema_version": 1,
+                "kind": "profile-agent",
+                "base_url": base_url,
+                "token": token,
+                "profile_id": profile_id,
+                "claim_id": claim_id,
+            },
+        )
+
+    @staticmethod
+    def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f"{path.name}.", suffix=".tmp", dir=path.parent,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+            os.chmod(path, 0o600)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def cleanup_factor_tester_config(self) -> None:
+        """Remove the short-lived Agent credential after the child stops."""
+        if not self.factor_tester_auth:
+            return
+        self.factor_tester_capability_path.unlink(missing_ok=True)
+        self.factor_tester_config_path.unlink(missing_ok=True)
+
     def environment(self) -> dict[str, str]:
         secret = str(self.provider.get("secret") or "")
         if not secret:
@@ -150,6 +207,14 @@ class AgentAppServerLaunch:
                     environment.get("PATH", ""),
                 ]).rstrip(os.pathsep)
             environment["FACTORTESTER_CLI"] = cli
+        if self.factor_tester_auth:
+            environment["FACTORTESTER_CONFIG"] = str(self.factor_tester_config_path)
+            environment["FACTORTESTER_HOME"] = str(
+                self.runtime.home_root / "factortester"
+            )
+            environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] = str(
+                self.factor_tester_capability_path
+            )
         return environment
 
     def _set_proxy_environment(self, environment: dict[str, str]) -> None:
@@ -168,6 +233,12 @@ class AgentAppServerLaunch:
             "FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT",
         ):
             hostname = urlsplit(str(environment.get(key) or "")).hostname
+            if hostname:
+                bypass.add(hostname)
+        if self.factor_tester_auth:
+            hostname = urlsplit(
+                str(self.factor_tester_auth.get("base_url") or "")
+            ).hostname
             if hostname:
                 bypass.add(hostname)
         existing = str(environment.get("NO_PROXY") or environment.get("no_proxy") or "")

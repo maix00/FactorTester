@@ -17,6 +17,11 @@ The harness is a remote HTTP client, not a local replacement for FactorTester.
 Use `--json` for agent-readable output and an explicit `--session` path when
 several agents work independently.
 
+When the harness runs inside a Manager-owned server Profile Agent, the Manager
+provides a short-lived local CLI capability automatically. In that context do
+not run `factortester configure` or `factortester login`; those commands remain
+for a standalone client or terminal installation.
+
 Use one role-specific startup packet rather than assembling infrastructure
 context with an Agent:
 
