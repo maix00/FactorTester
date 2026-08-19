@@ -209,6 +209,17 @@ assert.deepEqual(unregistered.map(item => [item.label, item.value]), [
   ["开始日期", "2025-01-02"],
 ]);
 
+const directOverrides = FTTestSettingChips.descriptors({
+  manifest,
+  values: {start_date: "2025-01-02", ic_method: "both"},
+  mountedTabs: ["time", "ic_method"],
+  onlyKeys: ["start_date"],
+  includeUnregistered: true,
+  context: {t: value => value},
+});
+assert.deepEqual(directOverrides.map(item => item.label), ["开始日期"],
+  "strategy rows must render only explicit override keys");
+
 const adapterFallback = FTTestSettingChips.descriptors({
   manifest,
   values: {},

@@ -113,9 +113,25 @@
     return payload?.run_spec || payload;
   }
 
-  function open(context, target, serverID = "") {
+  function entryRecord(context, entry, index) {
+    const value = typeof entry === "string" ? {target: entry} : object(entry);
+    const fallback = `${context.t("任务")} ${index + 1}`;
+    return {
+      target: String(value.target || ""),
+      serverID: String(value.serverID || ""),
+      label: String(value.label || value.taskLabel || fallback),
+      subtitle: String(value.subtitle || ""),
+    };
+  }
+
+  function openMany(context, entries) {
+    const records = (Array.isArray(entries) ? entries : [])
+      .map((entry, index) => entryRecord(context, entry, index))
+      .filter(entry => entry.target);
+    if (!records.length) return null;
     const dialog = document.createElement("dialog");
     dialog.className = "run-spec-dialog";
+    dialog.dataset.ftTabID = context.tabID || "";
     const card = document.createElement("article");
     card.className = "dialog-card run-spec-dialog-card";
     const close = document.createElement("button");
@@ -132,34 +148,73 @@
     description.textContent = context.t("查看来源配置身份与冻结执行合同");
     copy.append(title, description);
     const independent = FTUI.actionButton(context.t("在独立页面打开"), () => {
+      const current = records[activeIndex];
       dialog.close();
       context.navigate(FTReferencePage.routeFor(
-        "run-spec", target, context.t("运行配置"), serverID,
+        "run-spec", current.target, context.t("运行配置"), current.serverID,
       ));
     });
     header.append(copy, independent);
+    const tabs = document.createElement("div");
+    tabs.className = "run-spec-dialog-tabs";
+    tabs.setAttribute("role", "tablist");
     const body = document.createElement("div");
     body.className = "run-spec-dialog-body";
-    body.append(FTUI.loading(context.t("正在读取运行配置…")));
+    let activeIndex = 0;
+    const tabButtons = records.map((record, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "run-spec-dialog-tab";
+      button.setAttribute("role", "tab");
+      button.textContent = record.label;
+      if (record.subtitle) button.title = record.subtitle;
+      button.addEventListener("click", () => showRecord(index));
+      tabs.append(button);
+      return button;
+    });
+
+    function updateTabs() {
+      tabButtons.forEach((button, index) => {
+        const selected = index === activeIndex;
+        button.classList.toggle("is-active", selected);
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
+    }
+
+    function showRecord(index) {
+      activeIndex = index;
+      const current = records[index];
+      updateTabs();
+      body.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
+      load(context, current.target, current.serverID).then(value => {
+        if (activeIndex !== index) return;
+        body.replaceChildren(render(context, value));
+      }).catch(error => {
+        if (activeIndex !== index) return;
+        body.replaceChildren(FTUI.empty(
+          context.t("无法读取运行配置"), error.message || String(error),
+        ));
+      });
+    }
+
     close.addEventListener("click", () => dialog.close());
     dialog.addEventListener("close", () => dialog.remove());
     dialog.addEventListener("cancel", event => {
       event.preventDefault();
       dialog.close();
     });
-    card.append(close, header, body);
+    card.append(close, header, tabs, body);
     dialog.append(card);
     document.body.append(dialog);
     dialog.showModal();
-    load(context, target, serverID).then(value => {
-      body.replaceChildren(render(context, value));
-    }).catch(error => {
-      body.replaceChildren(FTUI.empty(
-        context.t("无法读取运行配置"), error.message || String(error),
-      ));
-    });
+    showRecord(0);
     return dialog;
   }
 
-  window.FTRunSpecView = Object.freeze({digest, load, model, open, render});
+  function open(context, target, serverID = "") {
+    return openMany(context, [{target, serverID}]);
+  }
+
+  window.FTRunSpecView = Object.freeze({digest, load, model, open, openMany, render});
 })();

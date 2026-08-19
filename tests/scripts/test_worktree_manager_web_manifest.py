@@ -942,13 +942,13 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     run_actions = (WEB_ROOT / "workbench" / "run-batch" / "actions.js").read_text(
         encoding="utf-8",
     )
-    assert 'loadGroups?.(["workbench-run-results"])' in run_batch
+    assert 'loadGroups?.(["workbench-run-results"])' not in run_batch
     progress = (WEB_ROOT / "workbench" / "test-run-progress.js").read_text(
         encoding="utf-8",
     )
     assert "FTJobProgress.progressView" in progress
     assert "FTJobProgress.watchProgress" in progress
-    assert "FTTestRunSummary?.planSummary" in run_batch
+    assert "FTTestRunSummary?.planSummary" not in run_batch
     assert "ensureRunBatchActionsCode" in run_batch
     assert "context.api(" not in run_batch
     assert "FTTestInputState.requestBody" not in run_batch
@@ -1307,7 +1307,10 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "options.onActivate?.(key)" in tab_content
     assert "FTTabChipContent.create" in settings
     assert 'groupBy: "tab"' in settings
-    assert 'groupBy: "tab"' in groups
+    assert "FTTestSettingChips.render" in groups
+    assert "onlyKeys" in groups
+    assert "groupOverrideChips" in groups
+    assert "content: groupChips" not in groups
     overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
         encoding="utf-8"
     )
@@ -1334,14 +1337,20 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "FTMultiSelectFilter.create" in output_choices
     assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
-    assert "FTTestRunBatch.render" in tests
+    assert "installRunToolbar" in tests
+    assert "headerActions" in tests
+    assert "FTTestRunBatch.render" not in tests
+    assert "产品路径任务" not in tests
     run_batch_model = (WEB_ROOT / "workbench" / "run-batch" / "model.js").read_text(
         encoding="utf-8",
     )
     assert "function jobPath(item)" in run_batch_model
     assert "function runSpecPath(item)" in run_batch_model
-    assert '"查看运行配置", runSpecPath(item)' in run_batch
-    assert 'context.t("查看 RunSpec")' in run_batch
+    assert "function runSpecTarget(item)" in run_batch_model
+    assert 'context.t("查看运行配置")' in run_batch
+    assert "FTRunSpecView.openMany" in run_batch
+    assert 'invokeAction("runAll"' in run_batch
+    assert 'context.t("查看 RunSpec")' not in run_batch
     assert 'context.t("运行")' in run_batch
 
 

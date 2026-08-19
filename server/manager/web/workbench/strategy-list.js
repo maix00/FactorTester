@@ -38,7 +38,13 @@
     const expanded = batch.expanded !== false;
     const header = document.createElement("div");
     header.className = `strategy-list-batch-header${batch.selected ? " selected" : ""}`;
-    const disclosure = button(options.context, expanded ? "⌄" : "›", () => {
+    const body = document.createElement("div");
+    body.className = "strategy-list-batch-body";
+    body.id = `strategy-list-batch-${batch.key}`;
+    body.hidden = !expanded;
+    const disclosure = button(options.context, expanded ? "⌄" : "›", event => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
       const next = body.hidden;
       body.hidden = !next;
       disclosure.textContent = next ? "⌄" : "›";
@@ -66,10 +72,6 @@
     if (options.showConfigOpen && batch.chips) header.append(chips(batch.chips));
     if (batch.actions) header.append(actions(batch.actions, options));
     shell.append(header);
-    const body = document.createElement("div");
-    body.className = "strategy-list-batch-body";
-    body.id = `strategy-list-batch-${batch.key}`;
-    body.hidden = !expanded;
     for (const item of batch.items || []) body.append(renderItem(item, options));
     shell.append(body);
     return shell;
@@ -99,11 +101,6 @@
       : document.createElement("b");
     if (!item.editableName) name.textContent = item.label || item.key;
     copy.append(name);
-    if (item.detail) {
-      const detail = document.createElement("small");
-      detail.textContent = item.detail;
-      copy.append(detail);
-    }
     row.append(branch, select, copy);
     if (options.showConfigOpen && item.chips) row.append(chips(item.chips));
     if (item.actions) row.append(actions(item.actions, options));
