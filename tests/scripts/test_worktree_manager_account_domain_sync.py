@@ -171,6 +171,55 @@ def test_factor_source_sync_tracks_each_storage_provider_without_conflicts(
     assert second.reconcile_factor_sources("alice") == 0
 
 
+def test_lazy_sync_reconciles_factor_source_provider_before_peer_reads(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    source = {
+        "owner_username": "alice",
+        "factor_id": "CA",
+        "factor_name": "CA",
+        "source_code": "class CA: pass",
+    }
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [source] if kind == "custom" else [],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.load_product_categories", lambda _owner: [],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.load_product_groups", lambda _owner: [],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.list_factor_research_runs",
+        lambda _owner, limit: [],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.list_factor_sets", lambda _owner: [],
+    )
+    monkeypatch.setattr(
+        "server.manager.storage.account_domain.factor_sync.materialized_factor_configs",
+        lambda _owner: [],
+    )
+    control = MemoryControlStore()
+    service = AccountDomainSyncService(
+        sqlite_path=tmp_path / "manager.sqlite",
+        control_store=control,
+        manager_id="office-a",
+        access_cooldown=0,
+    )
+
+    result = service.sync("alice")
+
+    assert result["reconciled"] == 1
+    assert (
+        "alice", "factor_source", "custom:CA@office-a"
+    ) in control.rows
+    assert "source_code" not in control.rows[
+        ("alice", "factor_source", "custom:CA@office-a")
+    ]["payload"]
+
+
 def test_factor_source_reconcile_retires_matching_legacy_conflict(
     monkeypatch, tmp_path: Path,
 ) -> None:
