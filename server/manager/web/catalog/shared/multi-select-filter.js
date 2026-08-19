@@ -200,6 +200,59 @@
     if (options.compact === true && multi) section.append(selectionPreview);
 
     let applying = false;
+    let menuPortaled = false;
+
+    function canPortalMenu() {
+      return Boolean(document?.body?.append
+        && summary?.getBoundingClientRect
+        && menu?.style);
+    }
+
+    function positionPortaledMenu() {
+      if (!menuPortaled) return;
+      const rect = summary.getBoundingClientRect();
+      const viewportWidth = Number(window.innerWidth || document.documentElement?.clientWidth || 0);
+      const viewportHeight = Number(window.innerHeight || document.documentElement?.clientHeight || 0);
+      const margin = 8;
+      const width = Math.max(240, Math.min(rect.width || 300, viewportWidth - margin * 2));
+      const left = Math.max(margin, Math.min(rect.left, viewportWidth - width - margin));
+      menu.style.width = `${width}px`;
+      menu.style.left = `${left}px`;
+      menu.style.top = `${Math.min(rect.bottom + 4, viewportHeight - margin)}px`;
+      const menuRect = menu.getBoundingClientRect?.();
+      if (menuRect && menuRect.bottom > viewportHeight - margin) {
+        const above = rect.top - menuRect.height - 4;
+        menu.style.top = `${Math.max(margin, above)}px`;
+      }
+    }
+
+    function portalMenu() {
+      if (menuPortaled || !canPortalMenu()) return;
+      document.body.append(menu);
+      menu.classList.add("is-portaled");
+      if (typeof menu.showPopover === "function") {
+        menu.setAttribute("popover", "manual");
+        try { menu.showPopover(); } catch (_error) { /* fixed portal remains usable */ }
+      }
+      menuPortaled = true;
+      positionPortaledMenu();
+      window.addEventListener?.("resize", positionPortaledMenu);
+      window.addEventListener?.("scroll", positionPortaledMenu, true);
+    }
+
+    function restoreMenu() {
+      if (!menuPortaled) return;
+      window.removeEventListener?.("resize", positionPortaledMenu);
+      window.removeEventListener?.("scroll", positionPortaledMenu, true);
+      if (typeof menu.hidePopover === "function") {
+        try { menu.hidePopover(); } catch (_error) { /* it may already be closed */ }
+      }
+      menu.removeAttribute?.("popover");
+      menu.classList.remove?.("is-portaled");
+      menu.removeAttribute?.("style");
+      dropdown.append(menu);
+      menuPortaled = false;
+    }
 
     function itemFor(value) {
       return items.find(item => item.value === value);
@@ -334,7 +387,12 @@
         );
         shell.classList.toggle("has-open-multi-select", Boolean(openPicker));
       }
-      if (dropdown.open && !controlDisabled) options.onOpen?.();
+      if (dropdown.open && !controlDisabled) {
+        portalMenu();
+        options.onOpen?.();
+      } else {
+        restoreMenu();
+      }
       if (!dropdown.open && multi && !applying) {
         selected = [...committedSelected];
         render();

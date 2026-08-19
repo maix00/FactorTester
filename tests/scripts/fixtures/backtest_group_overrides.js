@@ -10,7 +10,7 @@ global.FTSettingRules = {
   isVisible: (field, values) => Object.entries(field?.rules?.visible_if || {}).every(
     ([key, allowed]) => allowed.includes(values[key]),
   ),
-  isEditable: () => true,
+  isEditable: field => field?.locked !== true,
   valueFor: (key, field, values) => values[field?.serialization?.storage_key || key],
 };
 class Element {
@@ -60,6 +60,7 @@ const manifest = {
   defaults: {
     engine: {scope_policy: "local_only", tab_key: "engine"},
     engine_mode: {scope_policy: "overridable", tab_key: "engine"},
+    locked_mode: {scope_policy: "overridable", tab_key: "engine", locked: true},
     split_count: {scope_policy: "group_only", tab_key: "group_strategy"},
     factor: {
       scope_policy: "overridable", tab_key: "factor",
@@ -90,7 +91,7 @@ const manifest = {
 
 const api = window.FTBacktestGroupOverrides;
 assert.deepEqual(api.canonicalKeys(manifest), [
-  "engine_mode", "fee_mode", "custom_product_fields",
+  "engine_mode", "locked_mode", "fee_mode", "custom_product_fields",
 ]);
 assert.deepEqual(api.normalize(manifest, {
   engine: "rqalpha",
@@ -124,4 +125,22 @@ assert.equal(firstToggle.checked, false);
 firstToggle.checked = true;
 firstToggle.listeners.change();
 assert.deepEqual(view.value(), {engine_mode: "auto"});
+
+const contentOnly = api.render({
+  context: {t: value => value}, manifest,
+  inheritedValues: {engine_mode: "auto", locked_mode: "automatic"},
+  overrides: {locked_mode: "stale"},
+  onlyTabs: ["engine"], contentOnly: true,
+});
+assert.equal(contentOnly.children.length, 1,
+  "content-only rendering must not create a second tab bar");
+const contentRows = contentOnly.children[0];
+assert.equal(contentRows.className, "backtest-group-override-rows");
+assert.equal(contentRows.children.length, 3);
+const lockedControlHost = contentRows.children[1].children[1];
+assert.ok(lockedControlHost.className.includes("is-locked"));
+assert.equal(lockedControlHost.children.length, 1,
+  "auto-determined fields must not expose an override checkbox");
+assert.deepEqual(contentOnly.value(), {},
+  "stale overrides for auto-determined fields must not enter the RunSpec");
 console.log("ok");

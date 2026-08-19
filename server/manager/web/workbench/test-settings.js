@@ -197,43 +197,24 @@
   }
 
   function settingsManager(manifest, available, mounted, values, context, options) {
-    const root = document.createElement("div");
-    root.className = "test-settings-manager";
-    const list = document.createElement("div");
-    list.className = "test-settings-manager-list";
-    settingsSections(manifest, available).forEach(section => {
-      const sectionHeader = document.createElement("header");
-      sectionHeader.className = "test-settings-manager-section-heading";
-      const title = document.createElement("b");
-      title.textContent = context.t(section.label);
-      sectionHeader.append(title);
-      if (section.description) {
-        sectionHeader.title = context.t(section.description);
-      }
-      list.append(sectionHeader);
-      section.items.forEach(item => {
-        const row = document.createElement("label");
-        row.className = "test-settings-manager-row";
-        const toggle = document.createElement("input");
-        toggle.type = "checkbox";
-        toggle.checked = mounted.has(item.tab.key);
-        toggle.addEventListener("change", () => {
-          if (!toggle.checked) resetTabValues(manifest, values, item.tab.key);
-          const next = available.map(value => value.tab.key).filter(key => (
-            key === item.tab.key ? toggle.checked : mounted.has(key)
-          ));
-          options.onMountedTabsChange?.(next, item.tab.key, toggle.checked);
-        });
-        const body = document.createElement("span");
-        body.className = "test-settings-manager-row-body";
-        const copy = document.createElement("span");
-        const label = document.createElement("b");
-        label.textContent = context.t(item.tab.label || item.tab.key);
-        copy.append(label);
-        if (item.tab.help_text) row.title = context.t(item.tab.help_text);
-        body.append(copy);
-        if (window.FTTestSettingChips) {
-          const defaults = FTTestSettingChips.render({
+    return FTTabChipContent.createSettingsManager({
+      context,
+      sections: settingsSections(manifest, available).map(section => ({
+        label: section.label,
+        description: section.description,
+        items: section.items.map(item => ({
+          key: item.tab.key,
+          label: item.tab.label || item.tab.key,
+          description: item.tab.help_text || "",
+          mounted: mounted.has(item.tab.key),
+          onToggle: checked => {
+            if (!checked) resetTabValues(manifest, values, item.tab.key);
+            const next = available.map(value => value.tab.key).filter(key => (
+              key === item.tab.key ? checked : mounted.has(key)
+            ));
+            options.onMountedTabsChange?.(next, item.tab.key, checked);
+          },
+          preview: () => window.FTTestSettingChips ? FTTestSettingChips.render({
             manifest,
             values: FTSettingRules.previewDefaultsForTab(manifest, values, item.tab.key),
             context,
@@ -248,16 +229,10 @@
             groupBy: "tab",
             sources: {},
             inline: true,
-          });
-          defaults.className = `${defaults.className} test-settings-manager-defaults`.trim();
-          body.append(defaults);
-        }
-        row.append(toggle, body);
-        list.append(row);
-      });
+          }) : null,
+        })),
+      })),
     });
-    root.append(list);
-    return root;
   }
 
   function resetTabValues(manifest, values, tabKey) {
