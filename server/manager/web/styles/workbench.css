@@ -29,7 +29,8 @@
 .strategy-list-disclosure { flex: 0 0 22px; width: 22px; height: 22px; border: 0; border-radius: 5px; padding: 0; color: var(--muted); background: transparent; font-size: 16px; line-height: 20px; cursor: pointer; }
 .strategy-list-disclosure:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
 .strategy-list-batch-body { display: grid; min-width: 0; }
-.strategy-list-row { display: grid; grid-template-columns: 24px 20px minmax(130px, .72fr) minmax(0, 1.28fr) auto; gap: 5px; align-items: center; min-width: 0; padding: 5px 7px 5px calc(20px + var(--strategy-depth, 0) * 18px); border-top: 1px solid var(--line); }
+.strategy-list-row { display: grid; grid-template-columns: 24px 20px minmax(130px, .72fr) minmax(0, 1.28fr) auto; gap: 5px; align-items: center; min-width: 0; padding: 3px 7px 3px calc(20px + var(--strategy-depth, 0) * 18px); border-top: 1px solid var(--line); }
+.strategy-list-batch-body[hidden] { display: none !important; }
 .strategy-list-row.selected { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .strategy-list-name-editor { display: block; min-width: 0; }
 .strategy-list-name { display: block; max-width: 100%; overflow: hidden; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; font-weight: 650; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: text; }

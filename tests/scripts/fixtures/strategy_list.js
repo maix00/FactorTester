@@ -68,9 +68,10 @@ const options = {
   title: "策略",
   showConfig: false,
   batches: [{
-    key: "batch-1", label: "添加批次 1", expanded: true,
+    key: "batch-1", label: "添加批次 1", description: "5 个策略", expanded: true,
     items: [{
       key: "strategy-1", label: "旧名称", editableName: true,
+      detail: "基础组 · 1/5",
       onRename: value => { renameCalls += 1; assert.equal(value, "新名称"); },
       actions: [{
         label: "编辑", icon: "square.and.pencil", onClick: () => { actionCalls += 1; },
@@ -84,6 +85,10 @@ const root = window.FTStrategyList.render(options);
 const disclosure = find(root, node => node.className === "strategy-list-disclosure");
 const body = find(root, node => node.className === "strategy-list-batch-body");
 assert.ok(disclosure && body);
+const row = find(root, node => node.className === "strategy-list-row");
+assert.ok(row);
+assert.equal(find(row, node => node.tagName === "small"), null,
+  "strategy rows must not render a subtitle");
 assert.equal(body.hidden, false);
 disclosure.dispatch("click");
 assert.equal(body.hidden, true, "batch disclosure must update the current DOM immediately");

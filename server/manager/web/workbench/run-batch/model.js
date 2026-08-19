@@ -98,9 +98,14 @@
     return item;
   }
 
-  function runSpecPath(item) {
+  function runSpecTarget(item) {
     if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
-    const target = `runspec:sha256:${item.runSpecHash}`;
+    return `runspec:sha256:${item.runSpecHash}`;
+  }
+
+  function runSpecPath(item) {
+    const target = runSpecTarget(item);
+    if (!target) return "";
     if (window.FTReferencePage?.routeFor) {
       return FTReferencePage.routeFor(
         "run-spec", target, "运行配置", item.serverID || "",
@@ -137,6 +142,7 @@
 
   window.FTTestRunBatchModel = Object.freeze({
     PHASE_LABELS, groupIdentity, itemFor, jobPath, recordPreview,
-    recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, synchronize, update,
+    recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, runSpecTarget,
+    synchronize, update,
   });
 })();

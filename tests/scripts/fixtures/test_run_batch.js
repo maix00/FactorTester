@@ -21,6 +21,7 @@ global.FTTestProducts = {
   groupID: group => group.id,
   groupLabel: group => group.label,
 };
+window.FTTestProducts = global.FTTestProducts;
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/test-lazy-code.js", "utf8",
 ), {filename: "test-lazy-code.js"});
@@ -57,10 +58,22 @@ vm.runInThisContext(fs.readFileSync(
 
 const requests = [];
 let navigated = false;
+let openedRunSpecs = [];
+window.FTRunSpecView = {
+  openMany: (_context, entries) => { openedRunSpecs = entries; },
+};
 const context = {
   t: value => value,
   servicePath: path => `/service${path}`,
   navigate: () => { navigated = true; },
+  button: (label, action, help) => {
+    const button = {
+    textContent: label, title: help, className: "", disabled: false,
+    listeners: {click: action},
+    addEventListener: (name, callback) => { button.listeners[name] = callback; },
+    };
+    return button;
+  },
   async api(path, options) {
     requests.push({path, body: JSON.parse(options.body)});
     const index = requests.filter(item => item.path.endsWith("/api/runs")).length;
@@ -120,15 +133,36 @@ const backtest = {
   }],
 };
 
+const factorEvaluation = {
+  ...backtest,
+  kind: "factor_evaluation",
+  groups: [{id: "all", label: "全部产品"}],
+  outputRequests: ["factor_series"],
+};
+
 (async () => {
   const batch = window.FTTestRunBatch;
-  assert.equal(batch.render(context, {...state, groups: []}, () => {}), null);
-  assert.equal(actionLoaded, false, "submission code must not load with the batch view");
+  assert.equal(actionLoaded, false, "submission code must not load while creating header actions");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");
+  const header = batch.headerActions(context, state, () => {});
+  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行"]);
+  assert.equal(header[0].disabled, false);
+  assert.equal(header[1].disabled, false);
+  const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
+  assert.ok(emptyHeader.every(item => item.disabled),
+    "header run actions must stay visible but disabled without a product group");
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
+  const frozenHeader = batch.headerActions(context, state, () => {});
+  frozenHeader[0].listeners.click();
+  assert.deepEqual(openedRunSpecs.map(item => item.label), ["任务 1 · 日盘", "任务 2 · 夜盘"],
+    "view run configuration must open one overlay tab per task");
+  assert.ok(openedRunSpecs.every(item => /^runspec:sha256:/.test(item.target)),
+    "overlay tabs must use the frozen RunSpec references");
+  assert.match(frozenHeader[1].title, /全部任务/,
+    "the header run action must submit the complete task batch");
 
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
@@ -149,8 +183,12 @@ const backtest = {
   assert.equal(requests.at(-1).body.strategy_specs[0].strategy_id, "DynamicHold");
   assert.equal(requests[0].body.transient_factor_sources[0].factor_id,
     "UploadedMomentum");
+  assert.deepEqual(batch.synchronize(factorEvaluation).map(item => item.groupID), ["all"]);
+  await batch.runAll(context, factorEvaluation, () => {});
+  assert.equal(factorEvaluation.testRunBatch[0].jobID, "job-4");
+  assert.equal(requests.at(-1).body.analyses[0], "factor_evaluation");
   assert.equal(navigated, false, "submission must keep the test page visible");
-  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 3);
+  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 4);
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
   assert.ok(requests.slice(0, 4).every(item => item.body.retention_mode === "full"));

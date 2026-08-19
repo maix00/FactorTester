@@ -13,10 +13,39 @@
     if (!definition) throw new Error(context.t("未知测试类型"));
     context.activeNav(definition.nav);
     context.setHeading(context.t(definition.title), context.t("测试"));
+    installRunToolbar(context, null, () => {});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取测试设置…")));
     const state = await loadState(context, kind, options);
     applyTabReturn(state, context);
     render(context, state);
+  }
+
+  function placeholderRunActions(context) {
+    return ["查看运行配置", "运行"].map(label => {
+      const action = context.button(
+        context.t(label), () => {}, context.t("正在读取测试运行操作…"),
+      );
+      action.className = "test-workbench-header-action";
+      action.disabled = true;
+      return action;
+    });
+  }
+
+  function installRunToolbar(context, state, refresh) {
+    const toolbar = context.toolbar;
+    if (!toolbar) return;
+    toolbar.replaceChildren();
+    let actions = null;
+    if (state && window.FTTestRunBatch?.headerActions) {
+      try {
+        actions = window.FTTestRunBatch.headerActions(context, state, refresh);
+      } catch (_) {
+        // The run-batch model can arrive one tick after the page shell. Keep
+        // the two stable header actions visible until its deferred group is
+        // ready instead of allowing a stale/empty toolbar to flash.
+      }
+    }
+    toolbar.append(...(actions || placeholderRunActions(context)));
   }
 
   function applyTabReturn(state, context) {
@@ -416,6 +445,12 @@
   }
 
   function render(context, state) {
+    installRunToolbar(context, state, () => render(context, state));
+    if (!window.FTTestRunBatch && !state.runBatchCode?.error) {
+      // The header owns the run actions. Load their small controller lazily;
+      // do not reintroduce the removed lower run-task panel.
+      ensureRunBatchCode(context, state, () => render(context, state));
+    }
     const root = document.createElement("div");
     root.className = "test-workbench";
     if (!window.FTTestSettings || !state.settingsInitialized) {
@@ -510,16 +545,6 @@
           : FTUI.loading(context.t("正在读取策略列表…")));
         ensureBacktestCode(context, state, () => render(context, state));
       }
-    }
-    if (window.FTTestRunBatch) {
-      const runBatch = FTTestRunBatch.render(context, state, () => render(context, state));
-      if (runBatch) root.append(runBatch);
-    } else {
-      const runBatchCode = state.runBatchCode || {};
-      root.append(runBatchCode.status === "error"
-        ? FTUI.empty(context.t("读取任务代码失败"), runBatchCode.error)
-        : FTUI.loading(context.t("正在读取产品路径任务代码…")));
-      ensureRunBatchCode(context, state, () => render(context, state));
     }
     context.content.replaceChildren(root);
   }
