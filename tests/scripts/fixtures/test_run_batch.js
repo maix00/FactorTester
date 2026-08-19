@@ -122,6 +122,18 @@ const backtest = {
   ...state,
   kind: "backtest",
   groups: [{id: "all", label: "全部产品"}],
+  analysis: {
+    groups: [{
+      id: "default-strategy",
+      factorAlias: "DynamicHold",
+      product_path_selection_id: "all",
+      product_path_selection: {
+        product_path_selection_id: "all",
+        selected_paths: ["CNFutures/**"],
+      },
+    }],
+    ls_configs: [],
+  },
   outputRequests: ["equity_curve"],
   runValues: {retention_mode: "summary"},
   transientFactorSources: [],
@@ -140,6 +152,31 @@ const factorEvaluation = {
   kind: "factor_evaluation",
   groups: [{id: "all", label: "全部产品"}],
   outputRequests: ["factor_series"],
+};
+
+const strategyScopedBacktest = {
+  ...backtest,
+  groups: [],
+  analysis: {
+    groups: [{
+      id: "strategy-1",
+      factorAlias: "DynamicHold",
+      product_path_selection_id: "strategy-products",
+      product_path_selection: {
+        product_path_selection_id: "strategy-products",
+        selected_paths: ["CNFutures/**"],
+      },
+    }, {
+      id: "strategy-2",
+      factorAlias: "DynamicHold",
+      product_path_selection_id: "other-strategy-products",
+      product_path_selection: {
+        product_path_selection_id: "other-strategy-products",
+        selected_paths: ["USFutures/**"],
+      },
+    }],
+    ls_configs: [],
+  },
 };
 
 (async () => {
@@ -196,7 +233,7 @@ const factorEvaluation = {
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
-  assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["all"]);
+  assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["__backtest__"]);
   await batch.runAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].jobID, "job-3");
   assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3?server_id=public-1");
@@ -212,8 +249,16 @@ const factorEvaluation = {
   await batch.runAll(context, factorEvaluation, () => {});
   assert.equal(factorEvaluation.testRunBatch[0].jobID, "job-4");
   assert.equal(requests.at(-1).body.analyses[0], "factor_evaluation");
+
+  assert.deepEqual(batch.synchronize(strategyScopedBacktest)
+    .map(item => item.groupID), ["__backtest__"],
+  "strategy-owned product scopes must create one backtest task");
+  assert.equal(strategyScopedBacktest.testRunBatch[0].groupLabel, "回测任务");
+  await batch.runAll(context, strategyScopedBacktest, () => {});
+  assert.equal(strategyScopedBacktest.testRunBatch[0].jobID, "job-5");
+  assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(navigated, false, "submission must keep the test page visible");
-  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 4);
+  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
   assert.ok(requests.slice(0, 4).every(item => item.body.retention_mode === "full"));

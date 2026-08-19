@@ -102,14 +102,14 @@
   }
 
   async function previewAll(context, state, refresh) {
-    for (const group of FTTestProducts.selectedGroups(state)) {
+    for (const group of model().taskGroups(state)) {
       await previewOne(context, state, group, refresh);
     }
     return model().synchronize(state);
   }
 
   async function runAll(context, state, refresh) {
-    for (const group of FTTestProducts.selectedGroups(state)) {
+    for (const group of model().taskGroups(state)) {
       await runOne(context, state, group, refresh);
     }
     return model().synchronize(state);

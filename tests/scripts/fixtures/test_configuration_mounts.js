@@ -47,5 +47,38 @@ const context = {api: async (path, options) => {
     requests[0].body.payload.ui.ic.mounted_tabs,
     ["factor", "delay"],
   );
+
+  const backtestState = {
+    ...state,
+    kind: "backtest",
+    analysis: {
+      groups: [{
+        id: "strategy-1",
+        factorAlias: "ROC",
+        product_path_selection_id: "strategy-products",
+        product_path_selection: {
+          product_path_selection_id: "strategy-products",
+          selected_paths: ["CNFutures/**"],
+        },
+      }],
+      ls_configs: [],
+    },
+    workspace: {
+      workspace_id: "workspace-2",
+      configuration: {revision: 1, payload: {}},
+    },
+    groupRef: "",
+    groupRefs: [],
+  };
+  await window.FTTestConfiguration.save(
+    context, backtestState, {id: "__backtest__", label: "回测任务"},
+  );
+  const backtestPayload = requests[1].body.payload;
+  assert.equal(backtestPayload.ui.backtest.product_group_ref, undefined,
+    "backtest must not persist a global product-group execution scope");
+  assert.deepEqual(
+    backtestPayload.analyses.backtest.groups[0].product_path_selection,
+    backtestState.analysis.groups[0].product_path_selection,
+  );
   console.log("ok");
 })().catch(error => { console.error(error); process.exitCode = 1; });
