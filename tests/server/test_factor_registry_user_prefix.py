@@ -115,7 +115,7 @@ def test_visible_but_unregistered_other_user_factor_remains_private(
     monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
     monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
 
-    with pytest.raises(PermissionError, match="registered factor library"):
+    with pytest.raises(ImportError, match="factor family source"):
         get_factor_family_instance("18717974771:UserAlpha", username="MaxA")
 
 
