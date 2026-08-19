@@ -487,6 +487,10 @@ def single_factor_page_settings() -> ApplicationSettings:
     app.register_surface(SettingsSurface(
         "local", "因子家族测试设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
     ))
+    app.set_default_mounted_tabs(
+        TabMountPoint.LOCAL_SETTINGS,
+        ("setting_template", "time"),
+    )
     return app
 
 
@@ -505,6 +509,12 @@ def group_test_settings() -> ApplicationSettings:
     from tools.testers.backtest.modules.registry import register_all_module_settings
     register_all_module_settings(app)
     register_run_fields(app, backtest=True)
+    # 任务提交由独立 run tab 固定显示；回测外层设置只预挂载其余三个
+    # 核心 tab，因子、产品路径和运行输入均由用户按需挂载。
+    app.set_default_mounted_tabs(
+        TabMountPoint.LOCAL_SETTINGS,
+        ("test_template", "engine", "time"),
+    )
 
     # 分组测试：本地设置面板 + 分组列表（多选、一次运行所有选中、点击行编辑）。
     app.register_surface(SettingsSurface(
@@ -560,6 +570,10 @@ def ic_test_settings() -> ApplicationSettings:
     from tools.testers.settings.strategy_editor import register_strategy_editor_contract
     register_strategy_editor_contract(app)
     register_run_fields(app, backtest=False)
+    app.set_default_mounted_tabs(
+        TabMountPoint.LOCAL_SETTINGS,
+        ("test_template", "factor", "product_path_selection", "time"),
+    )
 
     return app
 
@@ -569,6 +583,10 @@ def factor_evaluation_settings() -> ApplicationSettings:
     from tools.testers.factor_evaluation.settings import register_factor_evaluation_settings
     register_factor_evaluation_settings(app)
     register_run_fields(app, backtest=False)
+    app.set_default_mounted_tabs(
+        TabMountPoint.LOCAL_SETTINGS,
+        ("product_path_selection", "time", "factor"),
+    )
 
     return app
 
@@ -579,6 +597,10 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     from tools.testers.factor_type_analysis.settings import register_factor_type_analysis_settings
     register_factor_type_analysis_settings(app)
     register_run_fields(app, backtest=False)
+    app.set_default_mounted_tabs(
+        TabMountPoint.LOCAL_SETTINGS,
+        ("product_path_selection", "time", "factor", "method"),
+    )
 
     return app
 

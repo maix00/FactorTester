@@ -121,6 +121,34 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("application", "expected"),
+    (
+        ("group_test", ["test_template", "engine", "time"]),
+        (
+            "ic_test",
+            ["test_template", "factor", "product_path_selection", "time"],
+        ),
+        ("single_factor_page", ["setting_template", "time"]),
+        (
+            "factor_evaluation",
+            ["product_path_selection", "time", "factor"],
+        ),
+        (
+            "factor_type_analysis",
+            ["product_path_selection", "time", "factor", "method"],
+        ),
+    ),
+)
+def test_time_range_is_always_mounted_by_default(
+    application: str,
+    expected: list[str],
+) -> None:
+    manifest = backtest_setting_registry.get(application).manifest()
+
+    assert manifest["default_mounted_tabs"]["local-settings"] == expected
+
+
 def test_every_mountable_tab_audits_every_registered_field() -> None:
     """Do not let a lazy tab or adapter-managed field bypass the contract."""
     for client in ("web", "swift"):
@@ -152,12 +180,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "accounting", "run_inputs", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
-        "local-settings": [
-            "test_template", "engine", "factor", "product_path_selection",
-            "run_inputs",
-        ],
+        "local-settings": ["test_template", "engine", "time"],
         "group-settings": [],
     }
+    assert index["run_settings"]["key"] == "run_context"
+    assert index["run_settings"]["default_mounted"] is True
     tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
     assert tabs["test_template"]["content_adapter"] == "test_templates"
     assert tabs["factor"]["content_adapter"] == "factor_selection"
@@ -441,7 +468,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
     }.issubset(item_fields)
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["test_template", "factor", "product_path_selection"],
+        "local-settings": [
+            "test_template", "factor", "product_path_selection", "time",
+        ],
         "group-settings": [],
     }
     tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
@@ -750,7 +779,7 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
     )
 
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["setting_template"],
+        "local-settings": ["setting_template", "time"],
         "group-settings": [],
     }
     assert index["shared_global_default_keys"] == [
