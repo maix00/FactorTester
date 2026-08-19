@@ -52,8 +52,23 @@ def test_local_lifecycle_starts_host_address_agent_before_compose() -> None:
     source = LOCAL_SCRIPT.read_text(encoding="utf-8")
 
     assert 'address_agent="$repo_root/scripts/server/host_lan_address_agent.py"' in source
+    assert "host_lan_address_service.py" in source
     assert "address_agent_start" in source
     assert "host-lan-addresses.json" in source
+    assert "nohup" not in source
+    assert "host-lan-address-agent.pid" not in source
+
+
+def test_host_address_service_uses_native_service_managers() -> None:
+    source = (ROOT / "scripts" / "server" / "host_lan_address_service.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"launchctl", "bootstrap"' in source
+    assert '"launchctl", "kickstart"' in source
+    assert '"systemctl", "--user", "enable", "--now"' in source
+    assert '"KeepAlive": True' in source
+    assert "Restart=always" in source
 
 
 def test_service_helper_resolves_port_to_opaque_instance_and_waits(
