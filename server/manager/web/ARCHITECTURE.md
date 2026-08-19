@@ -71,9 +71,9 @@ domain-specific top-level container is needed:
 - `FTTabChipContent` is the scalar settings container. It owns tab buttons,
   hidden content panels, optional descriptions, and optional action buttons.
 - `FTTabListChip` is optional and is used only when a surface contains a
-  selectable/repeated list. Group strategies, Long-Short strategies, and a
-  future custom-strategy list all reuse this shell; the rows and actions come
-  from backend surface declarations.
+  selectable/repeated list. Group strategies, Long-Short strategies, and
+  custom strategies all reuse this shell; the rows and actions come from
+  backend surface declarations.
 - `runspec-run` is the common first settings tab for task identity, submitter,
   retention, output requests, and run diagnostics. It is a content adapter
   mounted inside `FTTabChipContent`, not another tab bar.
@@ -89,12 +89,13 @@ container contracts. New test modules must provide manifest-backed items and
 actions to these seams; they must not introduce another tab/chip/content DOM
 contract or module-local tab CSS.
 
-Backtest custom strategies remain Job inputs rather than group records:
-`run_inputs` owns the registered source/spec/dependency upload controls, while
-the inspection response supplies the entrypoint, callbacks, and requirements
-shown in the preview and retained in Job detail. A future strategy-list view
-must reuse this input adapter and state; it must not create a second source
-store or silently turn uploaded code into a group.
+Backtest custom strategies are edited as the third strategy surface beside
+group and Long-Short strategies. Their source/spec payloads remain Job inputs
+rather than group records: the surface reuses the source-input adapter and
+state, while the separate `run_inputs` tab contains dependency files only.
+The inspection response supplies the entrypoint, callbacks, and requirements
+shown in the preview and retained in Job detail; clients must not create a
+second source store or silently turn uploaded code into a group.
 
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through

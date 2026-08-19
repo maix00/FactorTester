@@ -146,6 +146,7 @@ class FactorModule(ExecutableModule):
             tab_label="因子执行",
             tab_order=20,
             tab_content_adapter="factor_selection",
+            adapter_managed=True,
             help_text=(
                 "仅在已有至少两个可绑定因子候选时显示；按策略意图绑定"
                 " ranking、screen、entry、exit、sizing，未绑定角色使用主因子。"

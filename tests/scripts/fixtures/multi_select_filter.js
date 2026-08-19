@@ -12,6 +12,7 @@ class Element {
       add: (...names) => { this.className = `${this.className} ${names.join(" ")}`.trim(); },
     };
   }
+  get childElementCount() { return this.children.length; }
   append(...nodes) {
     nodes.forEach(node => { node.parentNode = this; this.children.push(node); });
   }
@@ -100,6 +101,22 @@ const optionHelp = descendants(multi.optionList).find(item => (
 ));
 assert.ok(optionHelp, "choice descriptions should use the shared help icon");
 assert.equal(optionHelp.textContent, "?");
+
+const trailing = window.FTMultiSelectFilter.create({t: value => value}, {
+  items: [{value: "a", label: "A"}],
+  selected: [],
+  compact: true,
+  actionsPlacement: "trailing",
+  actions: [{label: "新建因子", onClick: () => {}}],
+});
+const trailingRow = descendants(trailing.element).find(item => (
+  item.className === "ft-multi-select-control-row"
+));
+assert.ok(trailingRow, "trailing actions must share a row with the picker");
+assert.equal(trailingRow.children[0], trailing.dropdown);
+assert.ok(String(trailingRow.children[1].className).includes(
+  "ft-multi-select-trailing-actions",
+));
 
 (async () => {
   const multiChanges = [];

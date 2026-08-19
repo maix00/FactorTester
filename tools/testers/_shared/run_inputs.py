@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from tools.testers.run_input_contracts import RUN_INPUTS, factor_source_content_options
+from tools.testers.run_input_contracts import (
+    RUN_DEPENDENCY_INPUTS,
+    factor_source_content_options,
+)
 
 if TYPE_CHECKING:
     from tools.testers.settings.registry import ApplicationSettings
@@ -23,7 +26,7 @@ def register_run_inputs_base(app: Any) -> None:
     )
 
     app.register_module(SettingModule(
-        "run_inputs", "策略 Hook 与运行输入", "execution", 185,
+        "run_inputs", "运行输入", "execution", 185,
     ))
     app.register_tab(SettingTab(
         "run_inputs",
@@ -34,9 +37,9 @@ def register_run_inputs_base(app: Any) -> None:
         (TabMountPoint.LOCAL_SETTINGS,),
         content_adapter="run_inputs",
         content_options={
-            "title": "策略 Hook 与运行输入",
-            "description": "源码、策略配置和其他输入随任务冻结保留，清空任务文件时一并删除",
-            "inputs": RUN_INPUTS,
+            "title": "运行输入",
+            "description": "依赖文件随任务冻结保留，清空任务文件时一并删除",
+            "inputs": RUN_DEPENDENCY_INPUTS,
         },
     ))
     app.register_chip_field(ChipDefinition(

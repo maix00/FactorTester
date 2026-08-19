@@ -656,10 +656,38 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     source = (WEB_ROOT / "workbench" / "test-factor-candidate-sources.js").read_text(
         encoding="utf-8",
     )
+    roles = (WEB_ROOT / "workbench" / "factor-roles.js").read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
+        encoding="utf-8",
+    )
 
     assert "test-factor-candidate-heading-row" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3
+    candidate_index = source.rindex(
+        'context.t("因子候选"), FTTestFactorCandidates.summaryControl',
+    )
+    assert source.index("FTTestFactorSets.control") < candidate_index
+    assert candidate_index < source.index("FTTestFactorRoles.section")
+    assert 'className: "factor-role-child-row"' in roles
+    assert ".factor-role-child-row > span:first-child" in styles
+    assert ".test-factor-candidate-heading-row { border-top:" in styles
+
+
+def test_object_picker_places_create_action_beside_the_shared_control() -> None:
+    shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+        encoding="utf-8",
+    )
+    picker = (WEB_ROOT / "workbench" / "test-object-picker.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+
+    assert 'options.actionsPlacement === "trailing"' in shared
+    assert 'controlRow.className = "ft-multi-select-control-row"' in shared
+    assert '(actions.length ? "trailing" : undefined)' in picker
+    assert ".ft-multi-select-control-row > .ft-multi-select-dropdown" in styles
+    assert ".ft-multi-select-trailing-actions" in styles
 
 
 def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contract() -> None:
@@ -671,6 +699,7 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "outer_pre_mounted_tabs" in tabs
     assert "includeEmpty: true" in tabs
     assert ".strategy-editor-chip-row" in styles
+    assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
     assert ".test-object-editor-overlay-mount > .detail-stack" in styles
 

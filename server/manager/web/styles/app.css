@@ -594,6 +594,14 @@ button.reference-item { cursor: pointer; }
 .test-factor-candidate-list > label:last-child { border-bottom: 0; }
 .test-factor-candidate-list span { display: grid; gap: 2px; min-width: 0; }
 .test-factor-candidate-list b, .test-factor-candidate-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-factor-candidate-summary-list { display: grid; gap: 5px; margin: 0; padding-left: 1.3em; min-width: 0; }
+.test-factor-candidate-summary-list li { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 9px; align-items: baseline; min-width: 0; }
+.test-factor-candidate-summary-list strong,
+.test-factor-candidate-summary-list small { min-width: 0; overflow-wrap: anywhere; }
+.test-factor-candidate-summary-list small { color: var(--muted); }
+.ft-multi-select-control-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.ft-multi-select-control-row > .ft-multi-select-dropdown { flex: 1 1 auto; min-width: 0; }
+.ft-multi-select-trailing-actions { display: inline-flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; }
 .test-inline-creator {
   display: grid;
   grid-template-columns: minmax(12rem, .7fr) minmax(18rem, 1.3fr) auto auto;

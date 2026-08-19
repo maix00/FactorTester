@@ -383,3 +383,41 @@ def test_visitor_can_read_public_price_series_but_not_internal_product_prices(
     assert value["success"] is True
     assert calls == [{"product_name": "public-product"}]
     assert denied.value.code == 403
+
+
+def test_visitor_can_load_test_workbench_without_account_session(
+    tmp_path, monkeypatch,
+):
+    """Anonymous visitor capability is sufficient for the test editor shell."""
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-0")
+    grant = state.visitor_access.issue_grant(
+        "https://198.51.100.10:7998",
+    )
+    visitor_token = state.visitor_access.redeem_grant(
+        grant, target_origin="https://198.51.100.10:7998",
+    )
+    headers = {
+        "Host": "198.51.100.10:7998",
+        "X-Forwarded-Proto": "https",
+        "Cookie": f"ft-manager-visitor={visitor_token}",
+    }
+
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/backtest/settings/group_test/summary",
+            headers=headers,
+        )) as response:
+            settings = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/workspace-summaries",
+            headers=headers,
+        )) as response:
+            workspaces = json.loads(response.read())
+
+    assert settings["success"] is True
+    assert settings["application"] == "group_test"
+    assert any(settings["tab_lists"].values())
+    assert workspaces == {"success": True, "workspaces": []}

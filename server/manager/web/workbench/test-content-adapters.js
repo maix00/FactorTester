@@ -40,7 +40,7 @@
     run_inputs: Object.freeze({
       lazyKey: "run_inputs",
       ready: () => moduleReady("FTTestSourceUpload"),
-      render: options => FTTestSourceUpload.strategyPanel(
+      render: options => FTTestSourceUpload.dependencyPanel(
         options.context, options.state, options.refresh,
         options.tab?.content_options || {},
       ),
@@ -119,8 +119,7 @@
         strategies: (state.transientStrategySources || []).length,
         dependencies: (state.runInputDependencies || []).length,
       };
-      const total = counts.factors + counts.strategies + counts.dependencies;
-      return total ? {run_input_count: total} : {};
+      return counts.dependencies ? {run_input_count: counts.dependencies} : {};
     }
     return {};
   }

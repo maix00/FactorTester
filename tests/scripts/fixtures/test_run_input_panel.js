@@ -61,13 +61,13 @@ const context = {
   },
 };
 const state = {};
-const empty = window.FTTestSourceUpload.strategyPanel(
+const empty = window.FTTestSourceUpload.customStrategyPanel(
   context, state, () => {}, {title: "空输入", description: "无注册控件"},
 );
 assert.equal(findAll(empty, node => node.tagName === "button").length, 0);
 
-const panel = window.FTTestSourceUpload.strategyPanel(context, state, () => {}, {
-  title: "后端运行输入",
+const strategyPanel = window.FTTestSourceUpload.customStrategyPanel(context, state, () => {}, {
+  title: "自定义策略",
   description: "后端说明",
   inputs: [
     {
@@ -75,44 +75,63 @@ const panel = window.FTTestSourceUpload.strategyPanel(context, state, () => {}, 
       extensions: [".hook"], multiple: false, inspect_endpoint: "/inspect",
       path_prefix: "hooks",
     },
-    {
+  ],
+});
+const dependencyPanel = window.FTTestSourceUpload.dependencyPanel(
+  context, state, () => {}, {
+    title: "运行输入",
+    inputs: [{
       kind: "run_dependency", label: "自定义依赖", accept: ".cfg",
       extensions: [".cfg"], multiple: true, analyses: ["backtest"],
       default_purpose: "custom", content_types: {".cfg": "text/plain"},
       purposes: [{value: "custom", label: "自定义用途", path_prefix: "custom"}],
-    },
-  ],
-});
+    }],
+  },
+);
 assert.deepEqual(
-  findAll(panel, node => node.tagName === "button"
+  [...findAll(strategyPanel, node => node.tagName === "button"
     && !node.className.split(" ").includes("ft-help-icon")
-    && node.textContent !== "×")
+    && node.textContent !== "×"), ...findAll(dependencyPanel, node => node.tagName === "button"
+    && !node.className.split(" ").includes("ft-help-icon")
+    && node.textContent !== "×")]
     .map(node => node.textContent),
   ["自定义策略源码", "自定义依赖"],
 );
-const pickers = findAll(panel, node => node.tagName === "input" && node.accept);
+const pickers = [strategyPanel, dependencyPanel].flatMap(panel => (
+  findAll(panel, node => node.tagName === "input" && node.accept)
+));
 assert.deepEqual(pickers.map(node => [node.accept, node.multiple]), [
   [".hook", false], [".cfg", true],
 ]);
 assert.deepEqual(
-  findAll(panel, node => node.tagName === "span"
+  findAll(dependencyPanel, node => node.tagName === "span"
     && node.className === "ft-multi-select-option-label"
     && node.textContent !== "×")
     .map(node => node.textContent),
   ["自定义用途"],
 );
 
-const populated = window.FTTestSourceUpload.strategyPanel(context, {
+const populatedState = {
   transientStrategySources: [{path: "hooks/risk.hook", source_code: "allow = true"}],
   strategySpecs: [{source: "profile:hooks/risk.hook", strategy_id: "risk"}],
   runInputDependencies: [{
     path: "custom/risk.cfg", title_zh: "风险配置", content_type: "text/plain",
     content: "limit=0.4",
   }],
-}, () => {}, {title: "运行输入", inputs: []});
-const details = findAll(populated, node => node.tagName === "details");
+};
+const populatedStrategy = window.FTTestSourceUpload.customStrategyPanel(
+  context, populatedState, () => {}, {title: "自定义策略", inputs: []},
+);
+const populatedDependencies = window.FTTestSourceUpload.dependencyPanel(
+  context, populatedState, () => {}, {title: "运行输入", inputs: []},
+);
+const details = [populatedStrategy, populatedDependencies].flatMap(panel => (
+  findAll(panel, node => node.tagName === "details")
+));
 assert.equal(details.length, 2);
-assert.equal(findAll(populated, node => node.tagName === "pre").length, 0);
+assert.equal([populatedStrategy, populatedDependencies].flatMap(panel => (
+  findAll(panel, node => node.tagName === "pre")
+)).length, 0);
 details[0].open = true;
 details[0].listeners.toggle();
 assert.deepEqual(

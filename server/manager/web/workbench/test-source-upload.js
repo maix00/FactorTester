@@ -153,7 +153,7 @@
     return root;
   }
 
-  function strategyPanel(context, state, refresh, contentOptions) {
+  function customStrategyPanel(context, state, refresh, contentOptions) {
     FTTestInputState.initialize(state);
     const root = document.createElement("section");
     root.className = "test-run-inputs";
@@ -161,10 +161,9 @@
     const strategyDescriptors = descriptors.filter(item => (
       item.kind === "strategy_source" || item.kind === "strategy_spec"
     ));
-    const dependencyDescriptors = descriptors.filter(item => item.kind === "run_dependency");
     const heading = document.createElement("div"); heading.className = "section-heading";
     const title = document.createElement("h2");
-    title.textContent = context.t(contentOptions.title || "运行输入");
+    title.textContent = context.t(contentOptions.title || "自定义策略");
     const note = document.createElement("p");
     note.textContent = context.t(contentOptions.description || "");
     heading.append(title, note); root.append(heading);
@@ -205,25 +204,45 @@
       if ((actions.childElementCount ?? actions.children?.length ?? 0) > 0) {
         heading.append(actions);
       }
-      const previews = runInputPreviews(context, state, refresh);
+      const previews = strategySourcePreviews(context, state, refresh);
       if (previews) root.append(previews);
     }
 
-    if (dependencyDescriptors.length) {
-      const dependencies = document.createElement("section");
-      dependencies.className = "test-run-input-dependencies";
-      const dependencyHeading = document.createElement("strong");
-      dependencyHeading.textContent = context.t("任务依赖");
-      const actions = document.createElement("div"); actions.className = "test-input-actions";
-      dependencyDescriptors.forEach(descriptor => appendInputAction(
-        context, state, refresh, actions, descriptor,
-      ));
-      dependencies.append(dependencyHeading, actions);
-      const previews = dependencyPreviews(context, state, refresh);
-      if (previews) dependencies.append(previews);
-      root.append(dependencies);
-    }
     if (state.runInputStatus?.strategyError) root.append(error(state.runInputStatus.strategyError));
+    return root;
+  }
+
+  function dependencyPanel(context, state, refresh, contentOptions) {
+    FTTestInputState.initialize(state);
+    const root = document.createElement("section");
+    root.className = "test-run-inputs test-run-input-dependencies";
+    const descriptors = (contentOptions.inputs || []).filter(item => (
+      item.kind === "run_dependency"
+    ));
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
+    const title = document.createElement("h2");
+    title.textContent = context.t(contentOptions.title || "运行输入");
+    const note = document.createElement("p");
+    note.textContent = context.t(contentOptions.description || "");
+    heading.append(title, note);
+    root.append(heading);
+    const actions = document.createElement("div");
+    actions.className = "test-input-actions";
+    descriptors.forEach(descriptor => appendInputAction(
+      context, state, refresh, actions, descriptor,
+    ));
+    if ((actions.childElementCount ?? actions.children?.length ?? 0) > 0) {
+      root.append(actions);
+    }
+    const previews = dependencyPreviews(context, state, refresh);
+    if (previews) root.append(previews);
+    if (!descriptors.length && !previews) root.append(FTUI.empty(
+      context.t("当前测试未注册运行依赖输入"), "",
+    ));
+    if (state.runInputStatus?.dependencyError) {
+      root.append(error(state.runInputStatus.dependencyError));
+    }
     return root;
   }
 
@@ -348,7 +367,7 @@
     return (descriptor?.extensions || []).some(extension => name.endsWith(extension));
   }
 
-  function runInputPreviews(context, state, refresh) {
+  function strategySourcePreviews(context, state, refresh) {
     const entries = (state.transientStrategySources || []).map(source => {
       const spec = (state.strategySpecs || []).find(value => (
         value.source === `profile:${source.path}`
@@ -373,14 +392,6 @@
         remove: () => { FTTestInputState.removeStrategy(state, source.path); refresh(); },
       };
     });
-    for (const dependency of state.runInputDependencies || []) {
-      entries.push({
-        title: dependency.title_zh || dependency.path,
-        detail: dependency.path,
-        blocks: [{label: dependency.content_type || "text/plain", content: dependency.content}],
-        remove: () => { FTTestInputState.removeDependency(state, dependency.path); refresh(); },
-      });
-    }
     return sourcePreviews(context, entries);
   }
 
@@ -429,6 +440,7 @@
     inspectFactor,
     inspectStrategy,
     instantiateFactor,
-    strategyPanel,
+    customStrategyPanel,
+    dependencyPanel,
   });
 })();

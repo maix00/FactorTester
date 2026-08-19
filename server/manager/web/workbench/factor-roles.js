@@ -88,7 +88,9 @@
           onChange(next);
         },
       });
-      root.append(FTTestFieldRow.create(label, picker.element));
+      root.append(FTTestFieldRow.create(
+        label, picker.element, "", {className: "factor-role-child-row"},
+      ));
     }
     if (!root.childElementCount) {
       root.append(FTUI.empty(context.t("当前策略没有可绑定角色"), ""));
@@ -96,7 +98,30 @@
     return root;
   }
 
+  function section(options) {
+    const {context, field} = options;
+    const root = document.createElement("section");
+    root.className = "factor-role-section";
+    const heading = document.createElement("div");
+    heading.className = "factor-role-section-heading";
+    const copy = document.createElement("span");
+    copy.className = "factor-role-section-copy";
+    const title = document.createElement("b");
+    title.textContent = context.t(field?.label || "因子角色");
+    copy.append(title);
+    const help = window.FTTestFieldHelp?.forField?.(
+      options.manifest, options.fieldKey || "factor_role_bindings", context,
+    );
+    if (help && window.FTUI?.helpIcon) copy.append(FTUI.helpIcon(help));
+    const value = document.createElement("span");
+    value.className = "factor-role-section-value";
+    value.setAttribute("aria-hidden", "true");
+    heading.append(copy, value);
+    root.append(heading, render(options));
+    return root;
+  }
+
   window.FTTestFactorRoles = Object.freeze({
-    factorAlias, normalize, visibleRoles, display, render,
+    factorAlias, normalize, visibleRoles, display, render, section,
   });
 })();
