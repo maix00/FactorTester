@@ -11,8 +11,14 @@ global.FTTestFactors = {
   selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
 };
 global.FTTestProducts = {
-  synchronize() {}, groupID: group => group.id,
-  projection: group => ({product_path_selection_id: group.id, selected_paths: group.paths}),
+  synchronize() {}, groupID: group => group.group_ref || group.id,
+  projection: group => ({
+    product_path_selection_id: group.group_ref || group.id,
+    product_group_template_id: group.group_ref || group.id,
+    label: group.name || group.group_ref || group.id,
+    selected_paths: group.paths,
+    paths: group.paths,
+  }),
   selectedProjections: () => [{product_path_selection_id: "day", selected_paths: ["CNFutures"]}],
 };
 global.FTTestConfigurationCompiler = {
@@ -42,6 +48,9 @@ const state = {
   factors: [factor], families: [], groups: [{
     id: "inline-product-group:session", temporary: true,
     paths: ["CNFutures/**"],
+  }, {
+    group_ref: "product-group:persisted", name: "持久产品组",
+    paths: ["CNFutures/day/**"],
   }], analysis: {}, settingsMountedTabs: ["factor", "delay"],
   factorRef: factor.factor_ref, groupRef: "day", groupRefs: ["day"],
   outputCapabilities: [], outputRequests: [],
@@ -75,10 +84,10 @@ const context = {t: value => value, api: async (path, options) => {
       groups: [{
         id: "strategy-1",
         factorAlias: "ROC",
-        product_path_selection_id: "strategy-products",
+        product_path_selection_id: "product-group:persisted",
         product_path_selection: {
-          product_path_selection_id: "strategy-products",
-          selected_paths: ["CNFutures/**"],
+          product_path_selection_id: "product-group:persisted",
+          selected_paths: [],
         },
       }],
       ls_configs: [],
@@ -99,7 +108,13 @@ const context = {t: value => value, api: async (path, options) => {
     "backtest must not persist a global product-group execution scope");
   assert.deepEqual(
     backtestPayload.analyses.backtest.groups[0].product_path_selection,
-    backtestState.analysis.groups[0].product_path_selection,
+    {
+      product_path_selection_id: "product-group:persisted",
+      product_group_template_id: "product-group:persisted",
+      label: "持久产品组",
+      selected_paths: ["CNFutures/day/**"],
+      paths: ["CNFutures/day/**"],
+    },
   );
   console.log("ok");
 })().catch(error => { console.error(error); process.exitCode = 1; });

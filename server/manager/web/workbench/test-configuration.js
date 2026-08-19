@@ -237,6 +237,24 @@
       product_path_selection: FTTestProducts.projection(group),
       product_path_selection_id: FTTestProducts.groupID(group),
     }];
+    const catalogGroups = new Map((state.groups || []).map(value => [
+      String(FTTestProducts.groupID(value) || ""), value,
+    ]).filter(([id]) => id));
+    groups = groups.map(item => {
+      const id = String(
+        item.product_path_selection_id
+          || FTTestProducts.groupID(item.product_path_selection) || "",
+      );
+      const stored = item.product_path_selection;
+      const storedPaths = stored?.selected_paths || stored?.paths || [];
+      const catalog = catalogGroups.get(id);
+      if (!catalog || storedPaths.length) return item;
+      return {
+        ...item,
+        product_path_selection_id: id,
+        product_path_selection: FTTestProducts.projection(catalog),
+      };
+    });
     const productSelections = {};
     for (const item of groups.filter(value => !value.parentId)) {
       const selection = item.product_path_selection;
