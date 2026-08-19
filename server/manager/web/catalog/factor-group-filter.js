@@ -31,6 +31,7 @@
     const filter = window.FTMultiSelectFilter.create(context, {
       title: context.t("按产品组筛选"),
       className: "factor-product-group-filter",
+      menuClass: "factor-product-group-filter-menu",
       searchPlaceholder: context.t("搜索产品组"),
       items: choices(context, groups),
       selected: initialValues,
