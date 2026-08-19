@@ -2807,6 +2807,26 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
     assert env["FACTORTESTER_SERVICE_HOST"] == "127.0.0.1"
 
 
+def test_service_env_uses_native_daemon_runtime_directory(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "container-run"
+    monkeypatch.setenv("FACTORTESTER_JOB_DAEMON_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: "abc123\n",
+    )
+    repo = tmp_path / "repo"
+    state = manager.ManagerState(repo, "python")
+
+    env, deployment_id, socket_path = state._service_env(repo, 7999)
+
+    assert socket_path == runtime_dir / f"{deployment_id}.sock"
+    assert env["GTHT_JOB_DAEMON_SOCKET"] == str(socket_path)
+
+
 def test_federation_settings_offer_only_online_service_ports(
     tmp_path, monkeypatch,
 ) -> None:

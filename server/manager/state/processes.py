@@ -18,6 +18,16 @@ from server.manager.state.models import ServiceBundle
 from server.manager.system import safe_name
 
 
+def job_daemon_socket_path(path: Path, deployment_id: str) -> Path:
+    """Return an ephemeral socket path on the Manager's native filesystem."""
+    runtime_root = str(
+        os.environ.get("FACTORTESTER_JOB_DAEMON_RUNTIME_DIR") or ""
+    ).strip()
+    if runtime_root:
+        return Path(runtime_root).expanduser().resolve() / f"{deployment_id}.sock"
+    return path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+
+
 class ProcessStateMixin:
     """Start, stop, and restart services after route selection is complete."""
 
@@ -68,7 +78,7 @@ class ProcessStateMixin:
 
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
-        socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+        socket_path = job_daemon_socket_path(path, deployment_id)
         env = os.environ.copy()
         harness_root = str(
             (path / "tools" / "cli" / "agent-harness").resolve()
