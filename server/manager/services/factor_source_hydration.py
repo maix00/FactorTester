@@ -94,23 +94,31 @@ class FactorSourceHydrator:
         control = getattr(synchronizer, "control_store", None)
         if control is None:
             return values
-        try:
-            response = control.pull_account_domain_entities(
-                after_revision=0, principal=scope, limit=1000,
+        after_revision = 0
+        for _page in range(32):
+            try:
+                response = control.pull_account_domain_entities(
+                    after_revision=after_revision, principal=scope, limit=1000,
+                )
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                return values
+            remote_rows = response.get("entities") or []
+            remote_values = self._matching_payloads(
+                remote_rows, owner=owner, factor_id=factor_id,
             )
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-            return values
-        remote_rows = response.get("entities") or []
-        remote_values = self._matching_payloads(
-            remote_rows, owner=owner, factor_id=factor_id,
-        )
-        for row in remote_rows:
-            if not isinstance(row, dict):
-                continue
-            payload = row.get("payload")
-            if isinstance(payload, dict) and payload in remote_values:
-                synchronizer.local.apply_remote(row)
-        return [*values, *remote_values]
+            if remote_values:
+                for row in remote_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    payload = row.get("payload")
+                    if isinstance(payload, dict) and payload in remote_values:
+                        synchronizer.local.apply_remote(row)
+                return [*values, *remote_values]
+            next_revision = int(response.get("next_revision") or after_revision)
+            if next_revision <= after_revision or len(remote_rows) < 1000:
+                break
+            after_revision = next_revision
+        return values
 
     @staticmethod
     def _matching_payloads(

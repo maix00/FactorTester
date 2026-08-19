@@ -114,11 +114,22 @@ def test_hydration_repairs_missing_provider_metadata_from_control_store() -> Non
             self.applied.append(row)
 
     class Control:
+        calls = []
+
         def pull_account_domain_entities(self, **kwargs):
+            self.calls.append(kwargs)
+            if kwargs["after_revision"] == 0:
+                return {
+                    "entities": [
+                        {"payload": {"factor_id": f"Other{index}"}}
+                        for index in range(1000)
+                    ],
+                    "next_revision": 1000,
+                }
             assert kwargs == {
-                "after_revision": 0, "principal": "alice", "limit": 1000,
+                "after_revision": 1000, "principal": "alice", "limit": 1000,
             }
-            return {"entities": [provider]}
+            return {"entities": [provider], "next_revision": 1001}
 
     class Sync:
         local = Local()
@@ -138,3 +149,4 @@ def test_hydration_repairs_missing_provider_metadata_from_control_store() -> Non
 
     assert values == [provider["payload"]]
     assert Sync.local.applied == [provider]
+    assert len(Sync.control_store.calls) == 2
