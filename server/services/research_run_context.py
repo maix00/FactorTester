@@ -115,7 +115,7 @@ def load_manager_run_context(
     if schema_version >= 2:
         try:
             validate_context_sources(prepared, owner=owner)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError) as exc:
             raise RunRequestError(
                 str(exc), details={"code": "invalid_manager_run_context"},
             ) from exc
