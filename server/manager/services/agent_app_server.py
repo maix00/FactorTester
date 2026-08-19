@@ -88,7 +88,7 @@ class AgentAppServerSupervisor:
         key = self._key(principal, profile_id)
         with self._lock:
             session = self._sessions.get(key)
-            return session.status() if session is not None else {
+            status = session.status() if session is not None else {
                 "ready": False,
                 "running": False,
                 "pid": None,
@@ -96,6 +96,11 @@ class AgentAppServerSupervisor:
                 "event_sequence": 0,
                 "stderr_tail": [],
             }
+        active = self.profile_service.conversation_store.active(*key)
+        status["active_conversation_id"] = (
+            active.get("conversation_id") if active else ""
+        )
+        return status
 
     def request(
         self,
@@ -103,13 +108,180 @@ class AgentAppServerSupervisor:
         profile_id: str,
         method: str,
         params: Mapping[str, object] | None = None,
+        *,
+        conversation_id: str = "",
     ) -> dict[str, Any]:
         key = self._key(principal, profile_id)
+        identifier = str(conversation_id or "").strip()
+        if method == "thread/list":
+            raise AgentAppServerError(
+                "thread/list is managed by the Profile conversation catalog"
+            )
+        conversation = None
+        if identifier:
+            conversation = self.profile_service.conversation(
+                key[0], key[1], identifier,
+            )
+            if conversation is None:
+                raise AgentAppServerError("conversation not found")
+            self._validate_conversation_request(
+                method,
+                params or {},
+                conversation,
+                provider_id=self.profile_service.provider_id_for_profile(*key),
+            )
+        elif method in {
+            "thread/read",
+            "thread/start",
+            "thread/resume",
+            "turn/start",
+            "turn/interrupt",
+            "turn/steer",
+        }:
+            raise AgentAppServerError(
+                "conversation_id is required for Profile Agent thread operations"
+            )
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
                 raise AgentAppServerError("start the Profile Agent first")
-        return session.request(method, params)
+        response = session.request(method, params)
+        self._save_conversation_state(
+            key,
+            method,
+            params or {},
+            response,
+            conversation,
+        )
+        return response
+
+    @staticmethod
+    def _thread_from_response(response: Mapping[str, object]) -> Mapping[str, object] | None:
+        value: object = response
+        for key in ("result", "response"):
+            if isinstance(value, Mapping) and isinstance(value.get(key), Mapping):
+                value = value[key]
+        if not isinstance(value, Mapping):
+            return None
+        thread = value.get("thread")
+        return thread if isinstance(thread, Mapping) else None
+
+    @staticmethod
+    def _thread_value(thread: Mapping[str, object], *keys: str) -> object:
+        for key in keys:
+            if key in thread and thread[key] not in (None, ""):
+                return thread[key]
+        return ""
+
+    @classmethod
+    def _validate_conversation_request(
+        cls,
+        method: str,
+        params: Mapping[str, object],
+        conversation: Mapping[str, object],
+        *,
+        provider_id: str = "",
+    ) -> None:
+        if method in {
+            "thread/resume",
+            "thread/read",
+            "turn/start",
+            "turn/interrupt",
+            "turn/steer",
+        }:
+            stored_provider = str(conversation.get("provider_id") or "").strip()
+            current_provider = str(provider_id or "").strip()
+            if stored_provider and current_provider and stored_provider != current_provider:
+                raise AgentAppServerError(
+                    "conversation belongs to another Agent provider"
+                )
+        if method in {
+            "thread/resume",
+            "thread/read",
+            "turn/start",
+            "turn/interrupt",
+            "turn/steer",
+        }:
+            expected = str(conversation.get("provider_thread_id") or "").strip()
+            requested = str(
+                params.get("threadId")
+                or params.get("thread_id")
+                or "",
+            ).strip()
+            if not expected or requested != expected:
+                raise AgentAppServerError("conversation thread binding is invalid")
+        if method == "thread/start" and conversation.get("provider_thread_id"):
+            raise AgentAppServerError("conversation already has a thread; resume it")
+
+    def _save_conversation_state(
+        self,
+        key: tuple[str, str],
+        method: str,
+        params: Mapping[str, object],
+        response: Mapping[str, object],
+        conversation: Mapping[str, object] | None,
+    ) -> None:
+        if conversation is None:
+            return
+        thread = self._thread_from_response(response)
+        if method in {"thread/start", "thread/resume"} and thread is not None:
+            thread_id = str(self._thread_value(thread, "id", "threadId", "thread_id") or "").strip()
+            if not thread_id:
+                raise AgentAppServerError("Agent did not return a conversation thread")
+            created_at = self._thread_value(thread, "createdAt", "created_at")
+            title = str(self._thread_value(thread, "name", "title") or "").strip()
+            self.profile_service.conversation_store.save_thread(
+                key[0],
+                key[1],
+                str(conversation["conversation_id"]),
+                thread_id,
+                provider_id=self.profile_service.provider_id_for_profile(*key),
+                title=title,
+                created_at=float(created_at) if created_at not in (None, "") else None,
+            )
+            return
+        if method == "turn/start":
+            preview = self._preview(params)
+            self.profile_service.conversation_store.touch(
+                key[0],
+                key[1],
+                str(conversation["conversation_id"]),
+                preview=preview,
+            )
+
+    @staticmethod
+    def _preview(params: Mapping[str, object]) -> str:
+        raw = params.get("prompt") or params.get("input") or ""
+        if isinstance(raw, list):
+            raw = " ".join(
+                str(item.get("text") or "")
+                for item in raw
+                if isinstance(item, Mapping)
+            )
+        return " ".join(str(raw).split())[:2000]
+
+    def delete_conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> bool:
+        key = self._key(principal, profile_id)
+        conversation = self.profile_service.conversation(*key, conversation_id)
+        if conversation is None:
+            return False
+        thread_id = str(conversation.get("provider_thread_id") or "").strip()
+        with self._lock:
+            session = self._sessions.get(key)
+        if session is not None and thread_id:
+            try:
+                session.delete_thread(thread_id)
+            except AgentAppServerError:
+                # The local catalog is authoritative for discoverability.  A
+                # stopped or older provider process may not support deletion;
+                # it must not make a user's local conversation undeletable.
+                pass
+        return self.profile_service.delete_conversation(*key, conversation_id)
 
     def events(
         self,

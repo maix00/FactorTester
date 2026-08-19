@@ -25,6 +25,7 @@ from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
 )
+from server.manager.storage.agent_conversation_store import AgentConversationStore
 from server.manager.storage.agent_skill_store import AgentSkillStore
 from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
@@ -53,6 +54,7 @@ class AgentProfileService:
         self.data_root = data_root
         self.proxy_url_provider = proxy_url_provider
         self.runtime_store = ProfileRuntimeStore(db_path)
+        self.conversation_store = AgentConversationStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
         source_root = skill_source_root
         if source_root is None:
@@ -224,6 +226,83 @@ class AgentProfileService:
         return self.workspace_browser.file_metadata(
             principal, profile_id, relative_path,
         )
+
+    def conversations(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        return self.conversation_store.list(principal, profile_id)
+
+    def create_conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        title: str = "",
+    ) -> dict[str, Any]:
+        return self.conversation_store.create(
+            principal,
+            profile_id,
+            title=title,
+        )
+
+    def select_conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        return self.conversation_store.select(
+            principal,
+            profile_id,
+            conversation_id,
+        )
+
+    def update_conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        title: str | None = None,
+        preview: str | None = None,
+    ) -> dict[str, Any]:
+        return self.conversation_store.update(
+            principal,
+            profile_id,
+            conversation_id,
+            title=title,
+            preview=preview,
+        )
+
+    def delete_conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> bool:
+        return self.conversation_store.clear(
+            principal,
+            profile_id,
+            conversation_id,
+        )
+
+    def conversation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        return self.conversation_store.get(
+            principal,
+            profile_id,
+            conversation_id,
+        )
+
+    def provider_id_for_profile(self, principal: str, profile_id: str) -> str:
+        claim = self.runtime_store.active_claim(principal, profile_id)
+        return str(claim.get("provider_id") or "") if claim else ""
 
     def profile_skills(
         self,
