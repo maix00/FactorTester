@@ -118,7 +118,6 @@
         // The strategy name is the only user-facing label; its id remains the
         // stable machine identity used by selection and execution.
         label: item.group.name || FTBacktestGroupModel.groupLabel(item.group),
-        detail: groupDetail(context, item.group),
         depth: item.depth,
         editableName: true,
         onRename: name => {
@@ -127,7 +126,7 @@
           return true;
         },
         selected: state.selectedBacktestGroupIDs.includes(item.group.id),
-        content: groupChips(context, state, item.group, refresh),
+        chips: groupOverrideChips(context, state, item.group),
         actions: rowActions(context, state, surface, item.group, refresh),
       })),
     }));
@@ -169,14 +168,13 @@
       showConfigOpen: state.backtestGroupConfigOpen === true,
       items: values.map(item => ({
         key: item.id, label: item.name || item.id, editableName: true,
-        detail: `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`,
         onRename: name => {
           model().renameLongShort(state, item.id, name);
           refresh();
           return true;
         },
         selected: state.selectedBacktestLongShortIDs.includes(item.id),
-        content: groupChips(context, state, item, refresh),
+        chips: groupOverrideChips(context, state, item),
         actions: rowActions(context, state, surface, item, refresh),
       })),
       onToggle: (item, checked) => {
@@ -265,10 +263,6 @@
     return true;
   }
 
-  function labelFor(state, id) {
-    return FTBacktestGroupModel.groupLabel(FTBacktestGroupModel.find(state, id)) || id;
-  }
-
   function batchExpanded(state, key) {
     return (state.backtestExpandedBatches || {})[key] !== false;
   }
@@ -279,47 +273,23 @@
     return `${ordinal} · ${batch.key}`;
   }
 
-  function groupDetail(context, group) {
-    if (group.parentId) return context.t("派生组");
-    return `${context.t("基础组")} · ${group.groupIndex || 1}/${group.splitCount || 1}`;
-  }
-
-  function groupChips(context, state, group, refresh) {
-    if (!state.backtestGroupConfigOpen || !window.FTBacktestGroupOverrides) return null;
-    const host = document.createElement("section");
-    host.className = "backtest-strategy-settings";
-    const title = document.createElement("strong");
-    title.textContent = context.t("本策略设置（覆盖统一设置）");
-    const note = document.createElement("small");
-    note.textContent = context.t("未启用覆盖的字段继承回测上方统一策略");
-    host.append(title, note);
-    const overrides = FTBacktestGroupOverrides.render({
-      context, manifest: state.manifest, inheritedValues: state.values,
-      overrides: FTBacktestGroupModel.registeredOverrides(group, state.manifest),
-      groupBy: "tab",
-      manageTabs: true,
-      mountedTabs: Array.isArray(group.override_mounted_tabs)
-        ? group.override_mounted_tabs : [],
-      onMountedTabsChange: tabs => {
-        group.override_mounted_tabs = tabs;
-      },
-      onChange: values => {
-        const previous = FTBacktestGroupModel.registeredOverrides(group, state.manifest);
-        const cleared = Object.fromEntries(Object.keys(previous).map(key => [key, undefined]));
-        const patch = {
-          ...cleared, ...values,
-          override_mounted_tabs: group.override_mounted_tabs || [],
-        };
-        if (state.analysis.ls_configs?.some(item => item.id === group.id)) {
-          FTBacktestGroupModel.updateLongShort(state, group.id, patch);
-        } else {
-          FTBacktestGroupModel.updateGroup(state, group.id, patch);
-        }
-        refresh?.();
-      },
+  function groupOverrideChips(context, state, group) {
+    if (!state.backtestGroupConfigOpen || !window.FTTestSettingChips?.render) return null;
+    const overrides = FTBacktestGroupModel.registeredOverrides(group, state.manifest);
+    const onlyKeys = Object.keys(overrides);
+    if (!onlyKeys.length) return null;
+    const mountedTabs = [...new Set(Object.values(state.manifest?.defaults || {})
+      .map(field => field?.tab_key).filter(Boolean))];
+    return FTTestSettingChips.render({
+      context,
+      manifest: state.manifest,
+      values: {...(state.values || {}), ...overrides},
+      mountedTabs,
+      onlyKeys,
+      includeUnregistered: true,
+      includeRun: false,
+      groupBy: "none",
     });
-    host.append(overrides);
-    return host;
   }
 
   function rowActions(context, state, surface, item, refresh) {

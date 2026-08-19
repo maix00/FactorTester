@@ -2,6 +2,7 @@
   function descriptors(options) {
     const manifest = options.manifest || {};
     const context = options.context || {t: value => value};
+    const onlyKeys = options.onlyKeys ? new Set(options.onlyKeys) : null;
     const declaredTabs = manifest.tab_lists?.["local-settings"] || [];
     const tabs = new Set(declaredTabs.map(item => item.key));
     const mounted = new Set(options.mountedTabs || []);
@@ -9,6 +10,7 @@
       chip, options.sources || {}, tabs, context,
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
+      .filter(([key, field]) => matchesOnlyKey(key, field, onlyKeys))
       .filter(([, field]) => mounted.has(field.tab_key)
         && (options.includeUnregistered || field.chip_template))
       .filter(([, field]) => field.show_chip !== false)
@@ -34,6 +36,13 @@
         || left._descriptorOrder - right._descriptorOrder
       ))
       .map(({_descriptorOrder, ...item}) => item);
+  }
+
+  function matchesOnlyKey(key, field, onlyKeys) {
+    if (!onlyKeys) return true;
+    if (onlyKeys.has(key)) return true;
+    const storageKey = window.FTSettingRules?.storageKey?.(key, field);
+    return Boolean(storageKey && onlyKeys.has(storageKey));
   }
 
   function tabFallback(tabKey, tab, context, options) {
