@@ -252,6 +252,7 @@
     state.values = FTTestSettings.initialValues(
       state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
     );
+    FTTestState.restoreTemporaryObjects?.(state);
     state.settingsInitialized = true;
     return true;
   }
@@ -396,9 +397,13 @@
       await FTTestLazyCode.loadGroup("workbench-products");
       const value = await context.api("/api/catalog/product-groups");
       const catalog = Array.isArray(value.groups) ? value.groups : [];
-      const selected = state.groups.filter(group => group._savedPlaceholder
-        && state.groupRefs.includes(FTTestLazyCode.groupID(group)));
-      // Replace placeholders while preserving unresolved selected references.
+      const selected = state.groups.filter(group => (
+        group.temporary === true || group.source_kind === "transient"
+        || (group._savedPlaceholder
+          && state.groupRefs.includes(FTTestLazyCode.groupID(group)))
+      ));
+      // Replace placeholders while preserving unresolved selected references
+      // and template-owned inline groups that do not exist in the user catalog.
       state.groups = FTTestState.mergeByID(selected, catalog);
       FTTestProducts.synchronize(state);
       if (state.kind === "backtest") FTBacktestGroups.initialize(state);

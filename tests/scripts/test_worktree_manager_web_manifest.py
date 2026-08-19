@@ -1070,6 +1070,19 @@ def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_test_templates_restore_inline_objects_without_catalog_rows() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_temporary_template_state.js"
+    source = WEB_ROOT / "workbench" / "test-state.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
     import subprocess
 

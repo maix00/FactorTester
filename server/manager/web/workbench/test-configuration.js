@@ -71,7 +71,26 @@
       ...(factor.source_kind === "transient" ? {
         source_kind: "transient",
         transient_factor_id: factor.transient_factor_id || "",
+        temporary: factor.temporary === true,
       } : {}),
+    };
+  }
+
+  function temporaryObjects(state) {
+    const temporary = item => item?.temporary === true
+      || item?.source_kind === "transient"
+      || item?.source_origin === "test_inline";
+    const copy = value => structuredClone(value || []);
+    return {
+      factors: copy((state.values?.factor_candidates || []).filter(temporary)),
+      product_groups: copy((state.groups || []).filter(temporary)),
+      categories: copy((state.values?.category_candidates || []).filter(temporary)),
+      factor_sources: copy(state.transientFactorSources),
+      factor_families: copy(state.transientFactorFamilies),
+      strategy_sources: copy(state.transientStrategySources),
+      strategy_specs: copy(state.strategySpecs),
+      strategy_inspections: copy(state.strategyInspections),
+      run_input_dependencies: copy(state.runInputDependencies),
     };
   }
 
@@ -138,6 +157,7 @@
     payload.shared.factors = factors.map(item => (
       factorRecord(item, selectedFamily(state, item))
     ));
+    payload.shared.temporary_objects = temporaryObjects(state);
     payload.analyses = payload.analyses || {};
     state.analysis = buildAnalysis(state, factors, selectedFamily(state, factor), group);
     payload.analyses[state.kind] = state.analysis;

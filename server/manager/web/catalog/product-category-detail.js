@@ -23,7 +23,9 @@
       });
     }
 
-    const payload = await helpers.loadCategories(context, source);
+    const payload = context.testObjectTemporary && context.testObjectInitialValue
+      ? {categories: [context.testObjectInitialValue]}
+      : await helpers.loadCategories(context, source);
     if (!helpers.isCurrent(context)) return;
     const sourcesPromise = helpers.loadSources(context, source);
     const category = (payload.categories || []).find(item => item.id === target);
@@ -63,6 +65,15 @@
   }
 
   async function saveCategory(context, helpers, category, source, payload) {
+    if (context.testObjectTemporary) {
+      const name = payload.name || payload.title_zh || payload.alias || "category";
+      const id = category?.id || `inline-category:${name}`;
+      context.onSaved?.({
+        ...payload, id, name, title_zh: payload.title_zh || name,
+        temporary: true, source_kind: "transient", source_origin: "test_inline",
+      });
+      return;
+    }
     const endpoint = category
       ? `/api/catalog/categories/${encodeURIComponent(category.id)}`
       : "/api/catalog/categories";

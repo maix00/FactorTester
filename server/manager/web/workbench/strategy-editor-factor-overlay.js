@@ -8,6 +8,7 @@
       mode: "create",
       ref: "new",
       testState: state,
+      temporary: true,
       onSaved,
     });
   }

@@ -261,6 +261,17 @@
   async function saveLibraryFactor(context, state) {
     const alias = familyAlias(state.family);
     if (!alias) throw new Error(context.t("请先选择因子家族"));
+    if (context.testObjectTemporary) {
+      return {
+        factor_family_alias: alias,
+        factor_alias: alias,
+        params: state.parameterValues || {},
+        parameter_definitions: state.family?.params || [],
+        source_kind: "factor_library",
+        source_origin: "test_inline",
+        temporary: true,
+      };
+    }
     const value = await context.api(
       `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
       {
@@ -285,6 +296,21 @@
       description: readInput(fields.description),
       category: readInput(fields.category) || "自编",
     };
+    if (context.testObjectTemporary) {
+      const alias = state.inspection?.factor_name || state.factorID
+        || readInput(fields.name);
+      return {
+        ...payload,
+        name: alias,
+        factor_alias: alias,
+        params: state.parameterValues || {},
+        parameter_definitions: state.inspection?.params || [],
+        source_kind: "transient",
+        source_origin: "test_inline",
+        transient_factor_id: alias,
+        temporary: true,
+      };
+    }
     const endpoint = state.mode === "create"
       ? "/custom-factors/api/create"
       : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`;
@@ -307,30 +333,43 @@
 
   async function render(context, data, targetRef, mode) {
     if (!context.session) throw new Error(context.t("登录后才能编辑因子"));
-    let factor = data.factors.find(item => item.factor_ref === targetRef
+    let factor = context.testObjectInitialValue || data.factors.find(item => item.factor_ref === targetRef
       || item.factor_alias === targetRef || item.id === targetRef);
     const factorID = factor?.factor_alias || factor?.id || targetRef;
     if (mode === "edit" && !factorID) throw new Error(context.t("因子不存在"));
     let loaded = factor ? {...factor} : {};
-    if (mode === "edit") {
+    if (mode === "edit" && !context.testObjectTemporary) {
       const value = await context.api(
         `/custom-factors/api/get/${encodeURIComponent(factorID)}`,
       );
       loaded = {...loaded, ...(value.factor || {})};
     }
+    const temporaryFamilyEdit = mode === "edit" && context.testObjectTemporary
+      && loaded.source_kind !== "transient" && !loaded.source_code;
+    const loadedFamily = temporaryFamilyEdit
+      ? data.families.find(item => familyRef(item) === (
+        loaded.factor_family_ref || loaded.family_ref
+      ) || familyAlias(item) === (
+        loaded.factor_family_alias || loaded.family_alias
+      )) || null
+      : null;
     const state = {
-      mode, factorID, sourceMode: mode === "edit" ? "source" : "family",
-      family: mode === "edit" ? null : null,
+      mode, factorID, sourceMode: mode === "edit" && !temporaryFamilyEdit
+        ? "source" : "family",
+      family: loadedFamily,
       sourceCode: loaded.source_code || "",
-      inspection: mode === "edit" ? {
-        params: loaded.params || [],
+      inspection: mode === "edit" && !temporaryFamilyEdit ? {
+        params: Array.isArray(loaded.parameter_definitions)
+          ? loaded.parameter_definitions : (Array.isArray(loaded.params) ? loaded.params : []),
         math_expr: loaded.math_expr || loaded.formula || "",
         description: loaded.description || loaded.chinese_name || "",
       } : null,
-      parameterValues: Object.fromEntries((loaded.params || []).map(parameter => [
-        parameter.alias || parameter.name,
-        parameter.value ?? parameter.default_value ?? "",
-      ])),
+      parameterValues: Array.isArray(loaded.params)
+        ? Object.fromEntries(loaded.params.map(parameter => [
+          parameter.alias || parameter.name,
+          parameter.value ?? parameter.default_value ?? "",
+        ]))
+        : {...(loaded.factor_params || loaded.params || {})},
       loaded,
     };
     const titleText = mode === "create"
@@ -398,10 +437,25 @@
     form.addEventListener("submit", async event => {
       event.preventDefault(); save.disabled = true; status.textContent = "";
       try {
-        const saved = state.mode === "create" && state.sourceMode === "family"
+        const saved = state.sourceMode === "family"
           ? await saveLibraryFactor(context, state)
-          : await saveSourceFactor(context, state, {chineseName, description, category});
+          : await saveSourceFactor(context, state, {
+            name, chineseName, description, category,
+          });
         const result = normalizeSaved(saved, state, context);
+        if (context.testObjectTemporary && result.source_code && context.testState) {
+          window.FTTestInputState?.putFactor?.(context.testState, {
+            factor_id: result.factor_alias,
+            path: `inline/${result.factor_alias}.py`,
+            source_code: result.source_code,
+            source_origin: "upload",
+          }, {
+            factor_name: result.factor_alias,
+            params: state.inspection?.params || [],
+            description: result.description || "",
+            math_expr: state.inspection?.math_expr || "",
+          });
+        }
         if (context.onSaved) { context.onSaved(result); return; }
         const ref = result.factor_ref || result.factor_alias || result.name;
         if (FTTabReturn.returnToSource(context, {kind: "factor", ref})) return;

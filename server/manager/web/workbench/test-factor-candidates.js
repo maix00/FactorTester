@@ -1,7 +1,9 @@
 (() => {
-  function openEditor(context, mode, ref, onSaved) {
+  function openEditor(context, mode, ref, onSaved, testState = null, initialValue = null) {
     return FTTestObjectEditorOverlay.open(context, {
-      kind: "factor", mode, ref, onSaved,
+      kind: "factor", mode, ref, onSaved, testState,
+      temporary: mode === "create" || initialValue?.temporary === true,
+      initialValue,
     });
   }
 
@@ -16,7 +18,7 @@
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void openEditor(context, "edit", ref, onSaved);
+        void openEditor(context, "edit", ref, onSaved, null, factor);
       },
     };
   }
@@ -77,7 +79,7 @@
         ? () => void (
           window.FTStrategyEditorFactorOverlay?.open
             ? FTStrategyEditorFactorOverlay.open(context, state, savedFactor)
-            : openEditor(context, "create", "new", savedFactor)
+            : openEditor(context, "create", "new", savedFactor, state)
         )
         : null,
       createLabel: context.t("新建因子"),

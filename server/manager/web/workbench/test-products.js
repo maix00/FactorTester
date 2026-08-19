@@ -82,9 +82,11 @@
     setSelected(state, group, true);
   }
 
-  function openEditor(context, mode, ref, onSaved, testState = null) {
+  function openEditor(context, mode, ref, onSaved, testState = null, initialValue = null) {
     return FTTestObjectEditorOverlay.open(context, {
       kind: "product_group", mode, ref, onSaved, testState,
+      temporary: mode === "create" || initialValue?.temporary === true,
+      initialValue,
     });
   }
 
@@ -107,7 +109,7 @@
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void openEditor(context, "edit", id, onSaved);
+        void openEditor(context, "edit", id, onSaved, null, group);
       },
     };
   }

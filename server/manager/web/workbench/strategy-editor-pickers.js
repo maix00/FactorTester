@@ -31,13 +31,13 @@
       selected: selected ? [selected] : [], multi: false, name: "backtest-product-group",
       onCreate: context.session && canCreate ? () => void FTTestObjectEditorOverlay.open(context, {
         kind: "product_group", mode: "create", ref: "new", onSaved: saveGroup,
-        testState: state,
+        testState: state, temporary: true,
       }) : null,
       createLabel: context.t("新建产品组"), onChange,
       itemActions: item => {
         const group = state.groups.find(value => productGroupID(value) === item.value);
         if (!context.session || !group || group.source_managed) return [];
-        return [editAction(context, "product_group", item.value, saveGroup)];
+        return [editAction(context, "product_group", item.value, saveGroup, state, group)];
       },
     });
     return picker;
@@ -100,6 +100,7 @@
           ? FTStrategyEditorFactorOverlay.open(context, state, saveFactor)
           : FTTestObjectEditorOverlay.open(context, {
             kind: "factor", mode: "create", ref: "new", onSaved: saveFactor,
+            testState: state, temporary: true,
           })
       ) : null,
       createLabel: context.t("新建因子"), onChange,
@@ -107,19 +108,22 @@
         const factor = (state.factors || []).find(value => factorAlias(value) === item.value);
         const ref = factor?.factor_alias || factor?.alias || factor?.id || item.value;
         if (!context.session || !factor?.can_edit || factor.is_public) return [];
-        return [editAction(context, "factor", ref, saveFactor)];
+        return [editAction(context, "factor", ref, saveFactor, state, factor)];
       },
     });
     return picker;
   }
 
-  function editAction(context, kind, ref, onSaved) {
+  function editAction(context, kind, ref, onSaved, testState = null, initialValue = null) {
     return {
       label: context.t("编辑"), title: context.t("在当前浮层编辑"),
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void FTTestObjectEditorOverlay.open(context, {kind, mode: "edit", ref, onSaved});
+        void FTTestObjectEditorOverlay.open(context, {
+          kind, mode: "edit", ref, onSaved, testState, initialValue,
+          temporary: initialValue?.temporary === true,
+        });
       },
     };
   }

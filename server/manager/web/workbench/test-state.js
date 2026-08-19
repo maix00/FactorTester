@@ -31,6 +31,8 @@
     state.factors = [...(Array.isArray(state.savedFactors) ? state.savedFactors : [])];
     state.families = [...(Array.isArray(state.savedFamilies) ? state.savedFamilies : [])];
     const storedGroups = [
+      ...(Array.isArray(state.savedTemporaryObjects?.product_groups)
+        ? state.savedTemporaryObjects.product_groups : []),
       ...(Array.isArray(state.analysis.product_path_selections)
         ? state.analysis.product_path_selections : []),
       state.analysis.product_path_selection,
@@ -58,6 +60,9 @@
       ? structuredClone(payload.shared.factors) : [];
     state.savedFamilies = Array.isArray(payload.shared?.factor_families)
       ? structuredClone(payload.shared.factor_families) : [];
+    state.savedTemporaryObjects = payload.shared?.temporary_objects
+      && typeof payload.shared.temporary_objects === "object"
+      ? structuredClone(payload.shared.temporary_objects) : {};
     state.factorRef = state.savedFactors[0]?.factor_ref || "";
     state.groupRefs = window.FTTestProducts?.restoreReferences
       ? FTTestProducts.restoreReferences(state.analysis, payload.ui?.[state.kind] || {})
@@ -66,6 +71,25 @@
     const savedOutputs = payload.ui?.[state.kind]?.output_requests;
     state.outputRequestsExplicit = Array.isArray(savedOutputs);
     state.outputRequests = Array.isArray(savedOutputs) ? [...savedOutputs] : [];
+    restoreTemporaryObjects(state);
+  }
+
+  function restoreTemporaryObjects(state) {
+    const saved = state.savedTemporaryObjects || {};
+    const copy = key => Array.isArray(saved[key]) ? structuredClone(saved[key]) : [];
+    state.transientFactorSources = copy("factor_sources");
+    state.transientFactorFamilies = copy("factor_families");
+    state.transientStrategySources = copy("strategy_sources");
+    state.strategySpecs = copy("strategy_specs");
+    state.strategyInspections = copy("strategy_inspections");
+    state.runInputDependencies = copy("run_input_dependencies");
+    if (!state.values) return;
+    state.values.factor_candidates = mergeByID(
+      state.values.factor_candidates || [], copy("factors"),
+    );
+    state.values.category_candidates = mergeByID(
+      state.values.category_candidates || [], copy("categories"),
+    );
   }
 
   function restoreWorkspace(state) {
@@ -90,6 +114,6 @@
   window.FTTestState = Object.freeze({
     applyWorkspaceConfiguration, initializeInputState, lazyState,
     mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
-    seedSavedCatalogs,
+    restoreTemporaryObjects, seedSavedCatalogs,
   });
 })();
