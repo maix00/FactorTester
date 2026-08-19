@@ -73,6 +73,60 @@
     return P.responseValue(payload);
   }
 
+  function itemText(item) {
+    const content = item?.content;
+    if (Array.isArray(content)) {
+      return content.map(part => typeof part === "string"
+        ? part
+        : String(part?.text || part?.value || "")).join("");
+    }
+    return String(item?.text || item?.message || item?.output_text || "");
+  }
+
+  function itemKey(item) {
+    return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
+  }
+
+  function appendUniqueHistoryItems(state, items) {
+    const keys = new Set(state.items.map(itemKey));
+    for (const item of items) {
+      const key = itemKey(item);
+      if (!key.endsWith(":")) {
+        if (keys.has(key)) continue;
+        state.items.push(item);
+        keys.add(key);
+      }
+    }
+  }
+
+  async function reconcileThreadHistory(state, controller) {
+    const payload = await rpc(state, "thread/resume", {
+      threadId: state.threadID,
+    });
+    const value = P.responseValue(payload) || {};
+    const thread = value.thread || value;
+    const history = P.historyItems(state, thread);
+    const assistant = [...history].reverse().find(item => {
+      const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
+      return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type)
+        && Boolean(itemText(item));
+    });
+    // SSE is the fast path.  If it missed a delta or the provider emits a
+    // different event name, recover the authoritative text from the durable
+    // provider thread before closing the browser stream.
+    if (assistant) appendAssistantText(state, controller, itemText(assistant));
+    appendUniqueHistoryItems(state, history);
+    state.threadTitle = String(
+      thread.name || thread.title || state.threadTitle || "",
+    ).trim();
+    state.createdAt = P.historyTimestamp(
+      thread.createdAt || thread.created_at,
+      state.createdAt,
+    );
+    state.restored = true;
+    return history;
+  }
+
   function syncThread(state, payload) {
     const value = P.responseValue(payload) || {};
     const thread = value.thread || value;
@@ -305,9 +359,19 @@
           message: "Agent event stream did not complete",
         });
       }
+      if (!signal.aborted) {
+        try {
+          await reconcileThreadHistory(state, controller);
+        } catch (_) {
+          // Keep a successfully streamed response visible even if the
+          // post-turn history reconciliation is temporarily unavailable.
+        }
+      }
       if (state.assistant && !signal.aborted) {
         const item = P.assistantItem(state, state.assistant.text || "");
-        state.items.push(item);
+        if (!state.items.some(existing => itemKey(existing) === itemKey(item))) {
+          state.items.push(item);
+        }
         writeEvent(controller, {
           type: "assistant_message.content_part.done",
           content_index: 0, content: item.content[0],
