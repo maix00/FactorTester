@@ -678,10 +678,6 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert ".factor-role-child-row > span:first-child" in styles
     assert ".factor-candidate-child-section .factor-role-child-row" in styles
     assert ".test-factor-candidate-heading-row { border-top:" not in styles
-    assert (
-        ".test-factor-candidate-sources > .test-factor-candidate-heading-row "
-        "{ border-bottom: 0; }"
-    ) in styles
     assert ".test-setting-row:last-child { border-bottom: 0; }" not in styles
     assert ".test-setting-row {" in styles
     assert "border-bottom: 1px solid var(--line);" in styles

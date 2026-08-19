@@ -101,7 +101,6 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-factor-family-row { min-width: 0; }
 .test-factor-candidate-sources { display: grid; gap: 0; min-width: 0; }
 .test-factor-candidate-sources > .test-setting-row { min-width: 0; }
-.test-factor-candidate-sources > .test-factor-candidate-heading-row { border-bottom: 0; }
 .test-factor-candidate-heading-row .test-field-row-control { min-width: 0; }
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row > span { display: grid; gap: 2px; min-width: 0; }
