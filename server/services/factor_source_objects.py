@@ -140,6 +140,7 @@ def hydrate_source_free_entries(
     entries: Iterable[dict[str, Any]],
     *,
     owner: str,
+    allowed_object_ids: Iterable[str] = (),
     database: str | Path = CACHE_DB_PATH,
 ) -> list[dict[str, Any]]:
     """Resolve source-free factor objects from the executor's local store."""
@@ -150,6 +151,10 @@ def hydrate_source_free_entries(
 
     store = FactorSourceStore(database=database)
     result: list[dict[str, Any]] = []
+    delegated_objects = {
+        str(value or "").strip() for value in allowed_object_ids
+        if str(value or "").strip()
+    }
     for item in values:
         if item.get("source_code") is not None:
             result.append(item)
@@ -161,7 +166,10 @@ def hydrate_source_free_entries(
         if object_kind != "factor_source" or not object_id:
             raise ValueError("source-free factor object reference is invalid")
         source_owner, _factor_id = split_owner_qualified_factor_family(object_id)
-        if source_owner not in {"public", str(owner or "").strip()}:
+        if (
+            source_owner not in {"public", str(owner or "").strip()}
+            and object_id not in delegated_objects
+        ):
             raise PermissionError("factor source object owner does not match Run")
         source = store.source(object_id)
         encoded = source.encode("utf-8")

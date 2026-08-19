@@ -461,6 +461,39 @@ def test_factor_source_object_round_trip_and_source_free_context(tmp_path) -> No
     ] == digest
 
 
+def test_source_free_hydration_allows_an_exact_delegated_runspec_object(
+    tmp_path,
+) -> None:
+    database = tmp_path / "manager.sqlite"
+    object_id = "child:RemoteDemo"
+    source = "class RemoteDemo:\n    pass\n"
+    raw = source.encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    source_path = tmp_path / "source.py"
+    source_path.write_bytes(raw)
+    FactorSourceStore(database=database).store_from_file(
+        object_id, source_path, principal="child",
+        expected_size=len(raw), expected_sha256=digest,
+    )
+    entry = {
+        "canonical_family_ref": object_id,
+        "object_kind": "factor_source",
+        "object_id": object_id,
+        "source_kind": "custom",
+        "source_owner": "child",
+        "factor_id": "RemoteDemo",
+        "source_sha256": digest,
+        "source_bytes": len(raw),
+    }
+
+    hydrated = hydrate_source_free_entries(
+        [entry], owner="parent", allowed_object_ids={object_id},
+        database=database,
+    )
+
+    assert hydrated[0]["source_code"] == source
+
+
 def test_transient_factor_source_transfer_manifest_adds_canonical_identity() -> None:
     source = "class TransientDemo:\n    pass\n"
     digest = hashlib.sha256(source.encode()).hexdigest()

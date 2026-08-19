@@ -216,6 +216,7 @@ def validate_context_sources(prepared: dict[str, Any], *, owner: str) -> None:
     portable = validate_entries(hydrate_source_free_entries(
         prepared.get("portable_factor_sources") or [],
         owner=owner,
+        allowed_object_ids=expected,
     ))
     if len(transient) + len(portable) > MAX_FILES:
         raise ValueError("combined factor source bundle has too many files")
