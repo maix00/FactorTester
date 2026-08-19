@@ -134,11 +134,26 @@
       || String(params?.id || params?.thread?.id || "").trim();
   }
 
+  function readOnlyText(value) {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(readOnlyText).join("");
+    if (!value || typeof value !== "object") return "";
+    for (const key of ["text", "value", "output_text", "content", "parts", "message"]) {
+      const text = readOnlyText(value[key]);
+      if (text) return text;
+    }
+    return "";
+  }
+
   function readOnlyItem(profileKey, conversationID, item) {
-    const role = String(item?.role || "").toLowerCase() === "assistant"
+    const role = /^(assistant|assistant_message|agent_message)$/i.test(
+      String(item?.role || item?.type || item?.item_type || "").trim(),
+    )
       ? "assistant_message" : "user_message";
     const created = item?.created_at || new Date().toISOString();
-    const text = String(item?.text || "");
+    const text = readOnlyText(
+      item?.text ?? item?.content ?? item?.message ?? item?.output_text,
+    );
     return {
       id: String(item?.id || `item-${Math.random().toString(16).slice(2)}`),
       type: role,

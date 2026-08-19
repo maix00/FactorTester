@@ -79,6 +79,16 @@
       },
     });
     host.replaceChildren(chat);
+    if (options.readOnly) {
+      const composerNote = document.createElement("div");
+      composerNote.className = "profile-chatkit-readonly-composer";
+      composerNote.setAttribute("role", "note");
+      composerNote.setAttribute("aria-live", "polite");
+      composerNote.textContent = context.t(
+        "只读会话：可以查看历史消息，但不能发送问题。",
+      );
+      host.append(composerNote);
+    }
     return {adapter, chat};
   }
 
