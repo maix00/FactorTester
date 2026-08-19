@@ -347,6 +347,18 @@ const strategyScopedBacktest = {
     && /offline/.test(item.message)),
   "RunSpec preview failures must expose structured backend diagnostics");
 
+  const refreshDropsBatchState = () => { failingState.testRunBatch = []; };
+  notices.length = 0;
+  const refreshedFailureHeader = batch.headerActions(
+    failingContext, failingState, refreshDropsBatchState,
+  );
+  refreshedFailureHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(notices.some(item => item.isError
+    && /preview endpoint unavailable/.test(item.message)
+    && /required source is unavailable/.test(item.message)),
+  "preview diagnostics must survive a render that rebuilds batch state");
+
   const failedRunHeader = batch.headerActions(failingContext, failingState, () => {});
   failedRunHeader[1].listeners.click();
   assert.equal(failedRunHeader[1].disabled, true,
