@@ -485,5 +485,35 @@ class AgentProfileService:
             ),
         }
 
+    def pause(
+        self,
+        principal: str,
+        claim_id: str,
+        *,
+        agent_id: str = "",
+    ) -> dict[str, Any]:
+        """Stop a server Agent while retaining its Profile ownership."""
+        return {
+            "paused": self.runtime_store.pause(
+                principal,
+                claim_id,
+                agent_id=agent_id,
+            ),
+        }
+
+    def pause_server_agent(self, principal: str, profile_id: str) -> dict[str, Any]:
+        """Pause the claim owned by a Manager-hosted Profile Agent."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            return {"paused": False}
+        claim = self.runtime_store.active_claim(principal, profile_id)
+        if claim is None:
+            return {"paused": False}
+        return self.pause(
+            principal,
+            str(claim["claim_id"]),
+            agent_id=str(claim["agent_id"]),
+        )
+
     def claims(self, principal: str) -> list[dict[str, Any]]:
         return [self._public_claim(item) or {} for item in self.runtime_store.claims(principal)]

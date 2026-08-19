@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import io
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -223,11 +224,22 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     supervisor = AgentAppServerSupervisor(
         service,
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        heartbeat_interval=0.1,
     )
 
     status = supervisor.start(PRINCIPAL, PROFILE_ID)
     assert status["ready"] is True
     assert status["running"] is True
+    initial_heartbeat = service.runtime_store.active_claim(
+        PRINCIPAL, PROFILE_ID,
+    )["last_heartbeat_at"]
+    deadline = time.monotonic() + 1.0
+    renewed_heartbeat = initial_heartbeat
+    while time.monotonic() < deadline and renewed_heartbeat <= initial_heartbeat:
+        time.sleep(0.02)
+        renewed = service.runtime_store.active_claim(PRINCIPAL, PROFILE_ID)
+        renewed_heartbeat = renewed["last_heartbeat_at"] if renewed else 0
+    assert renewed_heartbeat > initial_heartbeat
     response = supervisor.request(
         PRINCIPAL,
         PROFILE_ID,
@@ -275,6 +287,16 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     supervisor.stop(PRINCIPAL, PROFILE_ID)
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False
     assert claim["claim"]["agent_id"] == "agent-a"
+    stopped_claim = service.runtime_store.active_claim(PRINCIPAL, PROFILE_ID)
+    assert stopped_claim is not None
+    assert stopped_claim["status"] == "stopped"
+
+    restarted = supervisor.start(PRINCIPAL, PROFILE_ID)
+    assert restarted["ready"] is True
+    resumed_claim = service.runtime_store.active_claim(PRINCIPAL, PROFILE_ID)
+    assert resumed_claim is not None
+    assert resumed_claim["status"] == "claimed"
+    supervisor.stop(PRINCIPAL, PROFILE_ID)
 
 
 class _AppHandler(AgentAppServerRoutesMixin, AgentRoutesMixin):
