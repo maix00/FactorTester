@@ -201,10 +201,20 @@ class AccountDomainControlMixin:
                 (max(0, int(after_revision)), owner, owner, bounded),
             ).fetchall()
         entities = [self._account_domain_value(row) for row in rows]
-        next_revision = max(
+        row_revision = max(
             [max(0, int(after_revision))]
-            + [int(_row_value(head, "revision", 0, after_revision) or after_revision)]
             + [int(item.get("revision") or 0) for item in entities]
+        )
+        # A full page means more visible rows may remain. Advancing straight
+        # to the global head would permanently skip them. Only jump over the
+        # irrelevant tail once this query returned fewer than the limit.
+        next_revision = (
+            row_revision
+            if len(entities) >= bounded
+            else max(
+                row_revision,
+                int(_row_value(head, "revision", 0, after_revision) or after_revision),
+            )
         )
         return {"entities": entities, "next_revision": next_revision}
 

@@ -16,6 +16,7 @@ from server.manager.http.gateway import GatewayResponse
 from server.manager.http.responses import json_response
 from server.manager.services.test_authoring import TestAuthoringError
 from server.manager.services.factor_source_transfer import FactorSourceTransfer
+from server.manager.services.factor_source_hydration import FactorSourceHydrator
 from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
@@ -453,22 +454,9 @@ class ServiceSelectionRoutesMixin:
         self._prepared_factor_source_entries = source_entries
         self._staged_factor_source_targets = set()
         try:
-            try:
-                context = self.state.test_authoring.prepare_run_context(
-                    dict(value),
-                    owner=principal,
-                    source_free=True,
-                    storage_server_id=self.state.server_id,
-                    source_collector=source_entries.extend,
-                )
-            except TypeError as exc:
-                # Keep the injected test/legacy authoring seam usable while
-                # deployed Managers use the source-free object contract.
-                if "unexpected keyword" not in str(exc):
-                    raise
-                context = self.state.test_authoring.prepare_run_context(
-                    dict(value), owner=principal,
-                )
+            context = self._prepare_run_context_with_sources(
+                value, principal=principal, source_entries=source_entries,
+            )
         except TestAuthoringError as exc:
             json_response(
                 self,
@@ -490,6 +478,47 @@ class ServiceSelectionRoutesMixin:
             )
             return None
         return encoded
+
+    def _prepare_run_context_with_sources(
+        self,
+        value: dict[str, object],
+        *,
+        principal: str,
+        source_entries: list[dict[str, object]],
+    ) -> dict[str, object]:
+        """Hydrate only missing referenced sources, then freeze once more."""
+        attempted: set[str] = set()
+        while True:
+            try:
+                return self.state.test_authoring.prepare_run_context(
+                    dict(value),
+                    owner=principal,
+                    source_free=True,
+                    storage_server_id=self.state.server_id,
+                    source_collector=source_entries.extend,
+                )
+            except TypeError as exc:
+                if "unexpected keyword" not in str(exc):
+                    raise
+                return self.state.test_authoring.prepare_run_context(
+                    dict(value), owner=principal,
+                )
+            except TestAuthoringError as exc:
+                if str(exc.details.get("code") or "") != "factor_source_unavailable":
+                    raise
+                detail = str(exc.details.get("detail") or "")
+                match = re.search(
+                    r"Cannot load factor family source for ['\"]([^'\"]+)['\"]",
+                    detail,
+                )
+                factor_ref = str(match.group(1) if match else "").strip()
+                if not factor_ref or factor_ref in attempted:
+                    raise
+                attempted.add(factor_ref)
+                if not FactorSourceHydrator(self.state).hydrate(
+                    factor_ref, principal=principal,
+                ):
+                    raise
 
     def _capable_service_route(
         self,
