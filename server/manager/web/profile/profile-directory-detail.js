@@ -62,47 +62,17 @@
     return element;
   }
 
-  function sharingControl(context, profile) {
-    if (profile.capabilities?.edit !== true) {
-      return note(context, profile.conversation_sharing
-        ? "已允许直属上级查看该研究身份的只读会话。"
-        : "该研究身份尚未向直属上级公开会话。只读会话不会获得文件修改权限。");
+  function conversationAccessNote(context, profile) {
+    if (profile.read_only && profile.capabilities?.view_conversations) {
+      return note(
+        context,
+        "直属下级研究身份的 Agent 会话默认对直属上级只读可见；不会获得文件修改或 Agent 控制权限。",
+      );
     }
-    const root = document.createElement("div");
-    root.className = "settings-row profile-conversation-sharing";
-    const label = document.createElement("label");
-    label.textContent = context.t("向直属上级公开 Agent 对话");
-    const control = document.createElement("div");
-    control.className = "settings-value";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = Boolean(profile.conversation_sharing);
-    checkbox.setAttribute("aria-label", context.t("向直属上级公开 Agent 对话"));
-    const status = document.createElement("span");
-    status.className = "settings-muted";
-    checkbox.addEventListener("change", async () => {
-      checkbox.disabled = true;
-      status.textContent = context.t("正在保存…");
-      try {
-        const payload = await context.api("/api/client/profile-directory/conversation-sharing", {
-          method: "POST",
-          body: JSON.stringify({
-            profile_id: profile.profile_id,
-            enabled: checkbox.checked,
-          }),
-        });
-        profile.conversation_sharing = Boolean(payload.conversation_sharing);
-        status.textContent = context.t("已保存");
-      } catch (error) {
-        checkbox.checked = !checkbox.checked;
-        status.textContent = error.message || context.t("保存失败");
-      } finally {
-        checkbox.disabled = false;
-      }
-    });
-    control.append(checkbox, status);
-    root.append(label, control);
-    return root;
+    if (profile.capabilities?.edit === true) {
+      return note(context, "当前研究身份可以管理自己的 Agent 会话。直属上级查看时始终为只读。");
+    }
+    return note(context, "该研究身份及其 Agent 会话对当前用户不可见。");
   }
 
   function overview(context, profile) {
@@ -114,6 +84,8 @@
       owner_ref: profile.owner_ref,
       owner_alias: profile.owner_alias,
       source_server_id: profile.source_server_id,
+      source_server_ids: Array.isArray(profile.source_server_ids)
+        ? profile.source_server_ids.join("\n") : profile.source_server_id,
       runtime_kind: profile.runtime_kind,
       binding_status: profile.binding_status,
       agent_status: profile.agent_status,
@@ -121,12 +93,7 @@
       conversation_count: profile.conversation_count,
       read_only: profile.read_only ? context.t("是") : context.t("否"),
     }));
-    root.append(sharingControl(context, profile));
-    if (!profile.capabilities?.view_conversations) {
-      root.append(note(context, "该研究身份没有向当前用户公开 Agent 会话。"));
-    } else if (profile.read_only) {
-      root.append(note(context, "该研究身份及其会话只能查看，不能启动、停止、修改或删除 Agent。"));
-    }
+    root.append(conversationAccessNote(context, profile));
     return root;
   }
 
@@ -148,8 +115,9 @@
   function sessionMeta(context, profile) {
     return fields(context, {
       conversation_count: profile.conversation_count,
-      conversation_sharing: profile.conversation_sharing
-        ? context.t("已向直属上级公开") : context.t("未公开"),
+      conversation_access: profile.capabilities?.view_conversations
+        ? (profile.read_only ? context.t("直属上级只读可见") : context.t("本人可管理"))
+        : context.t("不可见"),
       access_mode: profile.read_only ? context.t("只读") : context.t("可管理"),
     });
   }
@@ -161,7 +129,7 @@
     if (!profile.capabilities?.view_conversations) {
       root.append(FTUI.empty(
         context.t("会话不可见"),
-        context.t("该研究身份没有允许当前用户查看会话。"),
+        context.t("该研究身份的 Agent 会话对当前用户不可见。"),
       ));
       return root;
     }
@@ -240,6 +208,12 @@
     );
     context.updateActiveTab?.({title: profile.display_name || profile.profile_id});
     context.toolbar.replaceChildren();
+    const sectionTabs = window.FTResearch?.sectionTabs?.(
+      context,
+      "profiles",
+      new URLSearchParams(location.search).get("presentation") === "embedded",
+    );
+    if (sectionTabs) context.toolbar.append(sectionTabs);
     context.toolbar.append(context.button(
       "‹", () => context.navigate("/research?section=profiles"),
       context.t("返回研究身份"),

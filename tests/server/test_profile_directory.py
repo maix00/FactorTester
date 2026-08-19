@@ -62,6 +62,17 @@ class FakeAgentProfiles:
         return self.store.items(principal, profile_id, conversation_id) if self.store else []
 
 
+class FakeFederatedProfiles:
+    def __init__(self, profiles):
+        self._profiles = profiles
+
+    def profile_directory(self, owners):
+        return [
+            dict(item) for item in self._profiles
+            if item.get("owner_ref") in owners
+        ]
+
+
 def _profile(owner, profile_id, *, visibility="private"):
     return {
         "profile_id": profile_id,
@@ -71,7 +82,7 @@ def _profile(owner, profile_id, *, visibility="private"):
     }
 
 
-def _service(monkeypatch, client, agent, *, server_id="local-1"):
+def _service(monkeypatch, client, agent, *, server_id="local-1", federated=None):
     monkeypatch.setattr(directory_module, "load_accounts", lambda: list(ACCOUNTS.values()))
     monkeypatch.setattr(
         directory_module,
@@ -95,6 +106,7 @@ def _service(monkeypatch, client, agent, *, server_id="local-1"):
         server_id=server_id,
         client_state=client,
         agent_profiles=agent,
+        federated_public_data=federated,
     )
 
 
@@ -136,7 +148,47 @@ def test_servers_scope_hides_private_profiles_for_regular_users(monkeypatch):
     assert next(item for item in result["items"] if item["profile_id"] == "public-child")["read_only"] is True
 
 
-def test_conversation_visibility_requires_direct_parent_sharing(monkeypatch, tmp_path):
+def test_subordinate_directory_merges_mirrored_profile_projections(monkeypatch):
+    parent = "GTHT@parent@100000000001"
+    child = "GTHT@child@100000000002"
+    client = FakeClientState({
+        child: [_profile(child, "child-profile")],
+    })
+    remote = {
+        **_profile(child, "child-profile"),
+        "owner_ref": child,
+        "source_server_id": "remote-main",
+        "runtime": {
+            "runtime_kind": "server",
+            "executor_id": "remote-main",
+            "configured": True,
+        },
+        "active_claim": {"agent_id": "agent-remote", "status": "stopped"},
+        "conversation_count": 3,
+    }
+    service = _service(
+        monkeypatch,
+        client,
+        FakeAgentProfiles(),
+        federated=FakeFederatedProfiles([
+            {**_profile(child, "child-profile"), "owner_ref": child, "source_server_id": "local-1"},
+            remote,
+        ]),
+    )
+
+    result = service.directory(parent, scope="subordinates")
+
+    assert result["total"] == 1
+    item = result["items"][0]
+    assert item["owner_ref"] == child
+    assert item["source_server_ids"] == ["local-1", "remote-main"]
+    assert item["source_server_id"] == "remote-main"
+    assert item["profile_key"] == f"remote-main::{child}::child-profile"
+    assert item["agent_id"] == "agent-remote"
+    assert item["conversation_count"] == 3
+
+
+def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp_path):
     parent = "GTHT@parent@100000000001"
     child = "GTHT@child@100000000002"
     store = AgentConversationStore(tmp_path / "manager.sqlite")
@@ -152,7 +204,7 @@ def test_conversation_visibility_requires_direct_parent_sharing(monkeypatch, tmp
     agent = FakeAgentProfiles(store)
     service = _service(monkeypatch, client, agent)
 
-    assert not service.can_view_conversations(parent, child, {"conversation_sharing": False})
+    assert service.can_view_conversations(parent, child, {"conversation_sharing": False})
     store.set_parent_sharing(child, "child-profile", True)
     assert service.can_view_conversations(parent, child, {"conversation_sharing": True})
     items = service.conversation_items(

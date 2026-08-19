@@ -208,7 +208,7 @@
     const heading = document.createElement("h2");
     heading.textContent = context.t("研究图");
     const note = document.createElement("p");
-    note.className = "secondary";
+    note.className = "secondary research-graph-list-note";
     note.textContent = context.t("服务器版本与用户上传的 YAML 统一列出；点击行进入研究图详情");
     title.append(heading, note);
     const input = document.createElement("input");
