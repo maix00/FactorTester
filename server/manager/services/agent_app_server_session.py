@@ -140,6 +140,25 @@ class AgentAppServerSession:
             except AgentAppServerProcessError as exc:
                 raise AgentAppServerError(str(exc)) from exc
 
+    def delete_thread(self, thread_id: str) -> dict[str, Any]:
+        """Delete a thread only after the supervisor verified its ownership."""
+        identifier = str(thread_id or "").strip()
+        if not identifier:
+            raise AgentAppServerError("thread_id is required")
+        with self._lock:
+            if not self.ready or self.process is None or not self.process.is_running():
+                raise AgentAppServerError("Profile Agent is not running")
+            try:
+                response = self.process.request(
+                    "thread/delete",
+                    {"threadId": identifier},
+                    timeout=20,
+                )
+            except AgentAppServerProcessError as exc:
+                raise AgentAppServerError(str(exc)) from exc
+            self._error(response, "thread/delete")
+            return response
+
     def events(self, after: int = 0) -> list[dict[str, Any]]:
         process = self.process
         return [] if process is None else process.events(after)

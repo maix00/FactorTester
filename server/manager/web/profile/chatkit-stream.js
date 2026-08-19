@@ -1,0 +1,276 @@
+(() => {
+  const P = window.FTProfileChatKitProtocol;
+
+  function closeSource(state) {
+    state.source?.close();
+    state.source = null;
+  }
+
+  function writeEvent(controller, payload) {
+    controller.enqueue(new TextEncoder().encode(
+      `data: ${JSON.stringify(payload)}\n\n`,
+    ));
+  }
+
+  function writeError(controller, error) {
+    writeEvent(controller, {
+      type: "error",
+      code: "agent_request_failed",
+      message: error?.message || String(error),
+    });
+  }
+
+  function ensureAssistant(state, controller) {
+    if (state.assistant) return state.assistant;
+    state.assistant = {
+      id: P.randomID("assistant"),
+      created_at: new Date().toISOString(),
+      text: "",
+    };
+    writeEvent(controller, {
+      type: "thread.item.added",
+      item: {...P.assistantItem(state), content: []},
+    });
+    writeEvent(controller, {
+      type: "assistant_message.content_part.added",
+      content_index: 0,
+      content: {type: "output_text", text: "", annotations: []},
+    });
+    return state.assistant;
+  }
+
+  function appendAssistantText(state, controller, text) {
+    if (!text) return;
+    const assistant = ensureAssistant(state, controller);
+    const current = assistant.text || "";
+    if (text === current) return;
+    if (text.startsWith(current)) {
+      const delta = text.slice(current.length);
+      assistant.text = text;
+      if (delta) writeEvent(controller, {
+        type: "assistant_message.content_part.text_delta",
+        content_index: 0,
+        delta,
+      });
+      return;
+    }
+    if (text.length >= current.length) assistant.text = text;
+  }
+
+  async function rpc(state, method, params) {
+    const payload = await state.context.api("/api/client/profile-agent/rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        profile_id: state.profileID,
+        conversation_id: state.conversationID,
+        method,
+        params,
+      }),
+    });
+    if (payload?.success === false) {
+      throw new Error(payload.error || "Profile Agent request failed");
+    }
+    return P.responseValue(payload);
+  }
+
+  function syncThread(state, payload) {
+    const value = P.responseValue(payload) || {};
+    const thread = value.thread || value;
+    const identifier = P.threadIDFrom(payload);
+    if (!identifier) throw new Error("Profile Agent did not return a thread");
+    state.threadID = identifier;
+    state.threadTitle = String(
+      thread.name || thread.title || state.threadTitle || "",
+    ).trim();
+    state.createdAt = P.historyTimestamp(
+      thread.createdAt || thread.created_at,
+      state.createdAt,
+    );
+    state.items = P.historyItems(state, thread);
+    state.restored = true;
+    state.conversation = {
+      ...state.conversation,
+      provider_thread_id: identifier,
+      title: state.threadTitle,
+    };
+    return identifier;
+  }
+
+  async function restoreThread(state) {
+    if (state.restored && state.threadID) return state.threadID;
+    const providerThreadID = String(
+      state.conversation?.provider_thread_id || state.threadID || "",
+    ).trim();
+    if (!providerThreadID) return "";
+    if (!state.threadPromise) {
+      state.threadPromise = rpc(state, "thread/resume", {
+        threadId: providerThreadID,
+      }).then(payload => syncThread(state, payload))
+        .finally(() => { state.threadPromise = null; });
+    }
+    return state.threadPromise;
+  }
+
+  async function ensureThread(state) {
+    if (state.threadID && state.restored) return state.threadID;
+    if (state.conversation?.provider_thread_id) return restoreThread(state);
+    if (!state.threadPromise) {
+      state.threadPromise = rpc(state, "thread/start", {}).then(payload => {
+        return syncThread(state, payload);
+      }).finally(() => { state.threadPromise = null; });
+    }
+    return state.threadPromise;
+  }
+
+  function waitForEvents(state, controller, signal) {
+    return new Promise(resolve => {
+      if (signal.aborted) {
+        resolve("aborted");
+        return;
+      }
+      const url = `/api/client/profile-agent/events?profile_id=${
+        encodeURIComponent(state.profileID)}&after=${state.cursor}`;
+      const source = new EventSource(url);
+      state.source = source;
+      let settled = false;
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        source.close();
+        if (state.source === source) state.source = null;
+        signal.removeEventListener("abort", abort);
+        resolve(result);
+      };
+      const abort = () => finish("aborted");
+      signal.addEventListener("abort", abort, {once: true});
+      source.onmessage = event => {
+        if (event.lastEventId) state.cursor = Number(event.lastEventId) || state.cursor;
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (_) {
+          return;
+        }
+        const method = P.rawMethod(payload);
+        const delta = P.rawDelta(payload);
+        if (method === "app_server_exit" || payload?.type === "app_server_exit") {
+          if (state.assistant?.text) finish("done");
+          else {
+            writeEvent(controller, {
+              type: "error",
+              code: "agent_process_exited",
+              message: "Profile Agent exited before producing a response",
+            });
+            finish("error");
+          }
+          return;
+        }
+        if (payload?.error || /error/i.test(method) && !delta) {
+          writeEvent(controller, {
+            type: "error", code: "agent_error", message: P.errorMessage(payload),
+          });
+          finish("error");
+          return;
+        }
+        const completed = P.completedText(payload);
+        if (completed) appendAssistantText(state, controller, completed);
+        if (delta && /(agent.?message|assistant|delta|content)/i.test(method)) {
+          appendAssistantText(
+            state,
+            controller,
+            `${state.assistant?.text || ""}${delta}`,
+          );
+        }
+        if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
+          const completion = P.turnCompletion(payload);
+          if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
+            writeEvent(controller, {
+              type: "error",
+              code: "agent_turn_failed",
+              message: P.errorMessage(completion.error || payload),
+            });
+            finish("error");
+            return;
+          }
+          finish("done");
+          return;
+        }
+        if (P.terminalMethod(method)) finish("done");
+      };
+      source.onerror = () => finish("retry");
+    });
+  }
+
+  async function streamTurn(
+    controller,
+    state,
+    profileState,
+    params,
+    signal,
+    updateConversation,
+  ) {
+    const text = P.extractInputText(params);
+    if (!text) throw new Error("A non-empty text message is required");
+    if (state.active) throw new Error("The Profile Agent is already processing a message");
+    state.active = true;
+    const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
+    state.assistant = null;
+    state.turnID = "";
+    try {
+      await ensureThread(state);
+      if (!hadThread) writeEvent(controller, {
+        type: "thread.created", thread: P.threadObject(state),
+      });
+      const user = P.userItem(state, text);
+      state.items.push(user);
+      writeEvent(controller, {type: "thread.item.added", item: user});
+      writeEvent(controller, {type: "thread.item.done", item: user});
+      writeEvent(controller, {
+        type: "stream_options", stream_options: {allow_cancel: true},
+      });
+      const response = await rpc(state, "turn/start", {
+        threadId: state.threadID,
+        input: [{type: "text", text}],
+        skill_ids: state.skills,
+      });
+      state.turnID = P.threadIDFrom(response);
+      let result = "retry";
+      let retries = 0;
+      while (result === "retry" && !signal.aborted && retries < 8) {
+        result = await waitForEvents(state, controller, signal);
+        retries += 1;
+      }
+      if (result === "retry" && !signal.aborted) {
+        writeEvent(controller, {
+          type: "error", code: "agent_events_timeout",
+          message: "Agent event stream did not complete",
+        });
+      }
+      if (state.assistant && !signal.aborted) {
+        const item = P.assistantItem(state, state.assistant.text || "");
+        state.items.push(item);
+        writeEvent(controller, {
+          type: "assistant_message.content_part.done",
+          content_index: 0, content: item.content[0],
+        });
+        writeEvent(controller, {type: "thread.item.done", item});
+      }
+      await updateConversation(profileState, state, {
+        title: state.threadTitle || text.slice(0, 80),
+        preview: text,
+      }).catch(() => {});
+    } finally {
+      closeSource(state);
+      state.active = false;
+      state.assistant = null;
+    }
+  }
+
+  window.FTProfileChatKitStream = Object.freeze({
+    closeSource,
+    restoreThread,
+    rpc,
+    streamTurn,
+    writeError,
+  });
+})();

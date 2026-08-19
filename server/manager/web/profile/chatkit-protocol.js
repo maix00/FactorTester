@@ -20,14 +20,21 @@
     return {data, has_more: false, after: null};
   }
 
-  function threadObject(state) {
+  function threadObject(state, options = {}) {
+    const includeItems = options.includeItems !== false;
     return {
-      id: state.threadID,
+      // ChatKit sees the Manager-owned conversation id.  The provider thread
+      // id remains an internal binding and is never used as the browser's
+      // history key.
+      id: state.conversationID,
       title: state.threadTitle || null,
       created_at: state.createdAt,
       status: {type: "active"},
-      metadata: {profile_id: state.profileID},
-      items: page(state.items),
+      metadata: {
+        profile_id: state.profileID,
+        conversation_id: state.conversationID,
+      },
+      items: includeItems ? page(state.items) : page([]),
     };
   }
 
@@ -35,7 +42,7 @@
     return {
       id: randomID("user"),
       type: "user_message",
-      thread_id: state.threadID,
+      thread_id: state.conversationID,
       created_at: new Date().toISOString(),
       content: [{type: "input_text", text}],
       attachments: [],
@@ -52,7 +59,7 @@
     return {
       id: assistant.id,
       type: "assistant_message",
-      thread_id: state.threadID,
+      thread_id: state.conversationID,
       created_at: assistant.created_at,
       content: [{type: "output_text", text, annotations: []}],
     };
@@ -164,6 +171,62 @@
     ).trim();
   }
 
+  function historyTimestamp(value, fallback) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return new Date(value < 100000000000 ? value * 1000 : value).toISOString();
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+    }
+    return fallback;
+  }
+
+  function historyItems(state, thread) {
+    const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+    const result = [];
+    for (const turn of turns) {
+      const items = Array.isArray(turn?.items) ? turn.items : [];
+      for (const item of items) {
+        const rawType = String(item?.type || item?.kind || "")
+          .replace(/[-_]/g, "").toLowerCase();
+        const id = String(item?.id || randomID(rawType || "history"));
+        const createdAt = historyTimestamp(
+          item?.createdAt || item?.created_at || turn?.startedAt || turn?.started_at,
+          state.createdAt,
+        );
+        const threadID = state.threadID;
+        if (rawType === "usermessage" || rawType === "inputmessage") {
+          const text = textValue(item?.content ?? item?.text ?? item?.message);
+          if (!text) continue;
+          result.push({
+            id,
+            type: "user_message",
+            thread_id: threadID,
+            created_at: createdAt,
+            content: [{type: "input_text", text}],
+            attachments: [],
+            quoted_text: null,
+            inference_options: {},
+          });
+          continue;
+        }
+        if (rawType === "agentmessage" || rawType === "assistantmessage") {
+          const text = textValue(item?.text ?? item?.content ?? item?.message);
+          if (!text) continue;
+          result.push({
+            id,
+            type: "assistant_message",
+            thread_id: threadID,
+            created_at: createdAt,
+            content: [{type: "output_text", text, annotations: []}],
+          });
+        }
+      }
+    }
+    return result;
+  }
+
   function extractInputText(params) {
     const input = params?.input;
     if (typeof input === "string") return input.trim();
@@ -202,6 +265,8 @@
     completedText,
     errorMessage,
     extractInputText,
+    historyTimestamp,
+    historyItems,
     jsonResponse,
     operation,
     page,

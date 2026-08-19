@@ -330,6 +330,8 @@
     "profile": [
       "profile/agent-skills.js",
       "profile/chatkit-protocol.js",
+      "profile/chatkit-conversations.js",
+      "profile/chatkit-stream.js",
       "profile/chatkit-adapter.js",
       "profile/agent-chat.js",
       "profile/workspace-browser.js",
@@ -504,6 +506,8 @@
     "workbench/tests.js",
     "profile/agent-skills.js",
     "profile/chatkit-protocol.js",
+    "profile/chatkit-conversations.js",
+    "profile/chatkit-stream.js",
     "profile/chatkit-adapter.js",
     "profile/agent-chat.js",
     "profile/workspace-browser.js",
