@@ -83,8 +83,9 @@ services:
       # separate Compose project and explicitly prohibits hot reload.
       FACTORTESTER_HOT_RELOAD: ${FACTORTESTER_HOT_RELOAD:-1}
       # Unix sockets cannot be created reliably on Docker Desktop bind mounts.
-      # They are ephemeral process-control endpoints and belong on /run.
-      FACTORTESTER_JOB_DAEMON_RUNTIME_DIR: /run/factortester/job-daemons
+      # They are ephemeral process-control endpoints and belong on the
+      # container-native temporary filesystem, not a host bind mount.
+      FACTORTESTER_JOB_DAEMON_RUNTIME_DIR: /tmp/factortester-job-daemons
       FACTORTESTER_FEDERATION_CA_FILE: /run/trust/federation-ca.crt
       FACTORTESTER_LAN_ADDRESS_STATE_FILE: ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/host-lan-addresses.json
       FACTORTESTER_LAN_ADDRESS_MAX_AGE_SECONDS: ${FACTORTESTER_LAN_ADDRESS_MAX_AGE_SECONDS:-20}
