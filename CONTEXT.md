@@ -67,6 +67,13 @@ IC 的一个核心测试单元由产品范围、冻结因子、前瞻收益期�
 
 可交易的期货合约（如某个商品期货品种）。定义在 `sources/LocalCNFutures/CNFutures.py`。品种被组织为 `CategoryTree`（板块 × 夜盘时段）。每个品种对每种可用 `DataFreq` 有一个 `DataMeta` 实例（如 `product.MIN1`、`product.DAY1`）。
 
+### 冻结产品范围 (Frozen Product Scope)
+
+一次 Run 使用的产品选择属于 configuration 的共享不可变对象。分析与策略只引用
+selection ID；`shared.product_selections` 保存唯一的规范路径，现场产品分类保存完整
+定义，已有分类保存稳定元数据与定义哈希。关联数据源只冻结身份、频率、列映射、
+命名方案与能力语义，不冻结在线状态或完整产品目录。完整决策见 ADR-116。
+
 ### 行情数据源声明 (Market Data Source Declaration)
 
 每个 `sources/<Source>` 模块负责声明自己的可见运行位置、支持产品、数据形态、采样方式、频率、市场深度、交付方式、当前可用性和执行适配器。Manager、客户端目录、可用性审计与测试配置只投影这份声明，不按数据源名称猜测能力，也不在界面或服务层为某个供应商硬编码 MIN1、DAY1、L2 或实时/历史语义。历史 K 线 provider 与实时 connector 可以属于同一声明，但只有具备历史执行适配器的成员才能进入历史 IC/回测数据源选择器。
