@@ -106,4 +106,23 @@ assert.equal(tabs.children[0].getAttribute("aria-selected"), "true");
 tabs.children[1].listeners.click();
 assert.equal(tabs.children[1].getAttribute("aria-selected"), "true");
 assert.equal(loaded.length, 2, "each task tab must load its own RunSpec");
+
+const inlineDialog = view.openMany(context, [{
+  target: `runspec:sha256:${hash}`,
+  label: "预览任务",
+  value: {
+    run_spec_hash: hash,
+    run_spec_version: 2,
+    configuration_id: "preview-configuration",
+    configuration_revision: 1,
+    run_spec: {
+      workspace_id: "workspace-1",
+      analyses: ["backtest"],
+      configuration: {shared: {preview: true}},
+    },
+  },
+}]);
+assert.ok(inlineDialog, "inline preview should open the RunSpec overlay");
+assert.equal(loaded.length, 2,
+  "inline preview must not request a non-persisted RunSpec from the server");
 console.log("ok");

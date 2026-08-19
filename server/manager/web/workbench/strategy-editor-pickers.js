@@ -82,6 +82,11 @@
     };
     picker = FTTestObjectPicker.create(context, {
       title: context.t("因子"),
+      // The surrounding shared field row supplies the label.  Keeping the
+      // picker compact prevents a second title row inside the value column
+      // and places the create action beside the dropdown like the outer
+      // factor-source renderer.
+      compact: true,
       items: availableItems.map(item => {
         const alias = factorAlias(item);
         return {

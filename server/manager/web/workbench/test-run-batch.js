@@ -111,6 +111,7 @@
       return {
         target,
         serverID: item.serverID || "",
+        value: item.runSpecRecord || null,
         label: `${context.t("任务")} ${index + 1} · ${groupLabel}`,
         subtitle: item.jobID
           ? `${context.t("测试任务")} ${item.jobID}` : context.t("尚未提交"),

@@ -17,7 +17,65 @@
   };
 
   function groupIdentity(group) {
+    if (String(group?.id || "") === BACKTEST_TASK_ID) return BACKTEST_TASK_ID;
     return String(FTTestProducts.groupID(group) || "");
+  }
+
+  function groupLabel(group) {
+    if (String(group?.id || "") === BACKTEST_TASK_ID) {
+      return String(group.label || "回测任务");
+    }
+    return String(FTTestProducts.groupLabel(group) || group?.label || "");
+  }
+
+  function clone(value) {
+    if (value == null) return value;
+    if (typeof structuredClone === "function") return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function stableValue(value) {
+    if (value == null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(stableValue);
+    return Object.keys(value).sort().reduce((result, key) => {
+      if (typeof value[key] === "function" || value[key] === undefined) return result;
+      result[key] = stableValue(value[key]);
+      return result;
+    }, {});
+  }
+
+  function groupInput(group) {
+    if (!group || typeof group !== "object") return group || null;
+    return {
+      id: group.id || "",
+      product_path_selection_id: group.product_path_selection_id || "",
+      product_group_ref: group.product_group_ref || "",
+      product_path_selection: group.product_path_selection || null,
+      selected_paths: group.selected_paths || [],
+      paths: group.paths || [],
+    };
+  }
+
+  function inputFingerprint(state, group) {
+    const snapshot = {
+      kind: state?.kind || "",
+      factorRef: state?.factorRef || "",
+      groupRef: state?.groupRef || "",
+      groupRefs: state?.groupRefs || [],
+      values: state?.values || {},
+      runValues: state?.runValues || {},
+      outputRequests: state?.outputRequests || [],
+      transientFactorSources: state?.transientFactorSources || [],
+      transientStrategySources: state?.transientStrategySources || [],
+      strategySpecs: state?.strategySpecs || [],
+      settingsMountedTabs: state?.settingsMountedTabs || [],
+      group: groupInput(group),
+    };
+    // IC and factor-evaluation analysis is rebuilt per task from the group.
+    // Backtest analysis is user-authored and therefore belongs in the input
+    // identity used to decide whether a preview can be reused.
+    if (state?.kind === "backtest") snapshot.analysis = state.analysis || {};
+    return JSON.stringify(stableValue(snapshot));
   }
 
   function hasProductSelection(group) {
@@ -57,10 +115,12 @@
     state.testRunBatch = taskGroups(state).map(group => {
       const groupID = groupIdentity(group);
       return {
-        phase: "idle", runSpecHash: "", runID: "", jobID: "", port: 0,
+        phase: "idle", runSpecHash: "", runSpecRecord: null,
+        previewRunSpecHash: "", previewRequest: null, previewFingerprint: "",
+        runID: "", jobID: "", port: 0,
         serverID: "",
         error: "", ...prior.get(groupID), groupID,
-        groupLabel: FTTestProducts.groupLabel(group),
+        groupLabel: groupLabel(group),
       };
     });
     if (!state.testRunBatch.some(item => item.groupID === state.activeRunGroupID)) {
@@ -74,9 +134,19 @@
     return synchronize(state).find(item => item.groupID === groupID);
   }
 
-  function recordPreview(item, value) {
+  function recordPreview(item, value, request, fingerprint = "") {
+    const hash = runSpecHash(value);
+    if (!hash) throw new Error("运行配置预览响应缺少有效 RunSpec 哈希");
     item.phase = "frozen";
-    item.runSpecHash = String(value.run_spec_hash || "").replace(/^sha256:/, "");
+    item.runSpecHash = hash;
+    item.previewRunSpecHash = hash;
+    item.previewRequest = request ? clone(request) : null;
+    item.previewFingerprint = fingerprint;
+    // Preview endpoints deliberately do not create a durable ResearchRun.
+    // Keep the returned immutable projection with this task so the overlay
+    // can render it without asking the persistence endpoint for a row that
+    // does not exist yet.
+    item.runSpecRecord = previewRecord(value, hash);
     item.port = Number(value.port || item.port || 0);
     item.serverID = String(
       value.server_id || value.execution_server_id || item.serverID || "",
@@ -86,13 +156,91 @@
     return item;
   }
 
+  function previewMatches(item, state, group) {
+    return Boolean(
+      item?.phase === "frozen"
+      && item.previewRequest
+      && item.previewRunSpecHash
+      && item.previewFingerprint === inputFingerprint(state, group),
+    );
+  }
+
+  function invalidatePreview(item) {
+    if (!item) return item;
+    item.previewRunSpecHash = "";
+    item.previewRequest = null;
+    item.previewFingerprint = "";
+    item.runSpecHash = "";
+    item.runSpecRecord = null;
+    return item;
+  }
+
+  function runSpecHash(value) {
+    const candidates = [
+      value?.run_spec_hash,
+      value?.run?.run_spec_hash,
+      value?.run_spec?.run_spec_hash,
+      value?.report_projection?.run_spec_hash,
+      value?.report_projection?.run_spec?.run_spec_hash,
+      value?.report_projection?.run_spec?.target_ref,
+      value?.target_ref,
+    ];
+    for (const candidate of candidates) {
+      const match = String(candidate || "").match(
+        /(?:sha256:)?([a-f0-9]{64})$/i,
+      );
+      if (match) return match[1].toLowerCase();
+    }
+    return "";
+  }
+
+  function previewRecord(value, hash = runSpecHash(value)) {
+    const projection = value?.report_projection?.run_spec;
+    const runSpec = value?.run_spec || projection?.complete_parameters;
+    if (!runSpec || typeof runSpec !== "object" || Array.isArray(runSpec)) {
+      return null;
+    }
+    return {
+      run_spec_hash: hash,
+      run_spec_version: value?.run_spec_version
+        ?? projection?.run_spec_version ?? runSpec.run_spec_version ?? "",
+      configuration_id: value?.configuration_id
+        ?? runSpec.configuration_id ?? "",
+      configuration_revision: value?.configuration_revision
+        ?? runSpec.configuration_revision ?? "",
+      alias_zh: value?.alias_zh || projection?.alias_zh || "",
+      summary_zh: value?.summary_zh || projection?.summary_zh || "",
+      run_spec: runSpec,
+    };
+  }
+
+  function assertPreviewMatch(item, value) {
+    const expected = String(item?.previewRunSpecHash || "").toLowerCase();
+    if (!expected) return runSpecHash(value);
+    const actual = runSpecHash(value);
+    if (!actual) {
+      throw new Error("正式任务响应缺少 RunSpec 哈希，无法验证与预览一致");
+    }
+    if (actual !== expected) {
+      throw new Error("正式任务 RunSpec 与预览不一致，请重新生成运行配置");
+    }
+    return actual;
+  }
+
+  function clearPreviewRequest(item) {
+    item.previewRunSpecHash = "";
+    item.previewRequest = null;
+    item.previewFingerprint = "";
+  }
+
   function recordSubmission(item, value) {
     const job = value.jobs?.[0];
     if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
+    const submittedHash = assertPreviewMatch(item, value);
     item.phase = "submitted";
     item.jobID = String(job.job_id);
     item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
-    item.runSpecHash = String(
+    item.runSpecHash = submittedHash || String(
       value.run?.run_spec_hash || job.run_spec_hash || item.runSpecHash || "",
     ).replace(/^sha256:/, "");
     item.port = Number(value.port || job.server_context?.port || job.port || 0);
@@ -109,12 +257,14 @@
     item.resultError = "";
     item.resultAutoRefreshStarted = false;
     item.error = "";
+    clearPreviewRequest(item);
     return item;
   }
 
   function recordLocalSubmission(item, value) {
     const runID = String(value.run_id || value.run?.run_id || "");
     if (!runID) throw new Error("本地运行响应缺少运行 ID");
+    const submittedHash = assertPreviewMatch(item, value);
     item.phase = String(value.phase || "submitted");
     item.runID = runID;
     item.jobID = "";
@@ -123,11 +273,12 @@
     item.portQuery = "";
     item.artifactQuery = "";
     item.resultAutoRefreshStarted = false;
-    item.runSpecHash = String(
+    item.runSpecHash = submittedHash || String(
       value.run_spec_hash || value.run?.run_spec_hash || item.runSpecHash || "",
     ).replace(/^sha256:/, "");
     item.local = true;
     item.error = "";
+    clearPreviewRequest(item);
     return item;
   }
 
@@ -174,8 +325,9 @@
   }
 
   window.FTTestRunBatchModel = Object.freeze({
-    BACKTEST_TASK_ID, PHASE_LABELS, backtestStrategyGroups, groupIdentity, itemFor,
-    jobPath, recordPreview,
+    BACKTEST_TASK_ID, PHASE_LABELS, backtestStrategyGroups, groupIdentity, groupLabel,
+    clone, inputFingerprint, itemFor, invalidatePreview, jobPath, previewMatches,
+    previewRecord, recordPreview, runSpecHash,
     recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, runSpecTarget,
     synchronize, taskGroups, update,
   });

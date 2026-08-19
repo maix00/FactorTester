@@ -119,6 +119,7 @@
     return {
       target: String(value.target || ""),
       serverID: String(value.serverID || ""),
+      value: value.value && typeof value.value === "object" ? value.value : null,
       label: String(value.label || value.taskLabel || fallback),
       subtitle: String(value.subtitle || ""),
     };
@@ -149,6 +150,13 @@
     copy.append(title, description);
     const independent = FTUI.actionButton(context.t("在独立页面打开"), () => {
       const current = records[activeIndex];
+      if (current.value) {
+        context.showNotice?.(
+          context.t("预览运行配置尚未持久化，请提交任务后再在独立页面打开"),
+          true,
+        );
+        return;
+      }
       dialog.close();
       context.navigate(FTReferencePage.routeFor(
         "run-spec", current.target, context.t("运行配置"), current.serverID,
@@ -186,6 +194,10 @@
       activeIndex = index;
       const current = records[index];
       updateTabs();
+      if (current.value) {
+        body.replaceChildren(render(context, current.value));
+        return;
+      }
       body.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
       load(context, current.target, current.serverID).then(value => {
         if (activeIndex !== index) return;
