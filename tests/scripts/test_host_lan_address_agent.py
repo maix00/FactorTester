@@ -99,4 +99,3 @@ def test_snapshot_write_is_versioned_and_timestamped(tmp_path: Path) -> None:
         "observed_at": 123.5,
         "addresses": ["10.0.0.8"],
     }
-
