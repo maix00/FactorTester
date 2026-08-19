@@ -43,7 +43,12 @@
     const hasTasks = tasks.length > 0;
     const runSpecButton = context.button(context.t("查看运行配置"), () => {
       if (!hasTasks) return;
-      void openRunSpecs(context, state, refresh);
+      // This action crosses several deferred code and API boundaries.  Do not
+      // leave a rejected Promise unobserved: after the old batch panel was
+      // removed there is no lower task row to display preview failures.
+      void openRunSpecs(context, state, refresh).catch(error => {
+        showRunSpecError(context, error);
+      });
     }, context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置"));
     runSpecButton.className = "test-workbench-header-action";
     runSpecButton.disabled = !hasTasks;
@@ -64,12 +69,31 @@
     return [runSpecButton, runButton];
   }
 
+  function showRunSpecError(context, error) {
+    const detail = error?.message || String(error || context.t("未知错误"));
+    context.showNotice?.(`${context.t("读取运行配置失败")}: ${detail}`, true);
+  }
+
+  function taskError(item) {
+    return item?.error ? String(item.error) : "";
+  }
+
   async function openRunSpecs(context, state, refresh) {
     const tasks = selectedTasks(state);
+    const failures = [];
     for (const {group, item} of tasks) {
       if (model().runSpecPath(item)) continue;
-      const completed = await previewOne(context, state, group, refresh);
-      if (!completed) continue;
+      try {
+        const completed = await previewOne(context, state, group, refresh);
+        const current = model().itemFor(state, group) || item;
+        if (!completed) failures.push({current, error: taskError(current)});
+      } catch (error) {
+        const current = model().itemFor(state, group) || item;
+        current.phase = "failed";
+        current.error = error?.message || String(error);
+        refresh?.();
+        failures.push({current, error: current.error});
+      }
     }
     const entries = selectedTasks(state).map(({item}, index) => {
       const target = model().runSpecTarget(item);
@@ -83,7 +107,13 @@
           ? `${context.t("测试任务")} ${item.jobID}` : context.t("尚未提交"),
       };
     }).filter(Boolean);
-    if (!entries.length) return false;
+    if (!entries.length) {
+      const detail = failures
+        .map(({current, error}) => `${current.groupLabel || current.groupID}: ${error || context.t("未生成运行配置")}`)
+        .join("；");
+      showRunSpecError(context, new Error(detail || context.t("尚未生成可查看的运行配置")));
+      return false;
+    }
     if (!window.FTRunSpecView?.openMany) {
       await window.FTStaticLoader?.loadGroups?.(["research"]);
     }
@@ -93,6 +123,12 @@
       window.FTRunSpecView.open(context, entries[0].target, entries[0].serverID);
     } else {
       context.navigate(model().runSpecPath(selectedTasks(state)[0].item));
+    }
+    if (failures.length) {
+      const detail = failures
+        .map(({current, error}) => `${current.groupLabel || current.groupID}: ${error || context.t("未生成运行配置")}`)
+        .join("；");
+      showRunSpecError(context, new Error(`${context.t("部分任务无法读取运行配置")}: ${detail}`));
     }
     return true;
   }

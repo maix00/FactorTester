@@ -59,6 +59,7 @@ vm.runInThisContext(fs.readFileSync(
 const requests = [];
 let navigated = false;
 let openedRunSpecs = [];
+const notices = [];
 window.FTRunSpecView = {
   openMany: (_context, entries) => { openedRunSpecs = entries; },
 };
@@ -66,6 +67,7 @@ const context = {
   t: value => value,
   servicePath: path => `/service${path}`,
   navigate: () => { navigated = true; },
+  showNotice: (message, isError) => { notices.push({message, isError}); },
   button: (label, action, help) => {
     const button = {
     textContent: label, title: help, className: "", disabled: false,
@@ -163,6 +165,23 @@ const factorEvaluation = {
     "overlay tabs must use the frozen RunSpec references");
   assert.match(frozenHeader[1].title, /全部任务/,
     "the header run action must submit the complete task batch");
+
+  const failingContext = {
+    ...context,
+    async api() {
+      throw new Error("preview endpoint unavailable");
+    },
+  };
+  const failingState = {
+    ...state,
+    groups: [{id: "broken", label: "故障产品组"}],
+    testRunBatch: [],
+  };
+  const failingHeader = batch.headerActions(failingContext, failingState, () => {});
+  failingHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(notices.some(item => item.isError && /preview endpoint unavailable/.test(item.message)),
+    "RunSpec preview failures must be visible instead of being swallowed");
 
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
