@@ -397,7 +397,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .library-page { display: grid; gap: 14px; max-width: 1240px; margin: 0 auto; }
 .factor-catalog-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(220px, 1fr); gap: 10px; align-items: start; }
 .factor-catalog-controls > * { min-width: 0; }
-.factor-catalog-controls .toolbar-search { width: 100%; min-height: 42px; box-sizing: border-box; }
+.factor-catalog-controls .toolbar-search { width: 100%; min-height: 0; box-sizing: border-box; padding: 5px 9px; border-radius: 7px; }
+.factor-catalog-controls .factor-catalog-search-control { max-width: none; }
 .factor-catalog-controls .factor-product-group-filter,
 .factor-catalog-controls .factor-subordinate-filter { padding: 0; border: 0; background: transparent; }
 .shared-table-pagination { padding-top: 10px; }

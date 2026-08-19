@@ -19,6 +19,7 @@ from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.test_authoring import (
+    TestAuthoringService,
     TestAuthoringResponse as _TestAuthoringResponse,
 )
 from server.manager.services.client_state import ClientStateService
@@ -449,6 +450,65 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
         "path": "/api/workspaces/workspace-one/configuration",
         "owner": "user@1",
         "payload": {"expected_revision": 1, "payload": {}},
+    }]
+
+
+def test_configuration_snapshot_is_manager_owned_without_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    calls = []
+    service = TestAuthoringService()
+    state.test_authoring = service
+
+    def create_snapshot(**values):
+        calls.append(values)
+        return {
+            "snapshot_id": "snapshot-one",
+            "snapshot_revision": 1,
+        }
+
+    from server.services import research_configuration_snapshots
+    monkeypatch.setattr(
+        research_configuration_snapshots, "create_snapshot", create_snapshot,
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("snapshot must not use a service gateway"),
+    )
+    monkeypatch.setattr(
+        state, "service_ports",
+        lambda: pytest.fail("snapshot must not inspect service ports"),
+    )
+    body = json.dumps({
+        "source_workspace_id": "workspace-one",
+        "source_configuration_id": "configuration-one",
+        "source_configuration_revision": 2,
+        "name": "preview-one",
+    }).encode()
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/workspaces/workspace-one/configuration-snapshots",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["snapshot"] == {
+        "snapshot_id": "snapshot-one",
+        "snapshot_revision": 1,
+    }
+    assert calls == [{
+        "owner": "user@1",
+        "workspace_id": "workspace-one",
+        "source_workspace_id": "workspace-one",
+        "source_configuration_id": "configuration-one",
+        "source_configuration_revision": 2,
+        "name": "preview-one",
     }]
 
 
@@ -2302,6 +2362,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert '"/factors/sets"' in listing
     assert "FTUI.pagedTable" in listing
     assert 'className = "factor-catalog-controls"' in coordinator
+    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in coordinator
     assert "context.toolbar.append(\n      search" not in coordinator
     assert 'context.t("按下级用户筛选")' in coordinator
     assert "decodeFrozenFactorRef" in details

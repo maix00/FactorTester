@@ -57,7 +57,7 @@
     search.className = "toolbar-search factor-catalog-search";
     search.placeholder = FTFactorList.searchPlaceholder(context, page, familyScope);
     search.setAttribute("aria-label", search.placeholder);
-    controls.append(search);
+    controls.append(searchControl(context, search));
     const group = FTFactorGroupFilter.create(
       context, data.groups, ["*"], () => resetAndRender(),
     );
@@ -91,6 +91,18 @@
     function resetAndRender() { tablePage = 1; render(); }
     search.addEventListener("input", resetAndRender);
     render();
+  }
+
+  function searchControl(context, search) {
+    const section = document.createElement("section");
+    section.className = "ft-multi-select-filter factor-catalog-search-control";
+    const heading = document.createElement("div");
+    heading.className = "ft-multi-select-heading";
+    const title = document.createElement("h2");
+    title.textContent = context.t("搜索");
+    heading.append(title);
+    section.append(heading, search);
+    return section;
   }
 
   function subordinateFilter(context, data, page, onChange) {
