@@ -713,6 +713,7 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "includeEmpty: true" in tabs
     assert "FTTabChipContent.createSettings" in tabs
     assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
+    assert "includeRun: false" in tabs
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
