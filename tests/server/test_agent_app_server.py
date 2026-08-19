@@ -29,11 +29,29 @@ PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
 
 
-def _fake_codex(path: Path) -> str:
+def _fake_codex(path: Path, *, history: bool = False) -> str:
+    turns = repr([{
+        "items": [
+            {
+                "id": "history-user-1",
+                "type": "user_message",
+                "content": [{"type": "input_text", "text": "查询产品"}],
+                "created_at": 2,
+            },
+            {
+                "id": "history-assistant-1",
+                "type": "assistant_message",
+                "text": "98 个期货品种，2846 个合约路径",
+                "created_at": 3,
+            },
+        ],
+    }] if history else [])
     path.write_text(
         """#!/usr/bin/env python3
 import json
 import sys
+
+HISTORY_TURNS = __HISTORY_TURNS__
 
 for raw in sys.stdin:
     request = json.loads(raw)
@@ -49,7 +67,7 @@ for raw in sys.stdin:
                 "name": "Recovered conversation",
                 "createdAt": 1,
                 "updatedAt": 1,
-                "turns": [],
+                "turns": HISTORY_TURNS,
             },
         }
     elif method == "thread/resume":
@@ -60,7 +78,7 @@ for raw in sys.stdin:
                 "name": "Recovered conversation",
                 "createdAt": 1,
                 "updatedAt": 1,
-                "turns": [],
+                "turns": HISTORY_TURNS,
             },
             "resumed": True,
         }
@@ -71,7 +89,7 @@ for raw in sys.stdin:
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
-""",
+""".replace("__HISTORY_TURNS__", turns),
         encoding="utf-8",
     )
     os.chmod(path, 0o700)
@@ -389,7 +407,7 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
     )
     supervisor = AgentAppServerSupervisor(
         service,
-        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        codex_binary=_fake_codex(tmp_path / "fake-codex", history=True),
     )
     conversation = service.create_conversation(PRINCIPAL, PROFILE_ID, title="Keep me")
 
@@ -402,6 +420,11 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert started["result"]["thread"]["id"] == "provider-thread-1"
+    items = service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )
+    assert [item["role"] for item in items] == ["user", "assistant"]
+    assert items[-1]["text"] == "98 个期货品种，2846 个合约路径"
     saved = service.conversation(PRINCIPAL, PROFILE_ID, conversation["conversation_id"])
     assert saved["provider_thread_id"] == "provider-thread-1"
     assert saved["provider_id"] == provider["provider_id"]
@@ -428,6 +451,9 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert resumed["result"]["resumed"] is True
+    assert len(service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )) == 2
     supervisor.stop(PRINCIPAL, PROFILE_ID)
 
 
