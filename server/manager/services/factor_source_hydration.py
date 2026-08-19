@@ -28,19 +28,22 @@ class FactorSourceHydrator:
             if expected_size <= 0 or len(expected_sha256) != 64:
                 continue
             object_id = f"{owner}:{factor_id}"
-            access = self.state.prepare_object_download(
-                principal=principal,
-                storage_server_id=storage_server_id,
-                object_kind="factor_source",
-                object_id=object_id,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-                idempotency_key=(
-                    f"hydrate-factor-source:{self.state.server_id}:"
-                    f"{object_id}:{expected_sha256}"
-                ),
-                content_type="text/x-python",
-            )
+            try:
+                access = self.state.prepare_object_download(
+                    principal=principal,
+                    storage_server_id=storage_server_id,
+                    object_kind="factor_source",
+                    object_id=object_id,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    idempotency_key=(
+                        f"hydrate-factor-source:{self.state.server_id}:"
+                        f"{object_id}:{expected_sha256}"
+                    ),
+                    content_type="text/x-python",
+                )
+            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                continue
             request = Request(
                 str(access.get("url") or ""),
                 headers={"Authorization": f"Bearer {access.get('bearer') or ''}"},
@@ -86,8 +89,6 @@ class FactorSourceHydrator:
         values = self._matching_payloads(
             rows, owner=owner, factor_id=factor_id,
         )
-        if any(self._usable_provider(item) for item in values):
-            return values
         # Repair mirrors created while the account-domain cursor skipped a
         # full page. This is metadata-only and bounded; source bytes still use
         # the 7997 data plane.
@@ -139,10 +140,6 @@ class FactorSourceHydrator:
                 continue
             values.append(payload)
         return values
-
-    def _usable_provider(self, metadata: dict[str, object]) -> bool:
-        provider = str(metadata.get("storage_server_id") or "").strip()
-        return bool(provider and provider != self.state.server_id)
 
     @staticmethod
     def _identity(factor_ref: str, *, principal: str) -> tuple[str, str]:

@@ -150,3 +150,37 @@ def test_hydration_repairs_missing_provider_metadata_from_control_store() -> Non
     assert values == [provider["payload"]]
     assert Sync.local.applied == [provider]
     assert len(Sync.control_store.calls) == 2
+
+
+def test_hydration_skips_stale_provider_and_uses_current_replica(monkeypatch) -> None:
+    source = "class DemoFactor:\n    pass\n"
+    raw = source.encode()
+    digest = hashlib.sha256(raw).hexdigest()
+
+    class State:
+        server_id = "public-1"
+
+        def prepare_object_download(self, **kwargs):
+            if kwargs["storage_server_id"] == "retired-node":
+                raise ValueError("node is not registered")
+            return {"url": "http://data/source", "bearer": "ticket"}
+
+    saved = []
+    hydrator = factor_source_hydration.FactorSourceHydrator(State())
+    monkeypatch.setattr(hydrator, "_candidates", lambda *_args, **_kwargs: [
+        {"factor_id": "DemoFactor", "source_sha256": digest,
+         "source_bytes": len(raw), "storage_server_id": "retired-node"},
+        {"factor_id": "DemoFactor", "source_sha256": digest,
+         "source_bytes": len(raw), "storage_server_id": "office-a"},
+    ])
+    monkeypatch.setattr(
+        factor_source_hydration, "urlopen",
+        lambda *_args, **_kwargs: _Response(raw),
+    )
+    monkeypatch.setattr(
+        factor_source_hydration, "upsert_factor_source",
+        lambda *args: saved.append(args),
+    )
+
+    assert hydrator.hydrate("DemoFactor", principal="alice")
+    assert saved[0][2] == "DemoFactor"
