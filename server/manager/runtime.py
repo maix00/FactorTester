@@ -58,6 +58,7 @@ from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
+from server.manager.services.profile_directory import ProfileDirectoryService
 from server.manager.services.federated_public_data import (
     FederatedPublicDataService,
 )
@@ -432,6 +433,12 @@ class ManagerState(
         # projection, while ``public_research`` remains the local authority
         # used by publication writes.
         self.federated_public_research = self.federated_public_data
+        self.profile_directory = ProfileDirectoryService(
+            server_id=self.server_id,
+            client_state=self.client_state,
+            agent_profiles=self.agent_profiles,
+            federated_public_data=self.federated_public_data,
+        )
         self.test_authoring = TestAuthoringService()
         # The Manager exposes several application projections from one Python
         # process.  Their first call imports overlapping FactorTester packages;

@@ -337,6 +337,8 @@
       "profile/chatkit-stream.js",
       "profile/chatkit-adapter.js",
       "profile/agent-chat.js",
+      "profile/profile-directory.js",
+      "profile/profile-directory-detail.js",
       "profile/workspace-browser.js",
       "profile/profiles.js",
       "profile/agent-models.js"
@@ -515,6 +517,8 @@
     "profile/chatkit-stream.js",
     "profile/chatkit-adapter.js",
     "profile/agent-chat.js",
+    "profile/profile-directory.js",
+    "profile/profile-directory-detail.js",
     "profile/workspace-browser.js",
     "profile/profiles.js",
     "profile/agent-models.js",
