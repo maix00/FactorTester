@@ -40,6 +40,8 @@ const dispatch = window.FTAppRouteDispatch.create({
     factorSeries: (context, factorRef, groupRef) => calls.push(
       `factor-series:${context.token}:${factorRef}:${groupRef}`,
     ),
+    icTest: context => calls.push(`ic-test:${context.token}`),
+    backtest: context => calls.push(`backtest:${context.token}`),
     factors: context => calls.push(`factors:${context.token}`),
     products: context => calls.push(`products:${context.token}`),
   },
@@ -84,6 +86,18 @@ const dispatch = window.FTAppRouteDispatch.create({
     calls.slice(-3),
     ["nav:products", "heading:产品", "products:10"],
     "public visitors must be able to browse the product catalog",
+  );
+  await dispatch.render({kind: "ic-test"}, 11);
+  assert.deepEqual(
+    calls.slice(-3),
+    ["nav:", "heading:IC 测试", "ic-test:11"],
+    "visitor mode must render the IC workbench without an account session",
+  );
+  await dispatch.render({kind: "backtest"}, 12);
+  assert.deepEqual(
+    calls.slice(-3),
+    ["nav:", "heading:回测", "backtest:12"],
+    "visitor mode must render the backtest workbench without an account session",
   );
   console.log("ok");
 })().catch(error => {
