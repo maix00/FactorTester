@@ -41,7 +41,12 @@ def _fake_codex(path: Path, *, history: bool = False) -> str:
             {
                 "id": "history-assistant-1",
                 "type": "assistant_message",
-                "text": "98 个期货品种，2846 个合约路径",
+                "text": (
+                    "98 个期货品种，2846 个合约路径\n\n"
+                    "```bash\n"
+                    "factortester products list\n"
+                    "```"
+                ),
                 "created_at": 3,
             },
         ],
@@ -424,7 +429,12 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
     )
     assert [item["role"] for item in items] == ["user", "assistant"]
-    assert items[-1]["text"] == "98 个期货品种，2846 个合约路径"
+    assert items[-1]["text"] == (
+        "98 个期货品种，2846 个合约路径\n\n"
+        "```bash\n"
+        "factortester products list\n"
+        "```"
+    )
     saved = service.conversation(PRINCIPAL, PROFILE_ID, conversation["conversation_id"])
     assert saved["provider_thread_id"] == "provider-thread-1"
     assert saved["provider_id"] == provider["provider_id"]

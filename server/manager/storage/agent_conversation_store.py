@@ -46,9 +46,14 @@ _LOCAL_PATH = re.compile(
 
 def sanitize_conversation_text(value: object, *, limit: int = 12_000) -> str:
     """Keep readable text while removing credential and local-path-shaped data."""
-    text = " ".join(str(value or "").split())[:limit]
+    # Keep the Provider's Markdown structure intact.  In particular, ChatKit
+    # needs newlines to render fenced code blocks and structured answers.  The
+    # catalog is still a sanitized projection, but whitespace normalization
+    # must not turn a multi-line message into one long paragraph.
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     text = _SECRET_VALUE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
-    return _LOCAL_PATH.sub("[server path redacted]", text)
+    text = _LOCAL_PATH.sub("[server path redacted]", text)
+    return text[:limit]
 
 
 class AgentConversationStore:
