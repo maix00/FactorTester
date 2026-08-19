@@ -45,6 +45,17 @@ class {family}(FactorFamily):
         "load_public_factor_source",
         lambda factor_id: factor_sources.get(str(factor_id)),
     )
+    # These lifecycle tests exercise freezing, retention, and retry behavior.
+    # Capability resolution has its own focused tests and needs a real product
+    # catalog/date range, so keep this fixture's planner deterministic.
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda prepared, owner: [
+            {"kind": kind, "resolved": {"data_requirements": []}}
+            for kind in prepared["analyses"]
+        ],
+    )
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -349,15 +360,36 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
-def test_run_preview_matches_submission_without_persisting(client) -> None:
+def test_run_preview_matches_submission_without_persisting(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
-    _update(client, workspace, _payload(workspace))
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["local_settings"].update({
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    })
+    _update(client, workspace, payload)
+    planned_hashes = []
+
+    def plan(prepared, owner):
+        planned_hashes.append(research_runs.hash_run_spec(prepared["run_spec"]))
+        return [
+            {"kind": kind, "resolved": {"data_requirements": []}}
+            for kind in prepared["analyses"]
+        ]
+
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        plan,
+    )
     request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["ic", "backtest"],
         "retention_mode": "summary",
         "step_mode": False,
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
     }
 
     preview = client.post(
@@ -399,6 +431,9 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )
+    assert planned_hashes == [
+        preview_payload["run_spec_hash"], preview_payload["run_spec_hash"],
+    ]
 
 
 def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
@@ -816,16 +851,28 @@ def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
 
 
 def test_preview_freezes_transient_profile_screen_without_shared_registration(
-    client,
+    client, monkeypatch,
 ) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
+    payload["analyses"]["backtest"]["local_settings"].update({
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    })
     payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
         "screen": "ProfileScreen|N:20d",
     }
     payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
     payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
     _update(client, workspace, payload)
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda prepared, owner: [
+            {"kind": kind, "resolved": {"data_requirements": []}}
+            for kind in prepared["analyses"]
+        ],
+    )
     source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -844,6 +891,8 @@ class ProfileScreen(FactorFamily):
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["backtest"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
         "transient_factor_sources": [{
             "path": "custom_factors/ProfileScreen.py",
             "source_code": source,

@@ -33,6 +33,7 @@ const manifest = {
     ic_decay_lags: {serialization: {}},
     forward_return_horizons: {serialization: {}},
     ic_lags: {serialization: {}},
+    split_count: {scope_policy: "group_only", serialization: {}},
   },
 };
 const factor = {
@@ -60,6 +61,7 @@ const values = {
     sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5],
   },
   ic_lags: [0, 1],
+  split_count: 5,
   stale_unknown_field: "must-not-enter-execution",
 };
 
@@ -80,7 +82,23 @@ assert.deepEqual(execution, {
 assert.equal("factor_candidates" in execution, false);
 assert.equal("factor_selections" in execution, false);
 assert.equal("product_path_selections" in execution, false);
+assert.equal("split_count" in execution, false);
 assert.equal("stale_unknown_field" in execution, false);
+
+const scopedPayload = FTTestConfigurationCompiler.sanitizeExecutionPayload(
+  manifest,
+  {
+    split_count: 5,
+    settings: {split_count: 5},
+    local_settings: {split_count: 5},
+    groups: [{id: "group-1", split_count: 5}],
+  },
+  values,
+);
+assert.equal("split_count" in scopedPayload, false);
+assert.equal("split_count" in scopedPayload.settings, false);
+assert.equal("split_count" in scopedPayload.local_settings, false);
+assert.equal(scopedPayload.groups[0].split_count, 5);
 
 const conditionalManifest = {
   defaults: {
