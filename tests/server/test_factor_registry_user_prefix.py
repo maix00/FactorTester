@@ -173,6 +173,52 @@ def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
     assert factor.owner_ref == "18717974771"
 
 
+def test_visible_hydrated_other_user_factor_is_executable_before_library_sync(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "factor-sharing.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE account_factor_param_configs (
+                username TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                ff_alias TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, scope_key, ff_alias)
+            )
+            """
+        )
+    monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
+    monkeypatch.setattr(
+        factor_registry,
+        "can_view_user_scope",
+        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        factor_registry,
+        "load_factor_source",
+        lambda username, factor_id: (
+            _FACTOR_SOURCE
+            if (username, factor_id) == ("18717974771", "UserAlpha")
+            else None
+        ),
+    )
+    monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
+    monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
+
+    source = factor_registry.resolve_factor_family_source(
+        "18717974771:UserAlpha",
+        username="MaxA",
+    )
+
+    assert source["canonical_family_ref"] == "18717974771:UserAlpha"
+    assert source["source_code"] == _FACTOR_SOURCE
+
+
 def test_namespaced_owner_reference_is_not_truncated() -> None:
     assert factor_registry._split_factor_owner_ref(
         "profile:maxa:UserAlpha"
