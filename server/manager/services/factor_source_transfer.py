@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from server.manager.objects.models import TransferObjectKind
+from server.manager.services.data_plane_client import loopback_client_access
 
 
 class FactorSourceTransfer:
@@ -24,7 +25,7 @@ class FactorSourceTransfer:
         target_server_id: str,
     ) -> None:
         target = str(target_server_id or "").strip()
-        if not target:
+        if not target or target == str(self.state.server_id or "").strip():
             return
         for entry in entries:
             self._stage_one(
@@ -67,8 +68,9 @@ class FactorSourceTransfer:
             ),
             content_type="text/x-python",
         )
+        upload_url, tls_context = loopback_client_access(access.get("url"))
         request = Request(
-            str(access.get("url") or ""),
+            upload_url,
             data=raw,
             headers={
                 "Authorization": f"Bearer {access.get('bearer') or ''}",
@@ -78,7 +80,9 @@ class FactorSourceTransfer:
             method="PUT",
         )
         try:
-            with urlopen(request, timeout=120.0) as response:
+            with urlopen(
+                request, timeout=120.0, context=tls_context,
+            ) as response:
                 if not 200 <= int(response.status) < 300:
                     raise ConnectionError(
                         f"factor source destination returned HTTP {response.status}"
