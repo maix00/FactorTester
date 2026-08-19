@@ -115,6 +115,34 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     )
 
 
+def test_public_agent_uses_codex_secure_container_profile() -> None:
+    services = _compose()["services"]
+    service = services["factortester-public"]
+    database = services["postgresql-control"]
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+
+    assert {
+        "SYS_ADMIN",
+        "SYS_CHROOT",
+        "SETUID",
+        "SETGID",
+        "SYS_PTRACE",
+        "NET_ADMIN",
+        "NET_RAW",
+    }.issubset(set(service["cap_add"]))
+    assert service["security_opt"] == [
+        "seccomp=unconfined",
+        "apparmor=unconfined",
+    ]
+    assert service.get("privileged", False) is not True
+    assert "no-new-privileges:true" not in service["security_opt"]
+    assert "chmod u+s /usr/bin/bwrap" in dockerfile
+    assert "SYS_ADMIN" not in database.get("cap_add", [])
+    assert database["security_opt"] == ["no-new-privileges:true"]
+
+
 def test_public_manager_can_import_vendored_research_contracts() -> None:
     entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(
         encoding="utf-8",
