@@ -6,7 +6,7 @@ import json
 import hashlib
 import os
 from dataclasses import dataclass
-from http.cookiejar import LWPCookieJar, LoadError
+from http.cookiejar import CookieJar, LWPCookieJar, LoadError
 from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
@@ -123,21 +123,34 @@ class HttpSession:
         cookies: Path | None = None,
         agent_capability: AgentCapability | None = None,
         bearer_token: str = "",
+        persist_cookies: bool | None = None,
         timeout: float = 30,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.agent_capability = agent_capability
         self.bearer_token = str(bearer_token or "").strip()
-        cookie_file = cookies or cookie_path_for(self.base_url)
-        self.cookie_jar = LWPCookieJar(str(cookie_file))
-        self.timeout = timeout
-        try:
-            self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
-        except FileNotFoundError:
-            pass
-        except LoadError:
-            Path(self.cookie_jar.filename).unlink(missing_ok=True)
+        # A Manager-issued Profile capability already authenticates every
+        # request.  It must not depend on the ordinary user's cookie file,
+        # which may be absent or read-only inside the isolated Agent runtime.
+        self.persist_cookies = (
+            bool(persist_cookies)
+            if persist_cookies is not None
+            else agent_capability is None
+        )
+        if self.persist_cookies:
+            cookie_file = cookies or cookie_path_for(self.base_url)
             self.cookie_jar = LWPCookieJar(str(cookie_file))
+        else:
+            self.cookie_jar = CookieJar()
+        self.timeout = timeout
+        if self.persist_cookies:
+            try:
+                self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
+            except FileNotFoundError:
+                pass
+            except LoadError:
+                Path(self.cookie_jar.filename).unlink(missing_ok=True)
+                self.cookie_jar = LWPCookieJar(str(cookie_file))
         self._opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
 
     def get(self, path: str, *, query: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -356,9 +369,17 @@ class HttpSession:
         return f"{base}?{urlencode({k: v for k, v in query.items() if v is not None}, doseq=True)}"
 
     def _save_cookies(self) -> None:
+        if not self.persist_cookies:
+            return
         cookie_file = Path(self.cookie_jar.filename)
-        cookie_file.parent.mkdir(parents=True, exist_ok=True)
-        self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
+        try:
+            cookie_file.parent.mkdir(parents=True, exist_ok=True)
+            self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
+        except OSError:
+            # A successful HTTP response must never be lost merely because
+            # optional local session persistence is unavailable.  The next
+            # request can still use the in-memory jar and bearer capability.
+            return
 
     def _headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Add the Profile capability without changing ordinary CLI cookies."""

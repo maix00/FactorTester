@@ -40,6 +40,7 @@ def client_from_config(*, port: int | None = None) -> FactorTesterClient:
             target,
             agent_capability=capability,
             bearer_token=capability.token if capability else "",
+            persist_cookies=capability is None,
         ),
     )
 
