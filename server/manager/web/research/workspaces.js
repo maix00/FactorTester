@@ -37,11 +37,13 @@
       // branch used to leave a blank research page during cold start.
       body.replaceChildren();
       if (selected === "profiles") {
-        const profilesContext = {...context, content: body};
         if (profileID) {
-          await FTProfiles.detail(profilesContext, profileID, {embedded: true});
+          // Older links may still carry the embedded query form.  Normalize
+          // them to the same independent Profile tab used by row clicks.
+          context.navigate(`/profiles/${encodeURIComponent(profileID)}`);
+          return;
         } else {
-          await FTProfiles.list(profilesContext, {embedded: true});
+          await FTProfiles.list({...context, content: body}, {embedded: true});
         }
       } else if (selected === "agent-models") {
         await FTAgentModels.list({...context, content: body});

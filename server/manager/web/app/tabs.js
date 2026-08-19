@@ -152,6 +152,15 @@
       return `factor-detail:${match[1]}:${target}`;
     }
 
+    function profileDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/profiles\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[1];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `profile-detail:${target}`;
+    }
+
     function productCategoryDetailTabID(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       const match = /^\/products\/categories\/(.+)$/.exec(pathname);
@@ -187,7 +196,8 @@
     function detailTabIDForPath(path) {
       return productSourceFamilyDetailTabID(path)
         || productCategoryDetailTabID(path)
-        || productDetailTabID(path) || factorDetailTabID(path) || runSpecTabID(path);
+        || productDetailTabID(path) || factorDetailTabID(path)
+        || profileDetailTabID(path) || runSpecTabID(path);
     }
 
     function navigate(path) {
