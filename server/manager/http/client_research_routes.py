@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote
 from server.manager.http.local_run_routes import ClientLocalRunRoutesMixin
 from server.manager.http.responses import json_response
 from server.manager.services.client_state import ProfileAlreadyExistsError
+from server.manager.services.profile_directory import ProfileDirectoryError
 
 
 class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
@@ -17,6 +18,69 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
     def _post_client_research_routes(self, parsed) -> bool:
         if self._post_local_run_routes(parsed):
             return True
+        if parsed.path in {
+            "/api/client/profile-directory/conversation-sharing",
+            "/api/client/profile-agent/conversations/items",
+        }:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return True
+            try:
+                payload = self._json_body(256 * 1024)
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be an object")
+                principal = str(session["username"])
+                directory = self.state.profile_directory
+                if parsed.path.endswith("conversation-sharing"):
+                    profile_id = str(payload.get("profile_id") or "").strip()
+                    if not profile_id:
+                        raise ValueError("profile_id is required")
+                    directory_value = directory.directory(
+                        principal, scope="mine", query=profile_id, page_size=100,
+                    )
+                    target = next(
+                        (
+                            item for item in directory_value.get("items", [])
+                            if item.get("profile_id") == profile_id
+                            and item.get("owner_ref") == principal
+                            and item.get("source_server_id") == directory.server_id
+                        ),
+                        None,
+                    )
+                    if not target or not target.get("capabilities", {}).get("edit"):
+                        raise PermissionError("only the Profile owner may change sharing")
+                    enabled = self.state.agent_profiles.set_conversation_sharing(
+                        principal, profile_id, bool(payload.get("enabled")),
+                    )
+                    json_response(self, {
+                        "success": True,
+                        "profile_id": profile_id,
+                        "conversation_sharing": enabled,
+                    })
+                    return True
+                profile_id = str(payload.get("profile_id") or "").strip()
+                conversation_id = str(payload.get("conversation_id") or "").strip()
+                role = str(payload.get("role") or "").strip().lower()
+                text = payload.get("text")
+                if not profile_id or not conversation_id or role not in {"user", "assistant"}:
+                    raise ValueError("profile_id, conversation_id and message role are required")
+                value = self.state.agent_profiles.append_conversation_item(
+                    principal,
+                    profile_id,
+                    conversation_id,
+                    role=role,
+                    text=text,
+                    item_id=str(payload.get("item_id") or ""),
+                )
+                json_response(self, {"success": True, "item": value})
+                return True
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return True
+            except (AttributeError, ProfileDirectoryError, TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return True
         if parsed.path not in {
             "/api/client/profiles/create",
             "/api/client/profiles/sync",
@@ -56,6 +120,65 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
 
     def _get_client_research_routes(self, parsed) -> bool:
         if self._get_local_run_routes(parsed):
+            return True
+        if parsed.path in {
+            "/api/client/profile-directory",
+            "/api/client/profile-directory/profile",
+            "/api/client/profile-directory/conversations",
+            "/api/client/profile-directory/conversation-items",
+        }:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return True
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                principal = str(session["username"])
+                directory = self.state.profile_directory
+                scope = str(query.get("scope", ["mine"])[0] or "mine")
+                if parsed.path == "/api/client/profile-directory":
+                    value = directory.directory(
+                        principal,
+                        scope=scope,
+                        query=str(query.get("query", [""])[0] or ""),
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
+                        server_id=str(query.get("server_id", [""])[0] or ""),
+                        binding=str(query.get("binding", [""])[0] or ""),
+                        agent=str(query.get("agent", [""])[0] or ""),
+                    )
+                elif parsed.path == "/api/client/profile-directory/profile":
+                    value = directory.detail(
+                        principal,
+                        str(query.get("profile_key", [""])[0] or ""),
+                        scope=scope,
+                    )
+                elif parsed.path == "/api/client/profile-directory/conversations":
+                    value = {
+                        "success": True,
+                        "conversations": directory.conversations(
+                            principal,
+                            str(query.get("profile_key", [""])[0] or ""),
+                            scope=scope,
+                        ),
+                    }
+                else:
+                    value = {
+                        "success": True,
+                        "items": directory.conversation_items(
+                            principal,
+                            str(query.get("profile_key", [""])[0] or ""),
+                            str(query.get("conversation_id", [""])[0] or ""),
+                            scope=scope,
+                        ),
+                    }
+                json_response(self, value)
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+            except (AttributeError, ProfileDirectoryError, TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+            except (ConnectionError, OSError, RuntimeError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
             return True
         if parsed.path == "/api/client/profiles":
             session = self._session()

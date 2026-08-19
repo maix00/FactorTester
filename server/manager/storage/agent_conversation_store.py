@@ -9,6 +9,7 @@ metadata only; provider credentials and server-local paths never enter it.
 from __future__ import annotations
 
 import sqlite3
+import re
 import threading
 import time
 import uuid
@@ -20,6 +21,8 @@ from tools.data.sqlite.db import connect_sqlite
 
 
 TABLE = "manager_agent_conversations"
+ITEM_TABLE = "manager_agent_conversation_items"
+SHARING_TABLE = "manager_agent_profile_conversation_sharing"
 _COLUMNS = {
     "conversation_id",
     "principal",
@@ -32,6 +35,20 @@ _COLUMNS = {
     "updated_at",
     "active",
 }
+
+_SECRET_VALUE = re.compile(
+    r"(?i)\b(api[_-]?key|authorization|password|secret|token)\b\s*[:=]\s*[^\s,;]+"
+)
+_LOCAL_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])/(?:Users|home|var|tmp|private|data|workspace)/[^\s`\"']+"
+)
+
+
+def sanitize_conversation_text(value: object, *, limit: int = 12_000) -> str:
+    """Keep readable text while removing credential and local-path-shaped data."""
+    text = " ".join(str(value or "").split())[:limit]
+    text = _SECRET_VALUE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+    return _LOCAL_PATH.sub("[server path redacted]", text)
 
 
 class AgentConversationStore:
@@ -79,6 +96,36 @@ class AgentConversationStore:
             f"""CREATE INDEX IF NOT EXISTS {TABLE}_active
                 ON {TABLE}(principal, profile_id, active)"""
         )
+        db.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {ITEM_TABLE} (
+                conversation_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                item_type TEXT NOT NULL DEFAULT 'message',
+                text TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (conversation_id, item_id),
+                FOREIGN KEY (conversation_id) REFERENCES {TABLE}(conversation_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute(
+            f"""CREATE INDEX IF NOT EXISTS {ITEM_TABLE}_conversation
+                ON {ITEM_TABLE}(conversation_id, created_at, item_id)"""
+        )
+        db.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {SHARING_TABLE} (
+                principal TEXT NOT NULL,
+                profile_id TEXT NOT NULL,
+                share_to_parent INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (principal, profile_id)
+            )
+            """
+        )
 
     def _initialize(self) -> None:
         with self._connection() as db:
@@ -119,8 +166,9 @@ class AgentConversationStore:
                             ),
                         )
                 db.execute(f"DROP TABLE {legacy}")
-            else:
-                self._create_table(db)
+            # The auxiliary tables are idempotent and are created after the
+            # legacy migration as well as for new Manager SQLite files.
+            self._create_table(db)
 
     @staticmethod
     def _required(value: object, field: str, limit: int = 512) -> str:
@@ -398,6 +446,134 @@ class AgentConversationStore:
             preview=preview or None,
         )
 
+    def append_item(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        role: str,
+        text: object,
+        item_id: str = "",
+        item_type: str = "message",
+        created_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Persist one sanitized user/assistant message for offline viewing."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        normalized_role = str(role or "").strip().lower()
+        if normalized_role not in {"user", "assistant"}:
+            raise ValueError("conversation item role is invalid")
+        normalized_text = sanitize_conversation_text(text)
+        if not normalized_text:
+            raise ValueError("conversation item text is required")
+        item_identifier = str(item_id or "").strip() or f"item-{uuid.uuid4().hex}"
+        item_identifier = self._required(item_identifier, "item_id", 256)
+        kind = str(item_type or "message").strip()[:64] or "message"
+        timestamp = float(time.time() if created_at is None else created_at)
+        with self._connection() as db:
+            owned = db.execute(
+                f"""SELECT 1 FROM {TABLE}
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (identifier, owner, profile),
+            ).fetchone()
+            if owned is None:
+                raise ValueError("conversation not found")
+            db.execute(
+                f"""INSERT INTO {ITEM_TABLE}(
+                        conversation_id, item_id, role, item_type, text, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(conversation_id, item_id) DO UPDATE SET
+                        role=excluded.role, item_type=excluded.item_type,
+                        text=excluded.text, created_at=excluded.created_at""",
+                (identifier, item_identifier, normalized_role, kind,
+                 normalized_text, timestamp),
+            )
+            # Keep local transcript growth bounded.  The metadata catalog is
+            # still the source of truth for the full provider thread.
+            db.execute(
+                f"""DELETE FROM {ITEM_TABLE}
+                    WHERE conversation_id = ? AND rowid NOT IN (
+                        SELECT rowid FROM {ITEM_TABLE}
+                        WHERE conversation_id = ?
+                        ORDER BY created_at DESC, item_id DESC LIMIT 500
+                    )""",
+                (identifier, identifier),
+            )
+            row = db.execute(
+                f"""SELECT item_id, role, item_type, text, created_at
+                    FROM {ITEM_TABLE}
+                    WHERE conversation_id = ? AND item_id = ?""",
+                (identifier, item_identifier),
+            ).fetchone()
+        if row is None:  # pragma: no cover - guarded by the upsert above
+            raise RuntimeError("conversation item was not saved")
+        return {
+            "id": str(row["item_id"] or ""),
+            "role": str(row["role"] or ""),
+            "item_type": str(row["item_type"] or "message"),
+            "text": str(row["text"] or ""),
+            "created_at": float(row["created_at"] or 0),
+        }
+
+    def items(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        with self._connection() as db:
+            rows = db.execute(
+                f"""SELECT i.item_id, i.role, i.item_type, i.text, i.created_at
+                    FROM {ITEM_TABLE} i
+                    JOIN {TABLE} c ON c.conversation_id = i.conversation_id
+                    WHERE i.conversation_id = ? AND c.principal = ? AND c.profile_id = ?
+                    ORDER BY i.created_at, i.item_id""",
+                (identifier, owner, profile),
+            ).fetchall()
+        return [
+            {
+                "id": str(row["item_id"] or ""),
+                "role": str(row["role"] or ""),
+                "item_type": str(row["item_type"] or "message"),
+                "text": str(row["text"] or ""),
+                "created_at": float(row["created_at"] or 0),
+            }
+            for row in rows
+        ]
+
+    def set_parent_sharing(
+        self, principal: str, profile_id: str, enabled: bool,
+    ) -> bool:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        with self._connection() as db:
+            db.execute(
+                f"""INSERT INTO {SHARING_TABLE}(
+                        principal, profile_id, share_to_parent, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(principal, profile_id) DO UPDATE SET
+                        share_to_parent=excluded.share_to_parent,
+                        updated_at=excluded.updated_at""",
+                (owner, profile, int(bool(enabled)), time.time()),
+            )
+        return bool(enabled)
+
+    def parent_sharing(self, principal: str, profile_id: str) -> bool:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        with self._connection() as db:
+            row = db.execute(
+                f"""SELECT share_to_parent FROM {SHARING_TABLE}
+                    WHERE principal = ? AND profile_id = ?""",
+                (owner, profile),
+            ).fetchone()
+        return bool(row and row["share_to_parent"])
+
     def clear(self, principal: str, profile_id: str, conversation_id: str) -> bool:
         owner = self._required(principal, "principal")
         profile = self._required(profile_id, "profile_id")
@@ -411,4 +587,10 @@ class AgentConversationStore:
         return bool(cursor.rowcount)
 
 
-__all__ = ["AgentConversationStore", "TABLE"]
+__all__ = [
+    "AgentConversationStore",
+    "ITEM_TABLE",
+    "SHARING_TABLE",
+    "TABLE",
+    "sanitize_conversation_text",
+]

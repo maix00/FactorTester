@@ -24,6 +24,7 @@ from server.manager.services.factor_library_scopes import (
     split_factor_library_scopes,
 )
 from server.manager.services.public_catalog import public_factor_library
+from server.manager.services.profile_directory import PROFILE_DIRECTORY_PRINCIPAL
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
@@ -622,6 +623,127 @@ class FederatedPublicDataService:
             merged.values(), key=lambda item: str(item.get("profile_id") or "")
         )
         return [dict(item) for item in self._store(key, result)]
+
+    def profile_directory(self, owners: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+        """Read bounded Profile projections for an authorized directory view.
+
+        The caller performs the user-facing authorization.  Federation peers
+        receive only an explicit owner list and return safe Profile metadata;
+        the peer never receives a browser session or a provider credential.
+        """
+        requested = sorted({
+            str(owner or "").strip()
+            for owner in owners
+            if str(owner or "").strip()
+        })[:2048]
+        if not requested:
+            return []
+        merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+        try:
+            local = self.client_state.profiles(
+                requested[0], include_local_paths=False,
+            ) if len(requested) == 1 else [
+                item
+                for owner in requested
+                for item in self.client_state.profiles(owner, include_local_paths=False)
+            ]
+        except TypeError:
+            local = [
+                item
+                for owner in requested
+                for item in self.client_state.profiles(owner)
+            ]
+        for raw in local or []:
+            if not isinstance(raw, dict):
+                continue
+            binding = raw.get("session_binding")
+            owner = str(
+                binding.get("principal_ref") if isinstance(binding, dict) else raw.get("owner_ref") or ""
+            ).strip()
+            profile_id = str(raw.get("profile_id") or "").strip()
+            if owner not in requested or not profile_id:
+                continue
+            value = dict(raw)
+            value["source_server_id"] = self.server_id
+            merged[(self.server_id, owner, profile_id)] = value
+        for route, response in self._query_peers(
+            kind="catalog",
+            operation="profiles-directory",
+            principal=PROFILE_DIRECTORY_PRINCIPAL,
+            payload={"owners": requested},
+        ):
+            for raw in response.get("profiles") or []:
+                if not isinstance(raw, dict):
+                    continue
+                binding = raw.get("session_binding")
+                owner = str(
+                    binding.get("principal_ref") if isinstance(binding, dict) else raw.get("owner_ref") or ""
+                ).strip()
+                profile_id = str(raw.get("profile_id") or "").strip()
+                if owner not in requested or not profile_id:
+                    continue
+                value = dict(raw)
+                value["source_server_id"] = route.server_id
+                merged[(route.server_id, owner, profile_id)] = value
+        return sorted(
+            merged.values(),
+            key=lambda item: (
+                str(item.get("source_server_id") or ""),
+                str(item.get("profile_id") or ""),
+            ),
+        )
+
+    def _profile_route(self, source_server_id: str):
+        target = str(source_server_id or "").strip()
+        return next(
+            (route for route in self._peer_routes() if route.server_id == target),
+            None,
+        )
+
+    def profile_conversations(
+        self,
+        source_server_id: str,
+        viewer: str,
+        owner: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        route = self._profile_route(source_server_id)
+        if route is None:
+            return []
+        response = self._query_peer(
+            route,
+            kind="catalog",
+            operation="profile-conversations",
+            principal=str(viewer or "").strip(),
+            payload={"owner": owner, "profile_id": profile_id},
+        )
+        rows = response.get("conversations")
+        return [dict(item) for item in rows or [] if isinstance(item, dict)]
+
+    def profile_conversation_items(
+        self,
+        source_server_id: str,
+        viewer: str,
+        owner: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        route = self._profile_route(source_server_id)
+        if route is None:
+            return []
+        response = self._query_peer(
+            route,
+            kind="catalog",
+            operation="profile-conversation-items",
+            principal=str(viewer or "").strip(),
+            payload={
+                "owner": owner,
+                "profile_id": profile_id,
+                "conversation_id": conversation_id,
+            },
+        )
+        rows = response.get("items")
+        return [dict(item) for item in rows or [] if isinstance(item, dict)]
 
     def factor_library(
         self, principal: str, *, visitor: bool = False,
