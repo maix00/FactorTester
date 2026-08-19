@@ -41,7 +41,11 @@ class AgentAppServerSupervisor:
         key = self._key(principal, profile_id)
         with self._lock:
             existing = self._sessions.get(key)
-            if existing is not None and existing.status().get("ready"):
+            if existing is not None:
+                existing_status = existing.status()
+            else:
+                existing_status = {}
+            if existing is not None and existing_status.get("ready") and existing_status.get("running"):
                 return existing.status()
             if existing is not None:
                 self._sessions.pop(key, None)
