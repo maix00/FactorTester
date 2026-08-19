@@ -667,11 +667,24 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     candidate_index = source.rindex(
         'context.t("因子候选"), FTTestFactorCandidates.summaryControl',
     )
-    assert source.index("FTTestFactorSets.control") < candidate_index
+    assert candidate_index < source.index("FTTestFactorSets.control")
     assert candidate_index < source.index("FTTestFactorRoles.section")
+    assert 'className: "factor-candidate-child-row"' in source
+    assert 'direct.classList.add("factor-candidate-child-row")' in source
+    assert "factor-candidate-child-section" in roles
+    assert ".factor-candidate-child-row > span:first-child" in styles
+    assert ".factor-candidate-child-section > .factor-role-section-heading" in styles
     assert 'className: "factor-role-child-row"' in roles
     assert ".factor-role-child-row > span:first-child" in styles
-    assert ".test-factor-candidate-heading-row { border-top:" in styles
+    assert ".factor-candidate-child-section .factor-role-child-row" in styles
+    assert ".test-factor-candidate-heading-row { border-top:" not in styles
+    assert (
+        ".test-factor-candidate-sources > .test-factor-candidate-heading-row "
+        "{ border-bottom: 0; }"
+    ) in styles
+    assert ".test-setting-row:last-child { border-bottom: 0; }" not in styles
+    assert ".test-setting-row {" in styles
+    assert "border-bottom: 1px solid var(--line);" in styles
 
 
 def test_object_picker_places_create_action_beside_the_shared_control() -> None:

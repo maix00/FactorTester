@@ -101,7 +101,7 @@
   function section(options) {
     const {context, field} = options;
     const root = document.createElement("section");
-    root.className = "factor-role-section";
+    root.className = "factor-role-section factor-candidate-child-section";
     const heading = document.createElement("div");
     heading.className = "factor-role-section-heading";
     const copy = document.createElement("span");

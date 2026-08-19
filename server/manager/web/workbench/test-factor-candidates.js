@@ -114,7 +114,7 @@
     );
     if (!rows.length) {
       control.querySelector(".test-field-row-control").append(FTUI.empty(
-        context.t("暂无因子候选"), context.t("从上方因子集合或因子来源添加"),
+        context.t("暂无因子候选"), context.t("通过因子集合或因子来源添加"),
       ));
     }
     root.append(control);
@@ -152,7 +152,7 @@
     root.className = "test-factor-candidate-summary-control";
     if (!rows.length) {
       root.append(FTUI.empty(
-        context.t("暂无因子候选"), context.t("从上方因子集合或因子来源添加"),
+        context.t("暂无因子候选"), context.t("通过因子集合或因子来源添加"),
       ));
       return root;
     }
