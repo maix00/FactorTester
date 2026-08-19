@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
+from server.manager.services.agent_conversation_history import thread_messages
 from server.manager.services.agent_profiles import AgentProfileService
 
 
@@ -238,7 +239,7 @@ class AgentAppServerSupervisor:
         if conversation is None:
             return
         thread = self._thread_from_response(response)
-        if method in {"thread/start", "thread/resume"} and thread is not None:
+        if method in {"thread/start", "thread/resume", "thread/read"} and thread is not None:
             thread_id = str(self._thread_value(thread, "id", "threadId", "thread_id") or "").strip()
             if not thread_id:
                 raise AgentAppServerError("Agent did not return a conversation thread")
@@ -253,6 +254,7 @@ class AgentAppServerSupervisor:
                 title=title,
                 created_at=float(created_at) if created_at not in (None, "") else None,
             )
+            self._persist_thread_history(key, str(conversation["conversation_id"]), thread)
             return
         if method == "turn/start":
             preview = self._preview(params)
@@ -273,6 +275,30 @@ class AgentAppServerSupervisor:
                 if isinstance(item, Mapping)
             )
         return " ".join(str(raw).split())[:2000]
+
+    def _persist_thread_history(
+        self,
+        key: tuple[str, str],
+        conversation_id: str,
+        thread: Mapping[str, object],
+    ) -> None:
+        """Mirror textual Provider history without exposing tool internals."""
+        store = self.profile_service.conversation_store
+        for item in thread_messages(thread):
+            try:
+                store.append_item(
+                    key[0],
+                    key[1],
+                    conversation_id,
+                    role=str(item["role"]),
+                    text=item["text"],
+                    item_id=str(item["item_id"]),
+                    created_at=float(item["created_at"]),
+                )
+            except (TypeError, ValueError, OSError):
+                # A malformed Provider item must not make an otherwise valid
+                # thread resume fail.  The next resume can retry it.
+                continue
 
     def delete_conversation(
         self,
