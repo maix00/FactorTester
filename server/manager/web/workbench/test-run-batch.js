@@ -129,7 +129,7 @@
       try {
         const frozen = await previewOne(context, state, group, refresh);
         const current = frozen || model().itemFor(state, group) || item;
-        if (frozen && model().runSpecTarget(frozen)) resolved.push(frozen);
+        if (model().runSpecTarget(current)) resolved.push(current);
         else failures.push({current, error: taskError(current)});
       } catch (error) {
         const current = model().itemFor(state, group) || item;

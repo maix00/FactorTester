@@ -140,7 +140,10 @@
       item.phase = "failed";
       item.error = model().errorDetail(error);
       refresh?.();
-      return null;
+      // A refresh may rebuild state.testRunBatch before the caller resumes.
+      // Return the failed item itself so the exact backend diagnostic is not
+      // replaced by the generic "RunSpec was not generated" fallback.
+      return item;
     }
   }
 
