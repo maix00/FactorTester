@@ -85,7 +85,17 @@ const data = {
         factor_kind: "custom",
         factor_count: 1,
       }],
-      factors: [],
+      factors: [{
+        factor_ref: "factor:one",
+        factor_alias: "MmRateOfChg|P:[CA]|N:20d|$F:1d",
+        factor_family_name: "MmRateOfChg",
+        factor_family_alias: "ROC",
+        chinese_name: "20 日动量变动率",
+        description: "使用二十日端点收益率构造的具体因子长篇说明",
+        factor_kind: "custom",
+        owner_username: "alice",
+        owner_alias: "MaxA",
+      }],
     },
     subordinates: {
       families: [{
@@ -160,7 +170,7 @@ assert.equal(mount.value.children[0].textContent, "公共因子家族");
 assert.equal(mount.value.children[1].rows.length, 2);
 
 window.FTFactorList.render(context, data, mount, {
-  page: "factors", query: "", groupRef: "*",
+  page: "factors", scope: "mine", query: "", groupRef: "*",
 });
 assert.deepStrictEqual(mount.value.headers, [
   "因子", "原类名", "说明", "来源", "所有者", "产品组",

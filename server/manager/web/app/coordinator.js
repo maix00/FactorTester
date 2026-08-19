@@ -380,11 +380,15 @@
       factorFamilies: (pageContext, route) => FTFactors.list(
         pageContext, "families", route?.scope || "public",
       ),
-      factorSets: pageContext => FTFactors.list(pageContext, "sets"),
+      factorSets: (pageContext, route) => FTFactors.list(
+        pageContext, "sets", route?.scope || "mine",
+      ),
       factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
       factor: (pageContext, id, mode) => FTFactors.factorDetail(pageContext, id, mode),
       factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),
-      factors: pageContext => FTFactors.list(pageContext, "factors"),
+      factors: (pageContext, route) => FTFactors.list(
+        pageContext, "factors", route?.scope || "mine",
+      ),
       productGroup: (pageContext, id) => FTProducts.groupDetail(pageContext, id),
       product: (pageContext, id) => FTProducts.productDetail(pageContext, id),
       productReference: (pageContext, kind, id) =>

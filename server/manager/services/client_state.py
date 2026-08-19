@@ -904,6 +904,33 @@ class ClientStateService:
                 known.add(target_ref)
         return values
 
+    def factor_set_scopes(
+        self, principal: str, query: str = "",
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return own and direct-child sets with the hierarchy boundary shared by factors."""
+        from server.manager.services.subordinate_factor_library import (
+            direct_subordinate_accounts,
+        )
+
+        account_store = self.local_account_store
+        if account_store is None:
+            try:
+                from server.manager.storage.local_accounts import LocalAccountStore
+
+                account_store = LocalAccountStore()
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+                account_store = None
+        children = direct_subordinate_accounts(principal, account_store)
+        subordinate: list[dict[str, Any]] = []
+        for account in children:
+            owner = str(account.get("username") or "").strip()
+            if owner:
+                subordinate.extend(self.factor_sets(owner, query))
+        return {
+            "mine": self.factor_sets(principal, query),
+            "subordinates": subordinate,
+        }
+
     def factor_set_detail(
         self,
         principal: str,

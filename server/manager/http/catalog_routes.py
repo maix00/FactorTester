@@ -387,11 +387,20 @@ class CatalogRoutesMixin:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
                     )
-                items = factor_service.factor_sets(
-                    principal, str(query.get("query", [""])[0] or ""),
-                )
+                needle = str(query.get("query", [""])[0] or "")
+                scope_reader = getattr(factor_service, "factor_set_scopes", None)
+                if callable(scope_reader):
+                    scopes = scope_reader(principal, needle)
+                    items = [
+                        *list(scopes.get("mine") or []),
+                        *list(scopes.get("subordinates") or []),
+                    ]
+                else:
+                    items = factor_service.factor_sets(principal, needle)
+                    scopes = {"mine": items, "subordinates": []}
                 json_response(self, {
                     "success": True, "count": len(items), "items": items,
+                    "item_scopes": scopes,
                 })
                 return True
             if parsed.path == "/api/catalog/factor-sets/detail":

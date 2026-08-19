@@ -200,3 +200,37 @@ def test_profile_read_does_not_wait_for_control_database(tmp_path):
 
     assert service.profiles("GTHT@MaxJJW@392452984564") == []
     assert sync.sync_flags == [False]
+
+
+def test_factor_set_scopes_include_only_direct_children(tmp_path, monkeypatch):
+    parent = "GTHT@testA@545963541963"
+    child = "GTHT@MaxJJW@392452984564"
+    peer = "GTHT@peer@123456789012"
+    accounts = LocalAccounts([
+        {"username": parent, "alias": "testA", "organization_id": "GTHT"},
+        {"username": child, "alias": "MaxJJW", "organization_id": "GTHT",
+         "parent_username": parent, "active": True},
+        {"username": peer, "alias": "peer", "organization_id": "GTHT",
+         "parent_username": "", "active": True},
+    ])
+    sync = LocalOnlySync([
+        {"principal": parent, "entity_type": "factor_set", "entity_id": "mine",
+         "payload": {"target_ref": "set:mine", "set_id": "mine"}},
+        {"principal": child, "entity_type": "factor_set", "entity_id": "child",
+         "payload": {"target_ref": "set:child", "set_id": "child"}},
+        {"principal": peer, "entity_type": "factor_set", "entity_id": "peer",
+         "payload": {"target_ref": "set:peer", "set_id": "peer"}},
+    ])
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_set_registry.factor_set_catalog",
+        lambda *_args, **_kwargs: [],
+    )
+    service = ClientStateService(
+        tmp_path / "client", account_domain_sync=sync,
+        local_account_store=accounts,
+    )
+
+    scopes = service.factor_set_scopes(parent)
+
+    assert [item["target_ref"] for item in scopes["mine"]] == ["set:mine"]
+    assert [item["target_ref"] for item in scopes["subordinates"]] == ["set:child"]
