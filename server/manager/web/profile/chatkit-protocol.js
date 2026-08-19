@@ -79,6 +79,40 @@
     return "";
   }
 
+  function eventParams(payload) {
+    return payload?.params && typeof payload.params === "object"
+      ? payload.params
+      : payload || {};
+  }
+
+  function textValue(value) {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(textValue).join("");
+    if (!value || typeof value !== "object") return "";
+    for (const key of ["text", "value", "output_text", "content", "parts", "message"]) {
+      const text = textValue(value[key]);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function completedItem(payload) {
+    const params = eventParams(payload);
+    return params.item || payload?.item || params.completed_item
+      || payload?.completed_item || null;
+  }
+
+  function isAssistantItem(item) {
+    const type = String(item?.type || item?.kind || "").replace(/[-_]/g, "");
+    return /^(agentmessage|assistantmessage|assistant|outputtext|message)$/i.test(type);
+  }
+
+  function completedText(payload) {
+    const item = completedItem(payload);
+    if (!isAssistantItem(item)) return "";
+    return textValue(item.text ?? item.content ?? item.output_text ?? item.message);
+  }
+
   function errorMessage(payload) {
     const value = payload?.error || payload?.params?.error || payload;
     if (typeof value === "string") return value;
@@ -86,8 +120,23 @@
   }
 
   function terminalMethod(method) {
-    return /(turn|item)[/:._-](completed|complete|failed|error|aborted|interrupted)/i
+    // Item completion only marks one item (often a tool call). The turn is
+    // the only event that closes the ChatKit response stream.
+    return /turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i
       .test(method);
+  }
+
+  function turnCompletion(payload) {
+    const params = eventParams(payload);
+    const turn = params.turn || payload?.turn || {};
+    const rawStatus = turn.status ?? params.status ?? payload?.status ?? "";
+    const status = typeof rawStatus === "string"
+      ? rawStatus
+      : String(rawStatus?.type || rawStatus?.value || "");
+    return {
+      status: status.toLowerCase(),
+      error: turn.error || params.error || payload?.error || null,
+    };
   }
 
   function chatLocale(context) {
@@ -150,6 +199,7 @@
   window.FTProfileChatKitProtocol = Object.freeze({
     assistantItem,
     chatLocale,
+    completedText,
     errorMessage,
     extractInputText,
     jsonResponse,
@@ -161,6 +211,7 @@
     rawMethod,
     responseValue,
     terminalMethod,
+    turnCompletion,
     threadIDFrom,
     threadObject,
     userItem,

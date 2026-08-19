@@ -73,6 +73,46 @@
     ));
   }
 
+  function ensureAssistant(state, controller) {
+    if (state.assistant) return state.assistant;
+    state.assistant = {
+      id: P.randomID("assistant"),
+      created_at: new Date().toISOString(),
+      text: "",
+    };
+    writeEvent(controller, {
+      type: "thread.item.added",
+      item: {...P.assistantItem(state), content: []},
+    });
+    writeEvent(controller, {
+      type: "assistant_message.content_part.added",
+      content_index: 0,
+      content: {type: "output_text", text: "", annotations: []},
+    });
+    return state.assistant;
+  }
+
+  function appendAssistantText(state, controller, text) {
+    if (!text) return;
+    const assistant = ensureAssistant(state, controller);
+    const current = assistant.text || "";
+    if (text === current) return;
+    if (text.startsWith(current)) {
+      const delta = text.slice(current.length);
+      assistant.text = text;
+      if (delta) writeEvent(controller, {
+        type: "assistant_message.content_part.text_delta",
+        content_index: 0,
+        delta,
+      });
+      return;
+    }
+    // A completed item is authoritative. If an upstream reconnect caused
+    // non-prefix deltas, preserve the full text for thread.item.done rather
+    // than duplicating an already rendered delta.
+    if (text.length >= current.length) assistant.text = text;
+  }
+
   async function rpc(state, method, params) {
     const payload = await state.context.api("/api/client/profile-agent/rpc", {
       method: "POST",
@@ -130,6 +170,19 @@
         }
         const method = P.rawMethod(payload);
         const delta = P.rawDelta(payload);
+        if (method === "app_server_exit" || payload?.type === "app_server_exit") {
+          if (state.assistant?.text) {
+            finish("done");
+          } else {
+            writeEvent(controller, {
+              type: "error",
+              code: "agent_process_exited",
+              message: "Profile Agent exited before producing a response",
+            });
+            finish("error");
+          }
+          return;
+        }
         if (payload?.error || /error/i.test(method) && !delta) {
           writeEvent(controller, {
             type: "error", code: "agent_error", message: P.errorMessage(payload),
@@ -137,28 +190,28 @@
           finish("error");
           return;
         }
+        const completed = P.completedText(payload);
+        if (completed) appendAssistantText(state, controller, completed);
         if (delta && /(agent.?message|assistant|delta|content)/i.test(method)) {
-          if (!state.assistant) {
-            state.assistant = {
-              id: P.randomID("assistant"),
-              created_at: new Date().toISOString(),
-            };
+          appendAssistantText(
+            state,
+            controller,
+            `${state.assistant?.text || ""}${delta}`,
+          );
+        }
+        if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
+          const completion = P.turnCompletion(payload);
+          if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
             writeEvent(controller, {
-              type: "thread.item.added",
-              item: {...P.assistantItem(state), content: []},
+              type: "error",
+              code: "agent_turn_failed",
+              message: P.errorMessage(completion.error || payload),
             });
-            writeEvent(controller, {
-              type: "assistant_message.content_part.added",
-              content_index: 0,
-              content: {type: "output_text", text: "", annotations: []},
-            });
+            finish("error");
+            return;
           }
-          state.assistant.text = `${state.assistant.text || ""}${delta}`;
-          writeEvent(controller, {
-            type: "assistant_message.content_part.text_delta",
-            content_index: 0,
-            delta,
-          });
+          finish("done");
+          return;
         }
         if (P.terminalMethod(method)) finish("done");
       };

@@ -150,8 +150,9 @@ class AgentAppServerSession:
 
     def status(self) -> dict[str, Any]:
         process = self.process
+        running = process is not None and process.is_running()
         return {
-            "ready": self.ready,
+            "ready": self.ready and running,
             **(process.status() if process is not None else {
                 "running": False,
                 "pid": None,
