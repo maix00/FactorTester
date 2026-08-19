@@ -25,6 +25,7 @@ class AgentAppServerSession:
         runtime: AgentSkillRuntime,
         provider: Mapping[str, object],
         codex_binary: str,
+        factor_tester_auth: Mapping[str, object] | None = None,
         proxy_url: str = "",
     ) -> None:
         self.runtime = runtime
@@ -32,6 +33,7 @@ class AgentAppServerSession:
             runtime=runtime,
             provider=provider,
             codex_binary=codex_binary,
+            factor_tester_auth=factor_tester_auth,
             proxy_url=proxy_url,
         )
         self.protocol = AgentSkillProtocol(runtime)
@@ -56,6 +58,7 @@ class AgentAppServerSession:
                 return
             self.launch.preflight()
             self.launch.write_provider_config()
+            self.launch.write_factor_tester_config()
             process = AgentAppServerProcess(
                 command=self.launch.command(),
                 cwd=self.runtime.workspace_root,
@@ -185,5 +188,6 @@ class AgentAppServerSession:
         with self._lock:
             if self.process is not None:
                 self.process.stop()
+            self.launch.cleanup_factor_tester_config()
             self.process = None
             self.ready = False

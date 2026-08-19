@@ -14,6 +14,8 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
+from .agent_auth import AgentCapability
+
 
 DEFAULT_HOME = Path.home() / ".factortester"
 CONFIG_ENV = "FACTORTESTER_CONFIG"
@@ -119,9 +121,13 @@ class HttpSession:
         base_url: str,
         *,
         cookies: Path | None = None,
+        agent_capability: AgentCapability | None = None,
+        bearer_token: str = "",
         timeout: float = 30,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.agent_capability = agent_capability
+        self.bearer_token = str(bearer_token or "").strip()
         cookie_file = cookies or cookie_path_for(self.base_url)
         self.cookie_jar = LWPCookieJar(str(cookie_file))
         self.timeout = timeout
@@ -167,7 +173,7 @@ class HttpSession:
         url = self._url(path)
         request = Request(
             url,
-            headers={"Accept": "application/octet-stream, image/*"},
+            headers=self._headers({"Accept": "application/octet-stream, image/*"}),
             method="GET",
         )
         try:
@@ -253,6 +259,7 @@ class HttpSession:
             "User-Agent": "FactorTester-CLI/1",
             "X-FactorTester-Client": "cli",
         }
+        headers = self._headers(headers)
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -306,6 +313,7 @@ class HttpSession:
             "User-Agent": "FactorTester-CLI/1",
             "X-FactorTester-Client": "cli",
         }
+        headers = self._headers(headers)
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -351,6 +359,17 @@ class HttpSession:
         cookie_file = Path(self.cookie_jar.filename)
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
+
+    def _headers(self, headers: dict[str, str]) -> dict[str, str]:
+        """Add the Profile capability without changing ordinary CLI cookies."""
+        result = dict(headers)
+        if self.bearer_token:
+            result["Authorization"] = f"Bearer {self.bearer_token}"
+        if self.agent_capability is not None:
+            result["X-FactorTester-Agent"] = "profile"
+            result["X-FactorTester-Agent-Profile"] = self.agent_capability.profile_id
+            result["X-FactorTester-Agent-Claim"] = self.agent_capability.claim_id
+        return result
 
     def clear_cookies(self) -> None:
         """Remove the persisted authenticated session from this client."""
