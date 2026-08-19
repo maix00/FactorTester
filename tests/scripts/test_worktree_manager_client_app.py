@@ -1502,7 +1502,9 @@ def test_web_shell_allows_authenticated_blob_image_previews(tmp_path) -> None:
         with urlopen(base_url) as response:
             assert response.headers["Content-Security-Policy"] == (
                 "default-src 'self'; img-src 'self' blob: data: https:; "
-                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' https://cdn.platform.openai.com; "
+                "frame-src 'self' https://cdn.platform.openai.com; "
                 "connect-src 'self' http: https:"
             )
             assert response.headers["Cache-Control"] == "no-store"
@@ -2574,7 +2576,7 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
     assert '尚无已注册 Profile。可在下方创建，注册完成后会立即显示。' in scripts["profiles"]
     assert 'context.api("/api/client/profiles/create"' in scripts["profiles"]
     assert '创建独立 Profile' in scripts["profiles"]
-    assert '/research?section=profiles&profile=${profileID}' in scripts["profiles"]
+    assert 'context.navigate(`/profiles/${profileID}`)' in scripts["profiles"]
     assert "const payload = await context.api(\"/api/client/workspace\")" in scripts["settings"]
     assert "if (!current(context)) return;" in scripts["catalog_details"]
 
@@ -2619,8 +2621,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'path: `/research?section=${encodeURIComponent(id)}`' in workspaces
     assert 'body.append(FTUI.loading(context.t("正在读取研究…")))' in workspaces
     assert 'context.content.replaceChildren(body)' in workspaces
-    assert 'FTProfiles.detail(profilesContext, profileID, {embedded: true})' in workspaces
-    assert 'FTProfiles.list(profilesContext, {embedded: true})' in workspaces
+    assert 'context.navigate(`/profiles/${encodeURIComponent(profileID)}`)' in workspaces
+    assert 'await FTProfiles.list({...context, content: body}, {embedded: true})' in workspaces
     assert 'url.searchParams.delete("profile")' in workspaces
     assert 'context.isRouteCurrent?.() === false' in local_page
     assert 'context.isRouteCurrent?.() === false' in shared_page

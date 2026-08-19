@@ -46,11 +46,10 @@
       row.dataset.href = "true";
       row.addEventListener("click", () => {
         const profileID = encodeURIComponent(cached[index].profile_id);
-        context.navigate(
-          embedded
-            ? `/research?section=profiles&profile=${profileID}`
-            : `/profiles/${profileID}`,
-        );
+        // A Profile is a durable research identity, not a subsection of the
+        // research list.  Always open its own closable detail tab so the
+        // four detail tabs keep their state independently of the list.
+        context.navigate(`/profiles/${profileID}`);
       });
     });
     context.content.replaceChildren(view.shell);
@@ -59,16 +58,20 @@
   async function detail(context, profileID, options = {}) {
     const embedded = Boolean(options.embedded);
     if (!embedded) context.activeNav("research");
-    if (!cached.length) {
-      const payload = await context.api("/api/client/profiles");
-      if (!current(context)) return;
-      cached = payload.profiles || [];
-    }
+    // The list may have been rendered from a stale local/peer projection.
+    // Reload when entering a detail tab so synced agents, workspaces and
+    // research records are not permanently hidden by the module cache.
+    const payload = await context.api("/api/client/profiles");
+    if (!current(context)) return;
+    cached = payload.profiles || [];
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
     const root = document.createElement("div"); root.className = "detail-stack";
     if (!embedded) {
       context.setHeading(profile.display_name || profile.profile_id, `${context.t("研究身份")} · ${profile.profile_id}`);
+      context.updateActiveTab?.({
+        title: profile.display_name || profile.profile_id,
+      });
       context.toolbar.append(context.button(
         "‹", () => context.navigate("/research?section=profiles"),
         context.t("返回研究身份")
@@ -94,7 +97,8 @@
     if (selectedTab === "overview") {
       root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows({
         profile_id: profile.profile_id, display_name: profile.display_name,
-        workspace_root: profile.workspace_root, server: profile.server?.base_url,
+        workspace_root: profile.workspace_root || context.t("路径由服务器保护"),
+        server: profile.server?.base_url || context.t("未配置"),
         principal: profile.session_binding?.principal_ref,
         runtime_kind: runtimeLabel(context, runtime),
         executor_id: runtime.executor_id || context.t("未绑定"),
@@ -102,23 +106,60 @@
         claim: claimLabel(context, claim),
         agent_id: claim?.agent_id || context.t("无"),
       })).shell);
-      root.append(section(context, "Agents", ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], (profile.agents || []).map(item => [
+      const projectionNote = document.createElement("p");
+      projectionNote.className = "settings-muted profile-projection-note";
+      projectionNote.textContent = context.t(
+        "详情只显示已同步的 Profile 元数据；运行绑定、Agent 会话和工作区状态请查看对应选项卡。",
+      );
+      root.append(projectionNote);
+      const agents = (profile.agents || []).map(item => [
         item.agent_id, item.role, item.status, item.next_action,
-      ])));
-      root.append(section(context, context.t("工作区"), [context.t("工作区"), context.t("访问模式"), context.t("所有者"), context.t("服务端引用")], (profile.workspaces || []).map(item => [
+      ]);
+      if (!agents.length && claim?.agent_id) {
+        agents.push([
+          claim.agent_id, context.t("研究 Agent"), claim.status || context.t("运行中"),
+          context.t("由当前认领会话提供"),
+        ]);
+      }
+      const workspaces = (profile.workspaces || []).map(item => [
         item.workspace_id, item.access_mode, item.owner_ref, item.server_workspace_ref,
-      ])));
-      root.append(section(context, context.t("研究记录"), [context.t("研究"), context.t("分支"), context.t("节点"), "Checkpoint"], (profile.research_records || []).map(item => [
+      ]);
+      if (!workspaces.length && runtime.workspace_relpath) {
+        workspaces.push([
+          runtime.workspace_relpath, context.t("服务器工作区"),
+          profile.session_binding?.principal_ref || "",
+          runtime.server_id || runtime.executor_id || "",
+        ]);
+      }
+      const researchRecords = (profile.research_records || []).map(item => [
         item.title || item.work_package_id || item.record_id, item.branch_id,
         item.current_node || item.node_id, item.checkpoint_ref,
-      ])));
+      ]);
+      const agentSection = section(
+        context, "Agents",
+        ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], agents,
+      );
+      const workspaceSection = section(
+        context, context.t("工作区"),
+        [context.t("工作区"), context.t("访问模式"), context.t("所有者"), context.t("服务端引用")],
+        workspaces,
+      );
+      const researchSection = section(
+        context, context.t("研究记录"),
+        [context.t("研究"), context.t("分支"), context.t("节点"), "Checkpoint"],
+        researchRecords,
+      );
+      [agentSection, workspaceSection, researchSection]
+        .filter(Boolean)
+        .forEach(item => root.append(item));
     } else if (selectedTab === "binding") {
       root.append(agentActions(context, profile, refresh));
       if (window.FTAgentSkills?.render) {
         root.append(await window.FTAgentSkills.render(context, profile, refresh));
       }
     } else if (selectedTab === "session") {
-      root.append(sessionSection(context, claim));
+      const session = sessionSection(context, claim);
+      if (session) root.append(session);
       if (window.FTAgentChat?.render) {
         root.append(await window.FTAgentChat.render(context, profile));
       }
@@ -300,9 +341,7 @@
       button.setAttribute("aria-current", id === selected ? "page" : "false");
       button.onclick = () => {
         const encoded = encodeURIComponent(profileID);
-        const path = embedded
-          ? `/research?section=profiles&profile=${encoded}&profile_tab=${id}`
-          : `/profiles/${encoded}?profile_tab=${id}`;
+        const path = `/profiles/${encoded}?profile_tab=${id}`;
         context.navigate(path);
       };
       nav.append(button);
@@ -435,9 +474,10 @@
   }
 
   function section(context, title, headers, rows) {
+    if (!rows.length) return null;
     const root = document.createElement("section"); root.className = "job-section";
     const heading = document.createElement("h2"); heading.textContent = title; root.append(heading);
-    root.append(rows.length ? FTUI.table(headers, rows).shell : FTUI.empty(context.t("暂无 %@").replace("%@", context.t(title)), ""));
+    root.append(FTUI.table(headers, rows).shell);
     return root;
   }
 
