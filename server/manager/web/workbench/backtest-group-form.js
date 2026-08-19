@@ -211,6 +211,7 @@
     fallbackFactorOverrides = FTBacktestGroupOverrides.render({
       context, manifest: state.manifest, inheritedValues: innerScopeValues,
       overrides: initialOverrides, onlyTabs: ["factor"], scopeSide: "inner",
+      contentOnly: true,
     });
     let editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
       context, state,
