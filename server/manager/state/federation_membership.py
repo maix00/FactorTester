@@ -11,6 +11,9 @@ from server.manager.domain.federation import (
     TargetUnavailable,
 )
 from server.manager.network_endpoints import validate_client_endpoint
+from server.manager.services.host_lan_runtime import (
+    dynamic_host_client_endpoints,
+)
 from server.manager.services.network_info import local_internal_addresses
 
 
@@ -34,7 +37,7 @@ class FederationMembershipStateMixin:
             route for route in routes
             if route.port in online_ports and route.online
         ]
-        selected_endpoint = self._federation_client_endpoint(endpoint)
+        selected_endpoint = self._refresh_host_client_endpoints(endpoint)
         payload = {
             "schema_version": 1,
             "server_id": self.server_id,
@@ -69,6 +72,18 @@ class FederationMembershipStateMixin:
         if self._transfer_server_endpoints is not None:
             payload["transfer_node"] = self.transfer_node_advertisement()
         return payload
+
+    def _refresh_host_client_endpoints(self, endpoint: str) -> str:
+        """Replace container client endpoints with the current host LAN IP."""
+        current = self._transfer_server_endpoints
+        if self.public_server:
+            return self._federation_client_endpoint(endpoint)
+        selected = dynamic_host_client_endpoints(current)
+        if selected is None:
+            return self._federation_client_endpoint(endpoint)
+        if selected != current:
+            self.configure_transfer_endpoints(selected)
+        return selected.client_control_endpoint
 
     def _federation_client_endpoint(self, endpoint: str = "") -> str:
         """Return the signed public endpoint owned by this node.

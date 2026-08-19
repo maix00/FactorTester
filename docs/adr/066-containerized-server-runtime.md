@@ -61,9 +61,10 @@ FactorTester application is being rebuilt or rolled back.
    Same-host FactorTester-to-PostgreSQL traffic uses a non-published Docker
    network. Authorized remote server nodes reach PostgreSQL through its
    database-only tunnel. Swift clients never receive a database-tunnel peer.
-9. Container deployments explicitly project the host LAN address into Manager
-   network information. Loopback and container bridge addresses are not shown
-   as LAN client targets.
+9. Intranet container deployments consume a short-lived LAN-address snapshot
+   produced in the host network namespace. They never retain a fixed host IP
+   or advertise loopback, container bridge, or WireGuard addresses as LAN
+   client targets. The dynamic lifecycle is specified by ADR-111.
 10. Local feature/issue deployments may enable a source watcher that restarts
     only the Manager subprocess when mounted Python files change. Public
     `main` deployments prohibit hot reload and change code only through an

@@ -34,6 +34,9 @@ Compose、Manager API 和入口脚本中，容易把“代码热重载”“服�
 6. 所有成功的服务操作必须等待 Manager 返回的实例状态恢复，不能只根据 HTTP
    `POST` 已接受就报告成功。7998 和 7997 的连通性由 Compose health/status 和
    发布验收分别验证。
+7. 宿主机入口在启动或重启 Compose 前确保 LAN 地址代理在线；完整 `down` 同时停止
+   代理并移除地址快照。代理与 Manager 通过 state root 中的短期原子快照通信，不把
+   Docker socket 或宿主机网络命名空间暴露给应用容器。地址协议见 ADR-111。
 
 ## 后果
 
@@ -41,6 +44,7 @@ Compose、Manager API 和入口脚本中，容易把“代码热重载”“服�
   Manager、重建 Manager 或重启全栈。
 - 重启单个测试服务不会误重启数据库、WireGuard 或 Manager，也不会把已停止的服务
   隐式启动。
+- DHCP 或活动网卡变化不需要重启容器；下一次地址快照和心跳自动替换旧 LAN 地址。
 - Docker 的 `restart: unless-stopped` 负责进程/容器退出恢复，不等于对“进程仍活着
   但业务失去响应”的 unhealthy 状态自动重建；后者由健康检查与运维入口报告，避免
   在没有人工确认时破坏正在运行的任务。

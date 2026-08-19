@@ -150,17 +150,6 @@
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    const sets = FTTestFactorSets.control(context, state, refresh);
-    if (sets) root.append(FTTestFieldRow.create(
-      context.t("因子集合"), sets,
-      window.FTTestFieldHelp?.forField?.(
-        state.manifest, "factor_set_selections", context,
-      ) || "",
-    ));
-    root.append(directControl(context, state, refresh));
-    // factor_candidates is derived from the two rows above.  Keep this row
-    // last so the empty-state copy “从上方…添加” always describes the DOM
-    // order, including after lazy candidate catalogs finish loading.
     root.append(FTTestFieldRow.create(
       context.t("因子候选"), FTTestFactorCandidates.summaryControl(context, state),
       window.FTTestFieldHelp?.forField?.(
@@ -168,6 +157,17 @@
       ) || "",
       {className: "test-factor-candidate-heading-row"},
     ));
+    const sets = FTTestFactorSets.control(context, state, refresh);
+    if (sets) root.append(FTTestFieldRow.create(
+      context.t("因子集合"), sets,
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "factor_set_selections", context,
+      ) || "",
+      {className: "factor-candidate-child-row"},
+    ));
+    const direct = directControl(context, state, refresh);
+    direct.classList.add("factor-candidate-child-row");
+    root.append(direct);
     const roleField = state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)
       && window.FTTestFactorRoles?.section) {

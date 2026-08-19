@@ -18,23 +18,21 @@ The native Swift client must use a different key and tunnel address. Dynamic
 test ports are deliberately not published by Compose; cross-host requests go
 through Manager 7998.
 
-`FACTORTESTER_LAN_ADDRESS` is projected into the Manager as an authoritative
-display address. This prevents the home page from advertising Docker bridge or
-loopback addresses that another LAN device cannot use.
+The host-side address agent continuously discovers the active physical LAN
+address and publishes a short-lived snapshot under `FACTORTESTER_STATE_ROOT`.
+Manager reads that snapshot for every heartbeat and derives the client-facing
+7998/7997 endpoints from it. Never put a fixed LAN IP in `server.env`.
 
-`FACTORTESTER_MANAGER_PUBLIC_ENDPOINT` and
-`FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT` are also client-facing addresses. Set
-them to the host/LAN address that Web and Swift clients can reach on 7998 and
-7997. Do not set either value to `FACTORTESTER_FEDERATION_LOCAL_ADDRESS`:
-that WireGuard address is reserved for Manager-to-Manager control and peer
-data, and is not reachable from ordinary clients.
+If the host address cannot be confirmed, Manager stops renewing its federation
+lease instead of retaining an old IP or advertising a Docker/WireGuard address.
+The public deployment has a separate stable-public-endpoint contract.
 
 ## Local setup
 
-1. Copy `server.env.example` to
-   `~/Library/Application Support/FactorTester/server-docker/server.env` and
-   replace every example path/address. Stop any host-native Manager before the
-   Docker stack claims canonical ports `7998/7997`.
+1. Copy `server.env.example` to the deployment state directory and replace the
+   example paths and WireGuard values. Do not add a host LAN IP. Stop any
+   host-native Manager before the Docker stack claims canonical ports
+   `7998/7997`.
 2. Store each server-specific WireGuard configuration as a `*.conf` file in
    `FACTORTESTER_WIREGUARD_CONFIG_DIR`; use mode 0700 for the directory and
    0600 for every file. One interface is sufficient initially. A future
@@ -60,6 +58,11 @@ data, and is not reachable from ordinary clients.
 6. Verify `http://<Mac-LAN-IP>:7998`, PostgreSQL through the tunnel, peer
    control/data access on `<container-WireGuard-IP>:17998/17997`, and
    authorized client data access on 7997.
+
+The address detector supports macOS, Linux, and Windows without fixed interface
+names. The current Bash lifecycle starts it for this macOS/Linux Compose entry;
+a Windows deployment launcher runs the same Python agent in foreground/service
+mode and uses the same snapshot contract.
 
 `up` and `restart` never build or pull an image. Run `build` explicitly only
 after changing the Dockerfile or dependency lock file. Ordinary source edits
