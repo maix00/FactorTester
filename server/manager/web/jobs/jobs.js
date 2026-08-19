@@ -86,7 +86,6 @@
   function installScopeToolbar(context, state, scope) {
     context.toolbar.replaceChildren(
       FTTestPageTabs.render(context, "tasks"),
-      scopeTabs(context, state),
       context.button(
         "↻", () => list(context, null, scope, {forceRefresh: true}),
         context.t("刷新任务列表"),
@@ -236,6 +235,7 @@
       if (!isCurrent()) return;
       const root = document.createElement("div"); root.className = "jobs-page";
       if (scope === "server") root.append(publicScopeNote(context));
+      root.append(scopeTabs(context, state));
       const failure = FTUI.empty(context.t("任务列表读取失败"), text(error.message || error));
       failure.append(context.button(
         context.t("重试"),
@@ -258,6 +258,7 @@
     if (!isCurrent()) return;
     const root = document.createElement("div"); root.className = "jobs-page";
     if (scope === "server") root.append(publicScopeNote(context, payload));
+    root.append(scopeTabs(context, state));
     if (payload.requires_login) {
       root.append(context.loginRequiredView());
       context.content.replaceChildren(root); return;

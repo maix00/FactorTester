@@ -558,6 +558,64 @@
     try { return JSON.stringify(value); } catch (_) { return String(value); }
   }
 
+  function renderGraph(context, mount, graph, options = {}) {
+    const section = document.createElement("section");
+    section.className = "research-graph-view research-graph-detail-page";
+    const toolbar = document.createElement("div");
+    toolbar.className = "research-graph-toolbar";
+    const title = document.createElement("h2");
+    title.textContent = `${options.title || graph.presentation?.title || context.t("研究图")} @v${graph.version || "—"}`;
+    const actions = document.createElement("div");
+    actions.className = "research-graph-actions";
+    if (options.downloadURL) {
+      const download = document.createElement("a");
+      download.className = "button secondary";
+      download.href = options.downloadURL;
+      download.download = options.filename || "research-graph.yaml";
+      download.textContent = context.t("下载 YAML");
+      actions.append(download);
+    }
+    actions.append(context.button(
+      context.t("返回研究图"),
+      () => context.navigate("/research?section=graph"),
+      context.t("返回研究图列表"),
+    ));
+    toolbar.append(title, actions);
+    section.append(toolbar);
+    const meta = document.createElement("p");
+    meta.className = "secondary research-graph-meta";
+    meta.textContent = [
+      graph.graph_id ? `${context.t("研究图")}: ${graph.graph_id}` : "",
+      graph.version ? `v${graph.version}` : "",
+      formatCount(context, "%lld 个节点", (graph.nodes || []).length),
+      formatCount(context, "%lld 条边", (graph.edges || []).length),
+      graph.presentation?.locale ? `${context.t("语言版本")}: ${graph.presentation.locale}` : "",
+      options.userFile ? context.t("用户文件不记录语言版本") : "",
+    ].filter(Boolean).join(" · ");
+    section.append(meta);
+    if (graph.presentation?.description) {
+      const description = document.createElement("p");
+      description.className = "secondary research-graph-description";
+      description.textContent = graph.presentation.description;
+      section.append(description);
+    }
+    const layout = document.createElement("div");
+    layout.className = "research-graph-layout";
+    const surface = document.createElement("div");
+    surface.className = "research-graph-surface";
+    const canvas = document.createElement("div");
+    canvas.className = "research-graph-canvas";
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", context.t("研究图拓扑", "Research graph topology"));
+    const details = document.createElement("aside");
+    details.className = "research-graph-details";
+    surface.append(canvas);
+    layout.append(surface, details);
+    section.append(layout);
+    mount.replaceChildren(section);
+    renderNetwork(context, graph, canvas, details, surface);
+  }
+
   function formatCount(context, key, value) {
     return context.t(key, key).replace("%lld", String(value));
   }
@@ -571,5 +629,5 @@
     return Boolean(window.webkit?.messageHandlers);
   }
 
-  window.FTResearchGraph = Object.freeze({render});
+  window.FTResearchGraph = Object.freeze({render, renderGraph});
 })();

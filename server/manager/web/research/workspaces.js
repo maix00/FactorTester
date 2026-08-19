@@ -1,7 +1,6 @@
 (() => {
   const fallbackSections = [
-    ["local", "本地研究"],
-    ["shared", "共享研究"],
+    ["reports", "研究报告"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
     ["agent-models", "智能体模型"],
@@ -12,7 +11,7 @@
     if (!isCurrent()) return;
     const sections = sectionsFor(context);
     const params = new URLSearchParams(location.search);
-    const requested = params.get("section") || "shared";
+    const requested = params.get("section") || "reports";
     const profileID = params.get("profile") || "";
     const allowedSections = new Set(sections.map(item => item[0]));
     const selected = allowedSections.has(requested)
@@ -47,12 +46,12 @@
         }
       } else if (selected === "agent-models") {
         await FTAgentModels.list({...context, content: body});
-      } else if (selected === "local") {
-        await FTResearchLocal.render(context, body, embedded);
+      } else if (selected === "reports") {
+        await FTResearchReports.render(context, body, embedded);
       } else if (selected === "graph") {
-        await FTResearchGraph.render(context, body);
+        await FTResearchGraphList.render(context, body);
       } else {
-        await FTResearchShared.render(context, body, embedded);
+        await FTResearchReports.render(context, body, embedded);
       }
       if (!isCurrent()) return;
     } catch (error) {
@@ -74,7 +73,7 @@
   }
 
   function labelFor(section, sections) {
-    return sections.find(item => item[0] === section)?.[1] || "共享研究";
+    return sections.find(item => item[0] === section)?.[1] || "研究报告";
   }
 
   function tabBar(context, selected, embedded) {
