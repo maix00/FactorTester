@@ -192,6 +192,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["factor_role_bindings"]["execution_policy"] == (
         "include"
     )
+    assert index["defaults"]["factor_role_bindings"]["adapter_managed"] is True
     assert index["defaults"]["factor_role_bindings"]["serialization"]["visible_when"] == {
         "min_items": {"factor_candidates": 2},
     }

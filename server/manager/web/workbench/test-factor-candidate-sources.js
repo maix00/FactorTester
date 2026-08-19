@@ -168,6 +168,27 @@
       ) || "",
       {className: "test-factor-candidate-heading-row"},
     ));
+    const roleField = state.manifest?.defaults?.factor_role_bindings;
+    if (roleField && FTSettingRules.isVisible(roleField, state.values)
+      && window.FTTestFactorRoles?.section) {
+      root.append(FTTestFactorRoles.section({
+        context,
+        manifest: state.manifest,
+        field: roleField,
+        fieldKey: "factor_role_bindings",
+        values: state.values,
+        value: FTSettingRules.valueFor(
+          "factor_role_bindings", roleField, state.values,
+        ),
+        disabled: !FTSettingRules.isEditable(roleField, state.values),
+        onChange: next => {
+          FTSettingRules.setValue(
+            state.manifest, state.values, "factor_role_bindings", roleField, next,
+          );
+          refresh?.();
+        },
+      }));
+    }
     return root;
   }
 

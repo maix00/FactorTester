@@ -20,12 +20,16 @@
       })),
       selected: options.selected || [],
       actions,
+      actionsPlacement: options.actionsPlacement
+        || (actions.length ? "trailing" : undefined),
       multi: options.multi !== false,
     });
     filter.element.classList.add("ft-test-object-picker");
     const insertBeforeDropdown = node => {
       const dropdown = filter.element.querySelector(".ft-multi-select-dropdown");
-      filter.element.insertBefore(node, dropdown || filter.element.firstChild);
+      const anchor = dropdown?.parentElement || filter.element.firstChild;
+      if (anchor?.parentElement) anchor.parentElement.insertBefore(node, anchor);
+      else filter.element.append(node);
     };
     if (options.loading) {
       const loading = document.createElement("small");

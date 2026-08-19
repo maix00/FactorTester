@@ -123,8 +123,10 @@
       button.addEventListener("click", event => action.onClick?.(event));
       headingActions.append(button);
     }
-    if (headingActions.childElementCount) heading.append(headingActions);
-    if (options.compact !== true || headingActions.childElementCount) {
+    const trailingActions = options.actionsPlacement === "trailing"
+      && headingActions.childElementCount > 0;
+    if (!trailingActions && headingActions.childElementCount) heading.append(headingActions);
+    if (options.compact !== true || (!trailingActions && headingActions.childElementCount)) {
       if (options.compact === true) heading.classList.add("is-compact");
       section.append(heading);
     }
@@ -171,7 +173,15 @@
     if (multi) menu.append(note);
     if (multi || typeof options.onApply === "function") menu.append(actions);
     dropdown.append(summary, menu);
-    section.append(dropdown);
+    if (trailingActions) {
+      const controlRow = document.createElement("div");
+      controlRow.className = "ft-multi-select-control-row";
+      headingActions.classList.add("ft-multi-select-trailing-actions");
+      controlRow.append(dropdown, headingActions);
+      section.append(controlRow);
+    } else {
+      section.append(dropdown);
+    }
     const selectionPreview = document.createElement("div");
     selectionPreview.className = "ft-multi-select-selection-preview";
     if (options.compact === true && multi) section.append(selectionPreview);
