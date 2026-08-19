@@ -50,38 +50,72 @@
     } else if (!data.visitor) {
       root.append(FTFactorList.subjectScopeTabs(context, page, familyScope));
     }
-    let group = null;
-    if (page !== "families") {
-      group = FTFactorGroupFilter.create(
-        context, data.groups, ["*"], () => render(),
-      );
-      root.append(group.element);
-    }
+    const controls = document.createElement("div");
+    controls.className = "factor-catalog-controls";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "toolbar-search factor-catalog-search";
+    search.placeholder = FTFactorList.searchPlaceholder(context, page, familyScope);
+    search.setAttribute("aria-label", search.placeholder);
+    controls.append(search);
+    const group = FTFactorGroupFilter.create(
+      context, data.groups, ["*"], () => resetAndRender(),
+    );
+    controls.append(group.element);
+    const owner = familyScope === "subordinates"
+      ? subordinateFilter(context, data, page, () => resetAndRender()) : null;
+    if (owner) controls.append(owner.element);
+    root.append(controls);
     const results = document.createElement("div");
     results.className = "library-results";
     root.append(results);
     context.content.replaceChildren(root);
 
-    const search = document.createElement("input");
-    search.className = "toolbar-search";
-    search.placeholder = FTFactorList.searchPlaceholder(context, page, familyScope);
-    search.setAttribute("aria-label", search.placeholder);
     context.toolbar.append(
-      search,
       context.button("↻", async () => {
         await load(context, true);
         if (!current(context)) return;
         list(context, page, familyScope);
       }, context.t("刷新")),
     );
+    let tablePage = 1;
     const render = () => FTFactorList.render(context, data, results, {
       page,
       scope: familyScope,
       query: search.value.trim().toLowerCase(),
-      groupRefs: group?.values ?? ["*"],
+      groupRefs: group.values,
+      ownerUsernames: owner?.values ?? ["*"],
+      tablePage,
+      onPageChange: value => { tablePage = value; render(); },
     });
-    search.addEventListener("input", render);
+    function resetAndRender() { tablePage = 1; render(); }
+    search.addEventListener("input", resetAndRender);
     render();
+  }
+
+  function subordinateFilter(context, data, page, onChange) {
+    const values = page === "sets"
+      ? (data.setScopes?.subordinates || [])
+      : (data.familyScopes?.subordinates?.[page === "families" ? "families" : "factors"] || []);
+    const owners = new Map();
+    values.forEach(item => {
+      const username = String(item?.owner_username || "").trim();
+      if (!username) return;
+      owners.set(username, String(item?.owner_alias || username));
+    });
+    const filter = FTMultiSelectFilter.create(context, {
+      title: context.t("按下级用户筛选"),
+      className: "factor-subordinate-filter",
+      menuClass: "factor-subordinate-filter-menu",
+      searchPlaceholder: context.t("搜索下级用户"),
+      items: [
+        {value: "*", label: context.t("全部下级用户"), exclusive: true},
+        ...[...owners].map(([value, label]) => ({value, label, description: value})),
+      ],
+      selected: ["*"],
+      onChange,
+    });
+    return filter;
   }
 
   async function factorDetail(context, targetRef, mode = "view") {

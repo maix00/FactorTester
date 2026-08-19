@@ -22,6 +22,15 @@ window.FTUI = {
   table(headers, rows) {
     return {shell: {headers, rows}, body: {rows: []}};
   },
+  pagedTable(headers, rows, options = {}) {
+    const pageSize = options.pageSize || 20;
+    const page = options.page || 1;
+    const start = (page - 1) * pageSize;
+    return {
+      shell: {headers, rows: rows.slice(start, start + pageSize)},
+      body: {rows: []}, page, pageSize, start,
+    };
+  },
   empty(title, description) { return {title, description}; },
 };
 global.FTUI = window.FTUI;
@@ -162,6 +171,30 @@ window.FTFactorList.render(context, data, mount, {
 });
 assert.strictEqual(mount.value.children[1].rows.length, 1);
 assert.strictEqual(mount.value.children[1].rows[0][0], "OtherFamily");
+
+const manyFamilies = Array.from({length: 21}, (_, index) => ({
+  family_ref: `family:page-${index}`,
+  factor_family_name: `PagedFamily${index}`,
+  factor_kind: "public",
+}));
+const pagedData = {
+  ...data,
+  family_scopes: {
+    ...data.family_scopes,
+    public: {families: manyFamilies, factors: []},
+  },
+};
+window.FTFactorList.render(context, pagedData, mount, {
+  page: "families", scope: "public", query: "", groupRefs: ["*"],
+  tablePage: 1,
+});
+assert.strictEqual(mount.value.children[1].rows.length, 20);
+window.FTFactorList.render(context, pagedData, mount, {
+  page: "families", scope: "public", query: "", groupRefs: ["*"],
+  tablePage: 2,
+});
+assert.strictEqual(mount.value.children[1].rows.length, 1);
+assert.strictEqual(mount.value.children[1].rows[0][0], "PagedFamily20");
 
 window.FTFactorList.render(context, {...data, visitor: true}, mount, {
   page: "families", scope: "public", query: "", groupRef: "*",

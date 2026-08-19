@@ -2300,6 +2300,10 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'context.t("因子")' in listing
     assert 'context.t("因子集合")' in listing
     assert '"/factors/sets"' in listing
+    assert "FTUI.pagedTable" in listing
+    assert 'className = "factor-catalog-controls"' in coordinator
+    assert "context.toolbar.append(\n      search" not in coordinator
+    assert 'context.t("按下级用户筛选")' in coordinator
     assert "decodeFrozenFactorRef" in details
 
 
