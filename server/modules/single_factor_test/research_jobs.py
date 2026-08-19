@@ -27,6 +27,7 @@ from server.services import (
     research_runs,
     research_workspaces,
 )
+from server.services.frozen_product_scope import freeze_product_scope
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.report_outputs import (
@@ -306,7 +307,7 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
             owner=owner,
             overrides=source_overrides,
         ):
-            frozen_configuration = _freeze_product_selections(
+            frozen_configuration = freeze_product_scope(
                 configuration,
                 owner=owner,
                 analyses=analyses,
@@ -650,74 +651,6 @@ def _capability_requirements(
                 seen.add(key)
                 requirements.append(row)
     return requirements
-
-
-def _selection_id(group: dict) -> str:
-    raw = group.get("product_path_selection")
-    if isinstance(raw, dict):
-        return str(
-            raw.get("product_path_selection_id")
-            or raw.get("selection_id")
-            or raw.get("id")
-            or ""
-        )
-    return str(group.get("product_path_selection_id") or group.get("testerId") or "")
-
-
-def _freeze_product_selections(configuration: dict, *, owner: str, analyses: list[str]) -> dict:
-    frozen = deepcopy(configuration)
-    if "backtest" not in analyses:
-        return frozen
-    backtest = frozen["payload"]["analyses"].get("backtest")
-    if not isinstance(backtest, dict):
-        return frozen
-    selections = deepcopy(backtest.get("product_selections") or {})
-    if isinstance(selections, list):
-        selections = {
-            str(item.get("product_path_selection_id") or item.get("selection_id") or item.get("id") or ""): item
-            for item in selections if isinstance(item, dict)
-        }
-    if not isinstance(selections, dict):
-        selections = {}
-    from server.modules.products.product_group_store import load_product_groups
-
-    product_groups = {
-        str(item.get("id") or ""): item
-        for item in load_product_groups(owner) if isinstance(item, dict)
-    }
-    unresolved: set[str] = set()
-    for group in backtest.get("groups") or []:
-        if not isinstance(group, dict):
-            continue
-        selection_id = _selection_id(group)
-        if not selection_id:
-            continue
-        raw = selections.get(selection_id)
-        if not isinstance(raw, dict):
-            group_selection = group.get("product_path_selection")
-            raw = deepcopy(group_selection) if isinstance(group_selection, dict) else {}
-        paths = raw.get("selected_paths") or raw.get("paths")
-        if not isinstance(paths, list) or not paths:
-            product_group = product_groups.get(selection_id)
-            if product_group is None:
-                unresolved.add(selection_id)
-                continue
-            paths = deepcopy(product_group.get("paths") or [])
-            raw.update({
-                "label": str(product_group.get("name") or selection_id),
-                "product_group": str(product_group.get("name") or selection_id),
-                "product_group_template_id": selection_id,
-            })
-        raw["product_path_selection_id"] = selection_id
-        raw["selected_paths"] = deepcopy(paths)
-        selections[selection_id] = raw
-    if unresolved:
-        raise ValueError(
-            "configuration references product selections unavailable to owner: "
-            + ", ".join(sorted(unresolved))
-        )
-    backtest["product_selections"] = selections
-    return frozen
 
 
 def _freeze_external_factor_artifacts(configuration: dict) -> dict:
