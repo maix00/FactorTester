@@ -192,6 +192,33 @@ def test_hydration_repairs_missing_provider_metadata_from_control_store() -> Non
     assert len(Sync.control_store.calls) == 2
 
 
+def test_delegated_hydration_queries_the_authorized_source_owner() -> None:
+    calls = []
+
+    class Sync:
+        control_store = None
+
+        @staticmethod
+        def entities(principal, **kwargs):
+            calls.append((principal, kwargs))
+            return []
+
+    class State:
+        server_id = "public-1"
+        account_domain_sync = Sync()
+
+    values = factor_source_hydration.FactorSourceHydrator(State())._candidates(
+        "child", "DemoFactor", principal="parent",
+    )
+
+    assert values == []
+    assert calls == [("child", {
+        "entity_type": "factor_source",
+        "include_shared": True,
+        "sync": True,
+    })]
+
+
 def test_hydration_skips_stale_provider_and_uses_current_replica(monkeypatch) -> None:
     source = "class DemoFactor:\n    pass\n"
     raw = source.encode()
