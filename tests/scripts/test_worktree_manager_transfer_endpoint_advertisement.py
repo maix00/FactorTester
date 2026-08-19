@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 from server.manager import runtime as manager
@@ -191,3 +194,55 @@ def test_federation_registration_payload_includes_transfer_node(tmp_path) -> Non
         "http://10.77.0.10:17998"
     )
     assert "latency_ms" not in payload
+
+
+def test_internal_registration_uses_fresh_host_address_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    snapshot = tmp_path / "host-lan-addresses.json"
+    snapshot.write_text(json.dumps({
+        "schema_version": 1,
+        "observed_at": time.time(),
+        "addresses": ["10.98.186.177"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("FACTORTESTER_LAN_ADDRESS_STATE_FILE", str(snapshot))
+    source = _state(tmp_path, "node-a")
+    source.configure_transfer_endpoints(server_endpoints(
+        client_control_endpoint="http://10.98.181.217:7998",
+        client_data_endpoint="http://10.98.181.217:7997",
+        peer_host="10.77.0.10",
+    ), now=100.0)
+
+    payload = source.registration_payload("http://10.98.181.217:7998")
+
+    assert payload["internal_addresses"] == ["10.98.186.177"]
+    assert payload["endpoint"] == "http://10.98.186.177:7998"
+    assert payload["transfer_node"]["client_control_endpoint"] == (
+        "http://10.98.186.177:7998"
+    )
+    assert payload["transfer_node"]["client_data_endpoint"] == (
+        "http://10.98.186.177:7997"
+    )
+
+
+def test_internal_registration_stops_when_host_snapshot_is_stale(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    snapshot = tmp_path / "host-lan-addresses.json"
+    snapshot.write_text(json.dumps({
+        "schema_version": 1,
+        "observed_at": 1,
+        "addresses": ["10.98.181.217"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("FACTORTESTER_LAN_ADDRESS_STATE_FILE", str(snapshot))
+    source = _state(tmp_path, "node-a")
+    source.configure_transfer_endpoints(server_endpoints(
+        client_control_endpoint="http://127.0.0.1:7998",
+        client_data_endpoint="http://127.0.0.1:7997",
+        peer_host="10.77.0.10",
+    ), now=100.0)
+
+    with pytest.raises(ValueError, match="LAN address is unavailable"):
+        source.registration_payload("http://127.0.0.1:7998")

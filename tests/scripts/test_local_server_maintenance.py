@@ -43,6 +43,17 @@ def test_local_compose_enables_hot_reload_by_default() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     assert "FACTORTESTER_HOT_RELOAD: ${FACTORTESTER_HOT_RELOAD:-1}" in source
     assert "restart: unless-stopped" in source
+    assert "FACTORTESTER_LAN_ADDRESS_STATE_FILE" in source
+    assert "FACTORTESTER_LAN_ADDRESS:?" not in source
+    assert "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT" not in source
+
+
+def test_local_lifecycle_starts_host_address_agent_before_compose() -> None:
+    source = LOCAL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'address_agent="$repo_root/scripts/server/host_lan_address_agent.py"' in source
+    assert "address_agent_start" in source
+    assert "host-lan-addresses.json" in source
 
 
 def test_service_helper_resolves_port_to_opaque_instance_and_waits(

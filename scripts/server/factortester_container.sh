@@ -41,6 +41,7 @@ fi
 
 compose=(docker compose --env-file "$env_file" --file "$compose_file")
 manager_helper="$repo_root/scripts/server/local_manager_service.py"
+address_agent="$repo_root/scripts/server/host_lan_address_agent.py"
 
 env_value() {
   local key="$1"
@@ -59,6 +60,76 @@ deployment_value() {
   local value
   value="$(env_value "$key")"
   printf '%s' "${value:-$fallback}"
+}
+
+address_agent_paths() {
+  local state_root
+  state_root="$(deployment_value FACTORTESTER_STATE_ROOT "")"
+  [[ -n "$state_root" ]] || {
+    echo "FACTORTESTER_STATE_ROOT is required for LAN address discovery" >&2
+    return 1
+  }
+  printf '%s\n' \
+    "$state_root/host-lan-addresses.json" \
+    "$state_root/host-lan-address-agent.pid" \
+    "$state_root/host-lan-address-agent.log"
+}
+
+address_agent_pid_matches() {
+  local pid="$1"
+  local snapshot="$2"
+  local command_line
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
+  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command_line" == *"$address_agent"* && "$command_line" == *"$snapshot"* ]]
+}
+
+address_agent_start() {
+  [[ -f "$address_agent" ]] || {
+    echo "Missing host LAN address agent: $address_agent" >&2
+    return 1
+  }
+  local paths snapshot pid_file log_file pid python_bin interval
+  paths="$(address_agent_paths)"
+  snapshot="$(sed -n '1p' <<<"$paths")"
+  pid_file="$(sed -n '2p' <<<"$paths")"
+  log_file="$(sed -n '3p' <<<"$paths")"
+  mkdir -p "$(dirname "$snapshot")"
+  if [[ -f "$pid_file" ]]; then
+    pid="$(tr -dc '0-9' < "$pid_file")"
+    if address_agent_pid_matches "$pid" "$snapshot"; then
+      return 0
+    fi
+    rm -f "$pid_file"
+  fi
+  python_bin="${FACTORTESTER_MAINTENANCE_PYTHON:-python3}"
+  interval="$(deployment_value FACTORTESTER_LAN_ADDRESS_INTERVAL_SECONDS 5)"
+  nohup "$python_bin" "$address_agent" \
+    --output "$snapshot" --interval "$interval" \
+    >>"$log_file" 2>&1 &
+  pid="$!"
+  printf '%s\n' "$pid" > "$pid_file"
+  for _ in {1..20}; do
+    [[ -f "$snapshot" ]] && return 0
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  echo "Host LAN address agent did not publish a snapshot" >&2
+  return 1
+}
+
+address_agent_stop() {
+  local paths snapshot pid_file pid
+  paths="$(address_agent_paths)"
+  snapshot="$(sed -n '1p' <<<"$paths")"
+  pid_file="$(sed -n '2p' <<<"$paths")"
+  if [[ -f "$pid_file" ]]; then
+    pid="$(tr -dc '0-9' < "$pid_file")"
+    if address_agent_pid_matches "$pid" "$snapshot"; then
+      kill "$pid"
+    fi
+  fi
+  rm -f "$pid_file" "$snapshot"
 }
 
 manager_service_action() {
@@ -93,6 +164,7 @@ manager_service_action() {
 
 manager_restart() {
   local recreate="$1"
+  address_agent_start
   if [[ "$recreate" == "1" ]]; then
     "${compose[@]}" up --detach --no-build --remove-orphans \
       --force-recreate --wait manager
@@ -136,15 +208,19 @@ case "$command" in
     "${compose[@]}" build "$@"
     ;;
   up)
+    address_agent_start
     "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@"
     ;;
   down)
     "${compose[@]}" down --remove-orphans "$@"
+    address_agent_stop
     ;;
   restart)
+    address_agent_start
     "${compose[@]}" up --detach --no-build --remove-orphans --force-recreate --wait "$@"
     ;;
   stack-restart)
+    address_agent_start
     "${compose[@]}" up --detach --no-build --remove-orphans --force-recreate --wait "$@"
     ;;
   manager-reload)
