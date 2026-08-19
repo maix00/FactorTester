@@ -81,6 +81,7 @@
   async function openRunSpecs(context, state, refresh) {
     const tasks = selectedTasks(state);
     const failures = [];
+    context.showNotice?.(context.t("正在准备运行配置…"));
     for (const {group, item} of tasks) {
       if (model().runSpecPath(item)) continue;
       try {
@@ -129,6 +130,8 @@
         .map(({current, error}) => `${current.groupLabel || current.groupID}: ${error || context.t("未生成运行配置")}`)
         .join("；");
       showRunSpecError(context, new Error(`${context.t("部分任务无法读取运行配置")}: ${detail}`));
+    } else {
+      context.showNotice?.("");
     }
     return true;
   }
