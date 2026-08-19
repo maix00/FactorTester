@@ -279,7 +279,11 @@ const strategyScopedBacktest = {
   const failingContext = {
     ...context,
     async api() {
-      throw new Error("preview endpoint unavailable");
+      const error = new Error("preview endpoint unavailable");
+      error.code = "no_capable_service";
+      error.details = {detail: "required source is unavailable"};
+      error.candidates = [{server_id: "office-a", port: 8141, detail: "offline"}];
+      throw error;
     },
   };
   const failingState = {
@@ -292,6 +296,12 @@ const strategyScopedBacktest = {
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(notices.some(item => item.isError && /preview endpoint unavailable/.test(item.message)),
     "RunSpec preview failures must be visible instead of being swallowed");
+  assert.ok(notices.some(item => item.isError
+    && /no_capable_service/.test(item.message)
+    && /required source is unavailable/.test(item.message)
+    && /office-a:8141/.test(item.message)
+    && /offline/.test(item.message)),
+  "RunSpec preview failures must expose structured backend diagnostics");
 
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);

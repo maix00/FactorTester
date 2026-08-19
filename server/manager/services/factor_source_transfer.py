@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 from server.manager.objects.models import TransferObjectKind
 from server.manager.services.data_plane_client import loopback_client_access
+from server.manager.transfers.models import TransferStatus
 
 
 class FactorSourceTransfer:
@@ -55,6 +56,16 @@ class FactorSourceTransfer:
         declared_size = int(entry.get("source_bytes") or -1)
         if digest != declared_hash or len(raw) != declared_size:
             raise ValueError("factor source object changed before transfer")
+        idempotency_key = f"factor-source:{target_server_id}:{object_id}:{digest}"
+        coordinator = getattr(self.state, "transfer_coordinator", None)
+        requests = getattr(coordinator, "requests", None)
+        existing = (
+            requests.by_idempotency_key(idempotency_key)
+            if requests is not None and hasattr(requests, "by_idempotency_key")
+            else None
+        )
+        if existing is not None and existing.status is TransferStatus.COMPLETED:
+            return
         access = self.state.prepare_object_upload(
             principal=str(principal or "").strip(),
             storage_server_id=target_server_id,
@@ -63,9 +74,7 @@ class FactorSourceTransfer:
             filename=f"{object_id.rsplit(':', 1)[-1]}.py",
             expected_size=len(raw),
             expected_sha256=digest,
-            idempotency_key=(
-                f"factor-source:{target_server_id}:{object_id}:{digest}"
-            ),
+            idempotency_key=idempotency_key,
             content_type="text/x-python",
         )
         upload_url, tls_context = loopback_client_access(access.get("url"))

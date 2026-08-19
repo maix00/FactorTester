@@ -78,7 +78,7 @@
   }
 
   function showRunSpecError(context, error) {
-    const detail = error?.message || String(error || context.t("未知错误"));
+    const detail = model().errorDetail(error);
     context.showNotice?.(`${context.t("读取运行配置失败")}: ${detail}`, true);
   }
 
@@ -104,7 +104,7 @@
       } catch (error) {
         const current = model().itemFor(state, group) || item;
         current.phase = "failed";
-        current.error = error?.message || String(error);
+        current.error = model().errorDetail(error);
         refresh?.();
         failures.push({current, error: current.error});
       }

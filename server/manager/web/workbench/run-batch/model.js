@@ -44,6 +44,33 @@
     }, {});
   }
 
+  function errorDetail(error) {
+    const seen = new Set();
+    const parts = [];
+    const append = value => {
+      if (value == null || value === "" || typeof value === "boolean") return;
+      if (typeof value === "string" || typeof value === "number") {
+        const text = String(value).trim();
+        if (text && !parts.includes(text)) parts.push(text);
+        return;
+      }
+      if (typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      if (Array.isArray(value)) return void value.forEach(append);
+      const identity = [value.server_id, value.port].filter(Boolean).join(":");
+      if (identity) append(identity);
+      ["error", "message", "code", "detail", "details", "reason", "candidates", "failures"]
+        .forEach(key => append(value[key]));
+    };
+    append(error?.message || error);
+    append(error?.code);
+    append(error?.detail);
+    append(error?.details);
+    append(error?.candidates);
+    append(error?.payload);
+    return parts.join(" · ") || "未知错误";
+  }
+
   function groupInput(group) {
     if (!group || typeof group !== "object") return group || null;
     return {
@@ -326,7 +353,7 @@
 
   window.FTTestRunBatchModel = Object.freeze({
     BACKTEST_TASK_ID, PHASE_LABELS, backtestStrategyGroups, groupIdentity, groupLabel,
-    clone, inputFingerprint, itemFor, invalidatePreview, jobPath, previewMatches,
+    clone, errorDetail, inputFingerprint, itemFor, invalidatePreview, jobPath, previewMatches,
     previewRecord, recordPreview, runSpecHash,
     recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, runSpecTarget,
     synchronize, taskGroups, update,

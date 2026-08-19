@@ -115,7 +115,7 @@
       return item;
     } catch (error) {
       item.phase = "failed";
-      item.error = error.message || String(error);
+      item.error = model().errorDetail(error);
       refresh?.();
       return null;
     }
@@ -153,7 +153,7 @@
       return true;
     } catch (error) {
       item.phase = "failed";
-      item.error = error.message || String(error);
+      item.error = model().errorDetail(error);
       refresh?.();
       return false;
     }

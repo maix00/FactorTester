@@ -91,6 +91,15 @@ class TransferStore(TransferDatabase):
             raise KeyError("transfer request not found")
         return transfer_record(row)
 
+    def by_idempotency_key(self, idempotency_key: str) -> TransferRecord | None:
+        """Return a durable transfer result for an exact replay key."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM transfer_requests WHERE idempotency_key=?",
+                (required(idempotency_key, field="idempotency_key"),),
+            ).fetchone()
+        return transfer_record(row) if row is not None else None
+
     def transition(
         self,
         transfer_id: str,
