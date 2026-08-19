@@ -91,6 +91,7 @@ def build_scoped_fields() -> dict[str, Any]:
                 "cardinality": "one",
                 "selection_mode": "override",
                 "editable": True,
+                "override_control": "direct",
             },
         },
         "warmup_mode": {
@@ -104,6 +105,7 @@ def build_scoped_fields() -> dict[str, Any]:
                 "cardinality": "one",
                 "selection_mode": "override",
                 "editable": True,
+                "override_control": "direct",
             },
         },
         "warmup_window": {
@@ -118,6 +120,7 @@ def build_scoped_fields() -> dict[str, Any]:
                 "cardinality": "one",
                 "selection_mode": "override",
                 "editable": True,
+                "override_control": "direct",
                 "visible_when": {"field_values": {"warmup_mode": ["fixed"]}},
             },
         },

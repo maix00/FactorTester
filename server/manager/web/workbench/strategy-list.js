@@ -38,11 +38,18 @@
     const expanded = batch.expanded !== false;
     const header = document.createElement("div");
     header.className = `strategy-list-batch-header${batch.selected ? " selected" : ""}`;
-    const disclosure = button(options.context, expanded ? "⌄" : "›", () => (
-      options.onToggleBatch?.(batch.key, !expanded)
-    ));
+    const disclosure = button(options.context, expanded ? "⌄" : "›", () => {
+      const next = body.hidden;
+      body.hidden = !next;
+      disclosure.textContent = next ? "⌄" : "›";
+      disclosure.title = tx(options, next ? "收起添加批次" : "展开添加批次");
+      disclosure.setAttribute("aria-expanded", String(next));
+      options.onToggleBatch?.(batch.key, next);
+    });
     disclosure.className = "strategy-list-disclosure";
     disclosure.title = tx(options, expanded ? "收起添加批次" : "展开添加批次");
+    disclosure.setAttribute("aria-expanded", String(expanded));
+    disclosure.setAttribute("aria-controls", `strategy-list-batch-${batch.key}`);
     const select = options.batchSelection === false
       ? document.createElement("span") : selection(options, batch, true);
     const copy = document.createElement("span");
@@ -61,6 +68,7 @@
     shell.append(header);
     const body = document.createElement("div");
     body.className = "strategy-list-batch-body";
+    body.id = `strategy-list-batch-${batch.key}`;
     body.hidden = !expanded;
     for (const item of batch.items || []) body.append(renderItem(item, options));
     shell.append(body);
@@ -104,40 +112,80 @@
   }
 
   function inlineName(item, options) {
-    const input = document.createElement("input");
-    input.className = "strategy-list-name-input";
-    input.type = "text";
-    input.value = item.label || item.key;
-    input.title = tx(options, "直接编辑策略名称，按 Enter 或离开输入框保存");
-    input.setAttribute("aria-label", tx(options, "策略名称"));
-    input.addEventListener("keydown", event => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        input.blur();
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        input.value = item.label || item.key;
-        input.blur();
-      }
-    });
-    input.addEventListener("change", () => {
-      const next = input.value.trim();
-      if (!next || next === String(item.label || item.key).trim()) {
-        input.value = item.label || item.key;
-        return;
-      }
-      try {
-        const accepted = item.onRename?.(next);
-        if (accepted === false) input.value = item.label || item.key;
-      } catch (error) {
-        input.value = item.label || item.key;
-        input.setCustomValidity(error.message || tx(options, "策略名称保存失败"));
-        input.reportValidity?.();
-        input.setCustomValidity("");
-      }
-    });
-    return input;
+    const host = document.createElement("span");
+    host.className = "strategy-list-name-editor";
+    const label = String(item.label || item.key);
+    const display = document.createElement("button");
+    display.type = "button";
+    display.className = "strategy-list-name";
+    display.textContent = label;
+    display.title = tx(options, "点击名称直接编辑，按 Enter 或离开输入框保存");
+    display.setAttribute("aria-label", tx(options, "编辑策略名称"));
+    host.append(display);
+
+    const edit = () => {
+      if (host.dataset.editing === "true") return;
+      host.dataset.editing = "true";
+      const input = document.createElement("input");
+      input.className = "strategy-list-name-input";
+      input.type = "text";
+      input.value = label;
+      input.title = tx(options, "按 Enter 或离开输入框保存，按 Escape 取消");
+      input.setAttribute("aria-label", tx(options, "策略名称"));
+      let settled = false;
+      let cancelled = false;
+      const restore = () => {
+        host.dataset.editing = "false";
+        host.replaceChildren(display);
+      };
+      const commit = () => {
+        if (settled || cancelled) return;
+        settled = true;
+        const next = input.value.trim();
+        if (!next || next === label.trim()) {
+          restore();
+          return;
+        }
+        try {
+          const result = item.onRename?.(next);
+          if (result && typeof result.then === "function") {
+            result.then(() => restore()).catch(error => {
+              input.setCustomValidity(error.message || tx(options, "策略名称保存失败"));
+              input.reportValidity?.();
+              input.setCustomValidity("");
+              restore();
+            });
+          } else if (result === false) {
+            restore();
+          } else {
+            restore();
+          }
+        } catch (error) {
+          input.setCustomValidity(error.message || tx(options, "策略名称保存失败"));
+          input.reportValidity?.();
+          input.setCustomValidity("");
+          restore();
+        }
+      };
+      input.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelled = true;
+          settled = true;
+          restore();
+        }
+      });
+      input.addEventListener("blur", commit);
+      host.replaceChildren(input);
+      input.focus?.();
+      input.select?.();
+    };
+    display.addEventListener("click", edit);
+    return host;
   }
 
   function selection(options, item, batch) {
@@ -171,9 +219,16 @@
     const host = document.createElement("span");
     host.className = "strategy-list-actions";
     for (const item of items || []) {
-      const action = button(options.context, item.label || "", item.onClick);
+      const action = button(
+        options.context, item.icon ? "" : (item.label || ""), item.onClick,
+        item.title || item.label || "",
+      );
       action.title = item.title || item.label || "";
+      action.setAttribute("aria-label", item.label || item.title || "");
       action.className = `strategy-list-action ${item.className || ""}`.trim();
+      if (item.icon && window.FTIcons?.node) {
+        action.replaceChildren(window.FTIcons.node(item.icon));
+      }
       if (item.disabled) action.disabled = true;
       host.append(action);
     }
@@ -186,11 +241,13 @@
     return items.length ? [{key: "all", label: options.title || "策略", items}] : [];
   }
 
-  function button(context, label, onClick) {
-    const value = context?.button ? context.button(label, onClick) : document.createElement("button");
+  function button(context, label, onClick, help = label) {
+    const value = context?.button
+      ? context.button(label, onClick, help)
+      : document.createElement("button");
     value.type = "button";
     if (!value.textContent) value.textContent = label;
-    if (!value.listeners && onClick) value.addEventListener("click", onClick);
+    if (!context?.button && onClick) value.addEventListener("click", onClick);
     return value;
   }
 

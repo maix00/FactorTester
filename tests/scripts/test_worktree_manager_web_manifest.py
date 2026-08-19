@@ -987,6 +987,19 @@ def test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contrac
     assert result.stdout.strip() == "ok"
 
 
+def test_strategy_list_keeps_compact_batch_and_inline_name_interactions() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_list.js"
+    source = WEB_ROOT / "workbench" / "strategy-list.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_backtest_group_forms_mount_shared_picker_elements() -> None:
     import subprocess
 
@@ -1165,6 +1178,15 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    picker = source.read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+    factor_filter = (WEB_ROOT / "catalog" / "factor-group-filter.js").read_text(
+        encoding="utf-8"
+    )
+    assert 'options.menuClass || ""' in picker
+    assert "height: max-content" in styles
+    assert ".ft-multi-select-options" in styles
+    assert 'menuClass: "factor-product-group-filter-menu"' in factor_filter
 
 
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
@@ -1319,6 +1341,8 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "function jobPath(item)" in run_batch_model
     assert "function runSpecPath(item)" in run_batch_model
     assert '"查看运行配置", runSpecPath(item)' in run_batch
+    assert 'context.t("查看 RunSpec")' in run_batch
+    assert 'context.t("运行")' in run_batch
 
 
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:

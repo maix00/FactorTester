@@ -83,7 +83,7 @@
         const surface = available.find(item => item.key === surfaceKey) || active || available[0];
         if (!surface) return [];
         const selected = adapterFor(surface).selected(state);
-        return flows(state, surface.key).map(flow => ({
+        return flows(state, surface.key).filter(flow => flow.kind !== "rename").map(flow => ({
           label: context.t(flow.label),
           buttonClass: flow.button_class,
           disabled: !enabled(flow, selected.length),
@@ -324,12 +324,25 @@
 
   function rowActions(context, state, surface, item, refresh) {
     return flows(state, surface.key)
-      .filter(flow => Number(flow.min_selected) === 1 && Number(flow.max_selected) === 1)
+      .filter(flow => flow.kind !== "rename"
+        && Number(flow.min_selected) === 1 && Number(flow.max_selected) === 1)
       .map(flow => ({
         label: context.t(flow.label), title: context.t(flow.label),
         className: flow.button_class || (flow.kind === "delete" ? "danger" : ""),
+        icon: iconFor(flow.kind),
         onClick: () => runFlow(context, state, surface, flow, [item], refresh),
       }));
+  }
+
+  function iconFor(kind) {
+    return {
+      create: "plus",
+      derive: "arrow.triangle.branch",
+      edit: "square.and.pencil",
+      delete: "trash",
+      compose: "square.stack.3d.up",
+      swap: "arrow.left.arrow.right",
+    }[kind] || "square.and.pencil";
   }
 
   window.FTBacktestGroups = Object.freeze({adapterFor, flows, initialize, render, surfaces});
