@@ -91,16 +91,14 @@
       ? `${context.t("最新版本")} ${value.version}`
       : context.t("暂未发现可用版本");
     mac.append(macMeta);
-    const link = document.createElement("a");
-    link.className = "button-link primary";
-    link.textContent = context.t("下载 macOS 客户端");
-    link.href = value?.dmg_url || value?.url || "#";
-    if (!value?.dmg_url && !value?.url) {
-      link.classList.add("disabled");
-      link.setAttribute("aria-disabled", "true");
-      link.addEventListener("click", event => event.preventDefault());
-    }
-    mac.append(link);
+    const open = context.button(
+      context.t("查看下载链接"),
+      () => showDownloadOverlay(context, value),
+      context.t("打开客户端下载链接"),
+    );
+    open.classList.add("primary");
+    open.disabled = !value?.dmg_url && !value?.url;
+    mac.append(open);
     downloads.append(mac);
     ["Windows", "Linux"].forEach(platform => {
       const item = document.createElement("div");
@@ -122,5 +120,39 @@
     return section;
   }
 
-  window.FTResearchLocal = Object.freeze({render});
+  function showDownloadOverlay(context, value) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "ft-dialog client-download-dialog";
+    const card = document.createElement("div");
+    card.className = "dialog-card wide";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("客户端下载");
+    const close = context.button(context.t("关闭"), () => dialog.close(), context.t("关闭"));
+    close.className = "dialog-close";
+    card.append(heading, close);
+    const note = document.createElement("p");
+    note.className = "secondary";
+    note.textContent = value?.version
+      ? `${context.t("最新版本")} ${value.version}`
+      : context.t("暂未发现可用版本");
+    card.append(note);
+    const link = document.createElement("a");
+    link.className = "button-link primary";
+    link.textContent = context.t("下载 macOS 客户端");
+    link.href = value?.dmg_url || value?.url || "#";
+    link.target = "_blank";
+    link.rel = "noopener";
+    if (!value?.dmg_url && !value?.url) {
+      link.classList.add("disabled");
+      link.setAttribute("aria-disabled", "true");
+      link.addEventListener("click", event => event.preventDefault());
+    }
+    card.append(link);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  window.FTResearchLocal = Object.freeze({render, clientDownload});
 })();

@@ -360,6 +360,7 @@
       }),
       report,
       research,
+      researchGraph: (pageContext, id) => FTResearchGraphList.detail(pageContext, pageContext.content, id),
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
       jobs: (pageContext, section) => section === "types" ? FTTestTypes.render(pageContext) : FTJobs.list(pageContext),
       job: (pageContext, port, id, serverID) => FTJobs.detail(

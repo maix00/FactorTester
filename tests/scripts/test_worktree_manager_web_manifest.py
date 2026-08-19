@@ -448,7 +448,9 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert manifest["route_groups"]["product-categories"] == ["catalog"]
-    assert manifest["group_dependencies"]["research"] == ["report", "profile"]
+    assert manifest["group_dependencies"]["research"] == [
+        "report", "profile", "catalog-core",
+    ]
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/page-tabs.js",
         "jobs/test-types.js", "jobs/jobs.js",
@@ -1296,6 +1298,18 @@ def test_json_details_use_a_bounded_code_container() -> None:
     assert ".json-code" in styles
     assert "max-height:" in styles.split(".json-code", 1)[1].split("}", 1)[0]
     assert "overflow: auto" in styles.split(".json-code", 1)[1].split("}", 1)[0]
+
+
+def test_shared_paged_table_keeps_pager_outside_scroll_container() -> None:
+    shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+
+    assert 'shell.className = "shared-paged-table"' in shared_ui
+    assert "shell.append(view.shell, pagination)" in shared_ui
+    assert "tableShell: view.shell" in shared_ui
+    assert ".shared-paged-table > .table-shell" in styles
+    pagination_rule = styles.split(".shared-table-pagination", 1)[1].split("}", 1)[0]
+    assert "border-top: 0" in pagination_rule
 
 
 def test_job_detail_uses_the_shared_run_spec_view() -> None:
