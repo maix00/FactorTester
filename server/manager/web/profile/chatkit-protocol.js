@@ -86,6 +86,19 @@
     return "";
   }
 
+  function eventTurnID(payload) {
+    const params = payload?.params || {};
+    const item = params.item || payload?.item || {};
+    const metadata = item.metadata
+      || item.internal_chat_message_metadata_passthrough
+      || {};
+    return String(
+      params.turnId || params.turn_id || params.turn?.id
+      || payload?.turnId || payload?.turn_id || payload?.turn?.id
+      || item.turnId || item.turn_id || metadata.turn_id || "",
+    ).trim();
+  }
+
   function eventParams(payload) {
     return payload?.params && typeof payload.params === "object"
       ? payload.params
@@ -274,6 +287,7 @@
     randomID,
     rawDelta,
     rawMethod,
+    eventTurnID,
     responseValue,
     terminalMethod,
     turnCompletion,

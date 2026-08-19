@@ -122,83 +122,134 @@
     return state.threadPromise;
   }
 
-  function waitForEvents(state, controller, signal) {
-    return new Promise(resolve => {
-      if (signal.aborted) {
-        resolve("aborted");
+  async function alignEventCursor(state) {
+    try {
+      const payload = await state.context.api(
+        `/api/client/profile-agent?profile_id=${encodeURIComponent(state.profileID)}`,
+      );
+      const sequence = Number(payload?.status?.event_sequence);
+      if (Number.isFinite(sequence) && sequence >= 0) state.cursor = sequence;
+    } catch (_) {
+      // Keep the last known cursor.  The SSE connection still provides a
+      // durable replay path when the status request is temporarily unavailable.
+    }
+  }
+
+  function eventBelongsToCurrentTurn(state, payload) {
+    const eventTurnID = P.eventTurnID(payload);
+    if (!eventTurnID) return true;
+    return !state.turnID || eventTurnID === state.turnID;
+  }
+
+  function openEventStream(state, controller, signal) {
+    let resolveReady;
+    let rejectReady;
+    let resolveDone;
+    const ready = new Promise((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    const done = new Promise(resolve => { resolveDone = resolve; });
+    if (signal.aborted) {
+      resolveReady();
+      resolveDone("aborted");
+      return {ready, done, activate: () => {}, close: () => {}};
+    }
+    const url = `/api/client/profile-agent/events?profile_id=${
+      encodeURIComponent(state.profileID)}&after=${state.cursor}`;
+    const source = new EventSource(url);
+    state.source = source;
+    const pending = [];
+    let settled = false;
+    let opened = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (state.source === source) state.source = null;
+      signal.removeEventListener("abort", abort);
+      resolveDone(result);
+    };
+    const abort = () => finish("aborted");
+    signal.addEventListener("abort", abort, {once: true});
+    source.onopen = () => {
+      opened = true;
+      resolveReady();
+    };
+    const processPayload = payload => {
+      if (!eventBelongsToCurrentTurn(state, payload)) return;
+      const method = P.rawMethod(payload);
+      const delta = P.rawDelta(payload);
+      if (method === "app_server_exit" || payload?.type === "app_server_exit") {
+        if (state.assistant?.text) finish("done");
+        else {
+          writeEvent(controller, {
+            type: "error",
+            code: "agent_process_exited",
+            message: "Profile Agent exited before producing a response",
+          });
+          finish("error");
+        }
         return;
       }
-      const url = `/api/client/profile-agent/events?profile_id=${
-        encodeURIComponent(state.profileID)}&after=${state.cursor}`;
-      const source = new EventSource(url);
-      state.source = source;
-      let settled = false;
-      const finish = result => {
-        if (settled) return;
-        settled = true;
-        source.close();
-        if (state.source === source) state.source = null;
-        signal.removeEventListener("abort", abort);
-        resolve(result);
-      };
-      const abort = () => finish("aborted");
-      signal.addEventListener("abort", abort, {once: true});
-      source.onmessage = event => {
-        if (event.lastEventId) state.cursor = Number(event.lastEventId) || state.cursor;
-        let payload;
-        try {
-          payload = JSON.parse(event.data);
-        } catch (_) {
-          return;
-        }
-        const method = P.rawMethod(payload);
-        const delta = P.rawDelta(payload);
-        if (method === "app_server_exit" || payload?.type === "app_server_exit") {
-          if (state.assistant?.text) finish("done");
-          else {
-            writeEvent(controller, {
-              type: "error",
-              code: "agent_process_exited",
-              message: "Profile Agent exited before producing a response",
-            });
-            finish("error");
-          }
-          return;
-        }
-        if (payload?.error || /error/i.test(method) && !delta) {
+      if (payload?.error || /error/i.test(method) && !delta) {
+        writeEvent(controller, {
+          type: "error", code: "agent_error", message: P.errorMessage(payload),
+        });
+        finish("error");
+        return;
+      }
+      const completed = P.completedText(payload);
+      if (completed) appendAssistantText(state, controller, completed);
+      if (delta && /(agent.?message|assistant|delta|content)/i.test(method)) {
+        appendAssistantText(
+          state,
+          controller,
+          `${state.assistant?.text || ""}${delta}`,
+        );
+      }
+      if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
+        const completion = P.turnCompletion(payload);
+        if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
           writeEvent(controller, {
-            type: "error", code: "agent_error", message: P.errorMessage(payload),
+            type: "error",
+            code: "agent_turn_failed",
+            message: P.errorMessage(completion.error || payload),
           });
           finish("error");
           return;
         }
-        const completed = P.completedText(payload);
-        if (completed) appendAssistantText(state, controller, completed);
-        if (delta && /(agent.?message|assistant|delta|content)/i.test(method)) {
-          appendAssistantText(
-            state,
-            controller,
-            `${state.assistant?.text || ""}${delta}`,
-          );
-        }
-        if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
-          const completion = P.turnCompletion(payload);
-          if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
-            writeEvent(controller, {
-              type: "error",
-              code: "agent_turn_failed",
-              message: P.errorMessage(completion.error || payload),
-            });
-            finish("error");
-            return;
-          }
-          finish("done");
-          return;
-        }
-        if (P.terminalMethod(method)) finish("done");
-      };
-      source.onerror = () => finish("retry");
-    });
+        finish("done");
+        return;
+      }
+      if (P.terminalMethod(method)) finish("done");
+    };
+    source.onmessage = event => {
+      if (event.lastEventId) state.cursor = Number(event.lastEventId) || state.cursor;
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (!state.turnID) {
+        pending.push(payload);
+        return;
+      }
+      processPayload(payload);
+    };
+    source.onerror = () => {
+      if (!opened) rejectReady(new Error("Profile Agent event stream unavailable"));
+      finish("retry");
+    };
+    return {
+      ready,
+      done,
+      activate: () => {
+        for (const payload of pending.splice(0)) processPayload(payload);
+      },
+      close: () => finish("aborted"),
+    };
   }
 
   async function streamTurn(
@@ -228,17 +279,25 @@
       writeEvent(controller, {
         type: "stream_options", stream_options: {allow_cancel: true},
       });
+      await alignEventCursor(state);
+      let eventStream = openEventStream(state, controller, signal);
+      await eventStream.ready.catch(() => {});
       const response = await rpc(state, "turn/start", {
         threadId: state.threadID,
         input: [{type: "text", text}],
         skill_ids: state.skills,
       });
-      state.turnID = P.threadIDFrom(response);
+      state.turnID = P.threadIDFrom(response) || state.turnID;
+      eventStream.activate();
       let result = "retry";
       let retries = 0;
       while (result === "retry" && !signal.aborted && retries < 8) {
-        result = await waitForEvents(state, controller, signal);
+        result = await eventStream.done;
         retries += 1;
+        if (result === "retry" && !signal.aborted) {
+          eventStream = openEventStream(state, controller, signal);
+          await eventStream.ready.catch(() => {});
+        }
       }
       if (result === "retry" && !signal.aborted) {
         writeEvent(controller, {

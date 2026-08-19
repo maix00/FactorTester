@@ -486,6 +486,15 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     ).read_text(encoding="utf-8")
     assert "/api/client/profile-agent/events" in stream_source
     assert "FTProfileChatKitProtocol" in stream_source
+    assert "alignEventCursor" in stream_source
+    assert "eventStream = openEventStream" in stream_source
+    assert stream_source.index(
+        "let eventStream = openEventStream(state, controller, signal);"
+    ) < stream_source.index(
+        'rpc(state, "turn/start"'
+    )
+    assert "event.lastEventId" in stream_source
+    assert "eventTurnID" in protocol_source
     assert profile_scripts.index("profile/chatkit-protocol.js") < profile_scripts.index(
         "profile/chatkit-conversations.js"
     )
