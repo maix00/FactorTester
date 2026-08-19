@@ -101,6 +101,46 @@ def test_manifest_is_source_free_and_changes_with_resolved_semantics(
     assert "Trend|N:20d" not in serialized
 
 
+def test_child_factor_uses_its_source_owner_for_revision_freeze(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...], str]] = []
+
+    def definition(*, family_ref: str, factor_aliases: list[str], owner: str):
+        calls.append((family_ref, tuple(factor_aliases), owner))
+        return {
+            **_definition(),
+            "canonical_family_ref": family_ref,
+            "resolved_factors": [{
+                "factor_alias": alias,
+                "tree_repr": alias,
+                "column_refs": [],
+            } for alias in factor_aliases],
+        }
+
+    monkeypatch.setattr(factor_revisions, "_load_revision_definition", definition)
+    shared = {
+        "factor_families": [{"alias": "CA"}],
+        "factors": [{
+            "alias": "CA|$F:1m",
+            "factor_family_alias": "CA",
+            "factor_family_ref": "CA",
+            "factor_owner_ref": "GTHT@MaxJJW@392452984564",
+        }],
+    }
+
+    factor_revisions.build_factor_revision_manifests(
+        shared=shared,
+        owner="GTHT@testA@545963541963",
+    )
+
+    assert calls == [(
+        "GTHT@MaxJJW@392452984564:CA",
+        ("CA|$F:1m",),
+        "GTHT@testA@545963541963",
+    )]
+
+
 def test_freeze_and_execution_revalidation_share_one_manifest_path(
     monkeypatch,
 ) -> None:
