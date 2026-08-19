@@ -6,6 +6,10 @@ import re
 import secrets
 from urllib.parse import quote, unquote
 
+from server.manager.http.job_public_projection import (
+    PUBLIC_JOB_PRINCIPAL,
+    read_principals,
+)
 from server.manager.http.responses import json_response
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
@@ -226,15 +230,18 @@ class JobTransferRoutesMixin:
             )
             if selected is None:
                 raise KeyError("artifact was not found")
-            route, artifact = selected
+            route, artifact, lookup_principal = selected
             if (
-                principal == "__public_jobs__"
+                lookup_principal == PUBLIC_JOB_PRINCIPAL
                 and str(artifact.get("artifact_role") or "output") == "input"
             ):
                 raise PermissionError("登录后才能查看运行输入")
             access = self._rewrite_client_data_access(
                 self.state.prepare_artifact_download(
-                    principal=principal,
+                    # The service and data plane authorize against the
+                    # concrete task owner.  Manager has already checked that
+                    # this owner is the caller or an allowed direct child.
+                    principal=lookup_principal,
                     storage_server_id=route.server_id,
                     job_id=job_id,
                     artifact=artifact,
@@ -304,29 +311,37 @@ class JobTransferRoutesMixin:
         principal: str,
     ):
         path = f"/api/jobs/{quote(job_id, safe='')}/artifacts"
+        principals = read_principals(
+            self.state, principal, job_id, routes=routes,
+        )
         for route in routes:
-            try:
-                payload = self.state.route_json(
-                    route,
-                    path=path,
-                    principal=principal,
-                )
-            except (ConnectionError, OSError, TypeError, ValueError):
-                continue
-            for artifact in payload.get("artifacts") or []:
-                if not isinstance(artifact, dict):
+            for lookup_principal in principals:
+                try:
+                    payload = self.state.route_json(
+                        route,
+                        path=path,
+                        principal=lookup_principal,
+                    )
+                except (ConnectionError, OSError, TypeError, ValueError):
                     continue
-                artifact_name = str(artifact.get("name") or "").strip()
-                file_name = str(artifact.get("file_name") or "").strip()
-                if name not in {artifact_name, file_name}:
-                    continue
-                if str(artifact.get("state") or "") != "active":
-                    continue
-                # ``name`` is the immutable API identity.  ``file_name`` is
-                # only the download/display name; accepting it here keeps
-                # older declarations and clients readable without making it
-                # the transfer object ID.
-                return route, {**artifact, "name": artifact_name or name}
+                for artifact in payload.get("artifacts") or []:
+                    if not isinstance(artifact, dict):
+                        continue
+                    artifact_name = str(artifact.get("name") or "").strip()
+                    file_name = str(artifact.get("file_name") or "").strip()
+                    if name not in {artifact_name, file_name}:
+                        continue
+                    if str(artifact.get("state") or "") != "active":
+                        continue
+                    # ``name`` is the immutable API identity.  ``file_name``
+                    # is only the download/display name; accepting it here
+                    # keeps older declarations and clients readable without
+                    # making it the transfer object ID.
+                    return (
+                        route,
+                        {**artifact, "name": artifact_name or name},
+                        lookup_principal,
+                    )
         return None
 
 

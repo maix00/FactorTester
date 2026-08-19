@@ -39,7 +39,7 @@ const items = [
     conversation_id: conversation.conversation_id,
     item_id: "item-2",
     role: "assistant",
-    text: "这是历史回答",
+    text: "这是历史回答\n\n```bash\nfactortester products list\n```",
     created_at: 1787125082,
   },
 ];
@@ -73,7 +73,10 @@ const adapter = window.FTProfileChatKit.create(
     thread.items.data.map(item => item.id),
     ["item-1", "item-2"],
   );
-  assert.equal(thread.items.data[1].content[0].text, "这是历史回答");
+  assert.equal(
+    thread.items.data[1].content[0].text,
+    "这是历史回答\n\n```bash\nfactortester products list\n```",
+  );
   assert.deepEqual(thread.items.data[1].content[0].annotations, []);
   assert.equal(thread.items.data[1].annotations, undefined);
 
