@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 
 from server.manager.services import factor_source_hydration
+from server.manager.services import data_plane_client
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.services.test_authoring import TestAuthoringError as AuthoringError
 
@@ -61,9 +62,7 @@ def test_internal_download_uses_loopback_http_client_listener() -> None:
         "url": "http://10.98.186.177:7997/v1/transfers/attempt/download",
     }
 
-    url, context = factor_source_hydration.FactorSourceHydrator(
-        object(),
-    )._internal_download(access)
+    url, context = data_plane_client.loopback_client_access(access["url"])
 
     assert url == "http://127.0.0.1:7997/v1/transfers/attempt/download"
     assert context is None
@@ -77,15 +76,13 @@ def test_internal_download_trusts_mounted_tls_certificate(
     sentinel = object()
     monkeypatch.setenv("FACTORTESTER_ARTIFACT_TLS_CERT", str(certificate))
     monkeypatch.setattr(
-        factor_source_hydration.ssl, "create_default_context",
+        data_plane_client.ssl, "create_default_context",
         lambda *, cafile: sentinel if cafile == str(certificate) else None,
     )
 
-    url, context = factor_source_hydration.FactorSourceHydrator(
-        object(),
-    )._internal_download({
-        "url": "https://101.133.144.27:7997/v1/transfers/attempt/download",
-    })
+    url, context = data_plane_client.loopback_client_access(
+        "https://101.133.144.27:7997/v1/transfers/attempt/download",
+    )
 
     assert url == "https://localhost:7997/v1/transfers/attempt/download"
     assert context is sentinel
