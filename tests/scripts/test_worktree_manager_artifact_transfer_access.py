@@ -121,6 +121,155 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
             assert response.read() == raw
 
 
+@pytest.mark.parametrize(
+    ("is_super_admin", "children"),
+    ((True, set()), (False, {"bob"})),
+)
+def test_authorized_account_artifact_read_uses_indexed_job_owner(
+    is_super_admin, children,
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "alice", "user", float("inf"),
+    )
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="feat",
+        branch="feat",
+        revision="test",
+        port=8141,
+    )
+    state.job_index.upsert("__public_jobs__", [{
+        "job_id": "job-1",
+        "owner": "bob",
+        "server_id": state.server_id,
+        "port": 8141,
+        "updated_at": "100",
+    }])
+    seen_principals: list[str] = []
+    prepared: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "server.manager.http.job_public_projection._account_scope",
+        lambda _principal: (is_super_admin, children),
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+
+    def route_json(_route, *, principal, **_values):
+        seen_principals.append(principal)
+        if principal != "bob":
+            return {"success": True, "artifacts": []}
+        return {
+            "success": True,
+            "artifacts": [{
+                "name": "equity_curve_report",
+                "file_name": "equity_curve_report.svg",
+                "content_type": "image/svg+xml",
+                "size_bytes": 7,
+                "content_hash": hashlib.sha256(b"<svg/>").hexdigest(),
+                "state": "active",
+            }],
+        }
+
+    monkeypatch.setattr(state, "route_json", route_json)
+
+    def prepare(**values):
+        prepared.update(values)
+        return {
+            "url": "http://127.0.0.1:7997/v1/transfers/public/download",
+            "bearer": "capability",
+        }
+
+    monkeypatch.setattr(
+        state,
+        "prepare_artifact_download",
+        prepare,
+    )
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        request = Request(
+            endpoint + "/api/jobs/job-1/artifacts/equity_curve_report/access",
+            data=b"",
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Idempotency-Key": "public-equity-curve",
+            },
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert seen_principals == ["alice", "bob"]
+    assert prepared["principal"] == "bob"
+
+
+def test_unrelated_account_cannot_use_public_job_projection(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "alice", "user", float("inf"),
+    )
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="feat",
+        branch="feat",
+        revision="test",
+        port=8141,
+    )
+    state.job_index.upsert("__public_jobs__", [{
+        "job_id": "job-1",
+        "owner": "bob",
+        "server_id": state.server_id,
+        "port": 8141,
+        "updated_at": "100",
+    }])
+    seen_principals: list[str] = []
+    monkeypatch.setattr(
+        "server.manager.http.job_public_projection._account_scope",
+        lambda _principal: (False, set()),
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    monkeypatch.setattr(
+        state,
+        "route_json",
+        lambda *_args, **values: seen_principals.append(values["principal"])
+        or {"success": True, "artifacts": []},
+    )
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        request = Request(
+            endpoint + "/api/jobs/job-1/artifacts/equity_curve_report/access",
+            data=b"",
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Idempotency-Key": "unrelated-equity-curve",
+            },
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
+
+    assert denied.value.code == 404
+    assert seen_principals == ["alice"]
+
+
 def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads(
     tmp_path, monkeypatch,
 ) -> None:

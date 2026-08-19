@@ -15,6 +15,7 @@ from server.manager.domain.federation import (
     TargetUnavailable,
 )
 from server.manager.http.gateway import GatewayResponse
+from server.manager.http.job_public_projection import read_principals
 from server.manager.http.responses import json_response
 
 
@@ -440,26 +441,36 @@ class JobProxyRoutesMixin:
             json_response(self, {"success": False, "error": str(exc)}, 502)
             return True
         last_response: tuple[ServiceRoute, GatewayResponse] | None = None
-        for route in routes:
-            try:
-                response = self.state.route_request(
-                    route,
-                    path=path,
-                    principal=principal,
-                    method=method,
-                    **forwarded,
-                )
-            except (ConnectionError, ValueError):
-                continue
-            last_response = (route, response)
-            if response.status == 404:
-                continue
-            self._send_gateway_response(
-                response,
-                route=route,
-                include_route_identity=suffix in {"", "/result", "/artifacts"},
+        principals = (
+            read_principals(
+                self.state,
+                principal,
+                unquote(match.group(1)),
+                routes=routes,
             )
-            return True
+            if method == "GET" else (principal,)
+        )
+        for route in routes:
+            for lookup_principal in principals:
+                try:
+                    response = self.state.route_request(
+                        route,
+                        path=path,
+                        principal=lookup_principal,
+                        method=method,
+                        **forwarded,
+                    )
+                except (ConnectionError, ValueError):
+                    continue
+                last_response = (route, response)
+                if response.status == 404:
+                    continue
+                self._send_gateway_response(
+                    response,
+                    route=route,
+                    include_route_identity=suffix in {"", "/result", "/artifacts"},
+                )
+                return True
         if last_response is not None:
             self._send_gateway_response(
                 last_response[1],
