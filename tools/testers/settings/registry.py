@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .contracts import (
@@ -46,6 +46,27 @@ class ApplicationSettings:
         if tab.key in self.tabs:
             raise ValueError(f"duplicate setting tab: {tab.key}")
         self.tabs[tab.key] = tab
+
+    def set_default_mounted_tabs(
+        self,
+        mount_point: TabMountPoint,
+        tab_keys: tuple[str, ...],
+    ) -> None:
+        """Replace one surface's default tabs without changing availability."""
+        unknown = [key for key in tab_keys if key not in self.tabs]
+        if unknown:
+            raise ValueError(
+                f"unknown default tabs for {mount_point.value}: {', '.join(unknown)}"
+            )
+        selected = set(tab_keys)
+        for key, tab in tuple(self.tabs.items()):
+            defaults = tuple(
+                point for point in tab.default_mount_points
+                if point is not mount_point
+            )
+            if key in selected:
+                defaults = (*defaults, mount_point)
+            self.tabs[key] = replace(tab, default_mount_points=defaults)
 
     def register_settings_section(self, section: SettingsSection) -> None:
         if section.key in self.settings_sections:
