@@ -74,6 +74,8 @@ const adapter = window.FTProfileChatKit.create(
     ["item-1", "item-2"],
   );
   assert.equal(thread.items.data[1].content[0].text, "这是历史回答");
+  assert.deepEqual(thread.items.data[1].content[0].annotations, []);
+  assert.equal(thread.items.data[1].annotations, undefined);
 
   const page = await (await get({
     type: "items.list",
