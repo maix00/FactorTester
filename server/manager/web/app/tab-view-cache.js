@@ -182,6 +182,29 @@
       if (session.view?.coldKey && session.view.pendingRestore
           && session.viewReady === false) return;
       const view = session.view || {};
+      if (view.rerenderOnRestore) {
+        view.lastUsedAt = Date.now();
+        session.view = view;
+        return;
+      }
+      const rerenderNode = content.querySelector?.(
+        "[data-ft-rerender-on-tab-restore]",
+      );
+      if (rerenderNode) {
+        rerenderNode.__ftBeforeTabSave?.();
+        content.replaceChildren();
+        view.title = title?.textContent || "";
+        view.eyebrow = eyebrow?.textContent || "";
+        view.notice = notice ? {
+          text: notice.textContent || "", color: notice.style?.color || "",
+        } : null;
+        view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
+        view.rerenderOnRestore = true;
+        view.ready = false;
+        view.lastUsedAt = Date.now();
+        session.view = view;
+        return;
+      }
       // Pointerdown captures report scroll before click navigates.  A second
       // save sees an empty shell, so retain the already detached fragment.
       if (view.content?.childNodes?.length && !content.firstChild) {
@@ -206,6 +229,7 @@
     function restoreView(tabID) {
       const session = tabSession(tabID);
       const view = session.view;
+      if (view?.rerenderOnRestore) return false;
       if (view?.coldKey) {
         view.pendingRestore = true;
         return "cold";
