@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import ssl
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from tools.data.sqlite.factor_source_store import upsert_factor_source
@@ -44,13 +47,16 @@ class FactorSourceHydrator:
                 )
             except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 continue
+            download_url, tls_context = self._internal_download(access)
             request = Request(
-                self._internal_download_url(access),
+                download_url,
                 headers={"Authorization": f"Bearer {access.get('bearer') or ''}"},
                 method="GET",
             )
             try:
-                with urlopen(request, timeout=120.0) as response:
+                with urlopen(
+                    request, timeout=120.0, context=tls_context,
+                ) as response:
                     raw = response.read(expected_size + 1)
             except (HTTPError, URLError, OSError, TimeoutError, ConnectionError):
                 continue
@@ -73,19 +79,36 @@ class FactorSourceHydrator:
             return True
         return False
 
-    def _internal_download_url(self, access: dict[str, object]) -> str:
-        """Use this Manager's WireGuard data listener, not its public TLS URL."""
-        endpoints = getattr(self.state, "transfer_endpoints", None)
-        if endpoints is not None:
-            try:
-                current = endpoints.snapshot().get(self.state.server_id)
-                peer = str(getattr(current, "peer_data_endpoint", "") or "").rstrip("/")
-                path = str(access.get("path") or "")
-                if peer and path.startswith("/"):
-                    return peer + path
-            except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
-                pass
-        return str(access.get("url") or "")
+    def _internal_download(
+        self, access: dict[str, object],
+    ) -> tuple[str, ssl.SSLContext | None]:
+        """Consume the client ticket on this Manager's loopback 7997 listener.
+
+        The WireGuard-only listener accepts peer ``origin``/``destination``
+        actions, not client ``download`` actions.  Keeping the client action on
+        loopback lets the data plane perform its normal direct-pull flow while
+        avoiding a public-network hairpin.  A mounted deployment certificate
+        is the trust anchor for self-signed HTTPS deployments.
+        """
+        public_url = str(access.get("url") or "")
+        parsed = urlsplit(public_url)
+        if parsed.scheme not in {"http", "https"} or parsed.port is None:
+            return public_url, None
+        host = "localhost" if parsed.scheme == "https" else "127.0.0.1"
+        internal_url = urlunsplit((
+            parsed.scheme, f"{host}:{parsed.port}", parsed.path,
+            parsed.query, parsed.fragment,
+        ))
+        if parsed.scheme != "https":
+            return internal_url, None
+        certificate = str(
+            os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
+            or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT")
+            or ""
+        ).strip()
+        if not certificate:
+            return public_url, None
+        return internal_url, ssl.create_default_context(cafile=certificate)
 
     def _candidates(
         self, owner: str, factor_id: str, *, principal: str,
