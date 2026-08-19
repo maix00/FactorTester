@@ -25,12 +25,6 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
     class State:
         server_id = "public-1"
         account_domain_sync = Sync()
-        transfer_endpoints = type("Endpoints", (), {
-            "snapshot": lambda self: {"public-1": type("Endpoint", (), {
-                "peer_data_endpoint": "http://10.77.0.1:17997",
-            })()},
-        })()
-
         @staticmethod
         def prepare_object_download(**kwargs):
             assert kwargs["storage_server_id"] == "office-a"
@@ -43,9 +37,13 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
 
     saved = []
     requested = []
-    monkeypatch.setattr(factor_source_hydration, "urlopen", lambda request, **_kwargs: (
-        requested.append(request.full_url) or _Response(raw)
-    ))
+    monkeypatch.setattr(
+        factor_source_hydration, "urlopen",
+        lambda request, **kwargs: (
+            requested.append((request.full_url, kwargs.get("context")))
+            or _Response(raw)
+        ),
+    )
     monkeypatch.setattr(
         factor_source_hydration, "upsert_factor_source",
         lambda *args: saved.append(args),
@@ -55,7 +53,42 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
         "DemoFactor", principal="alice",
     )
     assert saved == [("custom", "alice", "DemoFactor", "Demo", source)]
-    assert requested == ["http://10.77.0.1:17997/api/transfers/source"]
+    assert requested == [("https://public.example:7997/source", None)]
+
+
+def test_internal_download_uses_loopback_http_client_listener() -> None:
+    access = {
+        "url": "http://10.98.186.177:7997/v1/transfers/attempt/download",
+    }
+
+    url, context = factor_source_hydration.FactorSourceHydrator(
+        object(),
+    )._internal_download(access)
+
+    assert url == "http://127.0.0.1:7997/v1/transfers/attempt/download"
+    assert context is None
+
+
+def test_internal_download_trusts_mounted_tls_certificate(
+    monkeypatch, tmp_path,
+) -> None:
+    certificate = tmp_path / "manager.crt"
+    certificate.write_text("certificate-placeholder")
+    sentinel = object()
+    monkeypatch.setenv("FACTORTESTER_ARTIFACT_TLS_CERT", str(certificate))
+    monkeypatch.setattr(
+        factor_source_hydration.ssl, "create_default_context",
+        lambda *, cafile: sentinel if cafile == str(certificate) else None,
+    )
+
+    url, context = factor_source_hydration.FactorSourceHydrator(
+        object(),
+    )._internal_download({
+        "url": "https://101.133.144.27:7997/v1/transfers/attempt/download",
+    })
+
+    assert url == "https://localhost:7997/v1/transfers/attempt/download"
+    assert context is sentinel
 
 
 class _Response:
