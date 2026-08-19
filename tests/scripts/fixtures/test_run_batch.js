@@ -276,6 +276,26 @@ const strategyScopedBacktest = {
   assert.ok(openedRunSpecs.some(item => item.label.includes("回测任务")),
     "RunSpec overlay must use the returned frozen record across a UI refresh");
 
+  delete window.FTRunSpecView;
+  const previousLoader = window.FTStaticLoader.loadGroups;
+  window.FTStaticLoader.loadGroups = async names => {
+    lazyGroups.push(...names);
+    if (names.includes("research-reference")) {
+      window.FTRunSpecView = {
+        openMany: (_context, entries) => { openedRunSpecs = entries; },
+      };
+    }
+  };
+  openedRunSpecs = [];
+  const deferredViewerState = {...backtest, testRunBatch: []};
+  batch.headerActions(context, deferredViewerState, () => {})[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(lazyGroups.includes("research-reference"),
+    "RunSpec preview must load the module group that owns its overlay");
+  assert.ok(openedRunSpecs.some(item => item.label.includes("回测任务")),
+    "deferred RunSpec viewer must open after its module loads");
+  window.FTStaticLoader.loadGroups = previousLoader;
+
   const failingContext = {
     ...context,
     async api() {

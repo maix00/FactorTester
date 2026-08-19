@@ -130,14 +130,16 @@
       return false;
     }
     if (!window.FTRunSpecView?.openMany) {
-      await window.FTStaticLoader?.loadGroups?.(["research"]);
+      await window.FTStaticLoader?.loadGroups?.(["research-reference"]);
     }
     if (window.FTRunSpecView?.openMany) {
       window.FTRunSpecView.openMany(context, entries);
     } else if (window.FTRunSpecView?.open) {
       window.FTRunSpecView.open(context, entries[0].target, entries[0].serverID);
     } else {
-      context.navigate(model().runSpecPath(selectedTasks(state)[0].item));
+      context.navigate(FTReferencePage.routeFor(
+        "run-spec", entries[0].target, context.t("运行配置"), entries[0].serverID,
+      ));
     }
     if (failures.length) {
       const detail = failures
