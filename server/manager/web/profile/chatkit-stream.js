@@ -87,6 +87,21 @@
     return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
   }
 
+  async function persistConversationItem(state, item, role) {
+    const text = itemText(item);
+    if (!text || !state.context?.api || !state.conversationID) return;
+    await state.context.api("/api/client/profile-agent/conversations/items", {
+      method: "POST",
+      body: JSON.stringify({
+        profile_id: state.profileID,
+        conversation_id: state.conversationID,
+        role,
+        text,
+        item_id: String(item.id || ""),
+      }),
+    });
+  }
+
   function appendUniqueHistoryItems(state, items) {
     const keys = new Set(state.items.map(itemKey));
     for (const item of items) {
@@ -116,6 +131,12 @@
     // provider thread before closing the browser stream.
     if (assistant) appendAssistantText(state, controller, itemText(assistant));
     appendUniqueHistoryItems(state, history);
+    await Promise.all(history.map(item => {
+      const type = String(item?.type || "").toLowerCase();
+      const role = type === "user_message" ? "user"
+        : type === "assistant_message" ? "assistant" : "";
+      return role ? persistConversationItem(state, item, role).catch(() => {}) : null;
+    }));
     state.threadTitle = String(
       thread.name || thread.title || state.threadTitle || "",
     ).trim();
@@ -328,6 +349,7 @@
       });
       const user = P.userItem(state, text);
       state.items.push(user);
+      persistConversationItem(state, user, "user").catch(() => {});
       writeEvent(controller, {type: "thread.item.added", item: user});
       writeEvent(controller, {type: "thread.item.done", item: user});
       writeEvent(controller, {
@@ -377,6 +399,7 @@
           content_index: 0, content: item.content[0],
         });
         writeEvent(controller, {type: "thread.item.done", item});
+        await persistConversationItem(state, item, "assistant").catch(() => {});
       }
       await updateConversation(profileState, state, {
         title: state.threadTitle || text.slice(0, 80),

@@ -16,11 +16,14 @@
 
   function pagedTable(headers, rows = [], options = {}) {
     const pageSize = Math.max(1, Number(options.pageSize) || 20);
-    const total = rows.length;
+    const remote = options.remote === true;
+    const total = remote
+      ? Math.max(rows.length, Number(options.total) || 0)
+      : rows.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(totalPages, Math.max(1, Number(options.page) || 1));
     const start = (page - 1) * pageSize;
-    const view = table(headers, rows.slice(start, start + pageSize));
+    const view = table(headers, remote ? rows : rows.slice(start, start + pageSize));
     const pagination = document.createElement("div");
     pagination.className = "product-list-pagination shared-table-pagination";
     const previous = actionButton(options.previousLabel || "上一页", () => {

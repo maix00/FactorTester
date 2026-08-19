@@ -158,7 +158,11 @@
       if (!match) return "";
       let target = match[1];
       try { target = decodeURIComponent(target); } catch (_) {}
-      return `profile-detail:${target}`;
+      let profileKey = "local";
+      try {
+        profileKey = new URL(path, location.origin).searchParams.get("profile_key") || "local";
+      } catch (_) {}
+      return `profile-detail:${target}:${profileKey}`;
     }
 
     function productCategoryDetailTabID(path) {

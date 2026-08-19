@@ -11,6 +11,15 @@ from tools.cli.release.research_reporting.public_research.object_store import (
 from server.manager.services.factor_library_scopes import (
     compose_factor_library_scopes,
 )
+from server.manager.services.profile_directory import (
+    PROFILE_DIRECTORY_PRINCIPAL,
+    ProfileDirectoryService,
+)
+from tools.data.account_manage import (
+    direct_subordinate_accounts_for,
+    get_account,
+    is_super_admin_account,
+)
 
 
 VISITOR_PRINCIPAL = "__public_jobs__"
@@ -69,6 +78,110 @@ class FederationPublicDataRoutesMixin:
                 return {
                     "profiles": self.state.client_state.profiles(
                         principal, include_local_paths=False,
+                    ),
+                }
+            if operation == "profiles-directory":
+                if principal != PROFILE_DIRECTORY_PRINCIPAL:
+                    raise PermissionError("Profile directory federation requires a Manager identity")
+                owners = payload.get("owners")
+                if not isinstance(owners, list) or len(owners) > 2048:
+                    raise ValueError("Profile directory owners are invalid")
+                rows = []
+                for owner in sorted({str(item or "").strip() for item in owners if str(item or "").strip()}):
+                    values = self.state.client_state.profiles(
+                        owner, include_local_paths=False,
+                    )
+                    agent_service = getattr(self.state, "agent_profiles", None)
+                    if agent_service is not None:
+                        try:
+                            values = agent_service.enrich(owner, values)
+                        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                            pass
+                    for value in values:
+                        if isinstance(value, dict):
+                            projected = dict(value) | {"owner_ref": owner}
+                            if agent_service is not None:
+                                try:
+                                    projected["conversation_sharing"] = (
+                                        agent_service.conversation_sharing(
+                                            owner,
+                                            str(value.get("profile_id") or ""),
+                                        )
+                                    )
+                                    projected["conversation_count"] = len(
+                                        agent_service.conversations(
+                                            owner,
+                                            str(value.get("profile_id") or ""),
+                                        )
+                                    )
+                                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                                    pass
+                            rows.append(projected)
+                return {"profiles": rows}
+            if operation in {"profile-conversations", "profile-conversation-items"}:
+                owner = str(payload.get("owner") or "").strip()
+                profile_id = str(payload.get("profile_id") or "").strip()
+                if not owner or not profile_id:
+                    raise ValueError("Profile owner and profile_id are required")
+                profile = next(
+                    (
+                        item for item in self.state.client_state.profiles(
+                            owner, include_local_paths=False,
+                        )
+                        if isinstance(item, dict)
+                        and str(item.get("profile_id") or "") == profile_id
+                    ),
+                    None,
+                )
+                if profile is None:
+                    raise PermissionError("Profile is not available on this server")
+                viewer = str(principal or "").strip()
+                allowed = viewer == owner
+                try:
+                    allowed = allowed or is_super_admin_account(get_account(viewer))
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
+                if not allowed:
+                    direct_children = {
+                        str(item.get("username") or "").strip()
+                        for item in direct_subordinate_accounts_for(viewer)
+                    }
+                    sharing = False
+                    agent_service = getattr(self.state, "agent_profiles", None)
+                    if agent_service is not None:
+                        try:
+                            sharing = agent_service.conversation_sharing(owner, profile_id)
+                        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                            sharing = False
+                    allowed = owner in direct_children and sharing
+                if not allowed and ProfileDirectoryService.visible_to(profile, viewer):
+                    allowed = True
+                if not allowed:
+                    raise PermissionError("Profile conversations are not shared with this account")
+                agent_service = getattr(self.state, "agent_profiles", None)
+                if agent_service is None:
+                    return {"conversations": [], "items": []}
+                if operation == "profile-conversations":
+                    conversations = agent_service.conversations(owner, profile_id)
+                    return {
+                        "conversations": [
+                            {
+                                key: item.get(key)
+                                for key in (
+                                    "conversation_id", "profile_id", "title",
+                                    "preview", "created_at", "updated_at", "active",
+                                )
+                                if key in item
+                            }
+                            for item in conversations
+                        ],
+                    }
+                conversation_id = str(payload.get("conversation_id") or "").strip()
+                if not conversation_id:
+                    raise ValueError("conversation_id is required")
+                return {
+                    "items": agent_service.conversation_items(
+                        owner, profile_id, conversation_id,
                     ),
                 }
             if operation == "factors":

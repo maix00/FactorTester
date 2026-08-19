@@ -28,13 +28,18 @@
     );
   }
 
-  async function mountChatKit(context, profile, host, status) {
+  async function mountChatKit(context, profile, host, status, options = {}) {
     if (!window.FTProfileChatKit) {
       throw new Error(context.t("Agent 对话组件尚未加载"));
     }
-    const skills = await loadSkills(context, profile);
+    const skills = options.readOnly ? [] : await loadSkills(context, profile);
     await window.FTProfileChatKit.load();
-    const adapter = window.FTProfileChatKit.create(profile, context, {skills});
+    const adapter = window.FTProfileChatKit.create(profile, context, {
+      skills,
+      readOnly: Boolean(options.readOnly),
+      profileKey: options.profileKey,
+      profileScope: options.profileScope,
+    });
     const chat = document.createElement("openai-chatkit");
     chat.className = "profile-chatkit";
     chat.addEventListener("chatkit.ready", () => {
@@ -69,6 +74,7 @@
         ],
       },
       composer: {
+        disabled: Boolean(options.readOnly),
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
         attachments: {enabled: false},
       },
@@ -77,9 +83,35 @@
     return {adapter, chat};
   }
 
-  async function render(context, profile) {
+  async function render(context, profile, options = {}) {
     const root = section(context);
     const runtime = profile.runtime || {};
+    const readOnly = Boolean(options.readOnly);
+    if (readOnly) {
+      const note = document.createElement("p");
+      note.className = "settings-muted";
+      note.textContent = context.t(
+        "这是只读会话副本。可以查看历史消息，但不能发送问题、修改文件、停止或删除 Agent。",
+      );
+      const status = document.createElement("p");
+      status.className = "settings-muted profile-agent-status";
+      status.setAttribute("aria-live", "polite");
+      const host = document.createElement("div");
+      host.className = "profile-chatkit-host profile-chatkit-readonly";
+      host.setAttribute("aria-readonly", "true");
+      root.append(note, status, host);
+      try {
+        status.textContent = context.t("正在读取只读会话…");
+        await mountChatKit(context, profile, host, status, options);
+        status.textContent = context.t("只读会话");
+      } catch (error) {
+        host.replaceChildren(message(
+          context, "只读会话读取失败", error.message || "",
+        ));
+        status.textContent = context.t("只读会话");
+      }
+      return root;
+    }
     if (runtime.runtime_kind !== "server") {
       root.append(message(
         context,
@@ -151,7 +183,7 @@
       }
       if (mounted) return;
       status.textContent = context.t("正在加载 Agent 对话…");
-      mounted = await mountChatKit(context, profile, host, status);
+      mounted = await mountChatKit(context, profile, host, status, options);
       if (!isCurrent()) disposeChat();
     }
 

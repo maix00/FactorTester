@@ -129,7 +129,131 @@
     return P.jsonResponse({error: `Unsupported ChatKit operation: ${operation}`}, 400);
   }
 
+  function readOnlyConversationID(params) {
+    return C.conversationIDFrom(params)
+      || String(params?.id || params?.thread?.id || "").trim();
+  }
+
+  function readOnlyItem(profileKey, conversationID, item) {
+    const role = String(item?.role || "").toLowerCase() === "assistant"
+      ? "assistant_message" : "user_message";
+    const created = item?.created_at || new Date().toISOString();
+    const text = String(item?.text || "");
+    return {
+      id: String(item?.id || `item-${Math.random().toString(16).slice(2)}`),
+      type: role,
+      thread_id: conversationID,
+      created_at: created,
+      content: [{type: role === "assistant_message" ? "output_text" : "input_text", text}],
+      ...(role === "user_message" ? {
+        attachments: [], quoted_text: null, inference_options: {},
+      } : {annotations: []}),
+      metadata: {profile_key: profileKey},
+    };
+  }
+
+  function readOnlyThread(profileKey, conversation, items = []) {
+    const identifier = String(conversation?.conversation_id || "");
+    return {
+      id: identifier,
+      title: conversation?.title || null,
+      created_at: conversation?.created_at || new Date().toISOString(),
+      status: {type: "completed"},
+      metadata: {profile_key: profileKey, conversation_id: identifier},
+      items: P.page(items.map(item => readOnlyItem(profileKey, identifier, item))),
+    };
+  }
+
+  function readOnlyURL(path, profileState, conversationID = "") {
+    const params = new URLSearchParams({
+      profile_key: profileState.profileKey,
+      scope: profileState.profileScope,
+    });
+    if (conversationID) params.set("conversation_id", conversationID);
+    return `${path}?${params}`;
+  }
+
+  async function readOnlyJSON(profileState, path, conversationID = "") {
+    const payload = await profileState.context.api(
+      readOnlyURL(path, profileState, conversationID),
+    );
+    return payload || {};
+  }
+
+  async function readOnlyConversations(profileState) {
+    const payload = await readOnlyJSON(
+      profileState,
+      "/api/client/profile-directory/conversations",
+    );
+    return Array.isArray(payload.conversations) ? payload.conversations : [];
+  }
+
+  async function readOnlyItems(profileState, conversationID) {
+    const payload = await readOnlyJSON(
+      profileState,
+      "/api/client/profile-directory/conversation-items",
+      conversationID,
+    );
+    return Array.isArray(payload.items) ? payload.items : [];
+  }
+
+  async function fetchReadOnlyAdapter(profileState, input, init = {}) {
+    const body = await P.parseBody(input, init);
+    const operation = P.operation(body);
+    if (!operation) return window.fetch(input, init);
+    const params = body?.params && typeof body.params === "object"
+      ? body.params : (body || {});
+    const conversationID = readOnlyConversationID(params);
+    if (operation === "threads.list") {
+      const conversations = await readOnlyConversations(profileState);
+      return P.jsonResponse(P.page(conversations.map(item => (
+        readOnlyThread(profileState.profileKey, item)
+      ))));
+    }
+    if (operation === "threads.get_by_id") {
+      const conversations = await readOnlyConversations(profileState);
+      const conversation = conversations.find(
+        item => String(item.conversation_id || "") === conversationID,
+      );
+      if (!conversation) return P.jsonResponse({error: "conversation not found"}, 404);
+      return P.jsonResponse(readOnlyThread(
+        profileState.profileKey,
+        conversation,
+        await readOnlyItems(profileState, conversationID),
+      ));
+    }
+    if (operation === "items.list") {
+      return P.jsonResponse(P.page((await readOnlyItems(profileState, conversationID)).map(
+        item => readOnlyItem(profileState.profileKey, conversationID, item),
+      )));
+    }
+    if ([
+      "threads.create", "threads.add_user_message", "threads.update",
+      "threads.delete", "threads.stop",
+    ].includes(operation)) {
+      return P.jsonResponse({error: "read-only conversation"}, 403);
+    }
+    return P.jsonResponse({error: `Unsupported read-only ChatKit operation: ${operation}`}, 400);
+  }
+
   function create(profile, context, options = {}) {
+    if (options.readOnly) {
+      const profileKey = String(
+        options.profileKey || profile.profile_key || profile.profile_id || "",
+      ).trim();
+      const profileState = {
+        profileID: profile.profile_id,
+        profileKey,
+        profileScope: options.profileScope || "servers",
+        context,
+      };
+      return {
+        fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
+        endpoint: CHATKIT_ENDPOINT,
+        locale: P.chatLocale(context),
+        dispose() {},
+      };
+    }
     const profileState = C.profileStateFor(profile, context, options.skills || []);
     return {
       fetch: (input, init) => fetchAdapter(profileState, input, init),

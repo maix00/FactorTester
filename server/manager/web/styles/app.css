@@ -438,6 +438,21 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
 .profile-chatkit-host openai-chatkit { display: block; width: 100%; height: 600px; }
+.profile-directory { max-width: 1240px; }
+.profile-directory-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.profile-directory-section-heading { display: grid; gap: 4px; }
+.profile-directory-section-heading h2, .profile-directory-section-heading p { margin: 0; }
+.profile-directory-controls { align-items: center; margin: 4px 0; }
+.profile-directory-search, .profile-directory-server-filter { min-width: 180px; flex: 1 1 220px; }
+.profile-directory-filter { min-width: 140px; }
+.profile-directory-row { cursor: pointer; }
+.profile-directory-row td { white-space: pre-line; }
+.profile-directory-row:hover, .profile-directory-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
+.profile-directory-identity { display: grid; gap: 2px; }
+.profile-directory-identity small { color: var(--muted); }
+.profile-directory-detail { max-width: 1180px; }
+.profile-directory-note { white-space: pre-line; }
+.profile-chatkit-readonly { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 @media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host openai-chatkit { height: 500px; } }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }

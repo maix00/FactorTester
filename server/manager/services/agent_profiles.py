@@ -240,6 +240,50 @@ class AgentProfileService:
     ) -> list[dict[str, Any]]:
         return self.conversation_store.list(principal, profile_id)
 
+    def conversation_items(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        return self.conversation_store.items(
+            principal, profile_id, conversation_id,
+        )
+
+    def set_conversation_sharing(
+        self,
+        principal: str,
+        profile_id: str,
+        enabled: bool,
+    ) -> bool:
+        return self.conversation_store.set_parent_sharing(
+            principal, profile_id, enabled,
+        )
+
+    def conversation_sharing(self, principal: str, profile_id: str) -> bool:
+        return self.conversation_store.parent_sharing(principal, profile_id)
+
+    def append_conversation_item(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        role: str,
+        text: object,
+        item_id: str = "",
+        created_at: float | None = None,
+    ) -> dict[str, Any]:
+        return self.conversation_store.append_item(
+            principal,
+            profile_id,
+            conversation_id,
+            role=role,
+            text=text,
+            item_id=item_id,
+            created_at=created_at,
+        )
+
     def create_conversation(
         self,
         principal: str,

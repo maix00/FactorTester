@@ -6,6 +6,9 @@
   }
 
   async function list(context, options = {}) {
+    if (window.FTProfileDirectory?.list) {
+      return window.FTProfileDirectory.list(context, options);
+    }
     const embedded = Boolean(options.embedded);
     const nav = options.nav || "research";
     const heading = options.heading || "研究身份";
@@ -56,6 +59,10 @@
   }
 
   async function detail(context, profileID, options = {}) {
+    const profileKey = new URLSearchParams(location.search).get("profile_key");
+    if (profileKey && window.FTProfileDirectory?.detail) {
+      return window.FTProfileDirectory.detail(context, profileID, options);
+    }
     const embedded = Boolean(options.embedded);
     if (!embedded) context.activeNav("research");
     // The list may have been rendered from a stale local/peer projection.
@@ -481,5 +488,11 @@
     return root;
   }
 
-  window.FTProfiles = {detail, list};
+  window.FTProfiles = {
+    detail,
+    list,
+    // The directory detail reuses the established binding UI for the
+    // current user's Profile; remote rows never receive this capability.
+    renderBinding: agentActions,
+  };
 })();
