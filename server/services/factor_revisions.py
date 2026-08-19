@@ -16,6 +16,7 @@ from server.services.factor_registry import (
 )
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from tools.factors.FactorExpr import get_visual_operator_groups
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 
 
 SCHEMA_VERSION = 1
@@ -73,24 +74,32 @@ def build_factor_revision_manifests(
         raise ValueError("factor revision requires canonical shared factors")
     operator_hash = _hash_json(get_visual_operator_groups())
     aliases_by_family: dict[str, set[str]] = {}
+    canonical_by_alias: dict[str, set[str]] = {}
+    for item in factors:
+        if not isinstance(item, dict):
+            continue
+        family_alias = str(item.get("factor_family_alias") or "").strip()
+        family_ref = _canonical_family_ref(item, family_alias)
+        alias = str(item.get("alias") or "").strip()
+        if family_ref and alias:
+            aliases_by_family.setdefault(family_ref, set()).add(alias)
+            canonical_by_alias.setdefault(family_alias, set()).add(family_ref)
     for family in families:
         family_ref = str(
             family.get("alias") if isinstance(family, dict) else ""
         ).strip()
-        if family_ref:
-            aliases_by_family.setdefault(family_ref, set())
-    for item in factors:
-        if not isinstance(item, dict):
+        if not family_ref:
             continue
-        family_ref = str(item.get("factor_family_alias") or "").strip()
-        alias = str(item.get("alias") or "").strip()
-        if family_ref and alias:
-            aliases_by_family.setdefault(family_ref, set()).add(alias)
+        resolved = canonical_by_alias.get(family_ref) or {family_ref}
+        for canonical_ref in resolved:
+            aliases_by_family.setdefault(canonical_ref, set())
     for alias in extra_factor_aliases:
         value = str(alias or "").strip()
-        family_ref = value.split("|", 1)[0]
-        if value and family_ref:
-            aliases_by_family.setdefault(family_ref, set()).add(value)
+        family_alias = value.split("|", 1)[0]
+        if value and family_alias:
+            resolved = canonical_by_alias.get(family_alias) or {family_alias}
+            for family_ref in resolved:
+                aliases_by_family.setdefault(family_ref, set()).add(value)
 
     manifests: list[dict[str, Any]] = []
     for family_ref, aliases in aliases_by_family.items():
@@ -110,6 +119,24 @@ def build_factor_revision_manifests(
             item["factor_alias_hash"],
         ),
     )
+
+
+def _canonical_family_ref(item: dict[str, Any], family_alias: str) -> str:
+    """Preserve the source owner's identity for delegated factor execution."""
+    declared = str(
+        item.get("factor_family_ref") or item.get("family_ref") or ""
+    ).strip()
+    declared_owner, declared_family = (
+        split_owner_qualified_factor_family(declared)
+        if declared else (None, "")
+    )
+    if declared_owner is not None and declared_family:
+        return declared
+    owner = str(
+        item.get("factor_owner_ref") or item.get("owner_ref") or ""
+    ).strip()
+    family = str(family_alias or declared or "").strip()
+    return f"{owner}:{family}" if owner and family else family
 
 
 def assert_run_spec_factor_revisions_current(
