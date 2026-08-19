@@ -249,38 +249,20 @@ class AccountDomainSyncService:
         try:
             from tools.data.account_manage import (
                 list_factor_research_runs,
-                list_factor_sets,
-                list_factor_param_config_aliases,
-                list_factor_param_config_scopes,
-                load_factor_param_config,
                 load_product_categories,
                 load_product_groups,
             )
             categories = load_product_categories(owner)
             groups = load_product_groups(owner)
-            sets = list_factor_sets(owner)
             for value in categories:
                 if self._reconcile_value(owner, "product_category", value, "id"):
                     count += 1
             for value in groups:
                 if self._reconcile_value(owner, "product_group", value, "id"):
                     count += 1
-            for value in sets:
-                identifier = str(
-                    value.get("target_ref") or value.get("set_ref") or ""
-                )
-                if identifier:
-                    self.upsert(owner, "factor_set", identifier, value, flush=False)
-                    count += 1
-            for scope in list_factor_param_config_scopes(owner):
-                for alias in list_factor_param_config_aliases(owner, scope):
-                    value = load_factor_param_config(owner, alias, scope)
-                    if isinstance(value, dict):
-                        self.upsert(
-                            owner, "factor_param_config", f"{scope}:{alias}",
-                            value, flush=False,
-                        )
-                        count += 1
+            count += self.reconcile_factor_catalog(
+                owner, force=True, flush=False,
+            )
             for value in list_factor_research_runs(owner, limit=512):
                 identifier = str(value.get("run_id") or "")
                 if identifier:
@@ -292,6 +274,83 @@ class AccountDomainSyncService:
             pass
         count += self.reconcile_factor_sources(owner)
         if count:
+            self.flush(principal=owner)
+        return count
+
+    def reconcile_factor_catalog(
+        self,
+        principal: str,
+        *,
+        force: bool = False,
+        flush: bool = True,
+    ) -> int:
+        """Materialize local factor aliases without scanning unrelated domains."""
+        owner = str(principal or "").strip()
+        if not owner:
+            return 0
+        cooldown_key = f"factor-catalog:{owner}"
+        now = time.monotonic()
+        if (
+            not force
+            and now - self._last_reconcile.get(cooldown_key, 0.0)
+            < self.access_cooldown
+        ):
+            return 0
+        self._last_reconcile[cooldown_key] = now
+        try:
+            from tools.data.account_manage import list_factor_sets
+            from .factor_sync import materialized_factor_configs
+
+            values = {
+                "factor_set": [
+                    (
+                        str(item.get("target_ref") or item.get("set_ref") or ""),
+                        item,
+                    )
+                    for item in list_factor_sets(owner)
+                    if isinstance(item, Mapping)
+                ],
+                "factor_param_config": materialized_factor_configs(owner),
+            }
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            return 0
+
+        count = 0
+        for entity_type, items in values.items():
+            existing = {
+                str(row.get("entity_id") or ""): row
+                for row in self.local.list_entities(
+                    principal=owner,
+                    entity_type=entity_type,
+                    include_shared=False,
+                )
+            }
+            current_ids: set[str] = set()
+            for identifier, value in items:
+                identifier = str(identifier or "").strip()
+                if not identifier or not isinstance(value, Mapping):
+                    continue
+                current_ids.add(identifier)
+                clean = public_payload(value)
+                row = existing.get(identifier)
+                if (
+                    row is not None
+                    and row.get("payload") == clean
+                    and str(row.get("origin_manager_id") or "") == self.manager_id
+                ):
+                    continue
+                self.upsert(
+                    owner, entity_type, identifier, clean, flush=False,
+                )
+                count += 1
+            for identifier, row in existing.items():
+                if (
+                    identifier not in current_ids
+                    and str(row.get("origin_manager_id") or "") == self.manager_id
+                ):
+                    self.delete(owner, entity_type, identifier, flush=False)
+                    count += 1
+        if count and flush:
             self.flush(principal=owner)
         return count
 

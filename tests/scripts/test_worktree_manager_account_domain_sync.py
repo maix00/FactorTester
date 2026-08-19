@@ -6,6 +6,7 @@ from server.manager.services.federated_public_data import FederatedPublicDataSer
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.local import LocalAccountDomainStore
 from server.manager.storage.account_domain.payloads import public_payload
+from server.manager.storage.account_domain.factor_sync import materialized_factor_configs
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 
 
@@ -51,6 +52,84 @@ class MemoryControlStore:
                 [after_revision] + [row["revision"] for row in rows]
             ),
         }
+
+
+def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tools.data.account_manage.get_account",
+        lambda owner: {"username": owner, "alias": "Alice"},
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.list_factor_param_config_scopes",
+        lambda _owner: ["default"],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.list_factor_param_config_aliases",
+        lambda _owner, _scope: ["CA"],
+    )
+    monkeypatch.setattr(
+        "tools.data.account_manage.load_factor_param_config",
+        lambda _owner, _family, _scope: {"params_list": [{"$F": "1m"}]},
+    )
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_library_service.build_factor_library_overview",
+        lambda *_args, **_kwargs: {"factors": [{
+            "factor_alias": "CA|$F:1m",
+            "factor_family_alias": "CA",
+            "factor_family_name": "CA",
+            "scope_key": "default",
+            "params": [{"alias": "$F", "value": "1m"}],
+            "owner_username": "alice",
+        }]},
+    )
+
+    values = materialized_factor_configs("alice")
+
+    assert values[0][0] == "default:CA"
+    assert values[0][1]["resolved_factors"][0]["factor_alias"] == "CA|$F:1m"
+
+
+def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    service = AccountDomainSyncService(
+        sqlite_path=tmp_path / "manager.sqlite",
+        control_store=None,
+        manager_id="office-a",
+    )
+    configs = [(
+        "default:CA",
+        {
+            "scope_key": "default",
+            "factor_family_alias": "CA",
+            "resolved_factors": [{
+                "factor_alias": "CA|$F:1m",
+                "factor_family_alias": "CA",
+                "params": [{"alias": "$F", "value": "1m"}],
+            }],
+        },
+    )]
+    monkeypatch.setattr(
+        "tools.data.account_manage.list_factor_sets", lambda _owner: [],
+    )
+    monkeypatch.setattr(
+        "server.manager.storage.account_domain.factor_sync.materialized_factor_configs",
+        lambda _owner: list(configs),
+    )
+
+    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert service.reconcile_factor_catalog("alice", force=True) == 0
+    rows = service.entities(
+        "alice", entity_type="factor_param_config", sync=False,
+    )
+    assert rows[0]["payload"]["resolved_factors"][0]["factor_alias"] == "CA|$F:1m"
+
+    configs.clear()
+    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert service.entities(
+        "alice", entity_type="factor_param_config", sync=False,
+    ) == []
+    assert service.local.pending(principal="alice")[0]["deleted"] is True
 
 
 def test_metadata_payload_removes_credentials_paths_and_bytes() -> None:

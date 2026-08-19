@@ -38,6 +38,11 @@ def test_factor_projection_uses_local_owner_alias_and_hides_migrated_username():
             "name": "GTHT@MaxJJW@392452984564",
             "scope_user_id": "GTHT@MaxJJW@392452984564",
             "params_list": [{"$F": "1m"}],
+            "resolved_factors": [{
+                "factor_alias": "SgCCS|$F:1m",
+                "factor_family_alias": "SgCCS",
+                "params": [{"alias": "$F", "value": "1m"}],
+            }],
         },
     }])
 
@@ -51,7 +56,63 @@ def test_factor_projection_uses_local_owner_alias_and_hides_migrated_username():
     assert rows[0]["owner_alias"] == "MaxJJW"
     assert rows[0]["factor_family_alias"] == "SgCCS"
     assert rows[0]["factor_family_name"] == "SgCCS"
+    assert rows[0]["factor_alias"] == "SgCCS|$F:1m"
     assert sync.sync_flags == [False]
+
+
+def test_factor_projection_never_manufactures_index_aliases():
+    sync = LocalOnlySync([{
+        "principal": "alice",
+        "entity_type": "factor_param_config",
+        "entity_id": "default:CA",
+        "payload": {
+            "factor_family_alias": "CA",
+            "params_list": [{"$F": "1m"}, {"$F": "1d"}],
+        },
+    }])
+
+    assert factor_rows_from_sync(sync, "alice") == []
+
+
+def test_factor_library_prefers_resolved_sqlite_mirror_without_legacy_rebuild(
+    tmp_path, monkeypatch,
+):
+    class ResolvedSync(LocalOnlySync):
+        def reconcile_factor_catalog(self, principal):
+            assert principal == "GTHT@MaxJJW@392452984564"
+
+        def sync(self, principal):
+            assert principal == "GTHT@MaxJJW@392452984564"
+            return {"status": "synced"}
+
+    sync = ResolvedSync([{
+        "principal": "GTHT@MaxJJW@392452984564",
+        "entity_type": "factor_param_config",
+        "entity_id": "default:CA",
+        "payload": {
+            "factor_family_alias": "CA",
+            "resolved_factors": [{
+                "factor_alias": "CA|$F:1m",
+                "factor_family_alias": "CA",
+                "params": [{"alias": "$F", "value": "1m"}],
+            }],
+        },
+    }])
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_library_service.build_factor_library_overview",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy factor rebuild must not run")
+        ),
+    )
+    service = ClientStateService(
+        tmp_path / "client",
+        account_domain_sync=sync,
+        local_account_store=LocalAccounts(),
+    )
+
+    value = service.factor_library("GTHT@MaxJJW@392452984564")
+
+    assert [item["factor_alias"] for item in value["factors"]] == ["CA|$F:1m"]
 
 
 def test_profile_read_does_not_wait_for_control_database(tmp_path):
