@@ -65,7 +65,14 @@ RUN set -eu; \
     install -m 0555 \
         "/tmp/codex-package/vendor/${codex_target}/bin/codex" \
         /usr/local/bin/codex; \
+    install -m 0555 \
+        "/tmp/codex-package/vendor/${codex_target}/bin/codex-code-mode-host" \
+        /usr/local/bin/codex-code-mode-host; \
     test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"; \
+    test -x /usr/local/bin/codex-code-mode-host; \
+    codex-code-mode-host --help >/tmp/codex-code-mode-host-help; \
+    grep -F 'Usage: codex-code-mode-host' /tmp/codex-code-mode-host-help >/dev/null; \
+    rm -f /tmp/codex-code-mode-host-help; \
     rm -rf /tmp/codex-package /tmp/codex.tgz
 
 # Pin the upstream Mihomo binary in the image. The Manager never publishes
