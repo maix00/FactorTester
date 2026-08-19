@@ -132,6 +132,94 @@ def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
     assert service.local.pending(principal="alice")[0]["deleted"] is True
 
 
+def test_factor_source_sync_tracks_each_storage_provider_without_conflicts(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    source = {
+        "owner_username": "alice",
+        "factor_id": "CA",
+        "factor_name": "CA",
+        "source_code": "class CA: pass",
+    }
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [source] if kind == "custom" else [],
+    )
+    control = MemoryControlStore()
+    first = AccountDomainSyncService(
+        sqlite_path=tmp_path / "first.sqlite",
+        control_store=control,
+        manager_id="office-a",
+    )
+    second = AccountDomainSyncService(
+        sqlite_path=tmp_path / "second.sqlite",
+        control_store=control,
+        manager_id="office-b",
+    )
+
+    assert first.reconcile_factor_sources("alice") == 1
+    assert second.reconcile_factor_sources("alice") == 1
+    assert first.local.conflicts(principal="alice") == []
+    assert second.local.conflicts(principal="alice") == []
+    assert {
+        row[2] for row in control.rows
+        if row[0] == "alice" and row[1] == "factor_source"
+    } == {"custom:CA@office-a", "custom:CA@office-b"}
+    assert second.reconcile_factor_sources("alice") == 0
+
+
+def test_factor_source_reconcile_retires_matching_legacy_conflict(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import hashlib
+
+    source_code = "class CA: pass"
+    source_hash = hashlib.sha256(source_code.encode()).hexdigest()
+    source = {
+        "owner_username": "alice",
+        "factor_id": "CA",
+        "factor_name": "CA",
+        "source_code": source_code,
+    }
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [source] if kind == "custom" else [],
+    )
+    control = MemoryControlStore()
+    legacy = AccountDomainSyncService(
+        sqlite_path=tmp_path / "legacy.sqlite",
+        control_store=control,
+        manager_id="retired-node",
+    )
+    legacy.upsert("alice", "factor_source", "custom:CA", {
+        "source_kind": "custom",
+        "owner_username": "alice",
+        "factor_id": "CA",
+        "factor_name": "CA",
+        "source_sha256": source_hash,
+        "source_bytes": len(source_code.encode()),
+        "storage_server_id": "retired-node",
+        "visibility": "private",
+    })
+    current = AccountDomainSyncService(
+        sqlite_path=tmp_path / "current.sqlite",
+        control_store=control,
+        manager_id="office-a",
+    )
+    current.upsert("alice", "factor_source", "custom:CA", {
+        **control.rows[("alice", "factor_source", "custom:CA")]["payload"],
+        "storage_server_id": "office-a",
+    })
+    assert current.local.conflicts(principal="alice")
+
+    assert current.reconcile_factor_sources("alice") == 1
+    assert current.local.pending(principal="alice") == []
+    assert current.local.conflicts(principal="alice") == []
+    assert (
+        "alice", "factor_source", "custom:CA@office-a"
+    ) in control.rows
+
+
 def test_metadata_payload_removes_credentials_paths_and_bytes() -> None:
     value = public_payload({
         "display_name": "Research",
