@@ -14,6 +14,7 @@ from server.manager.state.models import (
     ServiceBundle,
     Worktree,
 )
+from server.manager.state.processes import job_daemon_socket_path
 from server.manager.system import extract_issue_number as _extract_issue_number, safe_name
 
 
@@ -248,7 +249,7 @@ class WorktreeStateMixin:
         """
         path = path.resolve()
         deployment_id = f"{safe_name(path.name)}-{port}"
-        socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+        socket_path = job_daemon_socket_path(path, deployment_id)
         api_pid: int | None = None
         daemon_pid: int | None = None
         for pid, command in self._process_listing():
