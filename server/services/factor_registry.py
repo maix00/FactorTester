@@ -328,7 +328,15 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
         visible_shared_factor = bool(
             owner != active_user
             and owner_visible
-            and _is_registered_shared_factor(owner, factor_id)
+            and (
+                _is_registered_shared_factor(owner, factor_id)
+                # A federated Manager persists an authorized 7997 hydration
+                # before retrying RunSpec freeze.  That canonical local copy
+                # is sufficient authority for the same visible owner; do not
+                # require an unrelated factor-library row to have arrived in
+                # the account-domain mirror first.
+                or load_factor_source(owner, factor_id)
+            )
         )
         if owner != active_user and not visible_shared_factor:
             sharing_reason = (
