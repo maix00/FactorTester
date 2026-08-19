@@ -41,6 +41,8 @@
       closeTab: () => closeOverlay(),
       onSaved,
       testState: options.testState || null,
+      testObjectTemporary: options.temporary === true,
+      testObjectInitialValue: options.initialValue || null,
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
     };
   }
@@ -83,8 +85,11 @@
     };
     const finish = value => close(dialog, state, value);
     const saved = value => {
-      options.onSaved?.(value);
-      finish(value);
+      const normalized = options.temporary === true && value
+        ? {...value, temporary: true, source_origin: value.source_origin || "test_inline"}
+        : value;
+      options.onSaved?.(normalized);
+      finish(normalized);
     };
     const proxy = editorContext(context, mount, () => finish(null), saved, options);
     closeButton.addEventListener("click", () => finish(null));

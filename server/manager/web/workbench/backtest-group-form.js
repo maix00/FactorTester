@@ -90,9 +90,19 @@
       factorRefs.includes(factorAlias(item))
     ));
     innerScopeValues.factor_candidates = selectedCandidateValues();
-    const productGroup = groupPicker(context, state, productGroupRef, value => {
-      productGroupRef = value[0] || "";
-    }, productItems, !productScopeBlocked);
+    const renderProductPanel = () => FTTestProducts.selectionPanel(
+      context, state, () => editorTabs?.refreshChips(), {
+        groups: productItems,
+        selectedRefs: productGroupRef ? [productGroupRef] : [],
+        multi: false,
+        canCreate: !productScopeBlocked,
+        onChange: values => {
+          productGroupRef = values[0] || "";
+          innerScopeValues.product_path_selection = productGroupRef;
+          editorTabs?.refreshChips();
+        },
+      },
+    );
     const storedFactors = selectedFactorAliases(state, defaults);
     const hasStoredFactors = Boolean(
       (Array.isArray(defaults.factorAliases) && defaults.factorAliases.length)
@@ -110,6 +120,7 @@
     let fallbackFactorOverrides;
     let factor;
     let combinationPicker;
+    let factorPanel;
     const factorHost = document.createElement("div");
     factorHost.className = "backtest-group-factor-panel";
     const renderFactorPanel = () => {
@@ -118,39 +129,49 @@
       ) ?? factorRefs.length > 1;
       const overrideContent = overrideEditor?.panel({key: "factor"})
         || fallbackFactorOverrides;
-      const shared = window.FTTestFactorCandidateSources?.innerPanel?.(
-        context, state, () => {}, {
-          candidateControl: factor,
-          candidateLabel: candidateDescriptor.label || context.t("因子候选"),
-          candidateHelp: candidateDescriptor.help_text || "",
-          combinationVisible,
-          combinationControl: combinationPicker,
-          combinationLabel: combinationDescriptor.label || context.t("组合方式"),
-          combinationHelp: combinationDescriptor.help_text
-            || context.t("多个因子候选需要一种组合方式"),
-          combinationEmpty: !combinationItems.length
-            ? context.t("当前没有可用组合方式，暂不能提交多个因子候选") : "",
-          overrideContent,
-        },
-      );
-      factorHost.replaceChildren(shared || field(
-        candidateDescriptor.label || context.t("因子候选"), factor,
-        candidateDescriptor.help_text || "",
-      ));
+      const panelOptions = {
+        candidateControl: factor,
+        candidateLabel: candidateDescriptor.label || context.t("因子候选"),
+        candidateHelp: candidateDescriptor.help_text || "",
+        combinationVisible,
+        combinationControl: combinationPicker,
+        combinationLabel: combinationDescriptor.label || context.t("组合方式"),
+        combinationHelp: combinationDescriptor.help_text
+          || context.t("多个因子候选需要一种组合方式"),
+        combinationEmpty: !combinationItems.length
+          ? context.t("当前没有可用组合方式，暂不能提交多个因子候选") : "",
+        overrideContent,
+      };
+      if (!factorPanel) {
+        factorPanel = window.FTTestFactorCandidateSources?.innerPanel?.(
+          context, state, () => {}, panelOptions,
+        ) || field(
+          candidateDescriptor.label || context.t("因子候选"), factor,
+          candidateDescriptor.help_text || "",
+        );
+        factorHost.replaceChildren(factorPanel);
+      } else {
+        factorPanel.update?.(panelOptions);
+      }
     };
-    factor = factorPicker(
-      context, state, factorRefs, candidateDescriptor.cardinality === "many", values => {
-      factorRefs = values;
-        innerScopeValues.factor_candidates = selectedCandidateValues();
-        renderFactorPanel();
-        overrideEditor?.refresh();
-        editorTabs?.refreshChips();
-      }, factorItems, !factorScopeBlocked && (
+    factor = FTTestFactorCandidateSources.candidatePicker(context, state, {
+      items: factorItems,
+      selected: factorRefs,
+      multi: candidateDescriptor.cardinality === "many",
+      canCreate: !factorScopeBlocked && (
         factorScope.source === "outer"
           ? candidateDescriptor.allow_inline_create_when_outer_mounted === true
           : candidateDescriptor.allow_inline_create_when_outer_unmounted !== false
       ),
-    );
+      name: "backtest-factor-candidates",
+      onChange: values => {
+        factorRefs = values;
+        innerScopeValues.factor_candidates = selectedCandidateValues();
+        renderFactorPanel();
+        overrideEditor?.refresh();
+        editorTabs?.refreshChips();
+      },
+    });
     combinationPicker = FTTestChoicePicker.create(context, {
       className: "test-choice-picker test-factor-combination-picker",
       compact: true,
@@ -219,7 +240,7 @@
       }),
       renderStructure: () => structure,
       renderFactor: () => { renderFactorPanel(); return factorHost; },
-      renderProduct: () => field(context.t("产品组"), productGroup),
+      renderProduct: renderProductPanel,
       renderProductFilter: () => window.FTStrategyEditorProductFilter?.render(
         context, state, productMask,
         values => { productMask = [...new Set((values || []).map(String).filter(Boolean))]; },
@@ -232,7 +253,7 @@
     // the initial render instead of only after the user changes a field.
     editorTabs?.refreshChips();
     if (editorTabs) form.append(scopeNote, editorTabs);
-    else form.append(scopeNote, field(context.t("产品组"), productGroup),
+    else form.append(scopeNote, renderProductPanel(),
       factorHost, structure, field(context.t("覆盖字段"), fallbackOverrides));
 
     appendActions(context, form, async () => {
@@ -436,9 +457,7 @@
     return window.FTStrategyEditorPickers;
   }
 
-  function groupPicker(...args) { return pickerTools().groupPicker(...args); }
   function strategyGroupPicker(...args) { return pickerTools().strategyGroupPicker(...args); }
-  function factorPicker(...args) { return pickerTools().factorPicker(...args); }
   function selectedFactorAliases(...args) {
     return pickerTools().selectedFactorAliases(...args);
   }

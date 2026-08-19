@@ -5,13 +5,20 @@
 
   async function initialize(context, state) {
     const existing = candidates(state);
-    if (existing.length) return;
+    if (state.categoryCandidatesLoaded) return;
     try {
       const value = await context.api("/api/data_source_categories");
-      state.values.category_candidates = (value.categories || []).map(item => ({
+      const fetched = (value.categories || []).map(item => ({
         ...item,
         enabled: item.enabled !== false,
       }));
+      const byID = new Map();
+      for (const item of [...fetched, ...existing]) {
+        const id = categoryID(item);
+        if (id) byID.set(String(id), item);
+      }
+      state.values.category_candidates = [...byID.values()];
+      state.categoryCandidatesLoaded = true;
       state.categoryError = "";
     } catch (error) {
       state.categoryError = error.message;
@@ -35,9 +42,11 @@
     }
   }
 
-  function openEditor(context, mode, ref, onSaved) {
+  function openEditor(context, mode, ref, onSaved, testState = null, initialValue = null) {
     return FTTestObjectEditorOverlay.open(context, {
-      kind: "category", mode, ref, onSaved,
+      kind: "category", mode, ref, onSaved, testState,
+      temporary: mode === "create" || initialValue?.temporary === true,
+      initialValue,
     });
   }
 
@@ -62,7 +71,7 @@
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void openEditor(context, "edit", id, onSaved);
+        void openEditor(context, "edit", id, onSaved, null, category);
       },
     };
   }
@@ -97,7 +106,7 @@
       compact: true,
       name: "ic-category",
       onCreate: context.session
-        ? () => void openEditor(context, "create", "new", savedCategory)
+        ? () => void openEditor(context, "create", "new", savedCategory, state)
         : null,
       createLabel: context.t("新建产品分类"),
       itemActions: item => {

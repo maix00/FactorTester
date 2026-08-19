@@ -147,9 +147,13 @@
     }
     let group = null;
     if (mode !== "create") {
-      const value = await context.api(endpoint(source, target));
-      if (!current(context)) return;
-      group = value.group;
+      if (context.testObjectTemporary && context.testObjectInitialValue) {
+        group = context.testObjectInitialValue;
+      } else {
+        const value = await context.api(endpoint(source, target));
+        if (!current(context)) return;
+        group = value.group;
+      }
       if (!group) throw new Error(context.t("产品组不存在"));
     }
     const categoryPayload = await helpers.loadCategories(context, source);
@@ -305,10 +309,24 @@
             category_ids: [...selected],
             paths,
           };
-          const value = await context.api(
-            creating ? endpoint(source) : endpoint(source, groupPath(group)),
-            {method: creating ? "POST" : "PUT", body: JSON.stringify(payload)},
-          );
+          const localID = groupPath(group) || `inline-product-group:${payload.name}`;
+          const value = context.testObjectTemporary
+            ? {group: {
+              ...payload,
+              id: localID,
+              group_ref: localID,
+              product_group_template_id: localID,
+              product_path_selection_id: localID,
+              title_zh: payload.name,
+              selected_paths: [...paths],
+              temporary: true,
+              source_kind: "transient",
+              source_origin: "test_inline",
+            }}
+            : await context.api(
+              creating ? endpoint(source) : endpoint(source, groupPath(group)),
+              {method: creating ? "POST" : "PUT", body: JSON.stringify(payload)},
+            );
           if (context.onSaved) {
             context.onSaved(value.group || value);
             return;

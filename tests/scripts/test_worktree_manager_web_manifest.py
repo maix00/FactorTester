@@ -663,6 +663,7 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
 
     assert "test-factor-candidate-heading-row" in source
     assert "function candidateHeading" in source
+    assert "function candidatePicker" in source
     assert "function innerPanel" in source
     assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
@@ -723,7 +724,11 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
     assert "includeRun: false" in tabs
     assert "FTTestFactorCandidateSources?.innerPanel" in form
-    assert "compact: true" in pickers
+    assert "FTTestFactorCandidateSources.candidatePicker" in form
+    assert "factorPicker" not in pickers
+    assert "compact: true" in (
+        WEB_ROOT / "workbench" / "test-factor-candidate-sources.js"
+    ).read_text(encoding="utf-8")
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
@@ -1062,6 +1067,19 @@ def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_configuration_mounts.js"
     source = WEB_ROOT / "workbench" / "test-configuration.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_templates_restore_inline_objects_without_catalog_rows() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_temporary_template_state.js"
+    source = WEB_ROOT / "workbench" / "test-state.js"
     result = subprocess.run(
         ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,

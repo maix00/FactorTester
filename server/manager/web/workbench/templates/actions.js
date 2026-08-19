@@ -63,6 +63,7 @@
       state.values = FTTestSettings.initialValues(
         state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
       );
+      FTTestState.restoreTemporaryObjects?.(state);
       state.settingsTabKey = "";
       state.lazy = FTTestState.lazyState();
       state.lazy.templates.status = "ready";

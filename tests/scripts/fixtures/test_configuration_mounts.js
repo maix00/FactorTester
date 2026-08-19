@@ -30,10 +30,25 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process
 
 const requests = [];
 const state = {
-  kind: "ic", manifest: {defaults: {}}, values: {factor_selections: [factor]},
-  factors: [factor], families: [], analysis: {}, settingsMountedTabs: ["factor", "delay"],
+  kind: "ic", manifest: {defaults: {}}, values: {
+    factor_selections: [factor],
+    factor_candidates: [{
+      ...factor, temporary: true, source_origin: "test_inline",
+    }],
+    category_candidates: [{
+      id: "inline-category:session", temporary: true, title_zh: "会话分类",
+    }],
+  },
+  factors: [factor], families: [], groups: [{
+    id: "inline-product-group:session", temporary: true,
+    paths: ["CNFutures/**"],
+  }], analysis: {}, settingsMountedTabs: ["factor", "delay"],
   factorRef: factor.factor_ref, groupRef: "day", groupRefs: ["day"],
   outputCapabilities: [], outputRequests: [],
+  transientFactorSources: [{
+    factor_id: "InlineFactor", path: "inline/InlineFactor.py",
+    source_code: "class InlineFactor: pass\n",
+  }],
   workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
 };
 const context = {api: async (path, options) => {
@@ -47,6 +62,11 @@ const context = {api: async (path, options) => {
     requests[0].body.payload.ui.ic.mounted_tabs,
     ["factor", "delay"],
   );
+  const temporary = requests[0].body.payload.shared.temporary_objects;
+  assert.equal(temporary.factors[0].factor_ref, factor.factor_ref);
+  assert.equal(temporary.product_groups[0].id, "inline-product-group:session");
+  assert.equal(temporary.categories[0].id, "inline-category:session");
+  assert.equal(temporary.factor_sources[0].factor_id, "InlineFactor");
 
   const backtestState = {
     ...state,
