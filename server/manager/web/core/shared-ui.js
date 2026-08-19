@@ -14,6 +14,40 @@
     return {shell, table: element, body};
   }
 
+  function pagedTable(headers, rows = [], options = {}) {
+    const pageSize = Math.max(1, Number(options.pageSize) || 20);
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(options.page) || 1));
+    const start = (page - 1) * pageSize;
+    const view = table(headers, rows.slice(start, start + pageSize));
+    const pagination = document.createElement("div");
+    pagination.className = "product-list-pagination shared-table-pagination";
+    const previous = actionButton(options.previousLabel || "上一页", () => {
+      if (page > 1) options.onPageChange?.(page - 1);
+    });
+    previous.disabled = page <= 1;
+    const next = actionButton(options.nextLabel || "下一页", () => {
+      if (page < totalPages) options.onPageChange?.(page + 1);
+    });
+    next.disabled = page >= totalPages;
+    pagination.append(
+      previous,
+      Object.assign(document.createElement("span"), {
+        className: "product-list-page-label",
+        textContent: String(options.pageLabel?.(page, totalPages)
+          || `${page} / ${totalPages}`),
+      }),
+      next,
+      Object.assign(document.createElement("span"), {
+        className: "product-list-total",
+        textContent: String(options.totalLabel?.(total) || total),
+      }),
+    );
+    view.shell.append(pagination);
+    return {...view, page, pageSize, total, totalPages, start};
+  }
+
   function appendRow(body, values) {
     const row = body.insertRow();
     values.forEach(value => {
@@ -84,6 +118,6 @@
 
   window.FTUI = {
     actionButton, appendRow, code, empty, fieldRows, formatDate, helpIcon, loading,
-    table, text,
+    pagedTable, table, text,
   };
 })();

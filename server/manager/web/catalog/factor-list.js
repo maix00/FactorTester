@@ -83,17 +83,30 @@
   }
 
   function render(context, data, mount, {
-    page, query, groupRefs = ["*"], scope = "public",
+    page, query, groupRefs = ["*"], ownerUsernames = ["*"], scope = "public",
+    tablePage = 1, onPageChange = () => {},
   }) {
     if (page === "families") {
-      return renderFamilies(context, data, mount, query, scope);
+      return renderFamilies(context, data, mount, {
+        query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
+      });
     }
-    return renderSubjects(context, data, mount, {page, query, groupRefs, scope});
+    return renderSubjects(context, data, mount, {
+      page, query, groupRefs, ownerUsernames, scope, tablePage, onPageChange,
+    });
   }
 
-  function renderFamilies(context, data, mount, query, scope) {
+  function renderFamilies(context, data, mount, {
+    query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
+  }) {
     const scoped = dataForScope(data, scope);
-    const rows = scoped.families.filter(item => model().matchesFamily(item, query));
+    const ownerMatches = ownerPredicate(ownerUsernames);
+    const allowedFamilies = familyRefsForGroups(data, scoped, groupRefs);
+    const rows = scoped.families.filter(item => (
+      model().matchesFamily(item, query)
+      && ownerMatches(item)
+      && (!allowedFamilies || allowedFamilies.has(item.family_ref))
+    ));
     const panel = document.createElement("section");
     panel.className = `factor-family-scope-panel ${scope}`;
     const heading = document.createElement("h2");
@@ -107,7 +120,7 @@
       mount.replaceChildren(panel);
       return;
     }
-    const view = FTUI.table(
+    const view = FTUI.pagedTable(
       [context.t("原类名"), context.t("说明"), context.t("分类"), context.t("来源"), context.t("所有者"), context.t("因子数")],
       rows.map(item => [
         model().familyName(item),
@@ -117,8 +130,9 @@
         model().owner(item),
         item.factor_count || 0,
       ]),
+      pagingOptions(context, tablePage, onPageChange),
     );
-    linkRows(view, rows, item =>
+    linkRows(view, rows.slice(view.start, view.start + view.pageSize), item =>
       `/factors/family/${encodeURIComponent(item.family_ref)}`, context,
     );
     panel.append(view.shell);
@@ -172,7 +186,9 @@
     return "暂无公共因子家族";
   }
 
-  function renderSubjects(context, data, mount, {page, query, groupRefs, scope}) {
+  function renderSubjects(context, data, mount, {
+    page, query, groupRefs, ownerUsernames, scope, tablePage, onPageChange,
+  }) {
     const names = model().productGroupNames(data.groups);
     const bySubject = model().subjectGroups(data.groups);
     const kind = page === "sets" ? "factor-set" : "factor";
@@ -182,6 +198,7 @@
       : scoped.factors;
     const selectedGroups = Array.isArray(groupRefs) ? groupRefs : ["*"];
     const allGroups = selectedGroups.includes("*") || !selectedGroups.length;
+    const ownerMatches = ownerPredicate(ownerUsernames);
     const items = values.map(value => ({kind, value})).filter(item => {
       const refs = model().productGroupRefs(item, bySubject);
       const groupMatches = allGroups || selectedGroups.some(groupRef => (
@@ -190,7 +207,7 @@
       const labels = model().groupLabels(
         item, names, bySubject, context.t("未绑定产品组"),
       );
-      return groupMatches && model().matches({
+      return groupMatches && ownerMatches(item.value) && model().matches({
         ...item.value,
         product_group_labels: labels.join(" "),
       }, query);
@@ -219,12 +236,49 @@
       model().owner(item.value),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
     ]);
-    const view = FTUI.table(headers, rows);
-    linkRows(view, items, item => item.kind === "factor"
+    const view = FTUI.pagedTable(
+      headers, rows, pagingOptions(context, tablePage, onPageChange),
+    );
+    linkRows(view, items.slice(view.start, view.start + view.pageSize), item => item.kind === "factor"
       ? `/factors/factor/${encodeURIComponent(item.value.factor_ref)}`
       : `/factors/set/${encodeURIComponent(item.value.target_ref || item.value.set_ref)}`,
     context);
     mount.replaceChildren(view.shell);
+  }
+
+  function ownerPredicate(ownerUsernames) {
+    const selected = Array.isArray(ownerUsernames) ? ownerUsernames : ["*"];
+    if (!selected.length || selected.includes("*")) return () => true;
+    const values = new Set(selected.map(value => String(value || "")));
+    return item => values.has(String(item?.owner_username || ""));
+  }
+
+  function familyRefsForGroups(data, scoped, groupRefs) {
+    const selected = Array.isArray(groupRefs) ? groupRefs : ["*"];
+    if (!selected.length || selected.includes("*")) return null;
+    const bySubject = model().subjectGroups(data.groups);
+    const refs = new Set();
+    (scoped.factors || []).forEach(value => {
+      const subject = {kind: "factor", value};
+      const groups = model().productGroupRefs(subject, bySubject);
+      if (selected.some(groupRef => (
+        groupRef === "" ? groups.length === 0 : groups.includes(groupRef)
+      ))) refs.add(value.family_ref || value.factor_family_ref);
+    });
+    return refs;
+  }
+
+  function pagingOptions(context, page, onPageChange) {
+    return {
+      page,
+      pageSize: 20,
+      onPageChange,
+      previousLabel: context.t("上一页"),
+      nextLabel: context.t("下一页"),
+      pageLabel: (current, total) => context.t("第 %lld / %lld 页")
+        .replace("%lld", String(current)).replace("%lld", String(total)),
+      totalLabel: total => `${total} ${context.t("项")}`,
+    };
   }
 
   function origin(value, context) {
