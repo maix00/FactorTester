@@ -151,6 +151,84 @@
     return control?.element || control;
   }
 
+  function candidatePicker(context, state, options = {}) {
+    const available = Array.isArray(options.items) ? options.items : catalogItems(state);
+    const factorAlias = value => FTTestFactorSelection.factorAlias(value);
+    const pickerRows = () => available.map(item => {
+      // Nested strategy RunSpecs historically store factor aliases.  Keep
+      // that value contract while sharing the outer renderer and controls.
+      const id = factorAlias(item) || factorID(item);
+      return {
+        value: id,
+        label: factorAlias(item) || id,
+        description: FTTestFactorCandidates.sourceDescription(context, state, item),
+        factor: item,
+      };
+    }).filter(item => item.value);
+    let picker;
+    const saved = value => {
+      if (!value) return;
+      const id = factorAlias(value) || factorID(value);
+      if (!id) return;
+      const stateIndex = (state.factors || []).findIndex(item => (
+        (factorAlias(item) || factorID(item)) === id
+      ));
+      const next = stateIndex >= 0 ? {...state.factors[stateIndex], ...value} : value;
+      if (stateIndex >= 0) state.factors[stateIndex] = next;
+      else (state.factors ||= []).push(next);
+      const availableIndex = available.findIndex(item => (
+        (factorAlias(item) || factorID(item)) === id
+      ));
+      if (availableIndex >= 0) available[availableIndex] = next; else available.push(next);
+      picker?.setItems(pickerRows());
+      const values = options.multi
+        ? [...new Set([...(picker?.values || []), id])]
+        : [id];
+      picker?.setValues(values);
+      options.onChange?.(values);
+    };
+    picker = FTTestObjectPicker.create(context, {
+      title: context.t(options.title || "因子候选"),
+      compact: true,
+      items: pickerRows(),
+      selected: options.selected || [],
+      multi: options.multi === true,
+      name: options.name || "test-factor-candidates",
+      loading: options.loading === true,
+      loadingText: context.t(options.loadingText || "正在读取因子候选…"),
+      onCreate: context.session && options.canCreate !== false ? () => void (
+        window.FTStrategyEditorFactorOverlay?.open
+          ? FTStrategyEditorFactorOverlay.open(context, state, saved)
+          : FTTestObjectEditorOverlay.open(context, {
+            kind: "factor", mode: "create", ref: "new", onSaved: saved,
+            testState: state, temporary: true,
+          })
+      ) : null,
+      createLabel: context.t("新建因子"),
+      itemActions: item => {
+        const factor = available.find(value => (
+          (factorAlias(value) || factorID(value)) === item.value
+        ));
+        if (!context.session || !factor?.can_edit || factor.is_public) return [];
+        return [{
+          label: context.t("编辑"),
+          title: context.t("在当前浮层编辑因子"),
+          buttonClass: "secondary",
+          onClick: event => {
+            event?.preventDefault();
+            void FTTestObjectEditorOverlay.open(context, {
+              kind: "factor", mode: "edit", ref: item.value,
+              onSaved: saved, testState: state, initialValue: factor,
+              temporary: factor.temporary === true,
+            });
+          },
+        }];
+      },
+      onChange: values => options.onChange?.(values),
+    });
+    return picker;
+  }
+
   function helpFor(context, state, key) {
     return window.FTTestFieldHelp?.forField?.(
       state.manifest, key, context,
@@ -189,22 +267,30 @@
       label: options.candidateLabel,
       help: options.candidateHelp,
     }));
-    if (options.combinationVisible && options.combinationControl) {
-      const row = FTTestFieldRow.create(
-        options.combinationLabel || context.t("组合方式"),
-        controlElement(options.combinationControl),
-        options.combinationHelp || context.t("多个因子候选需要一种组合方式"),
-        {className: "factor-candidate-child-row"},
-      );
-      if (options.combinationEmpty) {
-        const empty = document.createElement("small");
-        empty.className = "backtest-group-empty-combination-mode";
-        empty.textContent = options.combinationEmpty;
-        row.querySelector(".test-field-row-control")?.append(empty);
+    const dependent = document.createElement("div");
+    dependent.className = "test-factor-candidate-dependent-fields";
+    root.append(dependent);
+    const update = next => {
+      dependent.replaceChildren();
+      if (next.combinationVisible && next.combinationControl) {
+        const row = FTTestFieldRow.create(
+          next.combinationLabel || context.t("组合方式"),
+          controlElement(next.combinationControl),
+          next.combinationHelp || context.t("多个因子候选需要一种组合方式"),
+          {className: "factor-candidate-child-row"},
+        );
+        if (next.combinationEmpty) {
+          const empty = document.createElement("small");
+          empty.className = "backtest-group-empty-combination-mode";
+          empty.textContent = next.combinationEmpty;
+          row.querySelector(".test-field-row-control")?.append(empty);
+        }
+        dependent.append(row);
       }
-      root.append(row);
-    }
-    if (options.overrideContent) root.append(markInnerContent(options.overrideContent));
+      if (next.overrideContent) dependent.append(markInnerContent(next.overrideContent));
+    };
+    root.update = update;
+    update(options);
     return root;
   }
 
@@ -248,6 +334,6 @@
   }
 
   window.FTTestFactorCandidateSources = Object.freeze({
-    candidateHeading, innerPanel, panel, selections, syncCandidates,
+    candidateHeading, candidatePicker, innerPanel, panel, selections, syncCandidates,
   });
 })();

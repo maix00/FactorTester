@@ -58,6 +58,10 @@ global.FTBacktestGroupOverrides = {
   },
 };
 let sharedProductPanels = 0;
+let sharedFactorPickers = 0;
+let sharedFactorPanels = 0;
+let sharedFactorPanelUpdates = 0;
+let factorPickerOptions;
 global.FTTestProducts = {
   groupID: value => value?.id || "",
   groupLabel: value => value?.name || value?.id || "",
@@ -70,6 +74,20 @@ global.FTTestProducts = {
 global.FTTestFactors = {
   selectedFactor: state => state.factors[0],
 };
+global.FTTestFactorCandidateSources = {
+  candidatePicker: (_context, _state, options) => {
+    sharedFactorPickers += 1;
+    factorPickerOptions = options;
+    return {element: new Element("shared-factor-picker"), values: options.selected || []};
+  },
+  innerPanel: () => {
+    sharedFactorPanels += 1;
+    const panel = new Element("shared-factor-panel");
+    panel.update = () => { sharedFactorPanelUpdates += 1; };
+    return panel;
+  },
+};
+window.FTTestFactorCandidateSources = global.FTTestFactorCandidateSources;
 
 const groups = [
   {id: "g1", name: "第一组"},
@@ -123,6 +141,15 @@ assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
 ), "opening the base-group form must mount picker elements");
 assert.equal(sharedProductPanels, 1,
   "the nested product tab must use the outer shared product selection renderer");
+assert.equal(sharedFactorPickers, 1,
+  "the nested factor tab must use the shared factor candidate picker");
+assert.equal(sharedFactorPanels, 1,
+  "the nested factor tab must mount the shared factor panel once");
+factorPickerOptions.onChange(["ROC"]);
+assert.equal(sharedFactorPanels, 1,
+  "changing a factor must not replace the shared picker panel during its click event");
+assert.equal(sharedFactorPanelUpdates, 1,
+  "changing a factor must update only dependent shared factor fields");
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "ls", groupIDs: ["g1", "g2"]}, () => {},
 ), "opening the Long-Short form must mount picker elements");

@@ -663,6 +663,7 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
 
     assert "test-factor-candidate-heading-row" in source
     assert "function candidateHeading" in source
+    assert "function candidatePicker" in source
     assert "function innerPanel" in source
     assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
@@ -723,7 +724,11 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
     assert "includeRun: false" in tabs
     assert "FTTestFactorCandidateSources?.innerPanel" in form
-    assert "compact: true" in pickers
+    assert "FTTestFactorCandidateSources.candidatePicker" in form
+    assert "factorPicker" not in pickers
+    assert "compact: true" in (
+        WEB_ROOT / "workbench" / "test-factor-candidate-sources.js"
+    ).read_text(encoding="utf-8")
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
