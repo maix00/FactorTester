@@ -101,10 +101,9 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-factor-family-row { min-width: 0; }
 .test-factor-candidate-sources { display: grid; gap: 0; min-width: 0; }
 .test-factor-candidate-sources > .test-setting-row { min-width: 0; }
-.test-factor-candidate-heading-row { border-top: 1px solid var(--line); }
+.test-factor-candidate-sources > .test-factor-candidate-heading-row { border-bottom: 0; }
 .test-factor-candidate-heading-row .test-field-row-control { min-width: 0; }
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
-.test-setting-row:last-child { border-bottom: 0; }
 .test-setting-row > span { display: grid; gap: 2px; min-width: 0; }
 .test-field-row-heading { display: inline-flex; align-items: center; gap: 5px; min-width: 0; width: fit-content; }
 .test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
@@ -113,8 +112,14 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .factor-role-section-copy { display: inline-flex; align-items: center; gap: 5px; width: fit-content; min-width: 0; }
 .factor-role-section-value { min-width: 0; }
 .factor-role-bindings { display: grid; gap: 0; min-width: 0; }
+.factor-candidate-child-row > span:first-child,
+.factor-candidate-child-section > .factor-role-section-heading > .factor-role-section-copy { position: relative; padding-left: 24px; }
+.factor-candidate-child-row > span:first-child::before,
+.factor-candidate-child-section > .factor-role-section-heading > .factor-role-section-copy::before { content: "↳"; position: absolute; left: 4px; color: var(--muted); font-weight: 500; }
 .factor-role-child-row > span:first-child { position: relative; padding-left: 24px; }
 .factor-role-child-row > span:first-child::before { content: "↳"; position: absolute; left: 4px; color: var(--muted); font-weight: 500; }
+.factor-candidate-child-section .factor-role-child-row > span:first-child { padding-left: 48px; }
+.factor-candidate-child-section .factor-role-child-row > span:first-child::before { left: 28px; }
 .custom-product-overrides { display: grid; gap: 8px; min-width: 0; grid-column: 1 / -1; }
 .custom-product-rows { display: grid; gap: 6px; min-width: 0; }
 .custom-product-rows > small { color: var(--muted); }
