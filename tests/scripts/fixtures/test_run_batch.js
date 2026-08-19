@@ -152,8 +152,14 @@ const factorEvaluation = {
   assert.equal(header[0].disabled, false);
   assert.equal(header[1].disabled, false);
   const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
-  assert.ok(emptyHeader.every(item => item.disabled),
-    "header run actions must stay visible but disabled without a product group");
+  assert.equal(emptyHeader[0].disabled, false,
+    "view RunSpec must remain clickable without a product group");
+  assert.equal(emptyHeader[1].disabled, true,
+    "run action stays disabled without a product group");
+  emptyHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(notices.some(item => item.isError && /请先选择产品组/.test(item.message)),
+    "missing product selection must be explained by the header action");
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
