@@ -299,6 +299,8 @@ const strategyScopedBacktest = {
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(openedRunSpecs.some(item => item.label.includes("回测任务")),
     "RunSpec overlay must use the returned frozen record across a UI refresh");
+  assert.equal(refreshResetState.testRunBatch[0]?.phase, "frozen",
+    "preview must repopulate the current batch model after content refresh");
   assert.equal(resetHeader[0].disabled, false,
     "preview action must recover after the overlay opens");
   assert.equal(resetHeader[1].disabled, false,
