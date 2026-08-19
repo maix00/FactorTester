@@ -206,6 +206,51 @@ def test_stale_claim_expires_without_creating_agent_temp_directory(tmp_path):
     assert not list(tmp_path.rglob("agent-sessions"))
 
 
+def test_paused_server_claim_survives_stop_and_can_resume(tmp_path):
+    store = ProfileRuntimeStore(tmp_path / "manager.sqlite")
+    store.bind(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+        workspace_relpath=profile_workspace_relative_path(PRINCIPAL, PROFILE_ID),
+        now=100.0,
+    )
+    claim = store.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+        provider_id="provider-server",
+        agent_id="agent-server",
+        now=100.0,
+        lease_seconds=10.0,
+    )
+
+    assert store.pause(
+        PRINCIPAL,
+        claim["claim_id"],
+        agent_id="agent-server",
+        now=110.0,
+    ) is True
+    paused = store.active_claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        now=10_000.0,
+        lease_seconds=10.0,
+    )
+    assert paused is not None
+    assert paused["status"] == "stopped"
+
+    resumed = store.heartbeat(
+        PRINCIPAL,
+        claim["claim_id"],
+        agent_id="agent-server",
+        now=10_001.0,
+    )
+    assert resumed["status"] == "claimed"
+
+
 class _AgentRouteHandler(AgentRoutesMixin):
     def __init__(self, service, *, session=None, payload=None):
         self.state = SimpleNamespace(
