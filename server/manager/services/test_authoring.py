@@ -34,6 +34,9 @@ class TestAuthoringService:
     _CONFIG_RE = re.compile(
         r"/api/workspaces/([^/]{1,128})/configuration"
     )
+    _SNAPSHOT_RE = re.compile(
+        r"/api/workspaces/([^/]{1,128})/configuration-snapshots"
+    )
     _SAVE_TEMPLATE_RE = re.compile(
         r"/api/workspaces/([^/]{1,128})/configuration/templates"
     )
@@ -65,12 +68,14 @@ class TestAuthoringService:
                 or cls._SETTINGS_TAB_RE.fullmatch(path)
                 or cls._WORKSPACE_RE.fullmatch(path)
                 or cls._CONFIG_RE.fullmatch(path)
+                or cls._SNAPSHOT_RE.fullmatch(path)
             )
         if method == "POST":
             return bool(
                 path == "/api/workspaces"
                 or cls._SAVE_TEMPLATE_RE.fullmatch(path)
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
+                or cls._SNAPSHOT_RE.fullmatch(path)
             )
         if method == "PUT":
             return bool(
@@ -165,6 +170,15 @@ class TestAuthoringService:
             return TestAuthoringResponse({
                 "success": True, "configuration": value,
             })
+        if match := self._SNAPSHOT_RE.fullmatch(path):
+            from server.services import research_configuration_snapshots
+            return TestAuthoringResponse({
+                "success": True,
+                "snapshots": research_configuration_snapshots.list_snapshots(
+                    owner=owner,
+                    workspace_id=unquote(match.group(1)),
+                ),
+            })
         if match := self._WORKSPACE_RE.fullmatch(path):
             from server.services import research_workspaces
             value = research_workspaces.load_workspace(
@@ -191,6 +205,32 @@ class TestAuthoringService:
             )
             return TestAuthoringResponse({
                 "success": True, "workspace": workspace,
+            }, 201)
+        if match := self._SNAPSHOT_RE.fullmatch(path):
+            from server.services import research_configuration_snapshots
+            workspace_id = unquote(match.group(1))
+            try:
+                source_revision = self._required_int(
+                    payload, "source_configuration_revision",
+                )
+                value = research_configuration_snapshots.create_snapshot(
+                    owner=owner,
+                    workspace_id=workspace_id,
+                    source_workspace_id=str(
+                        payload.get("source_workspace_id") or workspace_id
+                    ),
+                    source_configuration_id=str(
+                        payload.get("source_configuration_id") or ""
+                    ),
+                    source_configuration_revision=source_revision,
+                    name=str(payload.get("name") or ""),
+                )
+            except KeyError as exc:
+                raise TestAuthoringError(str(exc), 404) from exc
+            except ValueError as exc:
+                raise TestAuthoringError(str(exc), 409) from exc
+            return TestAuthoringResponse({
+                "success": True, "snapshot": value,
             }, 201)
         if match := self._CONFIG_RE.fullmatch(path):
             if method == "PUT":
