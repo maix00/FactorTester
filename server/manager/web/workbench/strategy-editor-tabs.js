@@ -39,11 +39,12 @@
       context, state, mountedTabs: requested = [], onMountedTabsChange,
       onActivate, renderStructure, renderFactor, renderProduct,
       renderProductFilter, renderOverrides, chipValues, chipSources,
+      activeKey: requestedActiveKey = "",
     } = options;
     const root = document.createElement("section");
     root.className = "backend-settings-shell test-settings-shell strategy-editor-tabs";
     let mounted = unique([...defaultKeys(state), ...requested]);
-    let activeKey = "";
+    let activeKey = requestedActiveKey;
     let tabset = null;
     let settingsShell = null;
     let chipHost = null;

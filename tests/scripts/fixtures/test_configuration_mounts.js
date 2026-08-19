@@ -7,7 +7,7 @@ const factor = {
   factor_alias: "ROC", factor_ref: "factor:v1:roc", family_ref: "family:v1:roc",
 };
 global.FTTestFactors = {
-  selectedFactor: () => factor,
+  selectedFactor: state => state.noOuterFactor ? null : factor,
   selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
 };
 global.FTTestProducts = {
@@ -51,7 +51,7 @@ const state = {
   }],
   workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
 };
-const context = {api: async (path, options) => {
+const context = {t: value => value, api: async (path, options) => {
   requests.push({path, body: JSON.parse(options.body)});
   return {configuration: {revision: 2, payload: JSON.parse(options.body).payload}};
 }};
@@ -89,6 +89,7 @@ const context = {api: async (path, options) => {
     },
     groupRef: "",
     groupRefs: [],
+    noOuterFactor: true,
   };
   await window.FTTestConfiguration.save(
     context, backtestState, {id: "__backtest__", label: "回测任务"},
