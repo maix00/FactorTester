@@ -6,6 +6,48 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def _factor_source_alias(alias: str, data: dict) -> str:
+    """Restore the source owner for a frozen concrete factor alias.
+
+    The editable group keeps the short display alias (for example
+    ``CA|$F:1m``), while ``shared.factors`` carries the immutable source
+    owner.  Runtime resolution must use both pieces: otherwise a delegated
+    factor is incorrectly looked up in the executor user's own library.
+    """
+    alias = str(alias or "").strip()
+    if not alias or not isinstance(data, Mapping):
+        return alias
+    factors = data.get("factors")
+    if not isinstance(factors, list):
+        return alias
+    item = next(
+        (
+            value for value in factors
+            if isinstance(value, Mapping)
+            and str(value.get("alias") or "").strip() == alias
+        ),
+        None,
+    )
+    if item is None:
+        return alias
+
+    family_alias = str(
+        item.get("factor_family_alias")
+        or item.get("factor_family_ref")
+        or item.get("family_ref")
+        or alias.split("|", 1)[0]
+        or ""
+    ).strip()
+    owner_ref = str(
+        item.get("factor_owner_ref") or item.get("owner_ref") or ""
+    ).strip()
+    if not family_alias or not owner_ref or ":" in family_alias:
+        return alias
+    family_ref = f"{owner_ref}:{family_alias}"
+    family_alias_in_alias = alias.split("|", 1)[0]
+    return family_ref + alias[len(family_alias_in_alias):]
+
+
 def resolve_factor(
     alias: str,
     *,
@@ -23,7 +65,11 @@ def resolve_factor(
         from server.services.factor_registry import factor_from_alias
 
         try:
-            factor = factor_from_alias(alias, username=username, page_uuid=page_uuid)
+            factor = factor_from_alias(
+                _factor_source_alias(alias, data),
+                username=username,
+                page_uuid=page_uuid,
+            )
         except Exception as exc:
             raise ValueError(
                 f"未找到因子 {alias}。仅允许从当前用户可访问的公共因子家族"
