@@ -45,6 +45,10 @@ global.FTTestFieldRow = {
 };
 global.FTTestObjectPicker = {
   create: () => ({element: new Element("picker"), setValues: () => {}}),
+  lazyLoading: (state, key) => {
+    const status = String(state?.lazy?.[key]?.status || "");
+    return Boolean(status && status !== "ready" && status !== "error");
+  },
 };
 global.FTTestChoicePicker = {
   create: () => ({element: new Element("choice"), values: []}),

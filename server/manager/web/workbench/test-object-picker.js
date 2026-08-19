@@ -1,4 +1,9 @@
 (() => {
+  function lazyLoading(state, key) {
+    const status = String(state?.lazy?.[key]?.status || "");
+    return Boolean(status && status !== "ready" && status !== "error");
+  }
+
   function create(context, options = {}) {
     const actions = [
       ...(Array.isArray(options.actions) ? options.actions : []),
@@ -49,6 +54,6 @@
   // Object and scalar choice fields intentionally share this exact picker.
   // The product/factor catalog filters call FTMultiSelectFilter directly; the
   // workbench wrapper only adds the create/edit actions and field semantics.
-  window.FTTestObjectPicker = Object.freeze({create});
-  window.FTTestChoicePicker = Object.freeze({create});
+  window.FTTestObjectPicker = Object.freeze({create, lazyLoading});
+  window.FTTestChoicePicker = Object.freeze({create, lazyLoading});
 })();

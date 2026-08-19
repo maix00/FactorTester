@@ -101,7 +101,7 @@
       items,
       selected: state.values.category ? [state.values.category] : [],
       multi: false,
-      loading: state.lazy?.categories?.status === "loading",
+      loading: FTTestObjectPicker.lazyLoading(state, "categories"),
       loadingText: context.t("正在读取产品分类候选…"),
       compact: true,
       name: "ic-category",

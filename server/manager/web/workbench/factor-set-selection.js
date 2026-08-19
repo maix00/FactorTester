@@ -109,7 +109,7 @@
       name: "test-factor-sets",
       items,
       selected: selections(state).map(item => item.target_ref),
-      loading: state.lazy?.factors?.status === "loading" && !items.length,
+      loading: FTTestObjectPicker.lazyLoading(state, "factors") && !items.length,
       loadingText: context.t("正在读取因子集合…"),
       onChange: values => { void updateSelection(values); },
     });

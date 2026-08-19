@@ -124,7 +124,7 @@
       items: pickerItems(context, state),
       selected,
       multi: true,
-      loading: state.lazy?.factors?.status === "loading",
+      loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
       onCreate: context.session ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
