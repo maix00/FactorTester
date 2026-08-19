@@ -787,6 +787,7 @@ class ClientStateService:
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
             account=owner_account,
+            include_scope_catalog=False,
         )
         if self.account_domain_sync is not None:
             payload["factors"] = list(payload.get("factors") or []) + factor_rows_from_sync(
@@ -815,6 +816,7 @@ class ClientStateService:
         payload = build_factor_library_overview(
             principal, include_subordinates=True,
             account=owner_account,
+            include_scope_catalog=False,
         )
         managed_usernames = {
             str(account.get("username") or "")

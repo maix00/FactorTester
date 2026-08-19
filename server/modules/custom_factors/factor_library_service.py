@@ -152,6 +152,7 @@ def build_factor_library_overview(
     factor_family_alias: str | None = None,
     *,
     account: dict | None = None,
+    include_scope_catalog: bool = True,
 ) -> dict:
     product_group = normalize_product_group(product_group) if product_group else None
     accounts = (
@@ -218,14 +219,18 @@ def build_factor_library_overview(
         factor.get('factor_alias') or '',
         factor.get('template_name') or '',
     ))
+    scope_catalog = (
+        list_factor_library_product_groups(current_username)
+        if include_scope_catalog else []
+    )
     return {
         'factors': items,
         'errors': errors,
         'include_subordinates': include_subordinates,
         'current_username': current_username,
         'can_filter_organization': can_filter_organization,
-        'scopes': list_factor_library_product_groups(current_username),
-        'product_groups': list_factor_library_product_groups(current_username),
+        'scopes': scope_catalog,
+        'product_groups': scope_catalog,
     }
 
 

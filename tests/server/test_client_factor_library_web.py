@@ -11,9 +11,41 @@ from server.modules.custom_factors import catalog_routes
 from server.modules.custom_factors import factor_library_routes
 from server.modules.custom_factors import editor_routes
 from server.modules.custom_factors.client_library import build_client_library_projection
+from server.modules.custom_factors import factor_library_service
 
 
 ROOT = Path(__file__).parents[2]
+
+
+def test_projection_overview_can_skip_expensive_product_scope_catalog(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        factor_library_service, "get_account",
+        lambda username: {"username": username},
+    )
+    monkeypatch.setattr(factor_library_service, "list_public_factors", lambda: [])
+    monkeypatch.setattr(factor_library_service, "list_custom_factors", lambda _owner: [])
+    monkeypatch.setattr(
+        factor_library_service, "list_factor_param_config_scopes", lambda _owner: [],
+    )
+    monkeypatch.setattr(
+        factor_library_service,
+        "list_factor_library_product_groups",
+        lambda owner: calls.append(owner) or ["default", "expensive"],
+    )
+
+    compact = factor_library_service.build_factor_library_overview(
+        "alice", include_subordinates=False, include_scope_catalog=False,
+    )
+    complete = factor_library_service.build_factor_library_overview(
+        "alice", include_subordinates=False,
+    )
+
+    assert compact["scopes"] == compact["product_groups"] == []
+    assert complete["scopes"] == complete["product_groups"] == [
+        "default", "expensive",
+    ]
+    assert calls == ["alice"]
 
 
 def _app() -> Flask:
