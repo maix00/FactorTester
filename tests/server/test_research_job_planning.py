@@ -20,6 +20,11 @@ class _Selection:
     products = (_Named("AP.CZCE"),)
 
 
+class _OtherSelection:
+    selection_id = "other"
+    products = (_Named("CU.SHF"),)
+
+
 def test_backtest_planner_freezes_term_structure_and_market_data(monkeypatch) -> None:
     prepared = {
         "start_dt": "2025-01-02",
@@ -245,7 +250,7 @@ def test_backtest_planner_expands_shared_product_once(monkeypatch) -> None:
     ]
 
 
-def test_backtest_planner_preserves_distinct_frequency_requirements(monkeypatch) -> None:
+def test_backtest_planner_preserves_strategy_product_and_frequency_requirements(monkeypatch) -> None:
     prepared = {
         "start_dt": "2025-01-02",
         "end_dt": "2025-02-14",
@@ -255,7 +260,7 @@ def test_backtest_planner_preserves_distinct_frequency_requirements(monkeypatch)
                 "factor": _Named("daily"),
             },
             "minute": {
-                "product_path_selection": _Selection(),
+                "product_path_selection": _OtherSelection(),
                 "factor": _Named("minute"),
             },
         },
@@ -307,3 +312,5 @@ def test_backtest_planner_preserves_distinct_frequency_requirements(monkeypatch)
         (row["frequency"], row["data_source"])
         for row in plan["resolved"]["data_requirements"]
     ] == [("DAY1", "LocalDAY1"), ("MIN1", "LocalMIN1")]
+    assert plan["resolved"]["strategies"]["daily"]["products"] == ["AP.CZCE"]
+    assert plan["resolved"]["strategies"]["minute"]["products"] == ["CU.SHF"]

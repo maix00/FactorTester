@@ -27,16 +27,7 @@
   function runSpecPath(...args) { return model().runSpecPath(...args); }
 
   function selectedTasks(state) {
-    const products = window.FTTestProducts;
-    if (!products?.selectedGroups) {
-      return [];
-    }
-    // A saved workspace can restore product selections after the toolbar was
-    // first painted.  Reconcile the scalar refs before deciding whether the
-    // header action is usable; otherwise the button can remain disabled with
-    // a valid selection already present in state.values.
-    products.synchronize?.(state);
-    const groups = products.selectedGroups(state);
+    const groups = model().taskGroups(state);
     const items = model().synchronize(state);
     const byID = new Map(items.map(item => [item.groupID, item]));
     return groups.map(group => ({group, item: byID.get(model().groupIdentity(group))}))
@@ -49,7 +40,7 @@
     const runSpecButton = context.button(context.t("查看运行配置"), () => {
       const currentTasks = selectedTasks(state || {});
       if (!currentTasks.length) {
-        showRunSpecError(context, new Error(context.t("请先选择产品组")));
+        showRunSpecError(context, new Error(missingScopeMessage(context, state)));
         return;
       }
       // This action crosses several deferred code and API boundaries.  Do not
@@ -65,7 +56,7 @@
     runSpecButton.disabled = false;
     runSpecButton.title = hasTasks
       ? context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置")
-      : context.t("请先选择产品组");
+      : missingScopeMessage(context, state);
 
     const runButton = context.button(context.t("运行"), () => {
       if (hasTasks) void invokeAction("runAll", [context, state, refresh]);
@@ -76,8 +67,14 @@
     ));
     runButton.title = hasTasks
       ? context.t("运行当前测试配置下的全部任务")
-      : context.t("请先选择产品组");
+      : missingScopeMessage(context, state);
     return [runSpecButton, runButton];
+  }
+
+  function missingScopeMessage(context, state) {
+    return state?.kind === "backtest"
+      ? context.t("请先在策略组设置中为策略选择产品组")
+      : context.t("请先选择产品组");
   }
 
   function showRunSpecError(context, error) {

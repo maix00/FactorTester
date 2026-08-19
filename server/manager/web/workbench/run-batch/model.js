@@ -1,4 +1,5 @@
 (() => {
+  const BACKTEST_TASK_ID = "__backtest__";
   const PHASE_LABELS = {
     idle: "尚未提交",
     freezing: "正在冻结配置",
@@ -19,9 +20,41 @@
     return String(FTTestProducts.groupID(group) || "");
   }
 
+  function hasProductSelection(group) {
+    const selection = group?.product_path_selection;
+    return Boolean(
+      group?.product_path_selection_id
+      || group?.product_group_ref
+      || selection?.product_path_selection_id
+      || selection?.product_group_template_id
+      || selection?.group_ref
+      || selection?.id
+      || (Array.isArray(selection?.selected_paths) && selection.selected_paths.length)
+      || (Array.isArray(selection?.paths) && selection.paths.length),
+    );
+  }
+
+  function backtestStrategyGroups(state) {
+    return (Array.isArray(state?.analysis?.groups) ? state.analysis.groups : [])
+      .filter(hasProductSelection);
+  }
+
+  function taskGroups(state) {
+    if (state?.kind === "backtest") {
+      // A backtest is one task/RunSpec. Its execution scope is owned by the
+      // individual strategy groups in analysis.groups; this synthetic handle
+      // is only for the task matrix and is never persisted as a product group.
+      return backtestStrategyGroups(state).length
+        ? [{id: BACKTEST_TASK_ID, label: "回测任务"}] : [];
+    }
+    const products = window.FTTestProducts;
+    products?.synchronize?.(state);
+    return products?.selectedGroups?.(state) || [];
+  }
+
   function synchronize(state) {
     const prior = new Map((state.testRunBatch || []).map(item => [item.groupID, item]));
-    state.testRunBatch = FTTestProducts.selectedGroups(state).map(group => {
+    state.testRunBatch = taskGroups(state).map(group => {
       const groupID = groupIdentity(group);
       return {
         phase: "idle", runSpecHash: "", runID: "", jobID: "", port: 0,
@@ -141,8 +174,9 @@
   }
 
   window.FTTestRunBatchModel = Object.freeze({
-    PHASE_LABELS, groupIdentity, itemFor, jobPath, recordPreview,
+    BACKTEST_TASK_ID, PHASE_LABELS, backtestStrategyGroups, groupIdentity, itemFor,
+    jobPath, recordPreview,
     recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, runSpecTarget,
-    synchronize, update,
+    synchronize, taskGroups, update,
   });
 })();

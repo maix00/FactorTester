@@ -104,7 +104,27 @@
     await ensureWorkspace(context, state);
     const factor = selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
-    if (!group) throw new Error(context.t("请选择产品组"));
+    const isBacktest = state.kind === "backtest";
+    const strategyGroups = Array.isArray(state.analysis?.groups)
+      ? state.analysis.groups : [];
+    const hasStrategyProductScope = isBacktest && strategyGroups.some(item => (
+      item?.product_path_selection_id
+      || item?.product_path_selection?.product_path_selection_id
+      || item?.product_path_selection?.product_group_template_id
+      || item?.product_path_selection?.group_ref
+      || item?.product_path_selection?.id
+      || (Array.isArray(item?.product_path_selection?.selected_paths)
+        && item.product_path_selection.selected_paths.length)
+      || (Array.isArray(item?.product_path_selection?.paths)
+        && item.product_path_selection.paths.length)
+    ));
+    if (!group && !hasStrategyProductScope) {
+      throw new Error(isBacktest
+        ? context.t("请先在策略组设置中为策略选择产品组")
+        : context.t("请选择产品组"));
+    }
+    // Backtest still restores the optional outer catalog selection for the
+    // authoring UI; it is not used to build the task's execution scope.
     FTTestProducts.synchronize(state);
     const factors = executionFactors(state);
     const families = uniqueFamilies(state, factors);
@@ -122,17 +142,28 @@
     state.analysis = buildAnalysis(state, factors, selectedFamily(state, factor), group);
     payload.analyses[state.kind] = state.analysis;
     payload.ui = payload.ui || {};
-    payload.ui[state.kind] = {
+    const ui = {
       settings: FTTestConfigurationCompiler.authoringSettings(
         state.manifest, state.values,
       ),
       factor_ref: state.factorRef,
-      product_group_ref: FTTestProducts.groupID(group),
-      product_group_refs: state.groupRefs,
       output_requests: FTTestRunFields.selection(state),
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
     };
+    // Backtest execution is scoped by each strategy group's product
+    // selection. The optional outer selection is retained only as authoring
+    // state so it can continue to filter candidate choices after reload.
+    const syntheticBacktestTask = isBacktest && group?.id === "__backtest__";
+    const authoringGroupRef = syntheticBacktestTask
+      ? state.groupRef : FTTestProducts.groupID(group);
+    const authoringGroupRefs = syntheticBacktestTask
+      ? state.groupRefs : [authoringGroupRef];
+    if (authoringGroupRef) ui.product_group_ref = authoringGroupRef;
+    if (Array.isArray(authoringGroupRefs) && authoringGroupRefs.length) {
+      ui.product_group_refs = [...authoringGroupRefs];
+    }
+    payload.ui[state.kind] = ui;
     const value = await context.api(
       `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
       {
