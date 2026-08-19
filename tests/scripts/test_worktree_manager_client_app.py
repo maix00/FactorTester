@@ -2043,7 +2043,7 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
     assert {
         item["id"] for item in user_modules["research"]["children"]
     } == {
-        "research.local", "research.shared", "research.graph", "research.profiles",
+        "research.reports", "research.graph", "research.profiles",
         "research.agent-models",
     }
     assert "admin_users" not in user_modules
@@ -2665,21 +2665,40 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/graph.js") as response:
             graph = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/graph-list.js") as response:
+            graph_list = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/reports.js") as response:
+            reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/profile/agent-models.js") as response:
+            agent_models = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
+            jobs = response.read().decode("utf-8")
 
-    assert '["local", "本地研究"]' in workspaces
-    assert '["shared", "共享研究"]' in workspaces
+    assert '["reports", "研究报告"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
     assert '["agent-models", "智能体模型"]' in workspaces
     assert 'FTAgentModels.list' in workspaces
-    assert "FTResearchLocal.render(context, body, embedded)" in workspaces
-    assert "FTResearchShared.render(context, body, embedded)" in workspaces
-    assert "FTResearchGraph.render(context, body)" in workspaces
+    assert "FTResearchReports.render(context, body, embedded)" in workspaces
+    assert "FTResearchGraphList.render(context, body)" in workspaces
     assert "window.FTResearchLocal" in local_page
     assert "clientDownload(context" in local_page
     assert "window.FTResearchShared" in shared_page
     assert "resolvePublicationSource(item, localByReportID, embedded)" in shared_page
     assert "window.FTResearchGraph" in graph
     assert "async function render(context, mount)" in graph
+    assert "FTUI.pagedTable" in graph_list
+    assert "FTMultiSelectFilter.create" in graph_list
+    assert 'path("/user-library/subordinates")' in graph_list
+    assert "research-graphs/${encodeURIComponent" in graph_list
+    assert "FTUI.pagedTable" in reports
+    assert "我的研究报告" in reports
+    assert "下级用户的研究报告" in reports
+    assert "共享研究报告" in reports
+    assert "clientDownload" in reports
+    assert "FTUI.pagedTable" in agent_models
+    assert "agent-model-dialog" in agent_models
+    assert "testExisting" in agent_models
+    assert "FTTestPageTabs.render(context, \"tasks\")" in jobs
     assert 'get("presentation") === "embedded"' in workspaces
     assert 'context.toolbar.append(tabBar(context, selected, embedded))' in workspaces
     assert 'messageHandlers.researchNavigation.postMessage' in workspaces

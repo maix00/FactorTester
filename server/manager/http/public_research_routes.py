@@ -23,8 +23,30 @@ class PublicResearchRoutesMixin:
         if parsed.path == "/api/public-research":
             session = self._session()
             viewer = str(session["username"]) if session else None
+            scope = parse_qs(parsed.query, keep_blank_values=True).get("scope", [""])[0]
+            reports = research.list_visible(viewer)
+            if scope == "shared":
+                reports = [item for item in reports if item.get("is_owned") is not True]
+            elif scope == "subordinates":
+                if not viewer:
+                    reports = []
+                else:
+                    from server.manager.domain.accounts import manager_subordinate_users
+
+                    subordinate_refs = set()
+                    for item in manager_subordinate_users(viewer):
+                        subordinate_refs.update({
+                            str(item.get("username") or "").strip(),
+                            str(item.get("alias") or "").strip(),
+                        } - {""})
+                    reports = [
+                        item for item in reports
+                        if str(item.get("owner_ref") or item.get("owner_username") or "").strip()
+                        in subordinate_refs
+                    ]
             json_response(self, {
-                "reports": research.list_visible(viewer),
+                "reports": reports,
+                "scope": scope or "all",
             })
             return True
         public_component_match = re.fullmatch(

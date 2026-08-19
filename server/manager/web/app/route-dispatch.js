@@ -19,6 +19,10 @@
         case "reference": return pages.reference?.(context(routeToken), route);
         case "report": return pages.report?.(route.id, routeToken);
         case "research": return pages.research?.(routeToken);
+        case "research-graph": return guarded(
+          context(routeToken), {nav: "research", title: "研究图"},
+          pages.researchGraph, route.id,
+        );
         case "remote-module": {
           if (route.module === "sqlite-web") {
             const pageContext = context(routeToken);

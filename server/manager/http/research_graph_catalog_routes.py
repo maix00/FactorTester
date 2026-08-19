@@ -120,6 +120,28 @@ class ResearchGraphCatalogRoutesMixin:
                     "source_server_id": self.state.server_id,
                     "sync_scope": "manager-local",
                 })
+            if parsed.path == f"{GRAPH_CATALOG_PREFIX}/user-library/subordinates":
+                owner = self._catalog_session()
+                if owner is None:
+                    return True
+                from server.manager.domain.accounts import manager_subordinate_users
+
+                files = []
+                for account in manager_subordinate_users(str(owner["username"])):
+                    username = str(account["username"])
+                    for item in catalog.list_user_graphs(username):
+                        files.append({
+                            **item,
+                            "owner_ref": username,
+                            "owner_alias": account.get("alias") or "",
+                            "source_server_id": self.state.server_id,
+                        })
+                return self._write_json({
+                    "success": True,
+                    "files": files,
+                    "source_server_id": self.state.server_id,
+                    "sync_scope": "manager-local",
+                })
             if parsed.path == f"{GRAPH_CATALOG_PREFIX}/user-library/default":
                 owner = self._catalog_session()
                 if owner is None:
@@ -137,8 +159,19 @@ class ResearchGraphCatalogRoutesMixin:
                 owner = self._catalog_session()
                 if owner is None:
                     return True
+                username = str(owner["username"])
+                requested_owner = str(query.get("owner", [username])[0] or username).strip()
+                if requested_owner != username:
+                    from server.manager.domain.accounts import manager_subordinate_users
+
+                    allowed = {
+                        str(item.get("username") or "").strip()
+                        for item in manager_subordinate_users(username)
+                    }
+                    if requested_owner not in allowed:
+                        return self._error_json("user research graph is not visible", 403)
                 value = catalog.load_user_graph(
-                    str(owner["username"]), unquote(user_file.group(1)),
+                    requested_owner, unquote(user_file.group(1)),
                 )
                 if value is None:
                     return self._error_json("user research graph not found", 404)
@@ -153,10 +186,16 @@ class ResearchGraphCatalogRoutesMixin:
                     return True
                 if query.get("view", [""])[0].lower() in {"1", "true", "yes"}:
                     value.pop("yaml", None)
-                    return self._write_json({"success": True, "file": value})
+                    return self._write_json({
+                        "success": True,
+                        "file": {**value, "owner_ref": requested_owner},
+                    })
                 value.pop("yaml", None)
                 value.pop("graph", None)
-                return self._write_json({"success": True, "file": value})
+                return self._write_json({
+                    "success": True,
+                    "file": {**value, "owner_ref": requested_owner},
+                })
             version_match = _VERSION_PATH.fullmatch(parsed.path)
             if version_match:
                 graph_id = unquote(version_match.group(1))
