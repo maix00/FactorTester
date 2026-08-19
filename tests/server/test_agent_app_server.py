@@ -479,10 +479,56 @@ class _AppHandler(AgentAppServerRoutesMixin, AgentRoutesMixin):
         return None
 
 
+class _SSESupervisor:
+    def __init__(self):
+        self.calls = []
+
+    def status(self, _principal, _profile_id):
+        return {"running": True}
+
+    def events(self, _principal, _profile_id, *, after, timeout):
+        self.calls.append((after, timeout))
+        if len(self.calls) == 1:
+            return [{
+                "sequence": 7,
+                "payload": {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "hello"},
+                },
+            }]
+        raise ConnectionResetError
+
+
 def _response(handler):
     raw = handler.wfile.getvalue()
     content_length = int(handler.response_headers.get("Content-Length", len(raw)))
     return json.loads(raw[:content_length].decode("utf-8"))
+
+
+def test_profile_agent_sse_uses_incremental_http11_chunks():
+    supervisor = _SSESupervisor()
+    handler = _AppHandler(None, supervisor)
+
+    handler._stream_agent_events(
+        supervisor,
+        PRINCIPAL,
+        PROFILE_ID,
+        after=0,
+    )
+
+    raw = handler.wfile.getvalue()
+    assert handler.protocol_version == "HTTP/1.1"
+    assert handler.response_headers["Transfer-Encoding"] == "chunked"
+    assert handler.response_headers["Content-Encoding"] == "identity"
+    assert handler.response_headers["Cache-Control"] == (
+        "no-cache, no-store, no-transform"
+    )
+    sse_payload = b'id: 7\ndata: {"method": "item/agentMessage/delta", '
+    assert sse_payload in raw
+    chunk_length, chunk_body = raw.split(b"\r\n", 1)
+    assert int(chunk_length, 16) > 0
+    assert chunk_body.startswith(sse_payload)
+    assert supervisor.calls[0][0] == 0
 
 
 def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_path, monkeypatch):
