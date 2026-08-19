@@ -16,6 +16,10 @@ from urllib.parse import urlparse
 from server.manager.domain.organization_scope import (
     configured_managed_organizations,
 )
+from server.manager.services.host_lan_runtime import (
+    current_host_lan_addresses,
+    usable_lan_address,
+)
 
 
 LAN_ADDRESSES_ENV = "FACTORTESTER_LAN_ADDRESSES"
@@ -23,20 +27,7 @@ MAX_PUBLIC_SERVER_TARGETS = 3
 
 
 def _usable_lan_address(value: object) -> str | None:
-    """Return a displayable IP, excluding local-only values."""
-    raw = str(value or "").strip()
-    try:
-        address = ipaddress.ip_address(raw)
-    except ValueError:
-        return None
-    if (
-        address.is_loopback
-        or address.is_unspecified
-        or address.is_link_local
-        or address.is_multicast
-    ):
-        return None
-    return address.compressed
+    return usable_lan_address(value)
 
 
 def endpoint_host(endpoint: object) -> str:
@@ -51,13 +42,18 @@ def local_internal_addresses(
     *,
     hostnames: Iterable[str] | None = None,
     configured: Iterable[str] | None = None,
+    now: float | None = None,
 ) -> list[str]:
     """Return addresses that another LAN device can use for this Manager.
 
-    A deployment should set ``FACTORTESTER_LAN_ADDRESSES`` behind Docker;
-    automatic hostname lookup is kept for local development and tests.
+    Docker deployments read a short-lived snapshot written by the host-side
+    address agent. A configured snapshot that is absent, malformed, or stale
+    deliberately yields no address instead of reusing an old LAN endpoint.
     """
     explicit = configured
+    snapshot = current_host_lan_addresses(now=now) if explicit is None else None
+    if snapshot is not None:
+        return snapshot
     if explicit is None:
         raw_configured = os.environ.get(LAN_ADDRESSES_ENV)
         if raw_configured is not None:
