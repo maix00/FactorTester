@@ -6,6 +6,9 @@ from server.manager.services.federated_public_data import FederatedPublicDataSer
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.local import LocalAccountDomainStore
 from server.manager.storage.account_domain.payloads import public_payload
+from server.manager.storage.account_domain.remote import (
+    _can_repair_factor_source_provider,
+)
 from server.manager.storage.account_domain.factor_sync import materialized_factor_configs
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 
@@ -218,6 +221,32 @@ def test_factor_source_reconcile_retires_matching_legacy_conflict(
     assert (
         "alice", "factor_source", "custom:CA@office-a"
     ) in control.rows
+
+
+def test_factor_source_provider_repair_is_strictly_scoped() -> None:
+    incoming = {"source_sha256": "same", "storage_server_id": "office-a"}
+
+    assert _can_repair_factor_source_provider(
+        entity_type="factor_source",
+        entity_id="custom:CA@office-a",
+        incoming_payload=incoming,
+        current_payload={"source_sha256": "same", "storage_server_id": "old"},
+        origin_manager_id="office-a",
+    )
+    assert not _can_repair_factor_source_provider(
+        entity_type="factor_source",
+        entity_id="custom:CA@office-a",
+        incoming_payload=incoming,
+        current_payload={"source_sha256": "different", "storage_server_id": "old"},
+        origin_manager_id="office-a",
+    )
+    assert not _can_repair_factor_source_provider(
+        entity_type="factor_source",
+        entity_id="custom:CA@office-a",
+        incoming_payload=incoming,
+        current_payload={"source_sha256": "same", "storage_server_id": "old"},
+        origin_manager_id="office-b",
+    )
 
 
 def test_metadata_payload_removes_credentials_paths_and_bytes() -> None:

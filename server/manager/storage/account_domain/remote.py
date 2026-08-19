@@ -7,6 +7,35 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def _factor_source_provider(entity_type: str, entity_id: str) -> str:
+    if entity_type != "factor_source" or "@" not in entity_id:
+        return ""
+    return entity_id.rsplit("@", 1)[1].strip()
+
+
+def _can_repair_factor_source_provider(
+    *,
+    entity_type: str,
+    entity_id: str,
+    incoming_payload: Mapping[str, Any],
+    current_payload: Mapping[str, Any],
+    origin_manager_id: str,
+) -> bool:
+    """Allow an owning provider to repair only its polluted source slot."""
+    provider_id = _factor_source_provider(entity_type, entity_id)
+    incoming_hash = str(incoming_payload.get("source_sha256") or "")
+    return bool(
+        provider_id
+        and provider_id == str(origin_manager_id or "").strip()
+        and provider_id
+        == str(incoming_payload.get("storage_server_id") or "").strip()
+        and incoming_hash
+        and incoming_hash == str(current_payload.get("source_sha256") or "")
+        and provider_id
+        != str(current_payload.get("storage_server_id") or "").strip()
+    )
+
+
 class AccountDomainControlMixin:
     """Methods mixed into the existing PostgreSQL control repository."""
 
@@ -40,6 +69,12 @@ class AccountDomainControlMixin:
         storage_server_id = str(
             payload.get("storage_server_id") or origin_manager_id or ""
         ).strip()
+        provider_id = _factor_source_provider(kind, identifier)
+        if provider_id and (
+            provider_id != storage_server_id
+            or provider_id != str(origin_manager_id or "").strip()
+        ):
+            raise ValueError("factor source provider identity is inconsistent")
         self.ensure_schema()
         with self._connection() as connection:
             lock_key = f"factortester:account-domain:{owner}:{kind}:{identifier}"
@@ -69,7 +104,17 @@ class AccountDomainControlMixin:
                         "idempotent": True,
                         "operation_id": str(operation_id or ""),
                     }
-                if base_revision is None or int(base_revision) != current_revision:
+                repair_provider = _can_repair_factor_source_provider(
+                    entity_type=kind,
+                    entity_id=identifier,
+                    incoming_payload=dict(payload or {}),
+                    current_payload=current_payload,
+                    origin_manager_id=str(origin_manager_id or ""),
+                )
+                if (
+                    not repair_provider
+                    and (base_revision is None or int(base_revision) != current_revision)
+                ):
                     return {
                         "status": "conflict",
                         "revision": current_revision,
@@ -118,7 +163,6 @@ class AccountDomainControlMixin:
             "revision": revision,
             "operation_id": str(operation_id or ""),
         }
-
     def pull_account_domain_entities(
         self,
         *,
