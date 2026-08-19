@@ -156,7 +156,7 @@
     return "";
   }
 
-  function readOnlyItem(profileKey, conversationID, item) {
+  function readOnlyItem(profileKey, conversationID, item, index = 0) {
     const role = /^(assistant|assistant_message|agent_message)$/i.test(
       String(item?.role || item?.type || item?.item_type || "").trim(),
     )
@@ -166,8 +166,13 @@
       new Date().toISOString(),
     );
     const text = readOnlyText(item);
+    const itemID = String(item?.id || item?.item_id || "").trim()
+      || `item-${conversationID}-${index}`;
     return {
-      id: String(item?.id || `item-${Math.random().toString(16).slice(2)}`),
+      // Manager history rows use item_id rather than ChatKit's id.  Keep the
+      // mapped id stable across list/get requests so ChatKit does not discard
+      // the history as a different set of items on every read.
+      id: itemID,
       type: role,
       thread_id: conversationID,
       created_at: created,
@@ -189,9 +194,14 @@
       id: identifier,
       title: conversation?.title || null,
       created_at: created,
-      status: {type: "completed"},
+      // ChatKit's ThreadStatus accepts active, locked, or closed.  A parent
+      // viewer sees a locked historical thread: it is readable, but cannot
+      // be used to send turns or mutate the source Agent conversation.
+      status: {type: "locked", reason: "read-only conversation"},
       metadata: {profile_key: profileKey, conversation_id: identifier},
-      items: P.page(items.map(item => readOnlyItem(profileKey, identifier, item))),
+      items: P.page(items.map((item, index) => (
+        readOnlyItem(profileKey, identifier, item, index)
+      ))),
     };
   }
 
@@ -255,7 +265,7 @@
     }
     if (operation === "items.list") {
       return P.jsonResponse(P.page((await readOnlyItems(profileState, conversationID)).map(
-        item => readOnlyItem(profileState.profileKey, conversationID, item),
+        (item, index) => readOnlyItem(profileState.profileKey, conversationID, item, index),
       )));
     }
     if ([
