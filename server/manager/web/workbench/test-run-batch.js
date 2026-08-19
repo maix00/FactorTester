@@ -43,11 +43,23 @@
         showRunSpecError(context, new Error(missingScopeMessage(context, state)));
         return;
       }
+      runSpecButton.disabled = true;
+      runButton.disabled = true;
       // This action crosses several deferred code and API boundaries.  Do not
       // leave a rejected Promise unobserved: after the old batch panel was
       // removed there is no lower task row to display preview failures.
       void openRunSpecs(context, state, refresh).catch(error => {
         showRunSpecError(context, error);
+      }).finally(() => {
+        // Content refreshes may rebuild the batch while header actions remain
+        // mounted. Restore both controls from the current model explicitly;
+        // otherwise a successful preview can leave “运行” permanently
+        // disabled until the entire page is reloaded.
+        runSpecButton.disabled = false;
+        const current = selectedTasks(state || {});
+        runButton.disabled = !current.length || current.some(({item}) => (
+          ["freezing", "submitting"].includes(item.phase)
+        ));
       });
     }, context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置"));
     runSpecButton.className = "test-workbench-header-action";
