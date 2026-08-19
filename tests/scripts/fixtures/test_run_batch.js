@@ -5,13 +5,15 @@ const vm = require("node:vm");
 global.window = {};
 let actionLoaded = false;
 const lazyGroups = [];
+const actionsSource = fs.readFileSync(
+  "server/manager/web/workbench/run-batch/actions.js", "utf8",
+);
 global.window.FTStaticLoader = {
   async loadGroups(names) {
     lazyGroups.push(...names);
     if (names.includes("workbench-run-batch-actions") && !actionLoaded) {
-      vm.runInThisContext(fs.readFileSync(
-        "server/manager/web/workbench/run-batch/actions.js", "utf8",
-      ), {filename: "run-batch/actions.js"});
+      window.FTTestConfiguration = global.FTTestConfiguration;
+      vm.runInThisContext(actionsSource, {filename: "run-batch/actions.js"});
       actionLoaded = true;
     }
   },
@@ -236,6 +238,28 @@ const strategyScopedBacktest = {
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.ok(notices.some(item => item.isError && /请先选择产品组/.test(item.message)),
     "missing product selection must be explained by the header action");
+
+  const lateState = {...state, groups: [], testRunBatch: []};
+  let lateRuns = 0;
+  window.FTTestRunBatchActions = {
+    async runAll() { lateRuns += 1; },
+  };
+  const lateHeader = batch.headerActions(context, lateState, () => {});
+  lateState.groups = [{id: "late", label: "延迟加载产品组"}];
+  lateHeader[1].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lateRuns, 1,
+    "run action must read the current task scope instead of captured render-time state");
+
+  window.FTTestRunBatchActions = {
+    async runAll() { throw new Error("submission module failed"); },
+  };
+  batch.headerActions(context, state, () => {})[1].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(notices.some(item => item.isError && /submission module failed/.test(item.message)),
+    "run action failures must be visible instead of becoming unhandled rejections");
+  delete window.FTTestRunBatchActions;
+
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
@@ -323,8 +347,19 @@ const strategyScopedBacktest = {
     && /offline/.test(item.message)),
   "RunSpec preview failures must expose structured backend diagnostics");
 
+  const failedRunHeader = batch.headerActions(failingContext, failingState, () => {});
+  failedRunHeader[1].listeners.click();
+  assert.equal(failedRunHeader[1].disabled, true,
+    "run action must disable itself while the submission is pending");
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(failedRunHeader[1].disabled, false,
+    "a rejected submission must restore the run action without a full page render");
+  assert.ok(notices.some(item => item.isError && /运行测试失败/.test(item.message)));
+
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
+  assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1", "job-2"],
+    "submitted jobs must remain available to the test-page progress/result observer");
   assert.equal(state.activeRunGroupID, "night");
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141, 8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
@@ -355,6 +390,11 @@ const strategyScopedBacktest = {
   assert.deepEqual(batch.synchronize(factorEvaluation).map(item => item.groupID), ["all"]);
   await batch.runAll(context, factorEvaluation, () => {});
   assert.equal(factorEvaluation.testRunBatch[0].jobID, "job-4");
+  const factorEvaluationPreview = requests.filter(item => (
+    item.path.endsWith("/preview") && item.body.analyses[0] === "factor_evaluation"
+  )).at(-1).body;
+  assert.deepEqual(requests.at(-1).body, factorEvaluationPreview,
+    "direct run must freeze and submit the exact same RunSpec request");
   assert.equal(requests.at(-1).body.analyses[0], "factor_evaluation");
 
   assert.deepEqual(batch.synchronize(strategyScopedBacktest)
@@ -366,8 +406,18 @@ const strategyScopedBacktest = {
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(navigated, false, "submission must keep the test page visible");
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
+  assert.ok(actionsSource.includes("state.runValues?.service_port"));
+  assert.ok(actionsSource.includes(
+    'serviceRunPath(context, state, "/api/runs/preview")',
+  ));
+  assert.ok(actionsSource.includes(
+    'submitServerRun(context, state, request)',
+  ));
+  assert.ok(actionsSource.includes("controller.abort()"));
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
+  assert.ok(!lazyGroups.includes("research"),
+    "submitting a test must not wait for the unrelated report/profile/research UI bundle");
   const runRequests = requests.filter(item => item.path.endsWith("/api/runs"));
   const icRequests = runRequests.filter(item => item.body.analyses[0] === "ic");
   assert.ok(icRequests.every(item => item.body.retention_mode === "full"));

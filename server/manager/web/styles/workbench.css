@@ -103,6 +103,8 @@
 .ic-grid-add { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 5px; }
 .ic-grid-add button { border: 1px solid var(--line); border-radius: 8px; color: var(--accent); background: var(--panel); font-size: 16px; }
 .test-run-batch { display: grid; gap: 10px; }
+.test-run-observer { display: grid; gap: 8px; min-width: 0; margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.test-run-observer-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .test-run-batch-actions, .test-run-card-actions, .test-run-result-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .test-run-matrix { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
 .test-run-matrix strong { margin-right: 3px; }

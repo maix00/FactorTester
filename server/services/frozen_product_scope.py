@@ -48,18 +48,28 @@ def freeze_product_scope(
         selections.update(_selection_index(analysis.pop("product_selections", None)))
     selections.update(_selection_index(temporary.get("product_selections")))
 
-    product_groups = _product_group_index(owner)
     referenced_ids = {
         selection_id
         for analysis in analysis_values
         for selection_id in _analysis_selection_ids(analysis)
     }
+    embedded = {
+        selection_id: selections.get(selection_id)
+        or _embedded_selection(analysis_values, selection_id)
+        for selection_id in referenced_ids
+    }
+    # A self-contained RunSpec must not consult mutable catalog storage when
+    # the selected paths are already frozen in the request. Only unresolved
+    # references need the owner's persisted product-group catalog.
+    product_groups = (
+        _product_group_index(owner)
+        if any(not isinstance(value, dict) or not value for value in embedded.values())
+        else {}
+    )
     unresolved: set[str] = set()
     canonical_selections: dict[str, dict[str, Any]] = {}
     for selection_id in sorted(referenced_ids):
-        raw = selections.get(selection_id)
-        if not isinstance(raw, dict):
-            raw = _embedded_selection(analysis_values, selection_id)
+        raw = embedded.get(selection_id)
         group = product_groups.get(selection_id)
         if not raw and group:
             raw = group

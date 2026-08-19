@@ -45,7 +45,9 @@
     "workbench-run-batch": [
       "workbench-run", "workbench-products", "workbench-ic-controls"
     ],
-    "workbench-run-batch-actions": ["workbench-run-batch", "workbench-input-state"],
+    "workbench-run-batch-actions": [
+      "workbench-run-batch", "workbench-input-state", "workbench-run-submit"
+    ],
     "workbench-run-results": ["workbench-run", "jobs"],
     "workbench-run-submit": [
       "workbench-run", "workbench-compiler", "workbench-ic-controls"

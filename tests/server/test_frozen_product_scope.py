@@ -82,6 +82,31 @@ def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
     assert "product_path_candidates" not in payload["ui"]["backtest"]
 
 
+def test_embedded_product_scope_does_not_reopen_mutable_catalog(monkeypatch) -> None:
+    configuration = {
+        "payload": {
+            "shared": {},
+            "analyses": {"ic": {
+                "product_path_selection_id": "frozen-a",
+                "product_selections": {
+                    "frozen-a": {"paths": ["Product/A"]},
+                },
+            }},
+            "ui": {},
+        },
+    }
+    monkeypatch.setattr(
+        "server.services.frozen_product_scope._product_group_index",
+        lambda _owner: (_ for _ in ()).throw(AssertionError("catalog reopened")),
+    )
+
+    frozen = freeze_product_scope(configuration, owner="alice", analyses=["ic"])
+
+    assert frozen["payload"]["shared"]["product_selections"]["frozen-a"][
+        "paths"
+    ] == ["Product/A"]
+
+
 def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
     configuration = {
         "payload": {
