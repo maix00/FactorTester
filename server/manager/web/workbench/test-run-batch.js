@@ -31,6 +31,11 @@
     if (!products?.selectedGroups) {
       return [];
     }
+    // A saved workspace can restore product selections after the toolbar was
+    // first painted.  Reconcile the scalar refs before deciding whether the
+    // header action is usable; otherwise the button can remain disabled with
+    // a valid selection already present in state.values.
+    products.synchronize?.(state);
     const groups = products.selectedGroups(state);
     const items = model().synchronize(state);
     const byID = new Map(items.map(item => [item.groupID, item]));
@@ -42,7 +47,11 @@
     const tasks = selectedTasks(state || {});
     const hasTasks = tasks.length > 0;
     const runSpecButton = context.button(context.t("查看运行配置"), () => {
-      if (!hasTasks) return;
+      const currentTasks = selectedTasks(state || {});
+      if (!currentTasks.length) {
+        showRunSpecError(context, new Error(context.t("请先选择产品组")));
+        return;
+      }
       // This action crosses several deferred code and API boundaries.  Do not
       // leave a rejected Promise unobserved: after the old batch panel was
       // removed there is no lower task row to display preview failures.
@@ -51,7 +60,9 @@
       });
     }, context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置"));
     runSpecButton.className = "test-workbench-header-action";
-    runSpecButton.disabled = !hasTasks;
+    // Keep this action clickable so a missing selection is explained in the
+    // page notice instead of looking like a dead button.
+    runSpecButton.disabled = false;
     runSpecButton.title = hasTasks
       ? context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置")
       : context.t("请先选择产品组");
