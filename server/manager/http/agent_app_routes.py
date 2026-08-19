@@ -68,6 +68,13 @@ def _public_conversation(value: object) -> dict[str, object]:
 class AgentAppServerRoutesMixin:
     """Expose a narrow, authenticated Profile Agent transport."""
 
+    def _write_sse_chunk(self, payload: bytes) -> None:
+        """Write one HTTP/1.1 chunk without allowing response buffering."""
+        self.wfile.write(f"{len(payload):X}\r\n".encode("ascii"))
+        self.wfile.write(payload)
+        self.wfile.write(b"\r\n")
+        self.wfile.flush()
+
     def _agent_app_server(self) -> AgentAppServerSupervisor:
         service = getattr(self.state, "agent_app_server", None)
         if not isinstance(service, AgentAppServerSupervisor):
@@ -143,10 +150,17 @@ class AgentAppServerRoutesMixin:
         status = supervisor.status(principal, profile_id)
         if not status.get("running"):
             raise AgentAppServerError("start the Profile Agent before opening events")
+        # BaseHTTPRequestHandler defaults to HTTP/1.0.  An SSE response has no
+        # known Content-Length, so HTTP/1.0 keep-alive leaves browsers and
+        # intermediaries free to buffer the body until the connection closes.
+        # Use explicit HTTP/1.1 chunk framing for incremental delivery.
+        self.protocol_version = "HTTP/1.1"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-cache, no-store, no-transform")
         self.send_header("Connection", "keep-alive")
+        self.send_header("Content-Encoding", "identity")
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         cursor = max(0, int(after))
@@ -160,8 +174,7 @@ class AgentAppServerRoutesMixin:
                     timeout=min(5.0, max(0.1, deadline - time.monotonic())),
                 )
                 if not events:
-                    self.wfile.write(b": heartbeat\n\n")
-                    self.wfile.flush()
+                    self._write_sse_chunk(b": heartbeat\n\n")
                     continue
                 for event in events:
                     sequence = int(event.get("sequence") or 0)
@@ -171,11 +184,15 @@ class AgentAppServerRoutesMixin:
                         _public_value(event.get("payload") or {}),
                         ensure_ascii=False,
                     )
-                    self.wfile.write(
+                    self._write_sse_chunk(
                         f"id: {sequence}\ndata: {payload}\n\n".encode("utf-8")
                     )
                     cursor = sequence
-                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+        try:
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
 
