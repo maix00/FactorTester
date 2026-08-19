@@ -25,18 +25,27 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
     class State:
         server_id = "public-1"
         account_domain_sync = Sync()
+        transfer_endpoints = type("Endpoints", (), {
+            "snapshot": lambda self: {"public-1": type("Endpoint", (), {
+                "peer_data_endpoint": "http://10.77.0.1:17997",
+            })()},
+        })()
 
         @staticmethod
         def prepare_object_download(**kwargs):
             assert kwargs["storage_server_id"] == "office-a"
             assert kwargs["object_id"] == "alice:DemoFactor"
-            return {"url": "http://data/source", "bearer": "ticket"}
+            return {
+                "url": "https://public.example:7997/source",
+                "path": "/api/transfers/source",
+                "bearer": "ticket",
+            }
 
     saved = []
-    monkeypatch.setattr(
-        factor_source_hydration, "urlopen",
-        lambda *_args, **_kwargs: _Response(raw),
-    )
+    requested = []
+    monkeypatch.setattr(factor_source_hydration, "urlopen", lambda request, **_kwargs: (
+        requested.append(request.full_url) or _Response(raw)
+    ))
     monkeypatch.setattr(
         factor_source_hydration, "upsert_factor_source",
         lambda *args: saved.append(args),
@@ -46,6 +55,7 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
         "DemoFactor", principal="alice",
     )
     assert saved == [("custom", "alice", "DemoFactor", "Demo", source)]
+    assert requested == ["http://10.77.0.1:17997/api/transfers/source"]
 
 
 class _Response:

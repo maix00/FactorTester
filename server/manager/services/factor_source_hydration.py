@@ -45,7 +45,7 @@ class FactorSourceHydrator:
             except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 continue
             request = Request(
-                str(access.get("url") or ""),
+                self._internal_download_url(access),
                 headers={"Authorization": f"Bearer {access.get('bearer') or ''}"},
                 method="GET",
             )
@@ -72,6 +72,20 @@ class FactorSourceHydrator:
             )
             return True
         return False
+
+    def _internal_download_url(self, access: dict[str, object]) -> str:
+        """Use this Manager's WireGuard data listener, not its public TLS URL."""
+        endpoints = getattr(self.state, "transfer_endpoints", None)
+        if endpoints is not None:
+            try:
+                current = endpoints.snapshot().get(self.state.server_id)
+                peer = str(getattr(current, "peer_data_endpoint", "") or "").rstrip("/")
+                path = str(access.get("path") or "")
+                if peer and path.startswith("/"):
+                    return peer + path
+            except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+                pass
+        return str(access.get("url") or "")
 
     def _candidates(
         self, owner: str, factor_id: str, *, principal: str,
