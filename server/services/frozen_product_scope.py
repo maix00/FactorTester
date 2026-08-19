@@ -63,7 +63,11 @@ def freeze_product_scope(
     # references need the owner's persisted product-group catalog.
     product_groups = (
         _product_group_index(owner)
-        if any(not isinstance(value, dict) or not value for value in embedded.values())
+        if any(
+            not isinstance(value, dict)
+            or not (value.get("paths") or value.get("selected_paths"))
+            for value in embedded.values()
+        )
         else {}
     )
     unresolved: set[str] = set()
@@ -258,7 +262,13 @@ def _canonical_selection(
     stored_group: dict[str, Any] | None,
 ) -> dict[str, Any]:
     source = {**(stored_group or {}), **raw}
-    paths = source.get("paths") or source.get("selected_paths") or []
+    paths = (
+        source.get("paths")
+        or source.get("selected_paths")
+        or (stored_group or {}).get("paths")
+        or (stored_group or {}).get("selected_paths")
+        or []
+    )
     if not isinstance(paths, list) or not paths:
         raise ValueError(f"product selection has no paths: {selection_id}")
     result = {
