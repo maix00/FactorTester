@@ -130,8 +130,19 @@
   }
 
   function readOnlyConversationID(params) {
-    return C.conversationIDFrom(params)
-      || String(params?.id || params?.thread?.id || "").trim();
+    const values = [
+      params?.thread_id,
+      params?.threadId,
+      params?.threadID,
+      params?.conversation_id,
+      params?.conversationId,
+      params?.id,
+      params?.thread?.id,
+      params?.thread?.thread_id,
+      params?.thread?.threadId,
+      params?.thread?.conversation_id,
+    ];
+    return values.map(value => String(value || "").trim()).find(Boolean) || "";
   }
 
   function readOnlyText(value) {
@@ -150,10 +161,11 @@
       String(item?.role || item?.type || item?.item_type || "").trim(),
     )
       ? "assistant_message" : "user_message";
-    const created = item?.created_at || new Date().toISOString();
-    const text = readOnlyText(
-      item?.text ?? item?.content ?? item?.message ?? item?.output_text,
+    const created = P.historyTimestamp(
+      item?.created_at,
+      new Date().toISOString(),
     );
+    const text = readOnlyText(item);
     return {
       id: String(item?.id || `item-${Math.random().toString(16).slice(2)}`),
       type: role,
@@ -169,10 +181,14 @@
 
   function readOnlyThread(profileKey, conversation, items = []) {
     const identifier = String(conversation?.conversation_id || "");
+    const created = P.historyTimestamp(
+      conversation?.created_at,
+      new Date().toISOString(),
+    );
     return {
       id: identifier,
       title: conversation?.title || null,
-      created_at: conversation?.created_at || new Date().toISOString(),
+      created_at: created,
       status: {type: "completed"},
       metadata: {profile_key: profileKey, conversation_id: identifier},
       items: P.page(items.map(item => readOnlyItem(profileKey, identifier, item))),

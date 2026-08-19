@@ -484,6 +484,9 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     ).read_text(encoding="utf-8")
     assert "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" in adapter_source
     assert "FTProfileChatKitProtocol" in adapter_source
+    assert "params?.conversation_id" in adapter_source
+    assert "params?.thread?.conversation_id" in adapter_source
+    assert "P.historyTimestamp" in adapter_source
     stream_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-stream.js"
     ).read_text(encoding="utf-8")
