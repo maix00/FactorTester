@@ -42,6 +42,30 @@ for raw in sys.stdin:
         result = {"data": [{"cwd": request.get("params", {}).get("cwds", [""])[0], "skills": []}]}
     elif method == "initialize":
         result = {"userAgent": "fake-codex"}
+    elif method == "thread/start":
+        result = {
+            "thread": {
+                "id": "provider-thread-1",
+                "name": "Recovered conversation",
+                "createdAt": 1,
+                "updatedAt": 1,
+                "turns": [],
+            },
+        }
+    elif method == "thread/resume":
+        thread_id = request.get("params", {}).get("threadId", "")
+        result = {
+            "thread": {
+                "id": thread_id,
+                "name": "Recovered conversation",
+                "createdAt": 1,
+                "updatedAt": 1,
+                "turns": [],
+            },
+            "resumed": True,
+        }
+    elif method == "thread/delete":
+        result = {"deleted": True}
     else:
         result = {"accepted": method}
     if "id" in request:
@@ -240,11 +264,32 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         renewed = service.runtime_store.active_claim(PRINCIPAL, PROFILE_ID)
         renewed_heartbeat = renewed["last_heartbeat_at"] if renewed else 0
     assert renewed_heartbeat > initial_heartbeat
+    conversation = service.create_conversation(PRINCIPAL, PROFILE_ID)
+    supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "thread/start",
+        {},
+        conversation_id=conversation["conversation_id"],
+    )
+    with pytest.raises(AgentAppServerError, match="conversation catalog"):
+        supervisor.request(
+            PRINCIPAL,
+            PROFILE_ID,
+            "thread/list",
+            {},
+            conversation_id=conversation["conversation_id"],
+        )
     response = supervisor.request(
         PRINCIPAL,
         PROFILE_ID,
         "turn/start",
-        {"prompt": "hello", "skill_ids": []},
+        {
+            "prompt": "hello",
+            "threadId": "provider-thread-1",
+            "skill_ids": [],
+        },
+        conversation_id=conversation["conversation_id"],
     )
     assert response["result"]["accepted"] == "turn/start"
     config_path = (
@@ -265,7 +310,12 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
             PRINCIPAL,
             PROFILE_ID,
             "turn/start",
-            {"prompt": "hello", "approvalPolicy": "never"},
+            {
+                "prompt": "hello",
+                "threadId": "provider-thread-1",
+                "approvalPolicy": "never",
+            },
+            conversation_id=conversation["conversation_id"],
         )
     with pytest.raises(AgentAppServerError, match="only text input"):
         supervisor.request(
@@ -273,15 +323,19 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
             PROFILE_ID,
             "turn/start",
             {
+                "threadId": "provider-thread-1",
                 "input": [{"type": "image", "path": "/etc/passwd"}],
             },
+            conversation_id=conversation["conversation_id"],
         )
     with pytest.raises(AgentAppServerError, match="Profile workspace"):
+        cwd_conversation = service.create_conversation(PRINCIPAL, PROFILE_ID)
         supervisor.request(
             PRINCIPAL,
             PROFILE_ID,
             "thread/start",
             {"cwd": str(tmp_path)},
+            conversation_id=cwd_conversation["conversation_id"],
         )
 
     supervisor.stop(PRINCIPAL, PROFILE_ID)
@@ -297,6 +351,99 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert resumed_claim is not None
     assert resumed_claim["status"] == "claimed"
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+
+
+def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "fake provider",
+            "runtime_kind": "server",
+            "protocol": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "server-secret-token",
+        },
+    )
+    first_claim = service.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        provider_id=provider["provider_id"],
+        agent_id="agent-a",
+    )
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+    )
+    conversation = service.create_conversation(PRINCIPAL, PROFILE_ID, title="Keep me")
+
+    supervisor.start(PRINCIPAL, PROFILE_ID)
+    started = supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "thread/start",
+        {},
+        conversation_id=conversation["conversation_id"],
+    )
+    assert started["result"]["thread"]["id"] == "provider-thread-1"
+    saved = service.conversation(PRINCIPAL, PROFILE_ID, conversation["conversation_id"])
+    assert saved["provider_thread_id"] == "provider-thread-1"
+    assert saved["provider_id"] == provider["provider_id"]
+
+    supervisor.stop(PRINCIPAL, PROFILE_ID)
+    service.release(
+        PRINCIPAL,
+        first_claim["claim"]["claim_id"],
+        agent_id="agent-a",
+    )
+    service.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        provider_id=provider["provider_id"],
+        agent_id="agent-b",
+    )
+
+    supervisor.start(PRINCIPAL, PROFILE_ID)
+    resumed = supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "thread/resume",
+        {"threadId": "provider-thread-1"},
+        conversation_id=conversation["conversation_id"],
+    )
+    assert resumed["result"]["resumed"] is True
+    supervisor.stop(PRINCIPAL, PROFILE_ID)
+
+
+def test_profile_conversation_rejects_a_different_provider_on_resume(tmp_path):
+    conversation = {
+        "conversation_id": "conversation-1",
+        "provider_thread_id": "thread-1",
+        "provider_id": "provider-a",
+    }
+    with pytest.raises(AgentAppServerError, match="another Agent provider"):
+        AgentAppServerSupervisor._validate_conversation_request(
+            "thread/resume",
+            {"threadId": "thread-1"},
+            conversation,
+            provider_id="provider-b",
+        )
 
 
 class _AppHandler(AgentAppServerRoutesMixin, AgentRoutesMixin):
@@ -376,10 +523,29 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     assert handler.response_status == 200
     assert _response(handler)["status"]["ready"] is True
 
+    conversation = service.create_conversation(PRINCIPAL, PROFILE_ID)
     handler = _AppHandler(service, supervisor, {
         "profile_id": PROFILE_ID,
+        "conversation_id": conversation["conversation_id"],
+        "method": "thread/start",
+        "params": {},
+    })
+    assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(
+        urlparse(f"/api/client/profile-agent/conversations?profile_id={PROFILE_ID}"),
+    )
+    listed = _response(handler)["conversations"]
+    assert listed[0]["conversation_id"] == conversation["conversation_id"]
+    assert "principal" not in listed[0]
+    assert "provider_id" not in listed[0]
+
+    handler = _AppHandler(service, supervisor, {
+        "profile_id": PROFILE_ID,
+        "conversation_id": conversation["conversation_id"],
         "method": "turn/start",
-        "params": {"prompt": "hello", "skill_ids": []},
+        "params": {"prompt": "hello", "threadId": "provider-thread-1", "skill_ids": []},
     })
     assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
     assert _response(handler)["response"]["result"]["accepted"] == "turn/start"

@@ -26,6 +26,19 @@ _SENSITIVE_EVENT_KEYS = frozenset({
     "workspace",
 })
 
+_PUBLIC_CONVERSATION_KEYS = frozenset({
+    "conversation_id",
+    "profile_id",
+    "title",
+    "preview",
+    "created_at",
+    "updated_at",
+    "active",
+    # The adapter needs this opaque binding to resume the provider thread;
+    # it is never used as ChatKit's browser-visible thread id.
+    "provider_thread_id",
+})
+
 
 def _public_value(value: object, key: str = "") -> object:
     """Remove server-local paths and credential-shaped fields from payloads."""
@@ -40,6 +53,16 @@ def _public_value(value: object, key: str = "") -> object:
     if isinstance(value, list):
         return [_public_value(item) for item in value]
     return value
+
+
+def _public_conversation(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: _public_value(value[key], key)
+        for key in _PUBLIC_CONVERSATION_KEYS
+        if key in value
+    }
 
 
 class AgentAppServerRoutesMixin:
@@ -63,13 +86,18 @@ class AgentAppServerRoutesMixin:
 
     def _agent_app_error(self, exc: Exception) -> None:
         message = str(exc)
-        status = 409 if "claim" in message.casefold() or "running" in message.casefold() else 400
+        lowered = message.casefold()
+        if "not found" in lowered:
+            status = 404
+        else:
+            status = 409 if "claim" in lowered or "running" in lowered else 400
         json_response(self, {"success": False, "error": message}, status)
 
     def _get_agent_app_routes(self, parsed) -> bool:
         if parsed.path not in {
             "/api/client/profile-agent",
             "/api/client/profile-agent/events",
+            "/api/client/profile-agent/conversations",
         }:
             return False
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -86,6 +114,18 @@ class AgentAppServerRoutesMixin:
                         "status": _public_value(supervisor.status(principal, identifier)),
                     },
                 )
+                return True
+            if parsed.path.endswith("/conversations"):
+                json_response(self, {
+                    "success": True,
+                    "profile_id": identifier,
+                    "conversations": [
+                        _public_conversation(item)
+                        for item in supervisor.profile_service.conversations(
+                            principal, identifier,
+                        )
+                    ],
+                })
                 return True
             after = int(query.get("after", ["0"])[0] or 0)
             self._stream_agent_events(supervisor, principal, identifier, after)
@@ -144,6 +184,10 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent/start",
             "/api/client/profile-agent/stop",
             "/api/client/profile-agent/rpc",
+            "/api/client/profile-agent/conversations/create",
+            "/api/client/profile-agent/conversations/select",
+            "/api/client/profile-agent/conversations/update",
+            "/api/client/profile-agent/conversations/delete",
         }:
             return False
         try:
@@ -151,6 +195,46 @@ class AgentAppServerRoutesMixin:
             profile_id = str(payload.get("profile_id") or "").strip()
             principal, identifier = self._agent_app_profile(profile_id)
             supervisor = self._agent_app_server()
+            if parsed.path.endswith("/conversations/create"):
+                value = supervisor.profile_service.create_conversation(
+                    principal,
+                    identifier,
+                    title=str(payload.get("title") or "").strip(),
+                )
+                json_response(self, {
+                    "success": True,
+                    "conversation": _public_conversation(value),
+                })
+                return True
+            conversation_id = str(payload.get("conversation_id") or "").strip()
+            if parsed.path.endswith("/conversations/select"):
+                value = supervisor.profile_service.select_conversation(
+                    principal, identifier, conversation_id,
+                )
+                json_response(self, {
+                    "success": True,
+                    "conversation": _public_conversation(value),
+                })
+                return True
+            if parsed.path.endswith("/conversations/update"):
+                value = supervisor.profile_service.update_conversation(
+                    principal,
+                    identifier,
+                    conversation_id,
+                    title=payload.get("title"),
+                    preview=payload.get("preview"),
+                )
+                json_response(self, {
+                    "success": True,
+                    "conversation": _public_conversation(value),
+                })
+                return True
+            if parsed.path.endswith("/conversations/delete"):
+                deleted = supervisor.delete_conversation(
+                    principal, identifier, conversation_id,
+                )
+                json_response(self, {"success": True, "deleted": deleted})
+                return True
             if parsed.path.endswith("/start"):
                 status = supervisor.start(principal, identifier)
                 json_response(self, {
@@ -167,7 +251,13 @@ class AgentAppServerRoutesMixin:
             params = payload.get("params") or {}
             if not isinstance(params, dict):
                 raise AgentAppServerError("params must be an object")
-            response = supervisor.request(principal, identifier, method, params)
+            response = supervisor.request(
+                principal,
+                identifier,
+                method,
+                params,
+                conversation_id=str(payload.get("conversation_id") or "").strip(),
+            )
             json_response(self, {
                 "success": True,
                 "response": _public_value(response),

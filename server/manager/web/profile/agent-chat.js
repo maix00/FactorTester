@@ -47,17 +47,19 @@
     });
     chat.setOptions({
       api: {
-        // ChatKit is the UI protocol only. The Manager adapter routes each
-        // Profile to its configured provider without exposing provider keys.
+        // ChatKit is the UI protocol only. The Manager adapter owns the
+        // Profile-scoped thread catalog and provider-thread mapping.
         url: adapter.endpoint,
         domainKey: "factor-tester-profile-agent",
         fetch: adapter.fetch,
       },
       locale: adapter.locale || locale(context),
-      history: {enabled: false},
+      // Reuse ChatKit's built-in history view. Its thread operations are
+      // served by chatkit-adapter.js and filtered by the Manager API.
+      history: {enabled: true},
       header: {
         enabled: true,
-        title: {enabled: true, text: context.t("Agent 对话")},
+        title: {enabled: true, text: context.t("研究身份 Agent")},
       },
       startScreen: {
         greeting: context.t("可以向这个研究 Agent 提问"),
@@ -94,7 +96,7 @@
     const note = document.createElement("p");
     note.className = "settings-muted";
     note.textContent = context.t(
-      "服务器 Agent 通过当前 Profile 的正式工作区运行；对话事件不会把模型令牌或服务器本地路径发送给浏览器。",
+      "会话属于当前研究身份；停止、解绑或更换 Agent 不会删除会话。对话事件不会把模型令牌或服务器本地路径发送给浏览器。",
     );
     const status = document.createElement("p");
     status.className = "settings-muted profile-agent-status";
@@ -115,22 +117,30 @@
     root.append(note, status, actions, host);
 
     let mounted = null;
+    let running = false;
+
+    function disposeChat() {
+      mounted?.adapter.dispose();
+      mounted = null;
+      host.replaceChildren();
+    }
+
     async function refreshStatus() {
       const payload = await context.api(
         `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
       );
-      const running = Boolean(payload.status?.running);
+      running = Boolean(payload.status?.running);
       start.disabled = running;
       stop.disabled = !running;
       if (!running) {
-        mounted?.adapter.dispose();
-        mounted = null;
-        host.replaceChildren(message(context, "Agent 尚未启动"));
+        disposeChat();
+        host.append(message(context, "Agent 尚未启动"));
         status.textContent = context.t("Agent 尚未启动");
         return;
       }
+      if (mounted) return;
       status.textContent = context.t("正在加载 Agent 对话…");
-      if (!mounted) mounted = await mountChatKit(context, profile, host, status);
+      mounted = await mountChatKit(context, profile, host, status);
     }
 
     start.onclick = async () => {
@@ -154,8 +164,7 @@
           method: "POST",
           body: JSON.stringify({profile_id: profile.profile_id}),
         });
-        mounted?.adapter.dispose();
-        mounted = null;
+        disposeChat();
         await refreshStatus();
       } catch (error) {
         status.textContent = error.message || context.t("停止 Agent");
@@ -165,7 +174,8 @@
     start.disabled = true;
     stop.disabled = true;
     refreshStatus().catch(error => {
-      status.textContent = error.message || context.t("Agent 启动失败");
+      status.textContent = error.message || context.t("读取 Agent 状态失败");
+      start.disabled = false;
     });
     return root;
   }

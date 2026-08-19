@@ -480,11 +480,23 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         REPO_ROOT / "server/manager/web/profile/chatkit-adapter.js"
     ).read_text(encoding="utf-8")
     assert "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" in adapter_source
-    assert "/api/client/profile-agent/events" in adapter_source
     assert "FTProfileChatKitProtocol" in adapter_source
+    stream_source = (
+        REPO_ROOT / "server/manager/web/profile/chatkit-stream.js"
+    ).read_text(encoding="utf-8")
+    assert "/api/client/profile-agent/events" in stream_source
+    assert "FTProfileChatKitProtocol" in stream_source
     assert profile_scripts.index("profile/chatkit-protocol.js") < profile_scripts.index(
+        "profile/chatkit-conversations.js"
+    )
+    assert profile_scripts.index("profile/chatkit-conversations.js") < profile_scripts.index(
+        "profile/chatkit-stream.js"
+    )
+    assert profile_scripts.index("profile/chatkit-stream.js") < profile_scripts.index(
         "profile/chatkit-adapter.js"
     )
+    assert "profile/chatkit-conversations.js" in profile_scripts
+    assert "profile/chatkit-stream.js" in profile_scripts
     assert "profile/chatkit-adapter.js" in profile_scripts
     assert profile_scripts.index("profile/chatkit-adapter.js") < profile_scripts.index(
         "profile/agent-chat.js"
