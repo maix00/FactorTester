@@ -143,6 +143,7 @@
         mountedTabs: [...mounted],
         includeUnregistered: true,
         includeEmpty: true,
+        includeRun: false,
         sources: typeof chipSources === "function" ? chipSources() : (chipSources || {}),
         groupBy: "tab",
         onOpen: key => {
