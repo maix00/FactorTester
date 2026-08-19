@@ -473,6 +473,8 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "openai-chatkit" in chat_source
     assert "FTProfileChatKit" in chat_source
     assert "disabled: Boolean(options.readOnly)" not in chat_source
+    assert "profile-chatkit-readonly-composer" in chat_source
+    assert "不能发送问题" in chat_source
     protocol_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-protocol.js"
     ).read_text(encoding="utf-8")

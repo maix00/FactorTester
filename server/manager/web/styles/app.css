@@ -482,7 +482,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-identity small { color: var(--muted); }
 .profile-directory-detail { max-width: 1180px; }
 .profile-directory-note { white-space: pre-line; }
-.profile-chatkit-readonly { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
+.profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
+.profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }
 @media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host openai-chatkit { height: 500px; } }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }

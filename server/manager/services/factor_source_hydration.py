@@ -83,7 +83,12 @@ class FactorSourceHydrator:
         synchronizer = getattr(self.state, "account_domain_sync", None)
         if synchronizer is None:
             return []
-        scope = "__public__" if owner == "public" else principal
+        # Authorization is completed by the canonical factor-registry lookup
+        # before hydration is attempted. Query the immutable source manifest
+        # by its actual owner; using the submitting principal here hides a
+        # direct subordinate's private provider rows from an otherwise
+        # authorized delegated run.
+        scope = "__public__" if owner == "public" else owner
         rows = synchronizer.entities(
             scope,
             entity_type="factor_source",
