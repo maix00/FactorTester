@@ -431,8 +431,6 @@ class AccountDomainSyncService:
                     pending is not None
                     and pending_payload.get("source_sha256")
                     == payload["source_sha256"]
-                    and pending_payload.get("storage_server_id")
-                    == self.manager_id
                 ):
                     self.local.discard_local_entity(
                         target, "factor_source", legacy_id,

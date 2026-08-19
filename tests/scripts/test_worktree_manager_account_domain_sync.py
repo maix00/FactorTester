@@ -211,7 +211,8 @@ def test_factor_source_reconcile_retires_matching_legacy_conflict(
     )
     current.upsert("alice", "factor_source", "custom:CA", {
         **control.rows[("alice", "factor_source", "custom:CA")]["payload"],
-        "storage_server_id": "office-a",
+        "factor_name": "CA current",
+        "storage_server_id": "retired-node",
     })
     assert current.local.conflicts(principal="alice")
 
