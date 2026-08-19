@@ -741,6 +741,16 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert ".test-object-editor-overlay-mount > .detail-stack" in styles
 
 
+def test_dialog_cards_have_shared_viewport_scroll_fallback() -> None:
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+    dialog_rule = styles.split(".dialog-card {", 1)[1].split("}", 1)[0]
+    run_spec_rule = styles.split(".run-spec-dialog-card {", 1)[1].split("}", 1)[0]
+    assert "max-height: calc(100dvh - 32px)" in dialog_rule
+    assert "overflow-y: auto" in dialog_rule
+    assert "overscroll-behavior: contain" in dialog_rule
+    assert "overflow: hidden" not in run_spec_rule
+
+
 def test_outer_inner_and_ic_settings_use_one_manager_contract() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(
         encoding="utf-8",

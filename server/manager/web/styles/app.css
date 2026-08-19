@@ -323,13 +323,13 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-group-form-status { min-height: 1.2em; color: var(--danger); }
 dialog { border: 0; border-radius: 16px; padding: 0; box-shadow: 0 24px 80px #0005; }
 dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
-.dialog-card { position: relative; width: min(420px, 92vw); display: grid; gap: 14px; padding: 26px; background: var(--panel); }
+.dialog-card { position: relative; width: min(420px, 92vw); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: grid; gap: 14px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 26px; background: var(--panel); }
 .dialog-card.wide { width: min(680px, 94vw); }
 .reference-detail-card { max-height: min(78vh, 760px); overflow-y: auto; }
 .reference-detail-card .table-shell { max-height: min(38vh, 360px); }
 .reference-detail-card h2 { overflow-wrap: anywhere; }
 .run-spec-dialog { width: min(980px, calc(100vw - 48px)); max-width: none; }
-.run-spec-dialog-card { width: auto; max-height: calc(100vh - 48px); overflow: hidden; }
+.run-spec-dialog-card { width: auto; max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); }
 .run-spec-dialog-heading { padding-right: 28px; }
 .run-spec-dialog-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 0 2px 2px; border-bottom: 1px solid var(--line); }
 .run-spec-dialog-tab { flex: 0 0 auto; border: 1px solid var(--line); border-bottom: 0; border-radius: 9px 9px 0 0; padding: 8px 12px; background: var(--soft); color: var(--muted); font: inherit; cursor: pointer; }
