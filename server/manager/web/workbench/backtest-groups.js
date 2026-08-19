@@ -32,6 +32,12 @@
         },
       }),
     }),
+    backtest_custom_strategies: Object.freeze({
+      render: customStrategyList,
+      selected: () => [],
+      removeSelected: () => [],
+      actions: Object.freeze({}),
+    }),
   });
 
   function initialize(state) {
@@ -181,6 +187,19 @@
     });
   }
 
+  function customStrategyList(context, state, surface, refresh) {
+    if (!window.FTTestSourceUpload?.customStrategyPanel) {
+      return FTUI.empty(
+        context.t("自定义策略暂不可用"), context.t("策略输入组件尚未加载"),
+      );
+    }
+    return FTTestSourceUpload.customStrategyPanel(context, state, refresh, {
+      title: "自定义策略",
+      description: "策略源码和配置随本次任务冻结保存",
+      ...(surface.content_options || {}),
+    });
+  }
+
   function runFlow(context, state, surface, flow, selected, refresh) {
     const adapter = adapterFor(surface);
     if (flow.kind === "delete") {
@@ -232,7 +251,8 @@
 
   function strategyCount(state) {
     return Number(state.analysis.groups?.length || 0)
-      + Number(state.analysis.ls_configs?.length || 0);
+      + Number(state.analysis.ls_configs?.length || 0)
+      + Number(state.transientStrategySources?.length || 0);
   }
 
   function selectionType(surface) {

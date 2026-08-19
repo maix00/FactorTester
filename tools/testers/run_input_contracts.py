@@ -20,7 +20,7 @@ FACTOR_SOURCE_INPUT = {
 }
 
 
-RUN_INPUTS = (
+CUSTOM_STRATEGY_INPUTS = (
     {
         "kind": "strategy_source",
         "label": "上传策略 Hook",
@@ -39,6 +39,9 @@ RUN_INPUTS = (
         "multiple": False,
         "inspect_endpoint": "/api/run-inputs/strategy/inspect",
     },
+)
+
+RUN_DEPENDENCY_INPUTS = (
     {
         "kind": "run_dependency",
         "label": "添加依赖文件",
@@ -86,6 +89,8 @@ RUN_INPUTS = (
         ),
     },
 )
+
+RUN_INPUTS = CUSTOM_STRATEGY_INPUTS + RUN_DEPENDENCY_INPUTS
 
 
 def factor_source_content_options() -> dict:

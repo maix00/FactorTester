@@ -33,9 +33,17 @@ def test_group_test_declares_panel_and_multi_select_list() -> None:
     assert groups["run_mode"] == "run_all"
     assert groups["editable"] is True
     assert groups["content_adapter"] == "backtest_groups"
+    assert groups["label"] == "分组策略"
     long_short = surfaces["long_short"]
     assert long_short["content_adapter"] == "backtest_long_short"
     assert long_short["selection"] == "single"
+    assert long_short["label"] == "分组多空策略"
+    custom = surfaces["custom_strategy"]
+    assert custom["mount"] == "group-settings"
+    assert custom["content_adapter"] == "backtest_custom_strategies"
+    assert [item["kind"] for item in custom["content_options"]["inputs"]] == [
+        "strategy_source", "strategy_spec",
+    ]
 
 
 def test_ic_declares_single_select_select_then_run_list() -> None:

@@ -511,14 +511,22 @@ def group_test_settings() -> ApplicationSettings:
         "local", "本地设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
     ))
     app.register_surface(SettingsSurface(
-        "groups", "分组", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
+        "groups", "分组策略", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
         selection="multi", run_mode="run_all", editable=True, item_label="分组",
         content_adapter="backtest_groups",
     ))
     app.register_surface(SettingsSurface(
-        "long_short", "Long-Short", TabMountPoint.GROUP_SETTINGS, kind="list", order=30,
+        "long_short", "分组多空策略", TabMountPoint.GROUP_SETTINGS, kind="list", order=30,
         selection="single", run_mode="run_all", editable=True,
         item_label="Long-Short 组合", content_adapter="backtest_long_short",
+    ))
+    from tools.testers.run_input_contracts import CUSTOM_STRATEGY_INPUTS
+    app.register_surface(SettingsSurface(
+        "custom_strategy", "自定义策略", TabMountPoint.GROUP_SETTINGS,
+        kind="list", order=40, selection="single", run_mode="run_all",
+        editable=True, item_label="自定义策略",
+        content_adapter="backtest_custom_strategies",
+        content_options={"inputs": CUSTOM_STRATEGY_INPUTS},
     ))
     # 分组列表支持的 flow（声明元数据；行为仍由前端 GT.modes 提供）。
     for flow in (

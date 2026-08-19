@@ -409,6 +409,7 @@ class SettingsSurface:
     item_label: str = ""          # display name of one item, e.g. "分组" / "IC 配置"
     chip_keys: tuple[str, ...] = ()  # setting keys shown as chips per row (empty = all item settings)
     content_adapter: str = "settings"  # frontend domain adapter selected by the backend
+    content_options: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label:
@@ -422,6 +423,7 @@ class SettingsSurface:
         value = asdict(self)
         value["mount"] = self.mount.value
         value["chip_keys"] = list(self.chip_keys)
+        value["content_options"] = dict(self.content_options)
         return value
 
 

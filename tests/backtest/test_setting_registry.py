@@ -167,7 +167,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert tabs["run_inputs"]["content_adapter"] == "run_inputs"
     assert [
         item["kind"] for item in tabs["run_inputs"]["content_options"]["inputs"]
-    ] == ["strategy_source", "strategy_spec", "run_dependency"]
+    ] == ["run_dependency"]
     assert tabs["factor"].get("content_options") == {}
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",

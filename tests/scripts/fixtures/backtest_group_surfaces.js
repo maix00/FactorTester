@@ -48,6 +48,15 @@ global.FTBacktestGroupForm = {
     return form;
   },
 };
+global.FTTestSourceUpload = {
+  customStrategyPanel: (_context, _state, _refresh, options) => {
+    const panel = new Element("section");
+    panel.className = "test-custom-strategy-panel";
+    panel.textContent = options.title;
+    return panel;
+  },
+};
+window.FTTestSourceUpload = global.FTTestSourceUpload;
 
 vm.runInThisContext(fs.readFileSync(
   require("node:path").join(require("node:path").dirname(process.argv[2]), "tab-chip-content.js"),
@@ -124,6 +133,12 @@ const state = {
         order: 2, selection: "single", item_label: "组合",
         content_adapter: "backtest_long_short",
       },
+      {
+        key: "custom_strategy", label: "自定义策略", mount: "group-settings", kind: "list",
+        order: 3, selection: "single", item_label: "自定义策略",
+        content_adapter: "backtest_custom_strategies",
+        content_options: {inputs: [{kind: "strategy_source"}]},
+      },
     ],
     flows: [
       {
@@ -162,11 +177,16 @@ let root = window.FTBacktestGroups.render(context, state, () => { refreshCount +
 const tabButton = find(root, node => node.className.includes("tab-chip-button"));
 assert.ok(tabButton, "surface tabs should be rendered by the shared tab component");
 const surfaceTabs = findAll(root, node => node.className.includes("tab-chip-button"));
+assert.equal(surfaceTabs.length, 3, "strategy settings must expose three peer surfaces");
 surfaceTabs[1].listeners.click();
 assert.equal(state.backtestGroupSurfaceKey, "arbitrary-book");
 assert.ok(find(root, node => node.tagName === "button"
   && node.textContent === "新增 Long-Short 组合"),
   "switching strategy surfaces must immediately replace the action bar");
+state.backtestGroupSurfaceKey = "custom_strategy";
+root = window.FTBacktestGroups.render(context, state, () => { refreshCount += 1; });
+assert.ok(find(root, node => node.className === "test-custom-strategy-panel"),
+  "custom strategies must render inside the strategy-group surface");
 state.backtestGroupSurfaceKey = "groups";
 root = window.FTBacktestGroups.render(context, state, () => { refreshCount += 1; });
 const addGroup = find(root, node => node.tagName === "button" && node.textContent === "新增分组");
