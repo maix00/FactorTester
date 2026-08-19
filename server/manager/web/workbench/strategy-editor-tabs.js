@@ -49,35 +49,44 @@
     let chipHost = null;
 
     const manager = () => {
-      const panel = document.createElement("div");
-      panel.className = "strategy-editor-tab-manager";
-      const note = document.createElement("small");
-      const defaultLabels = defaultKeys(state).map(key => {
-        const tab = (state.manifest.tab_lists?.["group-settings"] || [])
-          .find(item => item.key === key)
-          || (state.manifest.strategy_editor?.inner_default_tabs || [])
-            .find(item => item.key === key);
-        return context.t(tab?.label || key);
+      const tabs = eligibleOverrideTabs(state);
+      return FTTabChipContent.createSettingsManager({
+        context,
+        sections: [{
+          label: "设置",
+          items: tabs.map(tab => ({
+            key: tab.key,
+            label: tab.label || tab.key,
+            description: tab.help_text || tab.description || "",
+            mounted: mounted.includes(tab.key),
+            onToggle: checked => {
+              mounted = unique([...defaultKeys(state), ...mounted.filter(key => (
+                key !== tab.key
+              )), ...(checked ? [tab.key] : [])]);
+              onMountedTabsChange?.([...mounted]);
+              redraw(tab.key);
+            },
+            preview: () => window.FTTestSettingChips ? FTTestSettingChips.render({
+              manifest: state.manifest,
+              values: FTSettingRules.previewDefaultsForTab(
+                state.manifest, state.values || {}, tab.key,
+              ),
+              context,
+              mountedTabs: [tab.key],
+              includeRun: false,
+              includeEmpty: true,
+              includeUnregistered: true,
+              includeHidden: true,
+              notApplicableLabel: "N/A",
+              includeTabFallbacks: true,
+              fallbackTabs: [tab.key],
+              groupBy: "tab",
+              sources: {},
+              inline: true,
+            }) : null,
+          })),
+        }],
       });
-      note.textContent = `${context.t("预挂载")}${defaultLabels.join("、")}；${context.t("其他覆盖设置可手动挂载")}`;
-      panel.append(note);
-      eligibleOverrideTabs(state).forEach(tab => {
-        const row = document.createElement("label");
-        row.className = "strategy-editor-tab-option";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = mounted.includes(tab.key);
-        checkbox.addEventListener("change", () => {
-          mounted = unique([...defaultKeys(state), ...mounted.filter(key => (
-            key !== tab.key
-          )), ...(checkbox.checked ? [tab.key] : [])]);
-          onMountedTabsChange?.([...mounted]);
-          redraw(tab.key);
-        });
-        row.append(checkbox, document.createTextNode(context.t(tab.label || tab.key)));
-        panel.append(row);
-      });
-      return panel;
     };
 
     function items() {

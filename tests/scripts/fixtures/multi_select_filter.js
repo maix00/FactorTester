@@ -7,9 +7,13 @@ class Element {
     this.tagName = tag; this.children = []; this.listeners = {};
     this.parentNode = null;
     this.className = ""; this.value = ""; this.checked = false;
-    this.disabled = false; this.hidden = false; this.dataset = {};
+    this.disabled = false; this.hidden = false; this.dataset = {}; this.style = {};
     this.classList = {
       add: (...names) => { this.className = `${this.className} ${names.join(" ")}`.trim(); },
+      remove: (...names) => {
+        const removed = new Set(names);
+        this.className = this.className.split(/\s+/).filter(name => !removed.has(name)).join(" ");
+      },
     };
   }
   get childElementCount() { return this.children.length; }
@@ -19,6 +23,12 @@ class Element {
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this[name] = String(value); }
+  removeAttribute(name) { if (name === "style") this.style = {}; else delete this[name]; }
+  getBoundingClientRect() {
+    return this.className.includes("ft-multi-select-menu")
+      ? {left: 20, top: 44, right: 340, bottom: 244, width: 320, height: 200}
+      : {left: 20, top: 10, right: 340, bottom: 40, width: 320, height: 30};
+  }
   closest(selector) {
     let current = this;
     while (current) {
@@ -34,9 +44,16 @@ function descendants(root) {
   return [root, ...root.children.flatMap(descendants)];
 }
 
-global.window = {};
+global.window = {
+  innerWidth: 1024, innerHeight: 768, listeners: {},
+  addEventListener(name, callback) { this.listeners[name] = callback; },
+  removeEventListener(name) { delete this.listeners[name]; },
+};
 const createdElements = [];
+const body = new Element("body");
 global.document = {
+  body,
+  documentElement: {clientWidth: 1024, clientHeight: 768},
   listeners: {},
   createElement: tag => {
     const element = new Element(tag);
@@ -160,9 +177,16 @@ assert.equal(locked.dropdown.open, false);
   assert.equal(multiSave.dropdown.open, false);
 
   multiSave.dropdown.open = true;
+  multiSave.dropdown.listeners.toggle();
+  assert.equal(multiSave.menu.parentNode, document.body,
+    "an open menu must be portaled above clipping ancestors");
+  assert.ok(multiSave.menu.className.includes("is-portaled"));
   document.dispatchEvent({type: "click", target: new Element("div")});
+  multiSave.dropdown.listeners.toggle();
   assert.equal(multiSave.dropdown.open, false,
     "clicking outside a multi-select must close the dropdown");
+  assert.equal(multiSave.menu.parentNode, multiSave.dropdown,
+    "closing restores the menu to its owning control");
 
   const cancel = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [{value: "a", label: "A"}, {value: "b", label: "B"}],

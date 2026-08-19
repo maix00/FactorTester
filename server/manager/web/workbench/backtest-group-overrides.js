@@ -66,7 +66,7 @@
     context, manifest, inheritedValues = {}, overrides: initial = {},
     manageTabs = false, mountedTabs: requestedMountedTabs,
     onlyTabs: requestedOnlyTabs,
-    onMountedTabsChange, onChange, scopeSide = "",
+    onMountedTabsChange, onChange, scopeSide = "", contentOnly = false,
   }) {
     const root = document.createElement("div");
     root.className = "backtest-group-overrides";
@@ -95,6 +95,12 @@
         const empty = document.createElement("small");
         empty.textContent = context.t("没有可按组覆盖的设置");
         root.append(empty); return;
+      }
+      if (contentOnly && usableTabs.length === 1 && !manageTabs) {
+        root.append(settingRows(
+          fieldsForTab(usableTabs[0].key, manifest, values, scopeSide), values,
+        ));
+        return;
       }
       const items = usableTabs.map(tab => ({
         key: tab.key,
@@ -158,10 +164,11 @@
 
     const settingRow = (key, field, values) => {
       const target = canonicalKey(key, field);
+      const editable = FTSettingRules.isEditable(field, values);
+      if (!editable && has(target)) delete overrides[target];
       const enabled = document.createElement("input");
       enabled.type = "checkbox"; enabled.checked = has(target);
       enabled.title = context.t("启用本组覆盖");
-      const editable = FTSettingRules.isEditable(field, values);
       const control = FTTestSettings.controlFor(
         key, field, manifest, values, context,
         {
@@ -194,7 +201,12 @@
       });
       const controlHost = document.createElement("div");
       controlHost.className = "backtest-group-override-control";
-      controlHost.append(enabled, control);
+      if (editable) controlHost.append(enabled);
+      else {
+        controlHost.classList.add("is-locked");
+        controlHost.setAttribute("aria-disabled", "true");
+      }
+      controlHost.append(control);
       return FTTestFieldRow.create(
         field.label || key,
         controlHost,

@@ -7,6 +7,7 @@
       inheritedValues: state.values,
       overrides: state.customStrategyOverrides || {},
       onlyTabs: [tab.key],
+      contentOnly: true,
       onChange: values => {
         state.customStrategyOverrides = values;
         refresh?.();

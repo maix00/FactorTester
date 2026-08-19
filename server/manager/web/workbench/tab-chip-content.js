@@ -172,8 +172,49 @@
     return Object.freeze({root, tabset, setCurrent});
   }
 
+  function createSettingsManager({context, sections = []}) {
+    const root = document.createElement("div");
+    root.className = "test-settings-manager";
+    const list = document.createElement("div");
+    list.className = "test-settings-manager-list";
+    for (const section of sections) {
+      if (!section?.items?.length) continue;
+      const header = document.createElement("header");
+      header.className = "test-settings-manager-section-heading";
+      const title = document.createElement("b");
+      title.textContent = context.t(section.label || "设置");
+      header.append(title);
+      if (section.description) header.title = context.t(section.description);
+      list.append(header);
+      for (const item of section.items) {
+        const row = document.createElement("label");
+        row.className = "test-settings-manager-row";
+        if (item.description) row.title = context.t(item.description);
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = Boolean(item.mounted);
+        toggle.disabled = Boolean(item.locked);
+        toggle.addEventListener("change", () => item.onToggle?.(toggle.checked));
+        const body = document.createElement("span");
+        body.className = "test-settings-manager-row-body";
+        const copy = document.createElement("span");
+        const label = document.createElement("b");
+        label.textContent = context.t(item.label || item.key);
+        copy.append(label); body.append(copy);
+        const preview = item.preview?.();
+        if (preview) {
+          preview.className = `${preview.className || ""} test-settings-manager-defaults`.trim();
+          body.append(preview);
+        }
+        row.append(toggle, body); list.append(row);
+      }
+    }
+    root.append(list);
+    return root;
+  }
+
   window.FTTabChipContent = Object.freeze({
-    create, createSettings,
+    create, createSettings, createSettingsManager,
     multiSelect(context, options = {}) {
       if (!window.FTMultiSelectFilter?.create) {
         throw new Error("共享多选筛选器尚未加载");

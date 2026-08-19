@@ -33,6 +33,7 @@
         inheritedValues,
         overrides: values,
         onlyTabs: [tab.key],
+        contentOnly: true,
         scopeSide,
         onChange: next => {
           values = clone(next) || {};

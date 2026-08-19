@@ -712,12 +712,31 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     assert "outer_pre_mounted_tabs" in tabs
     assert "includeEmpty: true" in tabs
     assert "FTTabChipContent.createSettings" in tabs
+    assert "FTTabChipContent.createSettingsManager" in tabs
     assert 'rootClass: "backend-settings-shell test-settings-shell strategy-editor-tabs"' in tabs
     assert "includeRun: false" in tabs
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
     assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
     assert ".test-object-editor-overlay-mount > .detail-stack" in styles
+
+
+def test_outer_inner_and_ic_settings_use_one_manager_contract() -> None:
+    settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(
+        encoding="utf-8",
+    )
+    tabs = (WEB_ROOT / "workbench" / "strategy-editor-tabs.js").read_text(
+        encoding="utf-8",
+    )
+    shared = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function createSettingsManager" in shared
+    assert "FTTabChipContent.createSettingsManager" in settings
+    assert "FTTabChipContent.createSettingsManager" in tabs
+    assert 'className = "strategy-editor-tab-manager"' not in tabs
+    assert 'className = "strategy-editor-tab-option"' not in tabs
 
 
 def test_test_settings_paints_registered_rows_before_lazy_adapter_catalogs() -> None:
