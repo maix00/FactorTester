@@ -185,6 +185,37 @@ class LocalAccountDomainStore:
             ).fetchall()
         return [_outbox_row(row) for row in rows]
 
+    def discard_local_entity(
+        self, principal: str, entity_type: str, entity_id: str,
+    ) -> None:
+        """Remove one superseded local identity and resolve its old conflicts."""
+        with connect_sqlite(self.path) as conn:
+            ensure_schema(conn)
+            key = (principal, entity_type, entity_id)
+            conn.execute(
+                """
+                DELETE FROM account_domain_outbox
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                key,
+            )
+            conn.execute(
+                """
+                DELETE FROM account_domain_entities
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                key,
+            )
+            conn.execute(
+                """
+                UPDATE account_domain_conflicts
+                SET status='resolved', resolved_at=?
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                  AND status='open'
+                """,
+                (time.time(), *key),
+            )
+
     def mark_attempt(self, operation_id: str, error: str = "") -> None:
         with connect_sqlite(self.path) as conn:
             conn.execute(

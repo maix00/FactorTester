@@ -355,12 +355,14 @@ class AccountDomainSyncService:
         return count
 
     def reconcile_factor_sources(self, principal: str = "") -> int:
-        """Backfill source manifests; source bodies never enter the payload."""
+        """Backfill one source manifest per storage provider, without bodies."""
         try:
             from tools.data.sqlite.factor_source_store import list_factor_sources
         except ImportError:
             return 0
         count = 0
+        existing_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
+        pending_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         for source_kind in ("custom", "public"):
             for value in list_factor_sources(source_kind):
                 owner = str(value.get("owner_username") or "").strip()
@@ -383,11 +385,59 @@ class AccountDomainSyncService:
                     "storage_server_id": self.manager_id,
                     "visibility": "public" if source_kind == "public" else "private",
                 }
-                self.upsert(
-                    target, "factor_source", f"{source_kind}:{factor_id}",
-                    payload, flush=False,
-                )
-                count += 1
+                # Source identity and storage availability are different
+                # dimensions. The same immutable source may be present on
+                # several Managers, so each provider owns an independent row.
+                entity_id = f"{source_kind}:{factor_id}@{self.manager_id}"
+                if target not in existing_by_principal:
+                    existing_by_principal[target] = {
+                        str(row.get("entity_id") or ""): row
+                        for row in self.local.list_entities(
+                            principal=target,
+                            entity_type="factor_source",
+                            include_shared=False,
+                        )
+                    }
+                existing = existing_by_principal[target]
+                current = existing.get(entity_id)
+                clean = public_payload(payload)
+                if not (
+                    current is not None
+                    and current.get("payload") == clean
+                    and str(current.get("origin_manager_id") or "")
+                    == self.manager_id
+                ):
+                    self.upsert(
+                        target, "factor_source", entity_id,
+                        clean, flush=False,
+                    )
+                    count += 1
+
+                # Versions before provider-scoped identities wrote every
+                # server to the same row. Retire only this Manager's matching
+                # pending override; never delete another provider's authority.
+                legacy_id = f"{source_kind}:{factor_id}"
+                if target not in pending_by_principal:
+                    pending_by_principal[target] = {
+                        str(item.get("entity_id") or ""): item
+                        for item in self.local.pending(
+                            principal=target, limit=1000,
+                        )
+                        if item.get("entity_type") == "factor_source"
+                    }
+                pending = pending_by_principal[target].get(legacy_id)
+                pending_payload = (pending or {}).get("payload") or {}
+                if (
+                    pending is not None
+                    and pending_payload.get("source_sha256")
+                    == payload["source_sha256"]
+                    and pending_payload.get("storage_server_id")
+                    == self.manager_id
+                ):
+                    self.local.discard_local_entity(
+                        target, "factor_source", legacy_id,
+                    )
+                    pending_by_principal[target].pop(legacy_id, None)
         if count:
             self.flush()
         return count
