@@ -60,13 +60,35 @@
     return tabs;
   }
 
+  function subjectScopeTabs(context, page, active) {
+    const tabs = document.createElement("nav");
+    tabs.className = "research-section-tabs factor-subject-scope-tabs";
+    tabs.setAttribute("aria-label", context.t(
+      page === "sets" ? "因子集合范围" : "因子范围",
+    ));
+    const noun = page === "sets" ? "因子集合" : "因子";
+    for (const [id, prefix] of [["mine", "我的"], ["subordinates", "下级用户"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `research-section-tab${id === active ? " active" : ""}`;
+      button.textContent = context.t(`${prefix}${noun}`);
+      button.setAttribute("aria-current", id === active ? "page" : "false");
+      const path = page === "sets" ? "/factors/sets" : "/factors";
+      button.addEventListener("click", () => context.navigate(
+        `${path}?scope=${encodeURIComponent(id)}`,
+      ));
+      tabs.append(button);
+    }
+    return tabs;
+  }
+
   function render(context, data, mount, {
     page, query, groupRefs = ["*"], scope = "public",
   }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, query, scope);
     }
-    return renderSubjects(context, data, mount, {page, query, groupRefs});
+    return renderSubjects(context, data, mount, {page, query, groupRefs, scope});
   }
 
   function renderFamilies(context, data, mount, query, scope) {
@@ -150,11 +172,14 @@
     return "暂无公共因子家族";
   }
 
-  function renderSubjects(context, data, mount, {page, query, groupRefs}) {
+  function renderSubjects(context, data, mount, {page, query, groupRefs, scope}) {
     const names = model().productGroupNames(data.groups);
     const bySubject = model().subjectGroups(data.groups);
     const kind = page === "sets" ? "factor-set" : "factor";
-    const values = kind === "factor-set" ? data.sets : data.factors;
+    const scoped = dataForScope(data, scope);
+    const values = kind === "factor-set"
+      ? (data.setScopes?.[scope] || [])
+      : scoped.factors;
     const selectedGroups = Array.isArray(groupRefs) ? groupRefs : ["*"];
     const allGroups = selectedGroups.includes("*") || !selectedGroups.length;
     const items = values.map(value => ({kind, value})).filter(item => {
@@ -225,5 +250,6 @@
     normalizeFamilyScope,
     render,
     searchPlaceholder,
+    subjectScopeTabs,
   });
 })();

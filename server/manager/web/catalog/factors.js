@@ -27,6 +27,7 @@
       principal: String(library.principal || ""),
       visitor: Boolean(library.visitor),
       sets: FTFactorModel.mergeFactorSets(sets.items, localSets.items),
+      setScopes: sets.item_scopes || {},
       groups: Array.isArray(groups.groups) ? groups.groups : [],
     };
     return cache;
@@ -46,6 +47,8 @@
     );
     if (page === "families") {
       root.append(FTFactorList.familyScopeTabs(context, familyScope, data.visitor));
+    } else if (!data.visitor) {
+      root.append(FTFactorList.subjectScopeTabs(context, page, familyScope));
     }
     let group = null;
     if (page !== "families") {

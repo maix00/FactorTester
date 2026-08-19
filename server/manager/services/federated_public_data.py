@@ -676,3 +676,9 @@ class FederatedPublicDataService:
         # Immutable sets share the same account-domain mirror as factors.
         # They must not reintroduce a peer wait after the factor list is ready.
         return self.client_state.factor_sets(principal, query)
+
+    def factor_set_scopes(
+        self, principal: str, query: str = "",
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read synchronized own/direct-child scopes without querying peers."""
+        return self.client_state.factor_set_scopes(principal, query)

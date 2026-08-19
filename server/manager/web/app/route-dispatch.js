@@ -82,7 +82,7 @@
           context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSet, route.id,
         );
         case "factors": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factors,
+          context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factors, route,
         );
         case "product-group": return guarded(
           context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroup, route.id,

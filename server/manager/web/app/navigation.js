@@ -230,7 +230,10 @@
           ? scope : "public",
       };
     }
-    if (parts[0] === "factors" && parts[1] === "sets") return {kind: "factor-sets"};
+    if (parts[0] === "factors" && parts[1] === "sets") {
+      const scope = new URLSearchParams(search).get("scope") || "mine";
+      return {kind: "factor-sets", scope: ["mine", "subordinates"].includes(scope) ? scope : "mine"};
+    }
     if (parts[0] === "factors" && parts[1] === "family" && parts[2]) {
       return {kind: "factor-family", id: decodeURIComponent(parts.slice(2).join("/"))};
     }
@@ -243,7 +246,10 @@
     if (parts[0] === "factors" && parts[1] === "set" && parts[2]) {
       return {kind: "factor-set", id: decodeURIComponent(parts.slice(2).join("/"))};
     }
-    if (parts[0] === "factors") return {kind: "factors"};
+    if (parts[0] === "factors") {
+      const scope = new URLSearchParams(search).get("scope") || "mine";
+      return {kind: "factors", scope: ["mine", "subordinates"].includes(scope) ? scope : "mine"};
+    }
     if (parts[0] === "products" && parts[1] === "group" && parts[2]) {
       return {kind: "product-group", id: decodeURIComponent(parts.slice(2).join("/"))};
     }
