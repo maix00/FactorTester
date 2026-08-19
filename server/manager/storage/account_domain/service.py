@@ -83,9 +83,20 @@ class AccountDomainSyncService:
         if not force and now - self._last_sync.get(owner, 0.0) < self.access_cooldown:
             return {"status": "cached", "principal": owner}
         self._last_sync[owner] = now
+        # Existing local rows may predate the generic account-domain outbox.
+        # Reconcile them at the same lazy boundary used by Web, Swift, and CLI
+        # reads so source-provider manifests are available before peers need
+        # to hydrate immutable factor source bytes over the data plane.
+        reconciled = self.reconcile_principal(owner)
         flushed = self.flush(principal=owner, limit=limit)
         pulled = self.pull(principal=owner, limit=limit)
-        return {"status": "synced", "principal": owner, "flushed": flushed, "pulled": pulled}
+        return {
+            "status": "synced",
+            "principal": owner,
+            "reconciled": reconciled,
+            "flushed": flushed,
+            "pulled": pulled,
+        }
 
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
         pending = self.local.pending(principal=principal, limit=limit)
