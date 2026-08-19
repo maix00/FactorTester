@@ -117,6 +117,9 @@ class _ClientState:
             "subordinates": {"factors": [], "families": []},
         }
 
+    def factor_sets(self, _principal, _query=""):
+        return [{"target_ref": "factor-set:local", "title_zh": "Local"}]
+
 
 def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     class ControlStore:
@@ -149,7 +152,7 @@ def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     assert "workspace_root" not in profiles[0]
 
 
-def test_federated_public_data_merges_remote_research_profiles_and_factors(
+def test_federated_public_data_merges_remote_research_and_profiles_without_live_factors(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -172,10 +175,10 @@ def test_federated_public_data_merges_remote_research_profiles_and_factors(
     assert reports[0]["source_server_id"] == "internal-1"
     assert profiles[0]["profile_id"] == "maxa"
     assert factors["factors"] == []
-    assert factors["families"][0]["factor_family_alias"] == "MomentumFamily"
+    assert factors["families"] == []
     assert ("research", "list", "__public_jobs__") in gateway.calls
     assert ("catalog", "profiles", "alice") in gateway.calls
-    assert ("catalog", "factors", "__public_jobs__") in gateway.calls
+    assert ("catalog", "factors", "__public_jobs__") not in gateway.calls
 
 
 def test_federated_factor_library_keeps_three_family_scopes(monkeypatch):
@@ -186,7 +189,7 @@ def test_federated_factor_library_keeps_three_family_scopes(monkeypatch):
     service = FederatedPublicDataService(
         server_id="public-1",
         registry=_Registry(_route()),
-        gateway=_Gateway(),
+        gateway=(gateway := _Gateway()),
         public_research=_Research(),
         client_state=_ClientState(),
     )
@@ -202,6 +205,23 @@ def test_federated_factor_library_keeps_three_family_scopes(monkeypatch):
         item["owner_username"] != "__public_jobs__"
         for item in value["factors"]
     )
+    assert not any(call[1] == "factors" for call in gateway.calls)
+
+
+def test_factor_sets_use_synced_local_mirror_without_peer_query():
+    gateway = _Gateway()
+    service = FederatedPublicDataService(
+        server_id="public-1",
+        registry=_Registry(_route()),
+        gateway=gateway,
+        public_research=_Research(),
+        client_state=_ClientState(),
+    )
+
+    assert service.factor_sets("alice") == [{
+        "target_ref": "factor-set:local", "title_zh": "Local",
+    }]
+    assert not any(call[1] == "factor-sets" for call in gateway.calls)
 
 
 def test_federated_public_research_detail_binds_publication_id_to_peer_payload():

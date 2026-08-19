@@ -784,16 +784,33 @@ class ClientStateService:
         )
 
         owner_account = self._local_account(principal)
+        if self.account_domain_sync is not None:
+            mirrored = factor_rows_from_sync(
+                self.account_domain_sync, principal,
+                owner_account=owner_account,
+            )
+            try:
+                # A picker must never wait for PostgreSQL or another Manager.
+                # Only seed an empty source-side mirror from local factor
+                # definitions; normal writes/background sync keep it fresh.
+                if not mirrored:
+                    self.account_domain_sync.reconcile_factor_catalog(principal)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                pass
+            if not mirrored:
+                mirrored = factor_rows_from_sync(
+                    self.account_domain_sync, principal,
+                    owner_account=owner_account,
+                )
+            if mirrored:
+                return build_client_library_projection(
+                    {"factors": mirrored, "errors": []}, principal=principal,
+                )
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
             account=owner_account,
             include_scope_catalog=False,
         )
-        if self.account_domain_sync is not None:
-            payload["factors"] = list(payload.get("factors") or []) + factor_rows_from_sync(
-                self.account_domain_sync, principal,
-                owner_account=owner_account,
-            )
         return build_client_library_projection(payload, principal=principal)
 
     def factor_library_scopes(self, principal: str) -> dict[str, dict[str, Any]]:
@@ -813,11 +830,7 @@ class ClientStateService:
         from tools.data.account_manage import visible_accounts_for
 
         owner_account = self._local_account(principal)
-        payload = build_factor_library_overview(
-            principal, include_subordinates=True,
-            account=owner_account,
-            include_scope_catalog=False,
-        )
+        mine = self.factor_library(principal)
         managed_usernames = {
             str(account.get("username") or "")
             for account in visible_accounts_for(
@@ -826,16 +839,20 @@ class ClientStateService:
             if isinstance(account, dict) and str(account.get("username") or "")
         }
         subordinate_rows = []
-        for item in payload.get("factors") or []:
-            owner = str(item.get("owner_username") or "")
-            if owner in managed_usernames:
-                subordinate_rows.append(item)
+        for owner in sorted(managed_usernames):
+            account = self._local_account(owner)
+            subordinate_payload = build_factor_library_overview(
+                owner, include_subordinates=False,
+                account=account,
+                include_scope_catalog=False,
+            )
+            subordinate_rows.extend(subordinate_payload.get("factors") or [])
         subordinate = build_client_library_projection({
             "factors": subordinate_rows,
-            "errors": payload.get("errors") or [],
+            "errors": [],
         }, principal=principal)
         return {
-            "mine": self.factor_library(principal),
+            "mine": mine,
             "subordinates": subordinate,
         }
 
@@ -853,6 +870,12 @@ class ClientStateService:
                 principal, entity_type="factor_set", include_shared=False,
                 sync=False,
             )
+            if not rows:
+                self.account_domain_sync.reconcile_factor_catalog(principal)
+                rows = self.account_domain_sync.entities(
+                    principal, entity_type="factor_set", include_shared=False,
+                    sync=False,
+                )
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
             rows = []
         known = {str(item.get("target_ref") or "") for item in values}
