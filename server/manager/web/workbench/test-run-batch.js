@@ -89,13 +89,18 @@
   async function openRunSpecs(context, state, refresh) {
     const tasks = selectedTasks(state);
     const failures = [];
+    const resolved = [];
     context.showNotice?.(context.t("正在准备运行配置…"));
     for (const {group, item} of tasks) {
-      if (model().runSpecPath(item)) continue;
+      if (model().runSpecPath(item)) {
+        resolved.push(item);
+        continue;
+      }
       try {
-        const completed = await previewOne(context, state, group, refresh);
-        const current = model().itemFor(state, group) || item;
-        if (!completed) failures.push({current, error: taskError(current)});
+        const frozen = await previewOne(context, state, group, refresh);
+        const current = frozen || model().itemFor(state, group) || item;
+        if (frozen && model().runSpecTarget(frozen)) resolved.push(frozen);
+        else failures.push({current, error: taskError(current)});
       } catch (error) {
         const current = model().itemFor(state, group) || item;
         current.phase = "failed";
@@ -104,7 +109,7 @@
         failures.push({current, error: current.error});
       }
     }
-    const entries = selectedTasks(state).map(({item}, index) => {
+    const entries = resolved.map((item, index) => {
       const target = model().runSpecTarget(item);
       if (!target) return null;
       const groupLabel = item.groupLabel || item.groupID || "";

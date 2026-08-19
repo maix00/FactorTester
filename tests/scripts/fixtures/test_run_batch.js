@@ -264,6 +264,18 @@ const strategyScopedBacktest = {
   assert.match(frozenHeader[1].title, /全部任务/,
     "the header run action must submit the complete task batch");
 
+  const refreshResetState = {
+    ...backtest,
+    testRunBatch: [],
+  };
+  const resetHeader = batch.headerActions(context, refreshResetState, () => {
+    refreshResetState.testRunBatch = [];
+  });
+  resetHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(openedRunSpecs.some(item => item.label.includes("回测任务")),
+    "RunSpec overlay must use the returned frozen record across a UI refresh");
+
   const failingContext = {
     ...context,
     async api() {
