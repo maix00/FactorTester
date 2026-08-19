@@ -51,6 +51,9 @@ global.FTTestFieldRow = {
     return row;
   },
 };
+global.window.FTStrategyEditorScope = {
+  scopedField: (value, key, side) => value.strategy_editor?.scoped_fields?.[key]?.[side],
+};
 
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-group-overrides.js",
@@ -143,4 +146,25 @@ assert.equal(lockedControlHost.children.length, 1,
   "auto-determined fields must not expose an override checkbox");
 assert.deepEqual(contentOnly.value(), {},
   "stale overrides for auto-determined fields must not enter the RunSpec");
+const directManifest = {
+  defaults: {
+    warmup_mode: {scope_policy: "overridable", tab_key: "factor"},
+  },
+  tab_lists: {"group-settings": [{key: "factor", label: "因子执行"}]},
+  strategy_editor: {
+    scoped_fields: {
+      warmup_mode: {inner: {override_control: "direct"}},
+    },
+  },
+};
+const directView = api.render({
+  context: {t: value => value}, manifest: directManifest,
+  inheritedValues: {warmup_mode: "auto"}, overrides: {},
+  scopeSide: "inner", onlyTabs: ["factor"], contentOnly: true,
+});
+const directHost = directView.children[0].children[0].children[1];
+assert.equal(directHost.children.length, 1,
+  "direct nested overrides must not render an enable checkbox");
+assert.equal(directHost.children[0].tagName, "control");
+assert.equal(directHost.children[0].disabled, false);
 console.log("ok");

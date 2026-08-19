@@ -147,6 +147,11 @@
     const groups = products.selectedGroups(state);
     if (!groups.length) return null;
     const items = model().synchronize(state);
+    const activeIndex = Math.max(0, items.findIndex(item => (
+      item.groupID === state.activeRunGroupID
+    )));
+    const activeItem = items[activeIndex];
+    const activeGroup = groups[activeIndex];
     const root = document.createElement("section"); root.className = "test-run-batch";
     const heading = document.createElement("div"); heading.className = "section-heading";
     const copy = document.createElement("div");
@@ -155,6 +160,19 @@
     description.textContent = context.t("每个产品组冻结独立 RunSpec，并保留对应测试任务入口");
     copy.append(title, description);
     const actions = document.createElement("div"); actions.className = "test-run-batch-actions";
+    const runSpecButton = context.button(context.t("查看 RunSpec"), () => {
+      const path = runSpecPath(activeItem);
+      if (path) context.navigate(path);
+      else void previewOne(context, state, activeGroup, refresh);
+    });
+    runSpecButton.title = context.t("查看当前产品组冻结的 RunSpec；尚未冻结时先生成 RunSpec");
+    const runButton = context.button(context.t("运行"), () => (
+      invokeAction("runOne", [context, state, activeGroup, refresh])
+    ));
+    runButton.title = context.t("运行当前选中的产品组任务");
+    runButton.disabled = !activeGroup || ["freezing", "submitting"].includes(
+      activeItem?.phase,
+    );
     const previewAllButton = context.button(
       context.t("全部预览"), () => previewAll(context, state, refresh),
     );
@@ -163,15 +181,12 @@
     ));
     previewAllButton.disabled = !groups.length;
     runAllButton.disabled = !groups.length;
-    actions.append(previewAllButton, runAllButton);
+    actions.append(runSpecButton, runButton, previewAllButton, runAllButton);
     heading.append(copy, actions); root.append(heading);
     const matrix = FTTestRunSummary?.planSummary?.(context, state);
     if (matrix) root.append(matrix);
     root.append(tabBar(context, state, items, refresh));
-    const activeIndex = Math.max(0, items.findIndex(item => (
-      item.groupID === state.activeRunGroupID
-    )));
-    root.append(panel(context, state, items[activeIndex], groups[activeIndex], refresh));
+    root.append(panel(context, state, activeItem, activeGroup, refresh));
     return root;
   }
 

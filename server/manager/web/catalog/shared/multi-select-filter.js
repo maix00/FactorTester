@@ -158,7 +158,8 @@
     }
 
     const menu = document.createElement("div");
-    menu.className = "ft-multi-select-menu";
+    menu.className = ["ft-multi-select-menu", options.menuClass || ""]
+      .filter(Boolean).join(" ");
     menu.addEventListener("click", event => event.stopPropagation());
     const searchRow = document.createElement("div");
     searchRow.className = "ft-multi-select-search-row";

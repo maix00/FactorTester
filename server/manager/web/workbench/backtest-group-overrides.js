@@ -165,10 +165,16 @@
     const settingRow = (key, field, values) => {
       const target = canonicalKey(key, field);
       const editable = FTSettingRules.isEditable(field, values);
+      const scopeField = scopeSide && window.FTStrategyEditorScope?.scopedField?.(
+        manifest, key, scopeSide,
+      );
+      const directOverride = scopeField?.override_control === "direct";
       if (!editable && has(target)) delete overrides[target];
-      const enabled = document.createElement("input");
-      enabled.type = "checkbox"; enabled.checked = has(target);
-      enabled.title = context.t("启用本组覆盖");
+      const enabled = directOverride ? null : document.createElement("input");
+      if (enabled) {
+        enabled.type = "checkbox"; enabled.checked = has(target);
+        enabled.title = context.t("启用本组覆盖");
+      }
       const control = FTTestSettings.controlFor(
         key, field, manifest, values, context,
         {
@@ -188,9 +194,9 @@
           },
           refresh: redraw,
         },
-        !enabled.checked || !editable,
+        (!directOverride && !enabled?.checked) || !editable,
       );
-      enabled.addEventListener("change", () => {
+      if (enabled) enabled.addEventListener("change", () => {
         if (enabled.checked) {
           overrides[target] = clone(FTSettingRules.valueFor(key, field, values));
         } else {
@@ -201,7 +207,8 @@
       });
       const controlHost = document.createElement("div");
       controlHost.className = "backtest-group-override-control";
-      if (editable) controlHost.append(enabled);
+      if (editable && enabled) controlHost.append(enabled);
+      else if (editable && directOverride) controlHost.classList.add("is-direct-override");
       else {
         controlHost.classList.add("is-locked");
         controlHost.setAttribute("aria-disabled", "true");

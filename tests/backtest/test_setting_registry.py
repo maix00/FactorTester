@@ -1333,6 +1333,8 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert scoped["warmup_window"]["inner"]["visible_when"] == {
             "field_values": {"warmup_mode": ["fixed"]},
         }
+        for key in ("factor_mode", "warmup_mode", "warmup_window"):
+            assert scoped[key]["inner"]["override_control"] == "direct"
         assert scoped["product_path_candidates"]["inner"][
             "source_when_outer_unmounted"
         ] == "visible_product_group_catalog"
