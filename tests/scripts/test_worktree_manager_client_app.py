@@ -709,6 +709,60 @@ def test_run_submission_skips_route_without_data_capability(
     ]
 
 
+def test_run_submission_honours_the_requested_business_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.test_authoring,
+        "prepare_run_context",
+        lambda payload, owner: {"owner": owner, "prepared": payload},
+    )
+    routes = [
+        manager.ServiceRoute(
+            server_id="feat-8141", role="feat", branch="feat",
+            revision="a", port=8141, latency_ms=1, online=True,
+        ),
+        manager.ServiceRoute(
+            server_id="main-8000", role="main", branch="main",
+            revision="b", port=8000, latency_ms=2, online=True,
+        ),
+    ]
+    monkeypatch.setattr(
+        state, "service_routes", lambda include_offline=True: routes,
+    )
+    calls = []
+
+    def route_request(route, **values):
+        calls.append((route.server_id, route.port, values["path"]))
+        return manager.GatewayResponse(
+            status=(200 if values["path"].endswith("capability-preview") else 202),
+            body=b'{"success":true,"run_id":"run-1"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    body = b'{"workspace_id":"workspace-1","analyses":["backtest"]}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/runs?port=8000",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["execution_server_id"] == "main-8000"
+    assert value["execution_port"] == 8000
+    assert calls == [
+        ("main-8000", 8000, "/api/runs/capability-preview"),
+        ("main-8000", 8000, "/api/runs"),
+    ]
+
+
 def test_remote_run_submission_uses_manager_frozen_authoring_context(
     tmp_path, monkeypatch,
 ) -> None:
@@ -1658,8 +1712,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "workbench-run-submit" in scripts["tests.js"]
     assert 'analyses: [state.kind]' in scripts["run-batch-actions.js"]
     assert "/api/runs" in scripts["run-batch-actions.js"]
-    assert 'servicePath("/api/runs/preview")' in scripts["run-batch-actions.js"]
-    assert 'servicePath("/api/runs")' in scripts["run-batch-actions.js"]
+    assert 'serviceRunPath(context, state, "/api/runs/preview")' in scripts["run-batch-actions.js"]
+    assert 'serviceRunPath(context, state, "/api/runs")' in scripts["run-batch-actions.js"]
     assert "FTICResults?.section" in scripts["test-run-results.js"]
     assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
     assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]

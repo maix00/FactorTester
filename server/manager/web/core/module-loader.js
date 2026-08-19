@@ -44,21 +44,6 @@
     return promise;
   }
 
-  function preloadScripts(relatives) {
-    const links = [];
-    for (const relative of relatives) {
-      if (loaded.has(relative)) continue;
-      const link = document.createElement("link");
-      link.rel = "preload";
-      link.as = "script";
-      link.href = assetURL(relative);
-      link.dataset.ftLazyPreload = relative;
-      document.head.append(link);
-      links.push(link);
-    }
-    return () => links.forEach(link => link.remove());
-  }
-
   async function loadGroup(name, value, stack = new Set()) {
     if (!name) return;
     if (stack.has(name)) {
@@ -76,16 +61,11 @@
       const external = value.group_external_scripts?.[name] || [];
       for (const relative of external) await loadScript(relative);
       const scripts = value.groups?.[name] || [];
-      // Dynamic script tags with async=false still fetch in sequence in some
-      // WebKit versions.  Preload the whole group first, then execute the
-      // original manifest order so global-IIFE dependencies remain unchanged
-      // while high-latency connections pay one round of network latency.
-      const removePreloads = preloadScripts(scripts);
-      try {
-        for (const relative of scripts) await loadScript(relative);
-      } finally {
-        removePreloads();
-      }
+      // Keep fetching and evaluation on one ordered script path. WebKit can
+      // lose the dynamic script's load event when an identical preload link
+      // wins the fetch race, leaving the group Promise pending forever even
+      // though the server returned both assets successfully.
+      for (const relative of scripts) await loadScript(relative);
     })();
     groupLoads.set(name, promise);
     try {

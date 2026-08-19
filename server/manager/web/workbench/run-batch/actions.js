@@ -5,6 +5,13 @@
     return String(state.runValues?.execution_target || "server") === "local";
   }
 
+  function serviceRunPath(context, state, path) {
+    const requestedPort = String(state.runValues?.service_port || "").trim();
+    if (!requestedPort) return context.servicePath(path);
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}port=${encodeURIComponent(requestedPort)}`;
+  }
+
   async function localRequest(action, request) {
     const handler = window.webkit?.messageHandlers?.factorTesterLocalRun;
     if (!handler?.postMessage) {
@@ -17,11 +24,27 @@
     return value;
   }
 
+  async function submitServerRun(context, state, request) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      return await context.api(serviceRunPath(context, state, "/api/runs"), {
+        method: "POST", body: JSON.stringify(request), signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("任务提交响应超时；请检查任务列表确认服务端是否已接收");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async function runRequest(context, state) {
     // Report/reference code and uploaded-source serializers are only needed
     // once an explicit preview/run action starts.  Rendering the batch matrix
     // must not pull this execution graph into the page.
-    await window.FTStaticLoader?.loadGroups?.(["research"]);
     await window.FTTests?.ensureFactorsForExecution?.(context, state);
     await window.FTTests?.ensureProductsForExecution?.(context, state);
     const factorSets = window.FTTestFactorSets;
@@ -79,6 +102,7 @@
   }
 
   async function requestForPreview(context, state, group) {
+    if (!window.FTTestConfiguration) throw new Error("运行配置提交模块不可用");
     const configuration = await FTTestConfiguration.save(context, state, group);
     const request = {
       ...await runRequest(context, state),
@@ -98,11 +122,10 @@
     try {
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
-      await window.FTTests?.ensureRunSubmitCode?.(context, state);
       const request = await requestForPreview(context, state, group);
       const value = usesLocalRuntime(state)
         ? await localRequest("preview", request)
-        : await context.api(context.servicePath("/api/runs/preview"), {
+        : await context.api(serviceRunPath(context, state, "/api/runs/preview"), {
           method: "POST", body: JSON.stringify(request),
         });
       model().recordPreview(
@@ -122,28 +145,22 @@
   }
 
   async function runOne(context, state, group, refresh) {
-    const item = model().itemFor(state, group);
+    let item = model().itemFor(state, group);
     state.activeRunGroupID = item.groupID;
-    const reusePreview = model().previewMatches(item, state, group);
-    if (!reusePreview) model().invalidatePreview(item);
-    model().update(item, "submitting", refresh);
     try {
-      await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
-      await window.FTTests?.ensureProductsForExecution?.(context, state);
-      await window.FTTests?.ensureRunSubmitCode?.(context, state);
-      const request = reusePreview
-        ? model().clone(item.previewRequest)
-        : {
-          ...await runRequest(context, state),
-          configuration_revision: (
-            await FTTestConfiguration.save(context, state, group)
-          ).revision,
-        };
+      if (!model().previewMatches(item, state, group)) {
+        model().invalidatePreview(item);
+        item = await previewOne(context, state, group, refresh);
+        if (!item || !model().previewMatches(item, state, group)) return false;
+      }
+      model().update(item, "submitting", refresh);
+      // Submission always reuses the exact immutable request that produced
+      // the RunSpec shown by “查看运行配置”. This prevents a second save or a
+      // late UI mutation from making the displayed and executed specs drift.
+      const request = model().clone(item.previewRequest);
       const value = usesLocalRuntime(state)
         ? await localRequest("run", request)
-        : await context.api(context.servicePath("/api/runs"), {
-          method: "POST", body: JSON.stringify(request),
-        });
+        : await submitServerRun(context, state, request);
       if (usesLocalRuntime(state)) {
         model().recordLocalSubmission(item, value);
       } else {
