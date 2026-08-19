@@ -132,6 +132,16 @@
         item, value, request, model().inputFingerprint(state, group),
       );
       refresh?.();
+      // A content refresh can replace state.testRunBatch while this async
+      // preview still owns the original item. Mirror the frozen contract into
+      // the current model so the persistent header enables Run and submission
+      // reuses the exact request/hash shown in the overlay.
+      const current = model().itemFor(state, group);
+      if (current && current !== item) {
+        model().recordPreview(
+          current, value, request, model().inputFingerprint(state, group),
+        );
+      }
       // Return the exact frozen record. A page refresh may rebuild
       // state.testRunBatch while this asynchronous action is still active;
       // callers must not have to rediscover this result from mutable UI state.
@@ -153,7 +163,8 @@
     try {
       if (!model().previewMatches(item, state, group)) {
         model().invalidatePreview(item);
-        item = await previewOne(context, state, group, refresh);
+        await previewOne(context, state, group, refresh);
+        item = model().itemFor(state, group);
         if (!item || !model().previewMatches(item, state, group)) return false;
       }
       model().update(item, "submitting", refresh);
