@@ -1,4 +1,8 @@
 from server.services.frozen_product_scope import freeze_product_scope
+from server.modules.shared.factor_tester_runtime import (
+    selection_for_product_path_selection,
+)
+from server.modules.single_factor_test.research_jobs import _execution_payload
 
 
 def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
@@ -160,3 +164,38 @@ def test_freeze_product_scope_is_shared_by_ic_and_backtest() -> None:
     ]
     assert "product_selections" not in payload["analyses"]["ic"]
     assert payload["analyses"]["ic"]["product_path_selection_id"] == "scope-a"
+
+
+def test_frozen_shared_selection_reaches_backtest_runtime(monkeypatch) -> None:
+    configuration = {
+        "configuration_id": "config-a",
+        "revision": 2,
+        "fingerprint": "sha256:config-a",
+        "payload": {
+            "schema_version": 1,
+            "shared": {"factor_families": [], "factors": []},
+            "analyses": {"backtest": {
+                "groups": [{"product_path_selection_id": "scope-a"}],
+                "product_selections": {
+                    "scope-a": {"paths": ["Product/A"]}
+                },
+            }},
+            "ui": {},
+        },
+    }
+    frozen = freeze_product_scope(
+        configuration, owner="alice", analyses=["backtest"]
+    )
+    execution = _execution_payload(frozen, "backtest")
+    product = object()
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (paths, [product]),
+    )
+
+    selection = selection_for_product_path_selection(
+        execution, "scope-a", page_uuid=""
+    )
+
+    assert selection.selected_paths == ["Product/A"]
+    assert selection.products == [product]
