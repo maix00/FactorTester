@@ -264,10 +264,26 @@ const strategyScopedBacktest = {
   assert.match(frozenHeader[1].title, /全部任务/,
     "the header run action must submit the complete task batch");
 
+  const refreshResetState = {
+    ...backtest,
+    testRunBatch: [],
+  };
+  const resetHeader = batch.headerActions(context, refreshResetState, () => {
+    refreshResetState.testRunBatch = [];
+  });
+  resetHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(openedRunSpecs.some(item => item.label.includes("回测任务")),
+    "RunSpec overlay must use the returned frozen record across a UI refresh");
+
   const failingContext = {
     ...context,
     async api() {
-      throw new Error("preview endpoint unavailable");
+      const error = new Error("preview endpoint unavailable");
+      error.code = "no_capable_service";
+      error.details = {detail: "required source is unavailable"};
+      error.candidates = [{server_id: "office-a", port: 8141, detail: "offline"}];
+      throw error;
     },
   };
   const failingState = {
@@ -280,6 +296,12 @@ const strategyScopedBacktest = {
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(notices.some(item => item.isError && /preview endpoint unavailable/.test(item.message)),
     "RunSpec preview failures must be visible instead of being swallowed");
+  assert.ok(notices.some(item => item.isError
+    && /no_capable_service/.test(item.message)
+    && /required source is unavailable/.test(item.message)
+    && /office-a:8141/.test(item.message)
+    && /offline/.test(item.message)),
+  "RunSpec preview failures must expose structured backend diagnostics");
 
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);

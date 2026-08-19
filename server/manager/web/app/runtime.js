@@ -86,6 +86,10 @@
         const error = new Error(value.error || `HTTP ${response.status}`);
         error.status = response.status;
         error.code = value.code || "";
+        error.detail = value.detail || "";
+        error.details = value.details || null;
+        error.candidates = value.candidates || value.failures || null;
+        error.payload = value;
         error.redirect = value.redirect || "";
         error.path = path;
         throw error;

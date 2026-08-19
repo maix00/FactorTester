@@ -109,12 +109,15 @@
         item, value, request, model().inputFingerprint(state, group),
       );
       refresh?.();
-      return true;
+      // Return the exact frozen record. A page refresh may rebuild
+      // state.testRunBatch while this asynchronous action is still active;
+      // callers must not have to rediscover this result from mutable UI state.
+      return item;
     } catch (error) {
       item.phase = "failed";
-      item.error = error.message || String(error);
+      item.error = model().errorDetail(error);
       refresh?.();
-      return false;
+      return null;
     }
   }
 
@@ -150,7 +153,7 @@
       return true;
     } catch (error) {
       item.phase = "failed";
-      item.error = error.message || String(error);
+      item.error = model().errorDetail(error);
       refresh?.();
       return false;
     }

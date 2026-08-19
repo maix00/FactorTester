@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 
 from server.manager.services import factor_source_transfer
+from server.manager.transfers.models import TransferStatus
 
 
 def _entry() -> dict[str, object]:
@@ -56,6 +57,25 @@ def test_remote_source_upload_consumes_ticket_on_loopback(monkeypatch) -> None:
     assert requested == [(
         "http://127.0.0.1:7997/v1/transfers/a/upload", None,
     )]
+
+
+def test_completed_remote_source_upload_is_not_repeated() -> None:
+    class Requests:
+        @staticmethod
+        def by_idempotency_key(_key):
+            return type("Transfer", (), {"status": TransferStatus.COMPLETED})()
+
+    class State:
+        server_id = "public-1"
+        transfer_coordinator = type("Coordinator", (), {"requests": Requests()})()
+
+        @staticmethod
+        def prepare_object_upload(**_kwargs):
+            raise AssertionError("completed source transfer must be reused")
+
+    factor_source_transfer.FactorSourceTransfer(State()).stage(
+        [_entry()], principal="alice", target_server_id="office-a",
+    )
 
 
 class _Response:
