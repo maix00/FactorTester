@@ -113,6 +113,11 @@
 
     const host = document.createElement("div");
     host.className = "profile-chatkit-host";
+    // ChatKit keeps internal request state in the custom element.  The tab
+    // cache may detach and later reattach that element, which leaves its
+    // history sidebar in an unfinished loading state in some browsers.  Ask
+    // the tab cache to remount this host when the tab is activated again.
+    host.dataset.ftRerenderOnTabRestore = "true";
     host.setAttribute("aria-live", "polite");
     root.append(note, status, actions, host);
 
@@ -125,10 +130,16 @@
       host.replaceChildren();
     }
 
+    host.__ftBeforeTabSave = disposeChat;
+
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+
     async function refreshStatus() {
+      if (!isCurrent()) return;
       const payload = await context.api(
         `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
       );
+      if (!isCurrent()) return;
       running = Boolean(payload.status?.running);
       start.disabled = running;
       stop.disabled = !running;
@@ -141,6 +152,7 @@
       if (mounted) return;
       status.textContent = context.t("正在加载 Agent 对话…");
       mounted = await mountChatKit(context, profile, host, status);
+      if (!isCurrent()) disposeChat();
     }
 
     start.onclick = async () => {

@@ -1,5 +1,7 @@
 (() => {
   const profileStates = new Map();
+  const CONVERSATION_LIST_TIMEOUT_MS = 10000;
+  const SELECTED_CONVERSATION_KEY = "ft-profile-agent-selected-conversation:";
 
   function profileKey(profile) {
     return String(profile?.profile_id || "").trim();
@@ -7,6 +9,43 @@
 
   function conversationKey(conversation) {
     return String(conversation?.conversation_id || "").trim();
+  }
+
+  function selectedConversationStorageKey(profileID) {
+    return `${SELECTED_CONVERSATION_KEY}${encodeURIComponent(String(profileID || ""))}`;
+  }
+
+  function readSelectedConversation(profileID) {
+    try {
+      return String(
+        sessionStorage.getItem(selectedConversationStorageKey(profileID)) || "",
+      ).trim();
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function rememberSelectedConversation(profileID, conversationID) {
+    const value = String(conversationID || "").trim();
+    try {
+      const key = selectedConversationStorageKey(profileID);
+      if (value) sessionStorage.setItem(key, value);
+      else sessionStorage.removeItem(key);
+    } catch (_) {
+      // Private browsing and embedded WebViews may deny sessionStorage.
+    }
+  }
+
+  function withTimeout(promise, milliseconds) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(
+        new Error("Profile Agent conversation history timed out"),
+      ), milliseconds);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer !== null) clearTimeout(timer);
+    });
   }
 
   function dateValue(value, fallback = new Date().toISOString()) {
@@ -34,7 +73,8 @@
       context,
       skills: [...skills],
       conversations: new Map(),
-      selectedID: "",
+      selectedID: readSelectedConversation(identifier),
+      conversationListPromise: null,
     };
     profileStates.set(identifier, state);
     return state;
@@ -73,34 +113,49 @@
   }
 
   async function loadConversations(profileState) {
-    const payload = await profileState.context.api(
+    if (profileState.conversationListPromise) {
+      return profileState.conversationListPromise;
+    }
+    let pending;
+    pending = withTimeout(profileState.context.api(
       `/api/client/profile-agent/conversations?profile_id=${encodeURIComponent(profileState.profileID)}`,
-    );
-    const conversations = Array.isArray(payload.conversations)
-      ? payload.conversations : [];
-    const seen = new Set();
-    for (const conversation of conversations) {
-      const identifier = conversationKey(conversation);
-      if (!identifier) continue;
-      const state = conversationState(profileState, conversation);
-      const providerThreadID = String(conversation.provider_thread_id || "").trim();
-      if (state.threadID !== providerThreadID) {
-        state.threadID = providerThreadID;
-        state.restored = false;
-        state.items = [];
+    ), CONVERSATION_LIST_TIMEOUT_MS).then(payload => {
+      const conversations = Array.isArray(payload.conversations)
+        ? payload.conversations : [];
+      return conversations;
+    }).then(conversations => {
+      const selectedID = profileState.selectedID;
+      const seen = new Set();
+      for (const conversation of conversations) {
+        const identifier = conversationKey(conversation);
+        if (!identifier) continue;
+        const state = conversationState(profileState, conversation);
+        const providerThreadID = String(conversation.provider_thread_id || "").trim();
+        if (state.threadID !== providerThreadID) {
+          state.threadID = providerThreadID;
+          state.restored = false;
+          state.items = [];
+        }
+        state.threadTitle = String(conversation.title || state.threadTitle || "").trim();
+        state.createdAt = dateValue(conversation.created_at, state.createdAt);
+        seen.add(identifier);
       }
-      state.threadTitle = String(conversation.title || state.threadTitle || "").trim();
-      state.createdAt = dateValue(conversation.created_at, state.createdAt);
-      seen.add(identifier);
-    }
-    for (const identifier of profileState.conversations.keys()) {
-      if (!seen.has(identifier)) profileState.conversations.delete(identifier);
-    }
-    const selected = conversations.find(item => item.active) || conversations[0];
-    if (!profileState.selectedID || !profileState.conversations.has(profileState.selectedID)) {
-      profileState.selectedID = conversationKey(selected);
-    }
-    return conversations;
+      for (const identifier of profileState.conversations.keys()) {
+        if (!seen.has(identifier)) profileState.conversations.delete(identifier);
+      }
+      const selected = conversations.find(item => item.active) || conversations[0];
+      if (!selectedID || !profileState.conversations.has(selectedID)) {
+        profileState.selectedID = conversationKey(selected);
+      }
+      rememberSelectedConversation(profileState.profileID, profileState.selectedID);
+      return conversations;
+    }).finally(() => {
+      if (profileState.conversationListPromise === pending) {
+        profileState.conversationListPromise = null;
+      }
+    });
+    profileState.conversationListPromise = pending;
+    return pending;
   }
 
   async function createConversation(profileState, title = "") {
@@ -113,6 +168,7 @@
     );
     const state = conversationState(profileState, payload.conversation);
     profileState.selectedID = state.conversationID;
+    rememberSelectedConversation(profileState.profileID, state.conversationID);
     return state;
   }
 
@@ -139,6 +195,7 @@
       }
     }
     profileState.selectedID = identifier;
+    rememberSelectedConversation(profileState.profileID, identifier);
     return state;
   }
 
@@ -176,6 +233,7 @@
     profileState.conversations.delete(state.conversationID);
     if (profileState.selectedID === state.conversationID) {
       profileState.selectedID = "";
+      rememberSelectedConversation(profileState.profileID, "");
     }
   }
 
