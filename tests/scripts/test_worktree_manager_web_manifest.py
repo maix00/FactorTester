@@ -434,6 +434,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
+
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-previews"]
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-ic"]
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-backtest"]
@@ -486,7 +487,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     initial = set(research_static._initial_scripts(manifest))
     assert not any(path.startswith("workbench/") for path in initial)
     assert not any(path.startswith("catalog/") for path in initial)
-    assert "preload" in loader
+    assert 'link.rel = "preload"' not in loader
     assert "protectedRouteKinds" in coordinator
     state_loader = tests_module.split("async function loadState", 1)[1].split(
         "function lazyReady", 1
@@ -502,6 +503,13 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     # A login-only deep link must not trigger feature code loading before the
     # existing route guard has rendered its login view.
     assert "if (!state.session && protectedRouteKinds.has(route.kind))" in coordinator
+
+
+def test_lazy_loader_uses_one_ordered_script_path_for_webkit() -> None:
+    loader = (WEB_ROOT / "core" / "module-loader.js").read_text(encoding="utf-8")
+    assert 'link.rel = "preload"' not in loader
+    assert "preloadScripts" not in loader
+    assert "for (const relative of scripts) await loadScript(relative);" in loader
 
 
 def test_product_price_chart_is_interactive_ohlcv() -> None:
@@ -859,7 +867,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-run", "workbench-products", "workbench-ic-controls",
     ]
     assert manifest["group_dependencies"]["workbench-run-batch-actions"] == [
-        "workbench-run-batch", "workbench-input-state",
+        "workbench-run-batch", "workbench-input-state", "workbench-run-submit",
     ]
     assert manifest["group_dependencies"]["workbench-run-results"] == [
         "workbench-run", "jobs",
@@ -988,6 +996,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert "context.api(" in run_actions
     assert "FTTestInputState.requestBody" in run_actions
     assert "FTTestConfiguration.save" in run_actions
+    assert 'loadGroups?.(["workbench-run-submit"])' not in run_actions
     assert 'run_inputs: "workbench-source-inputs"' in (
         WEB_ROOT / "workbench" / "test-lazy-code.js"
     ).read_text(encoding="utf-8")
@@ -1548,6 +1557,10 @@ def test_test_run_batch_keeps_runspec_and_job_links_for_ic_and_backtest() -> Non
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    tests_source = (
+        ROOT / "server" / "manager" / "web" / "workbench" / "tests.js"
+    ).read_text(encoding="utf-8")
+    assert "FTTestRunBatch.renderSubmitted" in tests_source
 
 
 def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:

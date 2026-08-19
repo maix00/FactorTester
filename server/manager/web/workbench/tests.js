@@ -551,6 +551,12 @@
         ensureBacktestCode(context, state, () => render(context, state));
       }
     }
+    if (window.FTTestRunBatch?.renderSubmitted) {
+      const submitted = window.FTTestRunBatch.renderSubmitted(
+        context, state, () => render(context, state),
+      );
+      if (submitted) root.append(submitted);
+    }
     context.content.replaceChildren(root);
   }
 

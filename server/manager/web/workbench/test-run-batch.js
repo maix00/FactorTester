@@ -59,7 +59,32 @@
       : missingScopeMessage(context, state);
 
     const runButton = context.button(context.t("运行"), () => {
-      if (hasTasks) void invokeAction("runAll", [context, state, refresh]);
+      const currentTasks = selectedTasks(state || {});
+      if (!currentTasks.length) {
+        showRunError(context, new Error(missingScopeMessage(context, state)));
+        return;
+      }
+      runButton.disabled = true;
+      context.showNotice?.(context.t("正在提交测试任务…"));
+      void invokeAction("runAll", [context, state, refresh])
+        .then(items => {
+          const failures = (Array.isArray(items) ? items : [])
+            .filter(item => item.error)
+            .map(item => `${item.groupLabel || item.groupID}: ${item.error}`);
+          if (failures.length) showRunError(context, new Error(failures.join("；")));
+          else context.showNotice?.("");
+        })
+        .catch(error => {
+          showRunError(context, error);
+        })
+        .finally(() => {
+          // Header controls are not recreated by every content refresh.  The
+          // button therefore owns its pending lifecycle and must never stay
+          // disabled after a rejected service submission (for example 507).
+          runButton.disabled = selectedTasks(state || {}).some(({item}) => (
+            ["freezing", "submitting"].includes(item.phase)
+          ));
+        });
     }, context.t("运行当前测试配置下的全部任务"));
     runButton.className = "test-workbench-header-action";
     runButton.disabled = !hasTasks || tasks.some(({item}) => (
@@ -80,6 +105,11 @@
   function showRunSpecError(context, error) {
     const detail = model().errorDetail(error);
     context.showNotice?.(`${context.t("读取运行配置失败")}: ${detail}`, true);
+  }
+
+  function showRunError(context, error) {
+    const detail = model().errorDetail(error);
+    context.showNotice?.(`${context.t("运行测试失败")}: ${detail}`, true);
   }
 
   function taskError(item) {
@@ -153,8 +183,105 @@
   }
   function jobPath(...args) { return model().jobPath(...args); }
 
+  function ensureResultCode(state, item, refresh) {
+    if (window.FTTestRunResults) return Promise.resolve(true);
+    if (!item.resultCodePromise) {
+      item.resultCodeLoading = true;
+      item.resultCodePromise = Promise.resolve(
+        window.FTStaticLoader?.loadGroups?.(["workbench-run-results"]),
+      )
+        .then(() => {
+          if (!window.FTTestRunResults) throw new Error("结果查看器不可用");
+          return true;
+        })
+        .catch(error => {
+          item.resultError = error.message || String(error);
+          return false;
+        })
+        .finally(() => {
+          item.resultCodeLoading = false;
+          refresh?.();
+        });
+    }
+    return item.resultCodePromise;
+  }
+
+  function resultPanel(context, state, item, refresh) {
+    if (window.FTTestRunResults) {
+      return window.FTTestRunResults.render(context, state, item, refresh);
+    }
+    const root = document.createElement("div");
+    root.className = "test-run-inline-results";
+    void ensureResultCode(state, item, refresh);
+    root.append(item.resultError
+      ? FTUI.empty(context.t("读取结果失败"), item.resultError)
+      : FTUI.loading(context.t("正在读取结果查看器…")));
+    return root;
+  }
+
+  function link(context, label, path) {
+    const anchor = document.createElement("a");
+    anchor.href = path;
+    anchor.textContent = context.t(label);
+    anchor.addEventListener("click", event => {
+      event.preventDefault();
+      context.navigate(path);
+    });
+    return anchor;
+  }
+
+  function submittedItems(state) {
+    return model().synchronize(state).filter(item => item.jobID);
+  }
+
+  function renderSubmitted(context, state, refresh) {
+    const items = submittedItems(state);
+    if (!items.length) return null;
+    if (!items.some(item => item.groupID === state.activeRunGroupID)) {
+      state.activeRunGroupID = items[0].groupID;
+    }
+    const active = items.find(item => item.groupID === state.activeRunGroupID) || items[0];
+    const root = document.createElement("section");
+    root.className = "test-run-observer";
+    const heading = document.createElement("div");
+    heading.className = "test-run-observer-heading";
+    const title = document.createElement("strong");
+    title.textContent = context.t("测试任务");
+    const jobLink = link(context, "查看测试任务", jobPath(active));
+    heading.append(title, jobLink);
+    root.append(heading);
+    if (items.length > 1) {
+      const tabs = document.createElement("div");
+      tabs.className = "test-run-tabs";
+      items.forEach(item => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.classList.toggle("active", item.groupID === active.groupID);
+        const name = document.createElement("span");
+        name.textContent = item.groupLabel;
+        const status = document.createElement("small");
+        status.textContent = context.t(model().PHASE_LABELS[item.phase] || item.phase);
+        button.append(name, status);
+        button.addEventListener("click", () => {
+          state.activeRunGroupID = item.groupID;
+          refresh?.();
+        });
+        tabs.append(button);
+      });
+      root.append(tabs);
+    }
+    if (active.error) {
+      const error = document.createElement("p");
+      error.className = "test-run-error";
+      error.textContent = active.error;
+      root.append(error);
+    }
+    root.append(resultPanel(context, state, active, refresh));
+    return root;
+  }
+
   window.FTTestRunBatch = Object.freeze({
     headerActions, jobPath, previewAll, previewOne, recordPreview, recordSubmission,
-    runAll, runOne, runSpecPath, synchronize,
+    renderSubmitted, runAll, runOne, runSpecPath, submittedItems, synchronize,
   });
 })();
