@@ -185,16 +185,36 @@
       const value = usesLocalRuntime(state)
         ? await localRequest("run", request)
         : await submitServerRun(context, state, request);
-      if (usesLocalRuntime(state)) {
-        model().recordLocalSubmission(item, value);
-      } else {
-        model().recordSubmission(item, value);
-      }
+      const record = target => {
+        if (usesLocalRuntime(state)) model().recordLocalSubmission(target, value);
+        else model().recordSubmission(target, value);
+        return target;
+      };
+      record(item);
+      // update(..., "submitting") repaints the workbench before the request
+      // resolves. synchronize() deliberately clones batch entries, so the
+      // item captured above may no longer be the object rendered by the page.
+      // Publish the durable Job identity into the current model before and
+      // after repainting; otherwise the API succeeds but no Job link,
+      // progress, or result panel can ever appear.
+      const mirrorSubmission = () => {
+        const current = model().itemFor(state, group);
+        if (current && current !== item) record(current);
+        return current;
+      };
+      mirrorSubmission();
       refresh?.();
+      mirrorSubmission();
       return true;
     } catch (error) {
+      const detail = model().errorDetail(error);
       item.phase = "failed";
-      item.error = model().errorDetail(error);
+      item.error = detail;
+      const current = model().itemFor(state, group);
+      if (current && current !== item) {
+        current.phase = "failed";
+        current.error = detail;
+      }
       refresh?.();
       return false;
     }
