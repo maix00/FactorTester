@@ -65,8 +65,16 @@
     }
   }
 
-  function sanitizeObject(manifest, object, values) {
+  function groupOnly(field) {
+    return String(field?.scope_policy || "").toLowerCase() === "group_only";
+  }
+
+  function sanitizeObject(manifest, object, values, {localScope = false} = {}) {
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      if (localScope && groupOnly(field)) {
+        deleteField(object, key, field);
+        continue;
+      }
       normalizeField(object, key, field, values, {executionOnly: true});
     }
     return object;
@@ -87,10 +95,13 @@
 
   function sanitizeExecutionPayload(manifest, payload, values) {
     const result = clone(payload || {}) || {};
-    sanitizeObject(manifest, result, values || {});
+    // The analysis root and local settings represent the shared/local layer.
+    // GROUP_ONLY fields are serialized on each strategy group below; keeping
+    // a second copy here makes the backend resolver reject the RunSpec.
+    sanitizeObject(manifest, result, values || {}, {localScope: true});
     for (const key of ["settings", "local_settings"]) {
       if (result[key] && typeof result[key] === "object") {
-        sanitizeObject(manifest, result[key], values || {});
+        sanitizeObject(manifest, result[key], values || {}, {localScope: true});
       }
     }
     if (Array.isArray(result.groups)) {
@@ -119,7 +130,7 @@
     const copied = new Set();
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
       const serialization = field?.serialization || {};
-      if (field?.execution_policy === "authoring_only") continue;
+      if (field?.execution_policy === "authoring_only" || groupOnly(field)) continue;
       const target = serialization.storage_key || key;
       if (copied.has(target)
         || !Object.prototype.hasOwnProperty.call(values || {}, target)

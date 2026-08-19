@@ -653,6 +653,26 @@ def _capability_requirements(
     return requirements
 
 
+def _execution_plans_or_error(prepared: dict, *, owner: str):
+    """Build the one execution-plan contract shared by preview and submit."""
+    try:
+        return _capability_plans(prepared, owner=owner), None
+    except (AssertionError, ValueError) as exc:
+        return None, (jsonify({
+            "success": False,
+            "error": str(exc),
+            "code": "data_capability_unavailable",
+            "requirements": [],
+        }), 422)
+    except (ImportError, KeyError, TypeError, RuntimeError) as exc:
+        return None, (jsonify({
+            "success": False,
+            "error": "data capability preflight is unavailable",
+            "code": "data_capability_preflight_unavailable",
+            "details": str(exc),
+        }), 503)
+
+
 def _freeze_external_factor_artifacts(configuration: dict) -> dict:
     frozen = deepcopy(configuration)
     shared = frozen["payload"]["shared"]
@@ -1003,6 +1023,9 @@ def submit_research_run():
         prepared = _prepare_research_run_request(data, owner=owner)
     except _RunRequestError as exc:
         return _run_request_error_response(exc)
+    _plans, planning_error = _execution_plans_or_error(prepared, owner=owner)
+    if planning_error is not None:
+        return planning_error
     workspace_id = prepared["workspace_id"]
     configuration = prepared["configuration"]
     frozen_configuration = prepared["frozen_configuration"]
@@ -1179,6 +1202,9 @@ def preview_research_run():
         prepared = _prepare_research_run_request(data, owner=owner)
     except _RunRequestError as exc:
         return _run_request_error_response(exc)
+    _plans, planning_error = _execution_plans_or_error(prepared, owner=owner)
+    if planning_error is not None:
+        return planning_error
     run_spec = prepared["run_spec"]
     configuration = prepared["configuration"]
     try:
@@ -1262,22 +1288,9 @@ def preview_research_run_capabilities():
         prepared = _prepare_research_run_request(data, owner=owner)
     except _RunRequestError as exc:
         return _run_request_error_response(exc)
-    try:
-        plans = _capability_plans(prepared, owner=owner)
-    except (AssertionError, ValueError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-            "code": "data_capability_unavailable",
-            "requirements": [],
-        }), 422
-    except (ImportError, KeyError, TypeError, RuntimeError) as exc:
-        return jsonify({
-            "success": False,
-            "error": "data capability preflight is unavailable",
-            "code": "data_capability_preflight_unavailable",
-            "details": str(exc),
-        }), 503
+    plans, planning_error = _execution_plans_or_error(prepared, owner=owner)
+    if planning_error is not None:
+        return planning_error
     requirements = _capability_requirements(plans)
     return jsonify({
         "success": True,
