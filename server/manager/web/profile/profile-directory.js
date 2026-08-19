@@ -1,7 +1,7 @@
 (() => {
   const SCOPES = [
     ["mine", "我的研究身份", "只显示当前登录用户创建的研究身份。"],
-    ["subordinates", "下级用户研究身份", "只显示直属下级用户的研究身份，详情与会话均为只读。"],
+    ["subordinates", "下级用户研究身份", "只显示直属下级用户的研究身份；详情与 Agent 会话自动只读可见。"],
     ["servers", "服务器研究身份", "显示当前可见服务器上的研究身份；非本用户拥有的内容为只读。"],
   ];
 
@@ -115,7 +115,13 @@
     id.textContent = text(item.profile_id);
     identity.append(name, id);
     const owner = `${text(item.owner_alias || item.owner_ref)}\n${text(item.owner_ref)}`;
-    const server = `${text(item.source_server_id)}\n${text(item.execution_server_id || "")}`;
+    const sourceServers = Array.isArray(item.source_server_ids) && item.source_server_ids.length
+      ? item.source_server_ids
+      : [item.source_server_id];
+    const executionServers = Array.isArray(item.execution_server_ids) && item.execution_server_ids.length
+      ? item.execution_server_ids
+      : [item.execution_server_id];
+    const server = `${sourceServers.filter(Boolean).map(text).join("\n")}\n${executionServers.filter(Boolean).map(text).join("\n")}`.trim();
     const runtime = `${context.t(item.runtime_kind === "server" ? "服务器运行" : "客户端运行")} · ${context.t(item.binding_status === "bound" ? "已绑定" : "未绑定")}`;
     const agent = item.agent_status === "claimed"
       ? `${context.t("已认领")} · ${text(item.agent_id)}${item.agent_runtime_status ? ` · ${text(item.agent_runtime_status)}` : ""}`
@@ -198,6 +204,8 @@
     context.activeNav("research");
     context.setHeading(context.t("研究身份"), context.t("我的研究身份、下级用户与服务器目录"));
     context.toolbar.replaceChildren();
+    const sectionTabs = window.FTResearch?.sectionTabs?.(context, "profiles", false);
+    if (sectionTabs) context.toolbar.append(sectionTabs);
     context.toolbar.append(context.button(
       "↻", () => list(context), context.t("刷新"),
     ));

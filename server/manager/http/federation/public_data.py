@@ -146,18 +146,14 @@ class FederationPublicDataRoutesMixin:
                         str(item.get("username") or "").strip()
                         for item in direct_subordinate_accounts_for(viewer)
                     }
-                    sharing = False
-                    agent_service = getattr(self.state, "agent_profiles", None)
-                    if agent_service is not None:
-                        try:
-                            sharing = agent_service.conversation_sharing(owner, profile_id)
-                        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                            sharing = False
-                    allowed = owner in direct_children and sharing
+                    # Direct parents can inspect direct-child Agent history by
+                    # default.  The federation endpoint remains read-only and
+                    # never exposes Agent control or file mutation APIs.
+                    allowed = owner in direct_children
                 if not allowed and ProfileDirectoryService.visible_to(profile, viewer):
                     allowed = True
                 if not allowed:
-                    raise PermissionError("Profile conversations are not shared with this account")
+                    raise PermissionError("Profile conversations are not visible to this account")
                 agent_service = getattr(self.state, "agent_profiles", None)
                 if agent_service is None:
                     return {"conversations": [], "items": []}

@@ -111,6 +111,7 @@
   // that only load the page coordinator; ownership remains in shared.js.
   window.FTResearch = {
     list,
+    sectionTabs: tabBar,
     resolvePublicationSource: (...args) =>
       window.FTResearchShared.resolvePublicationSource(...args),
   };

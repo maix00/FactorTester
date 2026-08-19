@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 
 from server.manager.domain.federation import ServiceRoute
+import server.manager.http.federation.public_data as public_data_routes
+from server.manager.http.federation.public_data import FederationPublicDataRoutesMixin
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.federated_public_data import (
     FederatedPublicDataService,
@@ -121,6 +123,40 @@ class _ClientState:
         return [{"target_ref": "factor-set:local", "title_zh": "Local"}]
 
 
+class _ConversationClientState:
+    def __init__(self, owner, profile):
+        self.owner = owner
+        self.profile = profile
+
+    def profiles(self, owner, *, include_local_paths):
+        assert include_local_paths is False
+        return [dict(self.profile)] if owner == self.owner else []
+
+
+class _ConversationAgentProfiles:
+    def conversations(self, owner, profile_id):
+        return [{
+            "conversation_id": "conversation-1",
+            "profile_id": profile_id,
+            "title": "Child conversation",
+            "updated_at": 4,
+        }]
+
+    def conversation_items(self, _owner, _profile_id, _conversation_id):
+        return [{"role": "assistant", "text": "read-only"}]
+
+
+class _ConversationState:
+    def __init__(self, owner, profile):
+        self.client_state = _ConversationClientState(owner, profile)
+        self.agent_profiles = _ConversationAgentProfiles()
+
+
+class _ConversationRoutes(FederationPublicDataRoutesMixin):
+    def __init__(self, state):
+        self.state = state
+
+
 def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     class ControlStore:
         def list_profiles(self, principal):
@@ -150,6 +186,35 @@ def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
     assert profiles[0]["profile_id"] == "maxa"
     assert profiles[0]["research_records"] == [{"record_id": "r1"}]
     assert "workspace_root" not in profiles[0]
+
+
+def test_direct_parent_can_read_federated_child_conversations_without_sharing_toggle(
+    monkeypatch,
+):
+    parent = "GTHT@parent@100000000001"
+    child = "GTHT@child@100000000002"
+    profile = {
+        "profile_id": "child-profile",
+        "session_binding": {"principal_ref": child},
+        "visibility": "private",
+    }
+    monkeypatch.setattr(
+        public_data_routes,
+        "direct_subordinate_accounts_for",
+        lambda username: [{"username": child}] if username == parent else [],
+    )
+    monkeypatch.setattr(public_data_routes, "get_account", lambda _username: None)
+    monkeypatch.setattr(public_data_routes, "is_super_admin_account", lambda _account: False)
+    routes = _ConversationRoutes(_ConversationState(child, profile))
+
+    value = routes._public_data_value(
+        kind="catalog",
+        operation="profile-conversations",
+        principal=parent,
+        payload={"owner": child, "profile_id": "child-profile"},
+    )
+
+    assert value["conversations"][0]["conversation_id"] == "conversation-1"
 
 
 def test_federated_public_data_merges_remote_research_and_profiles_without_live_factors(

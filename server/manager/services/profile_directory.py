@@ -2,9 +2,10 @@
 
 The ordinary ``/api/client/profiles`` endpoint remains owner-scoped for
 compatibility.  This service is the explicit directory surface used by the
-Research > Profiles page.  A directory identity is always the tuple
-``source_server_id + owner_ref + profile_id``; a profile id alone is not a
-stable identity once more than one Manager participates in the federation.
+Research > Profiles page.  Server-catalog rows retain the tuple
+``source_server_id + owner_ref + profile_id``.  The mine and direct-subordinate
+scopes collapse mirrored rows to one logical ``owner_ref + profile_id`` and
+retain a canonical source key plus the complete source-server list.
 """
 
 from __future__ import annotations
@@ -169,6 +170,80 @@ class ProfileDirectoryService:
             if key in raw
         }
 
+    @staticmethod
+    def _updated_rank(value: dict[str, Any]) -> float:
+        try:
+            return float(value.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _projection_rank(self, value: dict[str, Any], scope: str) -> tuple[Any, ...]:
+        """Choose the most useful server projection for one logical Profile.
+
+        ``mine`` must keep the local projection when it exists so the owner
+        retains its local management controls.  Read-only subordinate rows
+        prefer a bound/claimed projection so the parent sees the active Agent
+        even when the same Profile is mirrored by another Manager.
+        """
+        source = self._username(value.get("source_server_id"))
+        return (
+            1 if scope == "mine" and source == self.server_id else 0,
+            1 if value.get("binding_status") == "bound" else 0,
+            1 if value.get("agent_status") == "claimed" else 0,
+            1 if source == self.server_id else 0,
+            self._updated_rank(value),
+            source,
+        )
+
+    @classmethod
+    def _source_ids(cls, value: dict[str, Any]) -> set[str]:
+        result = {
+            cls._username(item)
+            for item in value.get("source_server_ids", [])
+            if cls._username(item)
+        }
+        source = cls._username(value.get("source_server_id"))
+        if source:
+            result.add(source)
+        return result
+
+    def _merge_projection(
+        self,
+        existing: dict[str, Any] | None,
+        candidate: dict[str, Any],
+        *,
+        scope: str,
+    ) -> dict[str, Any]:
+        """Merge server projections while retaining one canonical row."""
+        if existing is None:
+            merged = dict(candidate)
+            merged["source_server_ids"] = sorted(self._source_ids(candidate))
+            merged["execution_server_ids"] = sorted({
+                self._username(candidate.get("execution_server_id")),
+            } - {""})
+            return merged
+
+        preferred = (
+            candidate
+            if self._projection_rank(candidate, scope)
+            > self._projection_rank(existing, scope)
+            else existing
+        )
+        merged = dict(preferred)
+        merged["source_server_ids"] = sorted(
+            self._source_ids(existing) | self._source_ids(candidate),
+        )
+        execution_ids = {
+            self._username(existing.get("execution_server_id")),
+            self._username(candidate.get("execution_server_id")),
+        } - {""}
+        merged["execution_server_ids"] = sorted(execution_ids)
+        merged["conversation_count"] = max(
+            int(existing.get("conversation_count") or 0),
+            int(candidate.get("conversation_count") or 0),
+        )
+        return merged
+
     def _local_profiles(self, owners: Iterable[str]) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []
         for owner in owners:
@@ -310,10 +385,12 @@ class ProfileDirectoryService:
             account = None
         admin = is_super_admin_account(account)
         raw_profiles = self._profiles(owners)
+        owner_set = set(owners)
+        dedupe_by_profile = scope in {"mine", "subordinates"}
         projected: dict[str, dict[str, Any]] = {}
         for raw in raw_profiles:
             owner = self._profile_owner(raw)
-            if scope == "subordinates" and owner not in set(owners):
+            if scope == "subordinates" and owner not in owner_set:
                 continue
             if scope == "servers" and not admin and not self.visible_to(raw, viewer):
                 continue
@@ -329,8 +406,13 @@ class ProfileDirectoryService:
                 continue
             if agent and value["agent_status"] != agent:
                 continue
-            key = str(value["profile_key"])
-            projected[key] = value
+            key = (
+                f"{value['owner_ref']}::{value['profile_id']}"
+                if dedupe_by_profile else str(value["profile_key"])
+            )
+            projected[key] = self._merge_projection(
+                projected.get(key), value, scope=scope,
+            )
         values = list(projected.values())
         needle = str(query or "").strip().casefold()
         if needle:
@@ -341,6 +423,7 @@ class ProfileDirectoryService:
                     for key in (
                         "owner_alias", "owner_ref", "profile_id",
                         "display_name", "source_server_id", "agent_id",
+                        "source_server_ids",
                     )
                 ).casefold()
             ]
@@ -394,7 +477,11 @@ class ProfileDirectoryService:
             for item in direct_subordinate_accounts_for(viewer)
         }:
             return False
-        return bool(profile and profile.get("conversation_sharing"))
+        # A direct parent may always inspect a direct child's Agent history.
+        # The conversation is still read-only and no file mutation or Agent
+        # control is granted.  ``conversation_sharing`` remains a legacy
+        # stored field only; it is no longer an access gate.
+        return True
 
     def _source_profile(
         self,
@@ -423,7 +510,7 @@ class ProfileDirectoryService:
     def conversations(self, viewer: str, profile_key: str, *, scope: str = "servers") -> list[dict[str, Any]]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
         if not item["capabilities"].get("view_conversations"):
-            raise PermissionError("Profile conversations are not shared with this account")
+            raise PermissionError("Profile conversations are not visible to this account")
         source = str(item.get("source_server_id") or self.server_id)
         if source == self.server_id:
             rows = self.agent_profiles.conversations(owner, profile_id)
@@ -444,7 +531,7 @@ class ProfileDirectoryService:
     ) -> list[dict[str, Any]]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
         if not item["capabilities"].get("view_conversations"):
-            raise PermissionError("Profile conversations are not shared with this account")
+            raise PermissionError("Profile conversations are not visible to this account")
         source = str(item.get("source_server_id") or self.server_id)
         if source == self.server_id:
             rows = self.agent_profiles.conversation_items(owner, profile_id, conversation_id)
