@@ -150,6 +150,8 @@ def test_openai_provider_health_checks_model_without_returning_secret(monkeypatc
         "secret": "secret-token",
     })
     assert result["model_available"] is True
+    assert result["available_models"] == ["research-model"]
+    assert result["available_models_truncated"] is False
     assert "secret-token" not in json.dumps(result)
 
 

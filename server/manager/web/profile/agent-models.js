@@ -1,5 +1,6 @@
 (() => {
   const pageSize = 20;
+  let modelListSequence = 0;
 
   function current(context) {
     return context.isRouteCurrent?.() !== false;
@@ -42,6 +43,24 @@
       input.append(option);
     });
     return input;
+  }
+
+  function protocolDetails(capabilities) {
+    const result = new Map();
+    capabilities.forEach(capability => {
+      (Array.isArray(capability.protocol_details)
+        ? capability.protocol_details : []).forEach(item => {
+        if (item?.protocol) result.set(item.protocol, item);
+      });
+    });
+    return result;
+  }
+
+  function badge(context, label, kind = "") {
+    const value = document.createElement("span");
+    value.className = `agent-model-badge ${kind}`.trim();
+    value.textContent = context.t(label);
+    return value;
   }
 
   function iconButton(context, symbol, label, action) {
@@ -95,11 +114,8 @@
     })));
     agentRuntime.value = item?.agent_runtime || "codex";
     const protocol = select(context, []);
-    const protocolLabels = {
-      openai_responses: "OpenAI Responses API",
-      openai_chat: "OpenAI Chat Completions API",
-      anthropic_messages: "Anthropic Messages API",
-    };
+    const details = protocolDetails(capabilities);
+    let updateProtocolHint = () => {};
     const updateProtocols = preferred => {
       const capability = capabilities.find(entry => entry.runtime === agentRuntime.value);
       const protocols = Array.isArray(capability?.protocols) ? capability.protocols : [];
@@ -107,10 +123,11 @@
       protocols.forEach(value => {
         const option = document.createElement("option");
         option.value = value;
-        option.textContent = context.t(protocolLabels[value] || value);
+        option.textContent = context.t(details.get(value)?.label || value);
         protocol.append(option);
       });
       protocol.value = protocols.includes(preferred) ? preferred : (protocols[0] || "");
+      updateProtocolHint();
     };
     updateProtocols(item?.protocol || "openai_responses");
     agentRuntime.addEventListener("change", () => updateProtocols(""));
@@ -119,6 +136,21 @@
     baseURL.placeholder = "https://api.example.com/v1";
     const model = control("text", item?.default_model || "");
     model.required = true;
+    const modelList = document.createElement("datalist");
+    modelList.id = `agent-model-options-${++modelListSequence}`;
+    model.setAttribute("list", modelList.id);
+    const modelControl = document.createElement("div");
+    modelControl.className = "agent-model-model-control";
+    modelControl.append(model, modelList);
+    let modelCatalogLoaded = false;
+    const applyModelCatalog = result => {
+      const models = Array.isArray(result?.test?.available_models)
+        ? result.test.available_models : [];
+      modelList.replaceChildren(...models.map(value => Object.assign(
+        document.createElement("option"), {value: String(value)},
+      )));
+      modelCatalogLoaded = true;
+    };
     const token = control("password");
     token.autocomplete = "new-password";
     token.placeholder = item?.token_configured
@@ -151,6 +183,7 @@
         const result = await context.api("/api/client/agent-models/test", {
           method: "POST", body: JSON.stringify(providerPayload(view)),
         });
+        applyModelCatalog(result);
         status.textContent = context.t("连接成功：模型可用");
         if (result?.test?.default_model) status.textContent += ` · ${result.test.default_model}`;
       } catch (error) {
@@ -159,6 +192,10 @@
         test.disabled = false; save.disabled = false;
       }
     };
+    model.addEventListener("focus", () => {
+      if (!item?.provider_id || modelCatalogLoaded || test.disabled) return;
+      void test.onclick();
+    });
     save.onclick = async () => {
       if (!validate()) return;
       test.disabled = true; save.disabled = true;
@@ -175,13 +212,24 @@
         test.disabled = false; save.disabled = false;
       }
     };
+    const protocolHint = document.createElement("small");
+    updateProtocolHint = () => {
+      const detail = details.get(protocol.value);
+      protocolHint.textContent = detail
+        ? context.t(detail.transport_label || detail.transport || "") : "";
+    };
+    protocol.addEventListener("change", updateProtocolHint);
+    updateProtocolHint();
+    const protocolControl = document.createElement("div");
+    protocolControl.className = "agent-model-protocol-control";
+    protocolControl.append(protocol, protocolHint);
     card.append(
       field(context, "服务名称", label),
       field(context, "运行方式", runtime, "服务器凭证只保存在当前 Manager；客户端凭证由本地客户端管理。"),
-      field(context, "Agent Runtime", agentRuntime),
-      field(context, "协议", protocol),
+      field(context, "智能体运行", agentRuntime),
+      field(context, "协议", protocolControl),
       field(context, "API 地址", baseURL, "服务器运行的模型服务必须使用 HTTPS。"),
-      field(context, "默认模型", model),
+      field(context, "默认模型", modelControl, "聚焦时按需读取模型候选，也可以手动填写模型名称。"),
       field(context, "令牌", token, "令牌只写入当前运行时的本地加密存储，不会显示或同步到 PostgreSQL。"),
       actions, status,
     );
@@ -216,6 +264,7 @@
   }
 
   function table(context, providers, capabilities, page, refresh) {
+    const details = protocolDetails(capabilities);
     const rows = providers.map(item => {
       const status = document.createElement("span");
       status.className = "agent-model-test-status";
@@ -235,16 +284,27 @@
           }
         }),
       );
+      const protocol = document.createElement("span");
+      protocol.className = "agent-model-protocol-cell";
+      const detail = details.get(item.protocol);
+      protocol.append(
+        document.createTextNode(context.t(detail?.label || item.protocol || "")),
+        badge(
+          context,
+          detail?.transport_label || detail?.transport || "",
+          detail?.transport || "",
+        ),
+      );
       return [
         item.label || "",
         item.runtime_kind === "client" ? context.t("客户端运行") : context.t("服务器运行"),
-        item.agent_runtime || "codex", item.protocol || "", item.base_url || "", item.default_model || "",
+        item.agent_runtime || "codex", protocol, item.base_url || "", item.default_model || "",
         item.token_configured ? context.t("已配置") : context.t("未配置"),
         status, actions,
       ];
     });
     const view = FTUI.pagedTable(
-      ["服务名称", "运行方式", "Agent Runtime", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
+      ["服务名称", "运行方式", "智能体运行", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
         label => context.t(label),
       ),
       rows,

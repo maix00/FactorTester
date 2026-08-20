@@ -30,6 +30,24 @@ CAPABILITIES = {
     ),
 }
 
+PROTOCOL_DETAILS = {
+    "openai_responses": {
+        "label": "OpenAI Responses API",
+        "transport": "direct",
+        "transport_label": "直接连接",
+    },
+    "openai_chat": {
+        "label": "OpenAI Chat Completions API",
+        "transport": "cc_switch",
+        "transport_label": "CC Switch 转换",
+    },
+    "anthropic_messages": {
+        "label": "Anthropic Messages API",
+        "transport": "cc_switch",
+        "transport_label": "CC Switch 转换",
+    },
+}
+
 PROTOCOL_ALIASES = {
     "openai_compatible": "openai_responses",
 }
@@ -69,6 +87,10 @@ def public_capabilities() -> list[dict[str, object]]:
         {
             "runtime": capability.runtime,
             "protocols": sorted(capability.protocols),
+            "protocol_details": [
+                {"protocol": protocol, **PROTOCOL_DETAILS[protocol]}
+                for protocol in sorted(capability.protocols)
+            ],
             "executable_label": capability.executable_label,
         }
         for capability in CAPABILITIES.values()
@@ -79,6 +101,7 @@ __all__ = [
     "AgentRuntimeCapability",
     "AgentRuntimeCapabilityError",
     "CAPABILITIES",
+    "PROTOCOL_DETAILS",
     "normalize_protocol",
     "normalize_runtime",
     "public_capabilities",

@@ -456,6 +456,12 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .agent-model-icon-action .ft-icon, .agent-model-icon-action .ft-icon-svg { width: 16px; height: 16px; flex-basis: 16px; }
 .agent-model-test-status { color: var(--muted); white-space: nowrap; }
 .agent-model-dialog .settings-row { grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.4fr); }
+.agent-model-protocol-control { display: grid; gap: 5px; }
+.agent-model-model-control { display: grid; }
+.agent-model-protocol-control small { color: var(--muted); }
+.agent-model-protocol-cell { display: grid; justify-items: start; gap: 5px; }
+.agent-model-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font-size: 12px; white-space: nowrap; }
+.agent-model-badge.cc_switch { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .client-download-dialog .dialog-card { gap: 12px; }
 .profile-detail-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .profile-detail-tab { border: 0; border-radius: 7px; padding: 7px 13px; color: inherit; background: transparent; white-space: nowrap; }

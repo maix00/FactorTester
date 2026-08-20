@@ -487,3 +487,12 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
     assert capabilities == {
         "codex": ["anthropic_messages", "openai_chat", "openai_responses"],
     }
+    details = {
+        item["protocol"]: item["transport"]
+        for item in list_response["runtime_capabilities"][0]["protocol_details"]
+    }
+    assert details == {
+        "anthropic_messages": "cc_switch",
+        "openai_chat": "cc_switch",
+        "openai_responses": "direct",
+    }

@@ -133,6 +133,10 @@ class AgentProviderHealth:
             "base_url": base_url,
             "default_model": model,
             "model_available": True,
+            # Model choices are returned only by the explicit health endpoint;
+            # the Provider list never performs this potentially expensive I/O.
+            "available_models": sorted(model_ids)[:2000],
+            "available_models_truncated": len(model_ids) > 2000,
         }
 
 
