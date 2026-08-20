@@ -46,6 +46,13 @@ global.FTTestInputState = {
     transient_factor_sources: state.transientFactorSources || [],
     transient_strategy_sources: state.transientStrategySources || [],
     strategy_specs: state.strategySpecs || [],
+    run_input_dependencies: state.runInputDependencies || [],
+    ...(Object.keys(state.customStrategyOverrides || {}).length
+      ? {custom_strategy_overrides: state.customStrategyOverrides} : {}),
+    ...((state.customStrategyMountedTabs || []).length
+      ? {custom_strategy_mounted_tabs: state.customStrategyMountedTabs} : {}),
+    ...((state.customStrategyProductMask || []).length
+      ? {custom_strategy_product_mask: state.customStrategyProductMask} : {}),
   }),
 };
 vm.runInThisContext(fs.readFileSync(
@@ -291,6 +298,38 @@ const strategyScopedBacktest = {
     "preview RunSpecs must be available to the overlay without persistence");
   assert.match(frozenHeader[1].title, /全部任务/,
     "the header run action must submit the complete task batch");
+
+  const previewsBeforeUnchangedView = previewRequests.length;
+  frozenHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(previewRequests.length, previewsBeforeUnchangedView,
+    "viewing an unchanged RunSpec must reuse its matching frozen preview");
+
+  const previewsBeforeMutation = previewRequests.length;
+  const firstPreviewTargets = openedRunSpecs.map(item => item.target);
+  state.runValues.retention_mode = "summary";
+  frozenHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(previewRequests.length, previewsBeforeMutation + state.groups.length,
+    "viewing RunSpec after editing the page must freeze the current configuration again");
+  assert.ok(previewRequests.slice(-state.groups.length).every(item => (
+    item.body.retention_mode === "summary"
+  )), "the refreshed RunSpec preview must serialize the edited field values");
+  assert.notDeepEqual(openedRunSpecs.map(item => item.target), firstPreviewTargets,
+    "the second overlay must display the refreshed RunSpec references");
+
+  const previewsBeforeInputMutation = previewRequests.length;
+  state.customStrategyOverrides = {strategy_one: {factor_mode: "rank"}};
+  frozenHeader[0].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(previewRequests.length, previewsBeforeInputMutation + state.groups.length,
+    "editing an input-state field serialized into RunSpec must invalidate the preview");
+  assert.deepEqual(
+    previewRequests.at(-1).body.custom_strategy_overrides,
+    state.customStrategyOverrides,
+  );
+  state.runValues.retention_mode = "full";
+  state.customStrategyOverrides = {};
 
   const refreshResetState = {
     ...backtest,
