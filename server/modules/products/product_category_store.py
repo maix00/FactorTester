@@ -135,7 +135,7 @@ def list_product_categories(username: str) -> list[dict[str, Any]]:
 
 
 def _category_path_sources(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    from server.services.product_catalog_projection import source_ids_for_product_paths
+    from server.services.product_catalog_projection import source_ids_by_product_path
 
     paths = list(dict.fromkeys(
         str(path or "").removeprefix("-").strip()
@@ -143,8 +143,9 @@ def _category_path_sources(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for path in item.get("paths") or []
         if str(path or "").removeprefix("-").strip()
     ))
+    source_ids = source_ids_by_product_path(paths)
     return [
-        {"path": path, "source_ids": list(source_ids_for_product_paths([path]))}
+        {"path": path, "source_ids": list(source_ids.get(path, ()))}
         for path in paths
     ]
 

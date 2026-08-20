@@ -11,7 +11,10 @@ from server.modules.products.product_category_paths import (
     infer_category_ids,
     regenerate_generated_others,
 )
-from server.services.product_catalog_projection import source_ids_for_product_paths
+from server.services.product_catalog_projection import (
+    source_ids_by_product_path,
+    source_ids_for_product_paths,
+)
 from server.modules.products.product_category_definition import (
     normalize_composite_label_updates,
     source_category_items,
@@ -153,6 +156,29 @@ def test_classifier_node_infers_the_server_data_source_bundle(
     assert product_category_store.get_product_category(
         "alice", category["id"],
     )["source_ids"] == ["Local"]
+
+
+def test_classifier_nodes_share_one_batched_source_projection() -> None:
+    descriptors = [
+        {
+            "id": "source-a",
+            "product_paths": ["Product/Futures/CNFutures"],
+        },
+        {
+            "id": "source-b",
+            "product_paths": ["Product/Equity/CNEquity"],
+        },
+    ]
+
+    assert source_ids_by_product_path([
+        "Product/Futures/CNFutures/_products/CA.CZC",
+        "Product/Equity/CNEquity/_products/000001.SZ",
+        "Product/Options/CNOptions",
+    ], descriptors) == {
+        "Product/Futures/CNFutures/_products/CA.CZC": ("source-a",),
+        "Product/Equity/CNEquity/_products/000001.SZ": ("source-b",),
+        "Product/Options/CNOptions": (),
+    }
 
 
 def test_composite_paths_are_a_stored_snapshot_until_explicit_refresh(

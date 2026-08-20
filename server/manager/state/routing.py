@@ -15,6 +15,9 @@ from server.manager.domain.federation import (
     TargetNotFound,
     TargetUnavailable,
 )
+from server.manager.domain.federation.capability_catalog import (
+    load_peer_capability_snapshots,
+)
 from server.manager.http.gateway import GatewayResponse
 from server.manager.state.models import Worktree
 
@@ -380,11 +383,19 @@ class RoutingStateMixin:
         peer_route_groups: dict[str, list[ServiceRoute]] = {}
         for route in peer_routes:
             peer_route_groups.setdefault(route.server_id, []).append(route)
-        for server_id, routes in peer_route_groups.items():
-            route = min(routes, key=self.route_selection_key)
-            peer_snapshot = self._cached_peer_capabilities(
+        selected_peer_routes = {
+            server_id: min(routes, key=self.route_selection_key)
+            for server_id, routes in peer_route_groups.items()
+        }
+        peer_snapshots = load_peer_capability_snapshots(
+            selected_peer_routes.values(),
+            lambda route: self._cached_peer_capabilities(
                 route, refresh=refresh,
-            )
+            ),
+        )
+        for server_id, routes in peer_route_groups.items():
+            route = selected_peer_routes[server_id]
+            peer_snapshot = peer_snapshots.get(server_id)
             peer_sources = {
                 str(item.get("id") or ""): item
                 for item in ((peer_snapshot or {}).get("sources") or [])

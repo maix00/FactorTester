@@ -684,12 +684,19 @@ class ClientStateService:
             origin="server",
         )
         from server.services.product_catalog_projection import (
-            source_ids_for_product_paths,
+            source_ids_by_product_path,
         )
         categories = {
             str(item.get("id") or ""): item
             for item in self.product_categories(principal)
         }
+        group_paths = {
+            str(path or "").strip()
+            for group in projected
+            for path in group.get("paths") or []
+            if str(path or "").strip() and not str(path).strip().startswith("-")
+        }
+        path_sources = source_ids_by_product_path(group_paths)
         for group in projected:
             positive_paths = [
                 str(path or "").strip()
@@ -699,7 +706,7 @@ class ClientStateService:
             group["path_sources"] = [
                 {
                     "path": path,
-                    "source_ids": list(source_ids_for_product_paths([path])),
+                    "source_ids": list(path_sources.get(path, ())),
                 }
                 for path in positive_paths
             ]
