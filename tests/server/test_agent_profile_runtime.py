@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_provider_health import AgentProviderHealth
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_workspace import (
     WORKSPACE_DIRECTORIES,
@@ -70,6 +71,9 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
     assert updated["updated_at"] >= saved["updated_at"]
     assert key_path.stat().st_mode & 0o077 == 0
 
+    assert saved["agent_runtime"] == "codex"
+    assert saved["protocol"] == "openai_responses"
+
     with sqlite3.connect(db_path) as connection:
         raw = connection.execute(
             "SELECT secret_blob FROM manager_agent_provider_connections",
@@ -97,6 +101,96 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
                 "base_url": "https://localhost:9000",
                 "token": "x",
             },
+        )
+
+
+@pytest.mark.parametrize(
+    ("agent_runtime", "protocol"),
+    [
+        ("codex", "openai_responses"),
+        ("codex", "openai_chat"),
+        ("codex", "anthropic_messages"),
+    ],
+)
+def test_provider_accepts_supported_agent_runtime_protocol_pairs(
+    tmp_path, agent_runtime, protocol,
+):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+
+    saved = store.save(
+        PRINCIPAL,
+        {
+            "label": f"{agent_runtime} provider",
+            "runtime_kind": "server",
+            "server_id": "public-1",
+            "agent_runtime": agent_runtime,
+            "protocol": protocol,
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "secret-token-value",
+        },
+    )
+
+    assert saved["agent_runtime"] == agent_runtime
+    assert saved["protocol"] == protocol
+
+
+def test_provider_rejects_unsupported_agent_runtime(tmp_path):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+
+    with pytest.raises(ProviderStoreError, match="unsupported"):
+        store.save(
+            PRINCIPAL,
+            {
+                "label": "invalid provider",
+                "runtime_kind": "server",
+                "server_id": "public-1",
+                "agent_runtime": "gemini_cli",
+                "protocol": "anthropic_messages",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "token": "secret-token-value",
+            },
+        )
+
+
+def test_legacy_claim_provider_binding_is_frozen_once(tmp_path):
+    store = ProfileRuntimeStore(tmp_path / "manager.sqlite")
+    claim = store.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+        provider_id="provider-1",
+        provider_config_version=0,
+    )
+
+    frozen = store.freeze_legacy_provider_binding(
+        claim["claim_id"],
+        provider_id="provider-1",
+        agent_runtime="codex",
+        provider_protocol="anthropic_messages",
+        provider_model="claude-research",
+        provider_config_version=123.5,
+    )
+
+    assert frozen["provider_protocol"] == "anthropic_messages"
+    assert frozen["provider_model"] == "claude-research"
+    assert frozen["provider_config_version"] == 123.5
+    with pytest.raises(ProfileClaimConflict):
+        store.freeze_legacy_provider_binding(
+            claim["claim_id"],
+            provider_id="provider-1",
+            agent_runtime="codex",
+            provider_protocol="openai_responses",
+            provider_model="other-model",
+            provider_config_version=456,
         )
 
 
@@ -139,6 +233,10 @@ def test_profile_has_one_runtime_and_one_live_claim(tmp_path):
         provider_id=provider["provider_id"],
         agent_id="agent-a",
     )
+    assert first["claim"]["agent_runtime"] == "codex"
+    assert first["claim"]["provider_protocol"] == "openai_responses"
+    assert first["claim"]["provider_model"] == "research-model"
+    assert first["claim"]["provider_config_version"] == provider["updated_at"]
     assert (workspace / ".codex").is_dir()
     same_agent = service.claim(
         PRINCIPAL,
@@ -168,6 +266,59 @@ def test_profile_has_one_runtime_and_one_live_claim(tmp_path):
         agent_id="agent-b",
     )
     assert second["claim"]["agent_id"] == "agent-b"
+
+
+def test_live_profile_claim_cannot_switch_its_frozen_provider_binding(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="server",
+        executor_id="public-1",
+    )
+    first_provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "OpenAI",
+            "runtime_kind": "server",
+            "agent_runtime": "codex",
+            "protocol": "openai_responses",
+            "base_url": "https://api.openai.example/v1",
+            "default_model": "gpt-research",
+            "token": "openai-token",
+        },
+    )
+    second_provider = service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "Anthropic",
+            "runtime_kind": "server",
+            "agent_runtime": "codex",
+            "protocol": "anthropic_messages",
+            "base_url": "https://api.anthropic.example/v1",
+            "default_model": "claude-research",
+            "token": "anthropic-token",
+        },
+    )
+    service.claim(
+        PRINCIPAL,
+        PROFILE_ID,
+        provider_id=first_provider["provider_id"],
+        agent_id="agent-a",
+    )
+
+    with pytest.raises(ProfileClaimConflict):
+        service.claim(
+            PRINCIPAL,
+            PROFILE_ID,
+            provider_id=second_provider["provider_id"],
+            agent_id="agent-a",
+        )
 
 
 def test_stale_claim_expires_without_creating_agent_temp_directory(tmp_path):
@@ -323,3 +474,63 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
     assert response["success"] is True
     assert response["provider"]["token_configured"] is True
     assert '"token":' not in json.dumps(response)
+
+    listing = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+    assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
+    list_response = _route_payload(listing)
+    capabilities = {
+        item["runtime"]: item["protocols"]
+        for item in list_response["runtime_capabilities"]
+    }
+    assert capabilities == {
+        "codex": ["anthropic_messages", "openai_chat", "openai_responses"],
+    }
+    details = {
+        item["protocol"]: item["transport"]
+        for item in list_response["runtime_capabilities"][0]["protocol_details"]
+    }
+    assert details == {
+        "anthropic_messages": "cc_switch",
+        "openai_chat": "cc_switch",
+        "openai_responses": "direct",
+    }
+
+
+def test_agent_provider_listing_never_contacts_upstream_providers(
+    tmp_path,
+    monkeypatch,
+):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "model",
+            "token": "hidden-token",
+        },
+    )
+
+    def fail_if_health_check_runs(*_args, **_kwargs):
+        raise AssertionError("provider listing must not contact an upstream API")
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fail_if_health_check_runs)
+    listing = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+
+    assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
+    response = _route_payload(listing)
+    assert response["success"] is True
+    assert [item["label"] for item in response["providers"]] == ["provider"]

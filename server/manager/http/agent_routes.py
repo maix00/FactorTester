@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 from server.manager.http.responses import json_response
 from server.manager.services.agent_skill_catalog import AgentSkillCatalogError
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_runtime_capabilities import public_capabilities
 from server.manager.services.profile_workspace_browser import ProfileWorkspaceError
 from server.manager.storage.agent_provider_store import ProviderStoreError
 from server.manager.storage.profile_runtime_store import (
@@ -160,7 +161,14 @@ class AgentRoutesMixin:
             except (ProviderStoreError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
-            json_response(self, {"success": True, "providers": providers})
+            json_response(
+                self,
+                {
+                    "success": True,
+                    "providers": providers,
+                    "runtime_capabilities": public_capabilities(),
+                },
+            )
             return True
 
         if parsed.path == "/api/client/agent-runtime":

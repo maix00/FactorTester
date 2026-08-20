@@ -21,14 +21,14 @@ from urllib.parse import urlsplit
 from cryptography.fernet import Fernet, InvalidToken
 
 from tools.data.sqlite.db import connect_sqlite
+from server.manager.services.agent_runtime_capabilities import (
+    AgentRuntimeCapabilityError,
+    validate_runtime_protocol,
+)
 
 
 PROVIDER_TABLE = "manager_agent_provider_connections"
 SUPPORTED_RUNTIME_KINDS = frozenset({"client", "server"})
-# ``openai_compatible`` describes the wire contract consumed by the current
-# Codex app-server configuration.  Account login is not a provider protocol;
-# it is a separate authentication flow and is intentionally not accepted here.
-SUPPORTED_PROTOCOLS = frozenset({"openai_compatible"})
 
 
 class ProviderStoreError(ValueError):
@@ -91,6 +91,7 @@ class AgentProviderStore:
                     provider_id TEXT PRIMARY KEY,
                     principal TEXT NOT NULL,
                     runtime_kind TEXT NOT NULL,
+                    agent_runtime TEXT NOT NULL DEFAULT 'codex',
                     server_id TEXT NOT NULL DEFAULT '',
                     label TEXT NOT NULL,
                     protocol TEXT NOT NULL,
@@ -102,6 +103,21 @@ class AgentProviderStore:
                     updated_at REAL NOT NULL
                 )
                 """
+            )
+            columns = {
+                str(row[1])
+                for row in db.execute(
+                    f"PRAGMA table_info({PROVIDER_TABLE})"
+                ).fetchall()
+            }
+            if "agent_runtime" not in columns:
+                db.execute(
+                    f"ALTER TABLE {PROVIDER_TABLE} "
+                    "ADD COLUMN agent_runtime TEXT NOT NULL DEFAULT 'codex'"
+                )
+            db.execute(
+                f"UPDATE {PROVIDER_TABLE} SET protocol = 'openai_responses' "
+                "WHERE protocol = 'openai_compatible'"
             )
             db.execute(
                 f"""CREATE INDEX IF NOT EXISTS {PROVIDER_TABLE}_owner
@@ -125,11 +141,15 @@ class AgentProviderStore:
         return runtime
 
     @classmethod
-    def validate_protocol(cls, value: object) -> str:
-        protocol = cls._text(value, "protocol")
-        if protocol not in SUPPORTED_PROTOCOLS:
-            raise ProviderStoreError("provider protocol is unsupported")
-        return protocol
+    def validate_runtime_protocol(
+        cls,
+        runtime: object,
+        protocol: object,
+    ) -> tuple[str, str]:
+        try:
+            return validate_runtime_protocol(runtime, protocol)
+        except AgentRuntimeCapabilityError as exc:
+            raise ProviderStoreError(str(exc)) from exc
 
     @classmethod
     def validate_base_url(cls, value: object, *, runtime_kind: str) -> str:
@@ -159,6 +179,7 @@ class AgentProviderStore:
             "provider_id": str(row["provider_id"] or ""),
             "label": str(row["label"] or ""),
             "runtime_kind": str(row["runtime_kind"] or ""),
+            "agent_runtime": str(row["agent_runtime"] or "codex"),
             "server_id": str(row["server_id"] or ""),
             "protocol": str(row["protocol"] or ""),
             "base_url": str(row["base_url"] or ""),
@@ -259,9 +280,11 @@ class AgentProviderStore:
             or (previous["label"] if previous is not None else ""),
             "label",
         )
-        protocol = self.validate_protocol(
+        agent_runtime, protocol = self.validate_runtime_protocol(
+            payload.get("agent_runtime")
+            or (previous["agent_runtime"] if previous is not None else "codex"),
             payload.get("protocol")
-            or (previous["protocol"] if previous is not None else "openai_compatible")
+            or (previous["protocol"] if previous is not None else "openai_responses"),
         )
         base_url = self.validate_base_url(
             payload.get("base_url")
@@ -288,6 +311,7 @@ class AgentProviderStore:
             "provider_id": provider_id,
             "principal": owner,
             "runtime_kind": runtime_kind,
+            "agent_runtime": agent_runtime,
             "server_id": server_id,
             "label": label,
             "protocol": protocol,
@@ -312,6 +336,7 @@ class AgentProviderStore:
         owner = candidate["principal"]
         provider_id = candidate["provider_id"] or "provider_" + secrets.token_urlsafe(9)
         runtime_kind = candidate["runtime_kind"]
+        agent_runtime = candidate["agent_runtime"]
         server_id = candidate["server_id"]
         label = candidate["label"]
         protocol = candidate["protocol"]
@@ -324,12 +349,13 @@ class AgentProviderStore:
             secret_blob = self._cipher.encrypt(secret.encode("utf-8"))
             db.execute(
                 f"""INSERT INTO {PROVIDER_TABLE} (
-                    provider_id, principal, runtime_kind, server_id, label,
+                    provider_id, principal, runtime_kind, agent_runtime, server_id, label,
                     protocol, base_url, default_model, secret_blob, enabled,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     runtime_kind=excluded.runtime_kind,
+                    agent_runtime=excluded.agent_runtime,
                     server_id=excluded.server_id,
                     label=excluded.label,
                     protocol=excluded.protocol,
@@ -339,7 +365,7 @@ class AgentProviderStore:
                     enabled=1,
                     updated_at=excluded.updated_at""",
                 (
-                    provider_id, owner, runtime_kind, server_id, label,
+                    provider_id, owner, runtime_kind, agent_runtime, server_id, label,
                     protocol, base_url, default_model, secret_blob,
                     now if previous is None else float(previous["created_at"] or now),
                     now,

@@ -416,6 +416,9 @@ class ManagerState(
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,
             codex_binary=os.environ.get("FACTORTESTER_CODEX_BINARY", "codex"),
+            cc_switch_binary=os.environ.get(
+                "FACTORTESTER_CC_SWITCH_BINARY", "cc-switch",
+            ),
             proxy_url_provider=self.mihomo.proxy_url,
         )
         self.federated_public_data = FederatedPublicDataService(

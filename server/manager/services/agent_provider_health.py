@@ -1,8 +1,9 @@
-"""Non-destructive health checks for OpenAI Responses-compatible providers."""
+"""Non-destructive model-catalog checks for supported Agent providers."""
 
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener, urlopen
@@ -17,6 +18,47 @@ class AgentProviderHealth:
 
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
+    @staticmethod
+    def _catalog_request(
+        protocol: str,
+        base_url: str,
+        secret: str,
+    ) -> Request:
+        headers = {"Accept": "application/json"}
+        if protocol in {"openai_compatible", "openai_chat", "openai_responses"}:
+            headers["Authorization"] = f"Bearer {secret}"
+        elif protocol == "anthropic_messages":
+            headers["X-api-key"] = secret
+            headers["Anthropic-version"] = "2023-06-01"
+        elif protocol == "gemini_native":
+            headers["X-goog-api-key"] = secret
+        else:
+            raise AgentProviderHealthError(
+                f"unsupported provider protocol: {protocol or '(empty)'}"
+            )
+        return Request(f"{base_url}/models", headers=headers, method="GET")
+
+    @staticmethod
+    def _catalog_model_ids(protocol: str, payload: Mapping[str, object]) -> set[str]:
+        field = "models" if protocol == "gemini_native" else "data"
+        entries = payload.get(field)
+        if not isinstance(entries, list):
+            raise AgentProviderHealthError(
+                f"provider model-list response does not contain {field}"
+            )
+        model_ids: set[str] = set()
+        for item in entries:
+            if not isinstance(item, Mapping):
+                continue
+            value = item.get("name" if protocol == "gemini_native" else "id")
+            model_id = str(value or "").strip()
+            if not model_id:
+                continue
+            model_ids.add(model_id)
+            if protocol == "gemini_native" and model_id.startswith("models/"):
+                model_ids.add(model_id.removeprefix("models/"))
+        return model_ids
+
     @classmethod
     def test(
         cls,
@@ -26,10 +68,6 @@ class AgentProviderHealth:
         proxy_url: str = "",
     ) -> dict[str, Any]:
         protocol = str(provider.get("protocol") or "").strip()
-        if protocol != "openai_compatible":
-            raise AgentProviderHealthError(
-                "only OpenAI Responses-compatible providers are supported"
-            )
         base_url = str(provider.get("base_url") or "").strip().rstrip("/")
         model = str(provider.get("default_model") or "").strip()
         secret = str(provider.get("secret") or "")
@@ -37,15 +75,8 @@ class AgentProviderHealth:
             raise AgentProviderHealthError(
                 "provider address, default model, and API key are required"
             )
-        endpoint = f"{base_url}/models"
-        request = Request(
-            endpoint,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {secret}",
-            },
-            method="GET",
-        )
+        request = cls._catalog_request(protocol, base_url, secret)
+        started_at = time.monotonic()
         try:
             opener = (
                 build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
@@ -59,6 +90,7 @@ class AgentProviderHealth:
             with response_context as response:
                 body = response.read(cls.MAX_RESPONSE_BYTES + 1)
                 status = int(getattr(response, "status", 200) or 200)
+            latency_ms = max(0, round((time.monotonic() - started_at) * 1000))
         except HTTPError as exc:
             if exc.code in {401, 403}:
                 message = f"provider rejected the API key (HTTP {exc.code})"
@@ -92,16 +124,7 @@ class AgentProviderHealth:
             ) from exc
         if not isinstance(payload, Mapping):
             raise AgentProviderHealthError("provider model-list response is invalid")
-        entries = payload.get("data")
-        if not isinstance(entries, list):
-            raise AgentProviderHealthError(
-                "provider model-list response does not contain data"
-            )
-        model_ids = {
-            str(item.get("id") or "").strip()
-            for item in entries
-            if isinstance(item, Mapping)
-        }
+        model_ids = cls._catalog_model_ids(protocol, payload)
         if model not in model_ids:
             raise AgentProviderHealthError(
                 f"default model is not available: {model}"
@@ -113,6 +136,11 @@ class AgentProviderHealth:
             "base_url": base_url,
             "default_model": model,
             "model_available": True,
+            "latency_ms": latency_ms,
+            # Model choices are returned only by the explicit health endpoint;
+            # the Provider list never performs this potentially expensive I/O.
+            "available_models": sorted(model_ids)[:2000],
+            "available_models_truncated": len(model_ids) > 2000,
         }
 
 
