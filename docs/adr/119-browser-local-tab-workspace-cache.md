@@ -37,6 +37,12 @@ tree, report and analysis scroll containers opt in with
 `data-ft-scroll-state`. Ephemeral popovers and dropdown menus do not persist
 their scroll position.
 
+Research reports additionally retain the selected chapter and each report
+component's disclosure state by stable `component_id`. A report with no prior
+browser-local reading state opens at the bottom only after its initial lazy
+chapter has finished rendering; subsequent visits restore the saved reading
+position instead.
+
 This state does not synchronize between Managers, browsers, or devices. On
 restore, the page revalidates authoritative account, catalog, task and artifact
 objects through its normal lazy APIs. Authentication changes invalidate cached
@@ -51,4 +57,3 @@ DOM while retaining each account's separately namespaced workspace.
 - UI state is intentionally unavailable on a different device or Manager.
 - Adding a durable page type requires an explicit serializable projection and
   schema-version handling; arbitrary application state must not be serialized.
-

@@ -339,7 +339,14 @@
     const details = document.createElement("details");
     details.dataset.componentKind = component.kind || "";
     details.dataset.displayKind = component.display_kind || "";
-    details.open = !isCollapsible(component);
+    const disclosureKey = String(component.component_id || "").trim();
+    if (disclosureKey) details.dataset.ftStateKey = `report-component:${disclosureKey}`;
+    const savedDisclosure = disclosureKey
+      ? context.disclosureState?.[disclosureKey]
+      : undefined;
+    details.open = typeof savedDisclosure === "boolean"
+      ? savedDisclosure
+      : !isCollapsible(component);
     const summary = document.createElement("summary");
     const marker = document.createElement("span");
     marker.className = "section-marker";
@@ -369,6 +376,7 @@
     if (details.open) renderChildren();
     details.addEventListener("toggle", () => {
       if (details.open) renderChildren();
+      if (disclosureKey) context.setDisclosureState?.(disclosureKey, details.open);
       scheduleDisclosureAnchor(summary, disclosureAnchorTop);
       disclosureAnchorTop = null;
     });
