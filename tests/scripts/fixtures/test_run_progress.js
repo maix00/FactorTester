@@ -7,7 +7,10 @@ let watched = null;
 let watchCalls = 0;
 let refreshes = 0;
 window.FTTestRunResults = {
-  refresh: () => { refreshes += 1; },
+  refresh: (_context, _state, current) => {
+    refreshes += 1;
+    current.phase = "succeeded";
+  },
 };
 let stopped = 0;
 window.FTJobProgress = {
@@ -44,6 +47,16 @@ let rerenders = 0;
   window.FTTestRunProgress.render({}, {}, item, () => { rerenders += 1; });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(watchCalls, 1, "a closed stream must not reconnect during repaint");
+
+  const resumed = {
+    jobID: "job-2", portQuery: "?port=8000", serverID: "public-1",
+    phase: "running", progressStreamClosed: true,
+    progressView: {root: {status: "running"}},
+  };
+  window.FTTestRunProgress.render({}, {}, resumed, () => { rerenders += 1; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(resumed.phase, "succeeded", "returning to a tab must reconcile terminal state");
+  assert.equal(refreshes, 2);
   console.log("ok");
 })().catch(error => {
   console.error(error);

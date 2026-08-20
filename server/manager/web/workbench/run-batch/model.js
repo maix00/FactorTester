@@ -292,6 +292,8 @@
     item.job = null;
     item.artifactQuery = "";
     item.resultError = "";
+    item.resultBridgePromise = null;
+    item.resultViewerPromise = null;
     item.resultAutoRefreshStarted = false;
     item.error = "";
     clearPreviewRequest(item);
