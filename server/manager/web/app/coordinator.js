@@ -457,8 +457,15 @@
       } else if (!isPinnedPath(initial)) {
         const id = detailTabIDForPath(initial)
           || `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
-        state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
-        state.activeTabID = id;
+        const restored = state.tabs.find(tab => (
+          tab.id === id || (tab.closable && tab.path === initial)
+        ));
+        if (restored) {
+          state.activeTabID = restored.id;
+        } else {
+          state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
+          state.activeTabID = id;
+        }
       }
       renderOpenedTabs();
       tabs.checkpointWorkspace();
