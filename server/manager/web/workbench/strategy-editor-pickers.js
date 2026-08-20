@@ -27,10 +27,10 @@
     };
   }
 
-  function selectedFactorAliases(state, defaults) {
-    const values = defaults.factorAliases || defaults.factor_aliases;
+  function selectedFactorRefs(state, defaults) {
+    const values = defaults.factor_candidate_refs;
     if (Array.isArray(values) && values.length) return values.map(String).filter(Boolean);
-    return [defaults.factorAlias || selectedFactorAlias(state)].filter(Boolean);
+    return [factorRef(FTTestFactors.selectedFactor(state))].filter(Boolean);
   }
 
   function selectedFactorAlias(state) {
@@ -40,6 +40,11 @@
   function factorAlias(value) {
     if (typeof value === "string") return value;
     return value?.factor_alias || value?.alias || value?.name || "";
+  }
+
+  function factorRef(value) {
+    if (typeof value === "string") return value;
+    return value?.factor_ref || value?.target_ref || "";
   }
 
   function productGroupID(value) {
@@ -63,7 +68,7 @@
   }
 
   window.FTStrategyEditorPickers = Object.freeze({
-    factorAlias, productGroupID, productGroupLabel,
-    productProjection, selectedFactorAlias, selectedFactorAliases, strategyGroupPicker,
+    factorAlias, factorRef, productGroupID, productGroupLabel,
+    productProjection, selectedFactorAlias, selectedFactorRefs, strategyGroupPicker,
   });
 })();

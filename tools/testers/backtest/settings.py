@@ -95,14 +95,16 @@ def register_group_test_settings(app: Any) -> None:
 
     # ── ChipDefinitions ─────────────────────────────────────
     for chip in (
-        ChipDefinition("factor_alias", "因子", "identity",
-                       "因子: {factorAlias}", ("factorAlias",),
+        ChipDefinition("factor_candidates", "因子候选", "identity",
+                       "因子候选: {factorCandidateLabel}",
+                       ("factorCandidateLabel",),
                        module="factor_execution", target_tab="factor", order=10,
                        inherit_from_root=True, batch_owned=True,
-                       source_adapter="selected_factors", clickable=True,
+                       source_adapter="selected_factor_candidates", clickable=True,
                        detail_overlay={
-                           "kind": "factor", "mode": "view",
-                           "source_key": "factor",
+                           "kind": "factor_set", "mode": "view",
+                           "source_key": "factor_candidates",
+                           "ref_key": "target_ref",
                        }),
         ChipDefinition("product_path_selection", "产品组", "identity",
                        "产品组: {productPathSelectionLabel}",

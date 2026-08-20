@@ -39,6 +39,7 @@ class ProductSelectionModule(ExecutableModule):
                 "display_order": 10,
                 "item_kind": "product_path_selection",
                 "shared_page_field": "product_path_candidates",
+                "candidate_constraint": "product_path_candidates",
                 "selection_field": "product_path_selection",
                 "product_group_source": "user_product_group_templates",
                 "manual_candidate_source": "runtime_manual_path_group",
@@ -68,6 +69,7 @@ class ProductSelectionModule(ExecutableModule):
                 "kind": "product_path_selection",
                 "display_order": 20,
                 "shared_page_field": "product_path_selection",
+                "candidate_constraint": "product_path_candidates",
                 "product_group_reference_keys": (
                     "product_group_template_id",
                     "path_id",

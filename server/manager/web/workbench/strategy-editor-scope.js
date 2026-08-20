@@ -64,6 +64,42 @@
     return [value];
   }
 
+  function sourceIDs(value) {
+    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    if (value === undefined || value === null || value === "") return [];
+    return String(value).split(",").map(item => item.trim()).filter(Boolean);
+  }
+
+  function candidateSourceIDs(value) {
+    return sourceIDs(value?.source_ids || value?.data_source_ids || value?.data_sources);
+  }
+
+  function candidateCompatible(state, fieldKey, candidate) {
+    const rule = contract(state).candidate_constraints?.[fieldKey];
+    if (!rule) return true;
+    const values = state?.values || {};
+    const selected = new Set(sourceIDs(values[rule.source_field]));
+    const mode = String(values[rule.mode_field] || (selected.size ? "list" : rule.automatic_mode));
+    if (mode === String(rule.automatic_mode || "auto")) return true;
+    if (!selected.size) return false;
+    const overlaps = value => {
+      const ids = candidateSourceIDs(value);
+      return ids.length > 0 && ids.some(id => selected.has(id));
+    };
+    const firstPopulated = values => values.find(value => Array.isArray(value) && value.length) || [];
+    const pathSources = candidate?.path_sources || [];
+    const members = rule.coverage === "complete_product_coverage"
+      ? firstPopulated([candidate?.products, candidate?.product_records, pathSources])
+      : firstPopulated([candidate?.path_sources, candidate?.items]);
+    const comparable = members.filter(value => candidateSourceIDs(value).length > 0);
+    if (members.length && comparable.length !== members.length) return false;
+    return members.length ? members.every(overlaps) : overlaps(candidate);
+  }
+
+  function constrainedCandidates(state, fieldKey, values) {
+    return (values || []).filter(value => candidateCompatible(state, fieldKey, value));
+  }
+
   function fieldValues(state, fields) {
     const values = state?.values || {};
     for (const key of fields || []) {
@@ -97,10 +133,27 @@
       || value?.title_zh || value?.name || value?.label || groupID(value);
   }
 
+  function categoryID(value) {
+    if (typeof value === "string") return value;
+    return value?.id || value?.name || value?.label || "";
+  }
+
+  function categoryLabel(value) {
+    if (typeof value === "string") return value;
+    return value?.title_zh || value?.alias || value?.name
+      || value?.label || categoryID(value);
+  }
+
+  function identity(kind, value) {
+    if (kind === "factor") return factorID(value);
+    if (kind === "category") return categoryID(value);
+    return groupID(value);
+  }
+
   function mergeByID(kind, values) {
     const result = new Map();
     for (const value of values || []) {
-      const id = kind === "factor" ? factorID(value) : groupID(value);
+      const id = identity(kind, value);
       if (id) {
         const previous = result.get(String(id));
         result.set(String(id), previous && typeof value === "object"
@@ -119,11 +172,16 @@
         ...(state?.values?.factor_selections || []),
       ]);
     }
-    return mergeByID("product_group", [
+    if (kind === "category") {
+      return constrainedCandidates(state, "category_candidates", mergeByID("category", [
+        ...(state?.values?.category_candidates || []),
+      ]));
+    }
+    return constrainedCandidates(state, "product_path_candidates", mergeByID("product_group", [
       ...(state?.groups || []),
       ...(state?.values?.product_path_candidates || []),
       ...(state?.values?.product_path_selections || []),
-    ]);
+    ]));
   }
 
   function outerValues(state, kind) {
@@ -134,10 +192,10 @@
       ? candidates : fieldValues(state, rule.selection_fields);
     const catalog = visibleCatalog(state, kind);
     const byID = new Map(catalog.map(item => [
-      String(kind === "factor" ? factorID(item) : groupID(item)), item,
+      String(identity(kind, item)), item,
     ]));
     const resolved = selected.map(value => {
-      const id = kind === "factor" ? factorID(value) : groupID(value);
+      const id = identity(kind, value);
       return byID.get(String(id)) || value;
     });
     // Candidate rows are not a selection.  If the outer tab is mounted but
@@ -171,16 +229,19 @@
       ...item,
       message: item.kind === "factor"
         ? "外层因子执行已挂载但尚未选择因子；请先设置或取消挂载"
-        : "外层产品组已挂载但尚未选择产品组；请先设置或取消挂载",
+        : item.kind === "category"
+          ? "外层产品分类已挂载但没有可用分类；请先设置数据源或取消挂载"
+          : "外层产品组已挂载但尚未选择产品组；请先设置或取消挂载",
     }));
   }
 
   function itemID(kind, value) {
-    return String(kind === "factor" ? factorID(value) : groupID(value));
+    return String(identity(kind, value));
   }
 
   function itemLabel(kind, value) {
-    return kind === "factor" ? factorLabel(value) : groupLabel(value);
+    return kind === "factor" ? factorLabel(value)
+      : kind === "category" ? categoryLabel(value) : groupLabel(value);
   }
 
   function summary(context, state, kind) {
@@ -188,7 +249,8 @@
     root.className = "strategy-editor-scope-summary";
     const current = scope(state, kind);
     const title = document.createElement("strong");
-    title.textContent = context.t(kind === "factor" ? "因子候选范围" : "产品组候选范围");
+    title.textContent = context.t(kind === "factor" ? "因子候选范围"
+      : kind === "category" ? "产品分类候选范围" : "产品组候选范围");
     const note = document.createElement("small");
     note.textContent = current.required && !current.ready
       ? context.t("外层字段尚未设置")
@@ -228,7 +290,9 @@
   }
 
   window.FTStrategyEditorScope = Object.freeze({
-    contract, factorID, factorLabel, groupID, groupLabel, innerTabs,
+    contract, factorID, factorLabel, groupID, groupLabel,
+    categoryID, categoryLabel, innerTabs,
+    candidateCompatible, constrainedCandidates,
     itemID, itemLabel, mounted, scope, scopedField, scopedFields,
     fieldVisible, fieldRequired, fieldEditable, summary, validate, visibleCatalog,
   });

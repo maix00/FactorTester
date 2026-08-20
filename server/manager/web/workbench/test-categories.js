@@ -1,4 +1,5 @@
 (() => {
+  const pendingLoads = new WeakMap();
   function categoryID(value) {
     return value?.id || value?.name || value?.label || "";
   }
@@ -6,7 +7,8 @@
   async function initialize(context, state) {
     const existing = candidates(state);
     if (state.categoryCandidatesLoaded) return;
-    try {
+    if (pendingLoads.has(state)) return pendingLoads.get(state);
+    const request = (async () => { try {
       const value = await context.api("/api/data_source_categories");
       const fetched = (value.categories || []).map(item => ({
         ...item,
@@ -22,13 +24,26 @@
       state.categoryError = "";
     } catch (error) {
       state.categoryError = error.message;
-    }
+    } finally {
+      pendingLoads.delete(state);
+    }})();
+    pendingLoads.set(state, request);
+    return request;
   }
 
   function candidates(state) {
     return Array.isArray(state.values?.category_candidates)
       ? state.values.category_candidates.filter(item => item && typeof item === "object")
       : [];
+  }
+
+  function availableCandidates(state) {
+    const values = candidates(state);
+    return window.FTStrategyEditorScope?.constrainedCandidates
+      ? FTStrategyEditorScope.constrainedCandidates(
+          state, "category_candidates", values,
+        )
+      : values;
   }
 
   function setCategory(state, category) {
@@ -77,7 +92,7 @@
   }
 
   function panel(context, state, refresh) {
-    const items = candidates(state).map(category => ({
+    const items = availableCandidates(state).map(category => ({
       value: categoryID(category),
       label: category.title_zh || category.alias || categoryID(category),
       description: [
@@ -110,7 +125,7 @@
         : null,
       createLabel: context.t("新建产品分类"),
       itemActions: item => {
-        const category = candidates(state).find(value => categoryID(value) === item.value);
+        const category = availableCandidates(state).find(value => categoryID(value) === item.value);
         const actions = [];
         const edit = editAction(context, category, savedCategory);
         if (edit) actions.push(edit);
@@ -130,7 +145,7 @@
       },
       onChange: values => {
         const value = values[0] || "";
-        const category = candidates(state).find(item => categoryID(item) === value);
+        const category = availableCandidates(state).find(item => categoryID(item) === value);
         if (category) setCategory(state, category); else state.values.category = "";
         refresh?.();
       },
@@ -150,10 +165,17 @@
       error.textContent = state.categoryError;
       control.append(error);
     }
+    if (state.values.category && !items.some(item => item.value === state.values.category)) {
+      const warning = document.createElement("small");
+      warning.className = "test-product-warning";
+      warning.textContent = context.t("当前产品分类不受已选数据源完整支持，请重新选择");
+      control.append(warning);
+    }
     return root;
   }
 
   window.FTTestCategories = Object.freeze({
-    categoryID, initialize, candidates, setCategory, setEnabled, panel,
+    categoryID, initialize, candidates, availableCandidates,
+    setCategory, setEnabled, panel,
   });
 })();

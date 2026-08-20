@@ -808,9 +808,6 @@ def _execution_payload(configuration: dict, kind: str) -> dict:
         raise ValueError(f"configuration has no {kind} analysis payload")
     shared = deepcopy(payload["shared"])
     execution = {**shared, **deepcopy(analysis)}
-    families = shared.get("factor_families")
-    if isinstance(families, list) and len(families) == 1 and isinstance(families[0], dict):
-        execution.setdefault("factor_family_alias", str(families[0].get("alias") or ""))
     execution["research_configuration"] = {
         "configuration_id": configuration["configuration_id"],
         "revision": configuration["revision"],
@@ -822,16 +819,12 @@ def _execution_payload(configuration: dict, kind: str) -> dict:
 @sft_bp.post("/api/workspaces")
 def create_research_workspace():
     data = request.get_json(silent=True) or {}
-    factor_families = data.get("factor_families") or []
     factors = data.get("factors") or []
-    if not isinstance(factor_families, list) or not all(isinstance(item, dict) for item in factor_families):
-        return jsonify({"success": False, "error": "factor_families must be an array of objects"}), 400
     if not isinstance(factors, list) or not all(isinstance(item, dict) for item in factors):
         return jsonify({"success": False, "error": "factors must be an array of objects"}), 400
     workspace = research_workspaces.create_workspace(
         owner=require_user(),
         title=str(data.get("title") or "Factor research").strip(),
-        factor_families=factor_families,
         factors=factors,
     )
     return jsonify({"success": True, "workspace": workspace}), 201

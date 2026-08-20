@@ -259,18 +259,20 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
         ).fetchone() is None
     templates = research_configurations.list_templates(owner="alice")
     assert templates[0]["legacy_template_id"] == "MmRet:legacy-1"
-    assert templates[0]["payload"]["shared"]["factor_families"] == [{"alias": "MmRet"}]
+    alias = "MmRet|P:CA|N:10d|$F:1d"
+    legacy_ref = "factor:legacy:" + hashlib.sha256(alias.encode()).hexdigest()
+    assert "factor_families" not in templates[0]["payload"]["shared"]
     assert templates[0]["payload"]["shared"]["factors"] == [{
-        "alias": "MmRet|P:CA|N:10d|$F:1d",
+        "factor_ref": legacy_ref,
+        "alias": alias,
         "factor_family_alias": "MmRet",
     }]
     assert templates[0]["payload"]["analyses"]["backtest"]["groups"][0]["splitCount"] == 5
     migrated_backtest = templates[0]["payload"]["analyses"]["backtest"]
     assert "factor" not in migrated_backtest and "factor_candidates" not in migrated_backtest
-    assert migrated_backtest["local_settings"]["factor"] == "MmRet|P:CA|N:10d|$F:1d"
-    assert migrated_backtest["local_settings"]["factor_candidates"] == [{
-        "alias": "MmRet|P:CA|N:10d|$F:1d",
-    }]
+    assert "factor" not in migrated_backtest["local_settings"]
+    assert "factor_candidates" not in migrated_backtest["local_settings"]
+    assert migrated_backtest["groups"][0]["factor_candidate_refs"] == [legacy_ref]
 
 
 def test_legacy_workspace_and_runs_require_then_apply_one_time_migration(client) -> None:
@@ -401,7 +403,7 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     preview_payload = preview.get_json()
     assert preview_payload["success"] is True
     assert len(preview_payload["run_spec_hash"]) == 64
-    assert preview_payload["run_spec_version"] == 2
+    assert preview_payload["run_spec_version"] == 3
     assert preview_payload["factor_revision_manifests"]
     assert all(
         "source_code" not in manifest
@@ -859,8 +861,17 @@ def test_preview_freezes_transient_profile_screen_without_shared_registration(
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
     })
+    payload["shared"]["factors"].append({
+        "factor_ref": "factor:profile-screen-20d",
+        "factor_family_alias": "ProfileScreen",
+        "alias": "ProfileScreen|N:20d",
+        "source_kind": "transient",
+    })
+    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
+        "factor:profile-screen-20d"
+    ]
     payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
-        "screen": "ProfileScreen|N:20d",
+        "screen": "factor:profile-screen-20d",
     }
     payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
     payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
@@ -910,8 +921,8 @@ class ProfileScreen(FactorFamily):
     configuration = client.get(
         f"/api/workspaces/{workspace['workspace_id']}/configuration"
     ).get_json()["configuration"]["payload"]
-    assert all(
-        item["alias"] != "ProfileScreen|N:20d"
+    assert any(
+        item.get("factor_ref") == "factor:profile-screen-20d"
         for item in configuration["shared"]["factors"]
     )
 
@@ -926,6 +937,7 @@ def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
         "title": "transient factor inputs",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [{
+            "factor_ref": "factor:profile-screen-20d",
             "factor_family_alias": "ProfileScreen",
             "alias": "ProfileScreen|N:20d",
         }],
@@ -933,11 +945,11 @@ def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
     assert created.status_code == 201
     workspace = created.get_json()["workspace"]
     payload = _payload(workspace)
-    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
-        "ProfileScreen|N:20d"
-    )
+    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
+        "factor:profile-screen-20d"
+    ]
     payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
-        "screen": "ProfileScreen|N:20d",
+        "screen": "factor:profile-screen-20d",
     }
     payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
     payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
@@ -1028,6 +1040,7 @@ def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
         "title": "retry retained source",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [{
+            "factor_ref": "factor:profile-screen-20d",
             "factor_family_alias": "ProfileScreen",
             "alias": "ProfileScreen|N:20d",
         }],
@@ -1035,8 +1048,8 @@ def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
     workspace = created.get_json()["workspace"]
     payload = _payload(workspace)
     group = payload["analyses"]["backtest"]["groups"][0]
-    group["factorAlias"] = "ProfileScreen|N:20d"
-    group["factorRoleBindings"] = {"screen": "ProfileScreen|N:20d"}
+    group["factor_candidate_refs"] = ["factor:profile-screen-20d"]
+    group["factorRoleBindings"] = {"screen": "factor:profile-screen-20d"}
     group["screen_rule"] = "lte"
     group["screen_upper"] = 12
     _update(client, workspace, payload)
@@ -1680,14 +1693,10 @@ def test_migration_repairs_registered_settings_in_already_migrated_templates(cli
     applied = research_configurations.migrate_legacy_templates(apply=True)
     repaired = research_configurations.list_templates(owner="alice")[0]
 
-    assert dry_run["canonical_templates_repaired"] == 1
-    assert applied["canonical_templates_repaired"] == 1
+    assert dry_run["canonical_templates_repaired"] == 0
+    assert applied["canonical_templates_repaired"] == 0
     backtest = repaired["payload"]["analyses"]["backtest"]
-    assert "factor" not in backtest
-    assert backtest["local_settings"] == {
-        "start_date": "2024-01-01",
-        "factor": "MmRet|P:CA|N:10d|$F:1d",
-    }
+    assert backtest["factor"] == "MmRet|P:CA|N:10d|$F:1d"
 
 
 def test_all_analyses_dispatch_importable_process_runners(client) -> None:

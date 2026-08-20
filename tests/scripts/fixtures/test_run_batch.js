@@ -103,7 +103,7 @@ const context = {
       previewRequests.push({body, hash});
       return {
         run_spec_hash: hash,
-        run_spec_version: 2,
+        run_spec_version: 3,
         configuration_id: "configuration-preview",
         configuration_revision: requests.length,
         report_projection: {run_spec: {
@@ -111,7 +111,7 @@ const context = {
           alias_zh: "预览运行配置",
           summary_zh: "预览",
           complete_parameters: {
-            run_spec_version: 2,
+            run_spec_version: 3,
             configuration: {shared: {workspace_id: "workspace-one"}},
             analyses: [state?.kind || "ic"],
           },

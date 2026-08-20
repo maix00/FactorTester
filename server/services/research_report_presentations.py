@@ -65,7 +65,7 @@ def run_spec_presentation(
         "complete_parameters": run_spec,
         "complete_parameters_json": orjson.dumps(
             run_spec,
-            option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
+            option=orjson.OPT_INDENT_2,
         ).decode(),
         "strict_process_batch_candidate_key": strict_process_batch_candidate_key(
             run_spec,

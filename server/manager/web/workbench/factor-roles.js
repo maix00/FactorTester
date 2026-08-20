@@ -4,19 +4,23 @@
     exit: "退出", sizing: "目标权重",
   };
 
-  function factorAlias(value) {
+  function factorRef(value) {
     if (typeof value === "string") return value.trim();
     if (!value || typeof value !== "object") return "";
-    return String(
-      value.factor_alias || value.factorAlias || value.alias || value.name || "",
-    ).trim();
+    return String(value.factor_ref || value.target_ref || "").trim();
+  }
+
+  function factorLabel(value) {
+    if (typeof value === "string") return value.trim();
+    return String(value?.factor_alias || value?.alias || value?.name
+      || factorRef(value)).trim();
   }
 
   function normalize(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value)
-      .map(([role, factor]) => [role, factorAlias(factor)])
-      .filter(([, alias]) => alias));
+      .map(([role, factor]) => [role, factorRef(factor)])
+      .filter(([, ref]) => ref));
   }
 
   function visibleRoles(field, values) {
@@ -55,10 +59,10 @@
     root.className = "factor-role-bindings";
     const candidates = (values?.[field?.serialization?.candidate_field || "factor_candidates"] || [])
       .map(item => ({
-        alias: factorAlias(item), label: factorAlias(item),
+        ref: factorRef(item), label: factorLabel(item),
         description: sourceDescription(context, values, item),
       }))
-      .filter(item => item.alias);
+      .filter(item => item.ref);
     const bindings = normalize(options.value);
     for (const role of visibleRoles(field, values)) {
       const label = context.t(roleLabels[role] || role);
@@ -75,7 +79,7 @@
             description: context.t("不为此角色设置单独因子"),
           },
           ...candidates.map(candidate => ({
-            value: candidate.alias,
+            value: candidate.ref,
             label: candidate.label,
             description: candidate.description,
           })),
@@ -122,6 +126,6 @@
   }
 
   window.FTTestFactorRoles = Object.freeze({
-    factorAlias, normalize, visibleRoles, display, render, section,
+    factorRef, factorLabel, normalize, visibleRoles, display, render, section,
   });
 })();

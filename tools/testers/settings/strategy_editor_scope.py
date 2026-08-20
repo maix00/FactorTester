@@ -44,28 +44,6 @@ def build_scoped_fields() -> dict[str, Any]:
                 ),
             },
         },
-        "factor": {
-            "outer": {
-                "source": "factor_candidates",
-                "cardinality": "one",
-                "editable": False,
-                "resolution": {
-                    "kind": "automatic",
-                    "source": "factor_candidates",
-                    "resolver": "primary_item",
-                },
-            },
-            "inner": {
-                "source": "factor_candidates",
-                "cardinality": "one",
-                "editable": False,
-                "resolution": {
-                    "kind": "automatic",
-                    "source": "factor_candidates",
-                    "resolver": "primary_item",
-                },
-            },
-        },
         "factor_role_bindings": {
             "outer": {
                 "source": "factor_candidates",
@@ -160,6 +138,42 @@ def build_scoped_fields() -> dict[str, Any]:
                 "filter_only_when_outer_mounted": True,
                 "allow_inline_create_when_outer_unmounted": True,
                 "editable": True,
+            },
+        },
+        "category_candidates": {
+            "label": "产品分类候选",
+            "editor": "shared_object_multi_select",
+            "outer": {
+                "source": "visible_category_catalog",
+                "cardinality": "many",
+                "selection_mode": "build_candidate_pool",
+                "editable": True,
+                "allow_inline_create": True,
+            },
+            "inner": {
+                "source_when_outer_mounted": "outer_category_pool",
+                "source_when_outer_unmounted": "visible_category_catalog",
+                "cardinality": "many",
+                "selection_mode": "filter_or_build_candidates",
+                "filter_only_when_outer_mounted": True,
+                "allow_inline_create_when_outer_unmounted": True,
+                "editable": True,
+            },
+        },
+        "category": {
+            "label": "产品分类",
+            "editor": "shared_object_single_select",
+            "outer": {
+                "source": "category_candidates",
+                "cardinality": "one",
+                "editable": True,
+            },
+            "inner": {
+                "source": "category_candidates",
+                "cardinality": "one",
+                "selection_mode": "override",
+                "editable": True,
+                "override_control": "direct",
             },
         },
     }
