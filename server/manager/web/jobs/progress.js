@@ -76,6 +76,7 @@
 
   function updateProgress(view, payload) {
     const state = stateOf(view);
+    if (state.terminal) return state;
     const event = String(payload?.event || "message");
     const wrapped = payload?.latest_progress;
     const source = wrapped?.data || payload?.data || payload || {};
@@ -91,7 +92,10 @@
       state.percent = Math.max(state.percent ?? 0, Math.max(0, Math.min(100, measured)));
     }
     if (status === "succeeded") state.percent = 100;
-    if (status) state.terminal = true;
+    if (status) {
+      state.percent ??= 0;
+      state.terminal = true;
+    }
 
     // Once determinate, heartbeats and count-less phase messages must not put
     // the native progress element back into its indeterminate animation.
@@ -109,8 +113,13 @@
   async function watchProgress(context, jobID, portQuery, view, options = {}) {
     const controller = new AbortController();
     progressAbort = controller;
+    let streamError = null;
     try {
-      const response = await context.raw(`/api/jobs/${encodeURIComponent(jobID)}/stream${portQuery}`, {signal: controller.signal});
+      const cursor = stateOf(view).lastSeq;
+      const separator = portQuery ? "&" : "?";
+      const path = `/api/jobs/${encodeURIComponent(jobID)}/stream${portQuery}`
+        + (cursor > 0 ? `${separator}after=${encodeURIComponent(cursor)}` : "");
+      const response = await context.raw(path, {signal: controller.signal});
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -137,9 +146,26 @@
         });
       }
     } catch (error) {
-      if (error.name !== "AbortError") view.label.textContent = context.t("实时进度暂不可用");
+      if (error.name !== "AbortError") {
+        streamError = error;
+        view.label.textContent = context.t("实时进度暂不可用");
+      }
     } finally {
-      options.onComplete?.();
+      const terminal = stateOf(view).terminal;
+      if (!controller.signal.aborted && !terminal) {
+        view.label.textContent = context.t("实时进度暂不可用");
+      }
+      if (progressAbort === controller) progressAbort = null;
+      // Replacing a watcher or leaving the page is not task completion and
+      // must not launch an obsolete cross-server detail read. A terminal
+      // payload deliberately aborts its own stream and still converges once.
+      if (!controller.signal.aborted || terminal) {
+        options.onComplete?.({
+          aborted: controller.signal.aborted,
+          error: streamError,
+          terminal,
+        });
+      }
     }
   }
 

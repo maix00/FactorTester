@@ -236,7 +236,7 @@
     };
   }
 
-  async function detail(context, port, jobID, serverID = "") {
+  async function detail(context, port, jobID, serverID = "", watchLive = true) {
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
@@ -397,7 +397,22 @@
         }));
       })();
     }
-    if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, executionQuery, progress);
+    if (watchLive && ["queued", "planning", "running", "paused"].includes(job.status)) {
+      FTJobProgress.watchProgress(context, jobID, executionQuery, progress, {
+        onPayload: () => {
+          if (progress.progressState?.terminal) FTJobProgress.stopProgress();
+        },
+        onComplete: () => {
+          // Converge once against the authoritative detail projection.  The
+          // replacement view deliberately stays static when the stream ended
+          // non-terminally, avoiding an unbounded reconnect loop while a
+          // remote execution server remains unavailable.
+          if (isCurrent()) void detail(
+            context, resolvedPort || port, jobID, resolvedServerID, false,
+          );
+        },
+      });
+    }
 
     async function detailPage() {
       return window.FTJobs.detail(

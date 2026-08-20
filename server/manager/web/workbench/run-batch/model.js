@@ -274,6 +274,7 @@
     if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
     const submittedHash = assertPreviewMatch(item, value);
     item.phase = "submitted";
+    item.progressStreamClosed = false;
     item.jobID = String(job.job_id);
     item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
     item.runSpecHash = submittedHash || String(

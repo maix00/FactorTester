@@ -15,6 +15,7 @@
     window.FTJobProgress.stopProgress();
     activeKey = key;
     item.progressWatchKey = key;
+    item.progressStreamClosed = false;
     queueMicrotask(async () => {
       await window.FTJobProgress.watchProgress(
         context, item.jobID, item.portQuery || "", item.progressView,
@@ -30,6 +31,7 @@
           onComplete: () => {
             if (item.progressWatchKey !== key) return;
             item.progressWatchKey = "";
+            item.progressStreamClosed = true;
             if (activeKey === key) activeKey = "";
             // The stream may close before its final frame reaches the browser.
             // Always fetch the authoritative Job detail once on completion;
@@ -48,13 +50,25 @@
   function render(context, _state, item, rerender) {
     if (!item?.jobID || !window.FTJobProgress) return null;
     const key = [item.jobID, item.portQuery || "", item.serverID || ""].join("|");
+    if (!terminal.has(item.phase) && item.progressStreamClosed && item.progressView) {
+      return item.progressView.root;
+    }
+    if (!terminal.has(item.phase) && item.progressViewKey === key && item.progressView) {
+      if (!(activeKey === key && item.progressWatchKey === key)) {
+        watch(context, _state, item, rerender);
+      }
+      return item.progressView.root;
+    }
     if (!terminal.has(item.phase)
       && activeKey === key && item.progressWatchKey === key && item.progressView) {
       return item.progressView.root;
     }
     const view = window.FTJobProgress.progressView(context, item.phase);
     item.progressView = view;
-    if (!terminal.has(item.phase)) watch(context, _state, item, rerender);
+    item.progressViewKey = key;
+    if (!terminal.has(item.phase) && !item.progressStreamClosed) {
+      watch(context, _state, item, rerender);
+    }
     return view.root;
   }
 
