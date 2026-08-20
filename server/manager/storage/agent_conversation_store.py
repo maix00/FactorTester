@@ -34,6 +34,16 @@ _COLUMNS = {
     "updated_at",
     "active",
 }
+_RUNTIME_COLUMNS = {
+    "model_id": "TEXT NOT NULL DEFAULT ''",
+    "reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+    "service_tier": "TEXT NOT NULL DEFAULT ''",
+    "actual_model": "TEXT NOT NULL DEFAULT ''",
+    "model_context_window": "INTEGER NOT NULL DEFAULT 0",
+    "total_tokens": "INTEGER NOT NULL DEFAULT 0",
+    "last_tokens": "INTEGER NOT NULL DEFAULT 0",
+    "compaction_count": "INTEGER NOT NULL DEFAULT 0",
+}
 
 class AgentConversationStore:
     """Persist and list multiple conversations for one Profile."""
@@ -68,7 +78,15 @@ class AgentConversationStore:
                 preview TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
-                active INTEGER NOT NULL DEFAULT 0
+                active INTEGER NOT NULL DEFAULT 0,
+                model_id TEXT NOT NULL DEFAULT '',
+                reasoning_effort TEXT NOT NULL DEFAULT '',
+                service_tier TEXT NOT NULL DEFAULT '',
+                actual_model TEXT NOT NULL DEFAULT '',
+                model_context_window INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                last_tokens INTEGER NOT NULL DEFAULT 0,
+                compaction_count INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -137,6 +155,15 @@ class AgentConversationStore:
             # The auxiliary tables are idempotent and are created after the
             # legacy migration as well as for new Manager SQLite files.
             self._create_table(db)
+            columns = {
+                str(row[1])
+                for row in db.execute(f"PRAGMA table_info({TABLE})").fetchall()
+            }
+            for name, declaration in _RUNTIME_COLUMNS.items():
+                if name not in columns:
+                    db.execute(
+                        f"ALTER TABLE {TABLE} ADD COLUMN {name} {declaration}"
+                    )
 
     @staticmethod
     def _required(value: object, field: str, limit: int = 512) -> str:
@@ -162,6 +189,14 @@ class AgentConversationStore:
             "created_at": float(row["created_at"] or 0),
             "updated_at": float(row["updated_at"] or 0),
             "active": bool(row["active"]),
+            "model_id": str(row["model_id"] or ""),
+            "reasoning_effort": str(row["reasoning_effort"] or ""),
+            "service_tier": str(row["service_tier"] or ""),
+            "actual_model": str(row["actual_model"] or ""),
+            "model_context_window": int(row["model_context_window"] or 0),
+            "total_tokens": int(row["total_tokens"] or 0),
+            "last_tokens": int(row["last_tokens"] or 0),
+            "compaction_count": int(row["compaction_count"] or 0),
         }
 
     @classmethod
@@ -395,6 +430,96 @@ class AgentConversationStore:
                 (identifier,),
             ).fetchone()
         value = self._row(result)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
+    def update_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        """Persist conversation-local model choices without changing Provider defaults."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        model = str(model_id or "").strip()[:256]
+        effort = str(reasoning_effort or "").strip()[:64]
+        tier = str(service_tier or "").strip()[:64]
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE} SET model_id = ?, reasoning_effort = ?,
+                            service_tier = ?, updated_at = ?
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (model, effort, tier, time.time(), identifier, owner, profile),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
+    def update_runtime_observation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        actual_model: str | None = None,
+        model_context_window: int | None = None,
+        total_tokens: int | None = None,
+        last_tokens: int | None = None,
+        compaction_count: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist small runtime metadata used to restore conversation status UI."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        assignments: list[str] = []
+        values: list[object] = []
+        candidates = {
+            "actual_model": (
+                None if actual_model is None else str(actual_model).strip()[:256]
+            ),
+            "model_context_window": model_context_window,
+            "total_tokens": total_tokens,
+            "last_tokens": last_tokens,
+            "compaction_count": compaction_count,
+        }
+        for name, value in candidates.items():
+            if value is None:
+                continue
+            assignments.append(f"{name} = ?")
+            values.append(max(0, int(value)) if name != "actual_model" else value)
+        if not assignments:
+            current = self.get(owner, profile, identifier)
+            if current is None:
+                raise ValueError("conversation not found")
+            return current
+        values.extend((identifier, owner, profile))
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE} SET {', '.join(assignments)}
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
         if value is None:  # pragma: no cover
             raise RuntimeError("Agent conversation disappeared")
         return value
