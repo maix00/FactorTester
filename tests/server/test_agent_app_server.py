@@ -20,6 +20,7 @@ from server.manager.services.agent_provider_health import (
     AgentProviderHealthError,
 )
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.cc_switch_gateway import CCSwitchGateway
 from server.manager.services.agent_workspace import profile_workspace_relative_path
 from server.manager.storage.agent_provider_store import ProviderStoreError
 
@@ -433,6 +434,89 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert resumed_claim is not None
     assert resumed_claim["status"] == "claimed"
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+
+
+def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "FACTORTESTER_CLI",
+        _fake_factor_tester(tmp_path / "factortester"),
+    )
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    started_roots = []
+    stopped_roots = []
+
+    def fake_gateway_start(gateway):
+        started_roots.append(gateway.profile_state_root)
+        return {
+            **gateway.provider,
+            "protocol": "openai_responses",
+            "base_url": f"http://127.0.0.1:{17000 + len(started_roots)}/v1",
+            "secret": f"profile-local-token-{len(started_roots)}",
+        }
+
+    def fake_gateway_stop(gateway):
+        stopped_roots.append(gateway.profile_state_root)
+
+    monkeypatch.setattr(CCSwitchGateway, "start", fake_gateway_start)
+    monkeypatch.setattr(CCSwitchGateway, "stop", fake_gateway_stop)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    profile_ids = ("profile-a", "profile-b")
+    protocols = ("openai_chat", "anthropic_messages")
+    for profile_id, protocol in zip(profile_ids, protocols, strict=True):
+        service.bind_runtime(
+            PRINCIPAL,
+            profile_id,
+            runtime_kind="server",
+            executor_id="public-1",
+        )
+        provider = service.save_provider(
+            PRINCIPAL,
+            {
+                "label": f"{profile_id} provider",
+                "runtime_kind": "server",
+                "protocol": protocol,
+                "base_url": "https://api.example.test/v1",
+                "default_model": f"{profile_id}-model",
+                "token": f"{profile_id}-upstream-secret",
+            },
+        )
+        service.claim(
+            PRINCIPAL,
+            profile_id,
+            provider_id=provider["provider_id"],
+            agent_id=f"{profile_id}-agent",
+        )
+
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+    )
+    status_a = supervisor.start(PRINCIPAL, profile_ids[0])
+    status_b = supervisor.start(PRINCIPAL, profile_ids[1])
+
+    assert status_a["running"] is True
+    assert status_b["running"] is True
+    assert status_a["pid"] != status_b["pid"]
+    assert len(started_roots) == 2
+    assert started_roots[0] != started_roots[1]
+
+    supervisor.stop(PRINCIPAL, profile_ids[0])
+
+    assert stopped_roots == [started_roots[0]]
+    assert supervisor.status(PRINCIPAL, profile_ids[0])["running"] is False
+    assert supervisor.status(PRINCIPAL, profile_ids[1])["running"] is True
+    supervisor.stop(PRINCIPAL, profile_ids[1])
+    assert stopped_roots == started_roots
 
 
 def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypatch):
