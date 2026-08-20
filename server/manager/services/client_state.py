@@ -65,6 +65,41 @@ class ClientStateService:
         )
         self._profile_refresh_lock = threading.RLock()
         self._profile_refresh_inflight: set[str] = set()
+        self._catalog_refresh_lock = threading.RLock()
+        self._catalog_refresh_inflight: set[str] = set()
+
+    def _refresh_account_domain_async(self, principal: str) -> None:
+        """Refresh the local account mirror without delaying a catalog read."""
+        owner = str(principal or "").strip()
+        synchronizer = self.account_domain_sync
+        if not owner or synchronizer is None:
+            return
+        with self._catalog_refresh_lock:
+            if owner in self._catalog_refresh_inflight:
+                return
+            self._catalog_refresh_inflight.add(owner)
+
+        def refresh() -> None:
+            try:
+                synchronizer.sync(owner)
+            except (
+                AttributeError,
+                ConnectionError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ):
+                pass
+            finally:
+                with self._catalog_refresh_lock:
+                    self._catalog_refresh_inflight.discard(owner)
+
+        threading.Thread(
+            target=refresh,
+            name=f"account-catalog-refresh:{owner}",
+            daemon=True,
+        ).start()
 
     def _local_account(self, principal: str) -> dict[str, Any]:
         """Read the account projection from this Manager's SQLite first.
@@ -635,6 +670,7 @@ class ClientStateService:
 
     def product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return account groups projected against the server catalog."""
+        self._refresh_account_domain_async(principal)
         from tools.data.account_manage import load_product_groups
         from server.modules.products.product_group_store import (
             product_group_path_bindings,
@@ -795,6 +831,7 @@ class ClientStateService:
 
     def factor_library(self, principal: str) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""
+        self._refresh_account_domain_async(principal)
         from server.modules.custom_factors.client_library import (
             build_client_library_projection,
         )
@@ -888,6 +925,7 @@ class ClientStateService:
 
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
         """Return explicitly synchronized immutable factor sets."""
+        self._refresh_account_domain_async(principal)
         from server.modules.custom_factors.factor_set_registry import (
             factor_set_catalog,
         )
@@ -1044,6 +1082,7 @@ class ClientStateService:
 
     def product_categories(self, principal: str = "") -> list[dict[str, Any]]:
         """Return source and account-owned product category definitions."""
+        self._refresh_account_domain_async(principal)
         from server.modules.products.product_category_store import (
             list_product_categories,
         )
