@@ -123,14 +123,17 @@
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       const request = await requestForPreview(context, state, group);
+      // Bind the immutable request to the page inputs that produced it.  Do
+      // not recompute this after the network round trip: the user may edit the
+      // draft while preview generation is in flight, in which case the next
+      // click must detect that this response is already stale.
+      const fingerprint = model().inputFingerprint(state, group);
       const value = usesLocalRuntime(state)
         ? await localRequest("preview", request)
         : await context.api(serviceRunPath(context, state, "/api/runs/preview"), {
           method: "POST", body: JSON.stringify(request),
         });
-      model().recordPreview(
-        item, value, request, model().inputFingerprint(state, group),
-      );
+      model().recordPreview(item, value, request, fingerprint);
       refresh?.();
       // A content refresh can replace state.testRunBatch while this async
       // preview still owns the original item. Mirror the frozen contract into
@@ -139,9 +142,7 @@
       const mirrorPreview = () => {
         const current = model().itemFor(state, group);
         if (current && current !== item) {
-          model().recordPreview(
-            current, value, request, model().inputFingerprint(state, group),
-          );
+          model().recordPreview(current, value, request, fingerprint);
         }
         return current;
       };

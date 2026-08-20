@@ -142,11 +142,12 @@
     const resolved = [];
     context.showNotice?.(context.t("正在准备运行配置…"));
     for (const {group, item} of tasks) {
-      if (model().runSpecPath(item)) {
+      if (model().previewMatches(item, state, group)) {
         resolved.push(item);
         continue;
       }
       try {
+        model().invalidatePreview(item);
         const frozen = await previewOne(context, state, group, refresh);
         const current = frozen || model().itemFor(state, group) || item;
         if (model().runSpecTarget(current)) resolved.push(current);
