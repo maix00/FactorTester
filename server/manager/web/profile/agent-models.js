@@ -240,6 +240,7 @@
   }
 
   async function testExisting(context, item, status) {
+    status.className = "agent-model-test-status checking";
     status.textContent = context.t("正在测试…");
     try {
       const result = await context.api("/api/client/agent-models/test", {
@@ -258,12 +259,14 @@
       status.textContent = result?.test?.default_model
         ? `${context.t("连接成功")} · ${result.test.default_model}`
         : context.t("连接成功");
+      status.className = "agent-model-test-status success";
     } catch (error) {
       status.textContent = error.message || context.t("连接测试失败");
+      status.className = "agent-model-test-status failure";
     }
   }
 
-  function table(context, providers, capabilities, page, refresh) {
+  function table(context, providers, capabilities, page, onPageChange, refresh) {
     const details = protocolDetails(capabilities);
     const rows = providers.map(item => {
       const status = document.createElement("span");
@@ -311,7 +314,7 @@
       {
         page, pageSize,
         totalLabel: total => context.t("共 %lld 个").replace("%lld", String(total)),
-        onPageChange: next => refresh(next),
+        onPageChange,
       },
     );
     view.shell.classList.add("agent-model-table");
@@ -329,6 +332,7 @@
         ? payload.runtime_capabilities : [];
       const root = document.createElement("div");
       root.className = "agent-models-page";
+      const state = {page: requestedPage, query: "", renderFrame: 0};
       const intro = document.createElement("p");
       intro.className = "settings-muted";
       intro.textContent = context.t("模型服务只显示当前账户的配置；令牌不会同步到其他用户。");
@@ -343,7 +347,57 @@
       header.append(intro, add);
       root.append(header);
       if (providers.length) {
-        root.append(table(context, providers, capabilities, requestedPage, page => list(context, page)));
+        const toolbar = document.createElement("div");
+        toolbar.className = "agent-model-list-toolbar";
+        const search = document.createElement("input");
+        search.type = "search";
+        search.className = "inline-setting agent-model-search";
+        search.placeholder = context.t("搜索服务、协议、地址或模型");
+        search.setAttribute("aria-label", context.t("搜索模型服务"));
+        const count = document.createElement("span");
+        count.className = "agent-model-result-count settings-muted";
+        const tableHost = document.createElement("div");
+        tableHost.className = "agent-model-table-host";
+        const filteredProviders = () => {
+          const query = state.query.toLocaleLowerCase();
+          if (!query) return providers;
+          return providers.filter(item => [
+            item.label, item.runtime_kind, item.agent_runtime, item.protocol,
+            item.base_url, item.default_model,
+          ].some(value => String(value || "").toLocaleLowerCase().includes(query)));
+        };
+        const renderTable = () => {
+          const visible = filteredProviders();
+          const pages = Math.max(1, Math.ceil(visible.length / pageSize));
+          state.page = Math.min(state.page, pages);
+          count.textContent = context.t("显示 %lld / %total 个")
+            .replace("%lld", String(visible.length))
+            .replace("%total", String(providers.length));
+          if (!visible.length) {
+            tableHost.replaceChildren(FTUI.empty(
+              context.t("没有匹配的模型服务"),
+              context.t("清除搜索条件后可查看全部模型服务。"),
+            ));
+            return;
+          }
+          tableHost.replaceChildren(table(
+            context, visible, capabilities, state.page,
+            next => { state.page = next; renderTable(); },
+            () => list(context, state.page),
+          ));
+        };
+        search.addEventListener("input", () => {
+          state.query = search.value.trim();
+          state.page = 1;
+          if (state.renderFrame) cancelAnimationFrame(state.renderFrame);
+          state.renderFrame = requestAnimationFrame(() => {
+            state.renderFrame = 0;
+            renderTable();
+          });
+        });
+        toolbar.append(search, count);
+        root.append(toolbar, tableHost);
+        renderTable();
       } else {
         root.append(FTUI.empty(context.t("尚无已保存模型服务"), context.t("请先添加一个模型服务。")));
       }

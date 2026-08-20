@@ -2758,6 +2758,10 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "共享研究报告" in reports
     assert "clientDownload" in reports
     assert "loadClientRelease" in reports
+    assert 'search.type = "search"' in agent_models
+    assert 'search.addEventListener("input"' in agent_models
+    assert "requestAnimationFrame" in agent_models
+    assert 'onPageChange,' in agent_models
     assert "clientDownload?.(context, release)" in reports
     assert 'note.className = "secondary research-graph-list-note"' in graph_list
     assert "source_server_ids" in profile_directory
