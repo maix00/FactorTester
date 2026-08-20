@@ -87,41 +87,35 @@
     return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
   }
 
-  async function persistConversationItem(state, item, role) {
-    const text = itemText(item);
-    if (!text || !state.context?.api || !state.conversationID) return;
-    await state.context.api("/api/client/profile-agent/conversations/items", {
-      method: "POST",
-      body: JSON.stringify({
-        profile_id: state.profileID,
-        conversation_id: state.conversationID,
-        role,
-        text,
-        item_id: String(item.id || ""),
-      }),
+  async function authoritativePage(state, params = {}, viewOverride = "") {
+    const pageParams = P.itemPageParams(params);
+    const query = new URLSearchParams({
+      profile_id: state.profileID,
+      conversation_id: state.conversationID,
+      limit: String(pageParams.limit),
+      view: viewOverride || state.itemView || "results",
+      order: pageParams.order,
     });
-  }
-
-  function appendUniqueHistoryItems(state, items) {
-    const keys = new Set(state.items.map(itemKey));
-    for (const item of items) {
-      const key = itemKey(item);
-      if (!key.endsWith(":")) {
-        if (keys.has(key)) continue;
-        state.items.push(item);
-        keys.add(key);
-      }
-    }
+    if (pageParams.after) query.set("after", pageParams.after);
+    const payload = await state.context.api(
+      `/api/client/profile-agent/conversation-items?${query}`,
+    );
+    return {
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      has_more: Boolean(payload?.has_more),
+      after: payload?.after || null,
+      order: payload?.order || pageParams.order,
+    };
   }
 
   async function reconcileThreadHistory(state, controller) {
-    const payload = await rpc(state, "thread/resume", {
-      threadId: state.threadID,
-    });
-    const value = P.responseValue(payload) || {};
-    const thread = value.thread || value;
-    const history = P.historyItems(state, thread);
-    const assistant = [...history].reverse().find(item => {
+    // A turn always reconciles against the result projection.  The user may
+    // currently be browsing the lazy process projection, which deliberately
+    // omits the final assistant answer.
+    const page = await authoritativePage(state, {}, "results");
+    const history = page.items;
+    const newestFirst = page.order === "asc" ? [...history].reverse() : history;
+    const assistant = newestFirst.find(item => {
       const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
       return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type)
         && Boolean(itemText(item));
@@ -130,20 +124,8 @@
     // different event name, recover the authoritative text from the durable
     // provider thread before closing the browser stream.
     if (assistant) appendAssistantText(state, controller, itemText(assistant));
-    appendUniqueHistoryItems(state, history);
-    await Promise.all(history.map(item => {
-      const type = String(item?.type || "").toLowerCase();
-      const role = type === "user_message" ? "user"
-        : type === "assistant_message" ? "assistant" : "";
-      return role ? persistConversationItem(state, item, role).catch(() => {}) : null;
-    }));
-    state.threadTitle = String(
-      thread.name || thread.title || state.threadTitle || "",
-    ).trim();
-    state.createdAt = P.historyTimestamp(
-      thread.createdAt || thread.created_at,
-      state.createdAt,
-    );
+    state.items = history;
+    state.itemPage = page;
     state.restored = true;
     return history;
   }
@@ -161,7 +143,7 @@
       thread.createdAt || thread.created_at,
       state.createdAt,
     );
-    state.items = P.historyItems(state, thread);
+    state.items = [];
     state.restored = true;
     state.conversation = {
       ...state.conversation,
@@ -178,9 +160,13 @@
     ).trim();
     if (!providerThreadID) return "";
     if (!state.threadPromise) {
-      state.threadPromise = rpc(state, "thread/resume", {
-        threadId: providerThreadID,
-      }).then(payload => syncThread(state, payload))
+      state.threadPromise = authoritativePage(state).then(page => {
+        state.threadID = providerThreadID;
+        state.items = page.items;
+        state.itemPage = page;
+        state.restored = true;
+        return providerThreadID;
+      })
         .finally(() => { state.threadPromise = null; });
     }
     return state.threadPromise;
@@ -255,6 +241,30 @@
       if (!eventBelongsToCurrentTurn(state, payload)) return;
       const method = P.rawMethod(payload);
       const delta = P.agentMessageDelta(payload);
+      const structuredItem = payload?.chatkit_item;
+      if (structuredItem && ![
+        "user_message", "assistant_message",
+      ].includes(String(structuredItem.type || ""))) {
+        const existingIndex = state.items.findIndex(
+          item => item.id === structuredItem.id,
+        );
+        if (existingIndex < 0) {
+          state.items.push(structuredItem);
+          writeEvent(controller, {
+            type: "thread.item.added", item: structuredItem,
+          });
+        } else if (/item[/:._-]completed/i.test(method)) {
+          state.items[existingIndex] = structuredItem;
+          writeEvent(controller, {
+            type: "thread.item.replaced", item: structuredItem,
+          });
+        }
+        if (/item[/:._-]completed/i.test(method)) {
+          writeEvent(controller, {
+            type: "thread.item.done", item: structuredItem,
+          });
+        }
+      }
       if (method === "app_server_exit" || payload?.type === "app_server_exit") {
         if (state.assistant?.text) finish("done");
         else {
@@ -349,7 +359,6 @@
       });
       const user = P.userItem(state, text);
       state.items.push(user);
-      persistConversationItem(state, user, "user").catch(() => {});
       writeEvent(controller, {type: "thread.item.added", item: user});
       writeEvent(controller, {type: "thread.item.done", item: user});
       writeEvent(controller, {
@@ -399,7 +408,6 @@
           content_index: 0, content: item.content[0],
         });
         writeEvent(controller, {type: "thread.item.done", item});
-        await persistConversationItem(state, item, "assistant").catch(() => {});
       }
       await updateConversation(profileState, state, {
         title: state.threadTitle || text.slice(0, 80),
@@ -414,6 +422,7 @@
 
   window.FTProfileChatKitStream = Object.freeze({
     closeSource,
+    authoritativePage,
     restoreThread,
     rpc,
     streamTurn,

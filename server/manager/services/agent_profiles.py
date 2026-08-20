@@ -243,16 +243,6 @@ class AgentProfileService:
     ) -> list[dict[str, Any]]:
         return self.conversation_store.list(principal, profile_id)
 
-    def conversation_items(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-    ) -> list[dict[str, Any]]:
-        return self.conversation_store.items(
-            principal, profile_id, conversation_id,
-        )
-
     def set_conversation_sharing(
         self,
         principal: str,
@@ -265,27 +255,6 @@ class AgentProfileService:
 
     def conversation_sharing(self, principal: str, profile_id: str) -> bool:
         return self.conversation_store.parent_sharing(principal, profile_id)
-
-    def append_conversation_item(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-        *,
-        role: str,
-        text: object,
-        item_id: str = "",
-        created_at: float | None = None,
-    ) -> dict[str, Any]:
-        return self.conversation_store.append_item(
-            principal,
-            profile_id,
-            conversation_id,
-            role=role,
-            text=text,
-            item_id=item_id,
-            created_at=created_at,
-        )
 
     def create_conversation(
         self,
@@ -508,6 +477,50 @@ class AgentProfileService:
             "provider": provider,
             "factor_tester_auth": factor_tester_auth,
             "skill_runtime": skill_runtime,
+        }
+
+    def server_thread_read_context(
+        self,
+        principal: str,
+        profile_id: str,
+        provider_id: str = "",
+    ) -> dict[str, Any]:
+        """Return local material needed to read a persisted Provider thread.
+
+        Historical reads are authorized by the conversation catalog and do
+        not require an active Agent claim.  They also never call the model
+        provider, so a removed provider connection must not make the Profile's
+        locally persisted Codex thread unreadable.
+        """
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        identifier = str(provider_id or "").strip()
+        provider = self.provider_store.get(
+            principal, identifier, include_secret=True,
+        ) if identifier else None
+        if provider is None:
+            # Codex requires a syntactically complete provider configuration
+            # at process startup even though thread/read performs no network
+            # request.  These inert values never leave the child process.
+            provider = {
+                "provider_id": identifier or "history-only",
+                "runtime_kind": "server",
+                "server_id": self.server_id,
+                "protocol": "openai_responses",
+                "default_model": "history-only",
+                "base_url": "http://127.0.0.1.invalid",
+                "secret": "history-only",
+                "enabled": False,
+            }
+        return {
+            "runtime": runtime,
+            "provider": provider,
+            "skill_runtime": self.prepare_server_skill_runtime(
+                principal, profile_id,
+            ),
         }
 
     def revoke_agent_session(self, token: str) -> None:

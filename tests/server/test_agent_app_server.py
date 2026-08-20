@@ -76,7 +76,7 @@ for raw in sys.stdin:
                 "turns": HISTORY_TURNS,
             },
         }
-    elif method == "thread/resume":
+    elif method in {"thread/resume", "thread/read"}:
         thread_id = request.get("params", {}).get("threadId", "")
         result = {
             "thread": {
@@ -86,7 +86,7 @@ for raw in sys.stdin:
                 "updatedAt": 1,
                 "turns": HISTORY_TURNS,
             },
-            "resumed": True,
+            "resumed": method == "thread/resume",
         }
     elif method == "thread/delete":
         result = {"deleted": True}
@@ -672,11 +672,11 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert started["result"]["thread"]["id"] == "provider-thread-1"
-    items = service.conversation_items(
+    items = supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )
-    assert [item["role"] for item in items] == ["user", "assistant"]
-    assert items[-1]["text"] == (
+    )["items"]
+    assert [item["type"] for item in items] == ["assistant_message", "user_message"]
+    assert items[0]["content"][0]["text"] == (
         "98 个期货品种，2846 个合约路径\n\n"
         "```bash\n"
         "factortester products list\n"
@@ -692,39 +692,30 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation["conversation_id"],
     )
     assert refreshed is True
-    assert len(service.conversation_items(
+    assert len(supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 2
-
-    service.append_conversation_item(
-        PRINCIPAL,
-        PROFILE_ID,
-        conversation["conversation_id"],
-        role="assistant",
-        text="第一句PRIVATE_REASONING",
-        item_id="stream-assistant-stale",
-    )
-    assert len(service.conversation_items(
-        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 3
-    assert supervisor.refresh_conversation_history(
-        PRINCIPAL,
-        PROFILE_ID,
-        conversation["conversation_id"],
-    ) is True
-    authoritative = service.conversation_items(
-        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )
-    assert len(authoritative) == 2
-    assert all(item["id"] != "stream-assistant-stale" for item in authoritative)
+    )["items"]) == 2
 
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+    # A stopped Agent remains readable through a short-lived, read-only
+    # Provider app-server.  No SQLite transcript fallback is involved.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
     service.release(
         PRINCIPAL,
         first_claim["claim"]["claim_id"],
         agent_id="agent-a",
     )
-    service.claim(
+    # A fresh reader must not depend on an active claim or model-provider
+    # network.  Conversation ownership plus the stored Provider binding is
+    # sufficient to read this Profile's local thread history.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
+    second_claim = service.claim(
         PRINCIPAL,
         PROFILE_ID,
         provider_id=provider["provider_id"],
@@ -740,10 +731,23 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert resumed["result"]["resumed"] is True
-    assert len(service.conversation_items(
+    assert len(supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 2
+    )["items"]) == 2
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+    service.release(
+        PRINCIPAL,
+        second_claim["claim"]["claim_id"],
+        agent_id="agent-b",
+    )
+    service.delete_provider(PRINCIPAL, provider["provider_id"])
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
+    # Local Provider threads stay readable even after their former model
+    # connection is removed; thread/read itself performs no model request.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
 
 
 def test_profile_conversation_rejects_a_different_provider_on_resume(tmp_path):
@@ -799,7 +803,10 @@ class _SSESupervisor:
         self.calls = []
 
     def status(self, _principal, _profile_id):
-        return {"running": True}
+        return {
+            "running": True,
+            "active_conversation_id": "conversation-live",
+        }
 
     def events(self, _principal, _profile_id, *, after, timeout):
         self.calls.append((after, timeout))
@@ -809,6 +816,18 @@ class _SSESupervisor:
                 "payload": {
                     "method": "item/agentMessage/delta",
                     "params": {"delta": "hello"},
+                },
+            }, {
+                "sequence": 8,
+                "payload": {
+                    "method": "item/completed",
+                    "params": {"item": {
+                        "id": "command-1",
+                        "type": "commandExecution",
+                        "command": "factortester products list",
+                        "aggregatedOutput": "98 products",
+                        "status": "completed",
+                    }},
                 },
             }]
         raise ConnectionResetError
@@ -843,6 +862,8 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     chunk_length, chunk_body = raw.split(b"\r\n", 1)
     assert int(chunk_length, 16) > 0
     assert chunk_body.startswith(sse_payload)
+    assert b'"chatkit_item": {"id": "command-1"' in raw
+    assert b'"type": "workflow"' in raw
     assert supervisor.calls[0][0] == 0
 
 
@@ -876,7 +897,7 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     service.claim(PRINCIPAL, PROFILE_ID, provider_id=provider["provider_id"])
     supervisor = AgentAppServerSupervisor(
         service,
-        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        codex_binary=_fake_codex(tmp_path / "fake-codex", history=True),
     )
 
     handler = _AppHandler(service, supervisor, {"profile_id": PROFILE_ID})
@@ -910,6 +931,21 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     })
     assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
     assert _response(handler)["response"]["result"]["accepted"] == "turn/start"
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(urlparse(
+        "/api/client/profile-agent/conversation-items"
+        f"?profile_id={PROFILE_ID}"
+        f"&conversation_id={conversation['conversation_id']}"
+        "&limit=7&view=results",
+    ))
+    history = _response(handler)
+    assert history["success"] is True
+    assert history["turn_count"] == 1
+    assert history["has_more"] is False
+    assert [item["type"] for item in history["items"]] == [
+        "assistant_message", "user_message",
+    ]
 
     handler = _AppHandler(service, supervisor)
     assert handler._get_agent_app_routes(

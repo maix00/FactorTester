@@ -20,7 +20,6 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
             return True
         if parsed.path in {
             "/api/client/profile-directory/conversation-sharing",
-            "/api/client/profile-agent/conversations/items",
         }:
             session = self._session()
             if session is None:
@@ -59,22 +58,6 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
                         "conversation_sharing": enabled,
                     })
                     return True
-                profile_id = str(payload.get("profile_id") or "").strip()
-                conversation_id = str(payload.get("conversation_id") or "").strip()
-                role = str(payload.get("role") or "").strip().lower()
-                text = payload.get("text")
-                if not profile_id or not conversation_id or role not in {"user", "assistant"}:
-                    raise ValueError("profile_id, conversation_id and message role are required")
-                value = self.state.agent_profiles.append_conversation_item(
-                    principal,
-                    profile_id,
-                    conversation_id,
-                    role=role,
-                    text=text,
-                    item_id=str(payload.get("item_id") or ""),
-                )
-                json_response(self, {"success": True, "item": value})
-                return True
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
                 return True
@@ -163,15 +146,17 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
                         ),
                     }
                 else:
-                    value = {
-                        "success": True,
-                        "items": directory.conversation_items(
-                            principal,
-                            str(query.get("profile_key", [""])[0] or ""),
-                            str(query.get("conversation_id", [""])[0] or ""),
-                            scope=scope,
-                        ),
-                    }
+                    page = directory.conversation_items(
+                        principal,
+                        str(query.get("profile_key", [""])[0] or ""),
+                        str(query.get("conversation_id", [""])[0] or ""),
+                        scope=scope,
+                        limit=int(query.get("limit", ["10"])[0] or 10),
+                        after=str(query.get("after", [""])[0] or ""),
+                        view=str(query.get("view", ["results"])[0] or "results"),
+                        order=str(query.get("order", ["desc"])[0] or "desc"),
+                    )
+                    value = {"success": True, **page}
                 json_response(self, value)
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)

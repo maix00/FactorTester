@@ -1,27 +1,27 @@
 from __future__ import annotations
 
+import sqlite3
+
 from server.manager.storage.agent_conversation_store import (
     AgentConversationStore,
-    sanitize_conversation_text,
+    ITEM_TABLE,
 )
 
 
-def test_conversation_text_preserves_markdown_structure_and_source_text():
-    text = (
-        "说明\r\n\r\n"
-        "```bash\r\n"
-        "factortester products list\r\n"
-        "```\r\n\r\n"
-        "token=secret-value\r\n"
-        "/Users/private/workspace/report.png"
-    )
+def test_conversation_catalog_removes_legacy_message_mirror(tmp_path):
+    db_path = tmp_path / "manager.sqlite"
+    with sqlite3.connect(db_path) as db:
+        db.execute(f"CREATE TABLE {ITEM_TABLE}(text TEXT)")
+        db.execute(f"INSERT INTO {ITEM_TABLE}(text) VALUES ('legacy')")
 
-    sanitized = sanitize_conversation_text(text)
+    AgentConversationStore(db_path)
 
-    assert "```bash\nfactortester products list\n```" in sanitized
-    assert "token=secret-value" in sanitized
-    assert "/Users/private/workspace/report.png" in sanitized
-    assert "\r" not in sanitized
+    with sqlite3.connect(db_path) as db:
+        row = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (ITEM_TABLE,),
+        ).fetchone()
+    assert row is None
 
 
 def test_conversation_catalog_is_scoped_by_principal_and_profile(tmp_path):
