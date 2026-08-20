@@ -98,3 +98,64 @@ class AgentProfileClientMixin(ClientMixinBase):
             }),
         )
         return bool(data.get("released"))
+
+    def profile_agent_status(self, profile_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/client/profile-agent",
+            query={"profile_id": profile_id},
+        ))
+
+    def list_profile_agent_models(
+        self,
+        profile_id: str,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/client/profile-agent/models",
+            query={
+                "profile_id": profile_id,
+                "refresh": "1" if refresh else "0",
+            },
+        ))
+
+    def list_profile_agent_conversations(
+        self,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/client/profile-agent/conversations",
+            query={"profile_id": profile_id},
+        ))
+
+    def update_profile_agent_conversation_settings(
+        self,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str = "",
+        service_tier: str = "",
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/client/profile-agent/conversations/settings",
+            {
+                "profile_id": profile_id,
+                "conversation_id": conversation_id,
+                "model_id": model_id,
+                "reasoning_effort": reasoning_effort,
+                "service_tier": service_tier,
+            },
+        ))
+
+    def start_profile_agent(self, profile_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/client/profile-agent/start",
+            {"profile_id": profile_id},
+        ))
+
+    def stop_profile_agent(self, profile_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/client/profile-agent/stop",
+            {"profile_id": profile_id},
+        ))

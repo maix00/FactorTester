@@ -12,6 +12,7 @@ from server.manager.services.agent_app_server import (
     AgentAppServerSupervisor,
 )
 from server.manager.services.provider_thread_chatkit import provider_item
+from server.manager.storage.profile_runtime_store import ProfileRuntimeError
 
 
 _SENSITIVE_EVENT_KEYS = frozenset({
@@ -97,6 +98,7 @@ class AgentAppServerRoutesMixin:
         identifier = str(profile_id or "").strip()
         if not self._profile_exists(principal, identifier):
             raise AgentAppServerError("Profile does not belong to current account")
+        self._agent_service().require_local_server_runtime(principal, identifier)
         return principal, identifier
 
     def _agent_app_error(self, exc: Exception) -> None:
@@ -191,7 +193,7 @@ class AgentAppServerRoutesMixin:
                 return True
             after = int(query.get("after", ["0"])[0] or 0)
             self._stream_agent_events(supervisor, principal, identifier, after)
-        except (AgentAppServerError, TypeError, ValueError) as exc:
+        except (AgentAppServerError, ProfileRuntimeError, TypeError, ValueError) as exc:
             self._agent_app_error(exc)
         return True
 
@@ -359,6 +361,6 @@ class AgentAppServerRoutesMixin:
                 "response": _public_value(response),
             })
             return True
-        except (AgentAppServerError, TypeError, ValueError) as exc:
+        except (AgentAppServerError, ProfileRuntimeError, TypeError, ValueError) as exc:
             self._agent_app_error(exc)
             return True

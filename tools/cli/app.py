@@ -20,6 +20,7 @@ from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_step import research
 from tools.cli.commands.research_report import report
 from tools.cli.commands.research_evidence import research_evidence
+from tools.cli.commands.server_profile_agent import profile_agent
 from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
 
@@ -101,6 +102,7 @@ cli.add_command(agent_flow)
 cli.add_command(_research_graph_command())
 cli.add_command(report)
 cli.add_command(research_evidence)
+cli.add_command(profile_agent)
 cli.add_command(trial_plan)
 register_cli_modules(cli)
 

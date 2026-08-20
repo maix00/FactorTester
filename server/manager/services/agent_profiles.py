@@ -203,6 +203,19 @@ class AgentProfileService:
             workspace_relpath=relative,
         )
 
+    def require_local_server_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Authorize operations reserved for a Profile hosted by this Manager."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        return runtime
+
     def providers(
         self,
         principal: str,

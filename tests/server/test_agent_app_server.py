@@ -1013,6 +1013,32 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     supervisor.stop_all()
 
 
+def test_profile_agent_routes_reject_client_managed_profile(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="client",
+        executor_id="client-device-1",
+    )
+    supervisor = AgentAppServerSupervisor(service)
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(
+        urlparse(f"/api/client/profile-agent?profile_id={PROFILE_ID}"),
+    )
+
+    assert handler.response_status == 400
+    assert "not bound to a server runtime" in _response(handler)["error"]
+
+
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
     monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     service = AgentProfileService(
