@@ -7,7 +7,6 @@ ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG CODEX_VERSION=0.147.0
 ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org
-ARG CC_SWITCH_VERSION=5.10.2
 ARG TARGETARCH
 ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
 
@@ -82,6 +81,7 @@ RUN set -eu; \
 # CC Switch owns provider routing and wire-protocol conversion. FactorTester
 # invokes this pinned headless CLI on loopback with one private state directory
 # per Profile Agent session; it does not copy or fork the conversion code.
+ARG CC_SWITCH_VERSION=5.10.2
 RUN set -eu; \
     case "${TARGETARCH}" in \
         amd64) \
