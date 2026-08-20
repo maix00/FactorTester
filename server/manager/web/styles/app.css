@@ -514,7 +514,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-row:hover, .profile-directory-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
 .profile-directory-identity { display: grid; gap: 2px; }
 .profile-directory-identity small { color: var(--muted); }
-.profile-directory-detail { max-width: 1180px; }
+.profile-directory-detail { width: 100%; max-width: none; min-width: 0; }
 .profile-directory-note { white-space: pre-line; }
 .profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 .profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }
