@@ -56,7 +56,10 @@ class AgentAppServerLaunch:
     def _executable(value: str, label: str) -> str:
         resolved = shutil.which(str(value or "").strip())
         if not resolved:
-            raise AgentAppServerError(f"{label} executable is unavailable")
+            raise AgentAppServerError(
+                f"{label} executable is unavailable",
+                code="runtime_missing",
+            )
         return resolved
 
     def preflight(self) -> dict[str, object]:
@@ -77,7 +80,8 @@ class AgentAppServerLaunch:
             )
         except AgentProviderHealthError as exc:
             raise AgentAppServerError(
-                f"Agent provider preflight failed: {exc}"
+                f"Agent provider preflight failed: {exc}",
+                code=exc.code,
             ) from exc
         return {
             "codex": codex,

@@ -178,7 +178,26 @@ def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch)
             "default_model": "research-model",
             "secret": "secret-token",
         })
+    assert error.value.code == "credential_rejected"
     assert "secret-token" not in str(error.value)
+
+
+def test_provider_health_classifies_missing_model(monkeypatch):
+    monkeypatch.setattr(
+        provider_health_module,
+        "urlopen",
+        lambda _request, timeout: _ModelResponse({"data": [{"id": "other-model"}]}),
+    )
+
+    with pytest.raises(AgentProviderHealthError) as error:
+        AgentProviderHealth.test({
+            "protocol": "openai_responses",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "research-model",
+            "secret": "secret-token",
+        })
+
+    assert error.value.code == "model_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -818,6 +837,38 @@ def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
     assert "secret-must-not-return" not in json.dumps(payload)
 
 
+def test_provider_test_route_returns_stable_error_classification(tmp_path, monkeypatch):
+    def reject(_provider):
+        raise AgentProviderHealthError(
+            "provider rejected the API key (HTTP 401)",
+            code="credential_rejected",
+        )
+
+    monkeypatch.setattr(AgentProviderHealth, "test", reject)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    handler = _AppHandler(service, None, {
+        "label": "temporary provider",
+        "runtime_kind": "server",
+        "protocol": "openai_responses",
+        "base_url": "https://api.example.test/v1",
+        "default_model": "research-model",
+        "token": "secret-must-not-return",
+    })
+
+    assert handler._post_agent_routes(urlparse("/api/client/agent-models/test"))
+    payload = _response(handler)
+    assert payload["success"] is False
+    assert payload["code"] == "credential_rejected"
+    assert "secret-must-not-return" not in json.dumps(payload)
+
+
 def test_provider_preflight_failure_blocks_process_start(tmp_path, monkeypatch):
     monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
 
@@ -896,6 +947,7 @@ def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
     )
 
-    with pytest.raises(AgentAppServerError, match="FactorTester CLI"):
+    with pytest.raises(AgentAppServerError, match="FactorTester CLI") as error:
         supervisor.start(PRINCIPAL, PROFILE_ID)
+    assert error.value.code == "runtime_missing"
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False

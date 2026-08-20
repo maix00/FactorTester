@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+import server.manager.services.cc_switch_gateway as gateway_module
+from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.cc_switch_gateway import CCSwitchGateway
 
 
@@ -60,6 +64,31 @@ def test_cc_switch_gateway_maps_supported_codex_protocols(tmp_path: Path) -> Non
         assert plan.setup_command[
             plan.setup_command.index("--api-format") + 1
         ] == api_format
+
+
+def test_cc_switch_gateway_classifies_incompatible_protocol(tmp_path: Path) -> None:
+    gateway = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-a",
+        provider=_provider("gemini_native"),
+    )
+
+    with pytest.raises(AgentAppServerError) as error:
+        gateway.plan(port=17322)
+
+    assert error.value.code == "protocol_incompatible"
+
+
+def test_cc_switch_gateway_classifies_missing_runtime(tmp_path: Path, monkeypatch) -> None:
+    gateway = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-a",
+        provider=_provider(),
+    )
+    monkeypatch.setattr(gateway_module.shutil, "which", lambda _binary: None)
+
+    with pytest.raises(AgentAppServerError) as error:
+        gateway.start()
+
+    assert error.value.code == "runtime_missing"
 
 
 def test_cc_switch_gateway_child_provider_uses_local_credential(tmp_path: Path) -> None:

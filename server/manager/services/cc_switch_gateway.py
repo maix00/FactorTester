@@ -86,7 +86,8 @@ class CCSwitchGateway:
         api_format = CC_SWITCH_PROTOCOLS.get(protocol)
         if not api_format:
             raise AgentAppServerError(
-                "CC Switch does not support this Codex provider protocol"
+                "CC Switch does not support this Codex provider protocol",
+                code="protocol_incompatible",
             )
         base_url = str(self.provider.get("base_url") or "").strip().rstrip("/")
         model = str(self.provider.get("default_model") or "").strip()
@@ -195,7 +196,10 @@ class CCSwitchGateway:
         if self._process is not None and self._process.poll() is None and self._plan:
             return dict(self._plan.child_provider)
         if not shutil.which(self.binary):
-            raise AgentAppServerError("CC Switch executable is unavailable")
+            raise AgentAppServerError(
+                "CC Switch executable is unavailable",
+                code="runtime_missing",
+            )
         plan = self.plan()
         try:
             for command in (
