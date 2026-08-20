@@ -338,21 +338,14 @@ class AgentAppServerSupervisor:
     ) -> None:
         """Mirror textual Provider history without exposing tool internals."""
         store = self.profile_service.conversation_store
-        for item in thread_messages(thread):
-            try:
-                store.append_item(
-                    key[0],
-                    key[1],
-                    conversation_id,
-                    role=str(item["role"]),
-                    text=item["text"],
-                    item_id=str(item["item_id"]),
-                    created_at=float(item["created_at"]),
-                )
-            except (TypeError, ValueError, OSError):
-                # A malformed Provider item must not make an otherwise valid
-                # thread resume fail.  The next resume can retry it.
-                continue
+        try:
+            store.replace_items(
+                key[0], key[1], conversation_id, thread_messages(thread),
+            )
+        except (TypeError, ValueError, OSError):
+            # A malformed Provider thread must not make an otherwise valid
+            # resume fail.  The next resume can retry the projection refresh.
+            return
 
     def delete_conversation(
         self,

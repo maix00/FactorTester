@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -175,14 +174,13 @@ class AgentAppServerRoutesMixin:
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         cursor = max(0, int(after))
-        deadline = time.monotonic() + 25.0
         try:
-            while time.monotonic() < deadline:
+            while True:
                 events = supervisor.events(
                     principal,
                     profile_id,
                     after=cursor,
-                    timeout=min(5.0, max(0.1, deadline - time.monotonic())),
+                    timeout=5.0,
                 )
                 if not events:
                     self._write_sse_chunk(b": heartbeat\n\n")
