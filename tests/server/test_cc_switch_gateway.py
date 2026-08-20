@@ -112,6 +112,28 @@ def test_cc_switch_gateway_child_provider_uses_local_credential(tmp_path: Path) 
     assert str(child["secret"])
 
 
+def test_cc_switch_gateway_routes_upstream_through_manager_proxy(tmp_path: Path) -> None:
+    gateway = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-a",
+        provider=_provider(),
+        proxy_url="http://127.0.0.1:7890",
+    )
+
+    plan = gateway.plan(port=17324)
+
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        assert plan.environment[key] == "http://127.0.0.1:7890"
+    assert "127.0.0.1" in plan.environment["NO_PROXY"]
+    assert "localhost" in plan.environment["NO_PROXY"]
+
+
 def test_two_profile_gateways_never_share_state_ports_or_credentials(
     tmp_path: Path,
 ) -> None:

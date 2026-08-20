@@ -108,7 +108,7 @@ def _fake_factor_tester(path: Path) -> str:
     return str(path)
 
 
-def _provider_health_ok(provider):
+def _provider_health_ok(provider, **_kwargs):
     return {
         "status": "ok",
         "provider_id": provider.get("provider_id", ""),
@@ -465,10 +465,12 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
     )
     monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
     started_roots = []
+    started_proxies = []
     stopped_roots = []
 
     def fake_gateway_start(gateway):
         started_roots.append(gateway.profile_state_root)
+        started_proxies.append(gateway.proxy_url)
         return {
             **gateway.provider,
             "protocol": "openai_responses",
@@ -519,6 +521,7 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
     supervisor = AgentAppServerSupervisor(
         service,
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        proxy_url_provider=lambda: "http://127.0.0.1:7890",
     )
     status_a = supervisor.start(PRINCIPAL, profile_ids[0])
     status_b = supervisor.start(PRINCIPAL, profile_ids[1])
@@ -528,6 +531,10 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
     assert status_a["pid"] != status_b["pid"]
     assert len(started_roots) == 2
     assert started_roots[0] != started_roots[1]
+    assert started_proxies == [
+        "http://127.0.0.1:7890",
+        "http://127.0.0.1:7890",
+    ]
 
     supervisor.stop(PRINCIPAL, profile_ids[0])
 

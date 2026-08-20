@@ -47,6 +47,7 @@ class AgentAppServerSession:
                 profile_state_root=runtime.state_root / "cc-switch",
                 provider=self.provider,
                 binary=cc_switch_binary,
+                proxy_url=proxy_url,
             )
             if str(self.provider.get("protocol") or "") != "openai_responses"
             else None

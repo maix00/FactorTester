@@ -53,10 +53,12 @@ class CCSwitchGateway:
         profile_state_root: str | Path,
         provider: Mapping[str, object],
         binary: str = "cc-switch",
+        proxy_url: str = "",
     ) -> None:
         self.profile_state_root = Path(profile_state_root).expanduser().resolve()
         self.provider = dict(provider)
         self.binary = str(binary or "cc-switch").strip() or "cc-switch"
+        self.proxy_url = str(proxy_url or "").strip()
         self._session_root: Path | None = None
         self._process: subprocess.Popen[str] | None = None
         self._plan: CCSwitchGatewayPlan | None = None
@@ -140,6 +142,26 @@ class CCSwitchGateway:
         environment["CODEX_HOME"] = str(codex_home)
         environment["XDG_CONFIG_HOME"] = str(xdg_config_home)
         environment["XDG_STATE_HOME"] = str(xdg_state_home)
+        if self.proxy_url:
+            for key in (
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "ALL_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ):
+                environment[key] = self.proxy_url
+        bypass = {
+            value.strip()
+            for key in ("NO_PROXY", "no_proxy")
+            for value in str(environment.get(key) or "").split(",")
+            if value.strip()
+        }
+        bypass.update({"127.0.0.1", "localhost", "::1"})
+        no_proxy = ",".join(sorted(bypass))
+        environment["NO_PROXY"] = no_proxy
+        environment["no_proxy"] = no_proxy
         local_token = secrets.token_urlsafe(32)
         plan = CCSwitchGatewayPlan(
             environment=environment,
