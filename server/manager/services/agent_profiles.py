@@ -21,6 +21,10 @@ from server.manager.services.profile_workspace_browser import (
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
 )
+from server.manager.services.agent_provider_network import (
+    AgentProviderProxyUnavailable,
+    resolve_provider_proxy,
+)
 from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
@@ -77,15 +81,6 @@ class AgentProfileService:
             runtime_store=self.runtime_store,
             server_id=self.server_id,
         )
-
-    def _proxy_url(self) -> str:
-        """Return the optional Manager-local proxy without failing closed."""
-        if self.proxy_url_provider is None:
-            return ""
-        try:
-            return str(self.proxy_url_provider() or "").strip()
-        except Exception:
-            return ""
 
     @staticmethod
     def _profile_id(profile: dict[str, Any]) -> str:
@@ -596,7 +591,13 @@ class AgentProfileService:
             payload,
             default_server_id=self.server_id,
         )
-        proxy_url = self._proxy_url()
+        try:
+            proxy_url = resolve_provider_proxy(
+                candidate,
+                self.proxy_url_provider,
+            )
+        except AgentProviderProxyUnavailable as exc:
+            raise ProviderStoreError(str(exc), code=exc.code) from exc
         if proxy_url:
             return AgentProviderHealth.test(candidate, proxy_url=proxy_url)
         return AgentProviderHealth.test(candidate)
@@ -606,6 +607,13 @@ class AgentProfileService:
             if claim.get("provider_id") == provider_id:
                 raise ProviderStoreError("release the active Agent before deleting its provider")
         return self.provider_store.delete(principal, provider_id)
+
+    def duplicate_provider(
+        self,
+        principal: str,
+        provider_id: str,
+    ) -> dict[str, Any]:
+        return self.provider_store.duplicate(principal, provider_id)
 
     def claim(
         self,

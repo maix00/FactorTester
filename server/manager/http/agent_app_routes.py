@@ -98,7 +98,18 @@ class AgentAppServerRoutesMixin:
             status = 404
         else:
             status = 409 if "claim" in lowered or "running" in lowered else 400
-        json_response(self, {"success": False, "error": message}, status)
+        json_response(
+            self,
+            {
+                "success": False,
+                "error": message,
+                "code": str(
+                    getattr(exc, "code", "agent_runtime_error")
+                    or "agent_runtime_error"
+                ),
+            },
+            status,
+        )
 
     def _get_agent_app_routes(self, parsed) -> bool:
         if parsed.path not in {

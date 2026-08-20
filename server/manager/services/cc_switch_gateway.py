@@ -23,6 +23,18 @@ CC_SWITCH_PROTOCOLS = {
     "anthropic_messages": "anthropic",
 }
 
+_CC_SWITCH_ENV_ALLOWLIST = frozenset({
+    "LANG",
+    "LANGUAGE",
+    "NIX_SSL_CERT_FILE",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+})
+
 
 @dataclass(frozen=True)
 class CCSwitchGatewayPlan:
@@ -53,10 +65,12 @@ class CCSwitchGateway:
         profile_state_root: str | Path,
         provider: Mapping[str, object],
         binary: str = "cc-switch",
+        proxy_url: str = "",
     ) -> None:
         self.profile_state_root = Path(profile_state_root).expanduser().resolve()
         self.provider = dict(provider)
         self.binary = str(binary or "cc-switch").strip() or "cc-switch"
+        self.proxy_url = str(proxy_url or "").strip()
         self._session_root: Path | None = None
         self._process: subprocess.Popen[str] | None = None
         self._plan: CCSwitchGatewayPlan | None = None
@@ -86,7 +100,8 @@ class CCSwitchGateway:
         api_format = CC_SWITCH_PROTOCOLS.get(protocol)
         if not api_format:
             raise AgentAppServerError(
-                "CC Switch does not support this Codex provider protocol"
+                "CC Switch does not support this Codex provider protocol",
+                code="protocol_incompatible",
             )
         base_url = str(self.provider.get("base_url") or "").strip().rstrip("/")
         model = str(self.provider.get("default_model") or "").strip()
@@ -97,6 +112,17 @@ class CCSwitchGateway:
         root = self._private_session_root()
         config_root = root / "state"
         config_root.mkdir(mode=0o700)
+        private_home = root / "home"
+        codex_home = root / "codex"
+        xdg_config_home = root / "xdg-config"
+        xdg_state_home = root / "xdg-state"
+        for directory in (
+            private_home,
+            codex_home,
+            xdg_config_home,
+            xdg_state_home,
+        ):
+            directory.mkdir(mode=0o700)
         provider_config_path = root / "provider.json"
         provider_key = "factortester-profile-provider"
         provider_toml = "\n".join([
@@ -119,8 +145,39 @@ class CCSwitchGateway:
         if not 1 <= listen_port <= 65535:
             raise AgentAppServerError("CC Switch loopback port is invalid")
         executable = self.binary
-        environment = dict(os.environ)
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key in _CC_SWITCH_ENV_ALLOWLIST or key.startswith("LC_")
+        }
         environment["CC_SWITCH_CONFIG_DIR"] = str(config_root)
+        # CC Switch inspects native client configuration while constructing
+        # its state.  Keep even those reads and any future writes inside this
+        # disposable Profile session; never import Manager-user CLI state.
+        environment["HOME"] = str(private_home)
+        environment["CODEX_HOME"] = str(codex_home)
+        environment["XDG_CONFIG_HOME"] = str(xdg_config_home)
+        environment["XDG_STATE_HOME"] = str(xdg_state_home)
+        if self.proxy_url:
+            for key in (
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "ALL_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ):
+                environment[key] = self.proxy_url
+        bypass = {
+            value.strip()
+            for key in ("NO_PROXY", "no_proxy")
+            for value in str(environment.get(key) or "").split(",")
+            if value.strip()
+        }
+        bypass.update({"127.0.0.1", "localhost", "::1"})
+        no_proxy = ",".join(sorted(bypass))
+        environment["NO_PROXY"] = no_proxy
+        environment["no_proxy"] = no_proxy
         local_token = secrets.token_urlsafe(32)
         plan = CCSwitchGatewayPlan(
             environment=environment,
@@ -148,7 +205,6 @@ class CCSwitchGateway:
                 executable,
                 "--app", "codex",
                 "proxy", "serve",
-                "--takeover", "codex",
                 "--listen-address", "127.0.0.1",
                 "--listen-port", str(listen_port),
             ],
@@ -195,7 +251,10 @@ class CCSwitchGateway:
         if self._process is not None and self._process.poll() is None and self._plan:
             return dict(self._plan.child_provider)
         if not shutil.which(self.binary):
-            raise AgentAppServerError("CC Switch executable is unavailable")
+            raise AgentAppServerError(
+                "CC Switch executable is unavailable",
+                code="runtime_missing",
+            )
         plan = self.plan()
         try:
             for command in (

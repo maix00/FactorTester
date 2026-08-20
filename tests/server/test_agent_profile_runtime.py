@@ -73,6 +73,7 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
 
     assert saved["agent_runtime"] == "codex"
     assert saved["protocol"] == "openai_responses"
+    assert saved["network_route"] == "direct"
 
     with sqlite3.connect(db_path) as connection:
         raw = connection.execute(
@@ -91,6 +92,41 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
                 "token": "x",
             },
         )
+
+
+def test_provider_duplicate_keeps_secret_server_side_and_is_owner_scoped(tmp_path):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+    original = store.save(
+        PRINCIPAL,
+        {
+            "label": "Research provider",
+            "runtime_kind": "server",
+            "server_id": "public-1",
+            "agent_runtime": "codex",
+            "protocol": "anthropic_messages",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "secret-token-value",
+        },
+    )
+
+    duplicate = store.duplicate(PRINCIPAL, original["provider_id"])
+
+    assert duplicate["provider_id"] != original["provider_id"]
+    assert duplicate["label"] == "Research provider copy"
+    assert duplicate["protocol"] == "anthropic_messages"
+    assert duplicate["network_route"] == "direct"
+    assert "secret" not in duplicate
+    assert store.get(
+        PRINCIPAL,
+        duplicate["provider_id"],
+        include_secret=True,
+    )["secret"] == "secret-token-value"
+    with pytest.raises(ProviderStoreError, match="not found"):
+        store.duplicate("GTHT@Other@9999", original["provider_id"])
     with pytest.raises(ProviderStoreError, match="localhost"):
         store.save(
             PRINCIPAL,
@@ -100,6 +136,57 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
                 "server_id": "public-1",
                 "base_url": "https://localhost:9000",
                 "token": "x",
+            },
+        )
+
+
+def test_provider_persists_explicit_manager_proxy_route(tmp_path):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+
+    saved = store.save(
+        PRINCIPAL,
+        {
+            "label": "Proxied provider",
+            "runtime_kind": "server",
+            "server_id": "public-1",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "network_route": "manager_proxy",
+            "token": "secret-token-value",
+        },
+    )
+
+    assert saved["network_route"] == "manager_proxy"
+    with pytest.raises(ProviderStoreError, match="network_route is unsupported"):
+        store.save(
+            PRINCIPAL,
+            {
+                "label": "Invalid route",
+                "runtime_kind": "server",
+                "server_id": "public-1",
+                "protocol": "openai_responses",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "network_route": "automatic",
+                "token": "secret-token-value",
+            },
+        )
+
+    with pytest.raises(ProviderStoreError, match="client provider cannot use"):
+        store.save(
+            PRINCIPAL,
+            {
+                "label": "Invalid client proxy",
+                "runtime_kind": "client",
+                "protocol": "openai_responses",
+                "base_url": "http://127.0.0.1:9000/v1",
+                "default_model": "research-model",
+                "network_route": "manager_proxy",
+                "token": "secret-token-value",
             },
         )
 
@@ -497,6 +584,57 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
         "openai_chat": "cc_switch",
         "openai_responses": "direct",
     }
+    assert list_response["runtime_capabilities"][0]["network_route_details"] == [
+        {"network_route": "direct", "label": "直接连接"},
+        {
+            "network_route": "manager_proxy",
+            "label": "使用 Manager 网络代理",
+        },
+    ]
+
+    duplicate = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+    provider_id = response["provider"]["provider_id"]
+    assert duplicate._post_agent_routes(urlparse(
+        f"/api/client/agent-models/{provider_id}/duplicate",
+    )) is True
+    duplicate_response = _route_payload(duplicate)
+    assert duplicate_response["success"] is True
+    assert duplicate_response["provider"]["provider_id"] != provider_id
+    assert '"token":' not in json.dumps(duplicate_response)
+
+
+def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        proxy_url_provider=lambda: "",
+    )
+    handler = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+        payload={
+            "label": "provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "model",
+            "network_route": "manager_proxy",
+            "token": "hidden-token",
+        },
+    )
+
+    assert handler._post_agent_routes(
+        urlparse("/api/client/agent-models/test"),
+    ) is True
+    response = _route_payload(handler)
+
+    assert handler.response_status == 400
+    assert response["code"] == "proxy_unavailable"
 
 
 def test_agent_provider_listing_never_contacts_upstream_providers(

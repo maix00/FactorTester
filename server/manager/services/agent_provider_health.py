@@ -12,6 +12,10 @@ from urllib.request import ProxyHandler, Request, build_opener, urlopen
 class AgentProviderHealthError(ValueError):
     """A provider cannot be used by a Profile Agent."""
 
+    def __init__(self, message: str, *, code: str = "provider_unavailable") -> None:
+        super().__init__(message)
+        self.code = str(code or "provider_unavailable")
+
 
 class AgentProviderHealth:
     """Check credentials and model availability without running a model turn."""
@@ -34,7 +38,8 @@ class AgentProviderHealth:
             headers["X-goog-api-key"] = secret
         else:
             raise AgentProviderHealthError(
-                f"unsupported provider protocol: {protocol or '(empty)'}"
+                f"unsupported provider protocol: {protocol or '(empty)'}",
+                code="protocol_incompatible",
             )
         return Request(f"{base_url}/models", headers=headers, method="GET")
 
@@ -44,7 +49,8 @@ class AgentProviderHealth:
         entries = payload.get(field)
         if not isinstance(entries, list):
             raise AgentProviderHealthError(
-                f"provider model-list response does not contain {field}"
+                f"provider model-list response does not contain {field}",
+                code="provider_response_invalid",
             )
         model_ids: set[str] = set()
         for item in entries:
@@ -73,7 +79,8 @@ class AgentProviderHealth:
         secret = str(provider.get("secret") or "")
         if not base_url or not model or not secret:
             raise AgentProviderHealthError(
-                "provider address, default model, and API key are required"
+                "provider address, default model, and API key are required",
+                code="provider_incomplete",
             )
         request = cls._catalog_request(protocol, base_url, secret)
         started_at = time.monotonic()
@@ -104,30 +111,46 @@ class AgentProviderHealth:
             else:
                 message = f"provider returned HTTP {exc.code}"
             raise AgentProviderHealthError(
-                message
+                message,
+                code=(
+                    "credential_rejected" if exc.code in {401, 403}
+                    else "provider_endpoint_invalid" if exc.code == 404
+                    else "provider_rate_limited" if exc.code == 429
+                    else "provider_unavailable"
+                ),
             ) from exc
         except (URLError, OSError, TimeoutError) as exc:
             raise AgentProviderHealthError(
-                "provider connection failed; check the API address and network"
+                "provider connection failed; check the API address and network",
+                code="provider_unreachable",
             ) from exc
         if len(body) > cls.MAX_RESPONSE_BYTES:
-            raise AgentProviderHealthError("provider model response is too large")
+            raise AgentProviderHealthError(
+                "provider model response is too large",
+                code="provider_response_invalid",
+            )
         if status < 200 or status >= 300:
             raise AgentProviderHealthError(
-                f"provider returned an unexpected HTTP status ({status})"
+                f"provider returned an unexpected HTTP status ({status})",
+                code="provider_unavailable",
             )
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AgentProviderHealthError(
-                "provider returned an invalid model-list response"
+                "provider returned an invalid model-list response",
+                code="provider_response_invalid",
             ) from exc
         if not isinstance(payload, Mapping):
-            raise AgentProviderHealthError("provider model-list response is invalid")
+            raise AgentProviderHealthError(
+                "provider model-list response is invalid",
+                code="provider_response_invalid",
+            )
         model_ids = cls._catalog_model_ids(protocol, payload)
         if model not in model_ids:
             raise AgentProviderHealthError(
-                f"default model is not available: {model}"
+                f"default model is not available: {model}",
+                code="model_unavailable",
             )
         return {
             "status": "ok",

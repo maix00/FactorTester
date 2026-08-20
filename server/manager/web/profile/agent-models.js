@@ -51,6 +51,7 @@
           protocol: item.protocol,
           base_url: item.base_url,
           default_model: item.default_model,
+          network_route: item.network_route || "direct",
           token: "",
         }),
       });
@@ -80,6 +81,20 @@
         iconButton(context, "square.and.pencil", "编辑", () => (
           FTAgentModelEditor.open(context, item, capabilities, refresh)
         )),
+        iconButton(context, "doc.text", "复制", async () => {
+          try {
+            const result = await context.api(
+              `/api/client/agent-models/${encodeURIComponent(item.provider_id)}/duplicate`,
+              {method: "POST", body: "{}"},
+            );
+            await refresh();
+            FTAgentModelEditor.open(
+              context, result.provider, capabilities, refresh,
+            );
+          } catch (error) {
+            context.showNotice(error.message || String(error), true);
+          }
+        }),
         iconButton(context, "trash", "删除", async () => {
           if (!window.confirm(context.t("确定删除这个模型服务吗？"))) return;
           try {
@@ -104,13 +119,15 @@
       return [
         item.label || "",
         item.runtime_kind === "client" ? context.t("客户端运行") : context.t("服务器运行"),
-        item.agent_runtime || "codex", protocol, item.base_url || "", item.default_model || "",
+        item.agent_runtime || "codex", protocol, item.base_url || "",
+        context.t(item.network_route === "manager_proxy" ? "使用 Manager 网络代理" : "直接连接"),
+        item.default_model || "",
         item.token_configured ? context.t("已配置") : context.t("未配置"),
         status, actions,
       ];
     });
     const view = FTUI.pagedTable(
-      ["服务名称", "运行方式", "智能体运行", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
+      ["服务名称", "运行方式", "智能体运行", "协议", "API 地址", "网络访问", "默认模型", "令牌", "连接状态", "操作"].map(
         label => context.t(label),
       ),
       rows,

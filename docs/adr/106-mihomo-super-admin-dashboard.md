@@ -31,17 +31,19 @@
 6. 不新增安全组规则。公网容器继续只发布既有的 FactorTester 7998/7997
    与 WireGuard 端口；Mihomo 9090/7890 以及 Dashboard 代理路由均复用
    Manager 认证边界。
-7. Profile Agent 只有在启动时检测到 Mihomo 已运行，才在该 app-server
-   子进程中设置标准 `HTTP(S)_PROXY`/`ALL_PROXY` 环境变量，并把 Manager、
-   数据面、WireGuard 和 Docker 私网地址加入 `NO_PROXY`。Manager 自身和
-   其他服务不会继承该代理。Codex 没有稳定的逐请求代理配置，因此这是
-   当前可审计的最小兼容边界。
+7. 每个模型 Provider 显式保存 `direct` 或 `manager_proxy` 网络策略。
+   `direct` 永远不受 Mihomo 生命周期影响；`manager_proxy` 只在 Mihomo
+   已运行时向该 Profile 的 CC Switch 上游连接注入标准代理环境。代理不可用
+   必须明确失败，不得静默回退直连。Manager 自身、其他 Provider 和其他服务
+   不继承该代理。
 
 ## 后果
 
 - 管理员可以在手机或浏览器的现有 7998 页面打开原生 Mihomo Dashboard，
   并在需要时启停；普通用户和访客不会看到该模块。
 - Manager 进程或容器重启后 Mihomo 默认保持停止，避免无人值守地启用代理。
+- 选择 `manager_proxy` 的 Provider 在重启后必须等待管理员重新启动 Mihomo；
+  这属于显式的 Provider 网络状态，不会改变为直连。
 - Dashboard 依赖本地 Mihomo 配置和二进制；配置错误只影响该模块，不阻断
   FactorTester Manager、7997 数据面或 PostgreSQL 容器。
 - 代理流量仍由宿主/容器自身发起。该模块不是对外开放的公共代理入口，

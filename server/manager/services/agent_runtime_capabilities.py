@@ -52,6 +52,14 @@ PROTOCOL_ALIASES = {
     "openai_compatible": "openai_responses",
 }
 
+NETWORK_ROUTE_DETAILS = [
+    {"network_route": "direct", "label": "直接连接"},
+    {
+        "network_route": "manager_proxy",
+        "label": "使用 Manager 网络代理",
+    },
+]
+
 
 def normalize_runtime(value: object) -> str:
     runtime = str(value or "").strip() or "codex"
@@ -92,6 +100,7 @@ def public_capabilities() -> list[dict[str, object]]:
                 for protocol in sorted(capability.protocols)
             ],
             "executable_label": capability.executable_label,
+            "network_route_details": NETWORK_ROUTE_DETAILS,
         }
         for capability in CAPABILITIES.values()
     ]
@@ -102,6 +111,7 @@ __all__ = [
     "AgentRuntimeCapabilityError",
     "CAPABILITIES",
     "PROTOCOL_DETAILS",
+    "NETWORK_ROUTE_DETAILS",
     "normalize_protocol",
     "normalize_runtime",
     "public_capabilities",

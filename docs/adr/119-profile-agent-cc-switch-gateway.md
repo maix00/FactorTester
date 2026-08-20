@@ -1,4 +1,4 @@
-# ADR 118: Profile Agent 通过 CC Switch CLI 适配 Provider 协议
+# ADR 119: Profile Agent 通过 CC Switch CLI 适配 Provider 协议
 
 ## 状态
 
@@ -25,12 +25,20 @@ FactorTester 直接调用固定版本的 `cc-switch` CLI，不复制协议转换
 3. Manager 使用权限为 `0600` 的短时配置文件调用
    `cc-switch provider add --config-file`，避免密钥进入进程参数；
 4. CC Switch 仅监听 `127.0.0.1` 的临时端口，不开放为服务器服务；
-5. Codex 子进程只拿到本地临时令牌和 CC Switch 环回地址，不拿到上游密钥；
-6. Profile Agent 停止后终止 CC Switch，并清理其临时配置、SQLite 和凭据；
-7. OpenAI Responses 可保持现有直连；OpenAI Chat 和 Anthropic Messages 通过
+5. 不使用 CC Switch 的 `--takeover`；Codex 子进程显式连接环回 URL，
+   CC Switch 的 `HOME`、`CODEX_HOME` 和 XDG 目录也全部映射到该
+   Profile 的临时会话根，不读写 Manager 用户的全局 CLI 配置；
+6. Codex 子进程只拿到本地临时令牌和 CC Switch 环回地址，不拿到上游密钥；
+7. Profile Agent 停止后终止 CC Switch，并清理其临时配置、SQLite 和凭据；
+8. OpenAI Responses 可保持现有直连；OpenAI Chat 和 Anthropic Messages 通过
    CC Switch 的 Codex 路由转换；
-8. 未经 CC Switch Codex 路由明确支持的 Gemini Native 等组合必须在启动前
-   拒绝，不做隐式协议降级。
+9. 未经 CC Switch Codex 路由明确支持的 Gemini Native 等组合必须在启动前
+   拒绝，不做隐式协议降级；
+10. Provider 选择 `manager_proxy` 时，Manager 把当前 Mihomo loopback URL
+    只注入该 Profile 的 CC Switch 进程；选择 `direct` 时不注入。Mihomo
+    不可用时代理 Provider 明确失败，不做直连回退；
+11. CC Switch 子进程只继承运行所需的 PATH、locale、TLS 证书和临时目录环境，
+    不继承 Manager 进程中的数据库、云服务或其他 Provider 密钥。
 
 公网镜像固定安装 `cc-switch-cli v5.10.2`，按架构校验上游发布包 SHA-256。
 来源、固定版本和 MIT License 记录在 `third_party/cc-switch-cli/`。
@@ -64,6 +72,7 @@ FactorTester 保留现有 FTUI，不引入 CC Switch 的 React、TanStack Query�
 | 模型建议 | ModelDropdown | 仅在已保存 Provider 的模型字段获得焦点或用户测试连接时加载；允许手填 |
 | 健康状态与测试 | ProviderHealthBadge / useStreamCheck | 用户显式触发单个 Provider；禁止列表批量检查 |
 | 协议与传输标识 | Provider 类型及代理状态 | 由后端 capability registry 注册，显示 direct 或 CC Switch |
+| 网络代理 | Provider proxy configuration | Provider 只保存 direct/Manager proxy 策略；代理地址与凭据仍由超级管理员管理 |
 | 用量、日志和图表 | Usage/日志视图 | 尚未实现；以后只能在用户打开详情 overlay 后懒加载 |
 | 故障切换 | 应用级 Provider 切换 | 尚未实现；必须是 Profile 级策略，不得使用全局当前 Provider |
 

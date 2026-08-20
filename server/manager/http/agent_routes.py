@@ -214,6 +214,10 @@ class AgentRoutesMixin:
         return False
 
     def _post_agent_routes(self, parsed) -> bool:
+        duplicate_match = re.fullmatch(
+            rf"/api/client/agent-models/({PROVIDER_ID_PATTERN})/duplicate",
+            parsed.path,
+        )
         if parsed.path not in {
             "/api/client/agent-models",
             "/api/client/agent-models/test",
@@ -222,7 +226,7 @@ class AgentRoutesMixin:
             "/api/client/profile-claims",
             "/api/client/profile-claims/heartbeat",
             "/api/client/profile-claims/release",
-        }:
+        } and duplicate_match is None:
             return False
         session = self._agent_session()
         if session is None:
@@ -231,6 +235,13 @@ class AgentRoutesMixin:
             principal = self._agent_principal(session)
             payload = self._json_body(128 * 1024)
             service = self._agent_service()
+            if duplicate_match is not None:
+                provider = service.duplicate_provider(
+                    principal,
+                    duplicate_match.group(1),
+                )
+                json_response(self, {"success": True, "provider": provider}, 201)
+                return True
             if parsed.path == "/api/client/agent-models/test":
                 result = service.test_provider(principal, payload)
                 json_response(self, {"success": True, "test": result})
@@ -343,7 +354,18 @@ class AgentRoutesMixin:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return True
         except (AgentSkillCatalogError, ProviderStoreError, ProfileRuntimeError, RuntimeError, TypeError, ValueError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "code": str(
+                        getattr(exc, "code", "agent_request_invalid")
+                        or "agent_request_invalid"
+                    ),
+                },
+                400,
+            )
             return True
 
     def _delete_agent_routes(self, parsed) -> bool:

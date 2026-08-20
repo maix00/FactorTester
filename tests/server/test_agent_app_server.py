@@ -20,6 +20,7 @@ from server.manager.services.agent_provider_health import (
     AgentProviderHealthError,
 )
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.cc_switch_gateway import CCSwitchGateway
 from server.manager.services.agent_workspace import profile_workspace_relative_path
 from server.manager.storage.agent_provider_store import ProviderStoreError
 
@@ -107,7 +108,7 @@ def _fake_factor_tester(path: Path) -> str:
     return str(path)
 
 
-def _provider_health_ok(provider):
+def _provider_health_ok(provider, **_kwargs):
     return {
         "status": "ok",
         "provider_id": provider.get("provider_id", ""),
@@ -177,7 +178,26 @@ def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch)
             "default_model": "research-model",
             "secret": "secret-token",
         })
+    assert error.value.code == "credential_rejected"
     assert "secret-token" not in str(error.value)
+
+
+def test_provider_health_classifies_missing_model(monkeypatch):
+    monkeypatch.setattr(
+        provider_health_module,
+        "urlopen",
+        lambda _request, timeout: _ModelResponse({"data": [{"id": "other-model"}]}),
+    )
+
+    with pytest.raises(AgentProviderHealthError) as error:
+        AgentProviderHealth.test({
+            "protocol": "openai_responses",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "research-model",
+            "secret": "secret-token",
+        })
+
+    assert error.value.code == "model_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -262,12 +282,86 @@ def test_provider_test_uses_manager_mihomo_proxy(tmp_path, monkeypatch):
             "protocol": "openai_compatible",
             "base_url": "https://api.openai.com/v1",
             "default_model": "research-model",
+            "network_route": "manager_proxy",
             "token": "secret-token",
         },
     )
 
     assert result["status"] == "ok"
     assert observed["proxy_url"] == "http://127.0.0.1:7890"
+
+
+def test_provider_test_does_not_proxy_direct_provider(tmp_path, monkeypatch):
+    observed = {}
+
+    def fake_test(provider, *, proxy_url=""):
+        observed["proxy_url"] = proxy_url
+        return {"status": "ok"}
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fake_test)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+        proxy_url_provider=lambda: "http://127.0.0.1:7890",
+    )
+
+    service.test_provider(
+        PRINCIPAL,
+        {
+            "label": "Direct provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "network_route": "direct",
+            "token": "secret-token",
+        },
+    )
+
+    assert observed["proxy_url"] == ""
+
+
+def test_provider_test_fails_when_required_manager_proxy_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    called = False
+
+    def fake_test(provider, *, proxy_url=""):
+        nonlocal called
+        called = True
+        return {"status": "ok"}
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fake_test)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+        proxy_url_provider=lambda: "",
+    )
+
+    with pytest.raises(ProviderStoreError, match="Manager network proxy is unavailable") as error:
+        service.test_provider(
+            PRINCIPAL,
+            {
+                "label": "Proxied provider",
+                "runtime_kind": "server",
+                "protocol": "openai_responses",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "network_route": "manager_proxy",
+                "token": "secret-token",
+            },
+        )
+    assert error.value.code == "proxy_unavailable"
+    assert called is False
 
 
 def test_unimplemented_codex_protocol_cannot_be_saved(tmp_path):
@@ -433,6 +527,100 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert resumed_claim is not None
     assert resumed_claim["status"] == "claimed"
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+
+
+def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "FACTORTESTER_CLI",
+        _fake_factor_tester(tmp_path / "factortester"),
+    )
+    monkeypatch.setattr(AgentProviderHealth, "test", _provider_health_ok)
+    started_roots = []
+    started_proxies = []
+    stopped_roots = []
+
+    def fake_gateway_start(gateway):
+        started_roots.append(gateway.profile_state_root)
+        started_proxies.append(gateway.proxy_url)
+        return {
+            **gateway.provider,
+            "protocol": "openai_responses",
+            "base_url": f"http://127.0.0.1:{17000 + len(started_roots)}/v1",
+            "secret": f"profile-local-token-{len(started_roots)}",
+        }
+
+    def fake_gateway_stop(gateway):
+        stopped_roots.append(gateway.profile_state_root)
+
+    monkeypatch.setattr(CCSwitchGateway, "start", fake_gateway_start)
+    monkeypatch.setattr(CCSwitchGateway, "stop", fake_gateway_stop)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    profile_ids = ("profile-a", "profile-b")
+    protocols = ("openai_chat", "anthropic_messages")
+    routes = ("direct", "manager_proxy")
+    for profile_id, protocol, network_route in zip(
+        profile_ids, protocols, routes, strict=True,
+    ):
+        service.bind_runtime(
+            PRINCIPAL,
+            profile_id,
+            runtime_kind="server",
+            executor_id="public-1",
+        )
+        provider = service.save_provider(
+            PRINCIPAL,
+            {
+                "label": f"{profile_id} provider",
+                "runtime_kind": "server",
+                "protocol": protocol,
+                "base_url": "https://api.example.test/v1",
+                "default_model": f"{profile_id}-model",
+                "network_route": network_route,
+                "token": f"{profile_id}-upstream-secret",
+            },
+        )
+        service.claim(
+            PRINCIPAL,
+            profile_id,
+            provider_id=provider["provider_id"],
+            agent_id=f"{profile_id}-agent",
+        )
+
+    supervisor = AgentAppServerSupervisor(
+        service,
+        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        proxy_url_provider=lambda: "http://127.0.0.1:7890",
+    )
+    status_a = supervisor.start(PRINCIPAL, profile_ids[0])
+    status_b = supervisor.start(PRINCIPAL, profile_ids[1])
+
+    assert status_a["running"] is True
+    assert status_b["running"] is True
+    assert status_a["pid"] != status_b["pid"]
+    assert len(started_roots) == 2
+    assert started_roots[0] != started_roots[1]
+    assert started_proxies == [
+        "",
+        "http://127.0.0.1:7890",
+    ]
+
+    supervisor.stop(PRINCIPAL, profile_ids[0])
+
+    assert stopped_roots == [started_roots[0]]
+    assert supervisor.status(PRINCIPAL, profile_ids[0])["running"] is False
+    assert supervisor.status(PRINCIPAL, profile_ids[1])["running"] is True
+    supervisor.stop(PRINCIPAL, profile_ids[1])
+    assert stopped_roots == started_roots
 
 
 def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypatch):
@@ -734,6 +922,38 @@ def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
     assert "secret-must-not-return" not in json.dumps(payload)
 
 
+def test_provider_test_route_returns_stable_error_classification(tmp_path, monkeypatch):
+    def reject(_provider):
+        raise AgentProviderHealthError(
+            "provider rejected the API key (HTTP 401)",
+            code="credential_rejected",
+        )
+
+    monkeypatch.setattr(AgentProviderHealth, "test", reject)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    handler = _AppHandler(service, None, {
+        "label": "temporary provider",
+        "runtime_kind": "server",
+        "protocol": "openai_responses",
+        "base_url": "https://api.example.test/v1",
+        "default_model": "research-model",
+        "token": "secret-must-not-return",
+    })
+
+    assert handler._post_agent_routes(urlparse("/api/client/agent-models/test"))
+    payload = _response(handler)
+    assert payload["success"] is False
+    assert payload["code"] == "credential_rejected"
+    assert "secret-must-not-return" not in json.dumps(payload)
+
+
 def test_provider_preflight_failure_blocks_process_start(tmp_path, monkeypatch):
     monkeypatch.setenv("FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester"))
 
@@ -812,6 +1032,7 @@ def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
         codex_binary=_fake_codex(tmp_path / "fake-codex"),
     )
 
-    with pytest.raises(AgentAppServerError, match="FactorTester CLI"):
+    with pytest.raises(AgentAppServerError, match="FactorTester CLI") as error:
         supervisor.start(PRINCIPAL, PROFILE_ID)
+    assert error.value.code == "runtime_missing"
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False
