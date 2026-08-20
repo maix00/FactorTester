@@ -49,7 +49,9 @@
     fields.className = "profile-agent-runtime-fields";
     const status = document.createElement("p");
     status.className = "settings-muted profile-agent-runtime-status";
-    status.setAttribute("aria-live", "polite");
+    const notice = document.createElement("p");
+    notice.className = "settings-muted profile-agent-runtime-notice";
+    notice.setAttribute("aria-live", "polite");
     const usage = document.createElement("div");
     usage.className = "profile-agent-context-usage";
     const progress = document.createElement("progress");
@@ -57,7 +59,7 @@
     progress.value = 0;
     const usageText = document.createElement("span");
     usage.append(progress, usageText);
-    root.append(fields, usage, status);
+    root.append(fields, usage, status, notice);
 
     const controls = {};
     for (const [key, label] of [
@@ -80,7 +82,8 @@
     let models = [];
     let catalogLoaded = false;
     let catalogPromise = null;
-    let saveQueue = Promise.resolve();
+    let providerLatency = 0;
+    let saving = false;
 
     function option(select, value, label) {
       const item = document.createElement("option");
@@ -112,8 +115,18 @@
       }
       controls.effort.value = String(conversation.reasoning_effort || "");
       controls.tier.value = String(conversation.service_tier || "");
-      controls.effort.disabled = readOnly || !current;
-      controls.tier.disabled = readOnly || !current;
+      for (const [control, value] of [
+        [controls.effort, conversation.reasoning_effort],
+        [controls.tier, conversation.service_tier],
+      ]) {
+        const selected = String(value || "");
+        if (selected && ![...control.children].some(item => item.value === selected)) {
+          option(control, selected, selected);
+          control.value = selected;
+        }
+      }
+      controls.effort.disabled = readOnly || !current || saving;
+      controls.tier.disabled = readOnly || !current || saving;
     }
 
     function renderConversation() {
@@ -137,7 +150,7 @@
         }
       }
       controls.model.value = selected;
-      controls.model.disabled = readOnly || !current;
+      controls.model.disabled = readOnly || !current || saving;
       renderDependentChoices();
       const measured = contextUsage(conversation);
       progress.value = measured.percent;
@@ -151,9 +164,17 @@
           .replace("%@", number(conversation.compaction_count).toLocaleString())
         : context.t("上下文容量将在首次响应后显示");
       const actual = String(conversation.actual_model || "");
-      status.textContent = actual && selected && actual !== selected
+      const modelStatus = actual && selected && actual !== selected
         ? `${context.t("实际模型")}: ${actual} · ${context.t("已发生模型重路由")}`
         : actual ? `${context.t("实际模型")}: ${actual}` : "";
+      const latencyStatus = providerLatency
+        ? `${context.t("Provider 延迟")}: ${providerLatency} ms` : "";
+      status.textContent = [modelStatus, latencyStatus].filter(Boolean).join(" · ");
+    }
+
+    function showNotice(message, kind = "info") {
+      notice.textContent = message;
+      notice.dataset.kind = message ? kind : "";
     }
 
     async function loadModels(refresh = false) {
@@ -161,43 +182,57 @@
         return catalogPromise;
       }
       const suffix = refresh ? "&refresh=1" : "";
-      status.textContent = context.t("正在读取模型目录…");
+      showNotice(context.t("正在读取模型目录…"));
       catalogPromise = context.api(
         `/api/client/profile-agent/models?profile_id=${
           encodeURIComponent(profile.profile_id)}${suffix}`,
       ).then(payload => {
         models = Array.isArray(payload.models) ? payload.models : [];
         catalogLoaded = true;
-        status.textContent = payload.latency_ms
-          ? `${context.t("Provider 延迟")}: ${payload.latency_ms} ms` : "";
+        providerLatency = Number(payload.latency_ms) || 0;
+        showNotice("");
         renderConversation();
       }).catch(error => {
-        status.textContent = `${context.t("模型目录读取失败")}: ${error.message || ""}`;
+        showNotice(
+          `${context.t("模型目录读取失败")}: ${error.message || ""}`,
+          "error",
+        );
       }).finally(() => { catalogPromise = null; });
       return catalogPromise;
     }
 
-    function saveSettings() {
-      if (readOnly || !current || !controls.model.value) return;
+    function saveSettings(previous) {
+      if (readOnly || saving || !current || !controls.model.value) return;
+      const conversationID = current.conversationID;
       const snapshot = {
         profile_id: profile.profile_id,
-        conversation_id: current.conversationID,
-        model_id: controls.model.value,
-        reasoning_effort: controls.effort.value,
-        service_tier: controls.tier.value,
+        conversation_id: conversationID,
+        model_id: String(current.conversation.model_id || ""),
+        reasoning_effort: String(current.conversation.reasoning_effort || ""),
+        service_tier: String(current.conversation.service_tier || ""),
       };
-      status.textContent = context.t("正在保存会话模型设置…");
-      saveQueue = saveQueue.then(() => context.api(
+      saving = true;
+      showNotice(context.t("正在保存会话模型设置…"));
+      renderConversation();
+      context.api(
         "/api/client/profile-agent/conversations/settings",
         {method: "POST", body: JSON.stringify(snapshot)},
-      )).then(payload => {
-        if (payload.conversation && current) {
+      ).then(payload => {
+        if (payload.conversation && current?.conversationID === conversationID) {
           current.conversation = {...current.conversation, ...payload.conversation};
         }
-        status.textContent = context.t("会话模型设置已保存");
-        renderConversation();
+        showNotice(context.t("会话模型设置已保存；将在下一次提问时生效"), "success");
       }).catch(error => {
-        status.textContent = `${context.t("会话模型设置保存失败")}: ${error.message || ""}`;
+        if (current?.conversationID === conversationID) {
+          current.conversation = {...current.conversation, ...previous};
+        }
+        showNotice(
+          `${context.t("会话模型设置保存失败")}: ${error.message || ""}`,
+          "error",
+        );
+      }).finally(() => {
+        saving = false;
+        renderConversation();
       });
     }
 
@@ -205,6 +240,11 @@
     controls.model.addEventListener("pointerdown", () => loadModels());
     controls.model.addEventListener("change", () => {
       const model = selectedModel() || {};
+      const previous = current ? {
+        model_id: current.conversation.model_id,
+        reasoning_effort: current.conversation.reasoning_effort,
+        service_tier: current.conversation.service_tier,
+      } : {};
       if (current) {
         current.conversation.model_id = controls.model.value;
         current.conversation.reasoning_effort = String(
@@ -215,10 +255,20 @@
         );
       }
       renderDependentChoices();
-      saveSettings();
+      saveSettings(previous);
     });
-    controls.effort.addEventListener("change", saveSettings);
-    controls.tier.addEventListener("change", saveSettings);
+    controls.effort.addEventListener("change", () => {
+      if (!current) return;
+      const previous = {...current.conversation};
+      current.conversation.reasoning_effort = controls.effort.value;
+      saveSettings(previous);
+    });
+    controls.tier.addEventListener("change", () => {
+      if (!current) return;
+      const previous = {...current.conversation};
+      current.conversation.service_tier = controls.tier.value;
+      saveSettings(previous);
+    });
 
     function setConversation(state) {
       current = state || null;

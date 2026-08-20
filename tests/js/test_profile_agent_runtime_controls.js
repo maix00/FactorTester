@@ -52,4 +52,95 @@ assert.deepEqual(runtime.runtimeEventPatch({
   params: {item: {id: "compact-1", type: "contextCompaction"}},
 }, {compaction_count: 3}), {compaction_count: 4});
 
+class Element {
+  constructor(tagName) {
+    this.tagName = tagName;
+    this.children = [];
+    this.listeners = {};
+    this.textContent = "";
+    this.value = "";
+    this.disabled = false;
+    this.hidden = false;
+    this.dataset = {};
+  }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = [...children]; }
+  setAttribute() {}
+  addEventListener(name, listener) { this.listeners[name] = listener; }
+  dispatch(name) { this.listeners[name]?.({target: this}); }
+}
+
+function findByClass(root, className) {
+  if (String(root.className || "").split(" ").includes(className)) return root;
+  for (const child of root.children || []) {
+    const found = findByClass(child, className);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function flush() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+global.document = {createElement: tagName => new Element(tagName)};
+
+async function testSaveNoticeAndRollback() {
+  let rejectSave = false;
+  const context = {
+    t: value => value,
+    api: (url) => {
+      if (url.includes("/models?")) return Promise.resolve({
+        models: [{
+          id: "model-a",
+          display_name: "Model A",
+          reasoning_efforts: [{id: "high", description: "High"}],
+          service_tiers: [{id: "fast", name: "Fast"}],
+        }, {
+          id: "model-b",
+          display_name: "Model B",
+          reasoning_efforts: [],
+          service_tiers: [],
+        }],
+      });
+      if (rejectSave) return Promise.reject(new Error("save rejected"));
+      return Promise.resolve({conversation: {
+        model_id: "model-b", reasoning_effort: "", service_tier: "",
+      }});
+    },
+  };
+  const component = runtime.create({profile_id: "profile-1"}, context);
+  const conversation = {
+    model_id: "model-a", reasoning_effort: "high", service_tier: "fast",
+  };
+  component.setConversation({conversationID: "conversation-1", conversation});
+  const selects = findByClass(component.element, "profile-agent-runtime-fields")
+    .children.map(field => field.children[1]);
+  selects[0].dispatch("focus");
+  await flush();
+  selects[0].value = "model-b";
+  selects[0].dispatch("change");
+  assert.equal(selects.every(select => select.disabled), true);
+  await flush();
+  const notice = findByClass(component.element, "profile-agent-runtime-notice");
+  assert.equal(notice.textContent, "会话模型设置已保存；将在下一次提问时生效");
+  assert.equal(selects.every(select => !select.disabled), true);
+
+  rejectSave = true;
+  selects[0].value = "model-a";
+  selects[0].dispatch("change");
+  await flush();
+  assert.match(notice.textContent, /会话模型设置保存失败: save rejected/);
+  assert.equal(selects[0].value, "model-b");
+}
+
+testSaveNoticeAndRollback().then(() => {
+  console.log("PASS: Profile Agent model changes provide durable feedback");
+}).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
+
 console.log("PASS: Profile Agent runtime metadata projection");

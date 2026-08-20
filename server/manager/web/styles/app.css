@@ -495,6 +495,9 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-context-usage { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 12px; }
 .profile-agent-context-usage progress { width: min(220px, 36%); height: 7px; accent-color: var(--accent); }
 .profile-agent-runtime-status { min-height: 1.2em; margin: 0; }
+.profile-agent-runtime-notice { min-height: 1.2em; margin: 0; }
+.profile-agent-runtime-notice[data-kind="success"] { color: var(--success, #16803a); }
+.profile-agent-runtime-notice[data-kind="error"] { color: var(--danger, #b42318); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
 .profile-chatkit-slot, .profile-chatkit-host openai-chatkit { display: block; width: 100%; }
