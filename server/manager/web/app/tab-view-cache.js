@@ -2,6 +2,7 @@
   function create(options) {
     const {
       state, content, title, eyebrow, toolbar, notice,
+      persistSession, restoreSession, removeSession,
     } = options;
     const liveViewLimit = 3;
     const coldViewMemory = new Map();
@@ -299,6 +300,22 @@
       deleteColdView(tabID);
     }
 
+    function hydrateSession(tabID) {
+      const saved = restoreSession?.(tabID);
+      if (!saved || typeof saved !== "object") return false;
+      const session = tabSession(tabID);
+      session.path = String(saved.path || "");
+      session.scrollY = Number(saved.scrollY || 0);
+      session.durable = saved.durable && typeof saved.durable === "object"
+        ? saved.durable : {};
+      const key = writeColdView(tabID, saved);
+      session.view = {
+        coldKey: key, pendingRestore: false, ready: true,
+        lastUsedAt: Number(saved.updatedAt || Date.now()),
+      };
+      return true;
+    }
+
     function saveActiveTabSession() {
       const reportMatch = /^\/research\/([^/]+)$/.exec(location.pathname);
       const currentPublicationID = reportMatch?.[1] || null;
@@ -311,6 +328,17 @@
       };
       Object.assign(tabSession(state.activeTabID), snapshot);
       const session = tabSession(state.activeTabID);
+      persistSession?.(state.activeTabID, {
+        ...snapshot,
+        durable: session.durable || {},
+        title: title?.textContent || "",
+        eyebrow: eyebrow?.textContent || "",
+        notice: notice ? {text: notice.textContent || "", color: notice.style?.color || ""} : null,
+        navRoute: document.querySelector?.(".nav-button.active")?.dataset?.route || "",
+        contentControls: captureControlState(content),
+        toolbarControls: captureControlState(toolbar),
+        updatedAt: Date.now(),
+      });
       saveView(session);
       parkOverlays(state.activeTabID, session);
       if (currentPublicationID) Object.assign(
@@ -336,7 +364,7 @@
     return Object.freeze({
       tabSession, saveActiveTabSession, captureScrollPosition,
       markActiveViewLoading, markActiveViewReady, restoreView,
-      restoreColdView, discardView, activeTabHasOverlay,
+      restoreColdView, discardView, hydrateSession, activeTabHasOverlay,
     });
   }
 

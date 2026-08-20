@@ -52,17 +52,50 @@
         .map(normalizedTab).filter(Boolean);
       const activeTabID = tabs.some(tab => tab.id === value.activeTabID)
         ? String(value.activeTabID) : "home";
+      const previous = readPayload();
       const payload = {
         schemaVersion,
         updatedAt: Date.now(),
         tabs,
         activeTabID,
+        sessions: previous?.sessions || {},
       };
       try { storage.setItem(storageKey(), JSON.stringify(payload)); } catch (_) {}
       return payload;
     }
 
-    return Object.freeze({remove, restore, save, storageKey});
+    function readPayload() {
+      try {
+        const value = JSON.parse(storage.getItem(storageKey()) || "null");
+        return value?.schemaVersion === schemaVersion ? value : null;
+      } catch (_) { return null; }
+    }
+
+    function saveSession(tabID, value) {
+      const payload = readPayload() || {
+        schemaVersion, updatedAt: Date.now(), tabs: [], activeTabID: "home", sessions: {},
+      };
+      payload.sessions = payload.sessions || {};
+      payload.sessions[String(tabID)] = value;
+      payload.updatedAt = Date.now();
+      try { storage.setItem(storageKey(), JSON.stringify(payload)); } catch (_) {}
+    }
+
+    function restoreSession(tabID) {
+      return readPayload()?.sessions?.[String(tabID)] || null;
+    }
+
+    function removeSession(tabID) {
+      const payload = readPayload();
+      if (!payload?.sessions || !(String(tabID) in payload.sessions)) return;
+      delete payload.sessions[String(tabID)];
+      payload.updatedAt = Date.now();
+      try { storage.setItem(storageKey(), JSON.stringify(payload)); } catch (_) {}
+    }
+
+    return Object.freeze({
+      remove, removeSession, restore, restoreSession, save, saveSession, storageKey,
+    });
   }
 
   function principalKey(session) {

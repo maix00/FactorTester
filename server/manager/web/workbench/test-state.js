@@ -139,6 +139,32 @@
     return state;
   }
 
+  const draftKeys = Object.freeze([
+    "analysis", "savedFactors", "savedTemporaryObjects",
+    "factorRef", "groupRef", "groupRefs", "values",
+    "settingsTabKey", "settingsMountedTabs", "outputRequests",
+    "outputRequestsExplicit", "runValues", "transientFactorSources",
+    "transientFactorFamilies", "transientStrategySources", "strategySpecs",
+    "strategyInspections", "runInputDependencies", "selectedBacktestGroupIDs",
+    "selectedBacktestLongShortIDs", "backtestExpandedBatches",
+  ]);
+
+  function draftSnapshot(state) {
+    const values = {};
+    for (const key of draftKeys) values[key] = structuredClone(state[key]);
+    return {schemaVersion: 1, kind: state.kind, values};
+  }
+
+  function restoreDraft(state, snapshot) {
+    if (snapshot?.schemaVersion !== 1 || snapshot.kind !== state.kind
+        || !snapshot.values || typeof snapshot.values !== "object") return false;
+    for (const key of draftKeys) {
+      if (key in snapshot.values) state[key] = structuredClone(snapshot.values[key]);
+    }
+    state.settingsInitialized = false;
+    return true;
+  }
+
   function savedSettings(state) {
     const payload = state.workspace?.configuration?.payload || {};
     return payload.ui?.[state.kind]?.settings
@@ -152,6 +178,7 @@
 
   window.FTTestState = Object.freeze({
     applyWorkspaceConfiguration, clearDraft, defaultRunValues,
+    draftSnapshot, restoreDraft,
     initializeInputState, lazyState,
     mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
     restoreTemporaryObjects, seedSavedCatalogs,

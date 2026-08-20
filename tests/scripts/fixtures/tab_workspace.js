@@ -35,6 +35,11 @@ assert.deepStrictEqual(alice.restore(), {
   ],
   activeTabID: "factor:1",
 });
+alice.saveSession("factor:1", {scrollY: 41, durable: {draft: {name: "A"}}});
+assert.deepStrictEqual(
+  alice.restoreSession("factor:1"),
+  {scrollY: 41, durable: {draft: {name: "A"}}},
+);
 
 const bob = window.FTTabWorkspace.create({
   storage: localStorage,

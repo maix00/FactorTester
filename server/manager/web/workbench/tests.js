@@ -186,6 +186,8 @@
       state.runValues.retention_mode = "full";
     }
     FTTestState.seedSavedCatalogs(state);
+    const savedDraft = sessions.durable?.testDrafts?.[kind];
+    FTTestState.restoreDraft(state, savedDraft);
     window.FTTestFactors?.prepare?.(state);
     window.FTTestProducts?.synchronize?.(state);
     window.FTBacktestGroups?.initialize?.(state);
@@ -442,6 +444,9 @@
   }
 
   function render(context, state) {
+    const durable = context.tabSession.durable || (context.tabSession.durable = {});
+    durable.testDrafts = durable.testDrafts || {};
+    durable.testDrafts[state.kind] = FTTestState.draftSnapshot(state);
     installRunToolbar(context, state, () => render(context, state));
     if (!window.FTTestRunBatch && !state.runBatchCode?.error) {
       // The header owns the run actions. Load their small controller lazily;

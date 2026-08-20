@@ -5,10 +5,13 @@
       modulePath, isPinnedPath, titleForPath, tabIcon,
       content, title, eyebrow, toolbar, notice, beforeTabChange,
     } = options;
+    let workspace = null;
     const viewCache = window.FTTabViewCache.create({
       state, content, title, eyebrow, toolbar, notice,
+      persistSession: (tabID, value) => workspace?.saveSession?.(tabID, value),
+      restoreSession: tabID => workspace?.restoreSession?.(tabID),
+      removeSession: tabID => workspace?.removeSession?.(tabID),
     });
-    let workspace = null;
 
     function checkpointWorkspace() {
       workspace?.save?.({tabs: state.tabs, activeTabID: state.activeTabID});
@@ -75,6 +78,7 @@
       if (state.activeTabID === tabID) viewCache.saveActiveTabSession();
       else viewCache.discardView(tabID);
       state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
+      workspace?.removeSession?.(tabID);
       if (state.activeTabID !== tabID) {
         renderOpenedTabs();
         checkpointWorkspace();
@@ -323,6 +327,7 @@
       const fixedIDs = new Set(state.tabs.map(tab => tab.id));
       restored.filter(tab => tab.closable && !fixedIDs.has(tab.id))
         .forEach(tab => state.tabs.push({...tab, closable: true}));
+      state.tabs.forEach(tab => viewCache.hydrateSession(tab.id));
       state.activeTabID = state.tabs.some(tab => tab.id === snapshot?.activeTabID)
         ? snapshot.activeTabID : "home";
       renderOpenedTabs();
