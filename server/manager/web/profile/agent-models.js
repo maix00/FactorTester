@@ -57,6 +57,9 @@
       status.textContent = result?.test?.default_model
         ? `${context.t("连接成功")} · ${result.test.default_model}`
         : context.t("连接成功");
+      if (Number.isFinite(result?.test?.latency_ms)) {
+        status.textContent += ` · ${result.test.latency_ms} ms`;
+      }
       status.className = "agent-model-test-status success";
     } catch (error) {
       status.textContent = error.message || context.t("连接测试失败");

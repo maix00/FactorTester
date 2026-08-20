@@ -135,6 +135,13 @@ class _ModelResponse:
 
 
 def test_openai_provider_health_checks_model_without_returning_secret(monkeypatch):
+    clock = iter([100.0, 100.125])
+    monkeypatch.setattr(
+        provider_health_module.time,
+        "monotonic",
+        lambda: next(clock),
+    )
+
     def fake_urlopen(request, timeout):
         assert request.full_url == "https://api.openai.com/v1/models"
         assert request.headers["Authorization"] == "Bearer secret-token"
@@ -152,6 +159,7 @@ def test_openai_provider_health_checks_model_without_returning_secret(monkeypatc
     assert result["model_available"] is True
     assert result["available_models"] == ["research-model"]
     assert result["available_models_truncated"] is False
+    assert result["latency_ms"] == 125
     assert "secret-token" not in json.dumps(result)
 
 

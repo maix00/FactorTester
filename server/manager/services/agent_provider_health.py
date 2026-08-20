@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener, urlopen
@@ -75,6 +76,7 @@ class AgentProviderHealth:
                 "provider address, default model, and API key are required"
             )
         request = cls._catalog_request(protocol, base_url, secret)
+        started_at = time.monotonic()
         try:
             opener = (
                 build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
@@ -88,6 +90,7 @@ class AgentProviderHealth:
             with response_context as response:
                 body = response.read(cls.MAX_RESPONSE_BYTES + 1)
                 status = int(getattr(response, "status", 200) or 200)
+            latency_ms = max(0, round((time.monotonic() - started_at) * 1000))
         except HTTPError as exc:
             if exc.code in {401, 403}:
                 message = f"provider rejected the API key (HTTP {exc.code})"
@@ -133,6 +136,7 @@ class AgentProviderHealth:
             "base_url": base_url,
             "default_model": model,
             "model_available": True,
+            "latency_ms": latency_ms,
             # Model choices are returned only by the explicit health endpoint;
             # the Provider list never performs this potentially expensive I/O.
             "available_models": sorted(model_ids)[:2000],

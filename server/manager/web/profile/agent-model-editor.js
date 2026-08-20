@@ -160,6 +160,9 @@
         applyModelCatalog(result);
         status.textContent = context.t("连接成功：模型可用");
         if (result?.test?.default_model) status.textContent += ` · ${result.test.default_model}`;
+        if (Number.isFinite(result?.test?.latency_ms)) {
+          status.textContent += ` · ${result.test.latency_ms} ms`;
+        }
       } catch (error) {
         status.textContent = error.message || context.t("连接测试失败");
       } finally {
