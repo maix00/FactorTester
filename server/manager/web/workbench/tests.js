@@ -16,6 +16,7 @@
     installRunToolbar(context, null, () => {});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取测试设置…")));
     const state = await loadState(context, kind, options);
+    if (context.isRouteCurrent?.() === false) return;
     applyTabReturn(state, context);
     render(context, state);
   }
@@ -444,6 +445,10 @@
   }
 
   function render(context, state) {
+    // Every deferred loader and job-progress callback closes over the route
+    // token in this context. The shared content host may already belong to a
+    // different left-rail tab by the time it resolves.
+    if (context.isRouteCurrent?.() === false) return false;
     const durable = context.tabSession.durable || (context.tabSession.durable = {});
     durable.testDrafts = durable.testDrafts || {};
     durable.testDrafts[state.kind] = FTTestState.draftSnapshot(state);
@@ -556,6 +561,7 @@
       if (submitted) root.append(submitted);
     }
     context.content.replaceChildren(root);
+    return true;
   }
 
   function clearDraft(context, state, refresh) {
@@ -620,5 +626,6 @@
       ensureControl(context, state, field, refresh)
     ),
     clearDraft,
+    render,
   };
 })();

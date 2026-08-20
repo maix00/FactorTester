@@ -224,6 +224,16 @@ restoredTabs.initializeTabs(workspace.restore());
 assert(restoredState.tabs.some(tab => tab.path === "/products/product/D.DCE"));
 assert.strictEqual(restoredState.activeTabID, persistedActiveTabID);
 
+// Restoring an explicit detail URL reuses its stable native tab ID, and a
+// closed tab is removed from both the registry and durable session payload.
+const beforeExplicit = restoredState.tabs.length;
+restoredTabs.navigate("/products/product/D.DCE");
+assert.strictEqual(restoredState.tabs.length, beforeExplicit);
+const closedTabID = restoredState.activeTabID;
+restoredTabs.closeTab(closedTabID);
+assert(!workspace.restore().tabs.some(tab => tab.id === closedTabID));
+assert.strictEqual(workspace.restoreSession(closedTabID), null);
+
 // Cold restoration identifies controls by a stable semantic key rather than
 // their DOM index. Lazy rendering may insert a new control before the saved
 // field between capture and restore.
