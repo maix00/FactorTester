@@ -21,7 +21,10 @@
     if (method === "model/rerouted") {
       return {actual_model: String(params.toModel || "")};
     }
-    if (method === "thread/compacted") {
+    const itemType = String(params.item?.type || "").toLowerCase();
+    if (method === "thread/compacted" || (
+      method === "item/completed" && itemType === "contextcompaction"
+    )) {
       return {compaction_count: number(previous.compaction_count) + 1};
     }
     return {};

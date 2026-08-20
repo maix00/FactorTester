@@ -47,5 +47,9 @@ assert.deepEqual(runtime.runtimeEventPatch({
 assert.deepEqual(runtime.runtimeEventPatch({
   method: "thread/compacted",
 }, {compaction_count: 2}), {compaction_count: 3});
+assert.deepEqual(runtime.runtimeEventPatch({
+  method: "item/completed",
+  params: {item: {id: "compact-1", type: "contextCompaction"}},
+}, {compaction_count: 3}), {compaction_count: 4});
 
 console.log("PASS: Profile Agent runtime metadata projection");

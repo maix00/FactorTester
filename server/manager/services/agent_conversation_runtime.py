@@ -76,13 +76,20 @@ class AgentConversationRuntimeObserver:
                     actual_model=model,
                 )
             return
-        if method != "thread/compacted":
+        item = self._mapping(params.get("item"))
+        item_type = str(item.get("type") or "").strip().casefold()
+        is_compaction = method == "thread/compacted" or (
+            method == "item/completed" and item_type == "contextcompaction"
+        )
+        if not is_compaction:
             return
-        event_key = (thread_id, str(params.get("turnId") or "").strip())
+        event_key = (
+            thread_id,
+            str(item.get("id") or params.get("turnId") or "").strip(),
+        )
         if event_key in self._compactions:
             return
         self._compactions.add(event_key)
         self.store.increment_compaction(
             self.principal, self.profile_id, conversation_id,
         )
-

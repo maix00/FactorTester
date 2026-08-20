@@ -1096,6 +1096,16 @@ def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
     }
     observer.observe(compaction)
     observer.observe(compaction)
+    context_compaction = {
+        "method": "item/completed",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-2",
+            "item": {"id": "compaction-2", "type": "contextCompaction"},
+        },
+    }
+    observer.observe(context_compaction)
+    observer.observe(context_compaction)
 
     updated = service.conversation_store.get(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
@@ -1105,7 +1115,7 @@ def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
     assert updated["model_context_window"] == 200000
     assert updated["last_tokens"] == 12000
     assert updated["total_tokens"] == 45000
-    assert updated["compaction_count"] == 1
+    assert updated["compaction_count"] == 2
 
 
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
