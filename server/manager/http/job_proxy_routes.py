@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote
 from urllib.request import Request, urlopen
 
 from server.manager.domain.federation import (
@@ -18,6 +17,7 @@ from server.manager.http.gateway import GatewayResponse
 from server.manager.http.job_public_projection import read_principals
 from server.manager.http.responses import json_response
 from server.manager.http.streaming import read_available
+
 
 
 _SERVICE_WRITE_PATTERNS = {
@@ -576,7 +576,6 @@ class JobProxyRoutesMixin:
         else:
             principal = str(session["username"])
         path = self._forwarded_service_path(parsed)
-        job_id = unquote(match.group(1))
         last_error: HTTPError | None = None
         connection_failed = False
         try:

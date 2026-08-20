@@ -9,9 +9,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from server.manager.http.streaming import read_available
 from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.responses import json_response
+from server.manager.http.streaming import read_available
+
 
 class FederationServiceProxyRoutesMixin:
     @staticmethod
@@ -181,7 +182,7 @@ class FederationServiceProxyRoutesMixin:
             self.end_headers()
             self.wfile.write(body)
             return
-        except (URLError, OSError) as exc:
+        except (URLError, OSError):
             json_response(
                 self,
                 {"success": False, "error": "local service stream is unavailable"},
