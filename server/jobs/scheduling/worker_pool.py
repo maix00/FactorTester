@@ -180,11 +180,6 @@ class _WorkerSink:
         reports = build_report_artifacts(
             data, source=merged_source, requested=requested, job_id=self.job_id,
         )
-        if implicit_default and not implicit_ic:
-            reports = [
-                report for report in reports
-                if report.name in {"equity_curve_report"}
-            ]
         has_equity_curve = any(report.name == "equity_curve_report" for report in reports)
         for report in reports:
             self._write_bytes_artifact(

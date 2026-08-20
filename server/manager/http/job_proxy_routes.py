@@ -369,7 +369,7 @@ class JobProxyRoutesMixin:
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
-            r"(/result|/artifacts(?:/generate)?"
+            r"(/result|/artifacts(?:/generate|/[A-Za-z0-9._%+-]{1,512})?"
             r"|/group-detail|/group-ranking-detail|/group-snapshot"
             r"|/group-order-flow)?",
             parsed.path,
@@ -380,6 +380,10 @@ class JobProxyRoutesMixin:
         if method == "POST" and (
             suffix != "/artifacts/generate"
             and suffix not in _JOB_ANALYSIS_PATHS
+        ):
+            return False
+        if method == "DELETE" and not (
+            suffix == "/artifacts" or suffix.startswith("/artifacts/")
         ):
             return False
         session = self._session()
@@ -483,7 +487,7 @@ class JobProxyRoutesMixin:
                 ),
             }
         try:
-            if suffix in {"/result", "/artifacts"}:
+            if suffix in {"/result", "/artifacts"} or suffix.startswith("/artifacts/"):
                 routes = self._job_routes(
                     parsed, principal, for_artifact_storage=True,
                 )

@@ -252,6 +252,37 @@ class JobArtifactImplementation:
         self._reconcile_control_usage(str(owner))
         return artifacts
 
+    def mark_artifact_deleted(
+        self,
+        *,
+        job_id: str,
+        owner: str,
+        name: str,
+    ) -> dict[str, Any] | None:
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE artifacts.job_id=? AND artifacts.name=? AND jobs.owner=?
+                  AND artifacts.state != 'deleted'
+                """,
+                (str(job_id), str(name), str(owner)),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE research_job_artifacts SET state='deleted', deleted_at=?
+                WHERE job_id=? AND name=? AND state != 'deleted'
+                """,
+                (now, str(job_id), str(name)),
+            )
+        self._reconcile_control_usage(str(owner))
+        return dict(row)
+
     def mark_owner_artifacts_deleted(
         self,
         *,

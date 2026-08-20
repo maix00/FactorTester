@@ -320,6 +320,7 @@ def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_p
     artifacts = repository.list_artifacts(job_id="full", owner="alice")
     assert {item["name"] for item in artifacts} == {
         "details", "result", "equity_curve_report", "equity_curve_receipt",
+        "equity_curve_data", "equity_curve_data_receipt",
     }
     curve = next(
         item for item in artifacts if item["name"] == "equity_curve_report"

@@ -270,6 +270,48 @@ def delete_test_job_artifacts(job_id: str):
     return jsonify({"success": True, "job_id": job_id, "deleted_files": deleted})
 
 
+@sft_bp.route(
+    "/api/jobs/<job_id>/artifacts/<artifact_name>",
+    methods=["GET", "DELETE"],
+)
+def delete_test_job_artifact(job_id: str, artifact_name: str):
+    # Artifact bytes are always served by the Manager data plane (7997).
+    # Keep direct business-port GETs indistinguishable from an absent route.
+    if request.method != "DELETE":
+        return jsonify({"success": False, "error": "not found"}), 404
+    job, error = require_job(job_id)
+    if error:
+        return error
+    job_repository = repository()
+    current = job_repository.load_artifact(
+        job_id=job.job_id, owner=job.owner, name=artifact_name,
+    )
+    if current is None or current.get("state") == "deleted":
+        return jsonify({"success": False, "error": "artifact was not found"}), 404
+    if str(current.get("artifact_role") or "output") == "input":
+        return jsonify({
+            "success": False,
+            "error": "submitted inputs cannot be deleted individually",
+        }), 409
+    metadata = job_repository.mark_artifact_deleted(
+        job_id=job.job_id, owner=job.owner, name=artifact_name,
+    )
+    if metadata is None:
+        return jsonify({"success": False, "error": "artifact was not found"}), 404
+    root = artifact_root()
+    path = (root / str(metadata["relative_path"])).resolve()
+    deleted = 0
+    if root in path.parents and path.is_file():
+        path.unlink()
+        deleted = 1
+    return jsonify({
+        "success": True,
+        "job_id": job_id,
+        "artifact_name": artifact_name,
+        "deleted_files": deleted,
+    })
+
+
 @sft_bp.post("/api/jobs/<job_id>/cancel")
 def cancel_test_job(job_id: str):
     try:

@@ -463,6 +463,12 @@
     }
     const root = document.createElement("div");
     root.className = "test-workbench";
+    root.dataset.ftRerenderOnTabRestore = "true";
+    root.__ftBeforeTabSave = () => {
+      window.FTTestRunProgress?.suspend?.(
+        window.FTTestRunBatch?.submittedItems?.(state) || [],
+      );
+    };
     if (!window.FTTestSettings || !state.settingsInitialized) {
       const loading = FTUI.loading(context.t("正在读取测试设置代码…"));
       const error = state.settingsCode?.error;

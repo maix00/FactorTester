@@ -265,6 +265,8 @@
       context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, artifactQuery, jobID), context.t("清空任务文件")));
     }
     const root = document.createElement("div"); root.className = "job-detail";
+    root.dataset.ftRerenderOnTabRestore = "true";
+    root.__ftBeforeTabSave = () => FTJobProgress.stopProgress();
     const detailTabs = FTJobDetailTabs.create(
       context, `job-detail-section:${resolvedServerID}:${jobID}`,
     );
@@ -371,6 +373,12 @@
     } else if (activeArtifacts.length) artifactSection.append(FTJobArtifacts.artifactRows(
       context, activeArtifacts,
       item => downloadArtifact(item, context.t("登录后才能下载生成物")),
+      context.session ? {onDelete: async item => {
+          await FTJobArtifacts.deleteArtifact(
+            context, artifactQuery, jobID, item.name,
+          );
+          await detailPage();
+        }} : {},
     ));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
     artifactPanel.append(artifactSection);

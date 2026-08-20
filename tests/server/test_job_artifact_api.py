@@ -138,6 +138,53 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert repository.storage_usage(owner="alice") == 0
 
 
+def test_user_can_delete_one_output_without_deleting_other_artifacts(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    repository = JobRepository()
+    _create_job(repository, job_id="job-delete-one", status=JobStatus.RUNNING)
+    root = tmp_path / "artifacts" / "job-delete-one"
+    root.mkdir(parents=True)
+    for name, role in (("equity_curve_data", "output"), ("factor_source", "input")):
+        target = root / f"{name}.json"
+        raw = orjson.dumps({"name": name})
+        target.write_bytes(raw)
+        repository.record_artifact(
+            job_id="job-delete-one",
+            name=name,
+            relative_path=str(target.relative_to(tmp_path / "artifacts")),
+            content_type="application/json",
+            content_hash=hashlib.sha256(raw).hexdigest(),
+            size_bytes=len(raw),
+            artifact_role=role,
+        )
+
+    deleted = client.delete(
+        "/api/jobs/job-delete-one/artifacts/equity_curve_data"
+    )
+    input_delete = client.delete(
+        "/api/jobs/job-delete-one/artifacts/factor_source"
+    )
+    manifest = client.get("/api/jobs/job-delete-one/artifacts").get_json()
+
+    assert deleted.status_code == 200
+    assert deleted.get_json()["artifact_name"] == "equity_curve_data"
+    assert not (root / "equity_curve_data.json").exists()
+    assert input_delete.status_code == 409
+    assert (root / "factor_source.json").is_file()
+    states = {item["name"]: item["state"] for item in manifest["artifacts"]}
+    assert states == {"equity_curve_data": "deleted", "factor_source": "active"}
+
+
 def test_artifact_manifest_preserves_distinct_input_logical_paths(
     tmp_path, monkeypatch,
 ) -> None:

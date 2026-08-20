@@ -36,7 +36,15 @@ class FakeElement {
     this.append(...values);
   }
   querySelector(selector) {
-    if (selector === "[data-ft-rerender-on-tab-restore]") return null;
+    if (selector === "[data-ft-rerender-on-tab-restore]") {
+      const queue = [...this.children];
+      while (queue.length) {
+        const node = queue.shift();
+        if (node?.dataset?.ftRerenderOnTabRestore !== undefined) return node;
+        queue.push(...(node?.children || []));
+      }
+      return null;
+    }
     return new FakeElement();
   }
   querySelectorAll(selector) {
@@ -260,4 +268,27 @@ content.controls = [inserted, rerendered];
 tabs.markActiveViewReady();
 assert.strictEqual(inserted.value, "");
 assert.strictEqual(rerendered.value, "persist me");
+
+// Live task views are invalidated on every switch, not only on the first
+// return. Their save hook must stop the current stream before both rerenders.
+tabs.navigate("/backtest");
+const liveTabID = state.activeTabID;
+let beforeSaveCalls = 0;
+function installLiveView() {
+  const live = new FakeElement("section");
+  live.dataset.ftRerenderOnTabRestore = "true";
+  live.__ftBeforeTabSave = () => { beforeSaveCalls += 1; };
+  content.replaceChildren(live);
+}
+installLiveView();
+tabs.navigate("/products/product/LIVE-A.DCE");
+const firstLiveRenderCount = renderCount;
+tabs.activateTab(liveTabID);
+assert.strictEqual(renderCount, firstLiveRenderCount + 1);
+installLiveView();
+tabs.navigate("/products/product/LIVE-B.DCE");
+const secondLiveRenderCount = renderCount;
+tabs.activateTab(liveTabID);
+assert.strictEqual(renderCount, secondLiveRenderCount + 1);
+assert.strictEqual(beforeSaveCalls, 2);
 console.log("ok");

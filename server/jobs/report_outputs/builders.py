@@ -172,12 +172,15 @@ def _display_series(
         indices = list(range(0, len(values), stride))
         if indices[-1] != len(values) - 1:
             indices.append(len(values) - 1)
-        output.append({
-            **item,
-            "values": [values[index] for index in indices],
-            "timestamps": [timestamps[index] for index in indices]
-            if len(timestamps) >= len(values) else timestamps,
-        })
+        compacted = {**item}
+        for key, value in item.items():
+            if isinstance(value, list) and len(value) == len(values):
+                compacted[key] = [value[index] for index in indices]
+        compacted["values"] = [values[index] for index in indices]
+        compacted["timestamps"] = [timestamps[index] for index in indices]
+        if len(timestamps) < len(values):
+            compacted["timestamps"] = timestamps
+        output.append(compacted)
     return output
 
 
