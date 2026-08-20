@@ -69,7 +69,6 @@
       copy.append(note);
     }
     header.append(disclosure, select, copy);
-    if (options.showConfigOpen && batch.chips) header.append(chips(batch.chips));
     if (batch.actions) header.append(actions(batch.actions, options));
     shell.append(header);
     for (const item of batch.items || []) body.append(renderItem(item, options));

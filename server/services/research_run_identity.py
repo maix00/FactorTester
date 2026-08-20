@@ -8,7 +8,7 @@ from typing import Any
 import orjson
 
 
-RUN_SPEC_VERSION = 2
+RUN_SPEC_VERSION = 3
 
 
 def hash_run_spec(run_spec: dict[str, Any]) -> str:

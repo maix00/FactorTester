@@ -93,6 +93,7 @@
     surface.append(canvas);
     const details = document.createElement("aside");
     details.className = "research-graph-details";
+    if (details.dataset) details.dataset.ftScrollState = "research-graph-details";
     layout.append(surface, details);
     section.append(layout);
     mount.append(section);
@@ -216,6 +217,7 @@
       canvas.setAttribute("aria-label", context.t("个人研究图拓扑", "Personal research graph topology"));
       const details = document.createElement("aside");
       details.className = "research-graph-details";
+      if (details.dataset) details.dataset.ftScrollState = "research-graph-details";
       surface.append(canvas);
       layout.append(surface, details);
       network.append(toolbar, meta, layout);
@@ -609,6 +611,7 @@
     canvas.setAttribute("aria-label", context.t("研究图拓扑", "Research graph topology"));
     const details = document.createElement("aside");
     details.className = "research-graph-details";
+    if (details.dataset) details.dataset.ftScrollState = "research-graph-details";
     surface.append(canvas);
     layout.append(surface, details);
     section.append(layout);

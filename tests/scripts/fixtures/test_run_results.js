@@ -88,4 +88,37 @@ results.resultSection({}, {kind: "ic"}, {
 });
 assert.equal(icOptions.productGroupRef, "product-group:night");
 assert.equal(icOptions.configuration.payload.analyses.ic.product_path_selection_id, "fallback");
+
+class MiniElement {
+  constructor(tag) { this.tagName = tag; this.children = []; }
+  append(...nodes) { this.children.push(...nodes); }
+}
+global.document = {
+  createElement: tag => new MiniElement(tag),
+  createDocumentFragment: () => new MiniElement("fragment"),
+};
+let previewCalls = 0;
+window.FTJobArtifacts = {
+  effectiveDeclarations: declarations => declarations.length ? declarations : [{
+    name: "equity_curve_report", label: "净值曲线", artifacts: ["equity_curve_report"],
+  }],
+  declarationArtifacts: (_declaration, artifacts) => artifacts.slice(0, 1),
+  lazyArtifactPreview: () => { previewCalls += 1; return new MiniElement("preview"); },
+  artifactRows: () => new MiniElement("table"),
+  saveBlob: () => Promise.resolve(),
+};
+const backtestContent = results.resultSection(
+  {t: value => value}, {kind: "backtest"}, {
+    jobID: "job-backtest", artifactQuery: "?server_id=public-1",
+    taskDetail: {
+      artifacts: [
+        {name: "factor_source__Demo", role: "input", state: "active"},
+        {name: "equity_curve_report", file_name: "equity_curve_report.svg", state: "active"},
+      ],
+      input_artifacts: [{name: "factor_source__Demo"}], output_declarations: [],
+    },
+  },
+);
+assert.ok(backtestContent);
+assert.equal(previewCalls, 1, "backtest results must reuse the old artifact preview path");
 console.log("ok");

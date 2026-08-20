@@ -211,7 +211,6 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     for key in (
         "factor_candidates",
         "factor_source_selections",
-        "factor",
         "product_path_candidates",
         "product_path_selection",
     ):
@@ -380,11 +379,23 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         chip["module"] for chip in index["chip_fields"]
     } >= {"factor_execution", "product_selection", "group_strategy"}
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_alias",
+        "factor_candidates",
         "product_path_selection",
         "group_index",
-        "product_mask",
         "run_inputs",
+    }
+    chips = {chip["key"]: chip for chip in index["chip_fields"]}
+    assert chips["split_count"]["display_scope"] == "strategy"
+    assert chips["group_index"]["display_scope"] == "strategy"
+    assert "product_mask" not in chips
+    assert chips["factor_candidates"]["source_keys"] == ("factorCandidateLabel",)
+    assert chips["factor_candidates"]["detail_overlay"] == {
+        "kind": "factor_set", "mode": "view",
+        "source_key": "factor_candidates", "ref_key": "target_ref",
+    }
+    assert chips["product_path_selection"]["label"] == "产品组"
+    assert chips["product_path_selection"]["detail_overlay"] == {
+        "kind": "product_group", "mode": "view", "source_key": "product_group",
     }
     run_input_chip = next(
         chip for chip in index["chip_fields"] if chip["key"] == "run_inputs"
@@ -448,7 +459,6 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "setting_template",
         "factor_candidates",
         "factor_source_selections",
-        "factor_selections",
         "category_candidates",
         "product_path_candidates",
         "product_path_selections",
@@ -460,9 +470,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         key for key in (
             "factor_owner_ref", "factor_git_commit", "factor_family_ref",
             "factor_params", "factor_candidates", "factor_source_selections",
-            "factor_selections",
         ) if key in index["defaults"]
-    ] == ["factor_candidates", "factor_source_selections", "factor_selections"]
+        ] == ["factor_candidates", "factor_source_selections"]
     item_fields = index["defaults"]["factor_candidates"]["serialization"]["item_fields"]
     assert {
         "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
@@ -482,10 +491,18 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     )
     assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
-    assert chips["factor_alias"]["source_adapter"] == "selected_factors"
+    assert chips["factor_candidates"]["source_adapter"] == "selected_factor_candidates"
+    assert chips["factor_candidates"]["detail_overlay"] == {
+        "kind": "factor_set", "mode": "view",
+        "source_key": "factor_candidates", "ref_key": "target_ref",
+    }
     assert chips["product_path_selection"]["source_adapter"] == (
         "selected_product_paths"
     )
+    assert chips["product_path_selection"]["label"] == "产品组"
+    assert chips["product_path_selection"]["detail_overlay"] == {
+        "kind": "product_group", "mode": "view", "source_key": "product_group",
+    }
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
     horizon_field = index["defaults"]["forward_return_horizons"]
     assert horizon_field["value"] == {"sampling": "scale_aware"}
@@ -516,7 +533,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "time_precision": ["exact"],
     }
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_alias",
+        "factor_candidates",
         "product_path_selection",
     }
     assert [tab["key"] for tab in index["result_tabs"]][:3] == [
@@ -1293,8 +1310,11 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert [item["key"] for item in contract["pre_mounted_tabs"]] == expected
         assert not set(expected).intersection(contract["outer_only_tabs"])
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
-            "factor_selections", "factor",
+            "factor_candidates",
         ]
+        assert contract["factor_scope"]["strategy_selection_field"] == (
+            "factor_candidate_refs"
+        )
         assert contract["outer_scope_tabs"]["factor"]["scope_fields"] == [
             "factor_candidates",
         ]
@@ -1319,11 +1339,7 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert scoped["factor_candidates"]["inner"]["source_when_outer_mounted"] == (
             "outer_candidate_pool"
         )
-        assert scoped["factor"]["outer"]["resolution"] == {
-            "kind": "automatic",
-            "source": "factor_candidates",
-            "resolver": "primary_item",
-        }
+        assert "factor" not in scoped
         assert scoped["factor_role_bindings"]["outer"]["visible_when"] == {
             "min_items": {"factor_candidates": 2},
         }
@@ -1338,6 +1354,16 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert scoped["product_path_candidates"]["inner"][
             "source_when_outer_unmounted"
         ] == "visible_product_group_catalog"
+        assert scoped["category_candidates"]["inner"] == {
+            "source_when_outer_mounted": "outer_category_pool",
+            "source_when_outer_unmounted": "visible_category_catalog",
+            "cardinality": "many",
+            "selection_mode": "filter_or_build_candidates",
+            "filter_only_when_outer_mounted": True,
+            "allow_inline_create_when_outer_unmounted": True,
+            "editable": True,
+        }
+        assert contract["outer_scope_tabs"]["category"]["candidate_kind"] == "category"
         index = backtest_setting_registry.get(application_name).manifest()
         if "factor" in index["defaults"]:
             assert index["defaults"]["factor"]["serialization"]["resolution"] == {
@@ -1347,3 +1373,28 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
                 "editable": False,
             }
         assert "time" in contract["outer_only_tabs"]
+        assert "data_source" in contract["outer_only_tabs"]
+        data_source = backtest_setting_registry.get(application_name).manifest()["defaults"]["data_source"]
+        assert data_source["value_descriptor"]["cardinality"] == "many"
+        assert contract["candidate_constraints"]["category_candidates"] == {
+            "source_field": "data_source",
+            "mode_field": "data_source_mode",
+            "automatic_mode": "auto",
+            "coverage": "complete_path_coverage",
+            "side": "outer",
+        }
+        assert contract["candidate_constraints"]["product_path_candidates"] == {
+            "source_field": "data_source",
+            "mode_field": "data_source_mode",
+            "automatic_mode": "auto",
+            "coverage": "complete_product_coverage",
+            "side": "outer",
+        }
+
+    ic_manifest = backtest_setting_registry.get("ic_test").manifest()
+    category_chip = next(
+        item for item in ic_manifest["chip_fields"] if item["key"] == "category"
+    )
+    assert category_chip["source_adapter"] == "selected_category"
+    assert category_chip["detail_overlay"]["kind"] == "category"
+    assert ic_manifest["defaults"]["category"]["show_chip"] is False

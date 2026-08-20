@@ -24,6 +24,14 @@ global.FTTestSettings = window.FTTestSettings = {
 const source = fs.readFileSync(process.argv[2], "utf8");
 vm.runInThisContext(source, {filename: process.argv[2]});
 
+// A late lazy/progress callback belongs to the route token that created it.
+// Once the user changes tabs it must not touch the shared page content.
+const staleContent = {replaceChildren() { throw new Error("stale route repainted content"); }};
+assert.doesNotThrow(() => window.FTTests.render({
+  isRouteCurrent: () => false,
+  content: staleContent,
+}, {}));
+
 let refreshes = 0;
 const state = {
   manifest: {},

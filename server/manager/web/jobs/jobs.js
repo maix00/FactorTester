@@ -7,6 +7,10 @@
   } = FTJobListFormat;
 
   const pageSize = 20;
+  // A submission can finish while the pinned task-list tab is cached in a
+  // different tab session.  This process-local generation invalidates those
+  // caches without forcing every visit to fan out across every server.
+  let cacheGeneration = 0;
   const scopeDefinitions = [
     {id: "server", title: "服务器任务"},
     {id: "cross-server", title: "跨服务器任务"},
@@ -29,13 +33,15 @@
   function scopeState(context) {
     const existing = context.tabSession.jobLists;
     const identity = sessionKey(context);
-    if (existing && existing.byScope && existing.identityKey === identity) return existing;
+    if (existing && existing.byScope && existing.identityKey === identity
+        && existing.cacheGeneration === cacheGeneration) return existing;
     // The server feed is the default for both anonymous and authenticated
     // visits.  Private scopes remain available as explicit account tabs, and
     // a pending private tab survives the login round-trip.
     const initial = "server";
     const value = {
       identityKey: identity,
+      cacheGeneration,
       activeScope: initial,
       byScope: {
         mine: freshScopeState(),
@@ -46,6 +52,10 @@
     };
     context.tabSession.jobLists = value;
     return value;
+  }
+
+  function invalidate() {
+    cacheGeneration += 1;
   }
 
   function publicScopeNote(context, payload = null) {
@@ -312,7 +322,7 @@
   }
 
   window.FTJobs = {
-    list, text, scalar, date, table, statusPill, kindTitle, jobPort,
+    invalidate, list, text, scalar, date, table, statusPill, kindTitle, jobPort,
     formatBytes, taskCell, taskHash, taskTitle,
   };
 })();

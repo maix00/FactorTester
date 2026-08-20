@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import re
 import secrets
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
+from server.manager.http.job_public_projection import (
+    PUBLIC_JOB_PRINCIPAL,
+    read_principals,
+)
 from server.manager.http.responses import json_response
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
 
 
 _ACCESS_PATH = re.compile(
@@ -226,15 +231,18 @@ class JobTransferRoutesMixin:
             )
             if selected is None:
                 raise KeyError("artifact was not found")
-            route, artifact = selected
+            route, artifact, lookup_principal = selected
             if (
-                principal == "__public_jobs__"
+                lookup_principal == PUBLIC_JOB_PRINCIPAL
                 and str(artifact.get("artifact_role") or "output") == "input"
             ):
                 raise PermissionError("登录后才能查看运行输入")
             access = self._rewrite_client_data_access(
                 self.state.prepare_artifact_download(
-                    principal=principal,
+                    # The service and data plane authorize against the
+                    # concrete task owner.  Manager has already checked that
+                    # this owner is the caller or an allowed direct child.
+                    principal=lookup_principal,
                     storage_server_id=route.server_id,
                     job_id=job_id,
                     artifact=artifact,
@@ -303,30 +311,74 @@ class JobTransferRoutesMixin:
         name: str,
         principal: str,
     ):
-        path = f"/api/jobs/{quote(job_id, safe='')}/artifacts"
+        principals = read_principals(
+            self.state, principal, job_id, routes=routes,
+        )
         for route in routes:
-            try:
-                payload = self.state.route_json(
-                    route,
-                    path=path,
-                    principal=principal,
-                )
-            except (ConnectionError, OSError, TypeError, ValueError):
-                continue
-            for artifact in payload.get("artifacts") or []:
-                if not isinstance(artifact, dict):
+            for lookup_principal in principals:
+                try:
+                    payload = self._job_artifact_payload(
+                        route, job_id=job_id, principal=lookup_principal,
+                    )
+                except (ConnectionError, OSError, TypeError, ValueError):
                     continue
-                artifact_name = str(artifact.get("name") or "").strip()
-                file_name = str(artifact.get("file_name") or "").strip()
-                if name not in {artifact_name, file_name}:
+                for artifact in payload.get("artifacts") or []:
+                    if not isinstance(artifact, dict):
+                        continue
+                    artifact_name = str(artifact.get("name") or "").strip()
+                    file_name = str(artifact.get("file_name") or "").strip()
+                    if name not in {artifact_name, file_name}:
+                        continue
+                    if str(artifact.get("state") or "") != "active":
+                        continue
+                    # ``name`` is the immutable API identity.  ``file_name``
+                    # is only the download/display name; accepting it here
+                    # keeps older declarations and clients readable without
+                    # making it the transfer object ID.
+                    return (
+                        route,
+                        {**artifact, "name": artifact_name or name},
+                        lookup_principal,
+                    )
+        return None
+
+    def _job_artifact_payload(
+        self, route, *, job_id: str, principal: str,
+    ) -> dict[str, object]:
+        """Read metadata from the source Manager, never a worker port."""
+        if route.server_id in {self.state.server_id, "local"}:
+            return {
+                "artifacts": JobArtifactCatalog(self.state).list(
+                    job_id=job_id, principal=principal,
+                ),
+            }
+        return self.state.federation_gateway.public_data(
+            route,
+            kind="job-artifacts",
+            operation="list",
+            principal=principal,
+            payload={"job_id": job_id},
+        )
+
+    def _job_artifact_manifest(self, routes, *, job_id: str, principal: str):
+        principals = read_principals(
+            self.state, principal, job_id, routes=routes,
+        )
+        for route in routes:
+            for lookup_principal in principals:
+                try:
+                    payload = self._job_artifact_payload(
+                        route, job_id=job_id, principal=lookup_principal,
+                    )
+                except (ConnectionError, OSError, TypeError, ValueError):
                     continue
-                if str(artifact.get("state") or "") != "active":
-                    continue
-                # ``name`` is the immutable API identity.  ``file_name`` is
-                # only the download/display name; accepting it here keeps
-                # older declarations and clients readable without making it
-                # the transfer object ID.
-                return route, {**artifact, "name": artifact_name or name}
+                artifacts = [
+                    dict(item) for item in payload.get("artifacts") or []
+                    if isinstance(item, dict)
+                    and str(item.get("state") or "") == "active"
+                ]
+                if artifacts:
+                    return route, artifacts, lookup_principal
         return None
 
 

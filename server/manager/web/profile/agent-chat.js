@@ -44,6 +44,15 @@
     chat.className = "profile-chatkit";
     chat.addEventListener("chatkit.ready", () => {
       status.textContent = context.t("Agent 对话已连接");
+      if (options.readOnly && typeof chat.showHistory === "function") {
+        // Read-only entry is a history-list entry point, not a new-thread
+        // entry point.  ChatKit owns the list and will open a thread only
+        // after the viewer selects one.
+        Promise.resolve(chat.showHistory()).catch(error => {
+          status.textContent = `${context.t("历史会话读取失败")}: ${
+            error?.message || context.t("请重试")}`;
+        });
+      }
     });
     chat.addEventListener("chatkit.error", event => {
       const error = event.detail?.error;
@@ -62,6 +71,10 @@
       // Reuse ChatKit's built-in history view. Its thread operations are
       // served by chatkit-adapter.js and filtered by the Manager API.
       history: {enabled: true},
+      // Do not restore or create a thread while entering read-only mode.  The
+      // history view opened above is the first screen; selecting a row then
+      // asks the adapter for that specific locked thread.
+      ...(options.readOnly ? {initialThread: null} : {}),
       header: {
         enabled: true,
         title: {enabled: true, text: context.t("研究身份 Agent")},
@@ -74,12 +87,21 @@
         ],
       },
       composer: {
-        disabled: Boolean(options.readOnly),
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
         attachments: {enabled: false},
       },
     });
     host.replaceChildren(chat);
+    if (options.readOnly) {
+      const composerNote = document.createElement("div");
+      composerNote.className = "profile-chatkit-readonly-composer";
+      composerNote.setAttribute("role", "note");
+      composerNote.setAttribute("aria-live", "polite");
+      composerNote.textContent = context.t(
+        "只读会话：可以查看历史消息，但不能发送问题。",
+      );
+      host.append(composerNote);
+    }
     return {adapter, chat};
   }
 

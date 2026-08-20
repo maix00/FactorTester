@@ -5,46 +5,48 @@
 
   function executionFactors(state) {
     if (state.kind !== "ic") {
-      const aliases = new Set((state.analysis?.groups || []).flatMap(group => [
-        group?.factorAlias,
-        ...(Array.isArray(group?.factorAliases) ? group.factorAliases : []),
-      ]).filter(Boolean));
-      const factors = (state.factors || []).filter(item => aliases.has(
-        item.factor_alias || item.alias || item.name,
-      ));
+      const refs = new Set((state.analysis?.groups || []).flatMap(group => (
+        Array.isArray(group?.factor_candidate_refs)
+          ? group.factor_candidate_refs : []
+      )).filter(Boolean));
+      const factors = factorCatalog(state).filter(item => refs.has(factorRef(item)));
       return factors.length ? factors : [selectedFactor(state)].filter(Boolean);
     }
-    const selected = Array.isArray(state.values.factor_selections)
-      ? state.values.factor_selections : [];
+    const selected = Array.isArray(state.values.factor_candidates)
+      ? state.values.factor_candidates : [];
     return selected.length ? selected : [selectedFactor(state)].filter(Boolean);
+  }
+
+  function factorRef(value) {
+    return String(value?.factor_ref || value?.target_ref || "").trim();
+  }
+
+  function factorCatalog(state) {
+    const byRef = new Map();
+    for (const item of [
+      ...(state.factors || []), ...(state.savedFactors || []),
+      ...(state.values?.factor_candidates || []),
+    ]) {
+      const ref = factorRef(item);
+      if (ref) byRef.set(ref, {...(byRef.get(ref) || {}), ...item});
+    }
+    return [...byRef.values()];
+  }
+
+  function runtimeGroups(state, groups) {
+    const catalog = new Map(factorCatalog(state).map(item => [factorRef(item), item]));
+    return groups.map(group => {
+      const refs = Array.isArray(group.factor_candidate_refs)
+        ? group.factor_candidate_refs.map(String).filter(Boolean) : [];
+      for (const ref of refs) {
+        if (!catalog.has(ref)) throw new Error(`factor reference was not found: ${ref}`);
+      }
+      return group;
+    });
   }
 
   function selectedFamily(state, factor) {
     return FTTestFactors.selectedFamily(state, factor);
-  }
-
-  function uniqueFamilies(state, factors) {
-    const seen = new Set();
-    const result = [];
-    for (const factor of factors) {
-      const family = selectedFamily(state, factor);
-      const key = family?.family_ref || factor.family_ref
-        || family?.family || factor.family || factor.factor_family_alias;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      result.push({family, factor});
-    }
-    return result;
-  }
-
-  function familyRecord(family, factor) {
-    return {
-      alias: family?.factor_family_alias || family?.alias || family?.family
-        || factor.factor_family_alias || factor.family_alias
-        || factor.factor_alias || factor.alias,
-      family_ref: family?.family_ref || factor.family_ref
-        || factor.factor_family_ref || "",
-    };
   }
 
   function factorRecord(factor, family) {
@@ -100,7 +102,6 @@
     const factors = executionFactors(state);
     const factor = factors[0] || selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
-    const families = uniqueFamilies(state, factors);
     const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
     const kindTitle = {
       ic: "IC",
@@ -109,7 +110,6 @@
     }[state.kind] || state.kind;
     const body = {
       title: `${kindTitle} · ${alias}`,
-      factor_families: families.map(item => familyRecord(item.family, item.factor)),
       factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
     };
     const value = await context.api("/api/workspaces", {
@@ -147,14 +147,11 @@
     // Backtest still restores the optional outer catalog selection for the
     // authoring UI; it is not used to build the task's execution scope.
     FTTestProducts.synchronize(state);
-    const families = uniqueFamilies(state, factors);
     const configuration = state.workspace.configuration;
     const payload = structuredClone(configuration.payload || {});
     payload.schema_version = 1;
     payload.shared = payload.shared || {};
-    payload.shared.factor_families = families.map(item => (
-      familyRecord(item.family, item.factor)
-    ));
+    delete payload.shared.factor_families;
     payload.shared.factors = factors.map(item => (
       factorRecord(item, selectedFamily(state, item))
     ));
@@ -231,12 +228,14 @@
     }
     let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
     if (!groups.length) groups = [{
-      id: "group-1", batchId: "batch:1", name: "batch:1/group-1", factorAlias: alias,
+      id: "group-1", batchId: "batch:1", name: "batch:1/group-1",
+      factor_candidate_refs: [factorRef(factor)],
       splitCount: Number(state.values?.split_count || 5),
       groupIndex: Number(state.values?.group_index || 1),
       product_path_selection: FTTestProducts.projection(group),
       product_path_selection_id: FTTestProducts.groupID(group),
     }];
+    groups = runtimeGroups(state, groups);
     const catalogGroups = new Map((state.groups || []).map(value => [
       String(FTTestProducts.groupID(value) || ""), value,
     ]).filter(([id]) => id));
@@ -264,7 +263,6 @@
     return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
       ...prior, ...settings, local_settings: settings, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
-      factor_family_alias: family,
     }, state.values);
   }
 

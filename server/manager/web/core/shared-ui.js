@@ -3,6 +3,7 @@
 
   function table(headers, rows = []) {
     const shell = document.createElement("div"); shell.className = "table-shell";
+    if (shell.dataset) shell.dataset.ftScrollState = "shared-table";
     const element = document.createElement("table");
     const head = element.createTHead().insertRow();
     headers.forEach(label => {

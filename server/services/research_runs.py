@@ -71,14 +71,14 @@ def create_run(
     trial_binding: dict[str, Any] | None = None,
     report_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    # Historical internal callers created v1 specs before the body declared
-    # its version. Preserve those records; HTTP preview/submit always declares
-    # the current version explicitly.
-    run_spec_version = int(run_spec.get("run_spec_version") or 1)
-    if run_spec_version not in {1, RUN_SPEC_VERSION}:
+    run_spec_version = int(run_spec.get("run_spec_version") or 0)
+    if run_spec_version != RUN_SPEC_VERSION:
         raise ValueError("unsupported run_spec_version")
     run_id = uuid.uuid4().hex
-    raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+    # Persist the schema's insertion order for human inspection.  The hash
+    # function canonicalizes a temporary encoding independently and must not
+    # rewrite the displayed/downloaded RunSpec.
+    raw = orjson.dumps(run_spec)
     run_spec_hash = hash_run_spec(run_spec)
     sample_identity = derive_sample_identity_or_none(run_spec)
     binding = normalize_trial_binding(

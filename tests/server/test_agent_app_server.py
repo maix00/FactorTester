@@ -29,11 +29,34 @@ PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
 
 
-def _fake_codex(path: Path) -> str:
+def _fake_codex(path: Path, *, history: bool = False) -> str:
+    turns = repr([{
+        "items": [
+            {
+                "id": "history-user-1",
+                "type": "user_message",
+                "content": [{"type": "input_text", "text": "查询产品"}],
+                "created_at": 2,
+            },
+            {
+                "id": "history-assistant-1",
+                "type": "assistant_message",
+                "text": (
+                    "98 个期货品种，2846 个合约路径\n\n"
+                    "```bash\n"
+                    "factortester products list\n"
+                    "```"
+                ),
+                "created_at": 3,
+            },
+        ],
+    }] if history else [])
     path.write_text(
         """#!/usr/bin/env python3
 import json
 import sys
+
+HISTORY_TURNS = __HISTORY_TURNS__
 
 for raw in sys.stdin:
     request = json.loads(raw)
@@ -49,7 +72,7 @@ for raw in sys.stdin:
                 "name": "Recovered conversation",
                 "createdAt": 1,
                 "updatedAt": 1,
-                "turns": [],
+                "turns": HISTORY_TURNS,
             },
         }
     elif method == "thread/resume":
@@ -60,7 +83,7 @@ for raw in sys.stdin:
                 "name": "Recovered conversation",
                 "createdAt": 1,
                 "updatedAt": 1,
-                "turns": [],
+                "turns": HISTORY_TURNS,
             },
             "resumed": True,
         }
@@ -71,7 +94,7 @@ for raw in sys.stdin:
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
-""",
+""".replace("__HISTORY_TURNS__", turns),
         encoding="utf-8",
     )
     os.chmod(path, 0o700)
@@ -112,6 +135,13 @@ class _ModelResponse:
 
 
 def test_openai_provider_health_checks_model_without_returning_secret(monkeypatch):
+    clock = iter([100.0, 100.125])
+    monkeypatch.setattr(
+        provider_health_module.time,
+        "monotonic",
+        lambda: next(clock),
+    )
+
     def fake_urlopen(request, timeout):
         assert request.full_url == "https://api.openai.com/v1/models"
         assert request.headers["Authorization"] == "Bearer secret-token"
@@ -127,6 +157,9 @@ def test_openai_provider_health_checks_model_without_returning_secret(monkeypatc
         "secret": "secret-token",
     })
     assert result["model_available"] is True
+    assert result["available_models"] == ["research-model"]
+    assert result["available_models_truncated"] is False
+    assert result["latency_ms"] == 125
     assert "secret-token" not in json.dumps(result)
 
 
@@ -145,6 +178,55 @@ def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch)
             "secret": "secret-token",
         })
     assert "secret-token" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("protocol", "base_url", "expected_url", "header", "payload", "model"),
+    [
+        (
+            "anthropic_messages",
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com/v1/models",
+            "X-api-key",
+            {"data": [{"id": "claude-research"}]},
+            "claude-research",
+        ),
+        (
+            "gemini_native",
+            "https://generativelanguage.googleapis.com/v1beta",
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            "X-goog-api-key",
+            {"models": [{"name": "models/gemini-research"}]},
+            "gemini-research",
+        ),
+    ],
+)
+def test_native_provider_health_uses_protocol_auth_and_model_catalog(
+    monkeypatch,
+    protocol,
+    base_url,
+    expected_url,
+    header,
+    payload,
+    model,
+):
+    def fake_urlopen(request, timeout):
+        assert request.full_url == expected_url
+        assert request.headers[header] == "secret-token"
+        assert "Authorization" not in request.headers
+        return _ModelResponse(payload)
+
+    monkeypatch.setattr(provider_health_module, "urlopen", fake_urlopen)
+
+    result = AgentProviderHealth.test({
+        "protocol": protocol,
+        "base_url": base_url,
+        "default_model": model,
+        "secret": "secret-token",
+    })
+
+    assert result["model_available"] is True
+    assert result["protocol"] == protocol
 
 
 def test_provider_test_uses_manager_mihomo_proxy(tmp_path, monkeypatch):
@@ -389,7 +471,7 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
     )
     supervisor = AgentAppServerSupervisor(
         service,
-        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        codex_binary=_fake_codex(tmp_path / "fake-codex", history=True),
     )
     conversation = service.create_conversation(PRINCIPAL, PROFILE_ID, title="Keep me")
 
@@ -402,9 +484,29 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert started["result"]["thread"]["id"] == "provider-thread-1"
+    items = service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )
+    assert [item["role"] for item in items] == ["user", "assistant"]
+    assert items[-1]["text"] == (
+        "98 个期货品种，2846 个合约路径\n\n"
+        "```bash\n"
+        "factortester products list\n"
+        "```"
+    )
     saved = service.conversation(PRINCIPAL, PROFILE_ID, conversation["conversation_id"])
     assert saved["provider_thread_id"] == "provider-thread-1"
     assert saved["provider_id"] == provider["provider_id"]
+
+    refreshed = supervisor.refresh_conversation_history(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+    )
+    assert refreshed is True
+    assert len(service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )) == 2
 
     supervisor.stop(PRINCIPAL, PROFILE_ID)
     service.release(
@@ -428,6 +530,9 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert resumed["result"]["resumed"] is True
+    assert len(service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )) == 2
     supervisor.stop(PRINCIPAL, PROFILE_ID)
 
 

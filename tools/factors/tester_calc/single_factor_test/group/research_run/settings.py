@@ -9,7 +9,7 @@ from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
 from tools.testers.settings import backtest_setting_registry
 from tools.testers.settings.resolver import resolve_group_settings
 
-from .factor_roles import resolve_factor, resolve_factor_role_bindings
+from .factor_roles import resolve_factor_ref, resolve_factor_role_bindings
 
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "_expanded"}
@@ -255,14 +255,10 @@ def _strip_implicit_auto_ledger_defaults(
             settings.pop(key, None)
 
 
-def _factor_aliases_from_group(group: dict[str, Any]) -> list[str]:
-    raw = group.get("factorAliases")
-    if raw is None:
-        raw = group.get("factor_aliases")
-    if raw is None:
-        raw = [group.get("factorAlias") or group.get("factor_alias")]
+def _factor_refs_from_group(group: dict[str, Any]) -> list[str]:
+    raw = group.get("factor_candidate_refs")
     if not isinstance(raw, list):
-        raw = [raw]
+        raise ValueError("factor_candidate_refs must be an array")
     return list(dict.fromkeys(
         str(value).strip() for value in raw if str(value or "").strip()
     ))
@@ -328,21 +324,20 @@ def resolve_group_strategy_settings(
     if product_list:
         group_settings["product_mask_names"] = tuple(product_list)
 
-    factor_aliases = _factor_aliases_from_group(group)
+    factor_refs = _factor_refs_from_group(group)
     factor_combination_mode = _factor_combination_mode(group)
-    if not factor_aliases:
+    if not factor_refs:
         raise ValueError(
             f"缺少因子候选: group={group.get('name') or group_id}"
         )
-    if len(factor_aliases) > 1 and not factor_combination_mode:
+    if len(factor_refs) > 1 and not factor_combination_mode:
         raise ValueError(
             f"多个因子候选需要组合方式: group={group.get('name') or group_id}"
         )
-    factor_alias = factor_aliases[0]
-    group_settings["factor_aliases"] = tuple(factor_aliases)
+    group_settings["factor_refs"] = tuple(factor_refs)
     group_settings["factor_combination_mode"] = factor_combination_mode
-    group_settings["factor"] = resolve_factor(
-        factor_alias,
+    group_settings["factor"] = resolve_factor_ref(
+        factor_refs[0],
         data=data,
         page_factors=page_factors_dict,
         page_uuid=page_uuid,
@@ -481,7 +476,7 @@ def build_group_owner_rows(
             "group_name": display_name,
             "group_index": int(group.get("groupIndex", 1)) - 1,
             "product_path_selection_id": group_product_path_selection_id(group),
-            "factor_alias": str(group.get("factorAlias", "")),
+            "factor_ref": str((group.get("factor_candidate_refs") or [""])[0]),
             "is_ls": is_ls,
         })
     return rows

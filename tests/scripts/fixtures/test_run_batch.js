@@ -103,7 +103,7 @@ const context = {
       previewRequests.push({body, hash});
       return {
         run_spec_hash: hash,
-        run_spec_version: 2,
+        run_spec_version: 3,
         configuration_id: "configuration-preview",
         configuration_revision: requests.length,
         report_projection: {run_spec: {
@@ -111,7 +111,7 @@ const context = {
           alias_zh: "预览运行配置",
           summary_zh: "预览",
           complete_parameters: {
-            run_spec_version: 2,
+            run_spec_version: 3,
             configuration: {shared: {workspace_id: "workspace-one"}},
             analyses: [state?.kind || "ic"],
           },
@@ -225,10 +225,14 @@ const strategyScopedBacktest = {
   assert.equal(actionLoaded, false, "submission code must not load while creating header actions");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");
+  let cleared = 0;
+  window.FTTests = {clearDraft: () => { cleared += 1; }};
   const header = batch.headerActions(context, state, () => {});
-  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行"]);
+  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行", "清空"]);
   assert.equal(header[0].disabled, false);
   assert.equal(header[1].disabled, false);
+  header[2].listeners.click();
+  assert.equal(cleared, 1);
   const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
   assert.equal(emptyHeader[0].disabled, false,
     "view RunSpec must remain clickable without a product group");
@@ -446,6 +450,8 @@ const strategyScopedBacktest = {
     'submitServerRun(context, state, request)',
   ));
   assert.ok(actionsSource.includes("controller.abort()"));
+  assert.ok(actionsSource.includes("FTJobs?.invalidate?.()"),
+    "server submissions must invalidate the cached task-list pages");
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
   assert.ok(!lazyGroups.includes("research"),

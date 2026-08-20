@@ -68,6 +68,7 @@
 
     const treeMount = document.createElement("div");
     treeMount.className = "product-group-path-tree";
+    if (treeMount.dataset) treeMount.dataset.ftScrollState = "product-group-path-tree";
     treeMount.hidden = true;
     let treeLoaded = false;
     let disposed = false;

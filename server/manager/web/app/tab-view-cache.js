@@ -2,8 +2,9 @@
   function create(options) {
     const {
       state, content, title, eyebrow, toolbar, notice,
+      persistSession, restoreSession, removeSession,
     } = options;
-    const liveViewLimit = 3;
+    const liveViewLimit = Math.max(1, Number(options.liveViewLimit) || 3);
     const coldViewMemory = new Map();
 
     function moveChildren(element) {
@@ -24,9 +25,37 @@
       ) || [])];
     }
 
+    function controlBaseKey(control) {
+      const explicit = String(
+        control?.dataset?.ftStateKey || control?.dataset?.fieldKey || "",
+      ).trim();
+      if (explicit) return `explicit:${explicit}`;
+      if (control?.dataset?.ftScrollState !== undefined) {
+        const scrollKey = String(control.dataset.ftScrollState || control.className || "container");
+        return `scroll:${scrollKey}`;
+      }
+      const name = String(control?.name || "").trim();
+      if (name) return `name:${name}`;
+      const id = String(control?.id || "").trim();
+      if (id) return `id:${id}`;
+      return "";
+    }
+
+    function keyedControls(root) {
+      const occurrences = new Map();
+      return controlList(root).map((control, index) => {
+        const base = controlBaseKey(control);
+        if (!base) return {control, index, key: ""};
+        const occurrence = occurrences.get(base) || 0;
+        occurrences.set(base, occurrence + 1);
+        return {control, index, key: `${base}#${occurrence}`};
+      });
+    }
+
     function captureControlState(root) {
-      return controlList(root).map((control, index) => ({
+      return keyedControls(root).map(({control, index, key}) => ({
         index,
+        key,
         value: "value" in control ? control.value : undefined,
         checked: "checked" in control ? Boolean(control.checked) : undefined,
         selectedIndex: "selectedIndex" in control ? control.selectedIndex : undefined,
@@ -36,9 +65,11 @@
     }
 
     function restoreControlState(root, values) {
-      const controls = controlList(root);
+      const keyed = keyedControls(root);
+      const controls = keyed.map(item => item.control);
+      const byKey = new Map(keyed.filter(item => item.key).map(item => [item.key, item.control]));
       (Array.isArray(values) ? values : []).forEach(item => {
-        const control = controls[item.index];
+        const control = (item.key && byKey.get(item.key)) || controls[item.index];
         if (!control) return;
         if (item.value !== undefined && "value" in control) control.value = item.value;
         if (item.checked !== undefined && "checked" in control) control.checked = item.checked;
@@ -299,22 +330,60 @@
       deleteColdView(tabID);
     }
 
-    function saveActiveTabSession() {
+    function hydrateSession(tabID) {
+      const saved = restoreSession?.(tabID);
+      if (!saved || typeof saved !== "object") return false;
+      const session = tabSession(tabID);
+      session.path = String(saved.path || "");
+      session.scrollY = Number(saved.scrollY || 0);
+      session.durable = saved.durable && typeof saved.durable === "object"
+        ? saved.durable : {};
+      const key = writeColdView(tabID, saved);
+      session.view = {
+        coldKey: key, pendingRestore: false, ready: true,
+        lastUsedAt: Number(saved.updatedAt || Date.now()),
+      };
+      return true;
+    }
+
+    function activeSessionSnapshot() {
       const reportMatch = /^\/research\/([^/]+)$/.exec(location.pathname);
-      const currentPublicationID = reportMatch?.[1] || null;
       const pending = state.pendingScrollCapture?.tabID === state.activeTabID
         ? state.pendingScrollCapture : null;
-      const snapshot = {
+      const session = tabSession(state.activeTabID);
+      return {
         scrollY: pending ? pending.scrollY : window.scrollY,
         path: location.pathname,
-        publicationID: currentPublicationID,
+        publicationID: reportMatch?.[1] || null,
+        durable: session.durable || {},
+        title: title?.textContent || "",
+        eyebrow: eyebrow?.textContent || "",
+        notice: notice ? {text: notice.textContent || "", color: notice.style?.color || ""} : null,
+        navRoute: document.querySelector?.(".nav-button.active")?.dataset?.route || "",
+        contentControls: captureControlState(content),
+        toolbarControls: captureControlState(toolbar),
+        updatedAt: Date.now(),
       };
-      Object.assign(tabSession(state.activeTabID), snapshot);
+    }
+
+    function checkpointActiveSession() {
+      const snapshot = activeSessionSnapshot();
+      Object.assign(tabSession(state.activeTabID), {
+        scrollY: snapshot.scrollY,
+        path: snapshot.path,
+        publicationID: snapshot.publicationID,
+      });
+      persistSession?.(state.activeTabID, snapshot);
+      return snapshot;
+    }
+
+    function saveActiveTabSession() {
+      const snapshot = checkpointActiveSession();
       const session = tabSession(state.activeTabID);
       saveView(session);
       parkOverlays(state.activeTabID, session);
-      if (currentPublicationID) Object.assign(
-        tabSession(`report:${currentPublicationID}`), snapshot,
+      if (snapshot.publicationID) Object.assign(
+        tabSession(`report:${snapshot.publicationID}`), snapshot,
       );
     }
 
@@ -335,8 +404,9 @@
     observeDialogs();
     return Object.freeze({
       tabSession, saveActiveTabSession, captureScrollPosition,
+      checkpointActiveSession,
       markActiveViewLoading, markActiveViewReady, restoreView,
-      restoreColdView, discardView, activeTabHasOverlay,
+      restoreColdView, discardView, hydrateSession, activeTabHasOverlay,
     });
   }
 

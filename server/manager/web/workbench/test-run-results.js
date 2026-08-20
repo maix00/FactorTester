@@ -81,23 +81,86 @@
   function resultSection(context, state, item) {
     const task = item.taskDetail || {};
     const payload = item.detailPayload || {};
-    const artifacts = (task.artifacts || []).filter(entry => entry.state === "active");
+    const allArtifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
+    const inputNames = new Set(
+      (task.input_artifacts || []).map(entry => String(entry?.name || "")),
+    );
+    const artifacts = allArtifacts.filter(entry => entry.state === "active");
+    const outputArtifacts = artifacts.filter(entry => (
+      entry.role !== "input" && !inputNames.has(String(entry.name || ""))
+    ));
     const options = {
       artifacts, jobID: item.jobID,
       portQuery: item.portQuery || "",
       artifactQuery: item.artifactQuery || "",
       configuration: task.configuration || {}, productGroupRef: item.groupID || "",
     };
-    if (state.kind === "ic") return window.FTICResults?.section(context, options);
+    let domain = null;
+    if (state.kind === "ic") domain = window.FTICResults?.section(context, options);
     if (state.kind === "backtest") {
-      return window.FTBacktestResults?.section(context, {
+      domain = window.FTBacktestResults?.section(context, {
         ...options,
         configuration: task.configuration || {},
         resultSummary: payload.result_summary || task.results?.summary || {},
         job: item.job || {},
       });
     }
-    return null;
+    const previews = artifactPreviewSection(
+      context, task, outputArtifacts, item.jobID, item.artifactQuery || "",
+    );
+    const outputs = artifactOutputSection(
+      context, outputArtifacts, item.jobID, item.artifactQuery || "",
+    );
+    if (!domain && !previews && !outputs) return null;
+    if (domain && !previews && !outputs) return domain;
+    if (typeof document === "undefined") return domain || previews || outputs;
+    const content = document.createDocumentFragment();
+    if (domain) content.append(domain);
+    if (previews) content.append(previews);
+    if (outputs) content.append(outputs);
+    return content;
+  }
+
+  function artifactPreviewSection(context, task, artifacts, jobID, artifactQuery) {
+    const api = window.FTJobArtifacts;
+    if (!api?.effectiveDeclarations || !api.declarationArtifacts
+        || !api.lazyArtifactPreview || !artifacts.length) return null;
+    const declarations = api.effectiveDeclarations(
+      task.output_declarations || [], artifacts, context,
+    );
+    const root = document.createElement("section");
+    root.className = "test-run-artifact-previews";
+    const heading = document.createElement("h3");
+    heading.textContent = context.t("结果预览");
+    root.append(heading);
+    let count = 0;
+    declarations.forEach(declaration => {
+      const matches = api.declarationArtifacts(declaration, artifacts);
+      if (!matches.length) return;
+      root.append(api.lazyArtifactPreview(
+        context, declaration, matches, jobID, artifactQuery,
+      ));
+      count += 1;
+    });
+    return count ? root : null;
+  }
+
+  function artifactOutputSection(context, artifacts, jobID, artifactQuery) {
+    const api = window.FTJobArtifacts;
+    if (!api?.artifactRows || !api.saveBlob || !artifacts.length) return null;
+    const root = document.createElement("section");
+    root.className = "test-run-output-artifacts";
+    const heading = document.createElement("h3");
+    heading.textContent = context.t("输出生成物");
+    root.append(heading, api.artifactRows(
+      context, artifacts,
+      item => api.saveBlob(
+        context,
+        `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${artifactQuery}`,
+        item.file_name || item.name,
+      ),
+    ));
+    return root;
   }
 
   function render(context, state, item, rerender) {

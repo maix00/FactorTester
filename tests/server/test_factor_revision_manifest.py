@@ -155,7 +155,7 @@ def test_freeze_and_execution_revalidation_share_one_manifest_path(
         owner="alice",
     )
     run_spec = {
-        "run_spec_version": 2,
+        "run_spec_version": 3,
         "configuration": frozen["payload"],
     }
 
@@ -204,11 +204,16 @@ def test_run_scoped_role_factor_is_frozen_without_registering_it_shared(
 
     monkeypatch.setattr(factor_revisions, "_load_revision_definition", definition)
     configuration = _configuration()
+    configuration["payload"]["shared"]["factors"].append({
+        "factor_ref": "factor:profile-screen",
+        "factor_family_alias": "ProfileScreen",
+        "alias": "ProfileScreen|N:20d",
+    })
     configuration["payload"]["analyses"]["backtest"] = {
         "groups": [{
             "id": "A1",
             "factorRoleBindings": {
-                "screen": "ProfileScreen|N:20d",
+                "screen": "factor:profile-screen",
             },
         }],
     }
@@ -216,12 +221,13 @@ def test_run_scoped_role_factor_is_frozen_without_registering_it_shared(
     frozen = factor_revisions.freeze_factor_revisions(configuration, owner="alice")
     shared = frozen["payload"]["shared"]
     assert shared["factors"] == configuration["payload"]["shared"]["factors"]
+    assert "factor_families" not in shared
     assert ("ProfileScreen", ("ProfileScreen|N:20d",)) in calls
     manifests = shared["factor_revision_manifests"]
     assert len(manifests) == 2
     assert all("private profile source" not in json.dumps(item) for item in manifests)
 
-    run_spec = {"run_spec_version": 2, "configuration": frozen["payload"]}
+    run_spec = {"run_spec_version": 3, "configuration": frozen["payload"]}
     factor_revisions.assert_run_spec_factor_revisions_current(run_spec, owner="alice")
     source["profile"] = "changed transient source"
     with pytest.raises(ValueError, match="factor revision changed"):
@@ -243,7 +249,7 @@ def test_column_ref_projection_does_not_invalidate_historical_run_spec(
         manifest.pop("column_refs", None)
 
     factor_revisions.assert_run_spec_factor_revisions_current(
-        {"run_spec_version": 2, "configuration": frozen["payload"]},
+        {"run_spec_version": 3, "configuration": frozen["payload"]},
         owner="alice",
     )
 
@@ -252,7 +258,7 @@ def test_run_spec_v2_requires_manifests() -> None:
     with pytest.raises(ValueError, match="factor_revision_manifests"):
         factor_revisions.assert_run_spec_factor_revisions_current(
             {
-                "run_spec_version": 2,
+                "run_spec_version": 3,
                 "configuration": {
                     "shared": {
                         "factor_families": [{"alias": "MmRet"}],
@@ -280,7 +286,7 @@ def test_worker_planning_fails_after_factor_revision_changes(
     payload = {
         "_owner": "alice",
         "run_spec": {
-            "run_spec_version": 2,
+            "run_spec_version": 3,
             "configuration": frozen["payload"],
         },
     }

@@ -89,6 +89,7 @@ def register_product_path_selections_base(
             "item_kind": "product_path_selection",
             "multi": True,
             "candidate_field": "product_path_candidates",
+            "candidate_constraint": "product_path_candidates",
             "fallback": "candidates",
             "id_keys": (
                 "product_path_selection_id",
@@ -125,6 +126,7 @@ def register_product_path_candidate_list_base(
             "shared_page_field": "product_path_candidates",
             "selection_field": "product_path_selection",
             "product_group_source": "user_product_group_templates",
+            "candidate_constraint": "product_path_candidates",
             "manual_candidate_source": "runtime_manual_path_group",
             "fallback_policy": (
                 "copy_page_candidates",

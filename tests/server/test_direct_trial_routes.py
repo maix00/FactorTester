@@ -94,7 +94,7 @@ def test_run_spec_endpoint_returns_an_owned_immutable_run_spec(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "run-spec.sqlite")
-    run_spec = {"run_spec_version": 2, "configuration": {"shared": {}}}
+    run_spec = {"run_spec_version": 3, "configuration": {"shared": {}}}
     run = research_runs.create_run(
         owner="owner-1",
         workspace_id="workspace-1",
@@ -132,7 +132,7 @@ def test_run_spec_endpoint_does_not_expose_another_users_run_spec(
         workspace_id="workspace-2",
         configuration_id="configuration-2",
         configuration_revision=1,
-        run_spec={"run_spec_version": 2, "configuration": {"shared": {}}},
+        run_spec={"run_spec_version": 3, "configuration": {"shared": {}}},
     )
     app = Flask(__name__)
     app.secret_key = "private-run-spec-test"

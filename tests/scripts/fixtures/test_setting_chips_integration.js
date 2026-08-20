@@ -32,6 +32,11 @@ global.FTTestFactors = {panel: () => {
   factorPanelCalls += 1;
   return new Element("factor-panel");
 }};
+global.FTTestFactorSelection = {
+  factorAlias: value => value?.factor_alias || value?.alias || "",
+  candidates: state => state.values?.factor_candidates || [],
+};
+window.FTTestFactorSelection = global.FTTestFactorSelection;
 global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => values};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
@@ -51,6 +56,7 @@ const manifest = {
     {key: "products", label: "产品路径", section_key: "scope", content_adapter: "product_path_selection"},
     {key: "time", label: "时间范围", section_key: "scope"},
     {key: "advanced", label: "高级", section_key: "scope"},
+    {key: "group_strategy", label: "分组策略", section_key: "scope"},
   ]},
   defaults: {
     start_date: {
@@ -66,6 +72,11 @@ const manifest = {
   chip_fields: [{
     key: "factor_alias", label: "因子", chip_template: "因子: {factorAlias}",
     source_keys: ["factorAlias"], value_resolvers: {}, target_tab: "factor",
+  }, {
+    key: "strategy_identity", label: "策略分组",
+    chip_template: "策略分组: {n_groups}",
+    source_keys: ["n_groups"], value_resolvers: {}, target_tab: "group_strategy",
+    display_scope: "strategy",
   }],
 };
 
@@ -79,7 +90,7 @@ const deferred = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
   t: value => value,
 }, {
   activeTab: "factor", mountedTabs: ["factor", "time"],
-  chipSources: {factorAlias: ["ROC 1m"]},
+    chipSources: {factorAlias: ["ROC 1m"], n_groups: 5},
   lazyState: () => ({status: "ready"}),
   ensureSettingsFieldsCode: () => { requestedFieldCode += 1; },
 });
@@ -96,7 +107,7 @@ function render(factorAlias, onChipOpen) {
   }, {
     activeTab: "factor",
     mountedTabs: ["factor", "time"],
-    chipSources: {factorAlias: [factorAlias]},
+    chipSources: {factorAlias: [factorAlias], n_groups: 5},
     lazyState: () => ({status: "ready"}),
     onTabChange: onChipOpen,
   });
@@ -125,6 +136,10 @@ const factorGroup = chipRow.children.find(item => item.className === "backend-se
 assert.ok(factorGroup, "tab-based chip group should be present");
 const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(factorChip.children[1].textContent, "ROC 1m");
+assert.equal(
+  chipRow.children.some(group => group.textContent.includes("策略分组")), false,
+  "strategy-scoped chips must not enter the shared settings summary",
+);
 const host = first.children[2];
 assert.equal(host.children[1].children.length, 0,
   "inactive settings tabs should not render their content on first load");
@@ -148,7 +163,7 @@ const closed = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
   t: value => value,
 }, {
   activeTab: null, mountedTabs: ["factor", "time"],
-  chipSources: {factorAlias: ["ROC 1m"]}, lazyState: () => ({status: "ready"}),
+  chipSources: {factorAlias: ["ROC 1m"], n_groups: 5}, lazyState: () => ({status: "ready"}),
 });
 assert.equal(closed.children[2].children[0].hidden, true,
   "an explicit closed tab state should stay closed after settings rerender");
@@ -174,6 +189,125 @@ const productChip = productDefaultGroup.children
   .find(item => item.className.includes("backend-setting-chip"));
 assert.ok(productChip, "content-only tabs should render a default chip");
 assert.equal(productChip.children[1].textContent, "未设置（默认）");
+
+const overlayManifest = {
+  chip_fields: [
+    {
+      source_adapter: "selected_factor_candidates",
+      source_keys: ["factorCandidateLabel"],
+      detail_overlay: {source_key: "factor_candidates"},
+    },
+    {
+      source_adapter: "selected_factors", source_keys: ["factorRef", "factorLabel"],
+      detail_overlay: {source_key: "factor"},
+    },
+    {
+      source_adapter: "selected_product_paths", source_keys: ["product_path_selection"],
+      detail_overlay: {source_key: "product_group"},
+    },
+  ],
+};
+const adapterSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {factor_ref: "factor:value", factor_alias: "Value",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+  ], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
+  ]},
+  groups: [{group_ref: "group:day", name: "日盘"}],
+}, {
+  factor_candidate_refs: ["factor:roc"],
+  product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
+});
+assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
+assert.equal(adapterSources.factorCandidateLabel, "ROC 1m");
+assert.equal(adapterSources.factor_candidates.length, 1);
+assert.equal(adapterSources.factor_candidates[0].temporary, true);
+assert.deepEqual(adapterSources.factor_candidates[0].related_references, [{
+  target_ref: "factor:roc", label: "ROC 1m",
+}]);
+assert.equal(adapterSources.factor_candidates[0].source_factors.length, 1);
+assert.equal(adapterSources.factor_candidates[0].source_factor_sets.length, 0);
+assert.equal(adapterSources.product_group[0].group_ref, "group:day");
+const pageCandidateSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {factor_ref: "factor:value", factor_alias: "Value",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+  ], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
+  ]},
+});
+assert.equal(pageCandidateSources.factorCandidateLabel, "2 个");
+assert.equal(pageCandidateSources.factor_candidates[0].related_references.length, 2);
+assert.match(
+  pageCandidateSources.factor_candidates[0].target_ref,
+  /^factor-candidates:[0-9a-f]{8}:2$/,
+);
+assert.equal(pageCandidateSources.factor_candidates[0].source_factors.length, 1);
+assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [{
+  target_ref: "factor-set:value", label: "价值集合",
+}]);
+const oneSetCandidateSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:value-1", factor_alias: "Value 1",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+    {factor_ref: "factor:value-2", factor_alias: "Value 2",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
+  ]},
+});
+assert.equal(oneSetCandidateSources.factorCandidateLabel, "价值集合");
+const cacheState = {
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:first", factor_alias: "First"},
+  ], factor_source_selections: [], factor_set_selections: []},
+};
+assert.equal(
+  FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "First",
+);
+cacheState.values.factor_candidates = [
+  {factor_ref: "factor:second", factor_alias: "Second"},
+];
+assert.equal(
+  FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "Second",
+  "replacing the candidate array must invalidate its reference index",
+);
+
+const persistedStrategySources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: []},
+  groups: [{group_ref: "group:night", name: "夜盘"}],
+}, {
+  factor_candidate_refs: ["factor:sgccs-history"],
+  product_path_selection_id: "group:night",
+});
+assert.deepEqual(
+  persistedStrategySources.factor,
+  [{factor_ref: "factor:sgccs-history"}],
+  "a persisted strategy factor must remain a detail target before catalog loading",
+);
+assert.equal(persistedStrategySources.factorCandidateLabel, "factor:sgccs-history");
+assert.equal(
+  persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
+  "factor:sgccs-history",
+);
+assert.equal(
+  persistedStrategySources.product_path_selection[0],
+  "group:night",
+  "a persisted product-group reference must still produce the strategy chip",
+);
+assert.equal(persistedStrategySources.product_group[0].group_ref, "group:night");
 
 const advancedRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "高级");

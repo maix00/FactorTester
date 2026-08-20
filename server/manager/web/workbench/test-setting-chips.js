@@ -7,7 +7,7 @@
     const tabs = new Set(declaredTabs.map(item => item.key));
     const mounted = new Set(options.mountedTabs || []);
     const identity = (manifest.chip_fields || []).map(chip => identityChip(
-      chip, options.sources || {}, tabs, context,
+      chip, options.sources || {}, tabs, mounted, context, options,
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
       .filter(([key, field]) => matchesOnlyKey(key, field, onlyKeys))
@@ -111,8 +111,11 @@
     return optionLabel(field, raw, context);
   }
 
-  function identityChip(chip, sources, tabs, context) {
+  function identityChip(chip, sources, tabs, mounted, context, options = {}) {
     if (!(chip.source_keys || []).every(key => hasValue(sources[key]))) return null;
+    const tabKey = targetTab(chip, tabs);
+    if (!mounted.has(tabKey)) return null;
+    if (isStrategyScoped(chip) && options.includeStrategyChips !== true) return null;
     const values = {};
     for (const name of placeholders(chip.chip_template)) {
       const resolver = chip.value_resolvers?.[name];
@@ -123,15 +126,54 @@
     const rendered = interpolate(chip.chip_template, values, context);
     const parts = splitRendered(rendered, context.t(chip.label || chip.key));
     if (!hasValue(parts.value)) return null;
-    const fallback = tabs.has(chip.key) ? chip.key : "";
     return {
       key: `identity:${chip.key}`,
       label: parts.label,
       value: compact(parts.value, context),
       fullValue: expanded(parts.value),
-      tabKey: tabs.has(chip.target_tab) ? chip.target_tab : fallback,
+      tabKey,
       category: chip.category || "identity",
+      clickable: chip.clickable === true,
+      detailOverlay: detailOverlay(chip, sources),
     };
+  }
+
+  function detailOverlay(chip, sources) {
+    const action = chip.detail_overlay;
+    if (!action || typeof action !== "object") return null;
+    const sourceKey = action.source_key || action.sourceKey;
+    const raw = sourceKey ? sources[sourceKey] : null;
+    const values = Array.isArray(raw) ? raw.filter(hasValue) : [raw].filter(hasValue);
+    // A compact chip may summarize several factor candidates or product
+    // groups. Do not silently open the first one; only an unambiguous chip
+    // can open a detail overlay.
+    if (values.length !== 1) return null;
+    const value = values[0];
+    const object = value && typeof value === "object" ? value : null;
+    const ref = object
+      ? object[action.ref_key || "ref"]
+        || object.factor_ref || object.group_ref || object.product_group_ref
+        || object.product_group_template_id || object.product_path_selection_id
+        || object.id || object.alias || object.factor_alias || object.name
+      : value;
+    if (!hasValue(ref)) return null;
+    return {
+      ...action,
+      target: {ref: String(ref), value},
+    };
+  }
+
+  function targetTab(chip, tabs) {
+    if (tabs.has(chip.target_tab)) return chip.target_tab;
+    return tabs.has(chip.key) ? chip.key : "";
+  }
+
+  function isStrategyScoped(chip) {
+    // display_scope is the backend-owned declaration.  Keep the adapter
+    // fallback so manifests produced by older servers do not leak the
+    // primary strategy into the shared summary during a rolling upgrade.
+    return chip.display_scope === "strategy"
+      || (!chip.display_scope && chip.source_adapter === "primary_strategy_group");
   }
 
   function settingChip(key, field, values, context, options = {}) {
@@ -230,14 +272,23 @@
   }
 
   function renderChip(descriptor, options) {
-    const interactive = descriptor.tabKey && typeof options.onOpen === "function";
+    const hasOverlay = descriptor.clickable === true
+      && descriptor.detailOverlay
+      && typeof options.onOverlay === "function";
+    const interactive = Boolean(hasOverlay
+      || (descriptor.tabKey && typeof options.onOpen === "function"));
     const chip = document.createElement(interactive ? "button" : "span");
     chip.className = `backend-setting-chip ${descriptor.category}`;
     if (interactive) {
       chip.type = "button";
-      chip.addEventListener("click", () => options.onOpen?.(descriptor.tabKey));
+      chip.addEventListener("click", () => {
+        if (hasOverlay) options.onOverlay?.(descriptor);
+        else options.onOpen?.(descriptor.tabKey);
+      });
     }
-    chip.title = descriptor.fullValue;
+    chip.title = hasOverlay
+      ? `${descriptor.fullValue} · ${options.context?.t?.("查看详情") || "查看详情"}`
+      : descriptor.fullValue;
     const label = document.createElement("span");
     label.className = "backend-setting-chip-label";
     label.textContent = descriptor.label;

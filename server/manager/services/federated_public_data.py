@@ -9,11 +9,7 @@ source-free projections and keeps the report bytes on the source node.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from hashlib import sha256
-import json
 import threading
-import time
 from typing import Any
 
 from server.manager.domain.federation import ServiceRoute
@@ -23,6 +19,11 @@ from server.manager.services.factor_library_scopes import (
     empty_factor_projection,
     split_factor_library_scopes,
 )
+from server.manager.services.federated_factor_projection import (
+    VISITOR_PRINCIPAL,
+    merge_factor_library_projections,
+)
+from server.manager.services.federated_peer_reads import FederatedPeerReadMixin
 from server.manager.services.public_catalog import public_factor_library
 from server.manager.services.profile_directory import PROFILE_DIRECTORY_PRINCIPAL
 from tools.cli.release.research_reporting.public_research.object_store import (
@@ -31,131 +32,10 @@ from tools.cli.release.research_reporting.public_research.object_store import (
 from server.manager.services.research_object_transfer import ResearchObjectTransfer
 
 
-VISITOR_PRINCIPAL = "__public_jobs__"
 DEFAULT_CACHE_SECONDS = 10.0
 
 
-def _legacy_public_factor(item: dict[str, Any]) -> bool:
-    """Identify an old peer's public family template masquerading as a factor."""
-    return str(item.get("owner_username") or "").strip() == VISITOR_PRINCIPAL
-
-
-def _legacy_public_family(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert one legacy public factor row into an empty family template."""
-    owner = VISITOR_PRINCIPAL
-    family_alias = str(
-        item.get("factor_family_alias") or item.get("factor_family_name") or ""
-    ).strip()
-    family_ref = str(item.get("family_ref") or "").strip()
-    if not family_ref:
-        family_ref = "factor-family:sha256:" + sha256(
-            f"{owner}\x1f{family_alias}".encode()
-        ).hexdigest()
-    return {
-        "family_ref": family_ref,
-        "factor_family_alias": family_alias,
-        "factor_family_name": item.get("factor_family_name") or family_alias,
-        "chinese_name": item.get("chinese_name") or "",
-        "description": item.get("description") or "",
-        "math_expr": item.get("math_expr") or "",
-        "category": item.get("category") or "",
-        "categories": list(item.get("categories") or []),
-        "params": list(item.get("params") or []),
-        "owner_username": owner,
-        "owner_alias": item.get("owner_alias") or "公共因子库",
-        "factor_kind": "public",
-        "source": "public",
-        "factor_count": 0,
-        "factor_refs": [],
-        "updated_at": item.get("updated_at") or "",
-    }
-
-
-def merge_factor_library_projections(
-    values: list[dict[str, Any]], *, principal: str,
-) -> dict[str, Any]:
-    """Merge bounded factor projections without re-encoding stable refs.
-
-    Factor projections may come from an older Manager or a small test seam
-    that only supplies an already-frozen ``factor_ref``.  Rebuilding such
-    rows from display fields would silently change their identifiers, so the
-    federation layer merges the safe projections directly and only computes
-    a new envelope hash.
-    """
-    factors: dict[str, dict[str, Any]] = {}
-    families: dict[str, dict[str, Any]] = {}
-    categories: set[str] = set()
-    errors: list[Any] = []
-    schema_version = 1
-    for value in values:
-        if not isinstance(value, dict):
-            continue
-        try:
-            schema_version = max(schema_version, int(value.get("schema_version") or 1))
-        except (TypeError, ValueError):
-            pass
-        for item in value.get("factors") or []:
-            if not isinstance(item, dict):
-                continue
-            if _legacy_public_factor(item):
-                family = _legacy_public_family(item)
-                if family["factor_family_alias"]:
-                    families.setdefault(family["family_ref"], family)
-                continue
-            ref = str(item.get("factor_ref") or "").strip()
-            if ref:
-                factors.setdefault(ref, dict(item))
-            category = str(item.get("category") or "").strip()
-            if category:
-                categories.add(category)
-        for item in value.get("families") or []:
-            if not isinstance(item, dict):
-                continue
-            item = dict(item)
-            if _legacy_public_factor(item):
-                item["factor_count"] = 0
-                item["factor_refs"] = []
-            ref = str(item.get("family_ref") or "").strip()
-            if ref:
-                families[ref] = {**families.get(ref, {}), **item}
-            for category in item.get("categories") or []:
-                category = str(category or "").strip()
-                if category:
-                    categories.add(category)
-        errors.extend(item for item in value.get("errors") or [])
-    factor_values = sorted(
-        factors.values(),
-        key=lambda item: (
-            str(item.get("factor_family_alias") or ""),
-            str(item.get("owner_alias") or ""),
-            str(item.get("factor_alias") or ""),
-            str(item.get("factor_ref") or ""),
-        ),
-    )
-    family_values = sorted(
-        families.values(),
-        key=lambda item: (
-            str(item.get("factor_family_alias") or ""),
-            str(item.get("owner_alias") or ""),
-            str(item.get("family_ref") or ""),
-        ),
-    )
-    projection = {
-        "schema_version": schema_version,
-        "mode": "embedded_read_only_library",
-        "principal": str(principal or ""),
-        "factors": factor_values,
-        "families": family_values,
-        "categories": sorted(categories),
-        "omitted_error_count": len(errors),
-    }
-    encoded = json.dumps(
-        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode()
-    return {**projection, "projection_hash": sha256(encoded).hexdigest()}
-
-
-class FederatedPublicDataService:
+class FederatedPublicDataService(FederatedPeerReadMixin):
     """Merge local projections with safe projections from online peers."""
 
     def __init__(
@@ -189,18 +69,6 @@ class FederatedPublicDataService:
         self._publication_sources: dict[str, str] = {}
         self._lock = threading.RLock()
 
-    def _cached(self, key: tuple[object, ...]) -> Any | None:
-        with self._lock:
-            item = self._cache.get(key)
-            if item is None or time.monotonic() - item[0] >= self.cache_seconds:
-                return None
-            return item[1]
-
-    def _store(self, key: tuple[object, ...], value: Any) -> Any:
-        with self._lock:
-            self._cache[key] = (time.monotonic(), value)
-        return value
-
     def invalidate_research_cache(self) -> None:
         """Drop cached research listings after a local publication mutation."""
         with self._lock:
@@ -208,83 +76,6 @@ class FederatedPublicDataService:
                 if key and key[0] == "research-list":
                     self._cache.pop(key, None)
             self._publication_sources.clear()
-
-    def _peer_routes(self) -> list[ServiceRoute]:
-        """Choose one live control route per peer; stale leases never block."""
-        try:
-            routes = self.registry.routes(include_offline=False)
-        except (AttributeError, OSError, TypeError, ValueError):
-            return []
-        grouped: dict[str, list[ServiceRoute]] = {}
-        for route in routes:
-            if route.server_id == self.server_id or not route.online:
-                continue
-            grouped.setdefault(route.server_id, []).append(route)
-        result: list[ServiceRoute] = []
-        for values in grouped.values():
-            result.append(min(values, key=self._route_key))
-        return result
-
-    @staticmethod
-    def _route_key(route: ServiceRoute) -> tuple[float, float, int, str, int]:
-        return (
-            float(route.latency_ms)
-            if route.latency_ms is not None else float("inf"),
-            float(route.load),
-            int(route.queue_depth),
-            str(route.server_id),
-            int(route.port),
-        )
-
-    def _query_peer(
-        self,
-        route: ServiceRoute,
-        *,
-        kind: str,
-        operation: str,
-        principal: str,
-        payload: dict[str, object] | None = None,
-    ) -> dict[str, Any]:
-        value = self.gateway.public_data(
-            route,
-            kind=kind,
-            operation=operation,
-            principal=principal,
-            payload=payload,
-        )
-        return value if isinstance(value, dict) else {}
-
-    def _query_peers(
-        self,
-        *,
-        kind: str,
-        operation: str,
-        principal: str,
-        payload: dict[str, object] | None = None,
-    ) -> list[tuple[ServiceRoute, dict[str, Any]]]:
-        routes = self._peer_routes()
-        if not routes:
-            return []
-        result: list[tuple[ServiceRoute, dict[str, Any]]] = []
-        with ThreadPoolExecutor(max_workers=min(len(routes), 8)) as pool:
-            futures = {
-                pool.submit(
-                    self._query_peer,
-                    route,
-                    kind=kind,
-                    operation=operation,
-                    principal=principal,
-                    payload=payload,
-                ): route
-                for route in routes
-            }
-            for future in as_completed(futures):
-                route = futures[future]
-                try:
-                    result.append((route, future.result()))
-                except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                    continue
-        return result
 
     def list_visible(self, viewer_ref: str | None) -> list[dict[str, Any]]:
         viewer = str(viewer_ref or VISITOR_PRINCIPAL)
@@ -707,18 +498,33 @@ class FederatedPublicDataService:
         owner: str,
         profile_id: str,
     ) -> list[dict[str, Any]]:
+        cache_key = (
+            "profile-conversations",
+            str(source_server_id or "").strip(),
+            str(viewer or "").strip(),
+            str(owner or "").strip(),
+            str(profile_id or "").strip(),
+        )
         route = self._profile_route(source_server_id)
         if route is None:
-            return []
-        response = self._query_peer(
-            route,
-            kind="catalog",
-            operation="profile-conversations",
-            principal=str(viewer or "").strip(),
-            payload={"owner": owner, "profile_id": profile_id},
-        )
-        rows = response.get("conversations")
-        return [dict(item) for item in rows or [] if isinstance(item, dict)]
+            cached = self._stale_cached(cache_key)
+            return [dict(item) for item in cached or [] if isinstance(item, dict)]
+        try:
+            response = self._query_peer(
+                route,
+                kind="catalog",
+                operation="profile-conversations",
+                principal=str(viewer or "").strip(),
+                payload={"owner": owner, "profile_id": profile_id},
+            )
+            rows = [dict(item) for item in response.get("conversations") or []
+                    if isinstance(item, dict)]
+            return [dict(item) for item in self._store(cache_key, rows)]
+        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            cached = self._stale_cached(cache_key)
+            if cached is not None:
+                return [dict(item) for item in cached if isinstance(item, dict)]
+            raise
 
     def profile_conversation_items(
         self,
@@ -728,22 +534,38 @@ class FederatedPublicDataService:
         profile_id: str,
         conversation_id: str,
     ) -> list[dict[str, Any]]:
+        cache_key = (
+            "profile-conversation-items",
+            str(source_server_id or "").strip(),
+            str(viewer or "").strip(),
+            str(owner or "").strip(),
+            str(profile_id or "").strip(),
+            str(conversation_id or "").strip(),
+        )
         route = self._profile_route(source_server_id)
         if route is None:
-            return []
-        response = self._query_peer(
-            route,
-            kind="catalog",
-            operation="profile-conversation-items",
-            principal=str(viewer or "").strip(),
-            payload={
-                "owner": owner,
-                "profile_id": profile_id,
-                "conversation_id": conversation_id,
-            },
-        )
-        rows = response.get("items")
-        return [dict(item) for item in rows or [] if isinstance(item, dict)]
+            cached = self._stale_cached(cache_key)
+            return [dict(item) for item in cached or [] if isinstance(item, dict)]
+        try:
+            response = self._query_peer(
+                route,
+                kind="catalog",
+                operation="profile-conversation-items",
+                principal=str(viewer or "").strip(),
+                payload={
+                    "owner": owner,
+                    "profile_id": profile_id,
+                    "conversation_id": conversation_id,
+                },
+            )
+            rows = [dict(item) for item in response.get("items") or []
+                    if isinstance(item, dict)]
+            return [dict(item) for item in self._store(cache_key, rows)]
+        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            cached = self._stale_cached(cache_key)
+            if cached is not None:
+                return [dict(item) for item in cached if isinstance(item, dict)]
+            raise
 
     def factor_library(
         self, principal: str, *, visitor: bool = False,

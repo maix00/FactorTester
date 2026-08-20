@@ -8,6 +8,11 @@
       // catalog create/edit/view behavior is identical to the left-nav tab.
       render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
     },
+    factor_set: {
+      title: "因子候选",
+      load: "catalog",
+      render: (context, ref) => FTFactors.setDetail(context, ref),
+    },
     product_group: {
       title: "产品组",
       load: "catalog",
@@ -43,6 +48,7 @@
       testState: options.testState || null,
       testObjectTemporary: options.temporary === true,
       testObjectInitialValue: options.initialValue || null,
+      testObjectViewOnly: options.mode === "view",
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
     };
   }
@@ -50,7 +56,8 @@
   async function open(context, options = {}) {
     const definition = definitions[options.kind];
     if (!definition) throw new Error(`unsupported test object: ${options.kind}`);
-    const mode = options.mode === "edit" ? "edit" : "create";
+    const mode = ["create", "edit", "view"].includes(options.mode)
+      ? options.mode : "create";
     const dialog = document.createElement("dialog");
     dialog.className = "test-object-editor-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
@@ -60,11 +67,17 @@
     heading.className = "section-heading";
     const copy = document.createElement("div");
     const title = document.createElement("h2");
-    title.textContent = context.t(mode === "edit" ? "编辑" : "新建")
+    title.textContent = context.t(
+      mode === "edit" ? "编辑" : mode === "view" ? "查看" : "新建",
+    )
       + context.t(definition.title);
-    const note = document.createElement("p");
-    note.textContent = context.t("保存后返回当前测试，并立即更新候选列表");
-    copy.append(title, note);
+    if (mode !== "view") {
+      const note = document.createElement("p");
+      note.textContent = context.t("保存后返回当前测试，并立即更新候选列表");
+      copy.append(title, note);
+    } else {
+      copy.append(title);
+    }
     const closeButton = document.createElement("button");
     closeButton.type = "button";
     closeButton.className = "dialog-close";

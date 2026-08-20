@@ -17,13 +17,15 @@ def register_market_data_base(
         "data_source",
         "数据源",
         "data_source",
-        "select",
-        "",
+        "custom",
+        [],
         ScopePolicy.LOCAL_ONLY,
         module="market_data_source",
-        options=(SettingOption("", "自动"),),
+        options=(),
         chip_template="数据源: {value}",
-        serialization={"display_order": 10},
+        serialization={
+            "kind": "data_source_selection", "multi": True, "display_order": 10,
+        },
     ))
     app.register_setting(SettingDefinition(
         "frequency",

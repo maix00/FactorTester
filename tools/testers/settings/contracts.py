@@ -197,6 +197,13 @@ class ChipDefinition:
     # batch_id 冻结，不再由字段值或配置三元组推导。
     batch_owned: bool = False
     source_adapter: str = ""
+    # global chips belong to the shared settings summary.  Strategy-scoped
+    # chips depend on one concrete strategy row and must be rendered there.
+    display_scope: str = "global"
+    # Optional backend-owned action for opening the existing catalog detail
+    # surface in a view-only overlay. The client resolves the target from the
+    # declared source key rather than maintaining a second action map.
+    detail_overlay: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.category or not self.chip_template:

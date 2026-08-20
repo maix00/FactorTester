@@ -78,6 +78,36 @@ def resolve_factor(
     return factor
 
 
+def resolve_factor_ref(
+    factor_ref: str,
+    *,
+    data: dict,
+    page_factors: dict,
+    page_uuid: str,
+    username: str,
+) -> Any:
+    """Hydrate one frozen factor identity into the runtime Factor object."""
+
+    wanted = str(factor_ref or "").strip()
+    factor = page_factors.get(wanted)
+    if factor is not None:
+        return factor
+    descriptor = next((
+        item for item in data.get("factors") or ()
+        if isinstance(item, Mapping)
+        and str(item.get("factor_ref") or item.get("target_ref") or "").strip() == wanted
+    ), None)
+    if descriptor is None:
+        raise ValueError(f"未找到因子引用 {wanted}")
+    alias = str(descriptor.get("alias") or descriptor.get("factor_alias") or "").strip()
+    if not alias:
+        raise ValueError(f"冻结因子描述缺少显示别名: {wanted}")
+    return resolve_factor(
+        alias, data=data, page_factors=page_factors,
+        page_uuid=page_uuid, username=username,
+    )
+
+
 def resolve_factor_role_bindings(
     raw: Any,
     *,
@@ -93,21 +123,18 @@ def resolve_factor_role_bindings(
     result: dict[str, Any] = {}
     for role, binding in raw.items():
         if isinstance(binding, Mapping):
-            alias = str(
-                binding.get("factorAlias")
-                or binding.get("factor_alias")
-                or binding.get("alias")
-                or ""
+            factor_ref = str(
+                binding.get("factor_ref") or binding.get("target_ref") or ""
             ).strip()
         elif isinstance(binding, str):
-            alias = binding.strip()
+            factor_ref = binding.strip()
         else:
             result[str(role)] = binding
             continue
-        if not alias:
-            raise ValueError(f"factor role {role!r} is missing factor alias")
-        result[str(role)] = resolve_factor(
-            alias,
+        if not factor_ref:
+            raise ValueError(f"factor role {role!r} is missing factor_ref")
+        result[str(role)] = resolve_factor_ref(
+            factor_ref,
             data=data,
             page_factors=page_factors,
             page_uuid=page_uuid,

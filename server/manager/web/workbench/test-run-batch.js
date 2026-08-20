@@ -105,7 +105,11 @@
     runButton.title = hasTasks
       ? context.t("运行当前测试配置下的全部任务")
       : missingScopeMessage(context, state);
-    return [runSpecButton, runButton];
+    const clearButton = context.button(context.t("清空"), () => {
+      window.FTTests?.clearDraft?.(context, state, refresh);
+    }, context.t("清空当前测试配置，不删除模板、已提交任务或生成物"));
+    clearButton.className = "test-workbench-header-action";
+    return [runSpecButton, runButton, clearButton];
   }
 
   function missingScopeMessage(context, state) {
@@ -200,7 +204,7 @@
     if (!item.resultCodePromise) {
       item.resultCodeLoading = true;
       item.resultCodePromise = Promise.resolve(
-        window.FTStaticLoader?.loadGroups?.(["workbench-run-results"]),
+        window.FTTestLazyCode?.loadGroup?.("workbench-run-results"),
       )
         .then(() => {
           if (!window.FTTestRunResults) throw new Error("结果查看器不可用");
@@ -232,6 +236,13 @@
   }
 
   function link(context, label, path) {
+    if (!path) {
+      const missing = document.createElement("span");
+      missing.className = "test-run-missing-link";
+      missing.textContent = context.t(label);
+      missing.title = context.t("测试任务尚未生成 Job ID");
+      return missing;
+    }
     const anchor = document.createElement("a");
     anchor.href = path;
     anchor.textContent = context.t(label);

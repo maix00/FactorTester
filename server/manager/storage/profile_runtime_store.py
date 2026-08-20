@@ -78,6 +78,10 @@ class ProfileRuntimeStore:
                     executor_id TEXT NOT NULL,
                     agent_id TEXT NOT NULL,
                     provider_id TEXT NOT NULL DEFAULT '',
+                    agent_runtime TEXT NOT NULL DEFAULT 'codex',
+                    provider_protocol TEXT NOT NULL DEFAULT 'openai_responses',
+                    provider_model TEXT NOT NULL DEFAULT '',
+                    provider_config_version REAL NOT NULL DEFAULT 0,
                     claimed_at REAL NOT NULL,
                     last_heartbeat_at REAL NOT NULL,
                     released_at REAL,
@@ -85,6 +89,21 @@ class ProfileRuntimeStore:
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in db.execute(f"PRAGMA table_info({CLAIM_TABLE})").fetchall()
+            }
+            additions = {
+                "agent_runtime": "TEXT NOT NULL DEFAULT 'codex'",
+                "provider_protocol": "TEXT NOT NULL DEFAULT 'openai_responses'",
+                "provider_model": "TEXT NOT NULL DEFAULT ''",
+                "provider_config_version": "REAL NOT NULL DEFAULT 0",
+            }
+            for name, declaration in additions.items():
+                if name not in columns:
+                    db.execute(
+                        f"ALTER TABLE {CLAIM_TABLE} ADD COLUMN {name} {declaration}"
+                    )
             db.execute(
                 f"""CREATE UNIQUE INDEX IF NOT EXISTS {CLAIM_TABLE}_active_profile
                     ON {CLAIM_TABLE}(principal, profile_id)
@@ -135,6 +154,14 @@ class ProfileRuntimeStore:
             "executor_id": str(row["executor_id"] or ""),
             "agent_id": str(row["agent_id"] or ""),
             "provider_id": str(row["provider_id"] or ""),
+            "agent_runtime": str(row["agent_runtime"] or "codex"),
+            "provider_protocol": str(
+                row["provider_protocol"] or "openai_responses"
+            ),
+            "provider_model": str(row["provider_model"] or ""),
+            "provider_config_version": float(
+                row["provider_config_version"] or 0
+            ),
             "claimed_at": float(row["claimed_at"] or 0),
             "last_heartbeat_at": float(row["last_heartbeat_at"] or 0),
             "status": str(row["status"] or ""),
@@ -246,6 +273,10 @@ class ProfileRuntimeStore:
         runtime_kind: str,
         executor_id: str,
         provider_id: str = "",
+        agent_runtime: str = "codex",
+        provider_protocol: str = "openai_responses",
+        provider_model: str = "",
+        provider_config_version: float = 0,
         agent_id: str = "",
         now: float | None = None,
         lease_seconds: float = 120.0,
@@ -255,6 +286,10 @@ class ProfileRuntimeStore:
         runtime = self._runtime(runtime_kind)
         executor = self._text(executor_id, "executor_id")
         provider = self._text(provider_id, "provider_id", required=False)
+        frozen_runtime = self._text(agent_runtime, "agent_runtime")
+        frozen_protocol = self._text(provider_protocol, "provider_protocol")
+        frozen_model = self._text(provider_model, "provider_model", required=False)
+        frozen_version = float(provider_config_version or 0)
         agent = self._text(agent_id, "agent_id", required=False)
         current = float(time.time() if now is None else now)
         cutoff = current - max(1.0, float(lease_seconds))
@@ -272,13 +307,17 @@ class ProfileRuntimeStore:
                     existing["runtime_kind"] == runtime
                     and existing["executor_id"] == executor
                     and (not agent or existing["agent_id"] == agent)
+                    and existing["provider_id"] == provider
+                    and existing["agent_runtime"] == frozen_runtime
+                    and existing["provider_protocol"] == frozen_protocol
+                    and existing["provider_model"] == frozen_model
+                    and existing["provider_config_version"] == frozen_version
                 ):
                     db.execute(
                         f"""UPDATE {CLAIM_TABLE}
-                            SET last_heartbeat_at = ?, status = 'claimed',
-                                provider_id = ?
+                            SET last_heartbeat_at = ?, status = 'claimed'
                             WHERE claim_id = ?""",
-                        (current, provider, existing["claim_id"]),
+                        (current, existing["claim_id"]),
                     )
                     refreshed = db.execute(
                         f"SELECT * FROM {CLAIM_TABLE} WHERE claim_id = ?",
@@ -295,12 +334,14 @@ class ProfileRuntimeStore:
             db.execute(
                 f"""INSERT INTO {CLAIM_TABLE} (
                     claim_id, principal, profile_id, runtime_kind,
-                    executor_id, agent_id, provider_id, claimed_at,
+                    executor_id, agent_id, provider_id, agent_runtime,
+                    provider_protocol, provider_model, provider_config_version, claimed_at,
                     last_heartbeat_at, released_at, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'claimed')""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'claimed')""",
                 (
                     claim_id, owner, identifier, runtime, executor, agent,
-                    provider, current, current,
+                    provider, frozen_runtime, frozen_protocol, frozen_model,
+                    frozen_version, current, current,
                 ),
             )
             row = db.execute(
@@ -310,6 +351,48 @@ class ProfileRuntimeStore:
         value = self._claim_row(row)
         if value is None:  # pragma: no cover - guarded by the insert above
             raise ProfileRuntimeError("Profile claim was not saved")
+        return value
+
+    def freeze_legacy_provider_binding(
+        self,
+        claim_id: str,
+        *,
+        provider_id: str,
+        agent_runtime: str,
+        provider_protocol: str,
+        provider_model: str,
+        provider_config_version: float,
+    ) -> dict[str, Any]:
+        """Freeze one pre-capability claim exactly once."""
+        identifier = self._text(claim_id, "claim_id")
+        provider = self._text(provider_id, "provider_id")
+        runtime = self._text(agent_runtime, "agent_runtime")
+        protocol = self._text(provider_protocol, "provider_protocol")
+        model = self._text(provider_model, "provider_model")
+        version = float(provider_config_version or 0)
+        if version <= 0:
+            raise ProfileRuntimeError("provider_config_version is required")
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {CLAIM_TABLE}
+                    SET agent_runtime = ?, provider_protocol = ?,
+                        provider_model = ?, provider_config_version = ?
+                    WHERE claim_id = ? AND provider_id = ?
+                      AND provider_config_version = 0
+                      AND released_at IS NULL""",
+                (runtime, protocol, model, version, identifier, provider),
+            )
+            if cursor.rowcount != 1:
+                raise ProfileClaimConflict(
+                    "Agent provider binding changed while it was being frozen"
+                )
+            row = db.execute(
+                f"SELECT * FROM {CLAIM_TABLE} WHERE claim_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._claim_row(row)
+        if value is None:  # pragma: no cover
+            raise ProfileRuntimeError("Profile claim disappeared")
         return value
 
     def heartbeat(

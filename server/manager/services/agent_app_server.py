@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
+from server.manager.services.agent_conversation_history import thread_messages
 from server.manager.services.agent_profiles import AgentProfileService
 
 
@@ -18,11 +19,15 @@ class AgentAppServerSupervisor:
         profile_service: AgentProfileService,
         *,
         codex_binary: str = "codex",
+        cc_switch_binary: str = "cc-switch",
         proxy_url_provider: Callable[[], str] | None = None,
         heartbeat_interval: float = 30.0,
     ) -> None:
         self.profile_service = profile_service
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
+        self.cc_switch_binary = (
+            str(cc_switch_binary or "cc-switch").strip() or "cc-switch"
+        )
         self.proxy_url_provider = proxy_url_provider
         self.heartbeat_interval = max(0.1, float(heartbeat_interval))
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
@@ -68,6 +73,7 @@ class AgentAppServerSupervisor:
                 provider=context["provider"],
                 factor_tester_auth=context.get("factor_tester_auth") or None,
                 codex_binary=self.codex_binary,
+                cc_switch_binary=self.cc_switch_binary,
                 proxy_url=self._proxy_url(),
             )
             try:
@@ -115,6 +121,44 @@ class AgentAppServerSupervisor:
             active.get("conversation_id") if active else ""
         )
         return status
+
+    def refresh_conversation_history(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> bool:
+        """Refresh one local Provider thread before a read-only export.
+
+        The Manager owning the Agent is the only process allowed to resume the
+        Provider thread.  A requesting peer never receives the Provider
+        binding or credentials; it only receives the refreshed SQLite
+        projection through the federation catalog endpoint.
+        """
+        key = self._key(principal, profile_id)
+        identifier = str(conversation_id or "").strip()
+        if not identifier:
+            raise AgentAppServerError("conversation_id is required")
+        conversation = self.profile_service.conversation(
+            key[0], key[1], identifier,
+        )
+        if conversation is None:
+            raise AgentAppServerError("conversation not found")
+        thread_id = str(conversation.get("provider_thread_id") or "").strip()
+        if not thread_id:
+            return False
+        with self._lock:
+            session = self._sessions.get(key)
+            if session is None or not session.status().get("running"):
+                return False
+        self.request(
+            key[0],
+            key[1],
+            "thread/resume",
+            {"threadId": thread_id},
+            conversation_id=identifier,
+        )
+        return True
 
     def request(
         self,
@@ -238,7 +282,7 @@ class AgentAppServerSupervisor:
         if conversation is None:
             return
         thread = self._thread_from_response(response)
-        if method in {"thread/start", "thread/resume"} and thread is not None:
+        if method in {"thread/start", "thread/resume", "thread/read"} and thread is not None:
             thread_id = str(self._thread_value(thread, "id", "threadId", "thread_id") or "").strip()
             if not thread_id:
                 raise AgentAppServerError("Agent did not return a conversation thread")
@@ -253,6 +297,7 @@ class AgentAppServerSupervisor:
                 title=title,
                 created_at=float(created_at) if created_at not in (None, "") else None,
             )
+            self._persist_thread_history(key, str(conversation["conversation_id"]), thread)
             return
         if method == "turn/start":
             preview = self._preview(params)
@@ -273,6 +318,30 @@ class AgentAppServerSupervisor:
                 if isinstance(item, Mapping)
             )
         return " ".join(str(raw).split())[:2000]
+
+    def _persist_thread_history(
+        self,
+        key: tuple[str, str],
+        conversation_id: str,
+        thread: Mapping[str, object],
+    ) -> None:
+        """Mirror textual Provider history without exposing tool internals."""
+        store = self.profile_service.conversation_store
+        for item in thread_messages(thread):
+            try:
+                store.append_item(
+                    key[0],
+                    key[1],
+                    conversation_id,
+                    role=str(item["role"]),
+                    text=item["text"],
+                    item_id=str(item["item_id"]),
+                    created_at=float(item["created_at"]),
+                )
+            except (TypeError, ValueError, OSError):
+                # A malformed Provider item must not make an otherwise valid
+                # thread resume fail.  The next resume can retry it.
+                continue
 
     def delete_conversation(
         self,

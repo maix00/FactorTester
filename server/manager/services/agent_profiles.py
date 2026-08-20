@@ -162,6 +162,14 @@ class AgentProfileService:
             "executor_id": claim.get("executor_id", ""),
             "agent_id": claim.get("agent_id", ""),
             "provider_id": claim.get("provider_id", ""),
+            "agent_runtime": claim.get("agent_runtime", "codex"),
+            "provider_protocol": claim.get(
+                "provider_protocol", "openai_responses"
+            ),
+            "provider_model": claim.get("provider_model", ""),
+            "provider_config_version": claim.get(
+                "provider_config_version", 0
+            ),
             "claimed_at": claim.get("claimed_at", 0),
             "last_heartbeat_at": claim.get("last_heartbeat_at", 0),
             "status": claim.get("status", ""),
@@ -454,6 +462,23 @@ class AgentProfileService:
             raise ProviderStoreError("claimed Agent provider is not a server provider")
         if provider.get("server_id") != self.server_id:
             raise ProviderStoreError("claimed Agent provider belongs to another server")
+        if float(claim.get("provider_config_version") or 0) == 0:
+            claim = self.runtime_store.freeze_legacy_provider_binding(
+                str(claim.get("claim_id") or ""),
+                provider_id=str(provider.get("provider_id") or ""),
+                agent_runtime=str(provider.get("agent_runtime") or "codex"),
+                provider_protocol=str(
+                    provider.get("protocol") or "openai_responses"
+                ),
+                provider_model=str(provider.get("default_model") or ""),
+                provider_config_version=float(provider.get("updated_at") or 0),
+            )
+        if float(provider.get("updated_at") or 0) != float(
+            claim.get("provider_config_version") or 0
+        ):
+            raise ProviderStoreError(
+                "claimed Agent provider changed; release and reclaim the Profile"
+            )
         skill_runtime = self.prepare_server_skill_runtime(
             principal,
             profile_id,
@@ -615,6 +640,12 @@ class AgentProfileService:
             runtime_kind=runtime_kind,
             executor_id=executor_id,
             provider_id=provider_id,
+            agent_runtime=str(provider.get("agent_runtime") or "codex"),
+            provider_protocol=str(
+                provider.get("protocol") or "openai_responses"
+            ),
+            provider_model=str(provider.get("default_model") or ""),
+            provider_config_version=float(provider.get("updated_at") or 0),
             agent_id=agent_id,
         )
         return {

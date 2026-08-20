@@ -3,13 +3,12 @@
 Conversation identity belongs to an authenticated principal and Profile.  A
 provider-specific thread id is only a resumable runtime binding, so changing
 or stopping an Agent does not remove the conversation.  The catalog contains
-metadata only; provider credentials and server-local paths never enter it.
+a bounded text projection rather than the Provider's complete thread state.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import re
 import threading
 import time
 import uuid
@@ -36,19 +35,18 @@ _COLUMNS = {
     "active",
 }
 
-_SECRET_VALUE = re.compile(
-    r"(?i)\b(api[_-]?key|authorization|password|secret|token)\b\s*[:=]\s*[^\s,;]+"
-)
-_LOCAL_PATH = re.compile(
-    r"(?<![A-Za-z0-9_])/(?:Users|home|var|tmp|private|data|workspace)/[^\s`\"']+"
-)
-
-
 def sanitize_conversation_text(value: object, *, limit: int = 12_000) -> str:
-    """Keep readable text while removing credential and local-path-shaped data."""
-    text = " ".join(str(value or "").split())[:limit]
-    text = _SECRET_VALUE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
-    return _LOCAL_PATH.sub("[server path redacted]", text)
+    """Prepare text for the bounded Manager projection.
+
+    The name is kept for API compatibility. Credential and path redaction is
+    intentionally not implemented yet; a future versioned policy can be
+    inserted at this boundary without changing the conversation schema.
+    """
+    # Keep the Provider's Markdown structure intact.  In particular, ChatKit
+    # needs newlines to render fenced code blocks and structured answers.
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    # Placeholder: add an explicit, versioned redaction policy here later.
+    return text[:limit]
 
 
 class AgentConversationStore:
@@ -458,7 +456,7 @@ class AgentConversationStore:
         item_type: str = "message",
         created_at: float | None = None,
     ) -> dict[str, Any]:
-        """Persist one sanitized user/assistant message for offline viewing."""
+        """Persist one normalized user/assistant message for offline viewing."""
         owner = self._required(principal, "principal")
         profile = self._required(profile_id, "profile_id")
         identifier = self._required(conversation_id, "conversation_id", 256)

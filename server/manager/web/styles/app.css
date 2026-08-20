@@ -3,6 +3,7 @@
   --bg: #f5f5f7; --panel: #fff; --sidebar: #f0f0f4;
   --text: #1d1d1f; --muted: #74747a; --line: #d9d9de;
   --accent: #087cff; --soft: #eef5ff; --danger: #d92d20;
+  --test-workbench-section-gap: 12px;
   --sidebar-width: 230px;
   --sidebar-collapsed-width: 64px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -449,12 +450,29 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-graph-row-actions .button-link, .research-graph-row-actions button { min-height: 30px; padding: 6px 9px; font-size: 12px; }
 .agent-model-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .agent-model-header p { margin: 0; }
+.agent-model-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%); }
+.agent-model-search { width: min(100%, 440px); }
+.agent-model-result-count { flex: 0 0 auto; font-size: 13px; white-space: nowrap; }
 .agent-model-table table { min-width: 980px; }
 .agent-model-icon-action { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 7px; color: inherit; background: var(--panel); }
 .agent-model-icon-action:hover { border-color: var(--accent); color: var(--accent); }
 .agent-model-icon-action .ft-icon, .agent-model-icon-action .ft-icon-svg { width: 16px; height: 16px; flex-basis: 16px; }
 .agent-model-test-status { color: var(--muted); white-space: nowrap; }
+.agent-model-test-status.checking { color: var(--accent); }
+.agent-model-test-status.success { color: var(--success, #25844f); }
+.agent-model-test-status.failure { color: var(--danger, #c23b3b); }
 .agent-model-dialog .settings-row { grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.4fr); }
+.agent-model-protocol-control { display: grid; gap: 5px; }
+.agent-model-model-control { display: grid; }
+.agent-model-protocol-control small { color: var(--muted); }
+.agent-model-protocol-cell { display: grid; justify-items: start; gap: 5px; }
+.agent-model-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font-size: 12px; white-space: nowrap; }
+.agent-model-badge.cc_switch { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+@media (max-width: 720px) {
+  .agent-model-header, .agent-model-list-toolbar { align-items: stretch; flex-direction: column; }
+  .agent-model-search { width: 100%; }
+  .agent-model-result-count { align-self: flex-end; }
+}
 .client-download-dialog .dialog-card { gap: 12px; }
 .profile-detail-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .profile-detail-tab { border: 0; border-radius: 7px; padding: 7px 13px; color: inherit; background: transparent; white-space: nowrap; }
@@ -482,7 +500,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-identity small { color: var(--muted); }
 .profile-directory-detail { max-width: 1180px; }
 .profile-directory-note { white-space: pre-line; }
-.profile-chatkit-readonly { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
+.profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
+.profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }
 @media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host openai-chatkit { height: 500px; } }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }
@@ -617,7 +636,7 @@ button.reference-item { cursor: pointer; }
 .research-graph-detail-field small, .research-graph-detail-list > small { color: var(--muted); }
 .research-graph-detail-field div, .research-graph-detail-list li { overflow-wrap: anywhere; }
 .research-graph-detail-list ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; }
-.test-workbench { display: grid; gap: 22px; max-width: 1240px; margin: 0 auto; }
+.test-workbench { display: grid; gap: var(--test-workbench-section-gap); max-width: 1240px; margin: 0 auto; }
 .test-template-section { display: grid; gap: 10px; }
 .test-template-section h2 { margin: 0; font-size: 15px; }
 .test-template-toolbar { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }

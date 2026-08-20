@@ -1,7 +1,15 @@
 .content:has(> .test-workbench) { padding: 22px 36px 30px; }
 .content:has(> .job-detail),
 .content:has(> .job-input-detail) { padding: 14px 18px 24px; }
-.test-workbench { display: grid; gap: 6px; width: 100%; max-width: 1280px; margin: 0 auto; font-size: 13px; }
+.test-workbench {
+  display: grid;
+  gap: var(--test-workbench-section-gap);
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  font-size: 13px;
+}
+.test-workbench > .test-run-observer { margin-top: 0; }
 .test-workbench > section, .test-workbench > .test-settings-shell,
 .test-workbench > .test-run-options { min-width: 0; }
 .test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }

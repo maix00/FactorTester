@@ -191,6 +191,10 @@
         return target;
       };
       record(item);
+      // The jobs page keeps a per-tab cache for pagination.  Invalidate it
+      // only after a server submission is accepted so a later visit shows the
+      // new Job without turning every navigation into a federation fan-out.
+      if (!usesLocalRuntime(state)) window.FTJobs?.invalidate?.();
       // update(..., "submitting") repaints the workbench before the request
       // resolves. synchronize() deliberately clones batch entries, so the
       // item captured above may no longer be the object rendered by the page.

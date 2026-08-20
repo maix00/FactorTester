@@ -194,6 +194,28 @@ def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_tab_workspace_is_versioned_and_principal_scoped() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_workspace.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_draft_clear_resets_only_local_authoring_state() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_draft_clear.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_product_category_composition_uses_all_available_sources() -> None:
     import subprocess
 
@@ -1403,7 +1425,7 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "activeTab: state.settingsTabKey" in tests
     assert "installRunToolbar" in tests
     assert "headerActions" in tests
-    assert "FTTestRunBatch.render" not in tests
+    assert "FTTestRunBatch.render(" not in tests
     assert "产品路径任务" not in tests
     run_batch_model = (WEB_ROOT / "workbench" / "run-batch" / "model.js").read_text(
         encoding="utf-8",

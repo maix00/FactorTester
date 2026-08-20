@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from server.manager.services.account_domain_projection import factor_rows_from_sync
 from server.manager.services.client_state import ClientStateService
 
@@ -30,6 +32,41 @@ class LocalAccounts:
             "organization_id": "GTHT",
             "organization_name": "GTHT",
         }]
+
+
+def test_catalog_read_returns_local_mirror_before_background_refresh(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class SlowSync(LocalOnlySync):
+        def sync(self, principal):
+            assert principal == "alice"
+            started.set()
+            release.wait(timeout=2)
+            self.rows.append({
+                "principal": "alice",
+                "entity_type": "product_category",
+                "entity_id": "remote-category",
+                "payload": {"id": "remote-category", "title_zh": "远端分类"},
+            })
+            finished.set()
+
+    sync = SlowSync()
+    service = ClientStateService(
+        tmp_path / "client",
+        account_domain_sync=sync,
+        local_account_store=LocalAccounts(),
+    )
+
+    initial = service.product_categories("alice")
+
+    assert not any(item.get("id") == "remote-category" for item in initial)
+    assert started.wait(timeout=1)
+    release.set()
+    assert finished.wait(timeout=1)
+    refreshed = service.product_categories("alice")
+    assert any(item.get("id") == "remote-category" for item in refreshed)
 
 
 def test_factor_projection_uses_local_owner_alias_and_hides_migrated_username():

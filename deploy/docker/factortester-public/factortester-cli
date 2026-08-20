@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Run the server-bundled FactorTester CLI directly from the release source."""
+
+from __future__ import annotations
+
+import sys
+
+
+sys.path.insert(0, "/opt/factortester/app")
+
+from tools.cli.app import cli
+
+
+if __name__ == "__main__":
+    cli()

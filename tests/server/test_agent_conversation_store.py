@@ -1,6 +1,27 @@
 from __future__ import annotations
 
-from server.manager.storage.agent_conversation_store import AgentConversationStore
+from server.manager.storage.agent_conversation_store import (
+    AgentConversationStore,
+    sanitize_conversation_text,
+)
+
+
+def test_conversation_text_preserves_markdown_structure_and_source_text():
+    text = (
+        "说明\r\n\r\n"
+        "```bash\r\n"
+        "factortester products list\r\n"
+        "```\r\n\r\n"
+        "token=secret-value\r\n"
+        "/Users/private/workspace/report.png"
+    )
+
+    sanitized = sanitize_conversation_text(text)
+
+    assert "```bash\nfactortester products list\n```" in sanitized
+    assert "token=secret-value" in sanitized
+    assert "/Users/private/workspace/report.png" in sanitized
+    assert "\r" not in sanitized
 
 
 def test_conversation_catalog_is_scoped_by_principal_and_profile(tmp_path):

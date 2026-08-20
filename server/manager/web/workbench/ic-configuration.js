@@ -91,24 +91,15 @@
     return value;
   }
 
-  function factorFamilyAliases(factors, fallback = "") {
-    const aliases = unique((Array.isArray(factors) ? factors : []).map(item => (
-      item?.factor_family_alias || item?.family_alias || item?.family || ""
-    )).map(item => String(item).trim()).filter(Boolean));
-    if (!aliases.length && fallback) aliases.push(String(fallback).trim());
-    return aliases.filter(Boolean);
-  }
-
   function compileAnalysis(options) {
     const {
-      prior, manifest, values, factors, productSelection, fallbackFamilyAlias,
+      prior, manifest, values, factors, productSelection,
     } = options;
     const settings = normalizeSettings(
       manifest,
       FTTestConfigurationCompiler.executionSettings(manifest, values),
     );
     const selection = productScope(productSelection);
-    const families = factorFamilyAliases(factors, fallbackFamilyAlias);
     const result = {
       ...clone(prior || {}),
       ...settings,
@@ -120,8 +111,7 @@
       local_settings: clone(settings),
     };
     delete result.product_path_selections;
-    if (families.length === 1) result.factor_family_alias = families[0];
-    else delete result.factor_family_alias;
+    delete result.factor_family_alias;
     return result;
   }
 
@@ -152,7 +142,6 @@
     compileAnalysis,
     correlationMethods,
     evaluationPlan,
-    factorFamilyAliases,
     normalizeDecayLags,
     normalizeDelays,
     normalizeHorizon,

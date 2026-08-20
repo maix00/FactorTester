@@ -130,37 +130,80 @@
   }
 
   function readOnlyConversationID(params) {
-    return C.conversationIDFrom(params)
-      || String(params?.id || params?.thread?.id || "").trim();
+    const values = [
+      params?.thread_id,
+      params?.threadId,
+      params?.threadID,
+      params?.conversation_id,
+      params?.conversationId,
+      params?.id,
+      params?.thread?.id,
+      params?.thread?.thread_id,
+      params?.thread?.threadId,
+      params?.thread?.conversation_id,
+    ];
+    return values.map(value => String(value || "").trim()).find(Boolean) || "";
   }
 
-  function readOnlyItem(profileKey, conversationID, item) {
-    const role = String(item?.role || "").toLowerCase() === "assistant"
+  function readOnlyText(value) {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(readOnlyText).join("");
+    if (!value || typeof value !== "object") return "";
+    for (const key of ["text", "value", "output_text", "content", "parts", "message"]) {
+      const text = readOnlyText(value[key]);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function readOnlyItem(profileKey, conversationID, item, index = 0) {
+    const role = /^(assistant|assistant_message|agent_message)$/i.test(
+      String(item?.role || item?.type || item?.item_type || "").trim(),
+    )
       ? "assistant_message" : "user_message";
-    const created = item?.created_at || new Date().toISOString();
-    const text = String(item?.text || "");
+    const created = P.historyTimestamp(
+      item?.created_at,
+      new Date().toISOString(),
+    );
+    const text = readOnlyText(item);
+    const itemID = String(item?.id || item?.item_id || "").trim()
+      || `item-${conversationID}-${index}`;
     return {
-      id: String(item?.id || `item-${Math.random().toString(16).slice(2)}`),
+      // Manager history rows use item_id rather than ChatKit's id.  Keep the
+      // mapped id stable across list/get requests so ChatKit does not discard
+      // the history as a different set of items on every read.
+      id: itemID,
       type: role,
       thread_id: conversationID,
       created_at: created,
-      content: [{type: role === "assistant_message" ? "output_text" : "input_text", text}],
+      content: [role === "assistant_message"
+        ? {type: "output_text", text, annotations: []}
+        : {type: "input_text", text}],
       ...(role === "user_message" ? {
         attachments: [], quoted_text: null, inference_options: {},
-      } : {annotations: []}),
+      } : {}),
       metadata: {profile_key: profileKey},
     };
   }
 
   function readOnlyThread(profileKey, conversation, items = []) {
     const identifier = String(conversation?.conversation_id || "");
+    const created = P.historyTimestamp(
+      conversation?.created_at,
+      new Date().toISOString(),
+    );
     return {
       id: identifier,
       title: conversation?.title || null,
-      created_at: conversation?.created_at || new Date().toISOString(),
-      status: {type: "completed"},
+      created_at: created,
+      // ChatKit's ThreadStatus accepts active, locked, or closed.  A parent
+      // viewer sees a locked historical thread: it is readable, but cannot
+      // be used to send turns or mutate the source Agent conversation.
+      status: {type: "locked", reason: "read-only conversation"},
       metadata: {profile_key: profileKey, conversation_id: identifier},
-      items: P.page(items.map(item => readOnlyItem(profileKey, identifier, item))),
+      items: P.page(items.map((item, index) => (
+        readOnlyItem(profileKey, identifier, item, index)
+      ))),
     };
   }
 
@@ -224,7 +267,7 @@
     }
     if (operation === "items.list") {
       return P.jsonResponse(P.page((await readOnlyItems(profileState, conversationID)).map(
-        item => readOnlyItem(profileState.profileKey, conversationID, item),
+        (item, index) => readOnlyItem(profileState.profileKey, conversationID, item, index),
       )));
     }
     if ([

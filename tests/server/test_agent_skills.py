@@ -472,6 +472,9 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "/api/client/profile-agent/start" in chat_source
     assert "openai-chatkit" in chat_source
     assert "FTProfileChatKit" in chat_source
+    assert "disabled: Boolean(options.readOnly)" not in chat_source
+    assert "profile-chatkit-readonly-composer" in chat_source
+    assert "不能发送问题" in chat_source
     protocol_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-protocol.js"
     ).read_text(encoding="utf-8")
@@ -481,6 +484,9 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     ).read_text(encoding="utf-8")
     assert "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" in adapter_source
     assert "FTProfileChatKitProtocol" in adapter_source
+    assert "params?.conversation_id" in adapter_source
+    assert "params?.thread?.conversation_id" in adapter_source
+    assert "P.historyTimestamp" in adapter_source
     stream_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-stream.js"
     ).read_text(encoding="utf-8")

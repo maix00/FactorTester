@@ -207,6 +207,33 @@ class ProfileDirectoryService:
             result.add(source)
         return result
 
+    @classmethod
+    def _conversation_sources(cls, value: dict[str, Any]) -> list[str]:
+        """Order all known mirrors with the executing Manager first."""
+        runtime = value.get("runtime")
+        runtime_server = (
+            str(runtime.get("server_id") or "").strip()
+            if isinstance(runtime, dict) else ""
+        )
+        candidates = [
+            str(value.get("execution_server_id") or "").strip(),
+            runtime_server,
+            str(value.get("source_server_id") or "").strip(),
+            *(
+                str(item or "").strip()
+                for item in value.get("source_server_ids", [])
+            ),
+            *(
+                str(item or "").strip()
+                for item in value.get("execution_server_ids", [])
+            ),
+        ]
+        result: list[str] = []
+        for source in candidates:
+            if source and source not in result:
+                result.append(source)
+        return result
+
     def _merge_projection(
         self,
         existing: dict[str, Any] | None,
@@ -500,26 +527,108 @@ class ProfileDirectoryService:
             scope=scope,
             query=profile_id,
             page_size=100,
-            server_id=source,
         )
         for item in directory["items"]:
             if item.get("profile_key") == value:
                 return item, owner, profile_id
+        # A mirrored Profile may have been opened from an older tab whose key
+        # names a non-canonical source.  Reuse the merged logical row when the
+        # requested source is still one of its known mirrors; conversation
+        # reads will query all known sources and prefer the executing Manager.
+        for item in directory["items"]:
+            if (
+                str(item.get("owner_ref") or "").strip() == owner
+                and str(item.get("profile_id") or "").strip() == profile_id
+                and source in self._source_ids(item)
+            ):
+                resolved = dict(item)
+                resolved["source_server_id"] = source
+                resolved["profile_key"] = value
+                return resolved, owner, profile_id
         raise ProfileDirectoryError("Profile is not visible to current account")
+
+    def _source_conversations(
+        self,
+        source: str,
+        viewer: str,
+        owner: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        if source == self.server_id:
+            return self.agent_profiles.conversations(owner, profile_id)
+        reader = getattr(self.federated_public_data, "profile_conversations", None)
+        if not callable(reader):
+            return []
+        return reader(source, viewer, owner, profile_id)
+
+    def _source_conversation_items(
+        self,
+        source: str,
+        viewer: str,
+        owner: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        if source == self.server_id:
+            return self.agent_profiles.conversation_items(
+                owner, profile_id, conversation_id,
+            )
+        reader = getattr(
+            self.federated_public_data,
+            "profile_conversation_items",
+            None,
+        )
+        if not callable(reader):
+            return []
+        return reader(source, viewer, owner, profile_id, conversation_id)
 
     def conversations(self, viewer: str, profile_key: str, *, scope: str = "servers") -> list[dict[str, Any]]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
         if not item["capabilities"].get("view_conversations"):
             raise PermissionError("Profile conversations are not visible to this account")
-        source = str(item.get("source_server_id") or self.server_id)
-        if source == self.server_id:
-            rows = self.agent_profiles.conversations(owner, profile_id)
-        else:
-            reader = getattr(self.federated_public_data, "profile_conversations", None)
-            if not callable(reader):
-                return []
-            rows = reader(source, viewer, owner, profile_id)
-        return [self._public_conversation(row, read_only=item["read_only"]) for row in rows]
+        sources = self._conversation_sources(item) or [self.server_id]
+        preferred = sources[0]
+        merged: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
+        successful = False
+        last_error: Exception | None = None
+        for source in sources:
+            try:
+                rows = self._source_conversations(
+                    source, viewer, owner, profile_id,
+                )
+                successful = True
+            except PermissionError:
+                raise
+            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                last_error = exc
+                continue
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                identifier = str(row.get("conversation_id") or "").strip()
+                if not identifier:
+                    continue
+                rank = (
+                    self._updated_rank(row),
+                    1 if source == preferred else 0,
+                )
+                current = merged.get(identifier)
+                if current is None or rank > current[0]:
+                    merged[identifier] = (rank, dict(row))
+        if not successful and last_error is not None:
+            raise last_error
+        rows = [value[1] for value in merged.values()]
+        rows.sort(
+            key=lambda value: (
+                bool(value.get("active")),
+                self._updated_rank(value),
+            ),
+            reverse=True,
+        )
+        return [
+            self._public_conversation(row, read_only=item["read_only"])
+            for row in rows
+        ]
 
     def conversation_items(
         self,
@@ -532,15 +641,52 @@ class ProfileDirectoryService:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
         if not item["capabilities"].get("view_conversations"):
             raise PermissionError("Profile conversations are not visible to this account")
-        source = str(item.get("source_server_id") or self.server_id)
-        if source == self.server_id:
-            rows = self.agent_profiles.conversation_items(owner, profile_id, conversation_id)
-        else:
-            reader = getattr(self.federated_public_data, "profile_conversation_items", None)
-            if not callable(reader):
-                return []
-            rows = reader(source, viewer, owner, profile_id, conversation_id)
-        return [dict(row) for row in rows if isinstance(row, dict)]
+        sources = self._conversation_sources(item) or [self.server_id]
+        preferred = sources[0]
+        merged: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
+        successful = False
+        last_error: Exception | None = None
+        for source in sources:
+            try:
+                rows = self._source_conversation_items(
+                    source, viewer, owner, profile_id, conversation_id,
+                )
+                successful = True
+            except PermissionError:
+                raise
+            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                last_error = exc
+                continue
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                identifier = str(
+                    row.get("id") or row.get("item_id") or ""
+                ).strip()
+                if not identifier:
+                    identifier = (
+                        f"{row.get('role', '')}:{row.get('created_at', '')}:"
+                        f"{row.get('text', '')}"
+                    )
+                rank = (
+                    self._updated_rank({"updated_at": row.get("created_at")}),
+                    1 if source == preferred else 0,
+                )
+                current = merged.get(identifier)
+                if current is None or rank > current[0]:
+                    merged[identifier] = (rank, dict(row))
+        if not successful and last_error is not None:
+            raise last_error
+        return [
+            value[1]
+            for value in sorted(
+                merged.values(),
+                key=lambda value: (
+                    self._updated_rank({"updated_at": value[1].get("created_at")}),
+                    str(value[1].get("id") or value[1].get("item_id") or ""),
+                ),
+            )
+        ]
 
     @staticmethod
     def _public_conversation(value: dict[str, Any], *, read_only: bool) -> dict[str, Any]:

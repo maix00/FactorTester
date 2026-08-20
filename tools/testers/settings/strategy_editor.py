@@ -37,6 +37,13 @@ _INNER_DEFAULT_TABS = (
 
 _INNER_MANUAL_TABS = (
     {
+        "key": "category",
+        "label": "产品分类",
+        "kind": "category_scope",
+        "mount_policy": "manual",
+        "scope_policy": "overridable",
+    },
+    {
         "key": "trading_product_filter",
         "label": "交易产品",
         "kind": "product_filter",
@@ -70,7 +77,7 @@ def _contract(*, application: str) -> dict[str, Any]:
                     "factor_source_selections", "factor_set_selections",
                 ],
                 "scope_fields": ["factor_candidates"],
-                "selection_fields": ["factor_selections", "factor"],
+                "selection_fields": ["factor_candidates"],
                 "set_fields": ["factor_set_selections"],
                 "candidate_kind": "factor",
             },
@@ -84,6 +91,13 @@ def _contract(*, application: str) -> dict[str, Any]:
                 ],
                 "candidate_kind": "product_group",
             },
+            "category": {
+                "mounted_tab": "category",
+                "candidate_fields": ["category_candidates"],
+                "scope_fields": ["category_candidates"],
+                "selection_fields": ["category"],
+                "candidate_kind": "category",
+            },
         },
         # These fields are authored once by the outer test form.  They are
         # never silently copied into a strategy's inner override tab.
@@ -93,7 +107,24 @@ def _contract(*, application: str) -> dict[str, Any]:
             "run_inputs",
             "time",
             "calendar",
+            "data_source",
         ],
+        "candidate_constraints": {
+            "category_candidates": {
+                "source_field": "data_source",
+                "mode_field": "data_source_mode",
+                "automatic_mode": "auto",
+                "coverage": "complete_path_coverage",
+                "side": "outer",
+            },
+            "product_path_candidates": {
+                "source_field": "data_source",
+                "mode_field": "data_source_mode",
+                "automatic_mode": "auto",
+                "coverage": "complete_product_coverage",
+                "side": "outer",
+            },
+        },
         "manual_inner_tabs": True,
         "inner_override_scope": "overridable",
         # This is the reusable, client-neutral contract consumed by Web,
@@ -102,6 +133,9 @@ def _contract(*, application: str) -> dict[str, Any]:
         "scoped_fields": scoped_fields,
         "factor_scope": {
             "selection_kind": "factor",
+            "identity_field": "factor_ref",
+            "strategy_selection_field": "factor_candidate_refs",
+            "runtime_resolution_field": "factor",
             "family_kind": "factor_family",
             "inline_create": True,
         },

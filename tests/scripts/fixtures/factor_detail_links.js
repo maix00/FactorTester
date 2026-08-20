@@ -121,6 +121,36 @@ const data = {
   assert.strictEqual(
     navigated.at(-1), `/factors/factor/${encodeURIComponent(factorRef)}`,
   );
+
+  const temporarySet = {
+    target_ref: "factor-candidates:temporary",
+    title_zh: "因子候选（1）",
+    temporary: true,
+    source_factors: [{target_ref: factorRef, label: alias}],
+    source_factor_sets: [{target_ref: setRef, label: "动量集合"}],
+    related_references: [{target_ref: factorRef, label: alias}],
+  };
+  context.testObjectTemporary = true;
+  context.testObjectInitialValue = temporarySet;
+  await window.FTFactorDetails.setDetail(
+    context, {sets: [temporarySet], factors: []}, temporarySet.target_ref,
+    async () => ({}),
+  );
+  const detailRows = content.children[0].children[0].values;
+  const sourceFactorRow = detailRows.find(row => row[0] === "来源因子");
+  const sourceSetRow = detailRows.find(row => row[0] === "来源因子集合");
+  assert.ok(sourceFactorRow);
+  assert.ok(sourceSetRow);
+  const factorLink = sourceFactorRow[1].children[0];
+  const setLink = sourceSetRow[1].children[0];
+  factorLink.listeners.click({preventDefault() {}});
+  assert.strictEqual(
+    navigated.at(-1), `/factors/factor/${encodeURIComponent(factorRef)}`,
+  );
+  setLink.listeners.click({preventDefault() {}});
+  assert.strictEqual(
+    navigated.at(-1), `/factors/set/${encodeURIComponent(setRef)}`,
+  );
   console.log("ok");
 })().catch(error => {
   console.error(error);

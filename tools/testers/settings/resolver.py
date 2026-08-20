@@ -306,9 +306,15 @@ def _coerce_value(definition: SettingDefinition, value: Any) -> Any:
 
 def _validate_value(definition: SettingDefinition, value: Any) -> None:
     descriptor = definition.value_descriptor
-    if descriptor is not None and descriptor.options \
-            and value not in {option[0] for option in descriptor.options}:
-        raise ValueError(f"invalid value for {definition.key}: {value!r}")
+    if descriptor is not None and descriptor.options:
+        supported = {option[0] for option in descriptor.options}
+        values = (
+            value if descriptor.cardinality == "many"
+            and isinstance(value, (list, tuple)) else (value,)
+        )
+        unsupported = [item for item in values if item not in supported]
+        if unsupported:
+            raise ValueError(f"invalid value for {definition.key}: {unsupported!r}")
     if descriptor is not None and descriptor.value_type in {"integer", "number"}:
         if not isinstance(value, (int, float)):
             raise ValueError(f"setting {definition.key} requires a number")

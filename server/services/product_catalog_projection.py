@@ -351,19 +351,32 @@ def source_ids_for_product_paths(
     resolver for user-owned manifests.  When omitted, the server registry is
     used.
     """
-    requested_values = []
-    for value in paths or ():
-        normalized = _category_free_path(value)
-        if normalized and normalized not in requested_values:
-            requested_values.append(normalized)
-    requested = tuple(requested_values)
-    if not requested:
-        return ()
+    return tuple(sorted({
+        source_id
+        for source_ids in source_ids_by_product_path(
+            paths, source_descriptors,
+        ).values()
+        for source_id in source_ids
+    }))
+
+
+def source_ids_by_product_path(
+    paths: Iterable[str] | None,
+    source_descriptors: Iterable[Mapping[str, Any]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Resolve many persisted paths with one normalized source index."""
+    originals = tuple(dict.fromkeys(
+        str(value or "").strip()
+        for value in paths or ()
+        if str(value or "").strip()
+    ))
+    if not originals:
+        return {}
     descriptors = tuple(
         source_descriptors
         if source_descriptors is not None else product_source_descriptors()
     )
-    matched: set[str] = set()
+    declared_by_source: list[tuple[str, tuple[str, ...]]] = []
     for descriptor in descriptors:
         source_id = str(
             descriptor.get("id") or descriptor.get("source_id") or ""
@@ -374,13 +387,20 @@ def source_ids_for_product_paths(
             if normalized and normalized not in declared_values:
                 declared_values.append(normalized)
         declared_paths = tuple(declared_values)
-        if source_id and any(
-            _paths_overlap(path, declared)
-            for path in requested
-            for declared in declared_paths
-        ):
-            matched.add(source_id)
-    return tuple(sorted(matched))
+        if source_id and declared_paths:
+            declared_by_source.append((source_id, declared_paths))
+    result: dict[str, tuple[str, ...]] = {}
+    for original in originals:
+        requested = _category_free_path(original)
+        result[original] = tuple(sorted(
+            source_id
+            for source_id, declared_paths in declared_by_source
+            if requested and any(
+                _paths_overlap(requested, declared)
+                for declared in declared_paths
+            )
+        ))
+    return result
 
 
 def source_family_ids_for_member_ids(

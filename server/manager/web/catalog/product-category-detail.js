@@ -68,9 +68,16 @@
     if (context.testObjectTemporary) {
       const name = payload.name || payload.title_zh || payload.alias || "category";
       const id = category?.id || `inline-category:${name}`;
+      const selectedSources = Array.isArray(context.testState?.values?.data_source)
+        ? context.testState.values.data_source.map(String).filter(Boolean) : [];
+      const paths = (payload.items || []).flatMap(item => item?.paths || [])
+        .map(String).map(path => path.replace(/^-/, ""))
+        .filter(Boolean);
       context.onSaved?.({
         ...payload, id, name, title_zh: payload.title_zh || name,
         temporary: true, source_kind: "transient", source_origin: "test_inline",
+        source_ids: selectedSources,
+        path_sources: paths.map(path => ({path, source_ids: [...selectedSources]})),
       });
       return;
     }

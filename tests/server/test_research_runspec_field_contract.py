@@ -4,7 +4,8 @@ from flask import Flask
 import pytest
 
 import settings as Settings
-from server.modules.single_factor_test import sft_bp
+from server.modules.single_factor_test import research_jobs, sft_bp
+import server.modules.shared.submission_helpers  # noqa: F401 - product resolver
 from server.services import factor_registry
 
 
@@ -29,6 +30,17 @@ class {family}(FactorFamily):
         "load_public_factor_source",
         lambda factor_id: factor_sources.get(str(factor_id)),
     )
+    monkeypatch.setattr(
+        factor_registry, "factor_from_alias", lambda alias, **_kwargs: alias,
+    )
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda prepared, owner: [
+            {"kind": kind, "resolved": {"data_requirements": []}}
+            for kind in prepared["analyses"]
+        ],
+    )
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -43,8 +55,13 @@ def _create_workspace(client):
         "title": "RunSpec field contract",
         "factor_families": [{"alias": "MmRet"}, {"alias": "MmMADevRat"}],
         "factors": [
-            {"factor_family_alias": "MmRet", "alias": "MmRet|P:CA|N:10d|$F:1d"},
             {
+                "factor_ref": "factor:mmret-10d",
+                "factor_family_alias": "MmRet",
+                "alias": "MmRet|P:CA|N:10d|$F:1d",
+            },
+            {
+                "factor_ref": "factor:mmmadevrat-10d",
                 "factor_family_alias": "MmMADevRat",
                 "alias": "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
             },
@@ -62,9 +79,13 @@ def _update(client, workspace) -> None:
         "analyses": {
             "ic": {"factor_configs": [{"N": "10d"}], "product_paths": ["core8_path"]},
             "backtest": {
+                "local_settings": {
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-02-02",
+                },
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
-                    "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+                    "factor_candidate_refs": ["factor:mmret-10d"],
                     "product_path_selection_id": "core8",
                 }],
                 "product_selections": {
@@ -127,3 +148,8 @@ def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -
     controls = {"retention_mode", "step_mode", "output_requests"}
     assert {key for key in run_spec if key in controls} == _run_control_keys("group_test")
     assert run_spec["step_mode"] is False
+    assert run_spec["run_spec_version"] == 3
+    assert "factor_families" not in run_spec["configuration"]["shared"]
+    group = run_spec["configuration"]["analyses"]["backtest"]["groups"][0]
+    assert group["factor_candidate_refs"] == ["factor:mmret-10d"]
+    assert {"factorAlias", "factorAliases", "factor_alias", "factor_aliases"}.isdisjoint(group)

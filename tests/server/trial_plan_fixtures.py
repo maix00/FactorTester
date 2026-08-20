@@ -11,13 +11,14 @@ from server.jobs.states import JobStatus
 from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
 )
+from server.services.research_run_identity import RUN_SPEC_VERSION
 from server.services.research_graph.trial_plan import trial_plan_hash
 from tools.data.sqlite.db import connect_sqlite
 
 
 def run_spec() -> dict:
     return {
-        "run_spec_version": 1,
+        "run_spec_version": RUN_SPEC_VERSION,
         "workspace_id": "workspace-1",
         "analyses": ["ic"],
         "start_date": "2020-01-01",

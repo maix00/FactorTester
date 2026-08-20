@@ -156,7 +156,12 @@
       }
       if (!group) throw new Error(context.t("产品组不存在"));
     }
-    const categoryPayload = await helpers.loadCategories(context, source);
+    const inlineView = mode === "view"
+      && context.testObjectTemporary
+      && context.testObjectInitialValue;
+    const categoryPayload = inlineView
+      ? {categories: []}
+      : await helpers.loadCategories(context, source);
     if (!current(context)) return;
     const categories = [...(Array.isArray(categoryPayload.categories)
       ? categoryPayload.categories : [])];
@@ -174,7 +179,8 @@
       ? context.t("新增产品组") : target);
     context.setHeading(title, context.t("产品组"));
     context.updateActiveTab?.({title});
-    const editable = Boolean(context.session) && source === "server";
+    const editable = !context.testObjectViewOnly
+      && Boolean(context.session) && source === "server";
     if (mode === "edit" && !editable) {
       throw new Error(context.t("当前产品组不可编辑"));
     }
@@ -310,6 +316,8 @@
             paths,
           };
           const localID = groupPath(group) || `inline-product-group:${payload.name}`;
+          const selectedSources = Array.isArray(context.testState?.values?.data_source)
+            ? context.testState.values.data_source.map(String).filter(Boolean) : [];
           const value = context.testObjectTemporary
             ? {group: {
               ...payload,
@@ -322,6 +330,10 @@
               temporary: true,
               source_kind: "transient",
               source_origin: "test_inline",
+              source_ids: selectedSources,
+              path_sources: positive.map(path => ({
+                path, source_ids: [...selectedSources],
+              })),
             }}
             : await context.api(
               creating ? endpoint(source) : endpoint(source, groupPath(group)),

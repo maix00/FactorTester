@@ -15,6 +15,7 @@ from server.manager.services.profile_directory import (
     PROFILE_DIRECTORY_PRINCIPAL,
     ProfileDirectoryService,
 )
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
 from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
@@ -73,6 +74,13 @@ class FederationPublicDataRoutesMixin:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
         if kind == "research":
             return self._research_data_value(operation, viewer, payload)
+        if kind == "job-artifacts" and operation == "list":
+            return {
+                "artifacts": JobArtifactCatalog(self.state).list(
+                    job_id=str(payload.get("job_id") or ""),
+                    principal=principal,
+                ),
+            }
         if kind == "catalog":
             if operation == "profiles":
                 return {
@@ -175,10 +183,25 @@ class FederationPublicDataRoutesMixin:
                 conversation_id = str(payload.get("conversation_id") or "").strip()
                 if not conversation_id:
                     raise ValueError("conversation_id is required")
+                # The source Manager owns the Provider binding.  Refresh only
+                # this requested thread when its Agent process is available;
+                # a stopped Agent still falls back to its last durable SQLite
+                # projection instead of making a read-only viewer control it.
+                history_refreshed = False
+                supervisor = getattr(self.state, "agent_app_server", None)
+                refresh = getattr(supervisor, "refresh_conversation_history", None)
+                if callable(refresh):
+                    try:
+                        history_refreshed = bool(
+                            refresh(owner, profile_id, conversation_id)
+                        )
+                    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                        history_refreshed = False
                 return {
                     "items": agent_service.conversation_items(
                         owner, profile_id, conversation_id,
                     ),
+                    "history_refreshed": history_refreshed,
                 }
             if operation == "factors":
                 from server.manager.services.public_catalog import (

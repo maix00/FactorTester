@@ -66,12 +66,15 @@ const context = {
 const options = {
   context,
   title: "策略",
-  showConfig: false,
+  showConfig: true,
+  showConfigOpen: true,
   batches: [{
     key: "batch-1", label: "添加批次 1", description: "5 个策略", expanded: true,
+    chips: [new Element("span")],
     items: [{
       key: "strategy-1", label: "旧名称", editableName: true,
       detail: "基础组 · 1/5",
+      chips: [new Element("span")],
       onRename: value => { renameCalls += 1; assert.equal(value, "新名称"); },
       actions: [{
         label: "编辑", icon: "square.and.pencil", onClick: () => { actionCalls += 1; },
@@ -87,6 +90,13 @@ const body = find(root, node => node.className === "strategy-list-batch-body");
 assert.ok(disclosure && body);
 const row = find(root, node => node.className === "strategy-list-row");
 assert.ok(row);
+const batch = find(root, node => node.className === "strategy-list-batch");
+const batchHeader = find(batch, node => node.className.includes("strategy-list-batch-header"));
+assert.ok(batchHeader);
+assert.equal(find(batchHeader, node => node.className === "strategy-list-chips"), null,
+  "batch headers must not own strategy-specific override chips");
+assert.equal(find(row, node => node.className === "strategy-list-chips") != null, true,
+  "strategy-specific override chips must render under the strategy row");
 assert.equal(find(row, node => node.tagName === "small"), null,
   "strategy rows must not render a subtitle");
 assert.equal(body.hidden, false);

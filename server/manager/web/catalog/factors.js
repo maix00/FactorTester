@@ -132,7 +132,16 @@
 
   async function factorDetail(context, targetRef, mode = "view") {
     context.activeNav("factors");
-    const data = await load(context);
+    // A factor created inline in the test editor already carries its complete
+    // view model.  Do not make a catalog round-trip (or fail on an unavailable
+    // catalog service) just to render that temporary factor's read-only
+    // overlay.  Normal catalog factors keep the existing lazy catalog path.
+    const inline = mode === "view"
+      && context.testObjectTemporary
+      && context.testObjectInitialValue;
+    const data = inline
+      ? {factors: [context.testObjectInitialValue], families: []}
+      : await load(context);
     if (!current(context)) return;
     return FTFactorDetails.factorDetail(context, data, targetRef, mode, nativeRequest);
   }
@@ -146,7 +155,10 @@
 
   async function setDetail(context, targetRef) {
     context.activeNav("factors");
-    const data = await load(context);
+    const inline = context.testObjectTemporary && context.testObjectInitialValue;
+    const data = inline
+      ? {sets: [context.testObjectInitialValue], factors: []}
+      : await load(context);
     if (!current(context)) return;
     return FTFactorDetails.setDetail(context, data, targetRef, nativeRequest);
   }

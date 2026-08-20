@@ -7,6 +7,7 @@ ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG CODEX_VERSION=0.147.0
 ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org
+ARG CC_SWITCH_VERSION=5.10.2
 ARG TARGETARCH
 ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
 
@@ -78,6 +79,29 @@ RUN set -eu; \
     rm -f /tmp/codex-code-mode-host-help; \
     rm -rf /tmp/codex-package /tmp/codex.tgz
 
+# CC Switch owns provider routing and wire-protocol conversion. FactorTester
+# invokes this pinned headless CLI on loopback with one private state directory
+# per Profile Agent session; it does not copy or fork the conversion code.
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+        amd64) \
+            cc_switch_platform=linux-x64-musl; \
+            cc_switch_sha256=8065c5bae9eda270747c1766cefbb2091d9625655dbf409ad7764eb47c0a8635 ;; \
+        arm64) \
+            cc_switch_platform=linux-arm64-musl; \
+            cc_switch_sha256=b25c77f7eebbe3968c53022e1b5e703e324203e94e5c6379320bcd1bbe268e63 ;; \
+        *) echo "unsupported CC Switch architecture: ${TARGETARCH}" >&2; exit 2 ;; \
+    esac; \
+    cc_switch_url="https://github.com/SaladDay/cc-switch-cli/releases/download/v${CC_SWITCH_VERSION}/cc-switch-cli-${cc_switch_platform}.tar.gz"; \
+    curl --fail --location --retry 5 --retry-delay 2 \
+        --connect-timeout 20 --max-time 900 \
+        --output /tmp/cc-switch.tgz "${cc_switch_url}"; \
+    echo "${cc_switch_sha256}  /tmp/cc-switch.tgz" | sha256sum --check --status; \
+    tar -xzf /tmp/cc-switch.tgz -C /tmp; \
+    install -m 0555 /tmp/cc-switch /usr/local/bin/cc-switch; \
+    cc-switch --version; \
+    rm -f /tmp/cc-switch /tmp/cc-switch.tgz
+
 # Pin the upstream Mihomo binary in the image. The Manager never publishes
 # its controller or mixed proxy ports; both remain loopback-only.
 COPY deploy/docker/factortester-public/mihomo-linux-amd64-v1.19.30.gz /tmp/mihomo.gz
@@ -118,9 +142,9 @@ COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
     /usr/local/bin/factortester-public-entrypoint
 COPY deploy/docker/factortester-public/start-fixed-service.py \
     /usr/local/bin/start-fixed-service
+COPY deploy/docker/factortester-public/factortester-cli \
+    /usr/local/bin/factortester
 RUN set -eu; \
-    python -m pip install --no-cache-dir --no-deps --index-url "${PIP_INDEX_URL}" \
-        /opt/factortester/app/tools/cli; \
     rm -f /usr/local/bin/factortester-manager; \
     test -x /usr/local/bin/factortester; \
     test ! -e /usr/local/bin/factortester-manager; \
@@ -129,7 +153,8 @@ RUN set -eu; \
     rm -f /tmp/factortester-help; \
     mkdir /opt/factortester/app/.git; \
     printf '%s\n' "$FACTORTESTER_REVISION" > /opt/factortester/app/.deployment-revision; \
-    chmod 0555 /usr/local/bin/factortester-public-entrypoint \
+    chmod 0555 /usr/local/bin/factortester \
+        /usr/local/bin/factortester-public-entrypoint \
         /usr/local/bin/start-fixed-service; \
     find /opt/factortester/app -type d -exec chmod 0555 {} +; \
     find /opt/factortester/app -type f -exec chmod 0444 {} +

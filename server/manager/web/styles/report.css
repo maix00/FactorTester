@@ -30,6 +30,8 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .chapter-heading-row { position: sticky; top: 88px; z-index: 8; display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 0 12px; background: var(--bg); }
 .chapter-title { min-width: 0; flex: 1; margin: 0; font-size: 22px; overflow-wrap: anywhere; }
 .chapter-disclosure-reset { flex: 0 0 auto; width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; }
+.chapter-disclosure-reset::before { content: "›"; display: block; transition: transform .15s ease; }
+.chapter-disclosure-reset[aria-expanded="true"]::before { transform: rotate(90deg); }
 .chapter-disclosure-reset:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text); }
 .component { position: relative; min-width: 0; margin: 3px 0; }
 .component details > summary { cursor: pointer; list-style: none; padding: 6px 0; font-weight: 650; display: flex; align-items: flex-start; gap: 8px; }

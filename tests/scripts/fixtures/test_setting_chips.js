@@ -45,6 +45,7 @@ const manifest = {
     {key: "product_path_selection", label: "产品路径"},
     {key: "time", label: "时间范围"},
     {key: "ic_method", label: "IC 类型"},
+    {key: "group_strategy", label: "分组策略"},
   ]},
   defaults: {
     factor_owner_ref: {
@@ -95,6 +96,17 @@ const manifest = {
       value_resolvers: {productPathSelectionLabel: "product_path_selection_label"},
       target_tab: "product_path_selection",
     },
+    {
+      key: "unmounted_identity", label: "未挂载字段",
+      chip_template: "未挂载字段: {unmountedValue}",
+      source_keys: ["unmountedValue"], value_resolvers: {}, target_tab: "advanced",
+    },
+    {
+      key: "strategy_identity", label: "策略分组",
+      chip_template: "策略分组: {n_groups}",
+      source_keys: ["n_groups"], value_resolvers: {}, target_tab: "group_strategy",
+      display_scope: "strategy",
+    },
   ],
 };
 
@@ -112,6 +124,8 @@ const descriptors = FTTestSettingChips.descriptors({
     product_path_selection: [
       {label: "中国期货日盘"}, {label: "中国期货夜盘"}, {label: "能源期货"},
     ],
+    unmountedValue: "不应显示",
+    n_groups: 5,
   },
   context: {t: value => value},
 });
@@ -120,6 +134,17 @@ assert.deepEqual(descriptors.map(item => [item.label, item.value, item.tabKey]),
   ["产品路径", "中国期货日盘、中国期货夜盘 +1", "product_path_selection"],
   ["开始日期", "2025-01-02", "time"],
   ["IC", "Rank + Pearson", "ic_method"],
+]);
+
+const strategyDescriptors = FTTestSettingChips.descriptors({
+  manifest,
+  mountedTabs: ["group_strategy"],
+  sources: {n_groups: 5},
+  includeStrategyChips: true,
+  context: {t: value => value},
+});
+assert.deepEqual(strategyDescriptors.map(item => [item.label, item.value, item.tabKey]), [
+  ["策略分组", "5", "group_strategy"],
 ]);
 
 let opened = "";
@@ -132,7 +157,8 @@ const row = FTTestSettingChips.render({
   onOpen: tabKey => { opened = tabKey; },
 });
 assert.equal(row.className, "backend-settings-chip-row");
-assert.equal(row.children.length, 3);
+assert.equal(row.children.length, 2,
+  "identity chips for tabs that are not mounted must stay out of the summary");
 assert.ok(row.children.every(item => item.className === "backend-settings-chip-group"));
 const timeGroup = row.children.find(item => item.children[0].textContent === "时间范围");
 assert.ok(timeGroup);
@@ -141,6 +167,53 @@ assert.equal(timeChip.tagName, "button");
 assert.equal(timeChip.children[0].textContent, "开始日期");
 timeChip.listeners.click();
 assert.equal(opened, "time");
+
+const overlayManifest = {
+  ...manifest,
+  chip_fields: [
+    {
+      ...manifest.chip_fields[0],
+      clickable: true,
+      detail_overlay: {kind: "factor", mode: "view", source_key: "factor"},
+    },
+    {
+      ...manifest.chip_fields[1],
+      clickable: true,
+      detail_overlay: {
+        kind: "product_group", mode: "view", source_key: "product_group",
+      },
+    },
+  ],
+};
+let openedOverlay = null;
+const overlayRow = FTTestSettingChips.render({
+  manifest: overlayManifest,
+  mountedTabs: ["factor", "product_path_selection"],
+  sources: {
+    factorAlias: ["ROC 1m"],
+    factor: [{factor_ref: "factor:roc-1m", factor_alias: "ROC 1m"}],
+    product_path_selection: [{label: "日盘"}],
+    product_group: [{group_ref: "group:day", name: "日盘"}],
+  },
+  context: {t: value => value},
+  onOverlay: descriptor => { openedOverlay = descriptor; },
+});
+const factorOverlayChip = overlayRow.children
+  .flatMap(group => group.children)
+  .find(item => item.className?.includes("backend-setting-chip")
+    && item.children[0]?.textContent === "因子");
+assert.equal(factorOverlayChip.tagName, "button");
+factorOverlayChip.listeners.click();
+assert.equal(openedOverlay.detailOverlay.target.ref, "factor:roc-1m");
+assert.equal(openedOverlay.detailOverlay.kind, "factor");
+const productGroupOverlayChip = overlayRow.children
+  .flatMap(group => group.children)
+  .find(item => item.className?.includes("backend-setting-chip")
+    && item.children[0]?.textContent === "产品路径");
+assert.equal(productGroupOverlayChip.tagName, "button");
+productGroupOverlayChip.listeners.click();
+assert.equal(openedOverlay.detailOverlay.target.ref, "group:day");
+assert.equal(openedOverlay.detailOverlay.kind, "product_group");
 
 const runManifest = {
   run_settings: {key: "run_context", label: "任务提交"},
