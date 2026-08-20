@@ -7,7 +7,7 @@
     const tabs = new Set(declaredTabs.map(item => item.key));
     const mounted = new Set(options.mountedTabs || []);
     const identity = (manifest.chip_fields || []).map(chip => identityChip(
-      chip, options.sources || {}, tabs, context,
+      chip, options.sources || {}, tabs, mounted, context, options,
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
       .filter(([key, field]) => matchesOnlyKey(key, field, onlyKeys))
@@ -111,8 +111,11 @@
     return optionLabel(field, raw, context);
   }
 
-  function identityChip(chip, sources, tabs, context) {
+  function identityChip(chip, sources, tabs, mounted, context, options = {}) {
     if (!(chip.source_keys || []).every(key => hasValue(sources[key]))) return null;
+    const tabKey = targetTab(chip, tabs);
+    if (!mounted.has(tabKey)) return null;
+    if (isStrategyScoped(chip) && options.includeStrategyChips !== true) return null;
     const values = {};
     for (const name of placeholders(chip.chip_template)) {
       const resolver = chip.value_resolvers?.[name];
@@ -123,15 +126,27 @@
     const rendered = interpolate(chip.chip_template, values, context);
     const parts = splitRendered(rendered, context.t(chip.label || chip.key));
     if (!hasValue(parts.value)) return null;
-    const fallback = tabs.has(chip.key) ? chip.key : "";
     return {
       key: `identity:${chip.key}`,
       label: parts.label,
       value: compact(parts.value, context),
       fullValue: expanded(parts.value),
-      tabKey: tabs.has(chip.target_tab) ? chip.target_tab : fallback,
+      tabKey,
       category: chip.category || "identity",
     };
+  }
+
+  function targetTab(chip, tabs) {
+    if (tabs.has(chip.target_tab)) return chip.target_tab;
+    return tabs.has(chip.key) ? chip.key : "";
+  }
+
+  function isStrategyScoped(chip) {
+    // display_scope is the backend-owned declaration.  Keep the adapter
+    // fallback so manifests produced by older servers do not leak the
+    // primary strategy into the shared summary during a rolling upgrade.
+    return chip.display_scope === "strategy"
+      || (!chip.display_scope && chip.source_adapter === "primary_strategy_group");
   }
 
   function settingChip(key, field, values, context, options = {}) {

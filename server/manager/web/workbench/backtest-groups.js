@@ -297,6 +297,7 @@
       sources,
       includeUnregistered: true,
       includeRun: false,
+      includeStrategyChips: true,
       groupBy: "none",
     });
   }
