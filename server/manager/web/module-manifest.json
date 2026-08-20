@@ -359,6 +359,7 @@
     "app": [
       "app/navigation.js",
       "app/route-dispatch.js",
+      "app/tab-workspace.js",
       "app/tab-view-cache.js",
       "app/tabs.js",
       "app/tab-return.js",
@@ -534,6 +535,7 @@
     "manager/mihomo.js",
     "app/navigation.js",
     "app/route-dispatch.js",
+    "app/tab-workspace.js",
     "app/tab-view-cache.js",
     "app/tabs.js",
     "app/tab-return.js",

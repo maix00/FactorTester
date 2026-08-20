@@ -34,7 +34,10 @@ class FakeElement {
     this.children = [];
     this.append(...values);
   }
-  querySelector() { return new FakeElement(); }
+  querySelector(selector) {
+    if (selector === "[data-ft-rerender-on-tab-restore]") return null;
+    return new FakeElement();
+  }
   querySelectorAll() { return []; }
   addEventListener() {}
   setAttribute() {}
@@ -56,6 +59,7 @@ const toolbar = new FakeElement("header");
 const notice = new FakeElement("p");
 const dialogs = [];
 const storage = new Map();
+const durableStorage = new Map();
 
 global.document = {
   body: {classList: {contains: () => false}},
@@ -85,8 +89,17 @@ global.sessionStorage = {
   getItem: key => storage.get(key) || null,
   removeItem: key => storage.delete(key),
 };
+global.localStorage = {
+  setItem: (key, value) => durableStorage.set(key, value),
+  getItem: key => durableStorage.get(key) || null,
+  removeItem: key => durableStorage.delete(key),
+};
 global.FTIcons = {node: () => new FakeElement(), module: () => "shippingbox"};
 
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/app/tab-workspace.js", "utf8"),
+  {filename: "tab-workspace.js"},
+);
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/app/tab-view-cache.js", "utf8"),
   {filename: "tab-view-cache.js"},
@@ -116,6 +129,10 @@ const tabs = window.FTTabs.create({
   isPinnedPath: path => ["/", "/products"].includes(String(path).split("?", 1)[0]),
   titleForPath: () => "详情", tabIcon: () => "shippingbox",
 });
+const workspace = window.FTTabWorkspace.create({
+  storage: localStorage, managerKey: "manager", principalKey: "account:alice",
+});
+tabs.setWorkspace(workspace);
 
 const input = new FakeElement("input");
 input.value = "draft value";
@@ -160,10 +177,32 @@ tabs.navigate("/products/product/D.DCE");
 const coldSession = state.tabSessions.get(first);
 assert(coldSession.view?.coldKey);
 assert.strictEqual(coldSession.view.content, undefined);
+const persistedActiveTabID = state.activeTabID;
 
 // Session changes invalidate the fixed home entry as well as opened tabs;
 // home is intentionally not stored in state.tabs in the real shell.
 state.activeTabID = "home";
 tabs.discardViews();
 assert.strictEqual(state.tabSessions.get("home").view, null);
+
+// A browser refresh reconstructs the complete tab registry and active tab,
+// while DOM/network state remains cold and is rendered on demand.
+const restoredState = {
+  tabs: [], activeTabID: "home", tabSessions: new Map(),
+  modules: [
+    {id: "home", path: "/", title: "主页", pinned: true},
+    {id: "products", path: "/products", title: "产品", pinned: true},
+  ],
+};
+const restoredTabs = window.FTTabs.create({
+  state: restoredState, embeddedPresentation: false, t: value => value,
+  renderRoute() {}, content, title, eyebrow, toolbar, notice,
+  modulePath: value => value.path,
+  isPinnedPath: path => ["/", "/products"].includes(String(path).split("?", 1)[0]),
+  titleForPath: () => "详情", tabIcon: () => "shippingbox",
+});
+restoredTabs.setWorkspace(workspace);
+restoredTabs.initializeTabs(workspace.restore());
+assert(restoredState.tabs.some(tab => tab.path === "/products/product/D.DCE"));
+assert.strictEqual(restoredState.activeTabID, persistedActiveTabID);
 console.log("ok");

@@ -127,6 +127,9 @@
     tabs?.discardViews?.();
     await loadLanguage();
     await loadModules();
+    restoreWorkspaceForSession();
+    const active = state.tabs.find(tab => tab.id === state.activeTabID);
+    if (active?.path) history.replaceState({}, "", active.path);
     await renderRoute();
   }
 
@@ -331,6 +334,16 @@
   const initializeTabs = tabs.initializeTabs;
   const currentTabContext = tabs.currentTabContext;
   const detailTabIDForPath = tabs.detailTabIDForPath;
+  let tabWorkspace = null;
+
+  function restoreWorkspaceForSession() {
+    tabWorkspace = FTTabWorkspace.create({
+      managerKey: location.origin,
+      principalKey: FTTabWorkspace.principalKey(state.session),
+    });
+    tabs.setWorkspace(tabWorkspace);
+    initializeTabs(tabWorkspace.restore());
+  }
   const shell = FTAppShell.create({state, api, t, tabs});
   const {
     loadLanguage, loadModules, localizeShell, initializeSidebarLayout,
@@ -419,9 +432,12 @@
     await loadLanguage();
     await loadModules();
     initializeSidebarLayout();
-    initializeTabs();
+    restoreWorkspaceForSession();
     const initial = `${location.pathname}${location.search}`;
-    if (initial !== "/" && initial !== "") {
+    if ((initial === "/" || initial === "") && state.activeTabID !== "home") {
+      const active = state.tabs.find(tab => tab.id === state.activeTabID);
+      if (active?.path) history.replaceState({}, "", active.path);
+    } else if (initial !== "/" && initial !== "") {
       // Module routes, including /research?section=..., belong to the
       // existing feature-entry tab.  Only detail routes (for example
       // /research/<report>) get an independently closable tab.
@@ -439,6 +455,7 @@
         state.activeTabID = id;
       }
       renderOpenedTabs();
+      tabs.checkpointWorkspace();
     }
     await renderRoute();
   })();
