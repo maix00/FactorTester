@@ -181,6 +181,7 @@
       "jobs/artifacts.js",
       "jobs/generation.js",
       "jobs/actions.js",
+      "jobs/detail-tabs.js",
       "jobs/detail.js"
     ],
     "job-detail-input": [
@@ -433,6 +434,7 @@
     "jobs/jobs.js",
     "jobs/actions.js",
     "jobs/input-detail.js",
+    "jobs/detail-tabs.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",
