@@ -5,6 +5,7 @@ import json
 import threading
 from contextlib import contextmanager
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import pytest
@@ -320,6 +321,50 @@ def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads
     assert value["execution_server_id"] == "remote-main"
     assert value["execution_port"] == 8000
     assert value["storage_server_id"] == "remote-main"
+
+
+def test_artifact_route_uses_indexed_storage_server_without_execution_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "indexed-repo",
+        "python",
+        server_id="requesting-manager",
+        state_root=tmp_path / "indexed-state",
+    )
+    state.job_index.upsert("alice", [{
+        "job_id": "job-indexed",
+        "port": 8141,
+        "storage_server_id": "remote-storage",
+        "execution_server_id": "remote-storage",
+    }])
+    selected = ServiceRoute(
+        server_id="remote-storage",
+        role="feat",
+        branch="issue",
+        revision="revision",
+        port=9123,
+        remote=True,
+        online=True,
+    )
+    monkeypatch.setattr(
+        state,
+        "service_routes",
+        lambda **_kwargs: [selected],
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+    parsed = urlparse(
+        "/api/jobs/job-indexed/artifacts/equity_curve_report.svg/access"
+    )
+
+    routes = handler._job_routes(
+        parsed, "alice", for_artifact_storage=True,
+    )
+
+    assert routes == [selected]
+    assert routes[0].port == 9123
+    assert routes[0].port != 8141
 
 
 def test_public_artifact_transfer_access_requires_manager_session(tmp_path) -> None:

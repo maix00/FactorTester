@@ -245,6 +245,13 @@ class JobProxyRoutesMixin:
             raise ValueError("port must be an integer")
         port = int(raw_port) if raw_port and not for_artifact_storage else None
         server_id = str(query.get("server_id", [""])[0] or "").strip()
+        if for_artifact_storage and not server_id:
+            job_match = re.match(r"^/api/jobs/([^/]+)", parsed.path)
+            indexed = self._indexed_storage_servers(
+                unquote(job_match.group(1)) if job_match is not None else "",
+            )
+            if len(indexed) == 1:
+                server_id = next(iter(indexed))
         branch = (
             str(query.get("branch", [""])[0] or "").strip()
             if not for_artifact_storage else ""
@@ -310,6 +317,34 @@ class JobProxyRoutesMixin:
             self.state._local_route(port=value, online=True)
             for value in self._job_ports(parsed, principal)
         ]
+
+    def _indexed_storage_servers(self, job_id: str) -> set[str]:
+        """Resolve an artifact's server from the Manager index, never a port."""
+        target = str(job_id or "").strip()
+        index = getattr(self.state, "job_index", None)
+        if not target or index is None:
+            return set()
+        try:
+            jobs = index.list_all(limit=2000)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            return set()
+        return {
+            str(
+                item.get("storage_server_id")
+                or item.get("execution_server_id")
+                or item.get("server_id")
+                or ""
+            ).strip()
+            for item in jobs
+            if isinstance(item, dict)
+            and str(item.get("job_id") or "").strip() == target
+            and str(
+                item.get("storage_server_id")
+                or item.get("execution_server_id")
+                or item.get("server_id")
+                or ""
+            ).strip()
+        }
 
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
