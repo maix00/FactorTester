@@ -146,3 +146,27 @@ def list_workspace_summaries(*, owner: str) -> list[dict[str, Any]]:
             (owner,),
         ).fetchall()
     return [_row_payload(row) or {} for row in rows]
+
+
+def delete_draft_workspace(*, workspace_id: str, owner: str) -> dict[str, Any] | None:
+    """Delete tab-owned editable state without touching frozen evidence."""
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT workspace_id FROM research_workspaces "
+            "WHERE workspace_id=? AND owner=? AND deleted_at IS NULL",
+            (workspace_id, owner),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "DELETE FROM research_configurations WHERE workspace_id=? "
+            "AND owner=? AND role='workspace'",
+            (workspace_id, owner),
+        )
+        conn.execute(
+            "DELETE FROM research_workspaces WHERE workspace_id=? AND owner=?",
+            (workspace_id, owner),
+        )
+    return {"deleted": True}

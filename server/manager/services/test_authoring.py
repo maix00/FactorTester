@@ -82,7 +82,9 @@ class TestAuthoringService:
                 cls._CONFIG_RE.fullmatch(path)
                 or cls._TEMPLATE_RE.fullmatch(path)
             )
-        return bool(method == "DELETE" and cls._TEMPLATE_RE.fullmatch(path))
+        return bool(method == "DELETE" and (
+            cls._TEMPLATE_RE.fullmatch(path) or cls._WORKSPACE_RE.fullmatch(path)
+        ))
 
     @staticmethod
     def prepare_run_context(
@@ -193,6 +195,14 @@ class TestAuthoringService:
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
     ) -> TestAuthoringResponse:
         from server.services import research_configurations, research_workspaces
+
+        if method == "DELETE" and (match := self._WORKSPACE_RE.fullmatch(path)):
+            value = research_workspaces.delete_draft_workspace(
+                workspace_id=unquote(match.group(1)), owner=owner,
+            )
+            if value is None:
+                raise TestAuthoringError("workspace not found", 404)
+            return TestAuthoringResponse({"success": True, **value})
 
         if method == "POST" and path == "/api/workspaces":
             factors = self._object_list(payload, "factors")

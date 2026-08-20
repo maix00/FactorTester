@@ -512,6 +512,30 @@ def test_configuration_snapshot_is_manager_owned_without_service_port(
     }]
 
 
+def test_workspace_draft_delete_is_manager_owned_without_service_port(
+    monkeypatch,
+) -> None:
+    service = TestAuthoringService()
+    calls = []
+    from server.services import research_workspaces
+
+    monkeypatch.setattr(
+        research_workspaces,
+        "delete_draft_workspace",
+        lambda **values: calls.append(values) or {"deleted": True},
+    )
+    assert service.handles("/api/workspaces/workspace-one", "DELETE") is True
+    response = service.write(
+        "DELETE", "/api/workspaces/workspace-one",
+        owner="user@1", payload={},
+    )
+
+    assert response.payload == {
+        "success": True, "deleted": True,
+    }
+    assert calls == [{"workspace_id": "workspace-one", "owner": "user@1"}]
+
+
 def test_test_settings_are_available_without_execution_service(
     tmp_path, monkeypatch,
 ) -> None:

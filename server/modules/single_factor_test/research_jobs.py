@@ -858,6 +858,16 @@ def get_research_workspace(workspace_id: str):
     return jsonify({"success": True, "workspace": workspace})
 
 
+@sft_bp.delete("/api/workspaces/<workspace_id>")
+def delete_research_workspace(workspace_id: str):
+    value = research_workspaces.delete_draft_workspace(
+        workspace_id=workspace_id, owner=require_user(),
+    )
+    if value is None:
+        return jsonify({"success": False, "error": "workspace not found"}), 404
+    return jsonify({"success": True, **value})
+
+
 @sft_bp.get("/api/workspaces/<workspace_id>/configuration")
 def get_workspace_configuration(workspace_id: str):
     value = research_configurations.load_workspace_configuration(

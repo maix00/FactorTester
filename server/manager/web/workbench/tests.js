@@ -126,11 +126,13 @@
     const sessions = context.tabSession || (context.tabSession = {});
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
+    const savedDraft = sessions.durable?.testDrafts?.[kind];
     const application = definitions[kind].application;
     const clientQuery = clientScope === "web"
       ? ""
       : `?client=${encodeURIComponent(clientScope)}`;
-    const savedWorkspaceID = localStorage.getItem(`ft-${kind}-workspace`) || "";
+    const savedWorkspaceID = savedDraft?.schemaVersion === 2
+      ? String(savedDraft.workspaceID || "") : "";
     const savedWorkspaceConfigurationPromise = savedWorkspaceID
       ? context.api(`/api/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
         .then(value => ({value, error: null}))
@@ -163,6 +165,7 @@
       settingsChipsCode: {status: "idle", error: "", promise: null},
       settingsTabLoads: Object.create(null),
       settingsLoadedTabs: new Set(),
+      restoredWorkspaceID: savedWorkspaceID,
     };
     FTTestState.restoreWorkspace(state);
     if (state.workspace && !state.workspace.configuration) {
@@ -187,7 +190,6 @@
       state.runValues.retention_mode = "full";
     }
     FTTestState.seedSavedCatalogs(state);
-    const savedDraft = sessions.durable?.testDrafts?.[kind];
     FTTestState.restoreDraft(state, savedDraft);
     window.FTTestFactors?.prepare?.(state);
     window.FTTestProducts?.synchronize?.(state);
@@ -564,8 +566,14 @@
     return true;
   }
 
-  function clearDraft(context, state, refresh) {
+  async function clearDraft(context, state, refresh) {
     if (!window.confirm(context.t("确定清空当前测试配置吗？"))) return false;
+    const workspaceID = String(state.workspace?.workspace_id || "");
+    if (workspaceID) {
+      await context.api(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
+        method: "DELETE",
+      });
+    }
     FTTestState.clearDraft(state);
     initializeSettings(state);
     window.FTTestFactors?.prepare?.(state);

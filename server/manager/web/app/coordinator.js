@@ -323,6 +323,16 @@
     state, embeddedPresentation, t, renderRoute,
     content, title, eyebrow, toolbar, notice,
     beforeTabChange: () => { activeRouteToken += 1; },
+    onTabClosed: (_tab, session) => {
+      const drafts = session?.durable?.testDrafts;
+      const workspaceIDs = new Set(Object.values(drafts || {}).map(
+        draft => draft?.schemaVersion === 2 ? String(draft.workspaceID || "") : "",
+      ).filter(Boolean));
+      return Promise.all([...workspaceIDs].map(workspaceID => api(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}`,
+        {method: "DELETE"},
+      )));
+    },
     modulePath, isPinnedPath, titleForPath, tabIcon,
   });
   const tabSession = tabs.tabSession;
