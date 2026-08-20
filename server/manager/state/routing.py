@@ -8,7 +8,6 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.domain.federation import (
     ServiceRoute,
@@ -16,66 +15,11 @@ from server.manager.domain.federation import (
     TargetUnavailable,
 )
 from server.manager.http.gateway import GatewayResponse
+from server.manager.state.federated_source_catalog import (
+    federated_source_descriptors as build_federated_source_descriptors,
+    source_provider,
+)
 from server.manager.state.models import Worktree
-
-
-def _merge_source_values(first: object, second: object) -> list[str]:
-    values: list[str] = []
-    for collection in (first, second):
-        if not isinstance(collection, (list, tuple, set)):
-            continue
-        for value in collection:
-            text = str(value or "").strip()
-            if text and text not in values:
-                values.append(text)
-    return values
-
-
-def _merge_source_objects(
-    first: object,
-    second: object,
-    *,
-    key_fields: tuple[str, ...],
-) -> list[dict[str, object]]:
-    merged: dict[str, dict[str, object]] = {}
-    for collection in (first, second):
-        if not isinstance(collection, (list, tuple)):
-            continue
-        for value in collection:
-            if not isinstance(value, dict):
-                continue
-            key = next(
-                (str(value.get(field) or "").strip() for field in key_fields
-                 if str(value.get(field) or "").strip()),
-                "",
-            )
-            if not key:
-                continue
-            merged[key] = {**merged.get(key, {}), **value}
-    return list(merged.values())
-
-
-def _merge_source_members(first: object, second: object) -> list[dict[str, object]]:
-    return _merge_source_objects(first, second, key_fields=("id", "key", "label"))
-
-
-def _merge_source_availability(first: object, second: object) -> dict[str, object]:
-    left = first if isinstance(first, dict) else {}
-    right = second if isinstance(second, dict) else {}
-    status = "ready" if "ready" in {left.get("status"), right.get("status")} \
-        else str(left.get("status") or right.get("status") or "")
-    return {
-        **left,
-        **right,
-        "status": status,
-        "product_count": max(
-            int(left.get("product_count") or 0),
-            int(right.get("product_count") or 0),
-        ),
-        "frequency_names": _merge_source_values(
-            left.get("frequency_names"), right.get("frequency_names"),
-        ),
-    }
 
 
 class RoutingStateMixin:
@@ -275,198 +219,18 @@ class RoutingStateMixin:
         routes: list[ServiceRoute] | None = None,
         online: bool | None = None,
     ) -> dict[str, object]:
-        endpoint = str(route.endpoint or "")
-        host = urlparse(endpoint).hostname or ""
-        source = source or {}
-        target_routes = list(routes or [route])
-        target_ports = sorted({item.port for item in target_routes})
-        payload = {
-            "server_id": route.server_id,
-            "server_role": route.role,
-            "server_branch": route.branch,
-            "server_revision": route.revision,
-            "server_endpoint": endpoint,
-            "server_host": host,
-            "online": route.online if online is None else bool(online),
-            "ports": sorted({
-                int(value) for value in (ports or target_ports or [route.port])
-                if 1 <= int(value) <= 65535
-            }),
-            "targets": [
-                {
-                    "server_id": item.server_id,
-                    "port": item.port,
-                    "branch": item.branch,
-                    "revision": item.revision,
-                    "features": list(item.features),
-                    "online": item.online,
-                    "load": item.load,
-                    "queue_depth": item.queue_depth,
-                }
-                for item in sorted(
-                    target_routes,
-                    key=lambda item: (item.port, item.branch),
-                )
-            ],
-            "frequencies": list(source.get("frequencies") or []),
-            "catalog_product_count": int(
-                source.get("catalog_product_count") or 0
-            ),
-            "available_product_count": int(
-                source.get("available_product_count") or 0
-            ),
-            "capability_revision": str(source.get("revision") or ""),
-            "public_server": bool(route.public_server),
-        }
-        return payload
+        return source_provider(
+            route,
+            source=source,
+            ports=ports,
+            routes=routes,
+            online=online,
+        )
 
     def federated_source_descriptors(
         self, *, refresh: bool = False,
     ) -> list[dict[str, object]]:
-        """Merge local and peer source catalogs with provider metadata."""
-        local_ports = self.local_service_routes(include_offline=True)
-        peer_routes = self.federation_registry.routes(include_offline=True)
-        if not local_ports and not peer_routes:
-            # A Manager without an attached execution service is still useful
-            # for catalog authoring.  Preserve the old projection contract in
-            # that mode instead of fabricating a provider on port 7998.
-            return [
-                dict(item) for item in (self.client_state.product_sources() or [])
-                if isinstance(item, dict)
-            ]
-        local_snapshot = self.local_capability_snapshot({"summary": True})
-        local_by_id = {
-            str(item.get("id") or ""): dict(item)
-            for item in (self.client_state.product_sources() or [])
-            if isinstance(item, dict) and str(item.get("id") or "")
-        }
-        summary_by_id = {
-            str(item.get("id") or ""): item
-            for item in (local_snapshot.get("sources") or [])
-            if isinstance(item, dict) and str(item.get("id") or "")
-        }
-        merged: dict[str, dict[str, object]] = {}
-        local_reference = (
-            str(os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or "")
-            .strip().rstrip("/")
-            or "http://127.0.0.1:7998"
-        )
-        local_route = ServiceRoute(
-            server_id=self.server_id,
-            role=self.server_role,
-            branch=self.fixed_branch,
-            revision=self._revision_for_path(),
-            port=7998,
-            endpoint=local_reference,
-            online=True,
-            public_server=bool(self.public_server),
-            latency_ms=0.0,
-        )
-        local_ports_values = [route.port for route in local_ports]
-        for source_id, summary in summary_by_id.items():
-            base = dict(local_by_id.get(source_id) or summary)
-            base.setdefault("source_ref", f"data-source:server:{source_id}")
-            base.setdefault("bundle_id", source_id)
-            base.setdefault("bundle_name", base.get("source_name") or source_id)
-            base["server_providers"] = [self._source_provider(
-                local_route,
-                source=summary,
-                ports=local_ports_values or [7998],
-                routes=local_ports or [local_route],
-                online=any(route.online for route in local_ports) if local_ports else True,
-            )]
-            merged[source_id] = base
-
-        peer_route_groups: dict[str, list[ServiceRoute]] = {}
-        for route in peer_routes:
-            peer_route_groups.setdefault(route.server_id, []).append(route)
-        for server_id, routes in peer_route_groups.items():
-            route = min(routes, key=self.route_selection_key)
-            peer_snapshot = self._cached_peer_capabilities(
-                route, refresh=refresh,
-            )
-            peer_sources = {
-                str(item.get("id") or ""): item
-                for item in ((peer_snapshot or {}).get("sources") or [])
-                if isinstance(item, dict) and str(item.get("id") or "")
-            }
-            for source_id, summary in peer_sources.items():
-                base = merged.setdefault(source_id, {
-                    "id": source_id,
-                    "source_name": summary.get("source_name") or source_id,
-                    "source_ref": f"data-source:server:{source_id}",
-                    "bundle_id": source_id,
-                    "bundle_name": summary.get("source_name") or source_id,
-                    "provider_kind": summary.get("provider_kind") or "",
-                    "members": summary.get("members") or [],
-                    "frequencies": summary.get("frequencies") or [],
-                    "availability": summary.get("availability") or {},
-                    "catalog_product_count": summary.get("catalog_product_count") or 0,
-                })
-                if source_id not in local_by_id:
-                    for key in (
-                        "provider_kind", "frequencies",
-                    ):
-                        if key in summary:
-                            base[key] = summary[key]
-                base["members"] = _merge_source_members(
-                    base.get("members"), summary.get("members"),
-                )
-                base["product_paths"] = _merge_source_values(
-                    base.get("product_paths"), summary.get("product_paths"),
-                )
-                base["categories"] = _merge_source_objects(
-                    base.get("categories"), summary.get("categories"),
-                    key_fields=("id", "title_zh", "title"),
-                )
-                base["data_modes"] = _merge_source_objects(
-                    base.get("data_modes"), summary.get("data_modes"),
-                    key_fields=("id", "frequency", "title_zh"),
-                )
-                base["frequencies"] = _merge_source_values(
-                    base.get("frequencies"), summary.get("frequencies"),
-                )
-                base["catalog_product_count"] = max(
-                    int(base.get("catalog_product_count") or 0),
-                    int(summary.get("catalog_product_count") or 0),
-                )
-                base["availability"] = _merge_source_availability(
-                    base.get("availability"), summary.get("availability"),
-                )
-                base.setdefault("server_providers", []).append(
-                    self._source_provider(
-                        route,
-                        source=summary,
-                        routes=routes,
-                        online=any(item.online for item in routes),
-                    )
-                )
-            if not peer_sources:
-                # Keep a visible provider row for an offline/degraded peer
-                # when its last capability response is unavailable.  It is
-                # useful in the overlay even though no source claim is made.
-                continue
-        for source in merged.values():
-            providers = source.get("server_providers") or []
-            source["server_providers"] = sorted(
-                providers,
-                key=lambda item: (
-                    not bool(item.get("online")),
-                    str(item.get("server_id") or ""),
-                ),
-            )
-            # ``server_provided`` describes ownership of the current
-            # Manager's catalog, not the liveness of an execution route.
-            # A local source remains a server-provided source while its
-            # worker/data port is stopped; availability and provider rows
-            # carry the independent online state.
-            source["server_provided"] = bool(source.get("server_provided")) or any(
-                bool(item.get("online")) for item in providers
-            )
-        return sorted(
-            merged.values(),
-            key=lambda item: str(item.get("source_name") or item.get("id") or ""),
-        )
+        return build_federated_source_descriptors(self, refresh=refresh)
 
     def route_for(
         self,

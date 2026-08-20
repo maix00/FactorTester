@@ -5,10 +5,15 @@ import json
 import threading
 from contextlib import contextmanager
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import pytest
 
+import settings as Settings
+from server.jobs.models import JobRecord
+from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.manager import runtime as manager
 from server.manager.data_plane.context import DataPlaneRuntime
 from server.manager.data_plane.server import ClientDataPlaneHTTPServer
@@ -34,6 +39,18 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
     digest = hashlib.sha256(raw).hexdigest()
     origin = tmp_path / "result.bin"
     origin.write_bytes(raw)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    repository = JobRepository()
+    repository.create(JobRecord(
+        job_id="job-1", run_id="run-1", owner="alice",
+        workspace_id="workspace", kind="backtest",
+        status=JobStatus.SUBMITTED, retention_mode="full", job_spec={},
+    ))
+    repository.record_artifact(
+        job_id="job-1", name="result.bin", relative_path="job-1/result.bin",
+        content_type="image/svg+xml", content_hash=digest,
+        size_bytes=len(raw),
+    )
     state = manager.ManagerState(
         tmp_path / "repo",
         "python",
@@ -67,21 +84,6 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
         port=8141,
     )
     monkeypatch.setattr(state, "route_for", lambda **_values: route)
-    monkeypatch.setattr(
-        state,
-        "route_json",
-        lambda *_args, **_values: {
-            "success": True,
-            "artifacts": [{
-                "name": "result.bin",
-                "file_name": "result.bin",
-                "content_type": "image/svg+xml",
-                "size_bytes": len(raw),
-                "content_hash": digest,
-                "state": "active",
-            }],
-        },
-    )
     manager.Handler.state = state
     manager_server = manager.ThreadingHTTPServer(
         ("127.0.0.1", 0), manager.Handler,
@@ -161,23 +163,23 @@ def test_authorized_account_artifact_read_uses_indexed_job_owner(
     )
     monkeypatch.setattr(state, "route_for", lambda **_values: route)
 
-    def route_json(_route, *, principal, **_values):
+    def list_artifacts(_catalog, *, job_id, principal):
         seen_principals.append(principal)
         if principal != "bob":
-            return {"success": True, "artifacts": []}
-        return {
-            "success": True,
-            "artifacts": [{
+            return []
+        return [{
                 "name": "equity_curve_report",
                 "file_name": "equity_curve_report.svg",
                 "content_type": "image/svg+xml",
                 "size_bytes": 7,
                 "content_hash": hashlib.sha256(b"<svg/>").hexdigest(),
                 "state": "active",
-            }],
-        }
+            }]
 
-    monkeypatch.setattr(state, "route_json", route_json)
+    monkeypatch.setattr(
+        "server.manager.http.job_transfer_routes.JobArtifactCatalog.list",
+        list_artifacts,
+    )
 
     def prepare(**values):
         prepared.update(values)
@@ -245,10 +247,9 @@ def test_unrelated_account_cannot_use_public_job_projection(
     )
     monkeypatch.setattr(state, "route_for", lambda **_values: route)
     monkeypatch.setattr(
-        state,
-        "route_json",
-        lambda *_args, **values: seen_principals.append(values["principal"])
-        or {"success": True, "artifacts": []},
+        "server.manager.http.job_transfer_routes.JobArtifactCatalog.list",
+        lambda _catalog, *, job_id, principal: seen_principals.append(principal)
+        or [],
     )
     manager.Handler.state = state
     server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
@@ -322,6 +323,209 @@ def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads
     assert value["storage_server_id"] == "remote-main"
 
 
+def test_artifact_route_uses_indexed_storage_server_without_execution_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "indexed-repo",
+        "python",
+        server_id="requesting-manager",
+        state_root=tmp_path / "indexed-state",
+    )
+    state.job_index.upsert("alice", [{
+        "job_id": "job-indexed",
+        "port": 8141,
+        "storage_server_id": "remote-storage",
+        "execution_server_id": "remote-storage",
+    }])
+    selected = ServiceRoute(
+        server_id="remote-storage",
+        role="feat",
+        branch="issue",
+        revision="revision",
+        port=9123,
+        remote=True,
+        online=False,
+        peer_control_endpoint="http://10.0.0.2:7998",
+        proxy_token="peer-token",
+    )
+    monkeypatch.setattr(
+        state,
+        "service_routes",
+        lambda **_kwargs: [selected],
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+    parsed = urlparse(
+        "/api/jobs/job-indexed/artifacts/equity_curve_report.svg/access"
+    )
+
+    routes = handler._job_routes(
+        parsed, "alice", for_artifact_storage=True,
+    )
+
+    assert routes == [selected]
+    assert routes[0].port == 9123
+    assert routes[0].port != 8141
+
+
+def test_remote_artifact_metadata_uses_peer_manager_control_plane(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo", "python", server_id="requesting-manager",
+        state_root=tmp_path / "manager-state",
+    )
+    route = ServiceRoute(
+        server_id="source-manager", role="main", branch="main",
+        revision="revision", port=8000, remote=True, online=False,
+        peer_control_endpoint="http://10.0.0.2:7998",
+        proxy_token="peer-token",
+    )
+    calls: list[dict[str, object]] = []
+
+    def public_data(selected, **values):
+        calls.append({"route": selected, **values})
+        return {"success": True, "artifacts": [{
+            "name": "curve.svg", "file_name": "curve.svg",
+            "state": "active", "artifact_role": "output",
+            "content_type": "image/svg+xml", "size_bytes": 5,
+            "content_hash": hashlib.sha256(b"curve").hexdigest(),
+        }]}
+
+    monkeypatch.setattr(state.federation_gateway, "public_data", public_data)
+    monkeypatch.setattr(
+        state, "route_request",
+        lambda *_args, **_kwargs: pytest.fail(
+            "artifact metadata must not use the business-service proxy"
+        ),
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+
+    payload = handler._job_artifact_payload(
+        route, job_id="job-remote", principal="alice",
+    )
+
+    assert payload["artifacts"][0]["name"] == "curve.svg"
+    assert calls == [{
+        "route": route,
+        "kind": "job-artifacts",
+        "operation": "list",
+        "principal": "alice",
+        "payload": {"job_id": "job-remote"},
+    }]
+
+
+def test_artifact_route_can_target_peer_manager_with_no_business_ports(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo", "python", server_id="requesting-manager",
+        state_root=tmp_path / "manager-state",
+    )
+    state.job_index.upsert("alice", [{
+        "job_id": "job-no-worker",
+        "owner": "alice",
+        "port": 0,
+        "storage_server_id": "source-manager",
+    }])
+    monkeypatch.setattr(state, "service_routes", lambda **_values: [])
+    monkeypatch.setattr(
+        state.federation_registry,
+        "describe",
+        lambda server_id: {
+            "server_id": server_id,
+            "role": "main",
+            "branch": "main",
+            "revision": "revision",
+            "endpoint": "http://10.0.0.2:7998",
+            "proxy_token": "peer-token",
+            "transfer_node": {
+                "peer_control_endpoint": "http://10.10.0.2:7998",
+                "peer_data_endpoint": "http://10.10.0.2:7997",
+            },
+        },
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+
+    routes = handler._job_routes(
+        urlparse("/api/jobs/job-no-worker/artifacts/curve.svg/access"),
+        "alice",
+        for_artifact_storage=True,
+    )
+
+    assert len(routes) == 1
+    assert routes[0].server_id == "source-manager"
+    assert routes[0].port == 0
+    assert routes[0].peer_control_endpoint == "http://10.10.0.2:7998"
+
+
+def test_local_manager_reads_artifact_metadata_without_business_service(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    repository = JobRepository()
+    repository.create(JobRecord(
+        job_id="job-manager-owned",
+        run_id="run-manager-owned",
+        owner="alice",
+        workspace_id="workspace",
+        kind="backtest",
+        status=JobStatus.SUBMITTED,
+        retention_mode="full",
+        job_spec={},
+    ))
+    artifact = repository.record_artifact(
+        job_id="job-manager-owned",
+        name="curve.svg",
+        relative_path="job-manager-owned/curve.svg",
+        content_type="image/svg+xml",
+        content_hash=hashlib.sha256(b"curve").hexdigest(),
+        size_bytes=5,
+    )
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    state.job_index.upsert("alice", [{
+        "job_id": "job-manager-owned",
+        "owner": "alice",
+        "storage_server_id": "local-feat",
+    }])
+    monkeypatch.setattr(
+        state,
+        "route_json",
+        lambda *_args, **_kwargs: pytest.fail(
+            "artifact metadata must not use a business service route"
+        ),
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+
+    selected = handler._artifact_metadata(
+        [ServiceRoute(
+            server_id="local-feat",
+            role="feat",
+            branch="feat",
+            revision="test",
+            port=0,
+        )],
+        job_id="job-manager-owned",
+        name="curve.svg",
+        principal="alice",
+    )
+
+    assert selected is not None
+    route, metadata, lookup_principal = selected
+    assert route.server_id == "local-feat"
+    assert metadata["name"] == artifact["name"]
+    assert lookup_principal == "alice"
+
+
 def test_public_artifact_transfer_access_requires_manager_session(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "repo",
@@ -364,11 +568,8 @@ def test_local_unprotected_manager_uses_anonymous_transfer_principal(
     captured: dict[str, object] = {}
     monkeypatch.setattr(state, "route_for", lambda **_values: route)
     monkeypatch.setattr(
-        state,
-        "route_json",
-        lambda *_args, **_values: {
-            "success": True,
-            "artifacts": [{
+        "server.manager.http.job_transfer_routes.JobArtifactCatalog.list",
+        lambda _catalog, **_values: [{
                 "name": "result.bin",
                 "file_name": "result.bin",
                 "content_type": "application/octet-stream",
@@ -376,7 +577,6 @@ def test_local_unprotected_manager_uses_anonymous_transfer_principal(
                 "content_hash": hashlib.sha256(b"result").hexdigest(),
                 "state": "active",
             }],
-        },
     )
 
     def prepare(**values):
@@ -421,11 +621,8 @@ def test_local_unprotected_manager_does_not_expose_input_artifact(
     )
     monkeypatch.setattr(state, "route_for", lambda **_values: route)
     monkeypatch.setattr(
-        state,
-        "route_json",
-        lambda *_args, **_values: {
-            "success": True,
-            "artifacts": [{
+        "server.manager.http.job_transfer_routes.JobArtifactCatalog.list",
+        lambda _catalog, **_values: [{
                 "name": "factor_source.py",
                 "file_name": "factor_source.py",
                 "artifact_role": "input",
@@ -434,7 +631,6 @@ def test_local_unprotected_manager_does_not_expose_input_artifact(
                 "content_hash": hashlib.sha256(b"secret").hexdigest(),
                 "state": "active",
             }],
-        },
     )
     manager.Handler.state = state
     server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)

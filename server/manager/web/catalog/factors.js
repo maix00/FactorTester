@@ -155,7 +155,10 @@
 
   async function setDetail(context, targetRef) {
     context.activeNav("factors");
-    const data = await load(context);
+    const inline = context.testObjectTemporary && context.testObjectInitialValue;
+    const data = inline
+      ? {sets: [context.testObjectInitialValue], factors: []}
+      : await load(context);
     if (!current(context)) return;
     return FTFactorDetails.setDetail(context, data, targetRef, nativeRequest);
   }

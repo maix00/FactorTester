@@ -341,6 +341,7 @@
       "profile/profile-directory-detail.js",
       "profile/workspace-browser.js",
       "profile/profiles.js",
+      "profile/agent-model-editor.js",
       "profile/agent-models.js"
     ],
     "settings": [
@@ -521,6 +522,7 @@
     "profile/profile-directory-detail.js",
     "profile/workspace-browser.js",
     "profile/profiles.js",
+    "profile/agent-model-editor.js",
     "profile/agent-models.js",
     "settings/settings.js",
     "settings/devices.js",

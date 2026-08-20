@@ -36,13 +36,11 @@ def _loads(value: str | None) -> Any:
 
 def empty_payload(
     *,
-    factor_families: list[dict[str, Any]] | None = None,
     factors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "shared": {
-            "factor_families": deepcopy(factor_families or []),
             "factors": deepcopy(factors or []),
         },
         "analyses": {},
@@ -60,26 +58,21 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     ui = payload.get("ui")
     if not isinstance(shared, dict) or not isinstance(analyses, dict) or not isinstance(ui, dict):
         raise ValueError("configuration requires object shared, analyses, and ui sections")
-    families = shared.get("factor_families")
+    shared = deepcopy(shared)
+    # Family catalogs belong to the factor-create overlay, not to a reusable
+    # test configuration.  Loading an existing workspace opportunistically
+    # retires the old duplicate projection on its next save.
+    shared.pop("factor_families", None)
+    payload = {**payload, "shared": shared}
     factors = shared.get("factors")
-    if not isinstance(families, list) or not all(isinstance(item, dict) for item in families):
-        raise ValueError("shared.factor_families must be an array of objects")
     if not isinstance(factors, list) or not all(isinstance(item, dict) for item in factors):
         raise ValueError("shared.factors must be an array of objects")
-    family_names = [str(item.get("alias") or "").strip() for item in families]
-    if any(not alias for alias in family_names):
-        raise ValueError("each factor family requires a non-empty alias")
-    if len(set(family_names)) != len(family_names):
-        raise ValueError("factor family aliases must be unique")
-    family_aliases = set(family_names)
     factor_aliases: set[str] = set()
     for factor in factors:
         alias = str(factor.get("alias") or "").strip()
         family_alias = str(factor.get("factor_family_alias") or "").strip()
         if not alias or not family_alias:
             raise ValueError("each factor requires alias and factor_family_alias")
-        if family_alias not in family_aliases:
-            raise ValueError(f"factor {alias} references unknown factor family {family_alias}")
         if alias in factor_aliases:
             raise ValueError(f"factor alias must be unique: {alias}")
         factor_aliases.add(alias)
@@ -198,12 +191,10 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def create_workspace_configuration(
     *, owner: str, workspace_id: str,
-    factor_families: list[dict[str, Any]] | None = None,
     factors: list[dict[str, Any]] | None = None,
     payload: dict | None = None,
 ) -> dict[str, Any]:
     value = validate_payload(payload or empty_payload(
-        factor_families=factor_families,
         factors=factors,
     ))
     configuration_id = uuid.uuid4().hex
@@ -456,12 +447,37 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
         alias = str(source.get(key) or "").strip()
         if alias:
             factor_aliases.add(alias)
+    refs_by_alias = {
+        alias: "factor:legacy:" + hashlib.sha256(alias.encode()).hexdigest()
+        for alias in factor_aliases
+    }
+    for group in backtest.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        aliases = group.pop("factorAliases", None)
+        if aliases is None:
+            aliases = group.pop("factor_aliases", None)
+        primary = group.pop("factorAlias", None) or group.pop("factor_alias", None)
+        values = aliases if isinstance(aliases, list) else [primary]
+        group["factor_candidate_refs"] = [
+            refs_by_alias[str(alias).strip()]
+            for alias in values if str(alias or "").strip() in refs_by_alias
+        ]
+    backtest.pop("factor", None)
+    backtest.pop("factor_alias", None)
+    backtest.pop("factorAlias", None)
+    local_settings.pop("factor", None)
+    local_settings.pop("factor_candidates", None)
+    backtest["local_settings"] = local_settings
     return {
         "schema_version": SCHEMA_VERSION,
         "shared": {
-            "factor_families": [{"alias": factor_family_alias}],
             "factors": [
-                {"alias": alias, "factor_family_alias": factor_family_alias}
+                {
+                    "factor_ref": refs_by_alias[alias],
+                    "alias": alias,
+                    "factor_family_alias": factor_family_alias,
+                }
                 for alias in sorted(factor_aliases)
             ],
         },

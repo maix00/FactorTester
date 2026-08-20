@@ -107,9 +107,11 @@ def list_product_categories(username: str) -> list[dict[str, Any]]:
                 if override.get(key)
             })
         value["items"] = _source_category_items(value["id"])
-        source.append(_category_view(
+        projected = _category_view(
             value, kind="source", owner_ref="source", source_managed=True,
-        ))
+        )
+        projected["path_sources"] = _category_path_sources(projected.get("items") or [])
+        source.append(projected)
     owned = []
     raw_owned = load_product_categories(username)
     migrated_owned = []
@@ -121,13 +123,31 @@ def list_product_categories(username: str) -> list[dict[str, Any]]:
             if value.get("source_ids") != inferred:
                 value["source_ids"] = inferred
         migrated_owned.append(dict(value))
-        owned.append(_category_view(
+        projected = _category_view(
             value, kind="user", owner_ref=f"user:{username}",
             source_managed=False,
-        ))
+        )
+        projected["path_sources"] = _category_path_sources(projected.get("items") or [])
+        owned.append(projected)
     if migrated_owned != raw_owned:
         save_product_categories(username, migrated_owned)
     return source + owned
+
+
+def _category_path_sources(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from server.services.product_catalog_projection import source_ids_by_product_path
+
+    paths = list(dict.fromkeys(
+        str(path or "").removeprefix("-").strip()
+        for item in items
+        for path in item.get("paths") or []
+        if str(path or "").removeprefix("-").strip()
+    ))
+    source_ids = source_ids_by_product_path(paths)
+    return [
+        {"path": path, "source_ids": list(source_ids.get(path, ()))}
+        for path in paths
+    ]
 
 
 def get_product_category(

@@ -27,7 +27,7 @@ const state = {
       outer_scope_tabs: {
         factor: {
           mounted_tab: "factor", candidate_fields: ["factor_candidates"],
-          selection_fields: ["factor_selections", "factor"],
+          selection_fields: ["factor_candidates"],
         },
         product_path_selection: {
           mounted_tab: "product_path_selection", candidate_fields: ["product_path_candidates"],
@@ -43,13 +43,6 @@ const state = {
             source_when_outer_mounted: "outer_candidate_pool",
           },
         },
-        factor: {
-          outer: {
-            resolution: {
-              kind: "automatic", source: "factor_candidates", resolver: "primary_item",
-            },
-          },
-        },
         factor_role_bindings: {
           inner: {visible_when: {min_items: {factor_candidates: 2}}},
         },
@@ -59,7 +52,7 @@ const state = {
         {key: "factor", label: "因子执行"},
         {key: "product_path_selection", label: "产品组"},
       ],
-      outer_only_tabs: ["time"],
+      outer_only_tabs: ["time", "data_source"],
     },
     defaults: {
       time_field: {tab_key: "time", scope_policy: "overridable", execution_policy: "include"},
@@ -71,6 +64,46 @@ const state = {
   },
 };
 
+const sourceState = {
+  values: {data_source_mode: "list", data_source: ["source-a"]},
+  manifest: {strategy_editor: {candidate_constraints: {
+    category_candidates: {
+      source_field: "data_source", mode_field: "data_source_mode",
+      automatic_mode: "auto", coverage: "complete_path_coverage",
+    },
+    product_path_candidates: {
+      source_field: "data_source", mode_field: "data_source_mode",
+      automatic_mode: "auto", coverage: "complete_product_coverage",
+    },
+  }}},
+};
+const compatibleGroup = {products: [
+  {source_ids: ["source-a", "source-b"]}, {source_ids: ["source-a"]},
+]};
+const incompleteGroup = {products: [
+  {source_ids: ["source-a"]}, {source_ids: ["source-b"]},
+]};
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", compatibleGroup,
+), true);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", incompleteGroup,
+), false);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "category_candidates", {items: [
+    {source_ids: ["source-a"]}, {source_ids: ["source-b"]},
+  ]},
+), false);
+sourceState.values.data_source_mode = "auto";
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", incompleteGroup,
+), true);
+sourceState.values.data_source_mode = "list";
+sourceState.values.data_source = [];
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", compatibleGroup,
+), false);
+
 if (process.argv[3]) {
   state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 }
@@ -81,13 +114,13 @@ assert.deepEqual(window.FTStrategyEditorScope.validate(state), []);
 const innerCandidates = window.FTStrategyEditorScope.scopedField(
   state, "factor_candidates", "inner",
 );
-const outerFactor = window.FTStrategyEditorScope.scopedField(
-  state, "factor", "outer",
-);
 assert.equal(innerCandidates?.cardinality, "many");
 assert.equal(innerCandidates?.filter_only_when_outer_mounted, true);
 assert.equal(innerCandidates?.source_when_outer_mounted, "outer_candidate_pool");
-assert.equal(outerFactor?.resolution?.resolver, "primary_item");
+assert.equal(
+  window.FTStrategyEditorScope.scopedField(state, "factor", "outer"),
+  null,
+);
 assert.equal(
   window.FTStrategyEditorScope.fieldVisible(
     state, "factor_role_bindings", "inner", {factor_candidates: [{alias: "A"}]},
@@ -157,5 +190,10 @@ assert.deepEqual(
   window.FTStrategyEditorScope.innerTabs(state, ["cost", "time"])
     .map(item => item.key),
   ["__strategy__", "factor", "product_path_selection", "cost"],
+);
+assert.equal(
+  window.FTStrategyEditorScope.innerTabs(state, ["data_source"])
+    .some(item => item.key === "data_source"),
+  false,
 );
 console.log("ok");

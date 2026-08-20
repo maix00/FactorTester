@@ -448,12 +448,13 @@ class MarketDataModule(ExecutableModule):
             tab_order=35,
         ),
         "data_source": FieldDefinition(
-            public=True, label="数据源", default="", editor="select", tab="data_source",
+            public=True, label="数据源", default=[], editor="custom", tab="data_source",
             visible_if={"data_source_mode": ("list",)},
-            options=(("", "自动"), *_historical_data_source_options()),
+            options=_historical_data_source_options(),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,
+            serialization={"kind": "data_source_selection", "multi": True},
         ),
         "freq_mode": FieldDefinition(
             public=True, label="频率模式", default="auto", editor="select", tab="frequency",

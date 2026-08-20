@@ -18,17 +18,26 @@ _CN_FUTURES_PRODUCT_PATHS = ["CNFutures", "CNFuturesContract"]
 
 
 def _category_payload(cat: Any, product_paths: list[str]) -> dict[str, Any]:
+    from server.services.product_catalog_projection import source_ids_by_product_path
     raw = [str(c) for c in (getattr(cat, "categories", []) or [])]
     names = [c for c in raw if c != "Others"]
     # 组外产品归入"其他"。
     if "Others" in raw and "其他" not in names:
         names.append("其他")
+    path_sources = source_ids_by_product_path(product_paths)
     return {
         "name": str(getattr(cat, "alias", "") or ""),
         "source": "数据库",
         "product_paths": list(product_paths),
         "categories": names,
         "enabled": True,
+        "source_ids": sorted({
+            source_id for values in path_sources.values() for source_id in values
+        }),
+        "path_sources": [
+            {"path": path, "source_ids": list(path_sources.get(path, ()))}
+            for path in product_paths
+        ],
     }
 
 

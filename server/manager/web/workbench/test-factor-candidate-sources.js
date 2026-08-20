@@ -155,9 +155,7 @@
     const available = Array.isArray(options.items) ? options.items : catalogItems(state);
     const factorAlias = value => FTTestFactorSelection.factorAlias(value);
     const pickerRows = () => available.map(item => {
-      // Nested strategy RunSpecs historically store factor aliases.  Keep
-      // that value contract while sharing the outer renderer and controls.
-      const id = factorAlias(item) || factorID(item);
+      const id = factorID(item);
       return {
         value: id,
         label: factorAlias(item) || id,
@@ -168,16 +166,16 @@
     let picker;
     const saved = value => {
       if (!value) return;
-      const id = factorAlias(value) || factorID(value);
+      const id = factorID(value);
       if (!id) return;
       const stateIndex = (state.factors || []).findIndex(item => (
-        (factorAlias(item) || factorID(item)) === id
+        factorID(item) === id
       ));
       const next = stateIndex >= 0 ? {...state.factors[stateIndex], ...value} : value;
       if (stateIndex >= 0) state.factors[stateIndex] = next;
       else (state.factors ||= []).push(next);
       const availableIndex = available.findIndex(item => (
-        (factorAlias(item) || factorID(item)) === id
+        factorID(item) === id
       ));
       if (availableIndex >= 0) available[availableIndex] = next; else available.push(next);
       picker?.setItems(pickerRows());
@@ -207,7 +205,7 @@
       createLabel: context.t("新建因子"),
       itemActions: item => {
         const factor = available.find(value => (
-          (factorAlias(value) || factorID(value)) === item.value
+          factorID(value) === item.value
         ));
         if (!context.session || !factor?.can_edit || factor.is_public) return [];
         return [{

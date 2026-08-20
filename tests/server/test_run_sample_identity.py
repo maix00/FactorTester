@@ -16,7 +16,7 @@ def _run_spec_v2(
     backtest_range: tuple[str, str] = ("2024-01-02", "2024-12-31"),
 ) -> dict:
     return {
-        "run_spec_version": 2,
+        "run_spec_version": 3,
         "analyses": analyses,
         "configuration": {
             "analyses": {
