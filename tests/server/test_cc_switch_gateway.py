@@ -75,3 +75,41 @@ def test_cc_switch_gateway_child_provider_uses_local_credential(tmp_path: Path) 
     assert child["protocol"] == "openai_responses"
     assert child["secret"] != "super-secret-token"
     assert str(child["secret"])
+
+
+def test_two_profile_gateways_never_share_state_ports_or_credentials(
+    tmp_path: Path,
+) -> None:
+    provider_a = _provider("openai_chat")
+    provider_a.update({
+        "provider_id": "provider-a",
+        "secret": "secret-a",
+        "default_model": "model-a",
+    })
+    provider_b = _provider("anthropic_messages")
+    provider_b.update({
+        "provider_id": "provider-b",
+        "secret": "secret-b",
+        "default_model": "model-b",
+    })
+
+    plan_a = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-a",
+        provider=provider_a,
+    ).plan(port=17331)
+    plan_b = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-b",
+        provider=provider_b,
+    ).plan(port=17332)
+
+    assert plan_a.environment["CC_SWITCH_CONFIG_DIR"] != plan_b.environment[
+        "CC_SWITCH_CONFIG_DIR"
+    ]
+    assert plan_a.proxy_url != plan_b.proxy_url
+    assert plan_a.child_provider["secret"] != plan_b.child_provider["secret"]
+    assert plan_a.child_provider["default_model"] == "model-a"
+    assert plan_b.child_provider["default_model"] == "model-b"
+    config_a = plan_a.provider_config_path.read_text(encoding="utf-8")
+    config_b = plan_b.provider_config_path.read_text(encoding="utf-8")
+    assert "secret-a" in config_a and "secret-b" not in config_a
+    assert "secret-b" in config_b and "secret-a" not in config_b
