@@ -170,6 +170,55 @@ def test_openai_provider_health_reports_http_failure_without_secret(monkeypatch)
     assert "secret-token" not in str(error.value)
 
 
+@pytest.mark.parametrize(
+    ("protocol", "base_url", "expected_url", "header", "payload", "model"),
+    [
+        (
+            "anthropic_messages",
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com/v1/models",
+            "X-api-key",
+            {"data": [{"id": "claude-research"}]},
+            "claude-research",
+        ),
+        (
+            "gemini_native",
+            "https://generativelanguage.googleapis.com/v1beta",
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            "X-goog-api-key",
+            {"models": [{"name": "models/gemini-research"}]},
+            "gemini-research",
+        ),
+    ],
+)
+def test_native_provider_health_uses_protocol_auth_and_model_catalog(
+    monkeypatch,
+    protocol,
+    base_url,
+    expected_url,
+    header,
+    payload,
+    model,
+):
+    def fake_urlopen(request, timeout):
+        assert request.full_url == expected_url
+        assert request.headers[header] == "secret-token"
+        assert "Authorization" not in request.headers
+        return _ModelResponse(payload)
+
+    monkeypatch.setattr(provider_health_module, "urlopen", fake_urlopen)
+
+    result = AgentProviderHealth.test({
+        "protocol": protocol,
+        "base_url": base_url,
+        "default_model": model,
+        "secret": "secret-token",
+    })
+
+    assert result["model_available"] is True
+    assert result["protocol"] == protocol
+
+
 def test_provider_test_uses_manager_mihomo_proxy(tmp_path, monkeypatch):
     observed = {}
 

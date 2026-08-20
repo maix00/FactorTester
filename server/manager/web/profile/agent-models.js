@@ -63,6 +63,7 @@
       provider_id: view.providerID,
       label: view.label.value.trim(),
       runtime_kind: view.runtime.value,
+      agent_runtime: view.agentRuntime.value,
       protocol: view.protocol.value,
       base_url: view.baseURL.value.trim(),
       default_model: view.model.value.trim(),
@@ -70,7 +71,7 @@
     };
   }
 
-  function openEditor(context, item, refresh) {
+  function openEditor(context, item, capabilities, refresh) {
     const dialog = document.createElement("dialog");
     dialog.className = "ft-dialog agent-model-dialog";
     const card = document.createElement("div");
@@ -88,10 +89,31 @@
       {value: "client", label: "客户端运行"},
     ]);
     runtime.value = item?.runtime_kind || "server";
-    const protocol = select(context, [
-      {value: "openai_compatible", label: "OpenAI Responses API"},
-    ]);
-    protocol.value = item?.protocol || "openai_compatible";
+    const agentRuntime = select(context, capabilities.map(capability => ({
+      value: capability.runtime,
+      label: capability.executable_label || capability.runtime,
+    })));
+    agentRuntime.value = item?.agent_runtime || "codex";
+    const protocol = select(context, []);
+    const protocolLabels = {
+      openai_responses: "OpenAI Responses API",
+      openai_chat: "OpenAI Chat Completions API",
+      anthropic_messages: "Anthropic Messages API",
+    };
+    const updateProtocols = preferred => {
+      const capability = capabilities.find(entry => entry.runtime === agentRuntime.value);
+      const protocols = Array.isArray(capability?.protocols) ? capability.protocols : [];
+      protocol.replaceChildren();
+      protocols.forEach(value => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = context.t(protocolLabels[value] || value);
+        protocol.append(option);
+      });
+      protocol.value = protocols.includes(preferred) ? preferred : (protocols[0] || "");
+    };
+    updateProtocols(item?.protocol || "openai_responses");
+    agentRuntime.addEventListener("change", () => updateProtocols(""));
     const baseURL = control("url", item?.base_url || "");
     baseURL.required = true;
     baseURL.placeholder = "https://api.example.com/v1";
@@ -111,7 +133,8 @@
     actions.className = "settings-inline-actions";
     actions.append(test, save);
     const view = {
-      providerID: item?.provider_id || "", label, runtime, protocol, baseURL, model, token,
+      providerID: item?.provider_id || "", label, runtime, agentRuntime, protocol,
+      baseURL, model, token,
     };
     const validate = () => {
       if (!label.value.trim() || !baseURL.value.trim() || !model.value.trim()) {
@@ -155,6 +178,7 @@
     card.append(
       field(context, "服务名称", label),
       field(context, "运行方式", runtime, "服务器凭证只保存在当前 Manager；客户端凭证由本地客户端管理。"),
+      field(context, "Agent Runtime", agentRuntime),
       field(context, "协议", protocol),
       field(context, "API 地址", baseURL, "服务器运行的模型服务必须使用 HTTPS。"),
       field(context, "默认模型", model),
@@ -176,6 +200,7 @@
           provider_id: item.provider_id,
           label: item.label,
           runtime_kind: item.runtime_kind,
+          agent_runtime: item.agent_runtime,
           protocol: item.protocol,
           base_url: item.base_url,
           default_model: item.default_model,
@@ -190,7 +215,7 @@
     }
   }
 
-  function table(context, providers, page, refresh) {
+  function table(context, providers, capabilities, page, refresh) {
     const rows = providers.map(item => {
       const status = document.createElement("span");
       status.className = "agent-model-test-status";
@@ -199,7 +224,7 @@
       actions.className = "agent-model-actions";
       actions.append(
         iconButton(context, "play.circle", "测试连接", () => void testExisting(context, item, status)),
-        iconButton(context, "square.and.pencil", "编辑", () => openEditor(context, item, refresh)),
+        iconButton(context, "square.and.pencil", "编辑", () => openEditor(context, item, capabilities, refresh)),
         iconButton(context, "trash", "删除", async () => {
           if (!window.confirm(context.t("确定删除这个模型服务吗？"))) return;
           try {
@@ -213,13 +238,13 @@
       return [
         item.label || "",
         item.runtime_kind === "client" ? context.t("客户端运行") : context.t("服务器运行"),
-        item.protocol || "", item.base_url || "", item.default_model || "",
+        item.agent_runtime || "codex", item.protocol || "", item.base_url || "", item.default_model || "",
         item.token_configured ? context.t("已配置") : context.t("未配置"),
         status, actions,
       ];
     });
     const view = FTUI.pagedTable(
-      ["服务名称", "运行方式", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
+      ["服务名称", "运行方式", "Agent Runtime", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
         label => context.t(label),
       ),
       rows,
@@ -240,6 +265,8 @@
       const payload = await context.api("/api/client/agent-models");
       if (!current(context)) return;
       const providers = Array.isArray(payload.providers) ? payload.providers : [];
+      const capabilities = Array.isArray(payload.runtime_capabilities)
+        ? payload.runtime_capabilities : [];
       const root = document.createElement("div");
       root.className = "agent-models-page";
       const intro = document.createElement("p");
@@ -247,7 +274,7 @@
       intro.textContent = context.t("模型服务只显示当前账户的配置；令牌不会同步到其他用户。");
       const add = context.button(
         context.t("新增模型服务"),
-        () => openEditor(context, null, () => list(context, requestedPage)),
+        () => openEditor(context, null, capabilities, () => list(context, requestedPage)),
         context.t("新增模型服务"),
       );
       add.className = "primary agent-model-add";
@@ -256,7 +283,7 @@
       header.append(intro, add);
       root.append(header);
       if (providers.length) {
-        root.append(table(context, providers, requestedPage, page => list(context, page)));
+        root.append(table(context, providers, capabilities, requestedPage, page => list(context, page)));
       } else {
         root.append(FTUI.empty(context.t("尚无已保存模型服务"), context.t("请先添加一个模型服务。")));
       }
