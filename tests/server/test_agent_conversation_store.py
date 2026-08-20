@@ -6,7 +6,7 @@ from server.manager.storage.agent_conversation_store import (
 )
 
 
-def test_conversation_text_preserves_markdown_structure_and_redacts_sensitive_values():
+def test_conversation_text_preserves_markdown_structure_and_source_text():
     text = (
         "说明\r\n\r\n"
         "```bash\r\n"
@@ -19,8 +19,8 @@ def test_conversation_text_preserves_markdown_structure_and_redacts_sensitive_va
     sanitized = sanitize_conversation_text(text)
 
     assert "```bash\nfactortester products list\n```" in sanitized
-    assert "token=[redacted]" in sanitized
-    assert "[server path redacted]" in sanitized
+    assert "token=secret-value" in sanitized
+    assert "/Users/private/workspace/report.png" in sanitized
     assert "\r" not in sanitized
 
 

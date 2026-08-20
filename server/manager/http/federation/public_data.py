@@ -175,10 +175,25 @@ class FederationPublicDataRoutesMixin:
                 conversation_id = str(payload.get("conversation_id") or "").strip()
                 if not conversation_id:
                     raise ValueError("conversation_id is required")
+                # The source Manager owns the Provider binding.  Refresh only
+                # this requested thread when its Agent process is available;
+                # a stopped Agent still falls back to its last durable SQLite
+                # projection instead of making a read-only viewer control it.
+                history_refreshed = False
+                supervisor = getattr(self.state, "agent_app_server", None)
+                refresh = getattr(supervisor, "refresh_conversation_history", None)
+                if callable(refresh):
+                    try:
+                        history_refreshed = bool(
+                            refresh(owner, profile_id, conversation_id)
+                        )
+                    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                        history_refreshed = False
                 return {
                     "items": agent_service.conversation_items(
                         owner, profile_id, conversation_id,
                     ),
+                    "history_refreshed": history_refreshed,
                 }
             if operation == "factors":
                 from server.manager.services.public_catalog import (

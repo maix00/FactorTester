@@ -439,6 +439,16 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
     assert saved["provider_thread_id"] == "provider-thread-1"
     assert saved["provider_id"] == provider["provider_id"]
 
+    refreshed = supervisor.refresh_conversation_history(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+    )
+    assert refreshed is True
+    assert len(service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )) == 2
+
     supervisor.stop(PRINCIPAL, PROFILE_ID)
     service.release(
         PRINCIPAL,

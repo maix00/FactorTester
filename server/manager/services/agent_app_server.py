@@ -117,6 +117,44 @@ class AgentAppServerSupervisor:
         )
         return status
 
+    def refresh_conversation_history(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> bool:
+        """Refresh one local Provider thread before a read-only export.
+
+        The Manager owning the Agent is the only process allowed to resume the
+        Provider thread.  A requesting peer never receives the Provider
+        binding or credentials; it only receives the refreshed SQLite
+        projection through the federation catalog endpoint.
+        """
+        key = self._key(principal, profile_id)
+        identifier = str(conversation_id or "").strip()
+        if not identifier:
+            raise AgentAppServerError("conversation_id is required")
+        conversation = self.profile_service.conversation(
+            key[0], key[1], identifier,
+        )
+        if conversation is None:
+            raise AgentAppServerError("conversation not found")
+        thread_id = str(conversation.get("provider_thread_id") or "").strip()
+        if not thread_id:
+            return False
+        with self._lock:
+            session = self._sessions.get(key)
+            if session is None or not session.status().get("running"):
+                return False
+        self.request(
+            key[0],
+            key[1],
+            "thread/resume",
+            {"threadId": thread_id},
+            conversation_id=identifier,
+        )
+        return True
+
     def request(
         self,
         principal: str,
