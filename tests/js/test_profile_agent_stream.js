@@ -3,56 +3,15 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const protocol = {
-  randomID: prefix => `${prefix}-1`,
-  assistantItem: (_state, text = '') => ({
-    id: 'assistant-1',
-    type: 'assistant_message',
-    thread_id: 'conversation-1',
-    created_at: new Date(0).toISOString(),
-    content: [{type: 'output_text', text, annotations: []}],
-  }),
-  userItem: (_state, text) => ({
-    id: 'user-1',
-    type: 'user_message',
-    thread_id: 'conversation-1',
-    created_at: new Date(0).toISOString(),
-    content: [{type: 'input_text', text}],
-  }),
-  extractInputText: params => String(params.input || '').trim(),
-  responseValue: payload => payload.response?.result || payload.response || payload.result || payload,
-  threadIDFrom: payload => String(
-    payload.thread?.id || payload.turn?.id || payload.turnId || payload.id || '',
-  ),
-  historyTimestamp: (_value, fallback) => fallback,
-  historyItems: (state, thread) => {
-    const result = [];
-    for (const turn of thread.turns || []) {
-      for (const item of turn.items || []) {
-        if (item.type === 'assistant_message') {
-          result.push({
-            id: item.id,
-            type: 'assistant_message',
-            thread_id: state.threadID,
-            created_at: new Date(0).toISOString(),
-            content: [{type: 'output_text', text: item.text, annotations: []}],
-          });
-        }
-      }
-    }
-    return result;
-  },
-  threadObject: () => ({id: 'conversation-1'}),
-  eventTurnID: payload => String(payload.params?.turnId || ''),
-  rawMethod: payload => String(payload.method || payload.type || ''),
-  rawDelta: () => '',
-  completedText: () => '',
-  turnCompletion: payload => ({status: String(payload.params?.status || ''), error: null}),
-  terminalMethod: method => /turn[/:._-](completed|complete)/i.test(method),
-  errorMessage: () => 'Agent error',
-};
+global.window = {};
+global.document = {documentElement: {lang: 'zh-Hans'}};
+global.navigator = {language: 'zh-Hans'};
 
-global.window = {FTProfileChatKitProtocol: protocol};
+const protocolSource = fs.readFileSync(
+  path.resolve(__dirname, '../../server/manager/web/profile/chatkit-protocol.js'),
+  'utf8',
+);
+vm.runInThisContext(protocolSource, {filename: 'chatkit-protocol.js'});
 global.EventSource = class {
   constructor() {
     this.closed = false;
@@ -60,13 +19,39 @@ global.EventSource = class {
     queueMicrotask(() => {
       if (this.closed) return;
       this.onopen?.();
-      this.onmessage?.({
-        lastEventId: '1',
-        data: JSON.stringify({
+      const events = [
+        {
+          method: 'item/reasoning/textDelta',
+          params: {turnId: 'turn-1', delta: 'PRIVATE_REASONING'},
+        },
+        {
+          method: 'item/commandExecution/outputDelta',
+          params: {turnId: 'turn-1', delta: 'TOOL_STDOUT'},
+        },
+        {
+          method: 'item/agentMessage/delta',
+          params: {turnId: 'turn-1', delta: '第一句'},
+        },
+        {
+          method: 'item/agentMessage/delta',
+          params: {turnId: 'turn-1', delta: '\n第二句'},
+        },
+        {
+          method: 'item/completed',
+          params: {
+            turnId: 'turn-1',
+            item: {id: 'history-assistant-1', type: 'agentMessage', text: '第一句\n第二句'},
+          },
+        },
+        {
           method: 'turn/completed',
-          params: {turnId: 'turn-1', status: 'completed'},
-        }),
-      });
+          params: {turn: {id: 'turn-1', status: 'completed', error: null}},
+        },
+      ];
+      events.forEach((payload, index) => this.onmessage?.({
+        lastEventId: String(index + 1),
+        data: JSON.stringify(payload),
+      }));
     });
   }
 
@@ -103,8 +88,8 @@ const state = {
               id: 'provider-thread-1',
               turns: [{items: [{
                 id: 'history-assistant-1',
-                type: 'assistant_message',
-                text: '98 个期货品种，2846 个合约路径',
+                type: 'agentMessage',
+                text: '第一句\n第二句',
               }]}],
             },
           },
@@ -138,7 +123,10 @@ const state = {
     async () => {},
   );
   const output = chunks.join('');
-  assert.match(output, /98 个期货品种/);
+  assert.match(output, /第一句/);
+  assert.match(output, /第二句/);
+  assert.doesNotMatch(output, /PRIVATE_REASONING/);
+  assert.doesNotMatch(output, /TOOL_STDOUT/);
   assert.match(output, /assistant_message\.content_part\.done/);
   console.log('PASS: missed Profile Agent SSE output is recovered from thread history');
 })().catch(error => {

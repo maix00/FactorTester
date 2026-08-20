@@ -544,6 +544,52 @@ class AgentConversationStore:
             for row in rows
         ]
 
+    def replace_items(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Replace one transcript projection with Provider-authoritative items."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        normalized: list[tuple[str, str, str, str, float]] = []
+        for raw in items[-500:]:
+            role = str(raw.get("role") or "").strip().lower()
+            if role not in {"user", "assistant"}:
+                raise ValueError("conversation item role is invalid")
+            text = sanitize_conversation_text(raw.get("text"))
+            if not text:
+                raise ValueError("conversation item text is required")
+            item_id = self._required(raw.get("item_id"), "item_id", 256)
+            item_type = str(raw.get("item_type") or "message").strip()[:64]
+            created_at = float(raw.get("created_at") or time.time())
+            normalized.append((item_id, role, item_type, text, created_at))
+        with self._connection() as db:
+            owned = db.execute(
+                f"""SELECT 1 FROM {TABLE}
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (identifier, owner, profile),
+            ).fetchone()
+            if owned is None:
+                raise ValueError("conversation not found")
+            db.execute(
+                f"DELETE FROM {ITEM_TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            )
+            db.executemany(
+                f"""INSERT INTO {ITEM_TABLE}(
+                        conversation_id, item_id, role, item_type, text, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    (identifier, item_id, role, item_type, text, created_at)
+                    for item_id, role, item_type, text, created_at in normalized
+                ],
+            )
+        return self.items(owner, profile, identifier)
+
     def set_parent_sharing(
         self, principal: str, profile_id: str, enabled: bool,
     ) -> bool:

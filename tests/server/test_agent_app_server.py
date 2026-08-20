@@ -696,6 +696,28 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
     )) == 2
 
+    service.append_conversation_item(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+        role="assistant",
+        text="第一句PRIVATE_REASONING",
+        item_id="stream-assistant-stale",
+    )
+    assert len(service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )) == 3
+    assert supervisor.refresh_conversation_history(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+    ) is True
+    authoritative = service.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )
+    assert len(authoritative) == 2
+    assert all(item["id"] != "stream-assistant-stale" for item in authoritative)
+
     supervisor.stop(PRINCIPAL, PROFILE_ID)
     service.release(
         PRINCIPAL,
