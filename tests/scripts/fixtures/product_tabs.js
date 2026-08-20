@@ -94,6 +94,22 @@ tabs.navigate("/jobs?scope=mine");
 assert.strictEqual(state.activeTabID, "jobs");
 assert.strictEqual(state.tabs.find(tab => tab.id === "jobs").path, "/jobs?scope=mine");
 
+const jobPath = "/jobs/8141/job-one?server_id=public-1";
+tabs.navigate(jobPath);
+const jobTabID = "job-detail:8141:public-1:job-one";
+assert.strictEqual(state.activeTabID, jobTabID);
+assert.strictEqual(state.tabs.find(tab => tab.id === jobTabID).path, jobPath);
+assert.strictEqual(state.tabs.find(tab => tab.id === jobTabID).closable, true);
+tabs.navigate(jobPath);
+assert.strictEqual(state.tabs.filter(tab => tab.id === jobTabID).length, 1);
+tabs.navigate("/jobs?section=tasks");
+assert.strictEqual(state.activeTabID, "jobs");
+
+// A missing submitted-task path must not duplicate the current workbench tab.
+const activeBeforeEmptyNavigation = state.activeTabID;
+tabs.navigate("");
+assert.strictEqual(state.activeTabID, activeBeforeEmptyNavigation);
+
 tabs.navigate("/settings/account");
 assert.strictEqual(state.activeTabID, "settings");
 assert.strictEqual(state.tabs.find(tab => tab.id === "settings").path, "/settings/account");

@@ -200,7 +200,7 @@
     if (!item.resultCodePromise) {
       item.resultCodeLoading = true;
       item.resultCodePromise = Promise.resolve(
-        window.FTStaticLoader?.loadGroups?.(["workbench-run-results"]),
+        window.FTTestLazyCode?.loadGroup?.("workbench-run-results"),
       )
         .then(() => {
           if (!window.FTTestRunResults) throw new Error("结果查看器不可用");
@@ -232,6 +232,13 @@
   }
 
   function link(context, label, path) {
+    if (!path) {
+      const missing = document.createElement("span");
+      missing.className = "test-run-missing-link";
+      missing.textContent = context.t(label);
+      missing.title = context.t("测试任务尚未生成 Job ID");
+      return missing;
+    }
     const anchor = document.createElement("a");
     anchor.href = path;
     anchor.textContent = context.t(label);
