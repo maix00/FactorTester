@@ -62,13 +62,24 @@ class AgentAppServerLaunch:
             )
         return resolved
 
-    def preflight(self) -> dict[str, object]:
+    def preflight(
+        self,
+        *,
+        check_provider: bool = True,
+        require_factor_tester: bool = True,
+    ) -> dict[str, object]:
         """Validate all local and remote prerequisites before spawning Codex."""
         codex = self._executable(self.codex_binary, "Codex")
-        factor_tester = self._executable(
-            self.factor_tester_cli,
-            "FactorTester CLI",
+        factor_tester = (
+            self._executable(self.factor_tester_cli, "FactorTester CLI")
+            if require_factor_tester else None
         )
+        if not check_provider:
+            return {
+                "codex": codex,
+                "factor_tester_cli": factor_tester,
+                "provider": None,
+            }
         try:
             provider = (
                 AgentProviderHealth.test(

@@ -43,24 +43,32 @@
       const conversations = await C.loadConversations(profileState);
       return P.jsonResponse(P.page(conversations.map(conversation => {
         const state = C.conversationState(profileState, conversation);
-        return P.threadObject(state, {includeItems: false});
+        return P.threadObject(state, {
+          includeItems: false,
+          locked: profileState.historyOnly,
+        });
       })));
     }
     if (operation === "threads.get_by_id") {
       const state = await C.getConversation(
-        profileState, C.conversationIDFrom(params), true,
+        profileState, C.conversationIDFrom(params), !profileState.historyOnly,
       );
       await S.restoreThread(state);
-      return P.jsonResponse(P.threadObject(state));
+      return P.jsonResponse(P.threadObject(
+        state, {locked: profileState.historyOnly},
+      ));
     }
     if (operation === "items.list") {
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
-      await S.restoreThread(state);
-      return P.jsonResponse(P.page(state.items));
+      const page = await S.authoritativePage(state, params);
+      return P.jsonResponse(P.page(page.items, page));
     }
     if (operation === "threads.update") {
+      if (profileState.historyOnly) {
+        return P.jsonResponse({error: "Agent is stopped; history is read-only"}, 403);
+      }
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
@@ -70,6 +78,9 @@
       return P.jsonResponse(P.threadObject(state));
     }
     if (operation === "threads.delete") {
+      if (profileState.historyOnly) {
+        return P.jsonResponse({error: "Agent is stopped; history is read-only"}, 403);
+      }
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
@@ -77,6 +88,7 @@
       return P.jsonResponse({});
     }
     if (operation === "threads.stop") {
+      if (profileState.historyOnly) return P.jsonResponse({});
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
@@ -89,6 +101,11 @@
       return P.jsonResponse({});
     }
     if (operation === "threads.create" || operation === "threads.add_user_message") {
+      if (profileState.historyOnly) {
+        return P.jsonResponse({
+          error: "start the Profile Agent before sending a question",
+        }, 409);
+      }
       const text = P.extractInputText(params);
       const requestedID = C.conversationIDFrom(params);
       const state = requestedID
@@ -145,48 +162,23 @@
     return values.map(value => String(value || "").trim()).find(Boolean) || "";
   }
 
-  function readOnlyText(value) {
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) return value.map(readOnlyText).join("");
-    if (!value || typeof value !== "object") return "";
-    for (const key of ["text", "value", "output_text", "content", "parts", "message"]) {
-      const text = readOnlyText(value[key]);
-      if (text) return text;
+  function readOnlyItem(profileKey, conversationID, item) {
+    const nativeTypes = new Set([
+      "user_message", "assistant_message", "client_tool_call", "widget",
+      "generated_image", "structured_input", "workflow", "task",
+      "end_of_turn",
+    ]);
+    if (!nativeTypes.has(String(item?.type || ""))) {
+      throw new Error("conversation source returned a non-ChatKit item");
     }
-    return "";
-  }
-
-  function readOnlyItem(profileKey, conversationID, item, index = 0) {
-    const role = /^(assistant|assistant_message|agent_message)$/i.test(
-      String(item?.role || item?.type || item?.item_type || "").trim(),
-    )
-      ? "assistant_message" : "user_message";
-    const created = P.historyTimestamp(
-      item?.created_at,
-      new Date().toISOString(),
-    );
-    const text = readOnlyText(item);
-    const itemID = String(item?.id || item?.item_id || "").trim()
-      || `item-${conversationID}-${index}`;
     return {
-      // Manager history rows use item_id rather than ChatKit's id.  Keep the
-      // mapped id stable across list/get requests so ChatKit does not discard
-      // the history as a different set of items on every read.
-      id: itemID,
-      type: role,
+      ...item,
       thread_id: conversationID,
-      created_at: created,
-      content: [role === "assistant_message"
-        ? {type: "output_text", text, annotations: []}
-        : {type: "input_text", text}],
-      ...(role === "user_message" ? {
-        attachments: [], quoted_text: null, inference_options: {},
-      } : {}),
-      metadata: {profile_key: profileKey},
+      metadata: {...(item.metadata || {}), profile_key: profileKey},
     };
   }
 
-  function readOnlyThread(profileKey, conversation, items = []) {
+  function readOnlyThread(profileKey, conversation, itemPage = {}) {
     const identifier = String(conversation?.conversation_id || "");
     const created = P.historyTimestamp(
       conversation?.created_at,
@@ -201,24 +193,30 @@
       // be used to send turns or mutate the source Agent conversation.
       status: {type: "locked", reason: "read-only conversation"},
       metadata: {profile_key: profileKey, conversation_id: identifier},
-      items: P.page(items.map((item, index) => (
-        readOnlyItem(profileKey, identifier, item, index)
-      ))),
+      items: P.page((itemPage.items || []).map(item => (
+        readOnlyItem(profileKey, identifier, item)
+      )), itemPage),
     };
   }
 
-  function readOnlyURL(path, profileState, conversationID = "") {
+  function readOnlyURL(path, profileState, conversationID = "", pageParams = {}) {
     const params = new URLSearchParams({
       profile_key: profileState.profileKey,
       scope: profileState.profileScope,
     });
     if (conversationID) params.set("conversation_id", conversationID);
+    if (pageParams.limit) params.set("limit", String(pageParams.limit));
+    if (pageParams.after) params.set("after", pageParams.after);
+    if (pageParams.order) params.set("order", pageParams.order);
+    params.set("view", profileState.itemView || "results");
     return `${path}?${params}`;
   }
 
-  async function readOnlyJSON(profileState, path, conversationID = "") {
+  async function readOnlyJSON(
+    profileState, path, conversationID = "", pageParams = {},
+  ) {
     const payload = await profileState.context.api(
-      readOnlyURL(path, profileState, conversationID),
+      readOnlyURL(path, profileState, conversationID, pageParams),
     );
     return payload || {};
   }
@@ -231,13 +229,19 @@
     return Array.isArray(payload.conversations) ? payload.conversations : [];
   }
 
-  async function readOnlyItems(profileState, conversationID) {
+  async function readOnlyItems(profileState, conversationID, params = {}) {
     const payload = await readOnlyJSON(
       profileState,
       "/api/client/profile-directory/conversation-items",
       conversationID,
+      P.itemPageParams(params),
     );
-    return Array.isArray(payload.items) ? payload.items : [];
+    return {
+      items: Array.isArray(payload.items) ? payload.items : [],
+      has_more: Boolean(payload.has_more),
+      after: payload.after || null,
+      order: payload.order || P.itemPageParams(params).order,
+    };
   }
 
   async function fetchReadOnlyAdapter(profileState, input, init = {}) {
@@ -266,9 +270,10 @@
       ));
     }
     if (operation === "items.list") {
-      return P.jsonResponse(P.page((await readOnlyItems(profileState, conversationID)).map(
-        (item, index) => readOnlyItem(profileState.profileKey, conversationID, item, index),
-      )));
+      const page = await readOnlyItems(profileState, conversationID, params);
+      return P.jsonResponse(P.page(page.items.map(
+        item => readOnlyItem(profileState.profileKey, conversationID, item),
+      ), page));
     }
     if ([
       "threads.create", "threads.add_user_message", "threads.update",
@@ -289,19 +294,32 @@
         profileKey,
         profileScope: options.profileScope || "servers",
         context,
+        itemView: "results",
       };
       return {
         fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
         endpoint: CHATKIT_ENDPOINT,
         locale: P.chatLocale(context),
+        setItemView(value) {
+          profileState.itemView = value === "process" ? "process" : "results";
+        },
         dispose() {},
       };
     }
     const profileState = C.profileStateFor(profile, context, options.skills || []);
+    profileState.itemView = "results";
+    profileState.historyOnly = Boolean(options.historyOnly);
     return {
       fetch: (input, init) => fetchAdapter(profileState, input, init),
       endpoint: CHATKIT_ENDPOINT,
       locale: P.chatLocale(context),
+      setItemView(value) {
+        profileState.itemView = value === "process" ? "process" : "results";
+        for (const state of profileState.conversations?.values?.() || []) {
+          state.restored = false;
+          state.itemPage = null;
+        }
+      },
       dispose() {
         C.dispose(profileState, S.closeSource);
       },

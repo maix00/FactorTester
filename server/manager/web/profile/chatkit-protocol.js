@@ -16,8 +16,25 @@
     });
   }
 
-  function page(data) {
-    return {data, has_more: false, after: null};
+  function page(data, options = {}) {
+    return {
+      data,
+      has_more: Boolean(options.has_more),
+      after: options.after || null,
+    };
+  }
+
+  function itemPageParams(params = {}) {
+    const requested = Number(
+      params.limit ?? params.page_size ?? params.pageSize ?? 10,
+    );
+    return {
+      limit: Number.isFinite(requested)
+        ? Math.max(1, Math.min(Math.trunc(requested), 50)) : 10,
+      after: String(params.after ?? params.cursor ?? "").trim(),
+      order: String(params.order || "desc").toLowerCase() === "asc"
+        ? "asc" : "desc",
+    };
   }
 
   function threadObject(state, options = {}) {
@@ -29,12 +46,14 @@
       id: state.conversationID,
       title: state.threadTitle || null,
       created_at: state.createdAt,
-      status: {type: "active"},
+      status: options.locked
+        ? {type: "locked", reason: "Agent is stopped; history remains readable"}
+        : {type: "active"},
       metadata: {
         profile_id: state.profileID,
         conversation_id: state.conversationID,
       },
-      items: includeItems ? page(state.items) : page([]),
+      items: includeItems ? page(state.items, state.itemPage || {}) : page([]),
     };
   }
 
@@ -186,51 +205,6 @@
     return fallback;
   }
 
-  function historyItems(state, thread) {
-    const turns = Array.isArray(thread?.turns) ? thread.turns : [];
-    const result = [];
-    for (const turn of turns) {
-      const items = Array.isArray(turn?.items) ? turn.items : [];
-      for (const item of items) {
-        const rawType = String(item?.type || item?.kind || "")
-          .replace(/[-_]/g, "").toLowerCase();
-        const id = String(item?.id || randomID(rawType || "history"));
-        const createdAt = historyTimestamp(
-          item?.createdAt || item?.created_at || turn?.startedAt || turn?.started_at,
-          state.createdAt,
-        );
-        const threadID = state.threadID;
-        if (rawType === "usermessage" || rawType === "inputmessage") {
-          const text = textValue(item?.content ?? item?.text ?? item?.message);
-          if (!text) continue;
-          result.push({
-            id,
-            type: "user_message",
-            thread_id: threadID,
-            created_at: createdAt,
-            content: [{type: "input_text", text}],
-            attachments: [],
-            quoted_text: null,
-            inference_options: {},
-          });
-          continue;
-        }
-        if (rawType === "agentmessage" || rawType === "assistantmessage") {
-          const text = textValue(item?.text ?? item?.content ?? item?.message);
-          if (!text) continue;
-          result.push({
-            id,
-            type: "assistant_message",
-            thread_id: threadID,
-            created_at: createdAt,
-            content: [{type: "output_text", text, annotations: []}],
-          });
-        }
-      }
-    }
-    return result;
-  }
-
   function extractInputText(params) {
     const input = params?.input;
     if (typeof input === "string") return input.trim();
@@ -271,8 +245,8 @@
     errorMessage,
     extractInputText,
     historyTimestamp,
-    historyItems,
     jsonResponse,
+    itemPageParams,
     operation,
     page,
     parseBody,

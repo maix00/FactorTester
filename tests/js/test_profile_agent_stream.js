@@ -27,6 +27,13 @@ global.EventSource = class {
         {
           method: 'item/commandExecution/outputDelta',
           params: {turnId: 'turn-1', delta: 'TOOL_STDOUT'},
+          chatkit_item: {
+            id: 'command-1',
+            type: 'workflow',
+            workflow: {type: 'custom', tasks: [{
+              type: 'custom', title: 'command', status_indicator: 'loading',
+            }]},
+          },
         },
         {
           method: 'item/agentMessage/delta',
@@ -41,6 +48,13 @@ global.EventSource = class {
           params: {
             turnId: 'turn-1',
             item: {id: 'history-assistant-1', type: 'agentMessage', text: '第一句\n第二句'},
+          },
+          chatkit_item: {
+            id: 'command-1',
+            type: 'workflow',
+            workflow: {type: 'custom', tasks: [{
+              type: 'custom', title: 'command', status_indicator: 'complete',
+            }]},
           },
         },
         {
@@ -67,14 +81,35 @@ const source = fs.readFileSync(
 vm.runInThisContext(source, {filename: 'chatkit-stream.js'});
 
 const chunks = [];
+const requestedURLs = [];
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
 const state = {
   profileID: 'profile-main',
   conversationID: 'conversation-1',
   context: {
     api: async (url, init = {}) => {
+      requestedURLs.push(url);
       if (url.includes('/api/client/profile-agent?')) {
         return {status: {event_sequence: 0}};
+      }
+      if (url.includes('/api/client/profile-agent/conversation-items?')) {
+        return {
+          items: [
+            {
+              id: 'history-assistant-1',
+              type: 'assistant_message',
+              content: [{type: 'output_text', text: '第一句\n第二句', annotations: []}],
+            },
+            {
+              id: 'history-assistant-old',
+              type: 'assistant_message',
+              content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+            },
+          ],
+          has_more: false,
+          after: null,
+          order: 'desc',
+        };
       }
       const body = JSON.parse(init.body || '{}');
       if (body.method === 'turn/start') {
@@ -111,6 +146,7 @@ const state = {
   active: false,
   threadPromise: null,
   restored: true,
+  itemView: 'process',
 };
 
 (async () => {
@@ -125,9 +161,14 @@ const state = {
   const output = chunks.join('');
   assert.match(output, /第一句/);
   assert.match(output, /第二句/);
+  assert.doesNotMatch(output, /旧回答不应覆盖/);
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
   assert.doesNotMatch(output, /TOOL_STDOUT/);
   assert.match(output, /assistant_message\.content_part\.done/);
+  assert.match(output, /thread\.item\.replaced/);
+  assert.ok(requestedURLs.some(url => (
+    url.includes('conversation-items') && url.includes('view=results')
+  )));
   console.log('PASS: missed Profile Agent SSE output is recovered from thread history');
 })().catch(error => {
   console.error(error);

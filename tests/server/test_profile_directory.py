@@ -36,8 +36,9 @@ class FakeClientState:
 
 
 class FakeAgentProfiles:
-    def __init__(self, store=None):
+    def __init__(self, store=None, items=None):
         self.store = store
+        self._items = items or {}
 
     def enrich(self, principal, profiles):
         result = []
@@ -58,8 +59,17 @@ class FakeAgentProfiles:
     def conversation_sharing(self, principal, profile_id):
         return self.store.parent_sharing(principal, profile_id) if self.store else False
 
-    def conversation_items(self, principal, profile_id, conversation_id):
-        return self.store.items(principal, profile_id, conversation_id) if self.store else []
+    def conversation_items(
+        self, principal, profile_id, conversation_id, **_options,
+    ):
+        return {
+            "items": [dict(item) for item in self._items.get(
+                (principal, profile_id, conversation_id), [],
+            )],
+            "has_more": False,
+            "after": None,
+            "turn_count": 1,
+        }
 
 
 class FakeFederatedProfiles:
@@ -81,15 +91,20 @@ class FakeFederatedProfiles:
         ]
 
     def profile_conversation_items(
-        self, source, _viewer, owner, profile_id, conversation_id,
+        self, source, _viewer, owner, profile_id, conversation_id, **_options,
     ):
-        return [
-            dict(item)
-            for item in self._items.get(
-                (source, owner, profile_id, conversation_id),
-                [],
-            )
-        ]
+        return {
+            "items": [
+                dict(item)
+                for item in self._items.get(
+                    (source, owner, profile_id, conversation_id),
+                    [],
+                )
+            ],
+            "has_more": False,
+            "after": None,
+            "turn_count": 1,
+        }
 
 
 def _profile(owner, profile_id, *, visibility="private"):
@@ -126,6 +141,7 @@ def _service(monkeypatch, client, agent, *, server_id="local-1", federated=None)
         client_state=client,
         agent_profiles=agent,
         federated_public_data=federated,
+        conversation_items_reader=agent.conversation_items,
     )
 
 
@@ -212,15 +228,19 @@ def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp
     child = "GTHT@child@100000000002"
     store = AgentConversationStore(tmp_path / "manager.sqlite")
     conversation = store.create(child, "child-profile")
-    store.append_item(
-        child,
-        "child-profile",
-        conversation["conversation_id"],
-        role="assistant",
-        text="token=secret /Users/private/workspace/report.png",
-    )
     client = FakeClientState({child: [_profile(child, "child-profile")]})
-    agent = FakeAgentProfiles(store)
+    agent = FakeAgentProfiles(store, items={(
+        child, "child-profile", conversation["conversation_id"],
+    ): [{
+        "id": "assistant-1",
+        "type": "assistant_message",
+        "content": [{
+            "type": "output_text",
+            "text": "token=secret /Users/private/workspace/report.png",
+            "annotations": [],
+        }],
+        "created_at": "2026-08-20T00:00:00+00:00",
+    }]})
     service = _service(monkeypatch, client, agent)
 
     assert service.can_view_conversations(parent, child, {"conversation_sharing": False})
@@ -232,9 +252,9 @@ def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp
         conversation["conversation_id"],
         scope="subordinates",
     )
-    assert items[0]["role"] == "assistant"
-    assert "token=secret" in items[0]["text"]
-    assert "/Users/private/workspace/report.png" in items[0]["text"]
+    assert items["items"][0]["type"] == "assistant_message"
+    assert "token=secret" in items["items"][0]["content"][0]["text"]
+    assert "/Users/private/workspace/report.png" in items["items"][0]["content"][0]["text"]
 
 
 def test_mirrored_profile_reads_from_executing_server_even_for_stale_local_key(
@@ -285,4 +305,4 @@ def test_mirrored_profile_reads_from_executing_server_even_for_stale_local_key(
     )
 
     assert conversations[0]["title"] == "远端最新会话"
-    assert items[0]["text"] == "来自远端"
+    assert items["items"][0]["text"] == "来自远端"

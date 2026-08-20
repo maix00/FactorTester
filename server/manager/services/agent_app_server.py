@@ -7,12 +7,15 @@ from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
-from server.manager.services.agent_conversation_history import thread_messages
+from server.manager.services.agent_provider_thread_reader import (
+    AgentProviderThreadReader,
+)
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_provider_network import (
     AgentProviderProxyUnavailable,
     resolve_provider_proxy,
 )
+from server.manager.services.provider_thread_chatkit import provider_thread_page
 
 
 class AgentAppServerSupervisor:
@@ -38,6 +41,12 @@ class AgentAppServerSupervisor:
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
         self._lock = threading.RLock()
+        self.thread_reader = AgentProviderThreadReader(
+            profile_service,
+            codex_binary=self.codex_binary,
+            cc_switch_binary=self.cc_switch_binary,
+            proxy_url_provider=self.proxy_url_provider,
+        )
 
     @staticmethod
     def _key(principal: str, profile_id: str) -> tuple[str, str]:
@@ -49,6 +58,9 @@ class AgentAppServerSupervisor:
 
     def start(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
+        # A lifecycle Agent and a history-only app-server must never share one
+        # Profile state directory concurrently.
+        self.thread_reader.close(*key)
         with self._lock:
             existing = self._sessions.get(key)
             if existing is not None:
@@ -139,13 +151,22 @@ class AgentAppServerSupervisor:
         profile_id: str,
         conversation_id: str,
     ) -> bool:
-        """Refresh one local Provider thread before a read-only export.
+        """Compatibility probe for callers that previously refreshed SQLite."""
+        self.conversation_items(principal, profile_id, conversation_id)
+        return True
 
-        The Manager owning the Agent is the only process allowed to resume the
-        Provider thread.  A requesting peer never receives the Provider
-        binding or credentials; it only receives the refreshed SQLite
-        projection through the federation catalog endpoint.
-        """
+    def conversation_items(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        limit: int = 10,
+        after: str = "",
+        view: str = "results",
+        order: str = "desc",
+    ) -> dict[str, Any]:
+        """Read one ChatKit page from the authoritative local Provider thread."""
         key = self._key(principal, profile_id)
         identifier = str(conversation_id or "").strip()
         if not identifier:
@@ -157,19 +178,32 @@ class AgentAppServerSupervisor:
             raise AgentAppServerError("conversation not found")
         thread_id = str(conversation.get("provider_thread_id") or "").strip()
         if not thread_id:
-            return False
+            return {
+                "items": [], "has_more": False, "after": None,
+                "turn_count": 0, "view": view, "order": order,
+            }
         with self._lock:
             session = self._sessions.get(key)
-            if session is None or not session.status().get("running"):
-                return False
-        self.request(
-            key[0],
-            key[1],
-            "thread/resume",
-            {"threadId": thread_id},
-            conversation_id=identifier,
+            running = session is not None and session.status().get("running")
+        if running:
+            response = self.request(
+                key[0], key[1], "thread/read", {
+                    "threadId": thread_id,
+                    "includeTurns": True,
+                },
+                conversation_id=identifier,
+            )
+            thread = self._thread_from_response(response)
+        else:
+            thread = self.thread_reader.read(
+                key[0], key[1], thread_id,
+                str(conversation.get("provider_id") or ""),
+            )
+        if not isinstance(thread, Mapping):
+            raise AgentAppServerError("Provider did not return the conversation thread")
+        return provider_thread_page(
+            thread, identifier, limit=limit, after=after, view=view, order=order,
         )
-        return True
 
     def request(
         self,
@@ -308,7 +342,6 @@ class AgentAppServerSupervisor:
                 title=title,
                 created_at=float(created_at) if created_at not in (None, "") else None,
             )
-            self._persist_thread_history(key, str(conversation["conversation_id"]), thread)
             return
         if method == "turn/start":
             preview = self._preview(params)
@@ -329,23 +362,6 @@ class AgentAppServerSupervisor:
                 if isinstance(item, Mapping)
             )
         return " ".join(str(raw).split())[:2000]
-
-    def _persist_thread_history(
-        self,
-        key: tuple[str, str],
-        conversation_id: str,
-        thread: Mapping[str, object],
-    ) -> None:
-        """Mirror textual Provider history without exposing tool internals."""
-        store = self.profile_service.conversation_store
-        try:
-            store.replace_items(
-                key[0], key[1], conversation_id, thread_messages(thread),
-            )
-        except (TypeError, ValueError, OSError):
-            # A malformed Provider thread must not make an otherwise valid
-            # resume fail.  The next resume can retry the projection refresh.
-            return
 
     def delete_conversation(
         self,
@@ -389,6 +405,7 @@ class AgentAppServerSupervisor:
             keys = list(self._sessions)
         for principal, profile_id in keys:
             self.stop(principal, profile_id)
+        self.thread_reader.close_all()
 
     def _start_heartbeat(
         self,

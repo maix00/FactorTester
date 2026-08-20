@@ -533,39 +533,39 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         owner: str,
         profile_id: str,
         conversation_id: str,
-    ) -> list[dict[str, Any]]:
-        cache_key = (
-            "profile-conversation-items",
-            str(source_server_id or "").strip(),
-            str(viewer or "").strip(),
-            str(owner or "").strip(),
-            str(profile_id or "").strip(),
-            str(conversation_id or "").strip(),
-        )
+        *,
+        limit: int = 10,
+        after: str = "",
+        view: str = "results",
+        order: str = "desc",
+    ) -> dict[str, Any]:
         route = self._profile_route(source_server_id)
         if route is None:
-            cached = self._stale_cached(cache_key)
-            return [dict(item) for item in cached or [] if isinstance(item, dict)]
-        try:
-            response = self._query_peer(
-                route,
-                kind="catalog",
-                operation="profile-conversation-items",
-                principal=str(viewer or "").strip(),
-                payload={
-                    "owner": owner,
-                    "profile_id": profile_id,
-                    "conversation_id": conversation_id,
-                },
-            )
-            rows = [dict(item) for item in response.get("items") or []
-                    if isinstance(item, dict)]
-            return [dict(item) for item in self._store(cache_key, rows)]
-        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-            cached = self._stale_cached(cache_key)
-            if cached is not None:
-                return [dict(item) for item in cached if isinstance(item, dict)]
-            raise
+            raise ConnectionError("conversation source server is offline")
+        response = self._query_peer(
+            route,
+            kind="catalog",
+            operation="profile-conversation-items",
+            principal=str(viewer or "").strip(),
+            payload={
+                "owner": owner,
+                "profile_id": profile_id,
+                "conversation_id": conversation_id,
+                "limit": max(1, min(int(limit), 50)),
+                "after": str(after or ""),
+                "view": str(view or "results"),
+                "order": str(order or "desc"),
+            },
+        )
+        return {
+            "items": [dict(item) for item in response.get("items") or []
+                      if isinstance(item, dict)],
+            "has_more": bool(response.get("has_more")),
+            "after": response.get("after"),
+            "turn_count": int(response.get("turn_count") or 0),
+            "view": str(response.get("view") or view or "results"),
+            "order": str(response.get("order") or order or "desc"),
+        }
 
     def factor_library(
         self, principal: str, *, visitor: bool = False,

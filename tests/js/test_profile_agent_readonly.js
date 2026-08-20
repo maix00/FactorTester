@@ -29,25 +29,56 @@ const conversation = {
 };
 const items = [
   {
-    conversation_id: conversation.conversation_id,
-    item_id: "item-1",
-    role: "user",
-    text: "请检查当前研究身份的状态",
-    created_at: 1787125081,
+    id: "item-1",
+    type: "user_message",
+    thread_id: conversation.conversation_id,
+    content: [{type: "input_text", text: "请检查当前研究身份的状态"}],
+    attachments: [],
+    quoted_text: null,
+    inference_options: {},
+    created_at: "2026-08-20T00:00:01+00:00",
   },
   {
-    conversation_id: conversation.conversation_id,
-    item_id: "item-2",
-    role: "assistant",
-    text: "这是历史回答\n\n```bash\nfactortester products list\n```",
-    created_at: 1787125082,
+    id: "item-2",
+    type: "assistant_message",
+    thread_id: conversation.conversation_id,
+    content: [{type: "output_text", text: (
+      "这是历史回答\n\n```bash\nfactortester products list\n```"
+    ), annotations: []}],
+    created_at: "2026-08-20T00:00:02+00:00",
   },
 ];
+const processItems = [{
+  id: "process-1",
+  type: "workflow",
+  thread_id: conversation.conversation_id,
+  workflow: {
+    type: "reasoning",
+    expanded: false,
+    tasks: [{
+      type: "thought",
+      title: "Reasoning summary",
+      content: "读取状态。",
+      status_indicator: "complete",
+    }],
+  },
+  created_at: "2026-08-20T00:00:01+00:00",
+}];
+const requestedURLs = [];
 
 const context = {
-  api: async url => url.includes("conversation-items")
-    ? {items}
-    : {conversations: [conversation]},
+  api: async url => {
+    requestedURLs.push(url);
+    if (!url.includes("conversation-items")) {
+      return {conversations: [conversation]};
+    }
+    const process = url.includes("view=process");
+    return {
+      items: process ? processItems : items,
+      has_more: true,
+      after: "older-turn-cursor",
+    };
+  },
 };
 const adapter = window.FTProfileChatKit.create(
   {profile_id: "maxc"},
@@ -82,9 +113,29 @@ const adapter = window.FTProfileChatKit.create(
 
   const page = await (await get({
     type: "items.list",
-    params: {thread_id: conversation.conversation_id},
+    params: {
+      thread_id: conversation.conversation_id,
+      limit: 7,
+      after: "current-cursor",
+    },
   })).json();
   assert.deepEqual(page.data.map(item => item.id), ["item-1", "item-2"]);
+  assert.equal(page.has_more, true);
+  assert.equal(page.after, "older-turn-cursor");
+  assert.ok(requestedURLs.some(url => (
+    url.includes("limit=7") && url.includes("after=current-cursor")
+    && url.includes("view=results") && url.includes("order=desc")
+  )));
+
+  adapter.setItemView("process");
+  const processPage = await (await get({
+    type: "items.list",
+    params: {thread_id: conversation.conversation_id, limit: 5},
+  })).json();
+  assert.deepEqual(processPage.data.map(item => item.id), ["process-1"]);
+  assert.ok(requestedURLs.some(url => (
+    url.includes("limit=5") && url.includes("view=process")
+  )));
   console.log("PASS: read-only Profile Agent history uses valid locked threads and stable item ids");
 })().catch(error => {
   console.error(error);

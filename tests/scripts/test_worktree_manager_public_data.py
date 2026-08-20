@@ -142,8 +142,15 @@ class _ConversationAgentProfiles:
             "updated_at": 4,
         }]
 
-    def conversation_items(self, _owner, _profile_id, _conversation_id):
-        return [{"role": "assistant", "text": "read-only"}]
+    def conversation_items(
+        self, _owner, _profile_id, _conversation_id, **_options,
+    ):
+        return {
+            "items": [{"role": "assistant", "text": "read-only"}],
+            "has_more": False,
+            "after": None,
+            "turn_count": 1,
+        }
 
 
 class _ConversationState:
