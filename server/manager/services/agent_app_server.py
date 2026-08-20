@@ -8,6 +8,9 @@ from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
+from server.manager.services.agent_conversation_runtime import (
+    AgentConversationRuntimeObserver,
+)
 from server.manager.services.agent_provider_thread_reader import (
     AgentProviderThreadReader,
 )
@@ -100,6 +103,11 @@ class AgentAppServerSupervisor:
                 codex_binary=self.codex_binary,
                 cc_switch_binary=self.cc_switch_binary,
                 proxy_url=proxy_url,
+                event_observer=AgentConversationRuntimeObserver(
+                    self.profile_service.conversation_store,
+                    key[0],
+                    key[1],
+                ).observe,
             )
             try:
                 session.start()

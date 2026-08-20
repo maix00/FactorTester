@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 import threading
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
@@ -30,6 +30,7 @@ class AgentAppServerSession:
         proxy_url: str = "",
         cc_switch_binary: str = "cc-switch",
         read_only: bool = False,
+        event_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.runtime = runtime
         self.provider = dict(provider)
@@ -43,6 +44,7 @@ class AgentAppServerSession:
         self.protocol = AgentSkillProtocol(runtime)
         self.policy = AgentAppServerPolicy(runtime, self.protocol)
         self.read_only = bool(read_only)
+        self.event_observer = event_observer
         self.process: AgentAppServerProcess | None = None
         self.cc_switch = (
             CCSwitchGateway(
@@ -87,6 +89,7 @@ class AgentAppServerSession:
                 command=self.launch.command(),
                 cwd=self.runtime.workspace_root,
                 environment=self.launch.environment(),
+                event_observer=self.event_observer,
             )
             process.start()
             self.process = process

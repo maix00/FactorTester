@@ -298,6 +298,25 @@ class AgentConversationStore:
             ).fetchone()
         return self._row(row)
 
+    def get_by_provider_thread(
+        self,
+        principal: str,
+        profile_id: str,
+        provider_thread_id: str,
+    ) -> dict[str, Any] | None:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        thread = self._required(provider_thread_id, "provider_thread_id", 512)
+        with self._connection() as db:
+            row = db.execute(
+                f"""SELECT * FROM {TABLE}
+                    WHERE principal = ? AND profile_id = ?
+                      AND provider_thread_id = ?
+                    ORDER BY updated_at DESC LIMIT 1""",
+                (owner, profile, thread),
+            ).fetchone()
+        return self._row(row)
+
     def active(self, principal: str, profile_id: str) -> dict[str, Any] | None:
         owner = self._required(principal, "principal")
         profile = self._required(profile_id, "profile_id")
@@ -525,6 +544,33 @@ class AgentConversationStore:
                 f"""UPDATE {TABLE} SET {', '.join(assignments)}
                     WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
                 values,
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
+    def increment_compaction(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE}
+                    SET compaction_count = compaction_count + 1
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (identifier, owner, profile),
             )
             if cursor.rowcount != 1:
                 raise ValueError("conversation not found")

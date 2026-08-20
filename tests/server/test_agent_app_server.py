@@ -15,6 +15,9 @@ from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.agent_app_server_errors import AgentAppServerError
+from server.manager.services.agent_conversation_runtime import (
+    AgentConversationRuntimeObserver,
+)
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
     AgentProviderHealthError,
@@ -1037,6 +1040,72 @@ def test_profile_agent_routes_reject_client_managed_profile(tmp_path):
 
     assert handler.response_status == 400
     assert "not bound to a server runtime" in _response(handler)["error"]
+
+
+def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    conversation = service.conversation_store.create(PRINCIPAL, PROFILE_ID)
+    service.conversation_store.save_thread(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+        "provider-thread-1",
+    )
+    observer = AgentConversationRuntimeObserver(
+        service.conversation_store, PRINCIPAL, PROFILE_ID,
+    )
+
+    observer.observe({
+        "method": "thread/tokenUsage/updated",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-1",
+            "tokenUsage": {
+                "modelContextWindow": 200000,
+                "last": {"totalTokens": 12000},
+                "total": {"totalTokens": 45000},
+            },
+        },
+    })
+    observer.observe({
+        "method": "thread/settings/updated",
+        "params": {
+            "threadId": "provider-thread-1",
+            "threadSettings": {"model": "research-model"},
+        },
+    })
+    observer.observe({
+        "method": "model/rerouted",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-1",
+            "fromModel": "research-model",
+            "toModel": "research-model-safe",
+        },
+    })
+    compaction = {
+        "method": "thread/compacted",
+        "params": {"threadId": "provider-thread-1", "turnId": "turn-1"},
+    }
+    observer.observe(compaction)
+    observer.observe(compaction)
+
+    updated = service.conversation_store.get(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )
+    assert updated is not None
+    assert updated["actual_model"] == "research-model-safe"
+    assert updated["model_context_window"] == 200000
+    assert updated["last_tokens"] == 12000
+    assert updated["total_tokens"] == 45000
+    assert updated["compaction_count"] == 1
 
 
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):
