@@ -1595,6 +1595,18 @@ def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_test_run_progress_finishes_and_refreshes_terminal_results() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_progress.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_manifest_driven_setting_rules_contract() -> None:
     import subprocess
 

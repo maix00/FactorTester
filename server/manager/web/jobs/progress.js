@@ -31,7 +31,9 @@
     const total = Number(source.total);
     const percent = Number.isFinite(Number(source.percent)) ? Number(source.percent)
       : Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? completed / total * 100 : null;
+    const status = String(source.status || payload?.status || source.phase || "").trim();
     if (percent != null) view.bar.value = Math.max(0, Math.min(100, percent));
+    else if (status === "succeeded") view.bar.value = 100;
     else view.bar.removeAttribute("value");
     const phase = source.phase || payload?.status || "";
     const count = Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? ` · ${completed}/${total}` : "";
