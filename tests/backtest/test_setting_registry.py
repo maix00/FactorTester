@@ -379,7 +379,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         chip["module"] for chip in index["chip_fields"]
     } >= {"factor_execution", "product_selection", "group_strategy"}
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_ref",
+        "factor_candidates",
         "product_path_selection",
         "group_index",
         "run_inputs",
@@ -388,9 +388,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert chips["split_count"]["display_scope"] == "strategy"
     assert chips["group_index"]["display_scope"] == "strategy"
     assert "product_mask" not in chips
-    assert chips["factor_ref"]["source_keys"] == ("factorRef", "factorLabel")
-    assert chips["factor_ref"]["detail_overlay"] == {
-        "kind": "factor", "mode": "view", "source_key": "factor",
+    assert chips["factor_candidates"]["source_keys"] == ("factorCandidateCount",)
+    assert chips["factor_candidates"]["detail_overlay"] == {
+        "kind": "factor_set", "mode": "view",
+        "source_key": "factor_candidates", "ref_key": "target_ref",
     }
     assert chips["product_path_selection"]["label"] == "产品组"
     assert chips["product_path_selection"]["detail_overlay"] == {
@@ -490,9 +491,10 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     )
     assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
-    assert chips["factor_ref"]["source_adapter"] == "selected_factors"
-    assert chips["factor_ref"]["detail_overlay"] == {
-        "kind": "factor", "mode": "view", "source_key": "factor",
+    assert chips["factor_candidates"]["source_adapter"] == "selected_factor_candidates"
+    assert chips["factor_candidates"]["detail_overlay"] == {
+        "kind": "factor_set", "mode": "view",
+        "source_key": "factor_candidates", "ref_key": "target_ref",
     }
     assert chips["product_path_selection"]["source_adapter"] == (
         "selected_product_paths"
@@ -531,7 +533,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "time_precision": ["exact"],
     }
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_ref",
+        "factor_candidates",
         "product_path_selection",
     }
     assert [tab["key"] for tab in index["result_tabs"]][:3] == [

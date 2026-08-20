@@ -93,6 +93,29 @@
   }
 
   function sourceValues(adapter, state, item = null) {
+    if (adapter === "selected_factor_candidates") {
+      const itemRefs = Array.isArray(item?.factor_candidate_refs)
+        ? item.factor_candidate_refs.map(String).filter(Boolean) : [];
+      const factors = itemRefs.length
+        ? factorObjects(state, itemRefs)
+        : factorCandidateObjects(state);
+      const references = factors.map(factorReference).filter(Boolean);
+      if (!references.length) return {};
+      const candidateSet = {
+        target_ref: `factor-candidates:${references.join("|")}`,
+        title_zh: `因子候选（${references.length}）`,
+        related_references: factors.map(factor => ({
+          target_ref: factorReference(factor),
+          label: factorLabel(factor),
+        })),
+        temporary: true,
+        source_origin: "test_inline",
+      };
+      return {
+        factorCandidateCount: references.length,
+        factor_candidates: [candidateSet],
+      };
+    }
     if (adapter === "selected_factors") {
       const itemRefs = Array.isArray(item?.factor_candidate_refs)
         ? item.factor_candidate_refs.map(String).filter(Boolean) : [];
@@ -142,6 +165,11 @@
     return state.kind === "ic"
       ? FTTestFactorSelection.selectedFactors(state)
       : [FTTestFactors.selectedFactor(state)].filter(Boolean);
+  }
+
+  function factorCandidateObjects(state) {
+    if (!window.FTTestFactorSelection) return [];
+    return FTTestFactorSelection.candidates(state);
   }
 
   function factorReference(value) {

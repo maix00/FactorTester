@@ -150,12 +150,14 @@ def _register_tabs(app: ApplicationSettings) -> None:
 
 def _register_chips(app: ApplicationSettings) -> None:
     app.register_chip_field(ChipDefinition(
-        "factor_ref", "因子", "identity", "因子: {factorLabel}",
-        ("factorRef", "factorLabel"), module="factor_execution", target_tab="factor",
+        "factor_candidates", "因子候选", "identity",
+        "因子候选: {factorCandidateCount} 个", ("factorCandidateCount",),
+        module="factor_execution", target_tab="factor",
         order=10, inherit_from_root=True, batch_owned=True,
-        source_adapter="selected_factors", clickable=True,
+        source_adapter="selected_factor_candidates", clickable=True,
         detail_overlay={
-            "kind": "factor", "mode": "view", "source_key": "factor",
+            "kind": "factor_set", "mode": "view",
+            "source_key": "factor_candidates", "ref_key": "target_ref",
         },
     ))
     app.register_chip_field(ChipDefinition(

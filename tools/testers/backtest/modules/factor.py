@@ -80,7 +80,7 @@ class FactorModule(ExecutableModule):
             tab="factor", chip_template="因子集合: {value}",
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
-            adapter_managed=True, show_chip=True,
+            adapter_managed=True, show_chip=False,
             execution_policy="authoring_only",
             help_text="选择集合后展开为具体因子候选；运行时同时冻结集合身份与成员因子",
             serialization={

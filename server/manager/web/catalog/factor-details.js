@@ -148,6 +148,25 @@
     if (!frozenRef) {
       throw new Error(context.t("该因子集合尚未冻结，不能打开稳定详情"));
     }
+    if (context.testObjectTemporary && context.testObjectInitialValue) {
+      const value = context.testObjectInitialValue;
+      context.setHeading(value.title_zh || context.t("因子候选"), context.t("因子候选"));
+      context.updateActiveTab?.({title: value.title_zh || context.t("因子候选")});
+      const root = document.createElement("div");
+      root.className = "detail-stack";
+      const members = Array.isArray(value.related_references)
+        ? value.related_references : [];
+      const view = FTUI.table(
+        [context.t("因子"), context.t("冻结引用")],
+        members.map(item => [item.label || item.title_zh, item.target_ref]),
+      );
+      linkRows(view, members, item =>
+        `/factors/factor/${encodeURIComponent(item.target_ref)}`, context,
+      );
+      root.append(view.shell);
+      context.content.replaceChildren(root);
+      return;
+    }
     context.content.replaceChildren(FTUI.loading(context.t("正在解析因子集合…")));
     const first = await loadSetPage(context, selected, frozenRef, 0, nativeRequest);
     const value = first.factor_set || first || {};

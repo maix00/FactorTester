@@ -193,6 +193,11 @@ assert.equal(productChip.children[1].textContent, "未设置（默认）");
 const overlayManifest = {
   chip_fields: [
     {
+      source_adapter: "selected_factor_candidates",
+      source_keys: ["factorCandidateCount"],
+      detail_overlay: {source_key: "factor_candidates"},
+    },
+    {
       source_adapter: "selected_factors", source_keys: ["factorRef", "factorLabel"],
       detail_overlay: {source_key: "factor"},
     },
@@ -204,14 +209,32 @@ const overlayManifest = {
 };
 const adapterSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
-  values: {factor_candidates: [{factor_ref: "factor:roc", factor_alias: "ROC 1m"}]},
+  values: {factor_candidates: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {factor_ref: "factor:value", factor_alias: "Value"},
+  ]},
   groups: [{group_ref: "group:day", name: "日盘"}],
 }, {
   factor_candidate_refs: ["factor:roc"],
   product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
 });
 assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
+assert.equal(adapterSources.factorCandidateCount, 1);
+assert.equal(adapterSources.factor_candidates.length, 1);
+assert.equal(adapterSources.factor_candidates[0].temporary, true);
+assert.deepEqual(adapterSources.factor_candidates[0].related_references, [{
+  target_ref: "factor:roc", label: "ROC 1m",
+}]);
 assert.equal(adapterSources.product_group[0].group_ref, "group:day");
+const pageCandidateSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {factor_ref: "factor:value", factor_alias: "Value"},
+  ]},
+});
+assert.equal(pageCandidateSources.factorCandidateCount, 2);
+assert.equal(pageCandidateSources.factor_candidates[0].related_references.length, 2);
 
 const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
@@ -225,6 +248,11 @@ assert.deepEqual(
   persistedStrategySources.factor,
   [{factor_ref: "factor:sgccs-history"}],
   "a persisted strategy factor must remain a detail target before catalog loading",
+);
+assert.equal(persistedStrategySources.factorCandidateCount, 1);
+assert.equal(
+  persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
+  "factor:sgccs-history",
 );
 assert.equal(
   persistedStrategySources.product_path_selection[0],

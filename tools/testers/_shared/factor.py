@@ -183,7 +183,7 @@ def register_factor_set_selections_base(
         module="factor_execution",
         chip_template="因子集合: {value}",
         adapter_managed=True,
-        show_chip=True,
+        show_chip=False,
         execution_policy="authoring_only",
         help_text="选择集合后展开为有序具体因子；运行配置同时冻结集合身份与成员因子",
         serialization={
