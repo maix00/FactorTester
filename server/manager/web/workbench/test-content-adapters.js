@@ -116,6 +116,13 @@
           target_ref: factorSetReference(value),
           label: factorSetLabel(value),
         })).filter(value => value.target_ref);
+      const soleSet = references.length > 1 && directFactors.length === 0
+        && factorSets.length === 1
+        && factors.every(value => (
+          Array.isArray(value?.factor_set_refs)
+          && value.factor_set_refs.map(String).includes(factorSets[0].target_ref)
+        ))
+        ? factorSets[0] : null;
       const candidateSet = {
         target_ref: `factor-candidates:${references.join("|")}`,
         title_zh: `因子候选（${references.length}）`,
@@ -131,7 +138,8 @@
       return {
         factorCandidateCount: references.length,
         factorCandidateLabel: references.length === 1
-          ? factorLabel(factors[0]) : `${references.length} 个`,
+          ? factorLabel(factors[0])
+          : soleSet?.label || `${references.length} 个`,
         factor_candidates: [candidateSet],
       };
     }

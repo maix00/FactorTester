@@ -251,6 +251,18 @@ assert.equal(pageCandidateSources.factor_candidates[0].source_factors.length, 1)
 assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [{
   target_ref: "factor-set:value", label: "价值集合",
 }]);
+const oneSetCandidateSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:value-1", factor_alias: "Value 1",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+    {factor_ref: "factor:value-2", factor_alias: "Value 2",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
+  ]},
+});
+assert.equal(oneSetCandidateSources.factorCandidateLabel, "价值集合");
 
 const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
