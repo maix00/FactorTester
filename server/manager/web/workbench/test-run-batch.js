@@ -232,6 +232,13 @@
   }
 
   function link(context, label, path) {
+    if (!path) {
+      const missing = document.createElement("span");
+      missing.className = "test-run-missing-link";
+      missing.textContent = context.t(label);
+      missing.title = context.t("测试任务尚未生成 Job ID");
+      return missing;
+    }
     const anchor = document.createElement("a");
     anchor.href = path;
     anchor.textContent = context.t(label);

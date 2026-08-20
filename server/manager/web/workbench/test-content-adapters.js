@@ -89,18 +89,24 @@
 
   function sourceValues(adapter, state, item = null) {
     if (adapter === "selected_factors") {
+      const itemFactors = Array.isArray(item?.factorAliases)
+        ? item.factorAliases
+        : [item?.factorAlias || item?.factor_alias].filter(Boolean);
+      if (itemFactors.length) {
+        return {factorAlias: itemFactors.map(value => String(value).trim()).filter(Boolean)};
+      }
       if (!window.FTTestFactorSelection || !window.FTTestFactors) return {};
-      const factors = item?.factorAlias || item?.factor_alias
-        ? [item.factorAlias || item.factor_alias]
-        : state.kind === "ic"
+      const factors = state.kind === "ic"
         ? FTTestFactorSelection.selectedFactors(state)
         : [FTTestFactors.selectedFactor(state)].filter(Boolean);
       return {factorAlias: factors.map(FTTestFactorSelection.factorAlias).filter(Boolean)};
     }
     if (adapter === "selected_product_paths") {
+      if (item?.product_path_selection) {
+        return {product_path_selection: [item.product_path_selection]};
+      }
       if (!window.FTTestProducts) return {};
-      return {product_path_selection: item?.product_path_selection
-        ? [item.product_path_selection] : FTTestProducts.selectedProjections(state)};
+      return {product_path_selection: FTTestProducts.selectedProjections(state)};
     }
     if (adapter === "primary_strategy_group") {
       const group = item || state.analysis?.groups?.[0] || {};

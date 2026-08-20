@@ -277,15 +277,24 @@
     if (!state.backtestGroupConfigOpen || !window.FTTestSettingChips?.render) return null;
     const overrides = FTBacktestGroupModel.registeredOverrides(group, state.manifest);
     const onlyKeys = Object.keys(overrides);
-    if (!onlyKeys.length) return null;
-    const mountedTabs = [...new Set(Object.values(state.manifest?.defaults || {})
-      .map(field => field?.tab_key).filter(Boolean))];
+    const sources = window.FTTestContentAdapters?.chipSources?.(state, group) || {};
+    const hasIdentity = Object.values(sources).some(value => (
+      Array.isArray(value) ? value.length > 0 : value !== "" && value != null
+    ));
+    if (!onlyKeys.length && !hasIdentity) return null;
+    const defaultTabs = Object.values(state.manifest?.defaults || {})
+      .map(field => field?.tab_key).filter(Boolean);
+    const mountedTabs = [...new Set([
+      ...defaultTabs,
+      ...(Array.isArray(group?.override_mounted_tabs) ? group.override_mounted_tabs : []),
+    ])];
     return FTTestSettingChips.render({
       context,
       manifest: state.manifest,
       values: {...(state.values || {}), ...overrides},
       mountedTabs,
       onlyKeys,
+      sources,
       includeUnregistered: true,
       includeRun: false,
       groupBy: "none",

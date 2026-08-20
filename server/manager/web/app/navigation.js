@@ -170,6 +170,25 @@
       return {kind: "research-graph", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
     if (parts[0] === "research") return {kind: "research"};
+    // A task URL may omit the worker port when it is only a storage/detail
+    // reference.  Classify these suffix routes before the numbered-port
+    // matcher so `/jobs/<id>/configuration` cannot become a Job whose port is
+    // the numeric-looking part of its id.
+    if (parts[0] === "jobs" && parts.length === 3 && parts[2] === "configuration") {
+      return {
+        kind: "job-configuration", port: 0,
+        id: decodeURIComponent(parts[1]),
+        ...serverSelector(search),
+      };
+    }
+    if (parts[0] === "jobs" && parts.length >= 4 && parts[2] === "inputs") {
+      return {
+        kind: "job-input", port: 0,
+        id: decodeURIComponent(parts[1]),
+        inputName: decodeURIComponent(parts.slice(3).join("/")),
+        ...serverSelector(search),
+      };
+    }
     if (parts[0] === "jobs" && parts.length === 4 && parts[3] === "configuration") {
       return {
         kind: "job-configuration", port: Number(parts[1]),

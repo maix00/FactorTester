@@ -446,6 +446,8 @@ const strategyScopedBacktest = {
     'submitServerRun(context, state, request)',
   ));
   assert.ok(actionsSource.includes("controller.abort()"));
+  assert.ok(actionsSource.includes("FTJobs?.invalidate?.()"),
+    "server submissions must invalidate the cached task-list pages");
   assert.equal(actionLoaded, true, "the first explicit action loads submission code");
   assert.ok(lazyGroups.includes("workbench-run-batch-actions"));
   assert.ok(!lazyGroups.includes("research"),

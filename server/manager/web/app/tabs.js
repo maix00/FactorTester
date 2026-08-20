@@ -183,6 +183,26 @@
       return `product-source-family-detail:${target}`;
     }
 
+    function jobDetailTabID(path) {
+      let route;
+      try { route = new URL(String(path || ""), "http://factortester.invalid"); }
+      catch (_) { return ""; }
+      const parts = route.pathname.split("/").filter(Boolean);
+      if (parts[0] !== "jobs" || parts.length < 2) return "";
+      // Configuration and input pages are separate detail routes. They must
+      // not share the base task tab, otherwise restoring the task tab can
+      // bring back the test workbench DOM instead of the requested page.
+      if ((parts.length === 3 && parts[2] === "configuration")
+          || (parts.length >= 4 && parts[2] === "inputs")
+          || parts.length >= 4) return "";
+      const port = parts.length === 2 ? "0" : parts[1];
+      const target = parts.length === 2 ? parts[1] : parts.slice(2).join("/");
+      let jobID = target;
+      try { jobID = decodeURIComponent(target); } catch (_) {}
+      const serverID = route.searchParams.get("server_id") || "";
+      return `job-detail:${port}:${encodeURIComponent(serverID)}:${encodeURIComponent(jobID)}`;
+    }
+
     function runSpecTabID(path) {
       let route;
       try { route = new URL(String(path || ""), "http://factortester.invalid"); }
@@ -198,13 +218,20 @@
     }
 
     function detailTabIDForPath(path) {
-      return productSourceFamilyDetailTabID(path)
+      return jobDetailTabID(path)
+        || productSourceFamilyDetailTabID(path)
         || productCategoryDetailTabID(path)
         || productDetailTabID(path) || factorDetailTabID(path)
         || profileDetailTabID(path) || runSpecTabID(path);
     }
 
     function navigate(path) {
+      // A missing task URL must not create a new tab.  In particular, an
+      // empty href otherwise leaves the browser pathname unchanged while
+      // creating a new tab, so the new tab renders the current test
+      // workbench again instead of an independent task page.
+      path = String(path || "").trim();
+      if (!path) return;
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       // An overlay owns the source tab.  Any internal navigation initiated
       // from it gets a dedicated tab, including normally pinned feature routes.
@@ -237,6 +264,7 @@
       }
       return openTab(path, {
         id: detailTabID || undefined,
+        closable: nativeDetail,
         forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")
           || path.startsWith("/factor-series") || path.startsWith("/docs")
           || path.startsWith("/sqlite-web") || path.startsWith("/manager")
