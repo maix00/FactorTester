@@ -211,6 +211,9 @@ class AgentConversationStore:
         conversation_id: str = "",
         title: str = "",
         active: bool = True,
+        model_id: str = "",
+        reasoning_effort: str = "",
+        service_tier: str = "",
     ) -> dict[str, Any]:
         owner = self._required(principal, "principal")
         profile = self._required(profile_id, "profile_id")
@@ -220,6 +223,9 @@ class AgentConversationStore:
         identifier = self._required(identifier, "conversation_id", 256)
         now = time.time()
         label = str(title or "").strip()[:512]
+        model = str(model_id or "").strip()[:256]
+        effort = str(reasoning_effort or "").strip()[:64]
+        tier = str(service_tier or "").strip()[:64]
         with self._connection() as db:
             existing = db.execute(
                 f"SELECT principal, profile_id FROM {TABLE} WHERE conversation_id = ?",
@@ -239,13 +245,20 @@ class AgentConversationStore:
             db.execute(
                 f"""INSERT INTO {TABLE} (
                         conversation_id, principal, profile_id, title,
-                        created_at, updated_at, active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, active, model_id,
+                        reasoning_effort, service_tier
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(conversation_id) DO UPDATE SET
                         title = excluded.title,
                         updated_at = excluded.updated_at,
-                        active = excluded.active""",
-                (identifier, owner, profile, label, now, now, int(active)),
+                        active = excluded.active,
+                        model_id = excluded.model_id,
+                        reasoning_effort = excluded.reasoning_effort,
+                        service_tier = excluded.service_tier""",
+                (
+                    identifier, owner, profile, label, now, now, int(active),
+                    model, effort, tier,
+                ),
             )
             row = db.execute(
                 f"SELECT * FROM {TABLE} WHERE conversation_id = ?",

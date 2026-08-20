@@ -263,10 +263,16 @@ class AgentProfileService:
         *,
         title: str = "",
     ) -> dict[str, Any]:
+        model_id = ""
+        provider_id = self.provider_id_for_profile(principal, profile_id)
+        if provider_id:
+            provider = self.provider_store.get(principal, provider_id)
+            model_id = str((provider or {}).get("default_model") or "")
         return self.conversation_store.create(
             principal,
             profile_id,
             title=title,
+            model_id=model_id,
         )
 
     def select_conversation(
@@ -296,6 +302,25 @@ class AgentProfileService:
             conversation_id,
             title=title,
             preview=preview,
+        )
+
+    def update_conversation_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        return self.conversation_store.update_runtime_settings(
+            principal,
+            profile_id,
+            conversation_id,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            service_tier=service_tier,
         )
 
     def delete_conversation(

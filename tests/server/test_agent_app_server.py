@@ -91,7 +91,7 @@ for raw in sys.stdin:
     elif method == "thread/delete":
         result = {"deleted": True}
     else:
-        result = {"accepted": method}
+        result = {"accepted": method, "params": request.get("params", {})}
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
@@ -448,6 +448,14 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         {},
         conversation_id=conversation["conversation_id"],
     )
+    service.update_conversation_runtime_settings(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+        model_id="research-model-fast",
+        reasoning_effort="high",
+        service_tier="fast",
+    )
     with pytest.raises(AgentAppServerError, match="conversation catalog"):
         supervisor.request(
             PRINCIPAL,
@@ -468,6 +476,9 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert response["result"]["accepted"] == "turn/start"
+    assert response["result"]["params"]["model"] == "research-model-fast"
+    assert response["result"]["params"]["effort"] == "high"
+    assert response["result"]["params"]["serviceTier"] == "fast"
     config_path = (
         tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
         / ".codex" / "config.toml"
@@ -920,8 +931,24 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     )
     listed = _response(handler)["conversations"]
     assert listed[0]["conversation_id"] == conversation["conversation_id"]
+    assert listed[0]["model_id"] == "research-model"
     assert "principal" not in listed[0]
     assert "provider_id" not in listed[0]
+
+    handler = _AppHandler(service, supervisor, {
+        "profile_id": PROFILE_ID,
+        "conversation_id": conversation["conversation_id"],
+        "model_id": "research-model-fast",
+        "reasoning_effort": "high",
+        "service_tier": "fast",
+    })
+    assert handler._post_agent_app_routes(urlparse(
+        "/api/client/profile-agent/conversations/settings",
+    ))
+    settings = _response(handler)["conversation"]
+    assert settings["model_id"] == "research-model-fast"
+    assert settings["reasoning_effort"] == "high"
+    assert settings["service_tier"] == "fast"
 
     handler = _AppHandler(service, supervisor, {
         "profile_id": PROFILE_ID,
@@ -930,7 +957,9 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
         "params": {"prompt": "hello", "threadId": "provider-thread-1", "skill_ids": []},
     })
     assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
-    assert _response(handler)["response"]["result"]["accepted"] == "turn/start"
+    turn = _response(handler)["response"]["result"]
+    assert turn["accepted"] == "turn/start"
+    assert turn["params"]["model"] == "research-model-fast"
 
     handler = _AppHandler(service, supervisor)
     assert handler._get_agent_app_routes(urlparse(

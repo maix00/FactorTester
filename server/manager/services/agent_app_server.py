@@ -248,11 +248,28 @@ class AgentAppServerSupervisor:
             session = self._sessions.get(key)
             if session is None:
                 raise AgentAppServerError("start the Profile Agent first")
-        response = session.request(method, params)
+        request_params = dict(params or {})
+        if method == "turn/start" and conversation is not None:
+            # The Manager-owned conversation is the settings authority.  A
+            # browser cannot mutate a Provider default or smuggle a different
+            # model choice directly into one turn.
+            for field in ("model", "effort", "serviceTier"):
+                request_params.pop(field, None)
+            settings = {
+                "model": conversation.get("model_id"),
+                "effort": conversation.get("reasoning_effort"),
+                "serviceTier": conversation.get("service_tier"),
+            }
+            request_params.update({
+                name: str(value)
+                for name, value in settings.items()
+                if str(value or "").strip()
+            })
+        response = session.request(method, request_params)
         self._save_conversation_state(
             key,
             method,
-            params or {},
+            request_params,
             response,
             conversation,
         )

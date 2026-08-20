@@ -37,6 +37,14 @@ _PUBLIC_CONVERSATION_KEYS = frozenset({
     # The adapter needs this opaque binding to resume the provider thread;
     # it is never used as ChatKit's browser-visible thread id.
     "provider_thread_id",
+    "model_id",
+    "reasoning_effort",
+    "service_tier",
+    "actual_model",
+    "model_context_window",
+    "total_tokens",
+    "last_tokens",
+    "compaction_count",
 })
 
 
@@ -245,6 +253,7 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent/conversations/create",
             "/api/client/profile-agent/conversations/select",
             "/api/client/profile-agent/conversations/update",
+            "/api/client/profile-agent/conversations/settings",
             "/api/client/profile-agent/conversations/delete",
         }:
             return False
@@ -281,6 +290,22 @@ class AgentAppServerRoutesMixin:
                     conversation_id,
                     title=payload.get("title"),
                     preview=payload.get("preview"),
+                )
+                json_response(self, {
+                    "success": True,
+                    "conversation": _public_conversation(value),
+                })
+                return True
+            if parsed.path.endswith("/conversations/settings"):
+                value = supervisor.profile_service.update_conversation_runtime_settings(
+                    principal,
+                    identifier,
+                    conversation_id,
+                    model_id=str(payload.get("model_id") or "").strip(),
+                    reasoning_effort=str(
+                        payload.get("reasoning_effort") or ""
+                    ).strip(),
+                    service_tier=str(payload.get("service_tier") or "").strip(),
                 )
                 json_response(self, {
                     "success": True,
