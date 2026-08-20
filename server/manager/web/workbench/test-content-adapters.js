@@ -1,4 +1,9 @@
 (() => {
+  const candidateIndexes = new WeakMap();
+  const directSourceIndexes = new WeakMap();
+  const factorSetIndexes = new WeakMap();
+  const referenceDigests = new WeakMap();
+
   function moduleReady(name) {
     return Boolean(window[name] || globalThis[name]);
   }
@@ -94,24 +99,32 @@
 
   function sourceValues(adapter, state, item = null) {
     if (adapter === "selected_factor_candidates") {
-      const itemRefs = Array.isArray(item?.factor_candidate_refs)
-        ? item.factor_candidate_refs.map(String).filter(Boolean) : [];
+      const rawItemRefs = Array.isArray(item?.factor_candidate_refs)
+        ? item.factor_candidate_refs : [];
+      const itemRefs = rawItemRefs.map(String).filter(Boolean);
       const factors = itemRefs.length
         ? factorObjects(state, itemRefs)
         : factorCandidateObjects(state);
       const references = factors.map(factorReference).filter(Boolean);
       if (!references.length) return {};
-      const wanted = new Set(references);
-      const directFactors = sourceList(state, "factor_source_selections")
-        .filter(value => wanted.has(factorReference(value)))
+      const directIndex = indexedValues(
+        sourceList(state, "factor_source_selections"), directSourceIndexes,
+        factorReference,
+      );
+      const directFactors = references.map(ref => directIndex.get(ref)).filter(Boolean)
         .map(value => ({
           target_ref: factorReference(value), label: factorLabel(value),
         }));
       const referencedSets = new Set(factors.flatMap(value => (
         Array.isArray(value?.factor_set_refs) ? value.factor_set_refs : []
       )).map(String).filter(Boolean));
-      const factorSets = sourceList(state, "factor_set_selections")
-        .filter(value => !item || referencedSets.has(factorSetReference(value)))
+      const setSources = sourceList(state, "factor_set_selections");
+      const setIndex = indexedValues(
+        setSources, factorSetIndexes, factorSetReference,
+      );
+      const factorSets = (item
+        ? [...referencedSets].map(ref => setIndex.get(ref)).filter(Boolean)
+        : setSources)
         .map(value => ({
           target_ref: factorSetReference(value),
           label: factorSetLabel(value),
@@ -124,7 +137,9 @@
         ))
         ? factorSets[0] : null;
       const candidateSet = {
-        target_ref: `factor-candidates:${references.join("|")}`,
+        target_ref: `factor-candidates:${referenceDigest(
+          references, rawItemRefs.length ? rawItemRefs : null,
+        )}:${references.length}`,
         title_zh: `因子候选（${references.length}）`,
         related_references: factors.map(factor => ({
           target_ref: factorReference(factor),
@@ -199,6 +214,38 @@
     return FTTestFactorSelection.candidates(state);
   }
 
+  function indexedValues(values, cache, keyFor) {
+    if (!Array.isArray(values)) return new Map();
+    const prior = cache.get(values);
+    if (prior) return prior;
+    const index = new Map();
+    for (const value of values) {
+      const key = keyFor(value);
+      if (key) index.set(key, value);
+    }
+    cache.set(values, index);
+    return index;
+  }
+
+  function referenceDigest(references, cacheKey = null) {
+    if (cacheKey) {
+      const prior = referenceDigests.get(cacheKey);
+      if (prior) return prior;
+    }
+    let hash = 0x811c9dc5;
+    for (const reference of references) {
+      for (let index = 0; index < reference.length; index += 1) {
+        hash ^= reference.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      hash ^= 0xff;
+      hash = Math.imul(hash, 0x01000193);
+    }
+    const digest = (hash >>> 0).toString(16).padStart(8, "0");
+    if (cacheKey) referenceDigests.set(cacheKey, digest);
+    return digest;
+  }
+
   function sourceList(state, key) {
     return Array.isArray(state.values?.[key]) ? state.values[key] : [];
   }
@@ -228,9 +275,7 @@
   function factorObjects(state, refs) {
     const wanted = new Set(refs || []);
     const candidates = window.FTTestFactorSelection?.candidates?.(state) || [];
-    const matched = new Map(candidates
-      .filter(item => wanted.has(factorReference(item)))
-      .map(item => [factorReference(item), item]));
+    const matched = indexedValues(candidates, candidateIndexes, factorReference);
     // Strategy rows are rendered before the catalog is necessarily loaded.
     // Preserve their stable factor reference/alias so the detail overlay stays
     // clickable; the catalog detail view resolves the full object lazily.

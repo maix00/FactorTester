@@ -247,6 +247,10 @@ const pageCandidateSources = FTTestContentAdapters.chipSources({
 });
 assert.equal(pageCandidateSources.factorCandidateLabel, "2 个");
 assert.equal(pageCandidateSources.factor_candidates[0].related_references.length, 2);
+assert.match(
+  pageCandidateSources.factor_candidates[0].target_ref,
+  /^factor-candidates:[0-9a-f]{8}:2$/,
+);
 assert.equal(pageCandidateSources.factor_candidates[0].source_factors.length, 1);
 assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [{
   target_ref: "factor-set:value", label: "价值集合",
@@ -263,6 +267,22 @@ const oneSetCandidateSources = FTTestContentAdapters.chipSources({
   ]},
 });
 assert.equal(oneSetCandidateSources.factorCandidateLabel, "价值集合");
+const cacheState = {
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:first", factor_alias: "First"},
+  ], factor_source_selections: [], factor_set_selections: []},
+};
+assert.equal(
+  FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "First",
+);
+cacheState.values.factor_candidates = [
+  {factor_ref: "factor:second", factor_alias: "Second"},
+];
+assert.equal(
+  FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "Second",
+  "replacing the candidate array must invalidate its reference index",
+);
 
 const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
