@@ -25,11 +25,14 @@ FactorTester 直接调用固定版本的 `cc-switch` CLI，不复制协议转换
 3. Manager 使用权限为 `0600` 的短时配置文件调用
    `cc-switch provider add --config-file`，避免密钥进入进程参数；
 4. CC Switch 仅监听 `127.0.0.1` 的临时端口，不开放为服务器服务；
-5. Codex 子进程只拿到本地临时令牌和 CC Switch 环回地址，不拿到上游密钥；
-6. Profile Agent 停止后终止 CC Switch，并清理其临时配置、SQLite 和凭据；
-7. OpenAI Responses 可保持现有直连；OpenAI Chat 和 Anthropic Messages 通过
+5. 不使用 CC Switch 的 `--takeover`；Codex 子进程显式连接环回 URL，
+   CC Switch 的 `HOME`、`CODEX_HOME` 和 XDG 目录也全部映射到该
+   Profile 的临时会话根，不读写 Manager 用户的全局 CLI 配置；
+6. Codex 子进程只拿到本地临时令牌和 CC Switch 环回地址，不拿到上游密钥；
+7. Profile Agent 停止后终止 CC Switch，并清理其临时配置、SQLite 和凭据；
+8. OpenAI Responses 可保持现有直连；OpenAI Chat 和 Anthropic Messages 通过
    CC Switch 的 Codex 路由转换；
-8. 未经 CC Switch Codex 路由明确支持的 Gemini Native 等组合必须在启动前
+9. 未经 CC Switch Codex 路由明确支持的 Gemini Native 等组合必须在启动前
    拒绝，不做隐式协议降级。
 
 公网镜像固定安装 `cc-switch-cli v5.10.2`，按架构校验上游发布包 SHA-256。
