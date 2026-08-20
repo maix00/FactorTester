@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_provider_health import AgentProviderHealth
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_workspace import (
     WORKSPACE_DIRECTORIES,
@@ -496,3 +497,40 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
         "openai_chat": "cc_switch",
         "openai_responses": "direct",
     }
+
+
+def test_agent_provider_listing_never_contacts_upstream_providers(
+    tmp_path,
+    monkeypatch,
+):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    service.save_provider(
+        PRINCIPAL,
+        {
+            "label": "provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "model",
+            "token": "hidden-token",
+        },
+    )
+
+    def fail_if_health_check_runs(*_args, **_kwargs):
+        raise AssertionError("provider listing must not contact an upstream API")
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fail_if_health_check_runs)
+    listing = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+
+    assert listing._get_agent_routes(urlparse("/api/client/agent-models")) is True
+    response = _route_payload(listing)
+    assert response["success"] is True
+    assert [item["label"] for item in response["providers"]] == ["provider"]

@@ -49,3 +49,29 @@ FactorTester 直接调用固定版本的 `cc-switch` CLI，不复制协议转换
 - CC Switch 升级必须更新固定版本、校验和、归属记录并跑协议聚焦测试；
 - 若将来需要 Claude Code 或 Gemini CLI 自身作为 Agent Runtime，应另行实现
   Runtime 的会话事件适配，不能仅凭 Provider 转换宣称已经支持。
+
+## UI 对齐与性能门槛
+
+后续每增加一项 Provider UI 能力，都必须先与 CC Switch 的对应行为做语义映射，
+再决定 FactorTester 的呈现方式；不得仅凭视觉相似自行增加另一套状态模型。
+FactorTester 保留现有 FTUI，不引入 CC Switch 的 React、TanStack Query、Tauri
+运行时，避免形成第二套前端框架、路由、国际化和缓存系统。
+
+| 能力 | CC Switch 对应行为 | FactorTester 约束 |
+|---|---|---|
+| Provider 列表与搜索 | ProviderList | 只读 Manager SQLite；不得探测上游 |
+| 新增与编辑 | ProviderForm | 复用公共 overlay，并保持 Profile/服务器所有权隔离 |
+| 模型建议 | ModelDropdown | 仅在已保存 Provider 的模型字段获得焦点或用户测试连接时加载；允许手填 |
+| 健康状态与测试 | ProviderHealthBadge / useStreamCheck | 用户显式触发单个 Provider；禁止列表批量检查 |
+| 协议与传输标识 | Provider 类型及代理状态 | 由后端 capability registry 注册，显示 direct 或 CC Switch |
+| 用量、日志和图表 | Usage/日志视图 | 尚未实现；以后只能在用户打开详情 overlay 后懒加载 |
+| 故障切换 | 应用级 Provider 切换 | 尚未实现；必须是 Profile 级策略，不得使用全局当前 Provider |
+
+性能不变量：
+
+1. 打开 Provider 列表只允许一次 Manager 列表请求，向模型供应商发出零次请求；
+2. 不在列表加载、搜索、分页或语言切换时批量执行健康检查；
+3. 模型目录按交互懒加载，单次结果最多保留 2000 项；
+4. 用量图表、日志和大型详情只在 overlay 打开后加载，关闭后释放其视图状态；
+5. 每次 UI 扩展必须记录 CC Switch 对应组件、FactorTester 权限差异、增加的
+   请求数量和缓存边界，并用聚焦测试固定关键的不发请求约束。
