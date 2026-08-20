@@ -98,6 +98,47 @@
     applyWorkspaceConfiguration(state);
   }
 
+  function defaultRunValues(manifest) {
+    const values = {};
+    for (const item of manifest?.run_fields || []) {
+      if (item.placement !== "outputs") values[item.key] = structuredClone(item.default);
+    }
+    return values;
+  }
+
+  function clearDraft(state) {
+    state.workspace = null;
+    try { localStorage.removeItem(`ft-${state.kind}-workspace`); } catch (_) {}
+    state.analysis = {};
+    state.savedFactors = [];
+    state.savedTemporaryObjects = {};
+    state.factorRef = "";
+    state.groupRef = "";
+    state.groupRefs = [];
+    state.values = null;
+    state.settingsInitialized = false;
+    state.settingsMountedTabs = [];
+    state.settingsTabKey = "";
+    state.transientFactorSources = [];
+    state.transientFactorFamilies = [];
+    state.transientStrategySources = [];
+    state.strategySpecs = [];
+    state.strategyInspections = [];
+    state.runInputDependencies = [];
+    state.runInputStatus = {busy: false, error: ""};
+    state.outputRequests = [];
+    state.outputRequestsExplicit = false;
+    state.testRunBatch = [];
+    state.activeRunGroupID = "";
+    state.selectedBacktestGroupIDs = [];
+    state.selectedBacktestLongShortIDs = [];
+    state.backtestExpandedBatches = {};
+    state.backtestGroupEditor = null;
+    state.backtestGroupsOpen = false;
+    state.runValues = defaultRunValues(state.manifest);
+    return state;
+  }
+
   function savedSettings(state) {
     const payload = state.workspace?.configuration?.payload || {};
     return payload.ui?.[state.kind]?.settings
@@ -110,7 +151,8 @@
   }
 
   window.FTTestState = Object.freeze({
-    applyWorkspaceConfiguration, initializeInputState, lazyState,
+    applyWorkspaceConfiguration, clearDraft, defaultRunValues,
+    initializeInputState, lazyState,
     mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
     restoreTemporaryObjects, seedSavedCatalogs,
   });

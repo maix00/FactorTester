@@ -21,7 +21,7 @@
   }
 
   function placeholderRunActions(context) {
-    return ["查看运行配置", "运行"].map(label => {
+    return ["查看运行配置", "运行", "清空"].map(label => {
       const action = context.button(
         context.t(label), () => {}, context.t("正在读取测试运行操作…"),
       );
@@ -103,14 +103,6 @@
     return applied;
   }
 
-  function initialRunValues(manifest) {
-    const values = {};
-    (manifest?.run_fields || []).forEach(item => {
-      if (item.placement !== "outputs") values[item.key] = structuredClone(item.default);
-    });
-    return values;
-  }
-
   function applyBacktestDerivedPrefill(state) {
     if (state.kind !== "backtest") return;
     const raw = sessionStorage.getItem("ft-backtest-derived-prefill");
@@ -160,7 +152,7 @@
       runtimeServers: null, runtimeServersLoaded: false,
       runtimeServersLoading: false,
       lazy: FTTestState.lazyState(),
-      runValues: initialRunValues(manifest),
+      runValues: FTTestState.defaultRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
       runBatchCode: {status: "idle", error: "", promise: null},
       backtestCode: {status: "idle", error: "", promise: null},
@@ -560,6 +552,18 @@
     context.content.replaceChildren(root);
   }
 
+  function clearDraft(context, state, refresh) {
+    if (!window.confirm(context.t("确定清空当前测试配置吗？"))) return false;
+    FTTestState.clearDraft(state);
+    initializeSettings(state);
+    window.FTTestFactors?.prepare?.(state);
+    window.FTTestProducts?.synchronize?.(state);
+    window.FTBacktestGroups?.initialize?.(state);
+    context.showNotice?.(context.t("当前测试配置已清空"));
+    refresh?.();
+    return true;
+  }
+
   function ensureSettingsTab(context, state, tabKey, refresh) {
     // The schema loader belongs to the same deferred group as editable field
     // controls. A direct request must cross that code boundary first.
@@ -609,5 +613,6 @@
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)
     ),
+    clearDraft,
   };
 })();

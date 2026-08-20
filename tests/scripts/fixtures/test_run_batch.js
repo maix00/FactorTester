@@ -225,10 +225,14 @@ const strategyScopedBacktest = {
   assert.equal(actionLoaded, false, "submission code must not load while creating header actions");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");
+  let cleared = 0;
+  window.FTTests = {clearDraft: () => { cleared += 1; }};
   const header = batch.headerActions(context, state, () => {});
-  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行"]);
+  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行", "清空"]);
   assert.equal(header[0].disabled, false);
   assert.equal(header[1].disabled, false);
+  header[2].listeners.click();
+  assert.equal(cleared, 1);
   const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
   assert.equal(emptyHeader[0].disabled, false,
     "view RunSpec must remain clickable without a product group");
