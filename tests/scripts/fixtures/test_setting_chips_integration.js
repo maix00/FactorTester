@@ -194,7 +194,7 @@ const overlayManifest = {
   chip_fields: [
     {
       source_adapter: "selected_factor_candidates",
-      source_keys: ["factorCandidateCount"],
+      source_keys: ["factorCandidateLabel"],
       detail_overlay: {source_key: "factor_candidates"},
     },
     {
@@ -211,7 +211,12 @@ const adapterSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
     {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
-    {factor_ref: "factor:value", factor_alias: "Value"},
+    {factor_ref: "factor:value", factor_alias: "Value",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+  ], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
   ]},
   groups: [{group_ref: "group:day", name: "日盘"}],
 }, {
@@ -219,22 +224,33 @@ const adapterSources = FTTestContentAdapters.chipSources({
   product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
 });
 assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
-assert.equal(adapterSources.factorCandidateCount, 1);
+assert.equal(adapterSources.factorCandidateLabel, "ROC 1m");
 assert.equal(adapterSources.factor_candidates.length, 1);
 assert.equal(adapterSources.factor_candidates[0].temporary, true);
 assert.deepEqual(adapterSources.factor_candidates[0].related_references, [{
   target_ref: "factor:roc", label: "ROC 1m",
 }]);
+assert.equal(adapterSources.factor_candidates[0].source_factors.length, 1);
+assert.equal(adapterSources.factor_candidates[0].source_factor_sets.length, 0);
 assert.equal(adapterSources.product_group[0].group_ref, "group:day");
 const pageCandidateSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
     {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
-    {factor_ref: "factor:value", factor_alias: "Value"},
+    {factor_ref: "factor:value", factor_alias: "Value",
+      factor_set_refs: ["factor-set:value"], factor_set_only: true},
+  ], factor_source_selections: [
+    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+  ], factor_set_selections: [
+    {target_ref: "factor-set:value", title_zh: "价值集合"},
   ]},
 });
-assert.equal(pageCandidateSources.factorCandidateCount, 2);
+assert.equal(pageCandidateSources.factorCandidateLabel, "2 个");
 assert.equal(pageCandidateSources.factor_candidates[0].related_references.length, 2);
+assert.equal(pageCandidateSources.factor_candidates[0].source_factors.length, 1);
+assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [{
+  target_ref: "factor-set:value", label: "价值集合",
+}]);
 
 const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
@@ -249,7 +265,7 @@ assert.deepEqual(
   [{factor_ref: "factor:sgccs-history"}],
   "a persisted strategy factor must remain a detail target before catalog loading",
 );
-assert.equal(persistedStrategySources.factorCandidateCount, 1);
+assert.equal(persistedStrategySources.factorCandidateLabel, "factor:sgccs-history");
 assert.equal(
   persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
   "factor:sgccs-history",

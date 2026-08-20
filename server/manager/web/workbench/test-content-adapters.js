@@ -101,6 +101,21 @@
         : factorCandidateObjects(state);
       const references = factors.map(factorReference).filter(Boolean);
       if (!references.length) return {};
+      const wanted = new Set(references);
+      const directFactors = sourceList(state, "factor_source_selections")
+        .filter(value => wanted.has(factorReference(value)))
+        .map(value => ({
+          target_ref: factorReference(value), label: factorLabel(value),
+        }));
+      const referencedSets = new Set(factors.flatMap(value => (
+        Array.isArray(value?.factor_set_refs) ? value.factor_set_refs : []
+      )).map(String).filter(Boolean));
+      const factorSets = sourceList(state, "factor_set_selections")
+        .filter(value => !item || referencedSets.has(factorSetReference(value)))
+        .map(value => ({
+          target_ref: factorSetReference(value),
+          label: factorSetLabel(value),
+        })).filter(value => value.target_ref);
       const candidateSet = {
         target_ref: `factor-candidates:${references.join("|")}`,
         title_zh: `因子候选（${references.length}）`,
@@ -108,11 +123,15 @@
           target_ref: factorReference(factor),
           label: factorLabel(factor),
         })),
+        source_factors: directFactors,
+        source_factor_sets: factorSets,
         temporary: true,
         source_origin: "test_inline",
       };
       return {
         factorCandidateCount: references.length,
+        factorCandidateLabel: references.length === 1
+          ? factorLabel(factors[0]) : `${references.length} 个`,
         factor_candidates: [candidateSet],
       };
     }
@@ -170,6 +189,21 @@
   function factorCandidateObjects(state) {
     if (!window.FTTestFactorSelection) return [];
     return FTTestFactorSelection.candidates(state);
+  }
+
+  function sourceList(state, key) {
+    return Array.isArray(state.values?.[key]) ? state.values[key] : [];
+  }
+
+  function factorSetReference(value) {
+    return typeof value === "string"
+      ? value : String(value?.target_ref || value?.set_ref || value?.id || "").trim();
+  }
+
+  function factorSetLabel(value) {
+    if (typeof value === "string") return value;
+    return String(value?.title_zh || value?.set_id || value?.name
+      || factorSetReference(value)).trim();
   }
 
   function factorReference(value) {

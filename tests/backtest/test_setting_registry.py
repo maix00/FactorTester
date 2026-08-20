@@ -388,7 +388,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert chips["split_count"]["display_scope"] == "strategy"
     assert chips["group_index"]["display_scope"] == "strategy"
     assert "product_mask" not in chips
-    assert chips["factor_candidates"]["source_keys"] == ("factorCandidateCount",)
+    assert chips["factor_candidates"]["source_keys"] == ("factorCandidateLabel",)
     assert chips["factor_candidates"]["detail_overlay"] == {
         "kind": "factor_set", "mode": "view",
         "source_key": "factor_candidates", "ref_key": "target_ref",
