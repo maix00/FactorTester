@@ -500,6 +500,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["group_dependencies"]["job-detail-previews"] == [
         "job-detail-core", "report", "charts",
     ]
+    assert "job-detail-previews" in manifest["group_dependencies"]["job-detail-backtest"]
     assert "output-choice" in manifest["group_dependencies"]["job-detail-core"]
     core_detail = set(manifest["groups"]["job-detail-core"])
     assert "jobs/detail.js" in core_detail
