@@ -32,6 +32,11 @@ global.FTTestFactors = {panel: () => {
   factorPanelCalls += 1;
   return new Element("factor-panel");
 }};
+global.FTTestFactorSelection = {
+  factorAlias: value => value?.factor_alias || value?.alias || "",
+  candidates: state => state.values?.factor_candidates || [],
+};
+window.FTTestFactorSelection = global.FTTestFactorSelection;
 global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => values};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
@@ -184,6 +189,29 @@ const productChip = productDefaultGroup.children
   .find(item => item.className.includes("backend-setting-chip"));
 assert.ok(productChip, "content-only tabs should render a default chip");
 assert.equal(productChip.children[1].textContent, "未设置（默认）");
+
+const overlayManifest = {
+  chip_fields: [
+    {
+      source_adapter: "selected_factors", source_keys: ["factorAlias"],
+      detail_overlay: {source_key: "factor"},
+    },
+    {
+      source_adapter: "selected_product_paths", source_keys: ["product_path_selection"],
+      detail_overlay: {source_key: "product_group"},
+    },
+  ],
+};
+const adapterSources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [{factor_ref: "factor:roc", factor_alias: "ROC 1m"}]},
+  groups: [{group_ref: "group:day", name: "日盘"}],
+}, {
+  factorAlias: "ROC 1m",
+  product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
+});
+assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
+assert.equal(adapterSources.product_group[0].group_ref, "group:day");
 
 const advancedRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "高级");

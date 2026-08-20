@@ -156,7 +156,12 @@
       }
       if (!group) throw new Error(context.t("产品组不存在"));
     }
-    const categoryPayload = await helpers.loadCategories(context, source);
+    const inlineView = mode === "view"
+      && context.testObjectTemporary
+      && context.testObjectInitialValue;
+    const categoryPayload = inlineView
+      ? {categories: []}
+      : await helpers.loadCategories(context, source);
     if (!current(context)) return;
     const categories = [...(Array.isArray(categoryPayload.categories)
       ? categoryPayload.categories : [])];
@@ -174,7 +179,8 @@
       ? context.t("新增产品组") : target);
     context.setHeading(title, context.t("产品组"));
     context.updateActiveTab?.({title});
-    const editable = Boolean(context.session) && source === "server";
+    const editable = !context.testObjectViewOnly
+      && Boolean(context.session) && source === "server";
     if (mode === "edit" && !editable) {
       throw new Error(context.t("当前产品组不可编辑"));
     }

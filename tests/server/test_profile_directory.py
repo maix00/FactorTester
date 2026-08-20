@@ -63,13 +63,32 @@ class FakeAgentProfiles:
 
 
 class FakeFederatedProfiles:
-    def __init__(self, profiles):
+    def __init__(self, profiles, conversations=None, items=None):
         self._profiles = profiles
+        self._conversations = conversations or {}
+        self._items = items or {}
 
     def profile_directory(self, owners):
         return [
             dict(item) for item in self._profiles
             if item.get("owner_ref") in owners
+        ]
+
+    def profile_conversations(self, source, _viewer, owner, profile_id):
+        return [
+            dict(item)
+            for item in self._conversations.get((source, owner, profile_id), [])
+        ]
+
+    def profile_conversation_items(
+        self, source, _viewer, owner, profile_id, conversation_id,
+    ):
+        return [
+            dict(item)
+            for item in self._items.get(
+                (source, owner, profile_id, conversation_id),
+                [],
+            )
         ]
 
 
@@ -214,5 +233,56 @@ def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp
         scope="subordinates",
     )
     assert items[0]["role"] == "assistant"
-    assert "[redacted]" in items[0]["text"]
-    assert "[server path redacted]" in items[0]["text"]
+    assert "token=secret" in items[0]["text"]
+    assert "/Users/private/workspace/report.png" in items[0]["text"]
+
+
+def test_mirrored_profile_reads_from_executing_server_even_for_stale_local_key(
+    monkeypatch,
+    tmp_path,
+):
+    parent = "GTHT@parent@100000000001"
+    child = "GTHT@child@100000000002"
+    profile_id = "child-profile"
+    conversation_id = "conversation-remote"
+    client = FakeClientState({child: [_profile(child, profile_id)]})
+    remote_profile = {
+        **_profile(child, profile_id),
+        "owner_ref": child,
+        "source_server_id": "remote-main",
+        "runtime": {
+            "runtime_kind": "server",
+            "executor_id": "remote-main",
+            "configured": True,
+        },
+        "active_claim": {"agent_id": "agent-remote", "status": "running"},
+    }
+    federated = FakeFederatedProfiles(
+        [{**_profile(child, profile_id), "owner_ref": child, "source_server_id": "local-1"}, remote_profile],
+        conversations={(
+            "remote-main", child, profile_id,
+        ): [{
+            "conversation_id": conversation_id,
+            "profile_id": profile_id,
+            "title": "远端最新会话",
+            "updated_at": 10,
+        }]},
+        items={(
+            "remote-main", child, profile_id, conversation_id,
+        ): [{"id": "item-1", "role": "assistant", "text": "来自远端", "created_at": 10}]},
+    )
+    service = _service(
+        monkeypatch,
+        client,
+        FakeAgentProfiles(AgentConversationStore(tmp_path / "manager.sqlite")),
+        federated=federated,
+    )
+
+    stale_key = f"local-1::{child}::{profile_id}"
+    conversations = service.conversations(parent, stale_key, scope="subordinates")
+    items = service.conversation_items(
+        parent, stale_key, conversation_id, scope="subordinates",
+    )
+
+    assert conversations[0]["title"] == "远端最新会话"
+    assert items[0]["text"] == "来自远端"

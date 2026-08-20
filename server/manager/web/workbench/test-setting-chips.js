@@ -133,6 +133,33 @@
       fullValue: expanded(parts.value),
       tabKey,
       category: chip.category || "identity",
+      clickable: chip.clickable === true,
+      detailOverlay: detailOverlay(chip, sources),
+    };
+  }
+
+  function detailOverlay(chip, sources) {
+    const action = chip.detail_overlay;
+    if (!action || typeof action !== "object") return null;
+    const sourceKey = action.source_key || action.sourceKey;
+    const raw = sourceKey ? sources[sourceKey] : null;
+    const values = Array.isArray(raw) ? raw.filter(hasValue) : [raw].filter(hasValue);
+    // A compact chip may summarize several factor candidates or product
+    // groups. Do not silently open the first one; only an unambiguous chip
+    // can open a detail overlay.
+    if (values.length !== 1) return null;
+    const value = values[0];
+    const object = value && typeof value === "object" ? value : null;
+    const ref = object
+      ? object[action.ref_key || "ref"]
+        || object.factor_ref || object.group_ref || object.product_group_ref
+        || object.product_group_template_id || object.product_path_selection_id
+        || object.id || object.alias || object.factor_alias || object.name
+      : value;
+    if (!hasValue(ref)) return null;
+    return {
+      ...action,
+      target: {ref: String(ref), value},
     };
   }
 
@@ -245,14 +272,23 @@
   }
 
   function renderChip(descriptor, options) {
-    const interactive = descriptor.tabKey && typeof options.onOpen === "function";
+    const hasOverlay = descriptor.clickable === true
+      && descriptor.detailOverlay
+      && typeof options.onOverlay === "function";
+    const interactive = Boolean(hasOverlay
+      || (descriptor.tabKey && typeof options.onOpen === "function"));
     const chip = document.createElement(interactive ? "button" : "span");
     chip.className = `backend-setting-chip ${descriptor.category}`;
     if (interactive) {
       chip.type = "button";
-      chip.addEventListener("click", () => options.onOpen?.(descriptor.tabKey));
+      chip.addEventListener("click", () => {
+        if (hasOverlay) options.onOverlay?.(descriptor);
+        else options.onOpen?.(descriptor.tabKey);
+      });
     }
-    chip.title = descriptor.fullValue;
+    chip.title = hasOverlay
+      ? `${descriptor.fullValue} · ${options.context?.t?.("查看详情") || "查看详情"}`
+      : descriptor.fullValue;
     const label = document.createElement("span");
     label.className = "backend-setting-chip-label";
     label.textContent = descriptor.label;

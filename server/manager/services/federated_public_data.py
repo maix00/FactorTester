@@ -196,6 +196,22 @@ class FederatedPublicDataService:
                 return None
             return item[1]
 
+    def _stale_cached(
+        self,
+        key: tuple[object, ...],
+        *,
+        max_age: float = 300.0,
+    ) -> Any | None:
+        """Return a bounded read cache only when a peer refresh failed."""
+        with self._lock:
+            item = self._cache.get(key)
+            if item is None:
+                return None
+            if time.monotonic() - item[0] >= max(1.0, float(max_age)):
+                self._cache.pop(key, None)
+                return None
+            return item[1]
+
     def _store(self, key: tuple[object, ...], value: Any) -> Any:
         with self._lock:
             self._cache[key] = (time.monotonic(), value)
@@ -707,18 +723,33 @@ class FederatedPublicDataService:
         owner: str,
         profile_id: str,
     ) -> list[dict[str, Any]]:
+        cache_key = (
+            "profile-conversations",
+            str(source_server_id or "").strip(),
+            str(viewer or "").strip(),
+            str(owner or "").strip(),
+            str(profile_id or "").strip(),
+        )
         route = self._profile_route(source_server_id)
         if route is None:
-            return []
-        response = self._query_peer(
-            route,
-            kind="catalog",
-            operation="profile-conversations",
-            principal=str(viewer or "").strip(),
-            payload={"owner": owner, "profile_id": profile_id},
-        )
-        rows = response.get("conversations")
-        return [dict(item) for item in rows or [] if isinstance(item, dict)]
+            cached = self._stale_cached(cache_key)
+            return [dict(item) for item in cached or [] if isinstance(item, dict)]
+        try:
+            response = self._query_peer(
+                route,
+                kind="catalog",
+                operation="profile-conversations",
+                principal=str(viewer or "").strip(),
+                payload={"owner": owner, "profile_id": profile_id},
+            )
+            rows = [dict(item) for item in response.get("conversations") or []
+                    if isinstance(item, dict)]
+            return [dict(item) for item in self._store(cache_key, rows)]
+        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            cached = self._stale_cached(cache_key)
+            if cached is not None:
+                return [dict(item) for item in cached if isinstance(item, dict)]
+            raise
 
     def profile_conversation_items(
         self,
@@ -728,22 +759,38 @@ class FederatedPublicDataService:
         profile_id: str,
         conversation_id: str,
     ) -> list[dict[str, Any]]:
+        cache_key = (
+            "profile-conversation-items",
+            str(source_server_id or "").strip(),
+            str(viewer or "").strip(),
+            str(owner or "").strip(),
+            str(profile_id or "").strip(),
+            str(conversation_id or "").strip(),
+        )
         route = self._profile_route(source_server_id)
         if route is None:
-            return []
-        response = self._query_peer(
-            route,
-            kind="catalog",
-            operation="profile-conversation-items",
-            principal=str(viewer or "").strip(),
-            payload={
-                "owner": owner,
-                "profile_id": profile_id,
-                "conversation_id": conversation_id,
-            },
-        )
-        rows = response.get("items")
-        return [dict(item) for item in rows or [] if isinstance(item, dict)]
+            cached = self._stale_cached(cache_key)
+            return [dict(item) for item in cached or [] if isinstance(item, dict)]
+        try:
+            response = self._query_peer(
+                route,
+                kind="catalog",
+                operation="profile-conversation-items",
+                principal=str(viewer or "").strip(),
+                payload={
+                    "owner": owner,
+                    "profile_id": profile_id,
+                    "conversation_id": conversation_id,
+                },
+            )
+            rows = [dict(item) for item in response.get("items") or []
+                    if isinstance(item, dict)]
+            return [dict(item) for item in self._store(cache_key, rows)]
+        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            cached = self._stale_cached(cache_key)
+            if cached is not None:
+                return [dict(item) for item in cached if isinstance(item, dict)]
+            raise
 
     def factor_library(
         self, principal: str, *, visitor: bool = False,

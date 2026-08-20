@@ -383,13 +383,19 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "factor_alias",
         "product_path_selection",
         "group_index",
-        "product_mask",
         "run_inputs",
     }
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
     assert chips["split_count"]["display_scope"] == "strategy"
     assert chips["group_index"]["display_scope"] == "strategy"
-    assert chips["product_mask"]["display_scope"] == "strategy"
+    assert "product_mask" not in chips
+    assert chips["factor_alias"]["detail_overlay"] == {
+        "kind": "factor", "mode": "view", "source_key": "factor",
+    }
+    assert chips["product_path_selection"]["label"] == "产品组"
+    assert chips["product_path_selection"]["detail_overlay"] == {
+        "kind": "product_group", "mode": "view", "source_key": "product_group",
+    }
     run_input_chip = next(
         chip for chip in index["chip_fields"] if chip["key"] == "run_inputs"
     )
@@ -487,9 +493,16 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
     assert chips["factor_alias"]["source_adapter"] == "selected_factors"
+    assert chips["factor_alias"]["detail_overlay"] == {
+        "kind": "factor", "mode": "view", "source_key": "factor",
+    }
     assert chips["product_path_selection"]["source_adapter"] == (
         "selected_product_paths"
     )
+    assert chips["product_path_selection"]["label"] == "产品组"
+    assert chips["product_path_selection"]["detail_overlay"] == {
+        "kind": "product_group", "mode": "view", "source_key": "product_group",
+    }
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
     horizon_field = index["defaults"]["forward_return_horizons"]
     assert horizon_field["value"] == {"sampling": "scale_aware"}

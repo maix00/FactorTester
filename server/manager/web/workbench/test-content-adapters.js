@@ -83,6 +83,11 @@
     for (const chip of state.manifest?.chip_fields || []) {
       const source = sourceValues(chip.source_adapter, state, item);
       for (const key of chip.source_keys || []) values[key] = source[key];
+      const detailSource = chip.detail_overlay?.source_key
+        || chip.detail_overlay?.sourceKey;
+      if (detailSource && Object.prototype.hasOwnProperty.call(source, detailSource)) {
+        values[detailSource] = source[detailSource];
+      }
     }
     return values;
   }
@@ -92,21 +97,22 @@
       const itemFactors = Array.isArray(item?.factorAliases)
         ? item.factorAliases
         : [item?.factorAlias || item?.factor_alias].filter(Boolean);
-      if (itemFactors.length) {
-        return {factorAlias: itemFactors.map(value => String(value).trim()).filter(Boolean)};
-      }
-      if (!window.FTTestFactorSelection || !window.FTTestFactors) return {};
-      const factors = state.kind === "ic"
-        ? FTTestFactorSelection.selectedFactors(state)
-        : [FTTestFactors.selectedFactor(state)].filter(Boolean);
-      return {factorAlias: factors.map(FTTestFactorSelection.factorAlias).filter(Boolean)};
+      const aliases = itemFactors.length
+        ? itemFactors.map(value => String(value).trim()).filter(Boolean)
+        : selectedFactorAliases(state);
+      return {
+        factorAlias: aliases,
+        factor: factorObjects(state, aliases),
+      };
     }
     if (adapter === "selected_product_paths") {
-      if (item?.product_path_selection) {
-        return {product_path_selection: [item.product_path_selection]};
-      }
-      if (!window.FTTestProducts) return {};
-      return {product_path_selection: FTTestProducts.selectedProjections(state)};
+      const projections = item?.product_path_selection
+        ? [item.product_path_selection]
+        : window.FTTestProducts?.selectedProjections?.(state) || [];
+      return {
+        product_path_selection: projections,
+        product_group: productObjects(state, item, projections),
+      };
     }
     if (adapter === "primary_strategy_group") {
       const group = item || state.analysis?.groups?.[0] || {};
@@ -128,6 +134,46 @@
       return counts.dependencies ? {run_input_count: counts.dependencies} : {};
     }
     return {};
+  }
+
+  function selectedFactorAliases(state) {
+    if (!window.FTTestFactorSelection || !window.FTTestFactors) return [];
+    const factors = state.kind === "ic"
+      ? FTTestFactorSelection.selectedFactors(state)
+      : [FTTestFactors.selectedFactor(state)].filter(Boolean);
+    return factors.map(FTTestFactorSelection.factorAlias).filter(Boolean);
+  }
+
+  function factorObjects(state, aliases) {
+    const wanted = new Set(aliases || []);
+    const candidates = window.FTTestFactorSelection?.candidates?.(state) || [];
+    return candidates.filter(item => wanted.has(FTTestFactorSelection.factorAlias(item)));
+  }
+
+  function productObjects(state, item, projections) {
+    const explicit = [item?.product_group, item?.productGroup].filter(Boolean);
+    const catalog = Array.isArray(state.groups) ? state.groups : [];
+    const values = [...explicit];
+    for (const projection of projections || []) {
+      const ref = productGroupID(projection);
+      const match = catalog.find(group => productGroupID(group) === ref);
+      if (match) values.push(match);
+      else if (ref) values.push(projection);
+    }
+    const seen = new Set();
+    return values.filter(value => {
+      const ref = productGroupID(value);
+      if (!ref || seen.has(ref)) return false;
+      seen.add(ref);
+      return true;
+    });
+  }
+
+  function productGroupID(value) {
+    return typeof value === "string"
+      ? value
+      : value?.group_ref || value?.product_group_ref || value?.id
+        || value?.product_group_template_id || value?.product_path_selection_id || "";
   }
 
   window.FTTestContentAdapters = Object.freeze({
