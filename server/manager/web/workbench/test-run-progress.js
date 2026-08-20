@@ -86,5 +86,15 @@
     return view.root;
   }
 
-  window.FTTestRunProgress = Object.freeze({render});
+  function suspend(items = []) {
+    window.FTJobProgress?.stopProgress?.();
+    activeKey = "";
+    (Array.isArray(items) ? items : []).forEach(item => {
+      item.progressWatchKey = "";
+      item.progressResumePending = false;
+      if (!terminal.has(item.phase)) item.progressStreamClosed = true;
+    });
+  }
+
+  window.FTTestRunProgress = Object.freeze({render, suspend});
 })();

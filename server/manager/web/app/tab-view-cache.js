@@ -260,7 +260,14 @@
     function restoreView(tabID) {
       const session = tabSession(tabID);
       const view = session.view;
-      if (view?.rerenderOnRestore) return false;
+      if (view?.rerenderOnRestore) {
+        // This flag is a one-shot invalidation, not a permanent session mode.
+        // The route about to render becomes the next live view and must be
+        // eligible for the same save/stop/reconcile cycle on a later switch.
+        view.rerenderOnRestore = false;
+        view.ready = false;
+        return false;
+      }
       if (view?.coldKey) {
         view.pendingRestore = true;
         return "cold";

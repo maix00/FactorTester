@@ -1640,6 +1640,16 @@ def test_test_run_progress_finishes_and_refreshes_terminal_results() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
+    test_page = (
+        ROOT / "server" / "manager" / "web" / "workbench" / "tests.js"
+    ).read_text(encoding="utf-8")
+    job_page = (
+        ROOT / "server" / "manager" / "web" / "jobs" / "detail.js"
+    ).read_text(encoding="utf-8")
+    assert 'dataset.ftRerenderOnTabRestore = "true"' in test_page
+    assert 'dataset.ftRerenderOnTabRestore = "true"' in job_page
+    assert "FTTestRunProgress?.suspend" in test_page
+
 
 def test_manifest_driven_setting_rules_contract() -> None:
     import subprocess

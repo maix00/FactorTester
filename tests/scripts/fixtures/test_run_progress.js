@@ -57,6 +57,10 @@ let rerenders = 0;
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(resumed.phase, "succeeded", "returning to a tab must reconcile terminal state");
   assert.equal(refreshes, 2);
+  const suspended = {phase: "running", progressWatchKey: "job-3", progressStreamClosed: false};
+  window.FTTestRunProgress.suspend([suspended]);
+  assert.equal(suspended.progressWatchKey, "");
+  assert.equal(suspended.progressStreamClosed, true);
   console.log("ok");
 })().catch(error => {
   console.error(error);

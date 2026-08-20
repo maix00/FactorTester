@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 
 from server.jobs.equity_curve_artifact import build_equity_curve_artifact
@@ -49,7 +50,7 @@ def test_equity_curve_artifact_downsamples_and_rejects_invalid_series() -> None:
     }]}) is None
 
 
-def test_summary_retention_keeps_curve_image_and_receipt_not_full_result(
+def test_summary_retention_keeps_complete_interactive_curve_not_full_result(
     tmp_path,
 ) -> None:
     output = queue.Queue()
@@ -77,9 +78,45 @@ def test_summary_retention_keeps_curve_image_and_receipt_not_full_result(
         for item in messages
         if item.get("event") == "artifact"
     }
-    assert names == {"equity_curve_report", "equity_curve_receipt"}
+    assert names == {
+        "equity_curve_report", "equity_curve_receipt",
+        "equity_curve_data", "equity_curve_data_receipt",
+    }
     assert not (tmp_path / "job-summary" / "result.json").exists()
     assert (tmp_path / "job-summary" / "equity_curve_report.svg").is_file()
+    data = json.loads(
+        (tmp_path / "job-summary" / "equity_curve_data.json").read_text()
+    )
+    assert data["series"][0]["values"] == [100.0, 103.0, 101.0]
+    assert len(data["series"][0]["values"]) == len(
+        data["series"][0]["drawdown"]
+    )
+
+
+def test_summary_retention_does_not_downsample_interactive_curve(tmp_path) -> None:
+    output = queue.Queue()
+    sink = _WorkerSink(
+        "job-complete-series",
+        output,
+        artifact_root=str(tmp_path),
+        retention_mode="summary",
+    )
+    points = 3_000
+    sink.emit_result({
+        "success": True,
+        "groups": [{
+            "name": "main",
+            "timestamps": list(range(points)),
+            "total_equity": [100.0 + index / 10 for index in range(points)],
+        }],
+    })
+
+    data = json.loads(
+        (tmp_path / "job-complete-series" / "equity_curve_data.json").read_text()
+    )
+    assert len(data["series"][0]["values"]) == points
+    assert len(data["series"][0]["timestamps"]) == points
+    assert len(data["series"][0]["drawdown"]) == points
 
 
 def test_declared_outputs_retain_only_required_sources_and_generate_reports(tmp_path) -> None:

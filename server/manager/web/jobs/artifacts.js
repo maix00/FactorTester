@@ -62,8 +62,10 @@
   function artifactRows(context, artifacts, onOpen, options = {}) {
     const canUpload = typeof options.onUpload === "function"
       && artifacts.some(item => item.state === "local_only");
+    const canDelete = typeof options.onDelete === "function"
+      && artifacts.some(item => item.state === "active");
     const headers = [context.t("中文说明"), context.t("原文件名"), context.t("文件大小")];
-    if (canUpload) headers.push(context.t("操作"));
+    if (canUpload || canDelete) headers.push(context.t("操作"));
     const result = FTUI.table(headers, []);
     artifacts.filter(item => item.state === "active"
       || (options.includeLocalOnly && item.state === "local_only")).forEach(item => {
@@ -91,7 +93,7 @@
       }
       const size = row.insertCell();
       size.textContent = formatBytes(item.size_bytes || 0);
-      if (canUpload) {
+      if (canUpload || canDelete) {
         const action = row.insertCell();
         if (item.state === "local_only") {
           const upload = document.createElement("button");
@@ -111,7 +113,25 @@
           });
           action.append(upload);
         } else {
-          action.textContent = context.t("已上传");
+          if (canDelete) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "secondary-button danger-button";
+            remove.textContent = context.t("删除");
+            remove.addEventListener("click", async event => {
+              event.stopPropagation();
+              remove.disabled = true;
+              try {
+                await options.onDelete(item);
+              } catch (error) {
+                remove.disabled = false;
+                context.showNotice?.(error.message || String(error), true);
+              }
+            });
+            action.append(remove);
+          } else {
+            action.textContent = context.t("已上传");
+          }
         }
       }
     });
@@ -123,6 +143,13 @@
     const params = new URLSearchParams(artifactQuery.slice(1));
     return window.FTJobs.detail(
       context, 0, jobID, params.get("server_id") || "",
+    );
+  }
+
+  async function deleteArtifact(context, artifactQuery, jobID, name) {
+    return context.api(
+      `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(name)}${artifactQuery}`,
+      {method: "DELETE"},
     );
   }
 
@@ -293,6 +320,7 @@
     artifactRows,
     artifactDownloadParts,
     clearArtifacts,
+    deleteArtifact,
     collapsible,
     declarationArtifact,
     declarationArtifacts,

@@ -79,7 +79,7 @@
     }
   }
 
-  function resultSection(context, state, item) {
+  function resultSection(context, state, item, rerender) {
     const task = item.taskDetail || {};
     const payload = item.detailPayload || {};
     const allArtifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
@@ -111,6 +111,12 @@
     );
     const outputs = artifactOutputSection(
       context, outputArtifacts, item.jobID, item.artifactQuery || "",
+      async artifact => {
+        await window.FTJobArtifacts.deleteArtifact(
+          context, item.artifactQuery || "", item.jobID, artifact.name,
+        );
+        await refresh(context, state, item, rerender);
+      },
     );
     if (!domain && !previews && !outputs) return null;
     if (domain && !previews && !outputs) return domain;
@@ -146,7 +152,9 @@
     return count ? root : null;
   }
 
-  function artifactOutputSection(context, artifacts, jobID, artifactQuery) {
+  function artifactOutputSection(
+    context, artifacts, jobID, artifactQuery, onDelete,
+  ) {
     const api = window.FTJobArtifacts;
     if (!api?.artifactRows || !api.saveBlob || !artifacts.length) return null;
     const root = document.createElement("section");
@@ -160,6 +168,7 @@
         `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${artifactQuery}`,
         item.file_name || item.name,
       ),
+      context.session ? {onDelete} : {},
     ));
     return root;
   }
@@ -206,7 +215,7 @@
       root.append(window.FTUI.loading(context.t("正在加载结果查看器…")));
       return root;
     }
-    const section = resultSection(context, state, item);
+    const section = resultSection(context, state, item, rerender);
     if (section) root.append(section);
     else {
       const hint = document.createElement("p");
