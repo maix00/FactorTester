@@ -177,7 +177,10 @@
     }
     const toolbar = document.createElement("div");
     toolbar.className = "test-run-result-actions";
-    const reload = context.button("↻", () => refresh(context, state, item, rerender), context.t("刷新任务结果"));
+    const reload = context.button("↻", () => {
+      item.progressStreamClosed = false;
+      refresh(context, state, item, rerender);
+    }, context.t("刷新任务结果"));
     reload.disabled = Boolean(item.resultLoading);
     toolbar.append(reload);
     root.append(toolbar);

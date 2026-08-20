@@ -388,6 +388,11 @@ const strategyScopedBacktest = {
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["__backtest__"]);
+  const stableBacktestItem = backtest.testRunBatch[0];
+  assert.strictEqual(
+    batch.synchronize(backtest)[0], stableBacktestItem,
+    "repainting must preserve the task object observed by progress and result callbacks",
+  );
   await batch.previewAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].groupLabel, "回测任务");
   assert.match(backtest.testRunBatch[0].runSpecHash, /^[a-f0-9]{64}$/,
