@@ -17,7 +17,7 @@ window.FTJobProgress = {
   watchProgress: async (_context, _jobID, _query, _view, options) => {
     watched = options;
     options.onPayload({status: "running"});
-    options.onPayload({status: "succeeded"});
+    options.onPayload({event: "result", data: {}});
     options.onComplete();
   },
 };

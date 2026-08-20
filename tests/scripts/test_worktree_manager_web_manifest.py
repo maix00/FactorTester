@@ -160,6 +160,17 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_job_progress_is_monotonic_and_terminal() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "job_progress_state.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_help_popover_uses_click_bubble_and_overlay_modes() -> None:
     import subprocess
 

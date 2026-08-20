@@ -4,7 +4,9 @@
 
   function statusOf(payload) {
     const source = payload?.latest_progress?.data || payload?.data || payload || {};
-    return String(source.status || payload?.status || source.phase || "").trim();
+    const eventStatus = payload?.event === "result" ? "succeeded"
+      : payload?.event === "error" ? "failed" : "";
+    return String(source.status || payload?.status || eventStatus || source.phase || "").trim();
   }
 
   function watch(context, state, item, rerender) {
