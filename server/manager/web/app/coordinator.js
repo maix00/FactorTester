@@ -87,6 +87,7 @@
     isRouteCurrent: () => routeToken === activeRouteToken,
     languagePreference: state.languagePreference,
     setLanguagePreference,
+    checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
   });
 
   async function setLanguagePreference(language) {
@@ -127,6 +128,9 @@
     tabs?.discardViews?.();
     await loadLanguage();
     await loadModules();
+    restoreWorkspaceForSession();
+    const active = state.tabs.find(tab => tab.id === state.activeTabID);
+    if (active?.path) history.replaceState({}, "", active.path);
     await renderRoute();
   }
 
@@ -331,6 +335,16 @@
   const initializeTabs = tabs.initializeTabs;
   const currentTabContext = tabs.currentTabContext;
   const detailTabIDForPath = tabs.detailTabIDForPath;
+  let tabWorkspace = null;
+
+  function restoreWorkspaceForSession() {
+    tabWorkspace = FTTabWorkspace.create({
+      managerKey: location.origin,
+      principalKey: FTTabWorkspace.principalKey(state.session),
+    });
+    tabs.setWorkspace(tabWorkspace);
+    initializeTabs(tabWorkspace.restore());
+  }
   const shell = FTAppShell.create({state, api, t, tabs});
   const {
     loadLanguage, loadModules, localizeShell, initializeSidebarLayout,
@@ -339,6 +353,7 @@
   const auth = FTAuth.bind({
     state, api, t, loadLanguage, loadModules, renderRoute, appContext, navigate,
     refreshAfterSessionChange,
+    checkpointActiveSession: tabs.checkpointActiveSession,
     renderReport: publicationID => report(publicationID),
   });
   const openLogin = auth.openLogin;
@@ -413,15 +428,22 @@
   });
 
   window.addEventListener("popstate", renderRoute);
+  window.addEventListener("pagehide", () => tabs.checkpointActiveSession());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") tabs.checkpointActiveSession();
+  });
 
   (async () => {
     await restoreSession();
     await loadLanguage();
     await loadModules();
     initializeSidebarLayout();
-    initializeTabs();
+    restoreWorkspaceForSession();
     const initial = `${location.pathname}${location.search}`;
-    if (initial !== "/" && initial !== "") {
+    if ((initial === "/" || initial === "") && state.activeTabID !== "home") {
+      const active = state.tabs.find(tab => tab.id === state.activeTabID);
+      if (active?.path) history.replaceState({}, "", active.path);
+    } else if (initial !== "/" && initial !== "") {
       // Module routes, including /research?section=..., belong to the
       // existing feature-entry tab.  Only detail routes (for example
       // /research/<report>) get an independently closable tab.
@@ -435,10 +457,18 @@
       } else if (!isPinnedPath(initial)) {
         const id = detailTabIDForPath(initial)
           || `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
-        state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
-        state.activeTabID = id;
+        const restored = state.tabs.find(tab => (
+          tab.id === id || (tab.closable && tab.path === initial)
+        ));
+        if (restored) {
+          state.activeTabID = restored.id;
+        } else {
+          state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
+          state.activeTabID = id;
+        }
       }
       renderOpenedTabs();
+      tabs.checkpointWorkspace();
     }
     await renderRoute();
   })();

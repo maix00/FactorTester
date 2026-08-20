@@ -4,10 +4,39 @@
       state, embeddedPresentation, t, renderRoute,
       modulePath, isPinnedPath, titleForPath, tabIcon,
       content, title, eyebrow, toolbar, notice, beforeTabChange,
+      liveViewLimit,
     } = options;
+    let workspace = null;
+    let checkpointTimer = null;
     const viewCache = window.FTTabViewCache.create({
       state, content, title, eyebrow, toolbar, notice,
+      persistSession: (tabID, value) => workspace?.saveSession?.(tabID, value),
+      restoreSession: tabID => workspace?.restoreSession?.(tabID),
+      removeSession: tabID => workspace?.removeSession?.(tabID),
+      liveViewLimit,
     });
+
+    function checkpointWorkspace() {
+      workspace?.save?.({tabs: state.tabs, activeTabID: state.activeTabID});
+    }
+
+    function checkpointActiveSession() {
+      if (checkpointTimer) {
+        clearTimeout(checkpointTimer);
+        checkpointTimer = null;
+      }
+      viewCache.checkpointActiveSession();
+      checkpointWorkspace();
+    }
+
+    function scheduleActiveSessionCheckpoint() {
+      if (checkpointTimer) clearTimeout(checkpointTimer);
+      checkpointTimer = setTimeout(checkpointActiveSession, 250);
+    }
+
+    function setWorkspace(value) {
+      workspace = value || null;
+    }
 
     function renderOpenedTabs() {
       const host = document.querySelector("#opened-tabs");
@@ -48,6 +77,7 @@
       state.activeTabID = tabID;
       history.pushState({}, "", tab.path);
       renderOpenedTabs();
+      checkpointWorkspace();
       if (!options.forceRender) {
         const restored = viewCache.restoreView(tabID);
         if (restored === "live") return;
@@ -65,8 +95,10 @@
       if (state.activeTabID === tabID) viewCache.saveActiveTabSession();
       else viewCache.discardView(tabID);
       state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
+      workspace?.removeSession?.(tabID);
       if (state.activeTabID !== tabID) {
         renderOpenedTabs();
+        checkpointWorkspace();
         return;
       }
       beforeTabChange?.();
@@ -84,6 +116,7 @@
       state.activeTabID = fallback?.id || "home";
       history.pushState({}, "", fallback?.path || "/");
       renderOpenedTabs();
+      checkpointWorkspace();
       const restored = viewCache.restoreView(state.activeTabID);
       if (restored === "live") return;
       renderRoute();
@@ -274,7 +307,9 @@
 
     function updateActiveTab(fields) {
       const tab = state.tabs.find(item => item.id === state.activeTabID);
-      if (tab) { Object.assign(tab, fields); renderOpenedTabs(); }
+      if (tab) {
+        Object.assign(tab, fields); renderOpenedTabs(); checkpointWorkspace();
+      }
     }
 
     function discardViews() {
@@ -289,19 +324,32 @@
       tabIDs.forEach(tabID => viewCache.discardView(tabID));
     }
 
-    function initializeTabs() {
-      state.tabs = state.modules
+    function initializeTabs(snapshot = null) {
+      const defaults = state.modules
         .filter(item => item.pinned && item.id !== "settings")
         .map(item => ({
           id: item.id, path: modulePath(item), title: t(item.title_key || item.title),
           icon: FTIcons.module(item), closable: false,
         }));
-      state.tabs.push({
+      defaults.push({
         id: "settings", path: "/settings", title: t("设置"),
         icon: FTIcons.module("settings"), closable: false,
       });
-      state.activeTabID = "home";
+      const restored = Array.isArray(snapshot?.tabs) ? snapshot.tabs : [];
+      const restoredByID = new Map(restored.map(tab => [tab.id, tab]));
+      state.tabs = defaults.map(tab => {
+        const saved = restoredByID.get(tab.id);
+        return saved ? {...tab, path: saved.path || tab.path} : tab;
+      });
+      const fixedIDs = new Set(state.tabs.map(tab => tab.id));
+      restored.filter(tab => tab.closable && !fixedIDs.has(tab.id))
+        .forEach(tab => state.tabs.push({...tab, closable: true}));
+      state.tabs.forEach(tab => viewCache.hydrateSession(tab.id));
+      state.activeTabID = state.tabs.some(tab => tab.id === snapshot?.activeTabID)
+        ? snapshot.activeTabID : "home";
       renderOpenedTabs();
+      checkpointWorkspace();
+      return Boolean(snapshot);
     }
 
     function currentTabContext() {
@@ -315,7 +363,8 @@
       ...viewCache,
       renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
       updateActiveTab, discardViews, initializeTabs, currentTabContext,
-      detailTabIDForPath,
+      detailTabIDForPath, checkpointWorkspace, setWorkspace,
+      checkpointActiveSession, scheduleActiveSessionCheckpoint,
     };
   }
 

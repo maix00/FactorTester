@@ -194,6 +194,28 @@ def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_tab_workspace_is_versioned_and_principal_scoped() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_workspace.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_draft_clear_resets_only_local_authoring_state() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_draft_clear.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_product_category_composition_uses_all_available_sources() -> None:
     import subprocess
 

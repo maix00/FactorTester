@@ -49,6 +49,7 @@
       const copy = document.createElement("p"); copy.textContent = subtitle; heading.append(copy);
     }
     const body = document.createElement("div"); body.className = "backtest-analysis-body";
+    if (body.dataset) body.dataset.ftScrollState = "backtest-analysis";
     close.addEventListener("click", () => root.close());
     root.addEventListener("close", () => root.remove());
     root.addEventListener("cancel", event => { event.preventDefault(); root.close(); });

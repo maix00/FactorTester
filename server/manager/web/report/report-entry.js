@@ -6,8 +6,14 @@
     if (!isCurrent()) return;
     const source = FTReportSource.create(publicationID, api);
     const session = context.tabSession(`report:${publicationID}`);
-    const restoreScrollY = session.publicationID === publicationID
+    session.durable ||= {};
+    const reading = session.durable.reportReading ||= {disclosures: {}};
+    reading.disclosures ||= {};
+    const hadPriorReading = Boolean(reading.visited)
+      || (session.publicationID === publicationID && Number.isFinite(session.scrollY));
+    const restoreScrollY = hadPriorReading && session.publicationID === publicationID
       && Number.isFinite(session.scrollY) ? session.scrollY : null;
+    reading.visited = true;
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     context.activeNav("research");
     content.innerHTML = '<div class="empty"><p></p></div>';
@@ -70,15 +76,25 @@
         ),
       captureScrollPosition: context.captureScrollPosition,
       restoreScrollY,
+      selectedChapterID: reading.selectedChapterID || "",
+      setSelectedChapter: chapterID => { reading.selectedChapterID = chapterID; },
+      disclosureState: reading.disclosures,
+      setDisclosureState: (componentID, open) => {
+        reading.disclosures[componentID] = Boolean(open);
+      },
+      onInitialChapterReady: () => {
+        if (restoreScrollY != null || !isCurrent()) return;
+        requestAnimationFrame(() => {
+          if (isCurrent()) window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
+        });
+      },
       suppressAutoScroll: true,
       t,
     });
     session.publicationID = publicationID;
     requestAnimationFrame(() => {
       if (!isCurrent()) return;
-      if (restoreScrollY == null) {
-        window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
-      } else {
+      if (restoreScrollY != null) {
         // Rendering replaces the document body. Restore after a second layout
         // pass so the rail and lazy content cannot overwrite the saved view.
         requestAnimationFrame(() => {

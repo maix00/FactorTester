@@ -16,12 +16,13 @@
     installRunToolbar(context, null, () => {});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取测试设置…")));
     const state = await loadState(context, kind, options);
+    if (context.isRouteCurrent?.() === false) return;
     applyTabReturn(state, context);
     render(context, state);
   }
 
   function placeholderRunActions(context) {
-    return ["查看运行配置", "运行"].map(label => {
+    return ["查看运行配置", "运行", "清空"].map(label => {
       const action = context.button(
         context.t(label), () => {}, context.t("正在读取测试运行操作…"),
       );
@@ -103,14 +104,6 @@
     return applied;
   }
 
-  function initialRunValues(manifest) {
-    const values = {};
-    (manifest?.run_fields || []).forEach(item => {
-      if (item.placement !== "outputs") values[item.key] = structuredClone(item.default);
-    });
-    return values;
-  }
-
   function applyBacktestDerivedPrefill(state) {
     if (state.kind !== "backtest") return;
     const raw = sessionStorage.getItem("ft-backtest-derived-prefill");
@@ -160,7 +153,7 @@
       runtimeServers: null, runtimeServersLoaded: false,
       runtimeServersLoading: false,
       lazy: FTTestState.lazyState(),
-      runValues: initialRunValues(manifest),
+      runValues: FTTestState.defaultRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
       runBatchCode: {status: "idle", error: "", promise: null},
       backtestCode: {status: "idle", error: "", promise: null},
@@ -194,6 +187,8 @@
       state.runValues.retention_mode = "full";
     }
     FTTestState.seedSavedCatalogs(state);
+    const savedDraft = sessions.durable?.testDrafts?.[kind];
+    FTTestState.restoreDraft(state, savedDraft);
     window.FTTestFactors?.prepare?.(state);
     window.FTTestProducts?.synchronize?.(state);
     window.FTBacktestGroups?.initialize?.(state);
@@ -450,6 +445,14 @@
   }
 
   function render(context, state) {
+    // Every deferred loader and job-progress callback closes over the route
+    // token in this context. The shared content host may already belong to a
+    // different left-rail tab by the time it resolves.
+    if (context.isRouteCurrent?.() === false) return false;
+    const durable = context.tabSession.durable || (context.tabSession.durable = {});
+    durable.testDrafts = durable.testDrafts || {};
+    durable.testDrafts[state.kind] = FTTestState.draftSnapshot(state);
+    context.checkpointTabSession?.();
     installRunToolbar(context, state, () => render(context, state));
     if (!window.FTTestRunBatch && !state.runBatchCode?.error) {
       // The header owns the run actions. Load their small controller lazily;
@@ -558,6 +561,19 @@
       if (submitted) root.append(submitted);
     }
     context.content.replaceChildren(root);
+    return true;
+  }
+
+  function clearDraft(context, state, refresh) {
+    if (!window.confirm(context.t("确定清空当前测试配置吗？"))) return false;
+    FTTestState.clearDraft(state);
+    initializeSettings(state);
+    window.FTTestFactors?.prepare?.(state);
+    window.FTTestProducts?.synchronize?.(state);
+    window.FTBacktestGroups?.initialize?.(state);
+    context.showNotice?.(context.t("当前测试配置已清空"));
+    refresh?.();
+    return true;
   }
 
   function ensureSettingsTab(context, state, tabKey, refresh) {
@@ -609,5 +625,7 @@
     ensureControl: (context, state, field, refresh) => (
       ensureControl(context, state, field, refresh)
     ),
+    clearDraft,
+    render,
   };
 })();

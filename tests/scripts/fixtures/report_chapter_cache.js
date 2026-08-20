@@ -82,30 +82,33 @@ vm.runInThisContext(fs.readFileSync(
       signals.push(options.signal);
       return {components: [{component_id: id, parent_id: null, kind: "chapter", title: id}]};
     },
+    selectedChapterID: "b",
+    setSelectedChapter: id => { global.selectedChapterID = id; },
   });
   await settle();
-  assert.deepEqual(calls, ["d"]);
+  assert.deepEqual(calls, ["b"]);
+  assert.equal(global.selectedChapterID, "b");
   assert.equal(signals[0].aborted, false);
   assert.equal(scrollCalls.length, 0, "suppressed renderer must not scroll after lazy chapter load");
   for (const id of ["a", "b", "c"]) {
     controls.activate(["a", "b", "c", "d"].indexOf(id));
     await settle();
   }
-  assert.deepEqual(calls, ["d", "a", "b", "c"]);
+  assert.deepEqual(calls, ["b", "a", "c"]);
   controls.activate(2);
   await settle();
-  assert.deepEqual(calls, ["d", "a", "b", "c"], "recent chapters should be cached");
+  assert.deepEqual(calls, ["b", "a", "c"], "recent chapters should be cached");
   controls.activate(3);
   await settle();
-  assert.deepEqual(calls, ["d", "a", "b", "c", "d"]);
+  assert.deepEqual(calls, ["b", "a", "c", "d"]);
   controls.activate(0);
   await settle();
-  assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a"], "old chapters should be evicted by LRU");
+  assert.deepEqual(calls, ["b", "a", "c", "d", "a"], "old chapters should be evicted by LRU");
   controls.activate(1);
   const abandonedSignal = signals.at(-1);
   controls.activate(2);
   assert.equal(abandonedSignal.aborted, true, "switching chapters aborts the previous request");
-  assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a", "b"]);
+  assert.deepEqual(calls, ["b", "a", "c", "d", "a", "b"]);
   assert.ok(lazyResets >= 1, "chapter switches must release lazy observers");
   window.FTReportRenderer.render(report, mount, {
     chapterRail: rail,
