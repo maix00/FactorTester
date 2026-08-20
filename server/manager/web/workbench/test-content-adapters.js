@@ -180,6 +180,17 @@
         product_group: productObjects(state, item, projections),
       };
     }
+    if (adapter === "selected_category") {
+      const ref = String(item?.category || state.values?.category || "");
+      const category = (state.values?.category_candidates || []).find(value => (
+        String(value?.id || value?.name || value?.label || "") === ref
+      ));
+      return ref ? {
+        category: [category || {id: ref, name: ref}],
+        categoryLabel: category?.title_zh || category?.alias
+          || category?.name || category?.label || ref,
+      } : {};
+    }
     if (adapter === "primary_strategy_group") {
       const group = item || state.analysis?.groups?.[0] || {};
       return {
@@ -217,13 +228,13 @@
   function indexedValues(values, cache, keyFor) {
     if (!Array.isArray(values)) return new Map();
     const prior = cache.get(values);
-    if (prior) return prior;
+    if (prior?.length === values.length) return prior.index;
     const index = new Map();
     for (const value of values) {
       const key = keyFor(value);
       if (key) index.set(key, value);
     }
-    cache.set(values, index);
+    cache.set(values, {length: values.length, index});
     return index;
   }
 
@@ -300,17 +311,20 @@
       item?.product_group_ref,
     ].filter(Boolean);
     const catalog = Array.isArray(state.groups) ? state.groups : [];
+    const index = state.productGroupIndex instanceof Map
+      ? state.productGroupIndex
+      : new Map(catalog.map(group => [productGroupID(group), group]));
     const values = [...explicit];
     for (const projection of projections || []) {
       const ref = productGroupID(projection);
-      const match = catalog.find(group => productGroupID(group) === ref);
+      const match = index.get(ref);
       if (match) values.push(match);
       else if (ref) values.push(projection);
     }
     const seen = new Set();
     return values.map(value => {
       const ref = productGroupID(value);
-      return catalog.find(group => productGroupID(group) === ref) || value;
+      return index.get(ref) || value;
     }).filter(value => {
       const ref = productGroupID(value);
       if (!ref || seen.has(ref)) return false;

@@ -51,6 +51,7 @@
       state.groupRefs = state.groupRef ? [state.groupRef] : [];
     }
     if (state.values) {
+      state.productGroupIndex = new Map(state.groups.map(group => [groupID(group), group]));
       state.values.product_path_candidates = state.groups.map(projection);
       state.values.product_path_selections = selectedGroups(state).map(projection);
     }
@@ -96,7 +97,9 @@
     const index = state.groups.findIndex(value => groupID(value) === id);
     if (index >= 0) state.groups[index] = {...state.groups[index], ...group};
     else state.groups.push(group);
-    return state.groups[index >= 0 ? index : state.groups.length - 1];
+    const saved = state.groups[index >= 0 ? index : state.groups.length - 1];
+    state.productGroupIndex = new Map(state.groups.map(value => [groupID(value), value]));
+    return saved;
   }
 
   function editAction(context, group, onSaved, state = null) {
@@ -122,7 +125,12 @@
   }
 
   function selectionPanel(context, state, refresh, options = {}) {
-    const groups = Array.isArray(options.groups) ? options.groups : state.groups;
+    const allGroups = Array.isArray(options.groups) ? options.groups : state.groups;
+    const groups = window.FTStrategyEditorScope?.constrainedCandidates
+      ? FTStrategyEditorScope.constrainedCandidates(
+          state, "product_path_candidates", allGroups,
+        )
+      : allGroups;
     const selectedRefs = Array.isArray(options.selectedRefs)
       ? uniqueReferences(options.selectedRefs)
       : (state.kind === "ic" ? state.groupRefs : [state.groupRef]).filter(Boolean);
@@ -144,9 +152,9 @@
     const savedGroup = value => {
       const group = upsertGroup(state, value);
       if (!group) return;
-      if (groups !== state.groups) {
-        const index = groups.findIndex(item => groupID(item) === groupID(group));
-        if (index >= 0) groups[index] = group; else groups.push(group);
+      if (allGroups !== state.groups) {
+        const index = allGroups.findIndex(item => groupID(item) === groupID(group));
+        if (index >= 0) allGroups[index] = group; else allGroups.push(group);
       }
       if (typeof options.onChange === "function") {
         options.onChange([groupID(group)]);

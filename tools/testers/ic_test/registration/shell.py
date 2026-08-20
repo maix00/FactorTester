@@ -174,6 +174,15 @@ def _register_chips(app: ApplicationSettings) -> None:
             "source_key": "product_group",
         },
     ))
+    app.register_chip_field(ChipDefinition(
+        "category", "分类", "identity",
+        "分类: {categoryLabel}", ("categoryLabel",),
+        module="category_grouping", target_tab="category", order=15,
+        source_adapter="selected_category", clickable=True,
+        detail_overlay={
+            "kind": "category", "mode": "view", "source_key": "category",
+        },
+    ))
 
 
 def _register_shared_inputs(app: ApplicationSettings) -> None:

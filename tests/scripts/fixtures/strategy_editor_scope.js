@@ -52,7 +52,7 @@ const state = {
         {key: "factor", label: "因子执行"},
         {key: "product_path_selection", label: "产品组"},
       ],
-      outer_only_tabs: ["time"],
+      outer_only_tabs: ["time", "data_source"],
     },
     defaults: {
       time_field: {tab_key: "time", scope_policy: "overridable", execution_policy: "include"},
@@ -63,6 +63,46 @@ const state = {
     ]},
   },
 };
+
+const sourceState = {
+  values: {data_source_mode: "list", data_source: ["source-a"]},
+  manifest: {strategy_editor: {candidate_constraints: {
+    category_candidates: {
+      source_field: "data_source", mode_field: "data_source_mode",
+      automatic_mode: "auto", coverage: "complete_path_coverage",
+    },
+    product_path_candidates: {
+      source_field: "data_source", mode_field: "data_source_mode",
+      automatic_mode: "auto", coverage: "complete_product_coverage",
+    },
+  }}},
+};
+const compatibleGroup = {products: [
+  {source_ids: ["source-a", "source-b"]}, {source_ids: ["source-a"]},
+]};
+const incompleteGroup = {products: [
+  {source_ids: ["source-a"]}, {source_ids: ["source-b"]},
+]};
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", compatibleGroup,
+), true);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", incompleteGroup,
+), false);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "category_candidates", {items: [
+    {source_ids: ["source-a"]}, {source_ids: ["source-b"]},
+  ]},
+), false);
+sourceState.values.data_source_mode = "auto";
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", incompleteGroup,
+), true);
+sourceState.values.data_source_mode = "list";
+sourceState.values.data_source = [];
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", compatibleGroup,
+), false);
 
 if (process.argv[3]) {
   state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
@@ -150,5 +190,10 @@ assert.deepEqual(
   window.FTStrategyEditorScope.innerTabs(state, ["cost", "time"])
     .map(item => item.key),
   ["__strategy__", "factor", "product_path_selection", "cost"],
+);
+assert.equal(
+  window.FTStrategyEditorScope.innerTabs(state, ["data_source"])
+    .some(item => item.key === "data_source"),
+  false,
 );
 console.log("ok");

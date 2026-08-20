@@ -235,6 +235,7 @@ def test_source_and_user_categories_share_one_object_contract(
     common = {
         "id", "alias", "title_zh", "dimensions", "source_ids", "items",
         "composable", "is_composite", "kind", "owner_ref", "source_managed",
+        "path_sources",
     }
     assert common <= set(source)
     assert common <= set(user)
@@ -242,6 +243,8 @@ def test_source_and_user_categories_share_one_object_contract(
     assert user["source_managed"] is False
     assert user["id"].startswith("alice:")
     assert user["items"][0]["label_id"] == f"{user['id']}_1"
+    assert user["path_sources"]
+    assert all("source_ids" in item for item in user["path_sources"])
 
     with pytest.raises(ValueError, match="由服务器生成"):
         create_product_category(

@@ -67,7 +67,7 @@
         ? FTStrategyEditorScope.itemID("product_path_selection", productScope.items[0])
         : productScopeBlocked ? "" : state.groupRef || "");
     const productItems = productScopeBlocked ? []
-      : (productScope.items?.length ? productScope.items : state.groups || []);
+      : (Array.isArray(productScope.items) ? productScope.items : state.groups || []);
     const factorItems = factorScopeBlocked ? []
       : (factorScope.items?.length ? factorScope.items : state.factors || []);
     const innerScopeValues = {...state.values};
@@ -279,8 +279,8 @@
         }
         const parsedOverrides = overrideEditor?.value?.() || fallbackOverrides.value();
         if (editor.mode === "base") {
-          const group = productItems.find(item => productGroupID(item) === productGroupRef)
-            || state.groups.find(item => productGroupID(item) === productGroupRef);
+          const group = productItems.find(item => productGroupID(item) === productGroupRef);
+          if (!group) throw new Error(context.t("所选产品组不受当前数据源完整支持"));
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
             factor_candidate_refs: factorRefs, splitCount: splitCount.value,
@@ -297,8 +297,8 @@
             ...cleared, ...parsedOverrides, name: name.value.trim() || current.name,
             productMask,
           };
-          const group = productItems.find(item => productGroupID(item) === productGroupRef)
-            || state.groups.find(item => productGroupID(item) === productGroupRef);
+          const group = productItems.find(item => productGroupID(item) === productGroupRef);
+          if (!group) throw new Error(context.t("所选产品组不受当前数据源完整支持"));
           Object.assign(patch, {
             product_path_selection: productProjection(group || productGroupRef),
             product_path_selection_id: productGroupRef,
@@ -311,6 +311,9 @@
           model().updateGroup(state, current.id, patch);
         } else {
           const selectedGroup = productItems.find(item => productGroupID(item) === productGroupRef);
+          if (productGroupRef && !selectedGroup) {
+            throw new Error(context.t("所选产品组不受当前数据源完整支持"));
+          }
           const productPatch = productGroupRef ? {
             product_path_selection: productProjection(selectedGroup || productGroupRef),
             product_path_selection_id: productGroupRef,

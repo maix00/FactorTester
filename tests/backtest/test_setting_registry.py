@@ -1354,6 +1354,16 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert scoped["product_path_candidates"]["inner"][
             "source_when_outer_unmounted"
         ] == "visible_product_group_catalog"
+        assert scoped["category_candidates"]["inner"] == {
+            "source_when_outer_mounted": "outer_category_pool",
+            "source_when_outer_unmounted": "visible_category_catalog",
+            "cardinality": "many",
+            "selection_mode": "filter_or_build_candidates",
+            "filter_only_when_outer_mounted": True,
+            "allow_inline_create_when_outer_unmounted": True,
+            "editable": True,
+        }
+        assert contract["outer_scope_tabs"]["category"]["candidate_kind"] == "category"
         index = backtest_setting_registry.get(application_name).manifest()
         if "factor" in index["defaults"]:
             assert index["defaults"]["factor"]["serialization"]["resolution"] == {
@@ -1363,3 +1373,28 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
                 "editable": False,
             }
         assert "time" in contract["outer_only_tabs"]
+        assert "data_source" in contract["outer_only_tabs"]
+        data_source = backtest_setting_registry.get(application_name).manifest()["defaults"]["data_source"]
+        assert data_source["value_descriptor"]["cardinality"] == "many"
+        assert contract["candidate_constraints"]["category_candidates"] == {
+            "source_field": "data_source",
+            "mode_field": "data_source_mode",
+            "automatic_mode": "auto",
+            "coverage": "complete_path_coverage",
+            "side": "outer",
+        }
+        assert contract["candidate_constraints"]["product_path_candidates"] == {
+            "source_field": "data_source",
+            "mode_field": "data_source_mode",
+            "automatic_mode": "auto",
+            "coverage": "complete_product_coverage",
+            "side": "outer",
+        }
+
+    ic_manifest = backtest_setting_registry.get("ic_test").manifest()
+    category_chip = next(
+        item for item in ic_manifest["chip_fields"] if item["key"] == "category"
+    )
+    assert category_chip["source_adapter"] == "selected_category"
+    assert category_chip["detail_overlay"]["kind"] == "category"
+    assert ic_manifest["defaults"]["category"]["show_chip"] is False

@@ -683,11 +683,26 @@ class ClientStateService:
             product_records=[dict(item) for item in catalog_product_records()],
             origin="server",
         )
+        from server.services.product_catalog_projection import (
+            source_ids_for_product_paths,
+        )
         categories = {
             str(item.get("id") or ""): item
             for item in self.product_categories(principal)
         }
         for group in projected:
+            positive_paths = [
+                str(path or "").strip()
+                for path in group.get("paths") or []
+                if str(path or "").strip() and not str(path).strip().startswith("-")
+            ]
+            group["path_sources"] = [
+                {
+                    "path": path,
+                    "source_ids": list(source_ids_for_product_paths([path])),
+                }
+                for path in positive_paths
+            ]
             group["category_bindings"] = [
                 categories[category_id]
                 for category_id in group.get("category_ids") or []
