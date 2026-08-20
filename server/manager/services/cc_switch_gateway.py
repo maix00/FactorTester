@@ -98,6 +98,17 @@ class CCSwitchGateway:
         root = self._private_session_root()
         config_root = root / "state"
         config_root.mkdir(mode=0o700)
+        private_home = root / "home"
+        codex_home = root / "codex"
+        xdg_config_home = root / "xdg-config"
+        xdg_state_home = root / "xdg-state"
+        for directory in (
+            private_home,
+            codex_home,
+            xdg_config_home,
+            xdg_state_home,
+        ):
+            directory.mkdir(mode=0o700)
         provider_config_path = root / "provider.json"
         provider_key = "factortester-profile-provider"
         provider_toml = "\n".join([
@@ -122,6 +133,13 @@ class CCSwitchGateway:
         executable = self.binary
         environment = dict(os.environ)
         environment["CC_SWITCH_CONFIG_DIR"] = str(config_root)
+        # CC Switch inspects native client configuration while constructing
+        # its state.  Keep even those reads and any future writes inside this
+        # disposable Profile session; never import Manager-user CLI state.
+        environment["HOME"] = str(private_home)
+        environment["CODEX_HOME"] = str(codex_home)
+        environment["XDG_CONFIG_HOME"] = str(xdg_config_home)
+        environment["XDG_STATE_HOME"] = str(xdg_state_home)
         local_token = secrets.token_urlsafe(32)
         plan = CCSwitchGatewayPlan(
             environment=environment,
@@ -149,7 +167,6 @@ class CCSwitchGateway:
                 executable,
                 "--app", "codex",
                 "proxy", "serve",
-                "--takeover", "codex",
                 "--listen-address", "127.0.0.1",
                 "--listen-port", str(listen_port),
             ],

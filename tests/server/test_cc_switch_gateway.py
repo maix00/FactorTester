@@ -33,11 +33,17 @@ def test_cc_switch_gateway_uses_profile_private_state_and_loopback(tmp_path: Pat
     assert plan.environment["CC_SWITCH_CONFIG_DIR"].startswith(
         str(tmp_path / "profile-a")
     )
+    session_root = Path(plan.environment["CC_SWITCH_CONFIG_DIR"]).parent
+    assert plan.environment["HOME"] == str(session_root / "home")
+    assert plan.environment["CODEX_HOME"] == str(session_root / "codex")
+    assert plan.environment["XDG_CONFIG_HOME"] == str(session_root / "xdg-config")
+    assert plan.environment["XDG_STATE_HOME"] == str(session_root / "xdg-state")
     assert plan.proxy_url == "http://127.0.0.1:17321/v1"
     assert "--listen-address" in plan.serve_command
     assert plan.serve_command[
         plan.serve_command.index("--listen-address") + 1
     ] == "127.0.0.1"
+    assert "--takeover" not in plan.serve_command
     assert "super-secret-token" not in " ".join(
         [*plan.setup_command, *plan.switch_command, *plan.config_command, *plan.serve_command]
     )
