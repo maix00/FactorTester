@@ -73,6 +73,7 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
 
     assert saved["agent_runtime"] == "codex"
     assert saved["protocol"] == "openai_responses"
+    assert saved["network_route"] == "direct"
 
     with sqlite3.connect(db_path) as connection:
         raw = connection.execute(
@@ -117,6 +118,7 @@ def test_provider_duplicate_keeps_secret_server_side_and_is_owner_scoped(tmp_pat
     assert duplicate["provider_id"] != original["provider_id"]
     assert duplicate["label"] == "Research provider copy"
     assert duplicate["protocol"] == "anthropic_messages"
+    assert duplicate["network_route"] == "direct"
     assert "secret" not in duplicate
     assert store.get(
         PRINCIPAL,
@@ -134,6 +136,57 @@ def test_provider_duplicate_keeps_secret_server_side_and_is_owner_scoped(tmp_pat
                 "server_id": "public-1",
                 "base_url": "https://localhost:9000",
                 "token": "x",
+            },
+        )
+
+
+def test_provider_persists_explicit_manager_proxy_route(tmp_path):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+
+    saved = store.save(
+        PRINCIPAL,
+        {
+            "label": "Proxied provider",
+            "runtime_kind": "server",
+            "server_id": "public-1",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "network_route": "manager_proxy",
+            "token": "secret-token-value",
+        },
+    )
+
+    assert saved["network_route"] == "manager_proxy"
+    with pytest.raises(ProviderStoreError, match="network_route is unsupported"):
+        store.save(
+            PRINCIPAL,
+            {
+                "label": "Invalid route",
+                "runtime_kind": "server",
+                "server_id": "public-1",
+                "protocol": "openai_responses",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "network_route": "automatic",
+                "token": "secret-token-value",
+            },
+        )
+
+    with pytest.raises(ProviderStoreError, match="client provider cannot use"):
+        store.save(
+            PRINCIPAL,
+            {
+                "label": "Invalid client proxy",
+                "runtime_kind": "client",
+                "protocol": "openai_responses",
+                "base_url": "http://127.0.0.1:9000/v1",
+                "default_model": "research-model",
+                "network_route": "manager_proxy",
+                "token": "secret-token-value",
             },
         )
 
@@ -531,6 +584,13 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
         "openai_chat": "cc_switch",
         "openai_responses": "direct",
     }
+    assert list_response["runtime_capabilities"][0]["network_route_details"] == [
+        {"network_route": "direct", "label": "直接连接"},
+        {
+            "network_route": "manager_proxy",
+            "label": "使用 Manager 网络代理",
+        },
+    ]
 
     duplicate = _AgentRouteHandler(
         service,

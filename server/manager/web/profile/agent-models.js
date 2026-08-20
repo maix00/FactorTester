@@ -51,6 +51,7 @@
           protocol: item.protocol,
           base_url: item.base_url,
           default_model: item.default_model,
+          network_route: item.network_route || "direct",
           token: "",
         }),
       });
@@ -118,13 +119,15 @@
       return [
         item.label || "",
         item.runtime_kind === "client" ? context.t("客户端运行") : context.t("服务器运行"),
-        item.agent_runtime || "codex", protocol, item.base_url || "", item.default_model || "",
+        item.agent_runtime || "codex", protocol, item.base_url || "",
+        context.t(item.network_route === "manager_proxy" ? "使用 Manager 网络代理" : "直接连接"),
+        item.default_model || "",
         item.token_configured ? context.t("已配置") : context.t("未配置"),
         status, actions,
       ];
     });
     const view = FTUI.pagedTable(
-      ["服务名称", "运行方式", "智能体运行", "协议", "API 地址", "默认模型", "令牌", "连接状态", "操作"].map(
+      ["服务名称", "运行方式", "智能体运行", "协议", "API 地址", "网络访问", "默认模型", "令牌", "连接状态", "操作"].map(
         label => context.t(label),
       ),
       rows,

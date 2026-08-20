@@ -29,6 +29,7 @@ from server.manager.services.agent_runtime_capabilities import (
 
 PROVIDER_TABLE = "manager_agent_provider_connections"
 SUPPORTED_RUNTIME_KINDS = frozenset({"client", "server"})
+SUPPORTED_NETWORK_ROUTES = frozenset({"direct", "manager_proxy"})
 
 
 class ProviderStoreError(ValueError):
@@ -97,6 +98,7 @@ class AgentProviderStore:
                     protocol TEXT NOT NULL,
                     base_url TEXT NOT NULL,
                     default_model TEXT NOT NULL DEFAULT '',
+                    network_route TEXT NOT NULL DEFAULT 'direct',
                     secret_blob BLOB NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at REAL NOT NULL,
@@ -114,6 +116,11 @@ class AgentProviderStore:
                 db.execute(
                     f"ALTER TABLE {PROVIDER_TABLE} "
                     "ADD COLUMN agent_runtime TEXT NOT NULL DEFAULT 'codex'"
+                )
+            if "network_route" not in columns:
+                db.execute(
+                    f"ALTER TABLE {PROVIDER_TABLE} "
+                    "ADD COLUMN network_route TEXT NOT NULL DEFAULT 'direct'"
                 )
             db.execute(
                 f"UPDATE {PROVIDER_TABLE} SET protocol = 'openai_responses' "
@@ -139,6 +146,13 @@ class AgentProviderStore:
         if runtime not in SUPPORTED_RUNTIME_KINDS:
             raise ProviderStoreError("runtime_kind is unsupported")
         return runtime
+
+    @classmethod
+    def validate_network_route(cls, value: object) -> str:
+        route = cls._text(value or "direct", "network_route")
+        if route not in SUPPORTED_NETWORK_ROUTES:
+            raise ProviderStoreError("network_route is unsupported")
+        return route
 
     @classmethod
     def validate_runtime_protocol(
@@ -184,6 +198,7 @@ class AgentProviderStore:
             "protocol": str(row["protocol"] or ""),
             "base_url": str(row["base_url"] or ""),
             "default_model": str(row["default_model"] or ""),
+            "network_route": str(row["network_route"] or "direct"),
             "enabled": bool(row["enabled"]),
             "token_configured": bool(row["secret_blob"]),
             "created_at": float(row["created_at"] or 0),
@@ -297,6 +312,14 @@ class AgentProviderStore:
             "default_model",
             required=False,
         )
+        network_route = self.validate_network_route(
+            payload.get("network_route")
+            or (previous["network_route"] if previous is not None else "direct")
+        )
+        if runtime_kind == "client" and network_route != "direct":
+            raise ProviderStoreError(
+                "client provider cannot use the Manager network proxy"
+            )
         secret = str(payload.get("token") or "").strip()
         if not secret and previous is not None:
             try:
@@ -317,6 +340,7 @@ class AgentProviderStore:
             "protocol": protocol,
             "base_url": base_url,
             "default_model": default_model,
+            "network_route": network_route,
             "secret": secret,
             "previous": previous,
         }
@@ -342,6 +366,7 @@ class AgentProviderStore:
         protocol = candidate["protocol"]
         base_url = candidate["base_url"]
         default_model = candidate["default_model"]
+        network_route = candidate["network_route"]
         secret = candidate["secret"]
         previous = candidate["previous"]
         now = time.time()
@@ -350,9 +375,9 @@ class AgentProviderStore:
             db.execute(
                 f"""INSERT INTO {PROVIDER_TABLE} (
                     provider_id, principal, runtime_kind, agent_runtime, server_id, label,
-                    protocol, base_url, default_model, secret_blob, enabled,
+                    protocol, base_url, default_model, network_route, secret_blob, enabled,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     runtime_kind=excluded.runtime_kind,
                     agent_runtime=excluded.agent_runtime,
@@ -361,12 +386,13 @@ class AgentProviderStore:
                     protocol=excluded.protocol,
                     base_url=excluded.base_url,
                     default_model=excluded.default_model,
+                    network_route=excluded.network_route,
                     secret_blob=excluded.secret_blob,
                     enabled=1,
                     updated_at=excluded.updated_at""",
                 (
                     provider_id, owner, runtime_kind, agent_runtime, server_id, label,
-                    protocol, base_url, default_model, secret_blob,
+                    protocol, base_url, default_model, network_route, secret_blob,
                     now if previous is None else float(previous["created_at"] or now),
                     now,
                 ),
@@ -402,6 +428,7 @@ class AgentProviderStore:
                 "protocol": source["protocol"],
                 "base_url": source["base_url"],
                 "default_model": source["default_model"],
+                "network_route": source["network_route"],
                 "token": source["secret"],
             },
         )

@@ -60,6 +60,7 @@
       protocol: view.protocol.value,
       base_url: view.baseURL.value.trim(),
       default_model: view.model.value.trim(),
+      network_route: view.runtime.value === "client" ? "direct" : view.networkRoute.value,
       token: view.token.value,
     };
   }
@@ -82,6 +83,20 @@
       {value: "client", label: "客户端运行"},
     ]);
     runtime.value = item?.runtime_kind || "server";
+    const networkRouteDetails = Array.isArray(capabilities[0]?.network_route_details)
+      ? capabilities[0].network_route_details : [];
+    const networkRoute = select(context, networkRouteDetails.map(detail => ({
+      value: detail.network_route,
+      label: detail.label,
+    })));
+    networkRoute.value = item?.network_route || "direct";
+    const updateNetworkRoute = () => {
+      const clientRuntime = runtime.value === "client";
+      if (clientRuntime) networkRoute.value = "direct";
+      networkRoute.disabled = clientRuntime;
+    };
+    runtime.addEventListener("change", updateNetworkRoute);
+    updateNetworkRoute();
     const agentRuntime = select(context, capabilities.map(capability => ({
       value: capability.runtime,
       label: capability.executable_label || capability.runtime,
@@ -140,7 +155,7 @@
     actions.append(test, save);
     const view = {
       providerID: item?.provider_id || "", label, runtime, agentRuntime, protocol,
-      baseURL, model, token,
+      baseURL, model, networkRoute, token,
     };
     const validate = () => {
       if (!label.value.trim() || !baseURL.value.trim() || !model.value.trim()) {
@@ -206,6 +221,7 @@
       field(context, "智能体运行", agentRuntime),
       field(context, "协议", protocolControl),
       field(context, "API 地址", baseURL, "服务器运行的模型服务必须使用 HTTPS。"),
+      field(context, "网络访问", networkRoute, "选择使用 Manager 网络代理时，Mihomo 不可用会明确报错，不会自动改为直连。"),
       field(context, "默认模型", modelControl, "聚焦时按需读取模型候选，也可以手动填写模型名称。"),
       field(context, "令牌", token, "令牌只写入当前运行时的本地加密存储，不会显示或同步到 PostgreSQL。"),
       actions, status,

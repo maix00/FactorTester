@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "网络访问" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Network access"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"网络访问"}}}},
+    "使用 Manager 网络代理" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Use Manager network proxy"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用 Manager 网络代理"}}}},
+    "选择使用 Manager 网络代理时，Mihomo 不可用会明确报错，不会自动改为直连。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"When the Manager network proxy is selected, an unavailable Mihomo service produces an explicit error instead of silently falling back to a direct connection."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择使用 Manager 网络代理时，Mihomo 不可用会明确报错，不会自动改为直连。"}}}},
     "Mihomo Dashboard" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mihomo Dashboard"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Mihomo 控制面板"}}}},
     "Mihomo Dashboard 不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mihomo Dashboard is unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Mihomo 控制面板不可用"}}}},
     "打开官方 Mihomo Dashboard" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open the official Mihomo Dashboard"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开官方 Mihomo 控制面板"}}}},

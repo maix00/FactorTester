@@ -9,6 +9,10 @@ from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
 from server.manager.services.agent_conversation_history import thread_messages
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.agent_provider_network import (
+    AgentProviderProxyUnavailable,
+    resolve_provider_proxy,
+)
 
 
 class AgentAppServerSupervisor:
@@ -68,13 +72,20 @@ class AgentAppServerSupervisor:
                 str(claim["claim_id"]),
                 str(claim["agent_id"]),
             )
+            try:
+                proxy_url = resolve_provider_proxy(
+                    context["provider"],
+                    self.proxy_url_provider,
+                )
+            except AgentProviderProxyUnavailable as exc:
+                raise AgentAppServerError(str(exc)) from exc
             session = AgentAppServerSession(
                 runtime=context["skill_runtime"],
                 provider=context["provider"],
                 factor_tester_auth=context.get("factor_tester_auth") or None,
                 codex_binary=self.codex_binary,
                 cc_switch_binary=self.cc_switch_binary,
-                proxy_url=self._proxy_url(),
+                proxy_url=proxy_url,
             )
             try:
                 session.start()
@@ -430,14 +441,5 @@ class AgentAppServerSupervisor:
         stop_event = self._heartbeat_controls.pop(key, None)
         if stop_event is not None:
             stop_event.set()
-
-    def _proxy_url(self) -> str:
-        if self.proxy_url_provider is None:
-            return ""
-        try:
-            return str(self.proxy_url_provider() or "").strip()
-        except Exception:
-            return ""
-
 
 __all__ = ["AgentAppServerError", "AgentAppServerSupervisor"]

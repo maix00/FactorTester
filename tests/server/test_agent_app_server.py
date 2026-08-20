@@ -282,12 +282,85 @@ def test_provider_test_uses_manager_mihomo_proxy(tmp_path, monkeypatch):
             "protocol": "openai_compatible",
             "base_url": "https://api.openai.com/v1",
             "default_model": "research-model",
+            "network_route": "manager_proxy",
             "token": "secret-token",
         },
     )
 
     assert result["status"] == "ok"
     assert observed["proxy_url"] == "http://127.0.0.1:7890"
+
+
+def test_provider_test_does_not_proxy_direct_provider(tmp_path, monkeypatch):
+    observed = {}
+
+    def fake_test(provider, *, proxy_url=""):
+        observed["proxy_url"] = proxy_url
+        return {"status": "ok"}
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fake_test)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+        proxy_url_provider=lambda: "http://127.0.0.1:7890",
+    )
+
+    service.test_provider(
+        PRINCIPAL,
+        {
+            "label": "Direct provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "network_route": "direct",
+            "token": "secret-token",
+        },
+    )
+
+    assert observed["proxy_url"] == ""
+
+
+def test_provider_test_fails_when_required_manager_proxy_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    called = False
+
+    def fake_test(provider, *, proxy_url=""):
+        nonlocal called
+        called = True
+        return {"status": "ok"}
+
+    monkeypatch.setattr(AgentProviderHealth, "test", fake_test)
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+        proxy_url_provider=lambda: "",
+    )
+
+    with pytest.raises(ProviderStoreError, match="Manager network proxy is unavailable"):
+        service.test_provider(
+            PRINCIPAL,
+            {
+                "label": "Proxied provider",
+                "runtime_kind": "server",
+                "protocol": "openai_responses",
+                "base_url": "https://api.example.test/v1",
+                "default_model": "research-model",
+                "network_route": "manager_proxy",
+                "token": "secret-token",
+            },
+        )
+    assert called is False
 
 
 def test_unimplemented_codex_protocol_cannot_be_saved(tmp_path):
@@ -493,7 +566,10 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
     )
     profile_ids = ("profile-a", "profile-b")
     protocols = ("openai_chat", "anthropic_messages")
-    for profile_id, protocol in zip(profile_ids, protocols, strict=True):
+    routes = ("direct", "manager_proxy")
+    for profile_id, protocol, network_route in zip(
+        profile_ids, protocols, routes, strict=True,
+    ):
         service.bind_runtime(
             PRINCIPAL,
             profile_id,
@@ -508,6 +584,7 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
                 "protocol": protocol,
                 "base_url": "https://api.example.test/v1",
                 "default_model": f"{profile_id}-model",
+                "network_route": network_route,
                 "token": f"{profile_id}-upstream-secret",
             },
         )
@@ -532,7 +609,7 @@ def test_two_profile_app_servers_keep_cc_switch_lifecycles_isolated(
     assert len(started_roots) == 2
     assert started_roots[0] != started_roots[1]
     assert started_proxies == [
-        "http://127.0.0.1:7890",
+        "",
         "http://127.0.0.1:7890",
     ]
 
