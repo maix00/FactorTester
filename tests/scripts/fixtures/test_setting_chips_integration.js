@@ -51,6 +51,7 @@ const manifest = {
     {key: "products", label: "产品路径", section_key: "scope", content_adapter: "product_path_selection"},
     {key: "time", label: "时间范围", section_key: "scope"},
     {key: "advanced", label: "高级", section_key: "scope"},
+    {key: "group_strategy", label: "分组策略", section_key: "scope"},
   ]},
   defaults: {
     start_date: {
@@ -66,6 +67,11 @@ const manifest = {
   chip_fields: [{
     key: "factor_alias", label: "因子", chip_template: "因子: {factorAlias}",
     source_keys: ["factorAlias"], value_resolvers: {}, target_tab: "factor",
+  }, {
+    key: "strategy_identity", label: "策略分组",
+    chip_template: "策略分组: {n_groups}",
+    source_keys: ["n_groups"], value_resolvers: {}, target_tab: "group_strategy",
+    display_scope: "strategy",
   }],
 };
 
@@ -79,7 +85,7 @@ const deferred = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
   t: value => value,
 }, {
   activeTab: "factor", mountedTabs: ["factor", "time"],
-  chipSources: {factorAlias: ["ROC 1m"]},
+    chipSources: {factorAlias: ["ROC 1m"], n_groups: 5},
   lazyState: () => ({status: "ready"}),
   ensureSettingsFieldsCode: () => { requestedFieldCode += 1; },
 });
@@ -96,7 +102,7 @@ function render(factorAlias, onChipOpen) {
   }, {
     activeTab: "factor",
     mountedTabs: ["factor", "time"],
-    chipSources: {factorAlias: [factorAlias]},
+    chipSources: {factorAlias: [factorAlias], n_groups: 5},
     lazyState: () => ({status: "ready"}),
     onTabChange: onChipOpen,
   });
@@ -125,6 +131,10 @@ const factorGroup = chipRow.children.find(item => item.className === "backend-se
 assert.ok(factorGroup, "tab-based chip group should be present");
 const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(factorChip.children[1].textContent, "ROC 1m");
+assert.equal(
+  chipRow.children.some(group => group.textContent.includes("策略分组")), false,
+  "strategy-scoped chips must not enter the shared settings summary",
+);
 const host = first.children[2];
 assert.equal(host.children[1].children.length, 0,
   "inactive settings tabs should not render their content on first load");
@@ -148,7 +158,7 @@ const closed = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
   t: value => value,
 }, {
   activeTab: null, mountedTabs: ["factor", "time"],
-  chipSources: {factorAlias: ["ROC 1m"]}, lazyState: () => ({status: "ready"}),
+  chipSources: {factorAlias: ["ROC 1m"], n_groups: 5}, lazyState: () => ({status: "ready"}),
 });
 assert.equal(closed.children[2].children[0].hidden, true,
   "an explicit closed tab state should stay closed after settings rerender");

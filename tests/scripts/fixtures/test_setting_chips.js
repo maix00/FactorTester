@@ -45,6 +45,7 @@ const manifest = {
     {key: "product_path_selection", label: "产品路径"},
     {key: "time", label: "时间范围"},
     {key: "ic_method", label: "IC 类型"},
+    {key: "group_strategy", label: "分组策略"},
   ]},
   defaults: {
     factor_owner_ref: {
@@ -95,6 +96,17 @@ const manifest = {
       value_resolvers: {productPathSelectionLabel: "product_path_selection_label"},
       target_tab: "product_path_selection",
     },
+    {
+      key: "unmounted_identity", label: "未挂载字段",
+      chip_template: "未挂载字段: {unmountedValue}",
+      source_keys: ["unmountedValue"], value_resolvers: {}, target_tab: "advanced",
+    },
+    {
+      key: "strategy_identity", label: "策略分组",
+      chip_template: "策略分组: {n_groups}",
+      source_keys: ["n_groups"], value_resolvers: {}, target_tab: "group_strategy",
+      display_scope: "strategy",
+    },
   ],
 };
 
@@ -112,6 +124,8 @@ const descriptors = FTTestSettingChips.descriptors({
     product_path_selection: [
       {label: "中国期货日盘"}, {label: "中国期货夜盘"}, {label: "能源期货"},
     ],
+    unmountedValue: "不应显示",
+    n_groups: 5,
   },
   context: {t: value => value},
 });
@@ -120,6 +134,17 @@ assert.deepEqual(descriptors.map(item => [item.label, item.value, item.tabKey]),
   ["产品路径", "中国期货日盘、中国期货夜盘 +1", "product_path_selection"],
   ["开始日期", "2025-01-02", "time"],
   ["IC", "Rank + Pearson", "ic_method"],
+]);
+
+const strategyDescriptors = FTTestSettingChips.descriptors({
+  manifest,
+  mountedTabs: ["group_strategy"],
+  sources: {n_groups: 5},
+  includeStrategyChips: true,
+  context: {t: value => value},
+});
+assert.deepEqual(strategyDescriptors.map(item => [item.label, item.value, item.tabKey]), [
+  ["策略分组", "5", "group_strategy"],
 ]);
 
 let opened = "";
@@ -132,7 +157,8 @@ const row = FTTestSettingChips.render({
   onOpen: tabKey => { opened = tabKey; },
 });
 assert.equal(row.className, "backend-settings-chip-row");
-assert.equal(row.children.length, 3);
+assert.equal(row.children.length, 2,
+  "identity chips for tabs that are not mounted must stay out of the summary");
 assert.ok(row.children.every(item => item.className === "backend-settings-chip-group"));
 const timeGroup = row.children.find(item => item.children[0].textContent === "时间范围");
 assert.ok(timeGroup);

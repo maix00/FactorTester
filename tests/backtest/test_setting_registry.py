@@ -386,6 +386,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
         "run_inputs",
     }
+    chips = {chip["key"]: chip for chip in index["chip_fields"]}
+    assert chips["split_count"]["display_scope"] == "strategy"
+    assert chips["group_index"]["display_scope"] == "strategy"
+    assert chips["product_mask"]["display_scope"] == "strategy"
     run_input_chip = next(
         chip for chip in index["chip_fields"] if chip["key"] == "run_inputs"
     )

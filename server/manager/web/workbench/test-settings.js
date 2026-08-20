@@ -94,6 +94,7 @@
         manifest, values, context,
         mountedTabs: [...mounted],
         includeUnregistered: true,
+        includeStrategyChips: false,
         sources: options.chipSources || {},
         runValues: options.state?.runValues || {},
         outputRequests: options.state?.outputRequests || [],

@@ -112,12 +112,14 @@ def register_group_test_settings(app: Any) -> None:
                        "分组数: {n_groups}", ("n_groups",),
                        module="group_strategy", target_tab="group_strategy", order=30,
                        inherit_from_root=True, batch_owned=True,
-                       source_adapter="primary_strategy_group"),
+                       source_adapter="primary_strategy_group",
+                       display_scope="strategy"),
         ChipDefinition("group_index", "分组序号", "identity",
                        "分组序号: {group_index}", ("group_index",),
                        module="group_strategy", target_tab="group_strategy", order=31,
                        inherit_from_root=True,
-                       source_adapter="primary_strategy_group"),
+                       source_adapter="primary_strategy_group",
+                       display_scope="strategy"),
         ChipDefinition("product_mask", "品种范围", "derived",
                        "品种范围: {productCount}品种 {expandSymbol}",
                        ("productMask",),
@@ -127,7 +129,8 @@ def register_group_test_settings(app: Any) -> None:
                            "expandSymbol": "product_mask_expand_symbol",
                        },
                        clickable=True,
-                       source_adapter="primary_strategy_group"),
+                       source_adapter="primary_strategy_group",
+                       display_scope="strategy"),
     ):
         app.register_chip_field(chip)
 
