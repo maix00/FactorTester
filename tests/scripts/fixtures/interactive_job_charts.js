@@ -9,6 +9,9 @@ vm.runInThisContext(fs.readFileSync(
 ), {filename: "list-format.js"});
 global.FTJobListFormat = window.FTJobListFormat;
 vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/jobs/highcharts-timeline.js", "utf8",
+), {filename: "highcharts-timeline.js"});
+vm.runInThisContext(fs.readFileSync(
   "server/manager/web/jobs/highcharts-viewers.js", "utf8",
 ), {filename: "highcharts-viewers.js"});
 vm.runInThisContext(fs.readFileSync(
@@ -23,17 +26,31 @@ const equity = window.FTJobHighcharts.optionsFor("equity_curve", {
   artifact_kind: "equity_curve",
   series: [{
     label: "A1", currency: "CNY",
-    timestamps: ["2025-01-02T15:00:00+08:00", "2025-01-03T15:00:00+08:00"],
+    timestamps: ["2025-01-03T15:00:00+08:00", "2025-01-06T09:00:00+08:00"],
     values: [1_000_000, 1_020_000], drawdown: [0, -0.01],
+  }, {
+    label: "A2", currency: "CNY",
+    timestamps: ["2025-01-03T15:00:00+08:00", "2025-01-06T10:00:00+08:00"],
+    values: [1_000_000, 990_000], drawdown: [0, -0.02],
   }],
 }, context);
 assert.equal(equity.series[0].name, "A1");
-assert.equal(equity.series[1].name, "A1 · 当前回撤");
-assert.equal(equity.series[1].yAxis, 1);
+assert.equal(equity.series[2].name, "A1 · 当前回撤");
+assert.equal(equity.series[2].yAxis, 2);
 assert.equal(equity.navigator.enabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
+assert.equal(equity.xAxis.ordinal, true, "non-trading gaps must be compressed");
+assert.equal(equity.yAxis.length, 3, "equity and drawdown share one chart with two panes");
+assert.equal(equity.yAxis[0].top, "0%");
+assert.equal(equity.yAxis[0].height, "64%");
+assert.equal(equity.yAxis[1].linkedTo, 0);
+assert.equal(equity.yAxis[2].top, "72%");
+assert.equal(equity.yAxis[2].height, "28%");
+assert.equal(equity.yAxis[2].max, 0);
 assert.ok(Number.isFinite(equity.series[0].data[0][0]));
+const observedTimes = new Set(equity.series.flatMap(item => item.data.map(point => point[0])));
+assert.equal(observedTimes.size, 3, "the adapter must not synthesize non-trading timestamps");
 
 const metrics = {
   artifact_kind: "metrics_over_time",

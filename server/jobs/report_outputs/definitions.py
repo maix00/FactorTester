@@ -4,26 +4,37 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from .backtest_tables import BACKTEST_TABLE_DEFINITIONS, BACKTEST_TABLE_DESCRIPTIONS
+
 
 OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "equity_curve": {
         "label": "净值曲线与回撤", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "equity_curve",
-        "artifacts": ["equity_curve_report", "equity_curve_data", "equity_curve_receipt", "equity_curve_data_receipt"],
+        "artifacts": ["equity_curve_report", "equity_curve_data", "equity_curve_receipt"],
+        "canonical_artifact": "equity_curve_data",
+        "rendition_artifacts": ["equity_curve_report"],
+        "receipt_artifact": "equity_curve_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
     },
     "returns_over_time": {
         "label": "收益率随时间变化", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "line_chart",
-        "artifacts": ["returns_over_time_report", "returns_over_time_data", "returns_over_time_report_receipt", "returns_over_time_data_receipt"],
+        "artifacts": ["returns_over_time_report", "returns_over_time_data", "returns_over_time_receipt"],
+        "canonical_artifact": "returns_over_time_data",
+        "rendition_artifacts": ["returns_over_time_report"],
+        "receipt_artifact": "returns_over_time_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
     },
     "metrics_over_time": {
         "label": "指标随时间变化", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "metrics_chart",
-        "artifacts": ["metrics_over_time_report", "metrics_over_time_data", "metrics_over_time_report_receipt", "metrics_over_time_data_receipt"],
+        "artifacts": ["metrics_over_time_report", "metrics_over_time_data", "metrics_over_time_receipt"],
+        "canonical_artifact": "metrics_over_time_data",
+        "rendition_artifacts": ["metrics_over_time_report"],
+        "receipt_artifact": "metrics_over_time_receipt",
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
         "result_retention_mode": "full",
@@ -31,14 +42,20 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "fee_detail": {
         "label": "手续费明细", "formats": ["csv", "json"],
         "presentation": "table", "viewer": "data_table",
-        "artifacts": ["fee_detail_csv", "fee_detail_data", "fee_detail_csv_receipt", "fee_detail_data_receipt"],
+        "artifacts": ["fee_detail_csv", "fee_detail_data", "fee_detail_receipt"],
+        "canonical_artifact": "fee_detail_data",
+        "rendition_artifacts": ["fee_detail_csv"],
+        "receipt_artifact": "fee_detail_receipt",
         "before_run": True, "after_run": True, "requires": ["order_audit"],
         "analyses": ["backtest"],
     },
     "margin_detail": {
         "label": "保证金明细", "formats": ["csv", "json"],
         "presentation": "table", "viewer": "data_table",
-        "artifacts": ["margin_detail_csv", "margin_detail_data", "margin_detail_csv_receipt", "margin_detail_data_receipt"],
+        "artifacts": ["margin_detail_csv", "margin_detail_data", "margin_detail_receipt"],
+        "canonical_artifact": "margin_detail_data",
+        "rendition_artifacts": ["margin_detail_csv"],
+        "receipt_artifact": "margin_detail_receipt",
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
         "result_retention_mode": "full",
@@ -46,7 +63,10 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "ratio_detail": {
         "label": "收益、手续费、保证金占比", "formats": ["csv", "json"],
         "presentation": "table", "viewer": "data_table",
-        "artifacts": ["ratio_detail_csv", "ratio_detail_data", "ratio_detail_csv_receipt", "ratio_detail_data_receipt"],
+        "artifacts": ["ratio_detail_csv", "ratio_detail_data", "ratio_detail_receipt"],
+        "canonical_artifact": "ratio_detail_data",
+        "rendition_artifacts": ["ratio_detail_csv"],
+        "receipt_artifact": "ratio_detail_receipt",
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution", "order_audit"],
         "analyses": ["backtest"],
@@ -68,8 +88,11 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "chart", "viewer": "line_chart",
         "artifacts": [
             "ic_series_report", "ic_series_data",
-            "ic_series_report_receipt", "ic_series_data_receipt",
+            "ic_series_receipt",
         ],
+        "canonical_artifact": "ic_series_data",
+        "rendition_artifacts": ["ic_series_report"],
+        "receipt_artifact": "ic_series_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         "default": True,
@@ -79,16 +102,19 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "table", "viewer": "data_table",
         "artifacts": [
             "ic_statistics_csv", "ic_statistics_data",
-            "ic_statistics_csv_receipt", "ic_statistics_data_receipt",
+            "ic_statistics_receipt",
             "ic_statistics_summary_csv", "ic_statistics_summary_data",
-            "ic_statistics_summary_csv_receipt", "ic_statistics_summary_data_receipt",
+            "ic_statistics_summary_receipt",
             "ic_rolling_stability_csv", "ic_rolling_stability_data",
-            "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
+            "ic_rolling_stability_receipt",
             "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
-            "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+            "ic_period_diagnostics_receipt",
             "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
-            "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
+            "ic_quantile_portfolio_statistics_receipt",
         ],
+        "canonical_artifact": "ic_statistics_data",
+        "rendition_artifacts": ["ic_statistics_csv"],
+        "receipt_artifact": "ic_statistics_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         "default": True,
@@ -98,8 +124,11 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "table", "viewer": "data_table",
         "artifacts": [
             "ic_rolling_stability_csv", "ic_rolling_stability_data",
-            "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
+            "ic_rolling_stability_receipt",
         ],
+        "canonical_artifact": "ic_rolling_stability_data",
+        "rendition_artifacts": ["ic_rolling_stability_csv"],
+        "receipt_artifact": "ic_rolling_stability_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         # IC statistics auto-emits this artifact when rolling summaries exist;
@@ -111,8 +140,11 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "table", "viewer": "data_table",
         "artifacts": [
             "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
-            "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+            "ic_period_diagnostics_receipt",
         ],
+        "canonical_artifact": "ic_period_diagnostics_data",
+        "rendition_artifacts": ["ic_period_diagnostics_csv"],
+        "receipt_artifact": "ic_period_diagnostics_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
     },
@@ -121,8 +153,11 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "table", "viewer": "data_table",
         "artifacts": [
             "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
-            "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
+            "ic_quantile_portfolio_statistics_receipt",
         ],
+        "canonical_artifact": "ic_quantile_portfolio_statistics_data",
+        "rendition_artifacts": ["ic_quantile_portfolio_statistics_csv"],
+        "receipt_artifact": "ic_quantile_portfolio_statistics_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
     },
@@ -131,8 +166,11 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "chart", "viewer": "line_chart",
         "artifacts": [
             "ic_holding_half_life_report", "ic_holding_half_life_data",
-            "ic_holding_half_life_report_receipt", "ic_holding_half_life_data_receipt",
+            "ic_holding_half_life_receipt",
         ],
+        "canonical_artifact": "ic_holding_half_life_data",
+        "rendition_artifacts": ["ic_holding_half_life_report"],
+        "receipt_artifact": "ic_holding_half_life_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         # The IC result already contains the horizon-level means needed for
@@ -141,6 +179,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default": True,
     },
 }
+
+OUTPUT_DEFINITIONS.update(BACKTEST_TABLE_DEFINITIONS)
 
 _ALIASES = {
     "equity": "equity_curve", "equity_curve_report": "equity_curve",
@@ -159,46 +199,40 @@ _ARTIFACT_DESCRIPTIONS = {
     "equity_curve_report": "净值曲线图（SVG）",
     "equity_curve_data": "净值曲线与回撤数据（JSON）",
     "equity_curve_receipt": "净值曲线生成说明（JSON）",
-    "equity_curve_data_receipt": "净值数据生成说明（JSON）",
     "returns_over_time_report": "收益率随时间变化图（SVG）",
     "returns_over_time_data": "收益率随时间变化数据（JSON）",
-    "returns_over_time_report_receipt": "收益率图生成说明（JSON）",
-    "returns_over_time_data_receipt": "收益率数据生成说明（JSON）",
+    "returns_over_time_receipt": "收益率结果生成说明（JSON）",
     "metrics_over_time_report": "指标随时间变化图（SVG）",
     "metrics_over_time_data": "指标随时间变化数据（JSON）",
-    "metrics_over_time_report_receipt": "指标图生成说明（JSON）",
-    "metrics_over_time_data_receipt": "指标数据生成说明（JSON）",
+    "metrics_over_time_receipt": "指标结果生成说明（JSON）",
     "fee_detail_csv": "手续费明细表（CSV）", "fee_detail_data": "手续费明细数据（JSON）",
-    "fee_detail_csv_receipt": "手续费表生成说明（JSON）", "fee_detail_data_receipt": "手续费数据生成说明（JSON）",
+    "fee_detail_receipt": "手续费明细生成说明（JSON）",
     "margin_detail_csv": "保证金与名义金额明细表（CSV）", "margin_detail_data": "保证金明细数据（JSON）",
-    "margin_detail_csv_receipt": "保证金表生成说明（JSON）", "margin_detail_data_receipt": "保证金数据生成说明（JSON）",
+    "margin_detail_receipt": "保证金明细生成说明（JSON）",
     "ratio_detail_csv": "收益、手续费和保证金占比表（CSV）", "ratio_detail_data": "收益、手续费和保证金占比数据（JSON）",
-    "ratio_detail_csv_receipt": "占比表生成说明（JSON）", "ratio_detail_data_receipt": "占比数据生成说明（JSON）",
+    "ratio_detail_receipt": "收益、手续费和保证金占比生成说明（JSON）",
     "ic_series_report": "IC 序列图（SVG）", "ic_series_data": "IC 序列数据（JSON）",
-    "ic_series_report_receipt": "IC 序列图生成说明（JSON）", "ic_series_data_receipt": "IC 序列数据生成说明（JSON）",
+    "ic_series_receipt": "IC 序列生成说明（JSON）",
     "ic_statistics_csv": "IC 统计表（CSV）", "ic_statistics_data": "IC 统计数据（JSON）",
-    "ic_statistics_csv_receipt": "IC 统计表生成说明（JSON）", "ic_statistics_data_receipt": "IC 统计数据生成说明（JSON）",
+    "ic_statistics_receipt": "IC 统计生成说明（JSON）",
     "ic_statistics_summary_csv": "IC 统计摘要表（报告 artifact，CSV）",
     "ic_statistics_summary_data": "IC 统计摘要表（报告 artifact，JSON）",
-    "ic_statistics_summary_csv_receipt": "IC 统计摘要表生成说明（JSON）",
-    "ic_statistics_summary_data_receipt": "IC 统计摘要表数据生成说明（JSON）",
+    "ic_statistics_summary_receipt": "IC 统计摘要生成说明（JSON）",
     "ic_rolling_stability_csv": "滚动 IC 稳定性表（CSV）",
     "ic_rolling_stability_data": "滚动 IC 稳定性数据（JSON）",
-    "ic_rolling_stability_csv_receipt": "滚动 IC 稳定性表生成说明（JSON）",
-    "ic_rolling_stability_data_receipt": "滚动 IC 稳定性数据生成说明（JSON）",
+    "ic_rolling_stability_receipt": "滚动 IC 稳定性生成说明（JSON）",
     "ic_period_diagnostics_csv": "IC 周期诊断表（CSV）",
     "ic_period_diagnostics_data": "IC 周期诊断数据（JSON）",
-    "ic_period_diagnostics_csv_receipt": "IC 周期诊断表生成说明（JSON）",
-    "ic_period_diagnostics_data_receipt": "IC 周期诊断数据生成说明（JSON）",
+    "ic_period_diagnostics_receipt": "IC 周期诊断生成说明（JSON）",
     "ic_quantile_portfolio_statistics_csv": "IC 分组组合统计表（CSV）",
     "ic_quantile_portfolio_statistics_data": "IC 分组组合统计数据（JSON）",
-    "ic_quantile_portfolio_statistics_csv_receipt": "IC 分组组合统计表生成说明（JSON）",
-    "ic_quantile_portfolio_statistics_data_receipt": "IC 分组组合统计数据生成说明（JSON）",
+    "ic_quantile_portfolio_statistics_receipt": "IC 分组组合统计生成说明（JSON）",
     "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
     "ic_holding_half_life_data": "真实持有期 IC 半衰期数据（JSON）",
-    "ic_holding_half_life_report_receipt": "真实持有期 IC 半衰期图生成说明（JSON）",
-    "ic_holding_half_life_data_receipt": "真实持有期 IC 半衰期数据生成说明（JSON）",
+    "ic_holding_half_life_receipt": "真实持有期 IC 半衰期生成说明（JSON）",
 }
+
+_ARTIFACT_DESCRIPTIONS.update(BACKTEST_TABLE_DESCRIPTIONS)
 
 
 def output_capabilities() -> list[dict[str, Any]]:
@@ -218,30 +252,38 @@ def output_capabilities() -> list[dict[str, Any]]:
 
 def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
     """Return the viewer contract stored with a Job detail response."""
-    declarations = [
-        {
+    declarations = []
+    for name in normalize_output_requests(list(requests)):
+        definition = OUTPUT_DEFINITIONS[name]
+        declaration = {
             "name": name,
-            "label": OUTPUT_DEFINITIONS[name]["label"],
-            "presentation": OUTPUT_DEFINITIONS[name]["presentation"],
-            "viewer": OUTPUT_DEFINITIONS[name]["viewer"],
-            "formats": list(OUTPUT_DEFINITIONS[name]["formats"]),
-            "artifacts": list(OUTPUT_DEFINITIONS[name]["artifacts"]),
-            "before_run": bool(OUTPUT_DEFINITIONS[name].get("before_run")),
-            "after_run": bool(OUTPUT_DEFINITIONS[name].get("after_run")),
+            "label": definition["label"],
+            "presentation": definition["presentation"],
+            "viewer": definition["viewer"],
+            "formats": list(definition["formats"]),
+            "artifacts": list(definition["artifacts"]),
+            "before_run": bool(definition.get("before_run")),
+            "after_run": bool(definition.get("after_run")),
             "required_sources": [
                 {
                     "name": source,
                     "label": _ARTIFACT_DESCRIPTIONS.get(source, source),
                 }
-                for source in OUTPUT_DEFINITIONS[name].get("requires") or ()
+                for source in definition.get("requires") or ()
             ],
             "result_retention_mode": str(
-                OUTPUT_DEFINITIONS[name].get("result_retention_mode")
-                or "summary"
+                definition.get("result_retention_mode") or "summary"
             ),
         }
-        for name in normalize_output_requests(list(requests))
-    ]
+        if definition.get("canonical_artifact"):
+            declaration.update({
+                "canonical_artifact": definition["canonical_artifact"],
+                "rendition_artifacts": list(
+                    definition.get("rendition_artifacts") or ()
+                ),
+                "receipt_artifact": definition["receipt_artifact"],
+            })
+        declarations.append(declaration)
     # IC statistics produces the complete diagnostics table, curated summary,
     # period diagnostics, and vectorized portfolio category. Declare these so
     # the Job detail result
@@ -255,8 +297,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "formats": ["csv", "json"],
             "artifacts": [
                 "ic_statistics_summary_csv", "ic_statistics_summary_data",
-                "ic_statistics_summary_csv_receipt", "ic_statistics_summary_data_receipt",
+                "ic_statistics_summary_receipt",
             ],
+            "canonical_artifact": "ic_statistics_summary_data",
+            "rendition_artifacts": ["ic_statistics_summary_csv"],
+            "receipt_artifact": "ic_statistics_summary_receipt",
         }, {
             "name": "ic_rolling_stability",
             "label": "滚动 IC 稳定性表",
@@ -265,8 +310,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "formats": ["csv", "json"],
             "artifacts": [
                 "ic_rolling_stability_csv", "ic_rolling_stability_data",
-                "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
+                "ic_rolling_stability_receipt",
             ],
+            "canonical_artifact": "ic_rolling_stability_data",
+            "rendition_artifacts": ["ic_rolling_stability_csv"],
+            "receipt_artifact": "ic_rolling_stability_receipt",
         }, {
             "name": "ic_period_diagnostics",
             "label": "IC 周期诊断表",
@@ -275,8 +323,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "formats": ["csv", "json"],
             "artifacts": [
                 "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
-                "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+                "ic_period_diagnostics_receipt",
             ],
+            "canonical_artifact": "ic_period_diagnostics_data",
+            "rendition_artifacts": ["ic_period_diagnostics_csv"],
+            "receipt_artifact": "ic_period_diagnostics_receipt",
         }, {
             "name": "ic_quantile_portfolio_statistics",
             "label": "IC 分组组合统计表",
@@ -285,8 +336,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "formats": ["csv", "json"],
             "artifacts": [
                 "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
-                "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
+                "ic_quantile_portfolio_statistics_receipt",
             ],
+            "canonical_artifact": "ic_quantile_portfolio_statistics_data",
+            "rendition_artifacts": ["ic_quantile_portfolio_statistics_csv"],
+            "receipt_artifact": "ic_quantile_portfolio_statistics_receipt",
         }]
         declared_names = {item["name"] for item in declarations}
         declarations.extend(

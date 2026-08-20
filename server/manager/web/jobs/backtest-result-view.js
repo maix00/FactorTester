@@ -1,9 +1,11 @@
 (() => {
   const tabLabels = Object.freeze({
-    summary: "回测汇总", group_equity: "策略净值", group_metrics: "分组指标",
+    runtime: "策略运行摘要", summary: "回测汇总", group_metrics: "策略统计",
     equity: "净值与回撤", returns: "收益率",
     metrics: "时变指标", fees: "手续费", margin: "保证金",
-    ratios: "收益与费用",
+    ratios: "收益与费用", orders: "订单", fills: "成交与结算",
+    cash: "现金", positions: "持仓", exposure: "风险敞口",
+    turnover: "换手率", drawdowns: "回撤区间", period_returns: "周期收益",
   });
 
   function relevantArtifacts(artifacts) {
@@ -16,21 +18,18 @@
   function supports(artifacts, summary = {}) {
     return relevantArtifacts(artifacts).length > 0
       || Boolean(summary?.metrics && Object.keys(summary.metrics).length)
-      || Boolean(window.FTBacktestResultModel.groupEquityEntries?.(summary).length);
+      || Boolean(window.FTBacktestRuntimeModel?.rows?.(summary).length);
   }
 
   function artifactPath(jobID, artifact, artifactQuery) {
     return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
   }
 
-  async function loadPayloads(context, artifacts, jobID, artifactQuery) {
-    const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
-      const response = await FTJobArtifacts.fetch(
-        context, artifactPath(jobID, artifact, artifactQuery),
-      );
-      return [artifact.name, JSON.parse(await response.text())];
-    }));
-    return Object.fromEntries(pairs);
+  async function loadPayload(context, artifact, jobID, artifactQuery) {
+    const response = await FTJobArtifacts.fetch(
+      context, artifactPath(jobID, artifact, artifactQuery),
+    );
+    return JSON.parse(await response.text());
   }
 
   function message(context, value) {
@@ -129,22 +128,6 @@
     return target;
   }
 
-  function groupEquityChart(context, state) {
-    const target = document.createElement("div");
-    target.className = "backtest-domain-chart interactive-artifact-chart";
-    queueMicrotask(() => {
-      try {
-        window.FTBacktestGroupEquityChart.mount(context, target, state.model.summary, {
-          ...state.evaluationWindow,
-          showOutOfSample: state.showOutOfSample,
-          // Snapshot navigation remains an optional chart-module callback. It
-          // is deliberately not connected to the result view in this change.
-        });
-      } catch (error) { target.replaceChildren(message(context, error.message)); }
-    });
-    return target;
-  }
-
   function groupMetricsTable(context, state) {
     const matrix = state.model.metricMatrix;
     if (!matrix.entries.length) return message(context, "暂无分组指标");
@@ -191,24 +174,36 @@
     return result.shell;
   }
 
-  function dataTable(context, rows) {
+  function dataTable(context, rows, state) {
     if (!rows.length) return message(context, "暂无明细");
     const columns = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
-    return window.FTReportTables.render({
-      columns, rows: rows.slice(0, 500), context,
-      className: "backtest-domain-table",
-      renderHeader: key => window.FTRichText.inline(String(key), context),
-      renderCell: value => value && typeof value === "object"
+    const page = Number(state.tablePages[state.activeTab] || 1);
+    const values = rows.map(row => columns.map(key => {
+      const value = row[key];
+      return value && typeof value === "object"
         ? window.FTUI.code(value)
-        : window.FTRichText.inline(String(value ?? ""), context),
-      values: row => columns.map(key => row[key]),
+        : window.FTRichText.inline(String(value ?? ""), context);
+    }));
+    const table = window.FTUI.pagedTable(columns.map(key => context.t(key)), values, {
+      page, pageSize: 20,
+      previousLabel: context.t("上一页"), nextLabel: context.t("下一页"),
+      pageLabel: (current, total) => `${current} / ${total}`,
+      totalLabel: total => `${context.t("共")} ${total} ${context.t("行")}`,
+      onPageChange: next => {
+        state.tablePages[state.activeTab] = next;
+        renderLoaded(context, state.target, state);
+      },
     });
+    table.shell.classList.add("backtest-domain-table");
+    return table.shell;
   }
 
   function tabContent(context, state) {
     const payloads = state.model.payloads;
+    if (state.activeTab === "runtime") {
+      return runtimeTable(context, state.model) || message(context, "暂无策略运行摘要");
+    }
     if (state.activeTab === "summary") return summaryTable(context, state.model);
-    if (state.activeTab === "group_equity") return groupEquityChart(context, state);
     if (state.activeTab === "group_metrics") return groupMetricsTable(context, state);
     if (state.activeTab === "equity") {
       return chart(context, "equity_curve", payloads.equity_curve_data, {
@@ -225,13 +220,35 @@
         ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
       });
     }
-    const artifact = {
-      fees: "fee_detail_data", margin: "margin_detail_data",
-      ratios: "ratio_detail_data",
-    }[state.activeTab];
+    const artifact = window.FTBacktestResultModel.tabPayloads[state.activeTab];
     return dataTable(context, window.FTBacktestResultModel.scopedRows(
       payloads[artifact], state.activeGroup,
-    ));
+    ), state);
+  }
+
+  function activeArtifact(state) {
+    const name = window.FTBacktestResultModel.tabPayloads[state.activeTab];
+    if (!name || state.payloads[name]) return null;
+    return state.artifactsByName.get(name) || null;
+  }
+
+  function loadActiveTab(context, state) {
+    const artifact = activeArtifact(state);
+    if (!artifact || state.loading.has(artifact.name)) return;
+    state.loading.add(artifact.name);
+    loadPayload(
+      context, artifact, state.options.jobID, state.options.artifactQuery || "",
+    ).then(payload => {
+      state.payloads[artifact.name] = payload;
+      state.model = window.FTBacktestResultModel.build(
+        state.payloads, state.model.summary, [...state.artifactsByName.keys()],
+      );
+    }).catch(error => {
+      state.errors[artifact.name] = error;
+    }).finally(() => {
+      state.loading.delete(artifact.name);
+      if (state.target?.isConnected !== false) renderLoaded(context, state.target, state);
+    });
   }
 
   function renderLoaded(context, target, state) {
@@ -291,9 +308,15 @@
       header.append(actions);
     }
     const content = document.createElement("div"); content.className = "backtest-domain-content";
-    content.append(tabContent(context, state));
-    const runtime = runtimeTable(context, state.model);
-    target.replaceChildren(header, ...(runtime ? [runtime] : []), content);
+    const artifact = activeArtifact(state);
+    const payloadName = window.FTBacktestResultModel.tabPayloads[state.activeTab];
+    const error = payloadName ? state.errors[payloadName] : null;
+    if (error) content.append(message(context, error.message));
+    else if (artifact) {
+      content.append(window.FTUI.loading(context.t("正在读取所选结果…")));
+      queueMicrotask(() => loadActiveTab(context, state));
+    } else content.append(tabContent(context, state));
+    target.replaceChildren(header, content);
   }
 
   function section(context, options) {
@@ -302,26 +325,23 @@
     root.className = "job-section backtest-domain-results";
     const heading = document.createElement("h2"); heading.textContent = context.t("回测结果");
     const target = document.createElement("div");
-    target.append(window.FTUI.loading(context.t("正在读取回测结果…")));
+    target.append(window.FTUI.loading(context.t("正在准备回测结果选项卡…")));
     root.append(heading, target);
-    queueMicrotask(async () => {
-      try {
-        const model = window.FTBacktestResultModel.build(
-          await loadPayloads(
-            context, options.artifacts, options.jobID,
-            options.artifactQuery || "",
-          ),
-          options.resultSummary || {},
-        );
-        renderLoaded(context, target, {
-          model, activeTab: model.tabs[0] || "summary", activeGroup: "",
-          evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
-            model.summary, options.configuration || {},
-          ),
-          showOutOfSample: false,
-          options: {...options, resultSummary: model.summary},
-        });
-      } catch (error) { target.replaceChildren(message(context, error.message)); }
+    queueMicrotask(() => {
+      const relevant = relevantArtifacts(options.artifacts);
+      const artifactsByName = new Map(relevant.map(item => [String(item.name), item]));
+      const model = window.FTBacktestResultModel.build(
+        {}, options.resultSummary || {}, [...artifactsByName.keys()],
+      );
+      renderLoaded(context, target, {
+        model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
+        tablePages: {}, activeTab: model.tabs[0] || "summary", activeGroup: "",
+        evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
+          model.summary, options.configuration || {},
+        ),
+        showOutOfSample: false,
+        options: {...options, resultSummary: model.summary},
+      });
     });
     return root;
   }

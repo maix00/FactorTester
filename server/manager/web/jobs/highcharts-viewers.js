@@ -19,19 +19,11 @@
   ];
 
   function number(value) {
-    if (value == null || value === "" || typeof value === "boolean") return null;
-    const result = Number(value);
-    return Number.isFinite(result) ? result : null;
+    return window.FTChartTimeline.number(value);
   }
 
   function timestamp(value, index) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      if (Math.abs(value) > 20_000_000_000) return value;
-      if (Math.abs(value) > 1_000_000_000) return value * 1000;
-      return index;
-    }
-    const parsed = Date.parse(String(value || ""));
-    return Number.isFinite(parsed) ? parsed : index;
+    return window.FTChartTimeline.timestamp(value, index);
   }
 
   function points(item, field = "values") {
@@ -63,7 +55,7 @@
       navigator: {enabled: true},
       scrollbar: {enabled: true},
       legend: {enabled: true},
-      xAxis: {type: "datetime", ordinal: false},
+      xAxis: {type: "datetime", ordinal: true},
       yAxis: [{title: {text: yTitle}, opposite: false}],
       tooltip: {shared: true, valueDecimals: kind === "currency" ? 2 : 4, valueSuffix: format.suffix},
       plotOptions: {series: {animation: false, boostThreshold: 1000, turboThreshold: 0}},
@@ -83,27 +75,48 @@
         : context.t("序列图");
     const yTitle = equity ? `${context.t("金额")}（${currency || "CNY"}）`
       : returns ? context.t("收益率（%）") : context.t("数值");
-    const series = items.map(item => ({
-      id: String(item.factor_ref || item.label || ""),
-      name: String(item.label || context.t("序列")),
-      type: "line", data: scaledPoints(item, kind),
-      tooltip: {valueSuffix: valueFormat(kind, currency).suffix},
-    }));
+    const timeline = equity ? window.FTChartTimeline.observed(items) : [];
+    const series = items.map(item => {
+      const format = valueFormat(kind, item?.currency || currency);
+      return {
+        id: String(item.factor_ref || item.series_ref || item.label || ""),
+        name: String(item.label || context.t("序列")),
+        type: "line",
+        data: equity
+          ? window.FTChartTimeline.aligned(item, timeline, "values", format.scale)
+          : scaledPoints(item, kind),
+        connectNulls: true,
+        custom: {seriesRef: String(item.factor_ref || item.series_ref || "")},
+        tooltip: {valueSuffix: format.suffix},
+      };
+    });
     if (equity) items.forEach(item => {
       if (!Array.isArray(item.drawdown)) return;
       series.push({
         name: `${item.label || context.t("序列")} · ${context.t("当前回撤")}`,
-        type: "line", dashStyle: "ShortDash", yAxis: 1,
-        data: scaledPoints(item, "percent", "drawdown"),
+        type: "area", yAxis: 2,
+        data: window.FTChartTimeline.aligned(item, timeline, "drawdown", 100),
+        connectNulls: true,
+        custom: {seriesRef: String(item.factor_ref || item.series_ref || "")},
         tooltip: {valueSuffix: "%"},
       });
     });
     const options = baseOptions(title, yTitle, series, kind, currency);
-    if (equity && series.some(item => item.yAxis === 1)) {
-      options.yAxis.push({
-        title: {text: context.t("回撤（%）")}, opposite: true,
-        max: 0, labels: {format: "{value}%"},
-      });
+    if (equity) {
+      const initial = items.flatMap(item => item?.values || [])
+        .map(number).find(value => value != null) || 1;
+      options.rangeSelector = {enabled: false};
+      options.yAxis = [{
+        title: {text: yTitle}, opposite: false, top: "0%", height: "64%",
+      }, {
+        title: {text: context.t("累计收益率（%）")}, opposite: true,
+        linkedTo: 0, top: "0%", height: "64%",
+        labels: {formatter() { return `${(((this.value / initial) - 1) * 100).toFixed(2)}%`; }},
+      }, {
+        title: {text: context.t("回撤（%）")}, opposite: false,
+        top: "72%", height: "28%", offset: 0, max: 0,
+        labels: {format: "{value}%"},
+      }];
     }
     return options;
   }

@@ -322,7 +322,6 @@
     const declarations = FTJobArtifacts.effectiveDeclarations(
       taskDetail.output_declarations || [], outputArtifacts, context,
     );
-    if (declarations.length) resultsPanel.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = localRun
       ? [] : outputArtifacts.filter(item => item.state === "active");
@@ -331,17 +330,24 @@
     resultHost.className = "job-result-host";
     if (resultGroupName) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
     resultsPanel.append(resultHost);
-    declarations.forEach(declaration => {
-      const previewArtifacts = FTJobArtifacts.declarationArtifacts(
-        declaration, activeArtifacts,
-      );
-      if (previewArtifacts.length) {
-        resultsPanel.append(FTJobArtifacts.lazyArtifactPreview(
-          context, declaration, previewArtifacts, jobID, artifactQuery,
-        ));
-      }
-    });
-    if (results != null) resultsPanel.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
+    // Domain result viewers own their result tabs and load canonical JSON on
+    // demand. Generic artifact previews here would duplicate those tabs and
+    // eagerly introduce a second, inconsistent rendering path.
+    if (!resultGroupName) {
+      declarations.forEach(declaration => {
+        const previewArtifacts = FTJobArtifacts.declarationArtifacts(
+          declaration, activeArtifacts,
+        );
+        if (previewArtifacts.length) {
+          resultsPanel.append(FTJobArtifacts.lazyArtifactPreview(
+            context, declaration, previewArtifacts, jobID, artifactQuery,
+          ));
+        }
+      });
+      if (results != null) resultsPanel.append(FTJobArtifacts.collapsible(
+        context.t("结果预览"), FTUI.code(results),
+      ));
+    }
     if (!resultGroupName && results == null && !declarations.length) {
       resultsPanel.append(FTUI.empty(
         context.t("暂无测试结果"), context.t("任务尚未生成可展示的结果"),

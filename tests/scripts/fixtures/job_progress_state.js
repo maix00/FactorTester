@@ -12,25 +12,80 @@ function view() {
     value: undefined,
     removeAttribute(name) { if (name === "value") this.value = undefined; },
   };
-  return {bar, label: {textContent: ""}, progressState: null};
+  return {
+    bar,
+    label: {textContent: ""},
+    phaseTrack: {replaceChildren() {}},
+    progressState: null,
+  };
 }
 
 const progress = window.FTJobProgress;
 const current = view();
 progress.updateProgress(current, {
   event: "start", seq: 1,
-  data: {phase: "prepare", phases: [{key: "prepare"}, {key: "run"}]},
+  data: {phase: "prepare", phases: [
+    {key: "prepare", label: "准备", weight: 1},
+    {key: "run", label: "运行", weight: 3},
+  ]},
 });
 progress.updateProgress(current, {
   event: "progress", seq: 2,
   data: {phase: "prepare", completed: 1, total: 1},
 });
-assert.equal(current.bar.value, 50);
+assert.equal(current.bar.value, 25);
 progress.updateProgress(current, {
   event: "progress", seq: 3,
   data: {phase: "run", completed: 1, total: 4},
 });
-assert.equal(current.bar.value, 62.5);
+assert.equal(current.bar.value, 43.75);
+
+// Native backtests already emit one global percentage. It must not be folded
+// into the phase range a second time.
+progress.updateProgress(current, {
+  event: "signal_progress", seq: 4,
+  data: {phase: "run", percent: 72, percent_scope: "global"},
+});
+assert.equal(current.bar.value, 72);
+
+progress.updateProgress(current, {
+  event: "activity_manifest", seq: 5,
+  data: {phases: [{
+    key: "run", label: "运行", weight: 3,
+    flows: [{flow_key: "orders", flow_label: "订单处理", display_order: 2}],
+  }]},
+});
+progress.updateProgress(current, {
+  event: "activity", seq: 6,
+  data: {
+    phase: "run", flow_key: "orders", flow_label: "订单处理",
+    timestamp: "2026-08-20 09:31:00",
+    message: "正在处理订单",
+  },
+});
+assert.equal(current.progressState.activePhase, "run");
+assert.equal(current.progressState.activeFlow, "orders");
+assert.equal(current.progressState.message, "正在处理订单");
+assert.deepEqual(current.progressState.currentInfo, {
+  phase: "运行",
+  flow: "订单处理",
+  timestamp: "2026-08-20 09:31:00",
+  count: "1/4",
+  percent: "72.0%",
+});
+assert.equal(current.label.textContent, "正在处理订单");
+assert.deepEqual(current.progressState.phaseHistory.run, {
+  phase: "run",
+  label: "运行",
+  flow: "订单处理",
+  timestamp: "2026-08-20 09:31:00",
+  completed: 1,
+  total: 4,
+  message: "正在处理订单",
+  status: "active",
+});
+assert.equal(current.progressState.phases.find(item => item.key === "run")
+  .flows[0].label, "订单处理");
 
 // A delayed event and a heartbeat without measurable data cannot roll the bar back
 // or return it to the browser's indeterminate animation.
@@ -38,11 +93,11 @@ progress.updateProgress(current, {
   event: "progress", seq: 2,
   data: {phase: "prepare", completed: 0, total: 1},
 });
-assert.equal(current.bar.value, 62.5);
-progress.updateProgress(current, {event: "heartbeat", seq: 4, data: {status: "running"}});
-assert.equal(current.bar.value, 62.5);
+assert.equal(current.bar.value, 72);
+progress.updateProgress(current, {event: "heartbeat", seq: 7, data: {status: "running"}});
+assert.equal(current.bar.value, 72);
 
-progress.updateProgress(current, {event: "result", seq: 5, data: {status: "succeeded"}});
+progress.updateProgress(current, {event: "result", seq: 8, data: {status: "succeeded"}});
 assert.equal(current.bar.value, 100);
 assert.equal(current.progressState.terminal, true);
 

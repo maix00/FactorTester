@@ -1,9 +1,21 @@
 (() => {
-  const payloadNames = Object.freeze([
-    "equity_curve_data", "returns_over_time_data", "metrics_over_time_data",
-    "fee_detail_data", "margin_detail_data", "ratio_detail_data",
-    "result",
-  ]);
+  const tabPayloads = Object.freeze({
+    equity: "equity_curve_data",
+    returns: "returns_over_time_data",
+    metrics: "metrics_over_time_data",
+    fees: "fee_detail_data",
+    margin: "margin_detail_data",
+    ratios: "ratio_detail_data",
+    orders: "order_detail_data",
+    fills: "fill_detail_data",
+    cash: "cash_detail_data",
+    positions: "position_detail_data",
+    exposure: "exposure_detail_data",
+    turnover: "turnover_detail_data",
+    drawdowns: "drawdown_detail_data",
+    period_returns: "period_returns_data",
+  });
+  const payloadNames = Object.freeze(Object.values(tabPayloads));
 
   const metricSections = Object.freeze([
     {title: "收益", metrics: ["Total Return", "Annual Return", "Mean Return", "Win Rate"]},
@@ -52,39 +64,6 @@
       key: String(item?.strategy_id || item?.group_id || item?.key || item?.name || item?.metrics_key || index),
       label: String(item?.display_name || item?.name || item?.group_name || item?.strategy_id || item?.group_id || item?.key || item?.metrics_key || index),
     }));
-  }
-
-  function groupEquityEntries(summary) {
-    return groupEntries(summary).filter(item => {
-      const timestamps = Array.isArray(item.timestamps) ? item.timestamps : [];
-      const values = Array.isArray(item.total_equity) ? item.total_equity : [];
-      return timestamps.slice(0, values.length).some((value, index) => {
-        const numericTimestamp = finite(value);
-        const parsedTimestamp = numericTimestamp ?? Date.parse(String(value || ""));
-        return Number.isFinite(parsedTimestamp) && finite(values[index]) != null;
-      });
-    });
-  }
-
-  function enrichedSummary(summary = {}, retainedResult = {}) {
-    if (!Array.isArray(retainedResult?.groups) || !retainedResult.groups.length) {
-      return summary;
-    }
-    const retainedGroups = new Map(retainedResult.groups.map((item, index) => [
-      String(item?.strategy_id || item?.group_id || item?.key || item?.name || index), item,
-    ]));
-    const sourceGroups = Array.isArray(summary?.groups) && summary.groups.length
-      ? summary.groups : retainedResult.groups;
-    const groups = sourceGroups.map((item, index) => {
-      const key = String(item?.strategy_id || item?.group_id || item?.key || item?.name || index);
-      return {...(retainedGroups.get(key) || {}), ...item};
-    });
-    return {
-      ...retainedResult,
-      ...summary,
-      groups,
-      metrics: summary?.metrics || retainedResult?.metrics || {},
-    };
   }
 
   function resolveGroup(summary, value) {
@@ -293,35 +272,35 @@
     return scoped.length ? scoped : values;
   }
 
-  function availableTabs(payloads, summary = {}) {
-    const result = ["summary"];
-    if (groupEquityEntries(summary).length) result.push("group_equity");
+  function availableTabs(payloads, summary = {}, artifactNames = []) {
+    const availableArtifacts = new Set(artifactNames.map(String));
+    const hasPayload = name => Boolean(payloads[name]) || availableArtifacts.has(name);
+    const result = [];
+    if (window.FTBacktestRuntimeModel?.rows?.(summary).length) result.push("runtime");
+    if (summaryRows(payloads, summary).length) result.push("summary");
     if (metricMatrix(summary).entries.length) result.push("group_metrics");
-    if (series(payloads.equity_curve_data).length) result.push("equity");
-    if (series(payloads.returns_over_time_data).length) result.push("returns");
-    if (metricRows(payloads.metrics_over_time_data).length) result.push("metrics");
-    if (rows(payloads.fee_detail_data).length) result.push("fees");
-    if (rows(payloads.margin_detail_data).length) result.push("margin");
-    if (rows(payloads.ratio_detail_data).length) result.push("ratios");
+    Object.entries(tabPayloads).forEach(([tab, payload]) => {
+      if (hasPayload(payload)) result.push(tab);
+    });
     return result;
   }
 
-  function build(payloads = {}, summary = {}) {
-    const resolvedSummary = enrichedSummary(summary, payloads.result);
+  function build(payloads = {}, summary = {}, artifactNames = []) {
     return {
-      payloads, summary: resolvedSummary,
-      groups: groups(payloads, resolvedSummary),
-      groupEntries: groupEntries(resolvedSummary),
-      metricMatrix: metricMatrix(resolvedSummary),
-      summaryRows: summaryRows(payloads, resolvedSummary),
-      tabs: availableTabs(payloads, resolvedSummary),
+      payloads, summary,
+      groups: groups(payloads, summary),
+      groupEntries: groupEntries(summary),
+      metricMatrix: metricMatrix(summary),
+      summaryRows: summaryRows(payloads, summary),
+      tabs: availableTabs(payloads, summary, artifactNames),
     };
   }
 
   window.FTBacktestResultModel = Object.freeze({
-    availableTabs, bestMetricIndex, build, enrichedSummary, evaluationWindow,
-    finite, groupEquityEntries, metricValue,
+    availableTabs, bestMetricIndex, build, evaluationWindow,
+    finite, metricValue,
     groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
+    tabPayloads,
     scopedRows, series,
   });
 })();

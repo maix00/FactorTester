@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import metric_semantics_catalog
 from tools.cli.release.research_reporting.authoring.inline_links import (
@@ -10,6 +10,7 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
 )
 
 from .models import GeneratedReport
+from .dataset import ReportDataset
 from .ic import (
     ic_holding_half_life_rows,
     ic_series,
@@ -32,40 +33,91 @@ from .series_plot import (
     render_metrics_svg,
     render_series_svg,
 )
-from .series import extract_series, metrics_rows, return_series
-from .tables import fee_rows, margin_rows, ratio_rows
+from .series import metrics_rows
 
 
-def build_report_artifacts(result, *, source=None, requested=(), job_id=None):
+def build_report_artifacts(
+    result,
+    *,
+    source=None,
+    requested=(),
+    job_id=None,
+    progress: Callable[[int, int, str], None] | None = None,
+):
     result = result if isinstance(result, dict) else {}
     source = source if isinstance(source, dict) else {}
     names = list(dict.fromkeys(str(item) for item in requested)) or ["equity_curve"]
-    series = extract_series(result, source)
+    dataset = ReportDataset(result, source)
+    completed: set[str] = set()
+
+    def done(name: str) -> None:
+        completed.add(name)
+        if progress is not None:
+            progress(len(completed), len(names), name)
+
+    series = dataset.series if set(names) & {
+        "equity_curve", "returns_over_time", "metrics_over_time",
+        "ratio_detail", "drawdown_detail", "period_returns",
+    } else []
     output = []
     if "equity_curve" in names and series:
         output.extend(series_reports("equity_curve", series, "净值曲线与回撤"))
+    if "equity_curve" in names:
+        done("equity_curve")
     if "returns_over_time" in names and series:
-        output.extend(series_reports("returns_over_time", return_series(series), "收益率随时间变化"))
+        output.extend(series_reports("returns_over_time", dataset.returns, "收益率随时间变化"))
+    if "returns_over_time" in names:
+        done("returns_over_time")
     if "metrics_over_time" in names and series:
         output.extend(metrics_reports(series))
+    if "metrics_over_time" in names:
+        done("metrics_over_time")
     if "fee_detail" in names:
-        output.extend(table_reports("fee_detail", fee_rows(source)))
+        output.extend(table_reports("fee_detail", dataset.fees))
+        done("fee_detail")
     if "margin_detail" in names:
-        output.extend(table_reports("margin_detail", margin_rows(source)))
+        output.extend(table_reports("margin_detail", dataset.margins))
+        done("margin_detail")
     if "ratio_detail" in names:
-        output.extend(table_reports("ratio_detail", ratio_rows(result, source, series)))
+        output.extend(table_reports("ratio_detail", dataset.ratios))
+        done("ratio_detail")
+    table_datasets = {
+        "order_detail": lambda: dataset.orders,
+        "fill_detail": lambda: dataset.fills,
+        "cash_detail": lambda: dataset.cash,
+        "position_detail": lambda: dataset.positions,
+        "exposure_detail": lambda: dataset.exposures,
+        "turnover_detail": lambda: dataset.turnover,
+        "drawdown_detail": lambda: dataset.drawdowns,
+        "period_returns": lambda: dataset.period_returns,
+    }
+    for name, load_rows in table_datasets.items():
+        if name in names:
+            output.extend(table_reports(name, load_rows()))
+            done(name)
     if "ic_series" in names:
         output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
+        done("ic_series")
     if "ic_statistics" in names:
         output.extend(ic_statistics_reports(result, job_id=job_id))
+        done("ic_statistics")
     elif "ic_quantile_portfolio_statistics" in names:
         output.extend(ic_quantile_portfolio_statistics_reports(result, job_id=job_id))
+        done("ic_quantile_portfolio_statistics")
     if "ic_rolling_stability" in names or "ic_statistics" in names:
         output.extend(ic_rolling_stability_reports(result, job_id=job_id))
+        if "ic_rolling_stability" in names:
+            done("ic_rolling_stability")
     if "ic_period_diagnostics" in names or "ic_statistics" in names:
         output.extend(ic_period_diagnostics_reports(result, job_id=job_id))
+        if "ic_period_diagnostics" in names:
+            done("ic_period_diagnostics")
     if "ic_holding_half_life" in names:
         output.extend(ic_holding_half_life_plot(result))
+        done("ic_holding_half_life")
+    for name in names:
+        if name not in completed:
+            done(name)
     return output
 
 
@@ -185,9 +237,9 @@ def _display_series(
 
 
 def table_reports(name, rows, *, payload_extra=None, columns=None):
-    declared_columns = list(columns) if columns is not None else sorted(
-        {key for row in rows for key in row if key != "raw"}
-    )
+    declared_columns = list(columns) if columns is not None else list(dict.fromkeys(
+        key for row in rows for key in row if key != "raw"
+    ))
     column_presentations = {}
     if any(row.get("factor_alias") and row.get("factor_ref") for row in rows):
         column_presentations["factor_alias"] = {

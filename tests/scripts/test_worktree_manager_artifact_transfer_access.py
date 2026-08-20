@@ -20,6 +20,12 @@ from server.manager.data_plane.server import ClientDataPlaneHTTPServer
 from server.manager.domain.federation import ServiceRoute
 
 
+@pytest.fixture(autouse=True)
+def _isolated_manager_sqlite(tmp_path, monkeypatch):
+    """Never let HTTP transfer tests write the running Manager's database."""
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "manager.sqlite")
+
+
 @contextmanager
 def _running(server):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
