@@ -124,6 +124,7 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent",
             "/api/client/profile-agent/events",
             "/api/client/profile-agent/conversations",
+            "/api/client/profile-agent/models",
             "/api/client/profile-agent/conversation-items",
         }:
             return False
@@ -152,6 +153,18 @@ class AgentAppServerRoutesMixin:
                             principal, identifier,
                         )
                     ],
+                })
+                return True
+            if parsed.path.endswith("/models"):
+                refresh = str(query.get("refresh", [""])[0]).casefold() in {
+                    "1", "true", "yes",
+                }
+                json_response(self, {
+                    "success": True,
+                    "profile_id": identifier,
+                    **supervisor.model_capabilities(
+                        principal, identifier, refresh=refresh,
+                    ),
                 })
                 return True
             if parsed.path.endswith("/conversation-items"):
@@ -297,7 +310,7 @@ class AgentAppServerRoutesMixin:
                 })
                 return True
             if parsed.path.endswith("/conversations/settings"):
-                value = supervisor.profile_service.update_conversation_runtime_settings(
+                value = supervisor.update_conversation_runtime_settings(
                     principal,
                     identifier,
                     conversation_id,

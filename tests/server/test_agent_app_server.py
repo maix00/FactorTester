@@ -66,6 +66,22 @@ for raw in sys.stdin:
         result = {"data": [{"cwd": request.get("params", {}).get("cwds", [""])[0], "skills": []}]}
     elif method == "initialize":
         result = {"userAgent": "fake-codex"}
+    elif method == "model/list":
+        result = {"data": [{
+            "id": "research-model-fast",
+            "model": "research-model-fast",
+            "displayName": "Research Fast",
+            "description": "Fast research model",
+            "hidden": False,
+            "isDefault": False,
+            "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [
+                {"reasoningEffort": "medium", "description": "Balanced"},
+                {"reasoningEffort": "high", "description": "Deep"},
+            ],
+            "defaultServiceTier": None,
+            "serviceTiers": [{"id": "fast", "name": "Fast", "description": "Low latency"}],
+        }], "nextCursor": None}
     elif method == "thread/start":
         result = {
             "thread": {
@@ -116,6 +132,9 @@ def _provider_health_ok(provider, **_kwargs):
         "base_url": provider["base_url"],
         "default_model": provider["default_model"],
         "model_available": True,
+        "latency_ms": 125,
+        "available_models": ["research-model", "research-model-fast"],
+        "available_models_truncated": False,
     }
 
 
@@ -949,6 +968,16 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     assert settings["model_id"] == "research-model-fast"
     assert settings["reasoning_effort"] == "high"
     assert settings["service_tier"] == "fast"
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(urlparse(
+        f"/api/client/profile-agent/models?profile_id={PROFILE_ID}",
+    ))
+    catalog = _response(handler)
+    assert catalog["latency_ms"] == 125
+    fast = next(item for item in catalog["models"] if item["id"] == "research-model-fast")
+    assert [item["id"] for item in fast["reasoning_efforts"]] == ["medium", "high"]
+    assert [item["id"] for item in fast["service_tiers"]] == ["fast"]
 
     handler = _AppHandler(service, supervisor, {
         "profile_id": PROFILE_ID,

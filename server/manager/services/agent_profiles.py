@@ -640,6 +640,26 @@ class AgentProfileService:
             return AgentProviderHealth.test(candidate, proxy_url=proxy_url)
         return AgentProviderHealth.test(candidate)
 
+    def profile_provider_health(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Explicitly inspect the Provider bound to one Profile."""
+        provider_id = self.provider_id_for_profile(principal, profile_id)
+        provider = self.provider_store.get(
+            principal, provider_id, include_secret=True,
+        ) if provider_id else None
+        if provider is None:
+            raise ProviderStoreError("Profile Agent provider is unavailable")
+        try:
+            proxy_url = resolve_provider_proxy(provider, self.proxy_url_provider)
+        except AgentProviderProxyUnavailable as exc:
+            raise ProviderStoreError(str(exc), code=exc.code) from exc
+        if proxy_url:
+            return AgentProviderHealth.test(provider, proxy_url=proxy_url)
+        return AgentProviderHealth.test(provider)
+
     def delete_provider(self, principal: str, provider_id: str) -> bool:
         for claim in self.runtime_store.claims(principal):
             if claim.get("provider_id") == provider_id:

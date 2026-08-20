@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
@@ -40,6 +41,7 @@ class AgentAppServerSupervisor:
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
+        self._model_catalog_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self.thread_reader = AgentProviderThreadReader(
             profile_service,
@@ -154,6 +156,126 @@ class AgentAppServerSupervisor:
         """Compatibility probe for callers that previously refreshed SQLite."""
         self.conversation_items(principal, profile_id, conversation_id)
         return True
+
+    @staticmethod
+    def _response_result(response: Mapping[str, object]) -> Mapping[str, object]:
+        value: object = response
+        for key in ("result", "response"):
+            if isinstance(value, Mapping) and isinstance(value.get(key), Mapping):
+                value = value[key]
+        return value if isinstance(value, Mapping) else {}
+
+    def model_capabilities(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Merge the Provider account catalog with Codex runtime capabilities."""
+        key = self._key(principal, profile_id)
+        now = time.monotonic()
+        cached = self._model_catalog_cache.get(key)
+        if not refresh and cached is not None and now - cached[0] < 60:
+            return dict(cached[1])
+        health = self.profile_service.profile_provider_health(*key)
+        with self._lock:
+            session = self._sessions.get(key)
+        runtime_models: list[Mapping[str, object]] = []
+        if session is not None and session.status().get("running"):
+            response = session.request("model/list", {
+                "includeHidden": False,
+                "limit": 2000,
+            })
+            result = self._response_result(response)
+            runtime_models = [
+                item for item in (result.get("data") or [])
+                if isinstance(item, Mapping)
+            ]
+        runtime_by_id = {
+            str(item.get("id") or item.get("model") or "").strip(): item
+            for item in runtime_models
+            if str(item.get("id") or item.get("model") or "").strip()
+        }
+        models = []
+        for model_id in health.get("available_models") or []:
+            identifier = str(model_id or "").strip()
+            if not identifier:
+                continue
+            runtime = runtime_by_id.get(identifier, {})
+            efforts = [
+                {
+                    "id": str(item.get("reasoningEffort") or ""),
+                    "description": str(item.get("description") or ""),
+                }
+                for item in (runtime.get("supportedReasoningEfforts") or [])
+                if isinstance(item, Mapping) and item.get("reasoningEffort")
+            ]
+            tiers = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "name": str(item.get("name") or item.get("id") or ""),
+                    "description": str(item.get("description") or ""),
+                }
+                for item in (runtime.get("serviceTiers") or [])
+                if isinstance(item, Mapping) and item.get("id")
+            ]
+            models.append({
+                "id": identifier,
+                "display_name": str(runtime.get("displayName") or identifier),
+                "description": str(runtime.get("description") or ""),
+                "reasoning_efforts": efforts,
+                "service_tiers": tiers,
+                "default_reasoning_effort": str(
+                    runtime.get("defaultReasoningEffort") or ""
+                ),
+                "default_service_tier": str(runtime.get("defaultServiceTier") or ""),
+                "capabilities_known": bool(runtime),
+            })
+        value = {
+            "models": models,
+            "latency_ms": int(health.get("latency_ms") or 0),
+            "truncated": bool(health.get("available_models_truncated")),
+        }
+        self._model_catalog_cache[key] = (now, value)
+        return dict(value)
+
+    def update_conversation_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        catalog = self.model_capabilities(principal, profile_id)
+        models = {str(item.get("id") or ""): item for item in catalog["models"]}
+        model = str(model_id or "").strip()
+        if model not in models:
+            raise AgentAppServerError("selected model is unavailable")
+        metadata = models[model]
+        allowed_efforts = {
+            str(item.get("id") or "") for item in metadata["reasoning_efforts"]
+        }
+        effort = str(reasoning_effort or "").strip()
+        if effort and effort not in allowed_efforts:
+            raise AgentAppServerError("selected reasoning effort is unavailable")
+        allowed_tiers = {
+            str(item.get("id") or "") for item in metadata["service_tiers"]
+        }
+        tier = str(service_tier or "").strip()
+        if tier and tier not in allowed_tiers:
+            raise AgentAppServerError("selected service tier is unavailable")
+        return self.profile_service.update_conversation_runtime_settings(
+            principal,
+            profile_id,
+            conversation_id,
+            model_id=model,
+            reasoning_effort=effort,
+            service_tier=tier,
+        )
 
     def conversation_items(
         self,
