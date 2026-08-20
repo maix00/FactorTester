@@ -203,6 +203,19 @@ class AgentProfileService:
             workspace_relpath=relative,
         )
 
+    def require_local_server_runtime(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Authorize operations reserved for a Profile hosted by this Manager."""
+        runtime = self.runtime_store.runtime(principal, profile_id)
+        if runtime is None or str(runtime.get("runtime_kind") or "") != "server":
+            raise ProfileRuntimeError("Profile is not bound to a server runtime")
+        if str(runtime.get("executor_id") or "") != self.server_id:
+            raise ProfileRuntimeError("Profile belongs to another server")
+        return runtime
+
     def providers(
         self,
         principal: str,
@@ -263,10 +276,16 @@ class AgentProfileService:
         *,
         title: str = "",
     ) -> dict[str, Any]:
+        model_id = ""
+        provider_id = self.provider_id_for_profile(principal, profile_id)
+        if provider_id:
+            provider = self.provider_store.get(principal, provider_id)
+            model_id = str((provider or {}).get("default_model") or "")
         return self.conversation_store.create(
             principal,
             profile_id,
             title=title,
+            model_id=model_id,
         )
 
     def select_conversation(
@@ -296,6 +315,25 @@ class AgentProfileService:
             conversation_id,
             title=title,
             preview=preview,
+        )
+
+    def update_conversation_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        return self.conversation_store.update_runtime_settings(
+            principal,
+            profile_id,
+            conversation_id,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            service_tier=service_tier,
         )
 
     def delete_conversation(
@@ -614,6 +652,26 @@ class AgentProfileService:
         if proxy_url:
             return AgentProviderHealth.test(candidate, proxy_url=proxy_url)
         return AgentProviderHealth.test(candidate)
+
+    def profile_provider_health(
+        self,
+        principal: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Explicitly inspect the Provider bound to one Profile."""
+        provider_id = self.provider_id_for_profile(principal, profile_id)
+        provider = self.provider_store.get(
+            principal, provider_id, include_secret=True,
+        ) if provider_id else None
+        if provider is None:
+            raise ProviderStoreError("Profile Agent provider is unavailable")
+        try:
+            proxy_url = resolve_provider_proxy(provider, self.proxy_url_provider)
+        except AgentProviderProxyUnavailable as exc:
+            raise ProviderStoreError(str(exc), code=exc.code) from exc
+        if proxy_url:
+            return AgentProviderHealth.test(provider, proxy_url=proxy_url)
+        return AgentProviderHealth.test(provider)
 
     def delete_provider(self, principal: str, provider_id: str) -> bool:
         for claim in self.runtime_store.claims(principal):

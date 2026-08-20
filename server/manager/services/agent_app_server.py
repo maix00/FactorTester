@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable, Mapping
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
+from server.manager.services.agent_conversation_runtime import (
+    AgentConversationRuntimeObserver,
+)
+from server.manager.services.agent_model_catalog import (
+    build_model_catalog,
+    validate_model_settings,
+)
 from server.manager.services.agent_provider_thread_reader import (
     AgentProviderThreadReader,
 )
@@ -40,6 +48,7 @@ class AgentAppServerSupervisor:
         self._sessions: dict[tuple[str, str], AgentAppServerSession] = {}
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
+        self._model_catalog_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self.thread_reader = AgentProviderThreadReader(
             profile_service,
@@ -58,6 +67,7 @@ class AgentAppServerSupervisor:
 
     def start(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
+        self._model_catalog_cache.pop(key, None)
         # A lifecycle Agent and a history-only app-server must never share one
         # Profile state directory concurrently.
         self.thread_reader.close(*key)
@@ -98,6 +108,11 @@ class AgentAppServerSupervisor:
                 codex_binary=self.codex_binary,
                 cc_switch_binary=self.cc_switch_binary,
                 proxy_url=proxy_url,
+                event_observer=AgentConversationRuntimeObserver(
+                    self.profile_service.conversation_store,
+                    key[0],
+                    key[1],
+                ).observe,
             )
             try:
                 session.start()
@@ -116,6 +131,7 @@ class AgentAppServerSupervisor:
 
     def stop(self, principal: str, profile_id: str) -> dict[str, Any]:
         key = self._key(principal, profile_id)
+        self._model_catalog_cache.pop(key, None)
         with self._lock:
             session = self._sessions.pop(key, None)
             self._stop_heartbeat(key)
@@ -154,6 +170,71 @@ class AgentAppServerSupervisor:
         """Compatibility probe for callers that previously refreshed SQLite."""
         self.conversation_items(principal, profile_id, conversation_id)
         return True
+
+    @staticmethod
+    def _response_result(response: Mapping[str, object]) -> Mapping[str, object]:
+        value: object = response
+        for key in ("result", "response"):
+            if isinstance(value, Mapping) and isinstance(value.get(key), Mapping):
+                value = value[key]
+        return value if isinstance(value, Mapping) else {}
+
+    def model_capabilities(
+        self,
+        principal: str,
+        profile_id: str,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Merge the Provider account catalog with Codex runtime capabilities."""
+        key = self._key(principal, profile_id)
+        now = time.monotonic()
+        cached = self._model_catalog_cache.get(key)
+        if not refresh and cached is not None and now - cached[0] < 60:
+            return dict(cached[1])
+        health = self.profile_service.profile_provider_health(*key)
+        with self._lock:
+            session = self._sessions.get(key)
+        runtime_models: list[Mapping[str, object]] = []
+        if session is not None and session.status().get("running"):
+            response = session.request("model/list", {
+                "includeHidden": False,
+                "limit": 2000,
+            })
+            result = self._response_result(response)
+            runtime_models = [
+                item for item in (result.get("data") or [])
+                if isinstance(item, Mapping)
+            ]
+        value = build_model_catalog(health, runtime_models)
+        self._model_catalog_cache[key] = (now, value)
+        return dict(value)
+
+    def update_conversation_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        catalog = self.model_capabilities(principal, profile_id)
+        model, effort, tier = validate_model_settings(
+            catalog,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            service_tier=service_tier,
+        )
+        return self.profile_service.update_conversation_runtime_settings(
+            principal,
+            profile_id,
+            conversation_id,
+            model_id=model,
+            reasoning_effort=effort,
+            service_tier=tier,
+        )
 
     def conversation_items(
         self,
@@ -248,11 +329,28 @@ class AgentAppServerSupervisor:
             session = self._sessions.get(key)
             if session is None:
                 raise AgentAppServerError("start the Profile Agent first")
-        response = session.request(method, params)
+        request_params = dict(params or {})
+        if method == "turn/start" and conversation is not None:
+            # The Manager-owned conversation is the settings authority.  A
+            # browser cannot mutate a Provider default or smuggle a different
+            # model choice directly into one turn.
+            for field in ("model", "effort", "serviceTier"):
+                request_params.pop(field, None)
+            settings = {
+                "model": conversation.get("model_id"),
+                "effort": conversation.get("reasoning_effort"),
+                "serviceTier": conversation.get("service_tier"),
+            }
+            request_params.update({
+                name: str(value)
+                for name, value in settings.items()
+                if str(value or "").strip()
+            })
+        response = session.request(method, request_params)
         self._save_conversation_state(
             key,
             method,
-            params or {},
+            request_params,
             response,
             conversation,
         )

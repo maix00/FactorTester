@@ -12,6 +12,7 @@ from server.manager.services.agent_app_server import (
     AgentAppServerSupervisor,
 )
 from server.manager.services.provider_thread_chatkit import provider_item
+from server.manager.storage.profile_runtime_store import ProfileRuntimeError
 
 
 _SENSITIVE_EVENT_KEYS = frozenset({
@@ -37,6 +38,14 @@ _PUBLIC_CONVERSATION_KEYS = frozenset({
     # The adapter needs this opaque binding to resume the provider thread;
     # it is never used as ChatKit's browser-visible thread id.
     "provider_thread_id",
+    "model_id",
+    "reasoning_effort",
+    "service_tier",
+    "actual_model",
+    "model_context_window",
+    "total_tokens",
+    "last_tokens",
+    "compaction_count",
 })
 
 
@@ -89,6 +98,7 @@ class AgentAppServerRoutesMixin:
         identifier = str(profile_id or "").strip()
         if not self._profile_exists(principal, identifier):
             raise AgentAppServerError("Profile does not belong to current account")
+        self._agent_service().require_local_server_runtime(principal, identifier)
         return principal, identifier
 
     def _agent_app_error(self, exc: Exception) -> None:
@@ -116,6 +126,7 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent",
             "/api/client/profile-agent/events",
             "/api/client/profile-agent/conversations",
+            "/api/client/profile-agent/models",
             "/api/client/profile-agent/conversation-items",
         }:
             return False
@@ -146,6 +157,18 @@ class AgentAppServerRoutesMixin:
                     ],
                 })
                 return True
+            if parsed.path.endswith("/models"):
+                refresh = str(query.get("refresh", [""])[0]).casefold() in {
+                    "1", "true", "yes",
+                }
+                json_response(self, {
+                    "success": True,
+                    "profile_id": identifier,
+                    **supervisor.model_capabilities(
+                        principal, identifier, refresh=refresh,
+                    ),
+                })
+                return True
             if parsed.path.endswith("/conversation-items"):
                 conversation_id = str(
                     query.get("conversation_id", [""])[0] or ""
@@ -170,7 +193,7 @@ class AgentAppServerRoutesMixin:
                 return True
             after = int(query.get("after", ["0"])[0] or 0)
             self._stream_agent_events(supervisor, principal, identifier, after)
-        except (AgentAppServerError, TypeError, ValueError) as exc:
+        except (AgentAppServerError, ProfileRuntimeError, TypeError, ValueError) as exc:
             self._agent_app_error(exc)
         return True
 
@@ -245,6 +268,7 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent/conversations/create",
             "/api/client/profile-agent/conversations/select",
             "/api/client/profile-agent/conversations/update",
+            "/api/client/profile-agent/conversations/settings",
             "/api/client/profile-agent/conversations/delete",
         }:
             return False
@@ -287,6 +311,22 @@ class AgentAppServerRoutesMixin:
                     "conversation": _public_conversation(value),
                 })
                 return True
+            if parsed.path.endswith("/conversations/settings"):
+                value = supervisor.update_conversation_runtime_settings(
+                    principal,
+                    identifier,
+                    conversation_id,
+                    model_id=str(payload.get("model_id") or "").strip(),
+                    reasoning_effort=str(
+                        payload.get("reasoning_effort") or ""
+                    ).strip(),
+                    service_tier=str(payload.get("service_tier") or "").strip(),
+                )
+                json_response(self, {
+                    "success": True,
+                    "conversation": _public_conversation(value),
+                })
+                return True
             if parsed.path.endswith("/conversations/delete"):
                 deleted = supervisor.delete_conversation(
                     principal, identifier, conversation_id,
@@ -321,6 +361,6 @@ class AgentAppServerRoutesMixin:
                 "response": _public_value(response),
             })
             return True
-        except (AgentAppServerError, TypeError, ValueError) as exc:
+        except (AgentAppServerError, ProfileRuntimeError, TypeError, ValueError) as exc:
             self._agent_app_error(exc)
             return True

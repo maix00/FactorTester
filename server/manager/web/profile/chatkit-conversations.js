@@ -88,6 +88,7 @@
       state.conversation = {...state.conversation, ...conversation};
       state.context = profileState.context;
       state.skills = [...profileState.skills];
+      state.runtimeObserver = profileState.runtimeObserver;
       return state;
     }
     state = {
@@ -107,6 +108,7 @@
       active: false,
       threadPromise: null,
       restored: false,
+      runtimeObserver: profileState.runtimeObserver,
     };
     profileState.conversations.set(identifier, state);
     return state;
@@ -148,6 +150,8 @@
         profileState.selectedID = conversationKey(selected);
       }
       rememberSelectedConversation(profileState.profileID, profileState.selectedID);
+      const current = profileState.conversations.get(profileState.selectedID);
+      if (current) profileState.onConversationChange?.(current);
       return conversations;
     }).finally(() => {
       if (profileState.conversationListPromise === pending) {
@@ -169,6 +173,7 @@
     const state = conversationState(profileState, payload.conversation);
     profileState.selectedID = state.conversationID;
     rememberSelectedConversation(profileState.profileID, state.conversationID);
+    profileState.onConversationChange?.(state);
     return state;
   }
 
@@ -196,6 +201,7 @@
     }
     profileState.selectedID = identifier;
     rememberSelectedConversation(profileState.profileID, identifier);
+    profileState.onConversationChange?.(state);
     return state;
   }
 
@@ -214,6 +220,7 @@
     if (payload.conversation) {
       state.conversation = {...state.conversation, ...payload.conversation};
       state.threadTitle = String(state.conversation.title || state.threadTitle || "");
+      profileState.onConversationChange?.(state);
     }
     return state;
   }

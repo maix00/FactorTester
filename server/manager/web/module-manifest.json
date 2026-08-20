@@ -335,6 +335,7 @@
       "profile/agent-skills.js",
       "profile/chatkit-protocol.js",
       "profile/chatkit-conversations.js",
+      "profile/agent-runtime-controls.js",
       "profile/chatkit-stream.js",
       "profile/chatkit-adapter.js",
       "profile/agent-chat.js",

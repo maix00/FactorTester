@@ -505,6 +505,9 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         "profile/chatkit-conversations.js"
     )
     assert profile_scripts.index("profile/chatkit-conversations.js") < profile_scripts.index(
+        "profile/agent-runtime-controls.js"
+    )
+    assert profile_scripts.index("profile/agent-runtime-controls.js") < profile_scripts.index(
         "profile/chatkit-stream.js"
     )
     assert profile_scripts.index("profile/chatkit-stream.js") < profile_scripts.index(

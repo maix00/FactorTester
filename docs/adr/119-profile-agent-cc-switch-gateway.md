@@ -76,6 +76,44 @@ FactorTester 保留现有 FTUI，不引入 CC Switch 的 React、TanStack Query�
 | 用量、日志和图表 | Usage/日志视图 | 尚未实现；以后只能在用户打开详情 overlay 后懒加载 |
 | 故障切换 | 应用级 Provider 切换 | 尚未实现；必须是 Profile 级策略，不得使用全局当前 Provider |
 
+## 会话级模型与运行状态
+
+Provider 的 `default_model` 只负责初始化新会话。一个会话随后独立保存
+`model_id`、`reasoning_effort` 和 `service_tier`；修改这些字段不得写回 Provider，
+也不得影响同一 Profile 的其他会话。Manager 在每次 `turn/start` 前移除浏览器
+直接提交的同名参数，再注入该会话的持久设置。
+
+模型目录采用两层交集：CC Switch/Provider 健康检查返回账号实际可用模型，运行中
+的 Codex app-server `model/list` 返回模型的推理强度、服务档位等运行时能力。
+Manager 只向 UI 暴露二者交集，结果按 Profile 缓存 60 秒，并在 Agent 启停时
+失效；用户聚焦模型选择器或显式刷新时才发起查询。Provider 不可用或组合非法时
+保存操作明确失败，不修改旧设置。
+
+上下文信息不从 CC Switch 估算。Manager 直接观察 Codex app-server 的
+`thread/tokenUsage/updated`、`thread/settings/updated`、`model/rerouted`，以及新版
+`item/completed` 的 `contextCompaction` 项；弃用的 `thread/compacted` 仅作为
+兼容输入。SQLite 只保存轻量运行元数据，不镜像会话正文。界面中的“上下文已用”
+使用最近一次 active-context token，而“累计”单独显示总 token，避免把累计用量
+误当成上下文占用。
+
+只读的直属上级和跨服务器历史沿用 Provider thread 读取链路，显示这些设置与
+运行元数据但禁用编辑。Agent 停止后仍可读取 thread；模型能力目录只有在运行时
+能同时得到 app-server 能力时才声明推理强度和服务档位可选。
+
+## CLI 与管理边界
+
+研究用 `factortester` CLI 只为服务器管理的 Profile 提供
+`profile-agent`：状态、启停、会话列表、模型目录和单会话设置。能力文件模式必须
+锁定到签名 Profile；普通登录模式必须显式给出 Profile，并经过本服务器运行绑定
+校验。Provider 凭据增删改、Mihomo、CC Switch 进程和服务器集群维护继续只属于
+`factortester-manager`。
+
+CC Switch 的全局 Provider 切换、takeover、全局 failover、WebDAV、MCP 与其
+React/Tauri UI 不接入本功能。未来若增加自动故障切换，策略必须绑定 Profile，
+且一次跨 Provider 迁移必须显式创建或迁移会话，不能把 Provider 的全局状态冒充
+会话设置。MCP 与 Skill 可以在同一“Agent 能力”页面管理，但保持不同的数据模型、
+权限和生命周期。
+
 性能不变量：
 
 1. 打开 Provider 列表只允许一次 Manager 列表请求，向模型供应商发出零次请求；

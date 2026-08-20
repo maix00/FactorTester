@@ -21,6 +21,17 @@ global.EventSource = class {
       this.onopen?.();
       const events = [
         {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            turnId: 'turn-1',
+            tokenUsage: {
+              modelContextWindow: 200000,
+              last: {totalTokens: 12000},
+              total: {totalTokens: 45000},
+            },
+          },
+        },
+        {
           method: 'item/reasoning/textDelta',
           params: {turnId: 'turn-1', delta: 'PRIVATE_REASONING'},
         },
@@ -147,6 +158,11 @@ const state = {
   threadPromise: null,
   restored: true,
   itemView: 'process',
+  runtimeObserver: payload => {
+    if (payload.method === 'thread/tokenUsage/updated') {
+      global.__observedRuntime = true;
+    }
+  },
 };
 
 (async () => {
@@ -166,6 +182,7 @@ const state = {
   assert.doesNotMatch(output, /TOOL_STDOUT/);
   assert.match(output, /assistant_message\.content_part\.done/);
   assert.match(output, /thread\.item\.replaced/);
+  assert.equal(global.__observedRuntime, true);
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=results')
   )));

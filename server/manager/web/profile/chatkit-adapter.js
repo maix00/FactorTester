@@ -222,11 +222,18 @@
   }
 
   async function readOnlyConversations(profileState) {
+    if (profileState.conversationCache
+        && Date.now() - profileState.conversationCacheAt < 5000) {
+      return profileState.conversationCache;
+    }
     const payload = await readOnlyJSON(
       profileState,
       "/api/client/profile-directory/conversations",
     );
-    return Array.isArray(payload.conversations) ? payload.conversations : [];
+    profileState.conversationCache = Array.isArray(payload.conversations)
+      ? payload.conversations : [];
+    profileState.conversationCacheAt = Date.now();
+    return profileState.conversationCache;
   }
 
   async function readOnlyItems(profileState, conversationID, params = {}) {
@@ -263,6 +270,10 @@
         item => String(item.conversation_id || "") === conversationID,
       );
       if (!conversation) return P.jsonResponse({error: "conversation not found"}, 404);
+      profileState.onConversationChange?.({
+        conversationID,
+        conversation: {...conversation},
+      });
       return P.jsonResponse(readOnlyThread(
         profileState.profileKey,
         conversation,
@@ -271,6 +282,14 @@
     }
     if (operation === "items.list") {
       const page = await readOnlyItems(profileState, conversationID, params);
+      const conversations = await readOnlyConversations(profileState);
+      const conversation = conversations.find(
+        item => String(item.conversation_id || "") === conversationID,
+      );
+      if (conversation) profileState.onConversationChange?.({
+        conversationID,
+        conversation: {...conversation},
+      });
       return P.jsonResponse(P.page(page.items.map(
         item => readOnlyItem(profileState.profileKey, conversationID, item),
       ), page));
@@ -295,6 +314,9 @@
         profileScope: options.profileScope || "servers",
         context,
         itemView: "results",
+        onConversationChange: options.onConversationChange,
+        conversationCache: null,
+        conversationCacheAt: 0,
       };
       return {
         fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
@@ -309,6 +331,11 @@
     const profileState = C.profileStateFor(profile, context, options.skills || []);
     profileState.itemView = "results";
     profileState.historyOnly = Boolean(options.historyOnly);
+    profileState.onConversationChange = options.onConversationChange;
+    profileState.runtimeObserver = options.onRuntimeEvent;
+    for (const state of profileState.conversations.values()) {
+      state.runtimeObserver = profileState.runtimeObserver;
+    }
     return {
       fetch: (input, init) => fetchAdapter(profileState, input, init),
       endpoint: CHATKIT_ENDPOINT,
