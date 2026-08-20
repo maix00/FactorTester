@@ -8,7 +8,7 @@ from server.services.research_report_presentations import (
 def _spec(*, analysis: str, session: str, fee_mode: str) -> dict:
     session_zh = "夜盘" if session == "night" else "日盘"
     return {
-        "run_spec_version": 2,
+        "run_spec_version": 3,
         "configuration_revision": 4,
         "analyses": [analysis],
         "retention_mode": "summary",
@@ -76,7 +76,7 @@ def test_maxa_six_run_specs_get_readable_chips_and_complete_parameters():
         )
         assert "2024-01-02—2024-12-31" in projection["alias_zh"]
         assert "SgCPS" in projection["alias_zh"]
-        assert projection["complete_parameters"]["run_spec_version"] == 2
+        assert projection["complete_parameters"]["run_spec_version"] == 3
         assert projection["complete_parameters_json"].startswith("{")
         assert "运行前拟提交配置" in projection["summary_zh"]
 

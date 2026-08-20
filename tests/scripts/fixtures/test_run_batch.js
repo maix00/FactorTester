@@ -103,7 +103,7 @@ const context = {
       previewRequests.push({body, hash});
       return {
         run_spec_hash: hash,
-        run_spec_version: 2,
+        run_spec_version: 3,
         configuration_id: "configuration-preview",
         configuration_revision: requests.length,
         report_projection: {run_spec: {
@@ -111,7 +111,7 @@ const context = {
           alias_zh: "预览运行配置",
           summary_zh: "预览",
           complete_parameters: {
-            run_spec_version: 2,
+            run_spec_version: 3,
             configuration: {shared: {workspace_id: "workspace-one"}},
             analyses: [state?.kind || "ic"],
           },
@@ -225,10 +225,14 @@ const strategyScopedBacktest = {
   assert.equal(actionLoaded, false, "submission code must not load while creating header actions");
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
   assert.equal(state.activeRunGroupID, "day");
+  let cleared = 0;
+  window.FTTests = {clearDraft: () => { cleared += 1; }};
   const header = batch.headerActions(context, state, () => {});
-  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行"]);
+  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行", "清空"]);
   assert.equal(header[0].disabled, false);
   assert.equal(header[1].disabled, false);
+  header[2].listeners.click();
+  assert.equal(cleared, 1);
   const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
   assert.equal(emptyHeader[0].disabled, false,
     "view RunSpec must remain clickable without a product group");
@@ -384,6 +388,11 @@ const strategyScopedBacktest = {
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["__backtest__"]);
+  const stableBacktestItem = backtest.testRunBatch[0];
+  assert.strictEqual(
+    batch.synchronize(backtest)[0], stableBacktestItem,
+    "repainting must preserve the task object observed by progress and result callbacks",
+  );
   await batch.previewAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].groupLabel, "回测任务");
   assert.match(backtest.testRunBatch[0].runSpecHash, /^[a-f0-9]{64}$/,

@@ -66,7 +66,7 @@ def test_result_route_cli_local_publish_and_server_append(
         )
 
     run_spec = {
-        "run_spec_version": 2,
+        "run_spec_version": 3,
         "configuration_revision": 7,
         "analyses": ["ic"],
         "configuration": {
@@ -139,7 +139,7 @@ def test_result_route_cli_local_publish_and_server_append(
             "object_kind": "run",
             "run_id": "run-1",
             "run_spec_hash": run_spec_hash,
-            "run_spec_version": 2,
+            "run_spec_version": 3,
             "run_spec_json": json.dumps(
                 run_spec, ensure_ascii=False, indent=2, sort_keys=True,
             ),

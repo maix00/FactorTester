@@ -8,6 +8,11 @@
       // catalog create/edit/view behavior is identical to the left-nav tab.
       render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
     },
+    factor_set: {
+      title: "因子候选",
+      load: "catalog",
+      render: (context, ref) => FTFactors.setDetail(context, ref),
+    },
     product_group: {
       title: "产品组",
       load: "catalog",

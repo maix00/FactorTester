@@ -181,6 +181,7 @@
       "jobs/artifacts.js",
       "jobs/generation.js",
       "jobs/actions.js",
+      "jobs/detail-tabs.js",
       "jobs/detail.js"
     ],
     "job-detail-input": [
@@ -341,6 +342,7 @@
       "profile/profile-directory-detail.js",
       "profile/workspace-browser.js",
       "profile/profiles.js",
+      "profile/agent-model-editor.js",
       "profile/agent-models.js"
     ],
     "settings": [
@@ -358,6 +360,7 @@
     "app": [
       "app/navigation.js",
       "app/route-dispatch.js",
+      "app/tab-workspace.js",
       "app/tab-view-cache.js",
       "app/tabs.js",
       "app/tab-return.js",
@@ -431,6 +434,7 @@
     "jobs/jobs.js",
     "jobs/actions.js",
     "jobs/input-detail.js",
+    "jobs/detail-tabs.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",
@@ -521,6 +525,7 @@
     "profile/profile-directory-detail.js",
     "profile/workspace-browser.js",
     "profile/profiles.js",
+    "profile/agent-model-editor.js",
     "profile/agent-models.js",
     "settings/settings.js",
     "settings/devices.js",
@@ -532,6 +537,7 @@
     "manager/mihomo.js",
     "app/navigation.js",
     "app/route-dispatch.js",
+    "app/tab-workspace.js",
     "app/tab-view-cache.js",
     "app/tabs.js",
     "app/tab-return.js",

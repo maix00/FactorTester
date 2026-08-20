@@ -35,6 +35,7 @@ def register_category_candidate_list_base(
             "shared_page_field": "category_candidates",
             "selection_field": "category",
             "category_source": "data_source_categories",
+            "candidate_constraint": "category_candidates",
             "fallback_policy": (
                 "copy_page_candidates",
                 "load_data_source_categories_when_page_empty",
@@ -65,11 +66,14 @@ def register_category_selection_base(
         module="category_grouping",
         chip_template="分类: {value}",
         adapter_managed=True,
+        show_chip=False,
         help_text="选择数据源提供的分类用于 IC 分组；分类由数据源或用户产品分类提供。",
+        info_overlay={"type": "category_detail"},
         serialization={
             "kind": "category_selection",
             "display_order": 20,
             "candidate_field": "category_candidates",
+            "candidate_constraint": "category_candidates",
             "shared_page_field": "category",
             "id_keys": ("name", "id"),
             "label_keys": ("name", "label"),

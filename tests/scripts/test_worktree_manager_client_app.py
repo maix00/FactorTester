@@ -2726,6 +2726,10 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
         with urlopen(f"{base_url}/research-static/profile/agent-models.js") as response:
             agent_models = response.read().decode("utf-8")
         with urlopen(
+            f"{base_url}/research-static/profile/agent-model-editor.js"
+        ) as response:
+            agent_model_editor = response.read().decode("utf-8")
+        with urlopen(
             f"{base_url}/research-static/profile/profile-directory.js"
         ) as response:
             profile_directory = response.read().decode("utf-8")
@@ -2758,13 +2762,21 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "共享研究报告" in reports
     assert "clientDownload" in reports
     assert "loadClientRelease" in reports
+    assert 'search.type = "search"' in agent_models
+    assert 'search.addEventListener("input"' in agent_models
+    assert "requestAnimationFrame" in agent_models
+    assert 'onPageChange,' in agent_models
+    assert "FTAgentModelEditor.open" in agent_models
+    assert "/duplicate`" in agent_models
+    assert "window.FTAgentModelEditor" in agent_model_editor
+    assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
     assert 'note.className = "secondary research-graph-list-note"' in graph_list
     assert "source_server_ids" in profile_directory
     assert "直属下级研究身份的 Agent 会话默认对直属上级只读可见" in profile_directory_detail
     assert "profile-conversation-sharing" not in profile_directory_detail
     assert "FTUI.pagedTable" in agent_models
-    assert "agent-model-dialog" in agent_models
+    assert "agent-model-dialog" in agent_model_editor
     assert "testExisting" in agent_models
     assert "FTTestPageTabs.render(context, \"tasks\")" in jobs
     assert 'get("presentation") === "embedded"' in workspaces

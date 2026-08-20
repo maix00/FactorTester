@@ -85,19 +85,6 @@
     return content;
   }
 
-  function lazyConfigurationPreview(context, configuration) {
-    const target = document.createElement("div");
-    target.className = "job-configuration-preview";
-    const details = FTJobArtifacts.collapsible(context.t("运行配置摘要"), target);
-    let loaded = false;
-    details.addEventListener("toggle", () => {
-      if (!details.open || loaded) return;
-      loaded = true;
-      target.replaceChildren(fieldContent(context, configuration || {}));
-    });
-    return details;
-  }
-
   function fieldValue(context, key, value) {
     if (key === "status") return statusPill(value, context);
     const reference = fieldReference(context, key, value);
@@ -236,7 +223,7 @@
     };
   }
 
-  async function detail(context, port, jobID, serverID = "") {
+  async function detail(context, port, jobID, serverID = "", watchLive = true) {
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
@@ -278,21 +265,27 @@
       context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, artifactQuery, jobID), context.t("清空任务文件")));
     }
     const root = document.createElement("div"); root.className = "job-detail";
+    const detailTabs = FTJobDetailTabs.create(
+      context, `job-detail-section:${resolvedServerID}:${jobID}`,
+    );
+    const {overview, results: resultsPanel, configuration, inputs, artifacts: artifactPanel}
+      = detailTabs.panels;
+    root.append(detailTabs.root);
     const progress = FTJobProgress.progressView(context, job.status);
-    root.append(progress.root);
-    root.append(fieldSection(context, context.t("任务字段"), {
+    overview.append(progress.root);
+    overview.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
     }));
     const storage = taskDetail.storage || {};
-    root.append(fieldSection(context, context.t("文件占用"), {
+    overview.append(fieldSection(context, context.t("文件占用"), {
       [context.t("生成物数量")]: storage.output_artifact_count || 0,
       [context.t("生成物空间")]: formatBytes(storage.output_artifact_bytes || 0),
       [context.t("提交物数量")]: storage.input_artifact_count || 0,
       [context.t("提交物空间")]: formatBytes(storage.input_artifact_bytes || 0),
       [context.t("合计空间")]: formatBytes(storage.artifact_bytes || 0),
     }));
-    if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
-    if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
+    if (taskDetail.research_binding) overview.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
+    if (taskDetail.caller || taskDetail.submission_context) overview.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
     const activeInputs = inputArtifacts.filter(item => item.state === "active");
     if (activeInputs.length) {
       const inputSection = document.createElement("section");
@@ -308,15 +301,26 @@
            + (resolvedServerID ? `?server_id=${encodeURIComponent(resolvedServerID)}` : ""),
        ),
       ));
-      root.append(inputSection);
+      inputs.append(inputSection);
+    } else {
+      inputs.append(FTUI.empty(
+        context.t("暂无提交物"), context.t("此任务没有可查看的运行输入"),
+      ));
     }
-    if (taskDetail.configuration != null) {
-      root.append(lazyConfigurationPreview(context, taskDetail.configuration));
-    }
+    let configurationLoaded = false;
+    const loadConfiguration = () => {
+      if (configurationLoaded) return;
+      configurationLoaded = true;
+      configuration.replaceChildren(taskDetail.configuration != null
+        ? fieldSection(context, context.t("冻结运行配置"), taskDetail.configuration)
+        : FTUI.empty(
+          context.t("暂无运行配置"), context.t("任务没有绑定运行配置"),
+        ));
+    };
     const declarations = FTJobArtifacts.effectiveDeclarations(
       taskDetail.output_declarations || [], outputArtifacts, context,
     );
-    if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
+    if (declarations.length) resultsPanel.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = localRun
       ? [] : outputArtifacts.filter(item => item.state === "active");
@@ -324,22 +328,27 @@
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
     if (resultGroupName) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
-    root.append(resultHost);
+    resultsPanel.append(resultHost);
     declarations.forEach(declaration => {
       const previewArtifacts = FTJobArtifacts.declarationArtifacts(
         declaration, activeArtifacts,
       );
       if (previewArtifacts.length) {
-        root.append(FTJobArtifacts.lazyArtifactPreview(
+        resultsPanel.append(FTJobArtifacts.lazyArtifactPreview(
           context, declaration, previewArtifacts, jobID, artifactQuery,
         ));
       }
     });
-    if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
+    if (results != null) resultsPanel.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
+    if (!resultGroupName && results == null && !declarations.length) {
+      resultsPanel.append(FTUI.empty(
+        context.t("暂无测试结果"), context.t("任务尚未生成可展示的结果"),
+      ));
+    }
     const generationHost = document.createElement("div");
     if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
       generationHost.className = "job-generation-host";
-      root.append(generationHost);
+      artifactPanel.append(generationHost);
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("输出生成物"); artifactSection.append(artifactTitle);
@@ -364,12 +373,14 @@
       item => downloadArtifact(item, context.t("登录后才能下载生成物")),
     ));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
-    root.append(artifactSection);
-    // Paint the metadata and configuration immediately.  Result code and
-    // capability discovery are independent follow-up work, not a prerequisite
-    // for displaying this page.
+    artifactPanel.append(artifactSection);
+    // Paint the overview and artifact metadata immediately. Configuration,
+    // result runtimes, and generation capabilities load only when selected.
     context.content.replaceChildren(root);
-    if (resultGroupName && !localRun) {
+    let resultsLoaded = false;
+    const loadResults = () => {
+      if (resultsLoaded || !resultGroupName || localRun) return;
+      resultsLoaded = true;
       loadResultGroup(job, activeArtifacts, results).then(() => {
         if (!isCurrent()) return;
         resultHost.replaceChildren(resultSections(
@@ -381,8 +392,13 @@
           context.t("结果查看器不可用"), error.message || String(error),
         ));
       });
-    }
-    if (!localRun && ["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
+    };
+    let generationLoaded = false;
+    const loadGeneration = () => {
+      if (generationLoaded || localRun
+        || !["succeeded", "failed", "cancelled"].includes(job.status)
+        || !context.session) return;
+      generationLoaded = true;
       (async () => {
         let capabilities = [];
         let capabilityError = "";
@@ -396,8 +412,32 @@
           taskDetail, payload, onGenerated: detailPage,
         }));
       })();
+    };
+    const loadSelectedSection = id => {
+      if (id === "configuration") loadConfiguration();
+      if (id === "results") loadResults();
+      if (id === "artifacts") loadGeneration();
+    };
+    detailTabs.root.addEventListener("job-detail-tab-change", event => {
+      loadSelectedSection(event.detail?.id || "overview");
+    });
+    loadSelectedSection(detailTabs.current());
+    if (watchLive && ["queued", "planning", "running", "paused"].includes(job.status)) {
+      FTJobProgress.watchProgress(context, jobID, executionQuery, progress, {
+        onPayload: () => {
+          if (progress.progressState?.terminal) FTJobProgress.stopProgress();
+        },
+        onComplete: () => {
+          // Converge once against the authoritative detail projection.  The
+          // replacement view deliberately stays static when the stream ended
+          // non-terminally, avoiding an unbounded reconnect loop while a
+          // remote execution server remains unavailable.
+          if (isCurrent()) void detail(
+            context, resolvedPort || port, jobID, resolvedServerID, false,
+          );
+        },
+      });
     }
-    if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, executionQuery, progress);
 
     async function detailPage() {
       return window.FTJobs.detail(

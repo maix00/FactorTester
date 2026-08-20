@@ -135,13 +135,10 @@ def _compact_execution_projections(
     for group in backtest.get("groups") or []:
         if not isinstance(group, dict):
             continue
-        aliases = group.get("factorAliases")
-        if (
-            isinstance(aliases, list)
-            and len(aliases) == 1
-            and group.get("factorAlias") == aliases[0]
+        for legacy_key in (
+            "factorAlias", "factorAliases", "factor_alias", "factor_aliases",
         ):
-            group.pop("factorAlias", None)
+            group.pop(legacy_key, None)
     for factor in shared.get("factors") or []:
         if not isinstance(factor, dict):
             continue

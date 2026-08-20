@@ -94,6 +94,23 @@ const section = window.FTReportComponents.componentView(
   context,
 );
 assert.equal(observers.length, 1, "all deferred report content should share one observer");
+
+const disclosureChanges = [];
+const restoredSection = window.FTReportComponents.componentView(
+  {component_id: "section:remembered", kind: "section", title: "remember me"},
+  [],
+  {
+    lazyObservers: new Set(),
+    disclosureState: {"section:remembered": false},
+    setDisclosureState: (key, open) => disclosureChanges.push([key, open]),
+  },
+);
+const restoredDetails = restoredSection.children[0];
+assert.equal(restoredDetails.dataset.ftStateKey, "report-component:section:remembered");
+assert.equal(restoredDetails.open, false, "saved disclosure state overrides the default");
+restoredDetails.open = true;
+restoredDetails.listeners.toggle();
+assert.deepEqual(disclosureChanges, [["section:remembered", true]]);
 const childrenHost = section.children[0].children.find(
   item => String(item.className || "").includes("component-children-lazy"),
 );

@@ -14,6 +14,7 @@ from server.manager.services.agent_app_server_process import (
 )
 from server.manager.services.agent_skill_protocol import AgentSkillProtocol
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.cc_switch_gateway import CCSwitchGateway
 
 
 class AgentAppServerSession:
@@ -27,8 +28,10 @@ class AgentAppServerSession:
         codex_binary: str,
         factor_tester_auth: Mapping[str, object] | None = None,
         proxy_url: str = "",
+        cc_switch_binary: str = "cc-switch",
     ) -> None:
         self.runtime = runtime
+        self.provider = dict(provider)
         self.launch = AgentAppServerLaunch(
             runtime=runtime,
             provider=provider,
@@ -39,6 +42,16 @@ class AgentAppServerSession:
         self.protocol = AgentSkillProtocol(runtime)
         self.policy = AgentAppServerPolicy(runtime, self.protocol)
         self.process: AgentAppServerProcess | None = None
+        self.cc_switch = (
+            CCSwitchGateway(
+                profile_state_root=runtime.state_root / "cc-switch",
+                provider=self.provider,
+                binary=cc_switch_binary,
+                proxy_url=proxy_url,
+            )
+            if str(self.provider.get("protocol") or "") != "openai_responses"
+            else None
+        )
         self.ready = False
         self._lock = threading.RLock()
 
@@ -57,6 +70,8 @@ class AgentAppServerSession:
             if self.ready and self.process is not None and self.process.is_running():
                 return
             self.launch.preflight()
+            if self.cc_switch is not None:
+                self.launch.provider = self.cc_switch.start()
             self.launch.write_provider_config()
             self.launch.write_factor_tester_config()
             process = AgentAppServerProcess(
@@ -113,6 +128,8 @@ class AgentAppServerSession:
                 ValueError,
             ) as exc:
                 process.stop()
+                if self.cc_switch is not None:
+                    self.cc_switch.stop()
                 self.process = None
                 self.ready = False
                 if isinstance(exc, AgentAppServerError):
@@ -188,6 +205,8 @@ class AgentAppServerSession:
         with self._lock:
             if self.process is not None:
                 self.process.stop()
+            if self.cc_switch is not None:
+                self.cc_switch.stop()
             self.launch.cleanup_factor_tester_config()
             self.process = None
             self.ready = False

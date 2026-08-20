@@ -21,18 +21,23 @@ from urllib.parse import urlsplit
 from cryptography.fernet import Fernet, InvalidToken
 
 from tools.data.sqlite.db import connect_sqlite
+from server.manager.services.agent_runtime_capabilities import (
+    AgentRuntimeCapabilityError,
+    validate_runtime_protocol,
+)
 
 
 PROVIDER_TABLE = "manager_agent_provider_connections"
 SUPPORTED_RUNTIME_KINDS = frozenset({"client", "server"})
-# ``openai_compatible`` describes the wire contract consumed by the current
-# Codex app-server configuration.  Account login is not a provider protocol;
-# it is a separate authentication flow and is intentionally not accepted here.
-SUPPORTED_PROTOCOLS = frozenset({"openai_compatible"})
+SUPPORTED_NETWORK_ROUTES = frozenset({"direct", "manager_proxy"})
 
 
 class ProviderStoreError(ValueError):
     """A provider connection cannot be created or used safely."""
+
+    def __init__(self, message: str, *, code: str = "agent_request_invalid") -> None:
+        super().__init__(message)
+        self.code = str(code or "agent_request_invalid")
 
 
 class AgentProviderStore:
@@ -91,17 +96,39 @@ class AgentProviderStore:
                     provider_id TEXT PRIMARY KEY,
                     principal TEXT NOT NULL,
                     runtime_kind TEXT NOT NULL,
+                    agent_runtime TEXT NOT NULL DEFAULT 'codex',
                     server_id TEXT NOT NULL DEFAULT '',
                     label TEXT NOT NULL,
                     protocol TEXT NOT NULL,
                     base_url TEXT NOT NULL,
                     default_model TEXT NOT NULL DEFAULT '',
+                    network_route TEXT NOT NULL DEFAULT 'direct',
                     secret_blob BLOB NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 )
                 """
+            )
+            columns = {
+                str(row[1])
+                for row in db.execute(
+                    f"PRAGMA table_info({PROVIDER_TABLE})"
+                ).fetchall()
+            }
+            if "agent_runtime" not in columns:
+                db.execute(
+                    f"ALTER TABLE {PROVIDER_TABLE} "
+                    "ADD COLUMN agent_runtime TEXT NOT NULL DEFAULT 'codex'"
+                )
+            if "network_route" not in columns:
+                db.execute(
+                    f"ALTER TABLE {PROVIDER_TABLE} "
+                    "ADD COLUMN network_route TEXT NOT NULL DEFAULT 'direct'"
+                )
+            db.execute(
+                f"UPDATE {PROVIDER_TABLE} SET protocol = 'openai_responses' "
+                "WHERE protocol = 'openai_compatible'"
             )
             db.execute(
                 f"""CREATE INDEX IF NOT EXISTS {PROVIDER_TABLE}_owner
@@ -125,11 +152,22 @@ class AgentProviderStore:
         return runtime
 
     @classmethod
-    def validate_protocol(cls, value: object) -> str:
-        protocol = cls._text(value, "protocol")
-        if protocol not in SUPPORTED_PROTOCOLS:
-            raise ProviderStoreError("provider protocol is unsupported")
-        return protocol
+    def validate_network_route(cls, value: object) -> str:
+        route = cls._text(value or "direct", "network_route")
+        if route not in SUPPORTED_NETWORK_ROUTES:
+            raise ProviderStoreError("network_route is unsupported")
+        return route
+
+    @classmethod
+    def validate_runtime_protocol(
+        cls,
+        runtime: object,
+        protocol: object,
+    ) -> tuple[str, str]:
+        try:
+            return validate_runtime_protocol(runtime, protocol)
+        except AgentRuntimeCapabilityError as exc:
+            raise ProviderStoreError(str(exc)) from exc
 
     @classmethod
     def validate_base_url(cls, value: object, *, runtime_kind: str) -> str:
@@ -159,10 +197,12 @@ class AgentProviderStore:
             "provider_id": str(row["provider_id"] or ""),
             "label": str(row["label"] or ""),
             "runtime_kind": str(row["runtime_kind"] or ""),
+            "agent_runtime": str(row["agent_runtime"] or "codex"),
             "server_id": str(row["server_id"] or ""),
             "protocol": str(row["protocol"] or ""),
             "base_url": str(row["base_url"] or ""),
             "default_model": str(row["default_model"] or ""),
+            "network_route": str(row["network_route"] or "direct"),
             "enabled": bool(row["enabled"]),
             "token_configured": bool(row["secret_blob"]),
             "created_at": float(row["created_at"] or 0),
@@ -259,9 +299,11 @@ class AgentProviderStore:
             or (previous["label"] if previous is not None else ""),
             "label",
         )
-        protocol = self.validate_protocol(
+        agent_runtime, protocol = self.validate_runtime_protocol(
+            payload.get("agent_runtime")
+            or (previous["agent_runtime"] if previous is not None else "codex"),
             payload.get("protocol")
-            or (previous["protocol"] if previous is not None else "openai_compatible")
+            or (previous["protocol"] if previous is not None else "openai_responses"),
         )
         base_url = self.validate_base_url(
             payload.get("base_url")
@@ -274,6 +316,14 @@ class AgentProviderStore:
             "default_model",
             required=False,
         )
+        network_route = self.validate_network_route(
+            payload.get("network_route")
+            or (previous["network_route"] if previous is not None else "direct")
+        )
+        if runtime_kind == "client" and network_route != "direct":
+            raise ProviderStoreError(
+                "client provider cannot use the Manager network proxy"
+            )
         secret = str(payload.get("token") or "").strip()
         if not secret and previous is not None:
             try:
@@ -288,11 +338,13 @@ class AgentProviderStore:
             "provider_id": provider_id,
             "principal": owner,
             "runtime_kind": runtime_kind,
+            "agent_runtime": agent_runtime,
             "server_id": server_id,
             "label": label,
             "protocol": protocol,
             "base_url": base_url,
             "default_model": default_model,
+            "network_route": network_route,
             "secret": secret,
             "previous": previous,
         }
@@ -312,11 +364,13 @@ class AgentProviderStore:
         owner = candidate["principal"]
         provider_id = candidate["provider_id"] or "provider_" + secrets.token_urlsafe(9)
         runtime_kind = candidate["runtime_kind"]
+        agent_runtime = candidate["agent_runtime"]
         server_id = candidate["server_id"]
         label = candidate["label"]
         protocol = candidate["protocol"]
         base_url = candidate["base_url"]
         default_model = candidate["default_model"]
+        network_route = candidate["network_route"]
         secret = candidate["secret"]
         previous = candidate["previous"]
         now = time.time()
@@ -324,23 +378,25 @@ class AgentProviderStore:
             secret_blob = self._cipher.encrypt(secret.encode("utf-8"))
             db.execute(
                 f"""INSERT INTO {PROVIDER_TABLE} (
-                    provider_id, principal, runtime_kind, server_id, label,
-                    protocol, base_url, default_model, secret_blob, enabled,
+                    provider_id, principal, runtime_kind, agent_runtime, server_id, label,
+                    protocol, base_url, default_model, network_route, secret_blob, enabled,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     runtime_kind=excluded.runtime_kind,
+                    agent_runtime=excluded.agent_runtime,
                     server_id=excluded.server_id,
                     label=excluded.label,
                     protocol=excluded.protocol,
                     base_url=excluded.base_url,
                     default_model=excluded.default_model,
+                    network_route=excluded.network_route,
                     secret_blob=excluded.secret_blob,
                     enabled=1,
                     updated_at=excluded.updated_at""",
                 (
-                    provider_id, owner, runtime_kind, server_id, label,
-                    protocol, base_url, default_model, secret_blob,
+                    provider_id, owner, runtime_kind, agent_runtime, server_id, label,
+                    protocol, base_url, default_model, network_route, secret_blob,
                     now if previous is None else float(previous["created_at"] or now),
                     now,
                 ),
@@ -359,3 +415,24 @@ class AgentProviderStore:
                 (owner, identifier),
             )
         return bool(cursor.rowcount)
+
+    def duplicate(self, principal: str, provider_id: str) -> dict[str, Any]:
+        """Copy one owned Provider without exposing its decrypted token."""
+        source = self.get(principal, provider_id, include_secret=True)
+        if source is None:
+            raise ProviderStoreError("provider was not found")
+        label = f"{source['label'][:507]} copy"
+        return self.save(
+            principal,
+            {
+                "label": label,
+                "runtime_kind": source["runtime_kind"],
+                "agent_runtime": source["agent_runtime"],
+                "server_id": source["server_id"],
+                "protocol": source["protocol"],
+                "base_url": source["base_url"],
+                "default_model": source["default_model"],
+                "network_route": source["network_route"],
+                "token": source["secret"],
+            },
+        )

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from server.manager.web import assets as research_static
 from server.manager.web.assets import asset_revision, shell_bytes, static_file
-
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "server" / "manager" / "web"
@@ -160,6 +160,17 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_job_progress_is_monotonic_and_terminal() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "job_progress_state.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_help_popover_uses_click_bubble_and_overlay_modes() -> None:
     import subprocess
 
@@ -187,6 +198,28 @@ def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_tab_workspace_is_versioned_and_principal_scoped() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_workspace.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_draft_clear_resets_only_local_authoring_state() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_draft_clear.js"
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
     )
@@ -457,6 +490,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
         "jobs/test-types.js", "jobs/jobs.js",
     }
     assert "jobs/detail.js" in manifest["groups"]["job-detail-core"]
+    assert "jobs/detail-tabs.js" in manifest["groups"]["job-detail-core"]
     assert "jobs/input-detail.js" in manifest["groups"]["job-detail-input"]
     assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
@@ -1328,14 +1362,25 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
     assert 'context.t("查看运行配置")' in detail_page
     assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" in detail_page
     assert 'context.t("结果预览")' in detail_page
-    assert "function lazyConfigurationPreview(context, configuration)" in detail_page
-    assert 'context.t("运行配置摘要")' in detail_page
-    assert 'details.addEventListener("toggle"' in detail_page
-    assert "root.append(lazyConfigurationPreview" in detail_page
+    assert "FTJobDetailTabs.create" in detail_page
+    assert 'context.t("冻结运行配置")' in detail_page
+    assert "loadSelectedSection(detailTabs.current())" in detail_page
+    assert 'id === "configuration"' in detail_page
     assert "FTReferencePage.render(context" in configuration_page
     assert 'kind: "run-spec"' in configuration_page
     assert 'context.t("结果预览")' not in configuration_page
     assert "FTJobArtifacts.lazyArtifactPreview" not in configuration_page
+
+
+def test_job_detail_internal_tabs_preserve_the_selected_section() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "job_detail_tabs.js"
+    module = WEB_ROOT / "jobs" / "detail-tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
 
 
 def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> None:
@@ -1565,6 +1610,18 @@ def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_results.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_run_progress_finishes_and_refreshes_terminal_results() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_progress.js"
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
         check=False,

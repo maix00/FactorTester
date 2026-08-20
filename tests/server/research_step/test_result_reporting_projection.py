@@ -211,7 +211,7 @@ def test_retry_attempts_are_filtered_by_admitted_evidence_ref(monkeypatch):
             "run_kind": "ic", "status": "succeeded",
             "run_spec_hash": run_hash,
             "run_spec_json": (
-                '{"run_spec_version":2,"configuration_revision":1,'
+                '{"run_spec_version":3,"configuration_revision":1,'
                 '"analyses":["ic"],"configuration":{}}'
             ),
             "trial_role": "candidate", "trial_stage": "validation",

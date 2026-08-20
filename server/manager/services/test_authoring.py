@@ -195,12 +195,10 @@ class TestAuthoringService:
         from server.services import research_configurations, research_workspaces
 
         if method == "POST" and path == "/api/workspaces":
-            families = self._object_list(payload, "factor_families")
             factors = self._object_list(payload, "factors")
             workspace = research_workspaces.create_workspace(
                 owner=owner,
                 title=str(payload.get("title") or "Factor research").strip(),
-                factor_families=families,
                 factors=factors,
             )
             return TestAuthoringResponse({

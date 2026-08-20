@@ -29,7 +29,7 @@
 
   function seedSavedCatalogs(state) {
     state.factors = [...(Array.isArray(state.savedFactors) ? state.savedFactors : [])];
-    state.families = [...(Array.isArray(state.savedFamilies) ? state.savedFamilies : [])];
+    state.families = [];
     const storedGroups = [
       ...(Array.isArray(state.savedTemporaryObjects?.product_groups)
         ? state.savedTemporaryObjects.product_groups : []),
@@ -58,8 +58,6 @@
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
     state.savedFactors = Array.isArray(payload.shared?.factors)
       ? structuredClone(payload.shared.factors) : [];
-    state.savedFamilies = Array.isArray(payload.shared?.factor_families)
-      ? structuredClone(payload.shared.factor_families) : [];
     state.savedTemporaryObjects = payload.shared?.temporary_objects
       && typeof payload.shared.temporary_objects === "object"
       ? structuredClone(payload.shared.temporary_objects) : {};
@@ -100,6 +98,73 @@
     applyWorkspaceConfiguration(state);
   }
 
+  function defaultRunValues(manifest) {
+    const values = {};
+    for (const item of manifest?.run_fields || []) {
+      if (item.placement !== "outputs") values[item.key] = structuredClone(item.default);
+    }
+    return values;
+  }
+
+  function clearDraft(state) {
+    state.workspace = null;
+    try { localStorage.removeItem(`ft-${state.kind}-workspace`); } catch (_) {}
+    state.analysis = {};
+    state.savedFactors = [];
+    state.savedTemporaryObjects = {};
+    state.factorRef = "";
+    state.groupRef = "";
+    state.groupRefs = [];
+    state.values = null;
+    state.settingsInitialized = false;
+    state.settingsMountedTabs = [];
+    state.settingsTabKey = "";
+    state.transientFactorSources = [];
+    state.transientFactorFamilies = [];
+    state.transientStrategySources = [];
+    state.strategySpecs = [];
+    state.strategyInspections = [];
+    state.runInputDependencies = [];
+    state.runInputStatus = {busy: false, error: ""};
+    state.outputRequests = [];
+    state.outputRequestsExplicit = false;
+    state.testRunBatch = [];
+    state.activeRunGroupID = "";
+    state.selectedBacktestGroupIDs = [];
+    state.selectedBacktestLongShortIDs = [];
+    state.backtestExpandedBatches = {};
+    state.backtestGroupEditor = null;
+    state.backtestGroupsOpen = false;
+    state.runValues = defaultRunValues(state.manifest);
+    return state;
+  }
+
+  const draftKeys = Object.freeze([
+    "analysis", "savedFactors", "savedTemporaryObjects",
+    "factorRef", "groupRef", "groupRefs", "values",
+    "settingsTabKey", "settingsMountedTabs", "outputRequests",
+    "outputRequestsExplicit", "runValues", "transientFactorSources",
+    "transientFactorFamilies", "transientStrategySources", "strategySpecs",
+    "strategyInspections", "runInputDependencies", "selectedBacktestGroupIDs",
+    "selectedBacktestLongShortIDs", "backtestExpandedBatches",
+  ]);
+
+  function draftSnapshot(state) {
+    const values = {};
+    for (const key of draftKeys) values[key] = structuredClone(state[key]);
+    return {schemaVersion: 1, kind: state.kind, values};
+  }
+
+  function restoreDraft(state, snapshot) {
+    if (snapshot?.schemaVersion !== 1 || snapshot.kind !== state.kind
+        || !snapshot.values || typeof snapshot.values !== "object") return false;
+    for (const key of draftKeys) {
+      if (key in snapshot.values) state[key] = structuredClone(snapshot.values[key]);
+    }
+    state.settingsInitialized = false;
+    return true;
+  }
+
   function savedSettings(state) {
     const payload = state.workspace?.configuration?.payload || {};
     return payload.ui?.[state.kind]?.settings
@@ -112,7 +177,9 @@
   }
 
   window.FTTestState = Object.freeze({
-    applyWorkspaceConfiguration, initializeInputState, lazyState,
+    applyWorkspaceConfiguration, clearDraft, defaultRunValues,
+    draftSnapshot, restoreDraft,
+    initializeInputState, lazyState,
     mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
     restoreTemporaryObjects, seedSavedCatalogs,
   });

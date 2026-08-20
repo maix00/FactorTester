@@ -166,6 +166,7 @@
     inline.hidden = true;
     const treeMount = document.createElement("div");
     treeMount.className = "product-category-detail-tree";
+    if (treeMount.dataset) treeMount.dataset.ftScrollState = "product-category-detail-tree";
     rowState.treeMount = treeMount;
     inline.append(treeMount);
     const controls = document.createElement("div");

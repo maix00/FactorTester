@@ -108,7 +108,7 @@ def test_run_uses_owner_registry_without_timeline(tmp_path: Path) -> None:
 def test_run_spec_uses_owner_registry_without_timeline(tmp_path: Path) -> None:
     class Client:
         def get_run_spec(self, run_spec_hash):
-            return {"run_spec_hash": run_spec_hash, "run_spec_version": 2}
+            return {"run_spec_hash": run_spec_hash, "run_spec_version": 3}
 
         def list_profile_research_branch_timeline(self, *args, **kwargs):
             raise AssertionError("owned RunSpec must not require timeline")

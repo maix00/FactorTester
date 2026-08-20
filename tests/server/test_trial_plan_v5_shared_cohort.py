@@ -52,7 +52,7 @@ def _run_spec(*, cohort: str, stage_id: str) -> dict:
             },
         }
     return {
-        "run_spec_version": 2,
+        "run_spec_version": 3,
         "workspace_id": f"workspace-{cohort}",
         "analyses": [analysis],
         "configuration": {"analyses": {analysis: module}},

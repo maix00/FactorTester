@@ -141,12 +141,21 @@
     const prior = new Map((state.testRunBatch || []).map(item => [item.groupID, item]));
     state.testRunBatch = taskGroups(state).map(group => {
       const groupID = groupIdentity(group);
+      const existing = prior.get(groupID);
+      if (existing) {
+        // Progress streams and asynchronous result reads retain this object.
+        // Repainting must not replace it, otherwise terminal status and result
+        // payloads are written into a detached entry and disappear on the
+        // next synchronize() call.
+        existing.groupLabel = groupLabel(group);
+        return existing;
+      }
       return {
         phase: "idle", runSpecHash: "", runSpecRecord: null,
         previewRunSpecHash: "", previewRequest: null, previewFingerprint: "",
         runID: "", jobID: "", port: 0,
         serverID: "",
-        error: "", ...prior.get(groupID), groupID,
+        error: "", groupID,
         groupLabel: groupLabel(group),
       };
     });
@@ -265,6 +274,7 @@
     if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
     const submittedHash = assertPreviewMatch(item, value);
     item.phase = "submitted";
+    item.progressStreamClosed = false;
     item.jobID = String(job.job_id);
     item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
     item.runSpecHash = submittedHash || String(

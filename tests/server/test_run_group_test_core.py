@@ -66,10 +66,10 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
-        "factorAlias": "FactorA",
+        "factor_candidate_refs": ["FactorA"],
         "factorRoleBindings": {
             "entry": "EntryFactor",
-            "exit": {"factorAlias": "ExitFactor"},
+            "exit": {"factor_ref": "ExitFactor"},
         },
         "splitCount": 5,
         "groupIndex": 2,  # 1-based
@@ -105,7 +105,7 @@ def test_resolve_group_strategy_settings_strips_implicit_auto_cost_basis_default
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
-        "factorAlias": "FactorA",
+        "factor_candidate_refs": ["FactorA"],
         "splitCount": 5,
         "groupIndex": 1,
     }
@@ -141,7 +141,7 @@ def test_resolve_group_strategy_settings_keeps_explicit_cost_basis_default(monke
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
-        "factorAlias": "FactorA",
+        "factor_candidate_refs": ["FactorA"],
         "splitCount": 5,
         "groupIndex": 1,
         "cost_basis_method": "WeightAverage",
@@ -184,7 +184,7 @@ def test_resolve_group_strategy_settings_reuses_cached_selection(monkeypatch):
     for group_id in ("group-1", "group-2"):
         g = {
             "id": group_id, "product_path_selection_id": "sel-shared",
-            "factorAlias": "FactorA", "splitCount": 2, "groupIndex": 1,
+            "factor_candidate_refs": ["FactorA"], "splitCount": 2, "groupIndex": 1,
         }
         group_module._resolve_group_strategy_settings(
             g, resolved_backtest_settings={}, fallback_group_settings={},
@@ -206,7 +206,7 @@ def test_resolve_group_strategy_settings_keeps_full_factor_pool_and_passes_produ
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
-        "factorAlias": "FactorA",
+        "factor_candidate_refs": ["FactorA"],
         "splitCount": 2,
         "groupIndex": 1,
         "productMask": {p2.name: True, p3.name: True},
@@ -230,7 +230,7 @@ def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):
     )
     g = {
         "id": "group-1", "product_path_selection_id": "sel-1",
-        "factorAlias": "Missing", "splitCount": 2, "groupIndex": 1,
+        "factor_candidate_refs": ["Missing"], "splitCount": 2, "groupIndex": 1,
     }
     with pytest.raises(ValueError, match="未找到因子"):
         group_module._resolve_group_strategy_settings(
@@ -242,18 +242,18 @@ def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):
 def test_build_group_owner_rows_shape():
     groups = [
         {"id": "g1", "name": "batch:1/g1", "groupIndex": 1,
-         "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
+         "product_path_selection_id": "sel-1", "factor_candidate_refs": ["FactorA"]},
         {"id": "g2", "name": "G2", "groupIndex": 3,
-         "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
+         "product_path_selection_id": "sel-1", "factor_candidate_refs": ["FactorA"]},
     ]
     rows = group_module._build_group_owner_rows(groups, is_ls=False)
     assert rows == [
         {"strategy_id": "g1", "display_name": "batch:1/g1",
          "group_id": "g1", "group_name": "batch:1/g1", "group_index": 0,
-         "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
+         "product_path_selection_id": "sel-1", "factor_ref": "FactorA", "is_ls": False},
         {"strategy_id": "g2", "display_name": "G2",
          "group_id": "g2", "group_name": "G2", "group_index": 2,
-         "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
+         "product_path_selection_id": "sel-1", "factor_ref": "FactorA", "is_ls": False},
     ]
 
 

@@ -7,7 +7,9 @@
     }
     let factor = context.testObjectTemporary && context.testObjectInitialValue
       ? context.testObjectInitialValue
-      : data.factors.find(item => item.factor_ref === targetRef);
+      : data.factors.find(item => (
+        item.factor_ref === targetRef || item.factor_alias === targetRef
+      ));
     const frozen = factor ? null : model().decodeFrozenFactorRef(targetRef);
     if (!factor && !frozen) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
@@ -147,15 +149,18 @@
       throw new Error(context.t("该因子集合尚未冻结，不能打开稳定详情"));
     }
     context.content.replaceChildren(FTUI.loading(context.t("正在解析因子集合…")));
-    const first = await loadSetPage(context, selected, frozenRef, 0, nativeRequest);
+    const first = context.testObjectTemporary && context.testObjectInitialValue
+      ? {factor_set: context.testObjectInitialValue}
+      : await loadSetPage(context, selected, frozenRef, 0, nativeRequest);
     const value = first.factor_set || first || {};
     if (context.isRouteCurrent?.() === false) return;
-    context.setHeading(value.title_zh || context.t("因子集合"), context.t("因子集合"));
-    context.updateActiveTab?.({title: value.title_zh || context.t("因子集合")});
+    const fallbackTitle = context.testObjectTemporary ? "因子候选" : "因子集合";
+    context.setHeading(value.title_zh || context.t(fallbackTitle), context.t(fallbackTitle));
+    context.updateActiveTab?.({title: value.title_zh || context.t(fallbackTitle)});
     const root = document.createElement("div");
     root.className = "detail-stack";
     root.append(FTUI.table(
-      [context.t("字段"), context.t("值")], FTUI.fieldRows(value),
+      [context.t("字段"), context.t("值")], factorSetFieldRows(context, value),
     ).shell);
     const memberMount = document.createElement("section");
     memberMount.className = "factor-set-members";
@@ -165,6 +170,51 @@
     await appendSetPage(
       context, selected, frozenRef, first, members, memberMount, nativeRequest,
     );
+  }
+
+  function factorSetFieldRows(context, value) {
+    const rows = FTUI.fieldRows(value);
+    if (Object.prototype.hasOwnProperty.call(value || {}, "source_factors")) {
+      rows.push([
+        context.t("来源因子"),
+        referenceLinks(context, value.source_factors, "factor"),
+      ]);
+    }
+    if (Object.prototype.hasOwnProperty.call(value || {}, "source_factor_sets")) {
+      rows.push([
+        context.t("来源因子集合"),
+        referenceLinks(context, value.source_factor_sets, "set"),
+      ]);
+    }
+    return rows;
+  }
+
+  function referenceLinks(context, raw, kind) {
+    const root = document.createElement("span");
+    root.className = "factor-set-source-links";
+    const items = Array.isArray(raw) ? raw.filter(item => item?.target_ref) : [];
+    if (!items.length) {
+      root.textContent = context.t("无");
+      return root;
+    }
+    items.forEach((item, index) => {
+      if (index) {
+        const separator = document.createElement("span");
+        separator.textContent = "、";
+        root.append(separator);
+      }
+      const path = `/factors/${kind}/${encodeURIComponent(item.target_ref)}`;
+      const link = document.createElement("a");
+      link.href = path;
+      link.className = "catalog-source-family-link";
+      link.textContent = item.label || item.target_ref;
+      link.addEventListener("click", event => {
+        event.preventDefault();
+        context.navigate(path);
+      });
+      root.append(link);
+    });
+    return root;
   }
 
   async function appendSetPage(

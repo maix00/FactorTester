@@ -37,6 +37,12 @@
     const chapterCache = FTReportChapterCache.create(chapterCacheLimit);
     let activeNode = null;
     let railController = null;
+    let initialReadyNotified = false;
+    const notifyInitialReady = () => {
+      if (initialReadyNotified) return;
+      initialReadyNotified = true;
+      context.onInitialChapterReady?.();
+    };
     let chapterLoadToken = 0;
     let chapterAbortController = null;
     const abortChapterLoad = () => {
@@ -68,7 +74,12 @@
       originalCleanup?.();
     };
     const rail = context.chapterRail;
-    let selected = Math.max(roots.length - 1, 0);
+    const restoredChapterIndex = roots.findIndex(node =>
+      node.component.component_id === context.selectedChapterID,
+    );
+    let selected = restoredChapterIndex >= 0
+      ? restoredChapterIndex
+      : Math.max(roots.length - 1, 0);
     railController = rail
       ? FTReportChapterRail.setup(rail, roots, context, {
         getSelected: () => selected,
@@ -102,17 +113,13 @@
       const disclosure = document.createElement("button");
       disclosure.type = "button";
       disclosure.className = "chapter-disclosure-reset";
-      disclosure.textContent = "↕";
+      disclosure.setAttribute("aria-expanded", "false");
       disclosure.title = context.t?.("展开或收起章节") || "展开或收起章节";
       disclosure.setAttribute("aria-label", disclosure.title);
-      disclosure.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        // A chapter control only owns the chapter's direct children.  Do not
-        // walk nested details: opening a chapter must not eagerly expand its
-        // descendants or change a special subsection's lazy state.
+      const ownedDetails = () => {
         const bridge = [...article.children].find(item =>
-          item.classList.contains("section-bridge"),
+          item.classList?.contains?.("section-bridge")
+          || String(item.className || "").split(/\s+/).includes("section-bridge"),
         );
         const firstLevel = bridge
           ? [...bridge.children]
@@ -125,6 +132,21 @@
             item.dataset.displayKind,
           ),
         );
+        return {firstLevel, ordinary};
+      };
+      const refreshDisclosure = () => {
+        const {ordinary} = ownedDetails();
+        disclosure.setAttribute("aria-expanded", String(
+          ordinary.length > 0 && ordinary.every(item => item.open),
+        ));
+      };
+      disclosure.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        // A chapter control only owns the chapter's direct children.  Do not
+        // walk nested details: opening a chapter must not eagerly expand its
+        // descendants or change a special subsection's lazy state.
+        const {firstLevel, ordinary} = ownedDetails();
         const shouldExpand = ordinary.some(item => !item.open);
         if (shouldExpand) {
           ordinary.forEach(item => { item.open = true; });
@@ -136,7 +158,7 @@
         } else {
           firstLevel.forEach(item => { item.open = false; });
         }
-        disclosure.textContent = shouldExpand ? "⌃" : "⌄";
+        disclosure.setAttribute("aria-expanded", String(shouldExpand));
         disclosure.setAttribute("aria-label", shouldExpand
           ? (context.t?.("收起章节") || "收起章节")
           : (context.t?.("展开章节") || "展开章节"));
@@ -145,12 +167,15 @@
       article.append(headingRow);
       if (node.children.length) article.append(renderBridgeGroup(node.children, context, 0));
       if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
+      article.addEventListener("toggle", refreshDisclosure, true);
+      refreshDisclosure();
       mount.append(article);
     };
     function activate(index, initial = false) {
       if (!Number.isInteger(index) || index < 0 || index >= roots.length) return;
       abortChapterLoad();
       selected = index;
+      context.setSelectedChapter?.(roots[index]?.component?.component_id || "");
       activeNode = null;
       draw();
       if (!chapterDescriptors.length || !context.loadChapter) return;
@@ -161,6 +186,7 @@
         activeNode = cached.node;
         bindContext(cached.report);
         draw();
+        if (initial) notifyInitialReady();
         return;
       }
       const token = ++chapterLoadToken;
@@ -173,6 +199,7 @@
         bindContext(value);
         activeNode = loaded;
         draw();
+        if (initial) notifyInitialReady();
         if (
           initial
           && index === roots.length - 1
@@ -197,6 +224,7 @@
     draw = () => { originalDraw(); railController?.refresh(); };
     draw();
     if (chapterDescriptors.length && context.loadChapter) activate(selected, true);
+    else notifyInitialReady();
     if (rail && selected >= 0 && context.restoreScrollY == null) {
       requestAnimationFrame(() => {
         rail.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({block: "center"});

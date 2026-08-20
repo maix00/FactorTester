@@ -12,6 +12,7 @@
   function render({columns, rows, context, renderHeader, renderCell, values, className = "table-shell"}) {
     const shell = document.createElement("div");
     shell.className = className;
+    if (shell.dataset) shell.dataset.ftScrollState = `report-table:${className}`;
     const element = document.createElement("table");
     const head = element.createTHead().insertRow();
     columns.forEach(column => {

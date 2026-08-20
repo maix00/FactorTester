@@ -37,7 +37,6 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process
 const requests = [];
 const state = {
   kind: "ic", manifest: {defaults: {}}, values: {
-    factor_selections: [factor],
     factor_candidates: [{
       ...factor, temporary: true, source_origin: "test_inline",
     }],
@@ -83,7 +82,7 @@ const context = {t: value => value, api: async (path, options) => {
     analysis: {
       groups: [{
         id: "strategy-1",
-        factorAlias: "ROC",
+        factor_candidate_refs: ["factor:v1:roc"],
         product_path_selection_id: "product-group:persisted",
         product_path_selection: {
           product_path_selection_id: "product-group:persisted",

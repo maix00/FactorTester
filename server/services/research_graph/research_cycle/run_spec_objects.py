@@ -82,7 +82,7 @@ def load_run_spec_object(
             "summary_zh": presentation["summary_zh"],
             "complete_parameters_json": orjson.dumps(
                 run["run_spec"],
-                option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
+                option=orjson.OPT_INDENT_2,
             ).decode(),
         }
     raise KeyError("research cycle object not found")

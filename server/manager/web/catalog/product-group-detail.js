@@ -316,6 +316,8 @@
             paths,
           };
           const localID = groupPath(group) || `inline-product-group:${payload.name}`;
+          const selectedSources = Array.isArray(context.testState?.values?.data_source)
+            ? context.testState.values.data_source.map(String).filter(Boolean) : [];
           const value = context.testObjectTemporary
             ? {group: {
               ...payload,
@@ -328,6 +330,10 @@
               temporary: true,
               source_kind: "transient",
               source_origin: "test_inline",
+              source_ids: selectedSources,
+              path_sources: positive.map(path => ({
+                path, source_ids: [...selectedSources],
+              })),
             }}
             : await context.api(
               creating ? endpoint(source) : endpoint(source, groupPath(group)),

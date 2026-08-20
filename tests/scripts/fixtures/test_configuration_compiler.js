@@ -216,6 +216,6 @@ assert.deepEqual(analysis.settings, analysis.local_settings);
 const oneFamily = FTICConfiguration.compileAnalysis({
   prior: {}, manifest, values, factors: [factor], productSelection: product,
 });
-assert.equal(oneFamily.factor_family_alias, "ROC");
+assert.equal("factor_family_alias" in oneFamily, false);
 
 console.log("ok");

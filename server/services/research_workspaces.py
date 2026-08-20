@@ -60,7 +60,6 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def create_workspace(
     *, owner: str, title: str,
-    factor_families: list[dict[str, Any]] | None = None,
     factors: list[dict[str, Any]] | None = None,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -83,7 +82,6 @@ def create_workspace(
     workspace["configuration"] = research_configurations.create_workspace_configuration(
         owner=owner,
         workspace_id=workspace_id,
-        factor_families=factor_families,
         factors=factors,
         payload=payload,
     )
