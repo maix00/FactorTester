@@ -1,6 +1,6 @@
 (() => {
   const tabLabels = Object.freeze({
-    summary: "回测汇总", group_metrics: "分组指标",
+    summary: "回测汇总", group_equity: "策略净值", group_metrics: "分组指标",
     equity: "净值与回撤", returns: "收益率",
     metrics: "时变指标", fees: "手续费", margin: "保证金",
     ratios: "收益与费用",
@@ -15,7 +15,8 @@
 
   function supports(artifacts, summary = {}) {
     return relevantArtifacts(artifacts).length > 0
-      || Boolean(summary?.metrics && Object.keys(summary.metrics).length);
+      || Boolean(summary?.metrics && Object.keys(summary.metrics).length)
+      || Boolean(window.FTBacktestResultModel.groupEquityEntries?.(summary).length);
   }
 
   function artifactPath(jobID, artifact, artifactQuery) {
@@ -128,6 +129,22 @@
     return target;
   }
 
+  function groupEquityChart(context, state) {
+    const target = document.createElement("div");
+    target.className = "backtest-domain-chart interactive-artifact-chart";
+    queueMicrotask(() => {
+      try {
+        window.FTBacktestGroupEquityChart.mount(context, target, state.model.summary, {
+          ...state.evaluationWindow,
+          showOutOfSample: state.showOutOfSample,
+          // Snapshot navigation remains an optional chart-module callback. It
+          // is deliberately not connected to the result view in this change.
+        });
+      } catch (error) { target.replaceChildren(message(context, error.message)); }
+    });
+    return target;
+  }
+
   function groupMetricsTable(context, state) {
     const matrix = state.model.metricMatrix;
     if (!matrix.entries.length) return message(context, "暂无分组指标");
@@ -191,6 +208,7 @@
   function tabContent(context, state) {
     const payloads = state.model.payloads;
     if (state.activeTab === "summary") return summaryTable(context, state.model);
+    if (state.activeTab === "group_equity") return groupEquityChart(context, state);
     if (state.activeTab === "group_metrics") return groupMetricsTable(context, state);
     if (state.activeTab === "equity") {
       return chart(context, "equity_curve", payloads.equity_curve_data, {

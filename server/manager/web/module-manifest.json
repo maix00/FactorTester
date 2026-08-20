@@ -206,6 +206,7 @@
     "job-detail-backtest": [
       "jobs/backtest-runtime-model.js",
       "jobs/backtest-result-model.js",
+      "jobs/backtest-group-equity-chart.js",
       "jobs/backtest-analysis-api.js",
       "jobs/backtest-analysis-ui.js",
       "jobs/backtest-group-products.js",
@@ -395,6 +396,7 @@
     "jobs/ic-result-charts.js",
     "jobs/backtest-runtime-model.js",
     "jobs/backtest-result-model.js",
+    "jobs/backtest-group-equity-chart.js",
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
     "core/output-choices.js",

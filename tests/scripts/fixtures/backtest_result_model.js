@@ -35,6 +35,11 @@ const payloads = {
   ratio_detail_data: {rows: [{series: "__aggregate__", fee_total: 5}]},
 };
 
+assert.equal(
+  window.FTBacktestResultModel.payloadNames.includes("group_equity_data"), false,
+  "the direct result tab must not introduce a generated chart artifact",
+);
+
 const model = window.FTBacktestResultModel.build(payloads);
 assert.deepEqual(model.groups, ["A1", "A2"]);
 assert.deepEqual(model.tabs, [
@@ -59,9 +64,11 @@ const retainedSummary = {
   base_currency: "CNY",
   groups: [
     {key: "A1", name: "第一组", metrics_key: "A1", group_id: "group-a1",
-      group_index: 0, product_path_selection_id: "night", timestamps: [1700000000000]},
+      group_index: 0, product_path_selection_id: "night",
+      timestamps: [1700000000000, 1700000060000], total_equity: [1000000, 1080000]},
     {key: "A2", name: "第二组", metrics_key: "A2", group_id: "group-a2",
-      group_index: 1, product_path_selection_id: "night", timestamps: [1700000000000]},
+      group_index: 1, product_path_selection_id: "night",
+      timestamps: [1700000000000, 1700000060000], total_equity: [1000000, 980000]},
   ],
   metrics: {
     A1: {"Total Return": 8, "Annual Return": 16, "Sharpe Ratio": 1.2,
@@ -72,7 +79,11 @@ const retainedSummary = {
 };
 const retained = window.FTBacktestResultModel.build({}, retainedSummary);
 assert.deepEqual(retained.groups, ["第一组", "第二组"]);
-assert.deepEqual(retained.tabs, ["summary", "group_metrics"]);
+assert.deepEqual(retained.tabs, ["summary", "group_equity", "group_metrics"]);
+assert.deepEqual(
+  window.FTBacktestResultModel.groupEquityEntries(retainedSummary).map(item => item.label),
+  ["第一组", "第二组"],
+);
 assert.equal(retained.summaryRows[0].initial_equity, 1000000);
 assert.equal(retained.summaryRows[0].total_return, 0.08);
 assert.equal(retained.summaryRows[0].max_drawdown, -0.04);
@@ -82,6 +93,9 @@ assert.equal(window.FTBacktestResultModel.bestMetricIndex(
 assert.equal(window.FTBacktestResultModel.bestMetricIndex(
   retained.metricMatrix, "Max Drawdown",
 ), 0);
+assert.deepEqual(window.FTBacktestResultModel.build({}, {
+  groups: [{strategy_id: "curve-only", timestamps: [1], total_equity: [100]}],
+}).tabs, ["summary", "group_equity", "group_metrics"]);
 const resolved = window.FTBacktestResultModel.resolveGroup(retainedSummary, "group-a2");
 assert.equal(resolved.label, "第二组");
 assert.deepEqual(window.FTBacktestResultModel.groupRequest(resolved, retainedSummary), {

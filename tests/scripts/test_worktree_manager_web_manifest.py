@@ -495,6 +495,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/ic-result-view.js" in manifest["groups"]["job-detail-ic"]
+    assert "jobs/backtest-group-equity-chart.js" in manifest["groups"]["job-detail-backtest"]
     assert "jobs/backtest-result-view.js" in manifest["groups"]["job-detail-backtest"]
     assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
     assert manifest["group_dependencies"]["job-detail-previews"] == [
@@ -1169,6 +1170,19 @@ def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
     view = WEB_ROOT / "jobs" / "backtest-result-view.js"
     result = subprocess.run(
         ["node", str(fixture), str(view)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_backtest_group_equity_chart_restores_strategy_curves_without_artifacts() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_equity_chart.js"
+    chart = WEB_ROOT / "jobs" / "backtest-group-equity-chart.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(chart)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

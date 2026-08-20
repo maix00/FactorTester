@@ -54,6 +54,18 @@
     }));
   }
 
+  function groupEquityEntries(summary) {
+    return groupEntries(summary).filter(item => {
+      const timestamps = Array.isArray(item.timestamps) ? item.timestamps : [];
+      const values = Array.isArray(item.total_equity) ? item.total_equity : [];
+      return timestamps.slice(0, values.length).some((value, index) => {
+        const numericTimestamp = finite(value);
+        const parsedTimestamp = numericTimestamp ?? Date.parse(String(value || ""));
+        return Number.isFinite(parsedTimestamp) && finite(values[index]) != null;
+      });
+    });
+  }
+
   function enrichedSummary(summary = {}, retainedResult = {}) {
     if (!Array.isArray(retainedResult?.groups) || !retainedResult.groups.length) {
       return summary;
@@ -283,6 +295,7 @@
 
   function availableTabs(payloads, summary = {}) {
     const result = ["summary"];
+    if (groupEquityEntries(summary).length) result.push("group_equity");
     if (metricMatrix(summary).entries.length) result.push("group_metrics");
     if (series(payloads.equity_curve_data).length) result.push("equity");
     if (series(payloads.returns_over_time_data).length) result.push("returns");
@@ -307,7 +320,7 @@
 
   window.FTBacktestResultModel = Object.freeze({
     availableTabs, bestMetricIndex, build, enrichedSummary, evaluationWindow,
-    finite, metricValue,
+    finite, groupEquityEntries, metricValue,
     groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
     scopedRows, series,
   });
