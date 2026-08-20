@@ -91,6 +91,40 @@ def test_provider_token_is_encrypted_and_server_urls_are_restricted(tmp_path):
                 "token": "x",
             },
         )
+
+
+def test_provider_duplicate_keeps_secret_server_side_and_is_owner_scoped(tmp_path):
+    store = AgentProviderStore(
+        tmp_path / "manager.sqlite",
+        tmp_path / "agent-provider.key",
+    )
+    original = store.save(
+        PRINCIPAL,
+        {
+            "label": "Research provider",
+            "runtime_kind": "server",
+            "server_id": "public-1",
+            "agent_runtime": "codex",
+            "protocol": "anthropic_messages",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "research-model",
+            "token": "secret-token-value",
+        },
+    )
+
+    duplicate = store.duplicate(PRINCIPAL, original["provider_id"])
+
+    assert duplicate["provider_id"] != original["provider_id"]
+    assert duplicate["label"] == "Research provider copy"
+    assert duplicate["protocol"] == "anthropic_messages"
+    assert "secret" not in duplicate
+    assert store.get(
+        PRINCIPAL,
+        duplicate["provider_id"],
+        include_secret=True,
+    )["secret"] == "secret-token-value"
+    with pytest.raises(ProviderStoreError, match="not found"):
+        store.duplicate("GTHT@Other@9999", original["provider_id"])
     with pytest.raises(ProviderStoreError, match="localhost"):
         store.save(
             PRINCIPAL,
@@ -497,6 +531,19 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
         "openai_chat": "cc_switch",
         "openai_responses": "direct",
     }
+
+    duplicate = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+    )
+    provider_id = response["provider"]["provider_id"]
+    assert duplicate._post_agent_routes(urlparse(
+        f"/api/client/agent-models/{provider_id}/duplicate",
+    )) is True
+    duplicate_response = _route_payload(duplicate)
+    assert duplicate_response["success"] is True
+    assert duplicate_response["provider"]["provider_id"] != provider_id
+    assert '"token":' not in json.dumps(duplicate_response)
 
 
 def test_agent_provider_listing_never_contacts_upstream_providers(

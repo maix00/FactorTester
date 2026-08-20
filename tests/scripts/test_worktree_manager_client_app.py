@@ -2767,6 +2767,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "requestAnimationFrame" in agent_models
     assert 'onPageChange,' in agent_models
     assert "FTAgentModelEditor.open" in agent_models
+    assert "/duplicate`" in agent_models
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports

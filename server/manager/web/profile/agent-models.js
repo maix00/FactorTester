@@ -80,6 +80,20 @@
         iconButton(context, "square.and.pencil", "编辑", () => (
           FTAgentModelEditor.open(context, item, capabilities, refresh)
         )),
+        iconButton(context, "doc.text", "复制", async () => {
+          try {
+            const result = await context.api(
+              `/api/client/agent-models/${encodeURIComponent(item.provider_id)}/duplicate`,
+              {method: "POST", body: "{}"},
+            );
+            await refresh();
+            FTAgentModelEditor.open(
+              context, result.provider, capabilities, refresh,
+            );
+          } catch (error) {
+            context.showNotice(error.message || String(error), true);
+          }
+        }),
         iconButton(context, "trash", "删除", async () => {
           if (!window.confirm(context.t("确定删除这个模型服务吗？"))) return;
           try {

@@ -607,6 +607,13 @@ class AgentProfileService:
                 raise ProviderStoreError("release the active Agent before deleting its provider")
         return self.provider_store.delete(principal, provider_id)
 
+    def duplicate_provider(
+        self,
+        principal: str,
+        provider_id: str,
+    ) -> dict[str, Any]:
+        return self.provider_store.duplicate(principal, provider_id)
+
     def claim(
         self,
         principal: str,

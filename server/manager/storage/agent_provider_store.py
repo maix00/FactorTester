@@ -385,3 +385,23 @@ class AgentProviderStore:
                 (owner, identifier),
             )
         return bool(cursor.rowcount)
+
+    def duplicate(self, principal: str, provider_id: str) -> dict[str, Any]:
+        """Copy one owned Provider without exposing its decrypted token."""
+        source = self.get(principal, provider_id, include_secret=True)
+        if source is None:
+            raise ProviderStoreError("provider was not found")
+        label = f"{source['label'][:507]} copy"
+        return self.save(
+            principal,
+            {
+                "label": label,
+                "runtime_kind": source["runtime_kind"],
+                "agent_runtime": source["agent_runtime"],
+                "server_id": source["server_id"],
+                "protocol": source["protocol"],
+                "base_url": source["base_url"],
+                "default_model": source["default_model"],
+                "token": source["secret"],
+            },
+        )
