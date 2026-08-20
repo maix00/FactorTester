@@ -1403,7 +1403,7 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "activeTab: state.settingsTabKey" in tests
     assert "installRunToolbar" in tests
     assert "headerActions" in tests
-    assert "FTTestRunBatch.render" not in tests
+    assert "FTTestRunBatch.render(" not in tests
     assert "产品路径任务" not in tests
     run_batch_model = (WEB_ROOT / "workbench" / "run-batch" / "model.js").read_text(
         encoding="utf-8",

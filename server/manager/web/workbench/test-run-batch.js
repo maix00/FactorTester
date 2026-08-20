@@ -200,7 +200,7 @@
     if (!item.resultCodePromise) {
       item.resultCodeLoading = true;
       item.resultCodePromise = Promise.resolve(
-        window.FTStaticLoader?.loadGroups?.(["workbench-run-results"]),
+        window.FTTestLazyCode?.loadGroup?.("workbench-run-results"),
       )
         .then(() => {
           if (!window.FTTestRunResults) throw new Error("结果查看器不可用");
