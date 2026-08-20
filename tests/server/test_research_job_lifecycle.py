@@ -362,6 +362,44 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_unsubmitted_workspace_can_be_deleted_without_touching_other_tabs(client) -> None:
+    first = _create_workspace(client)
+    second = _create_workspace(client)
+
+    response = client.delete(f"/api/workspaces/{first['workspace_id']}")
+
+    assert response.status_code == 200
+    assert response.get_json()["deleted"] is True
+    assert client.get(f"/api/workspaces/{first['workspace_id']}").status_code == 404
+    assert client.get(f"/api/workspaces/{second['workspace_id']}").status_code == 200
+
+
+def test_workspace_delete_preserves_immutable_snapshot_evidence(client) -> None:
+    workspace = _create_workspace(client)
+    configuration = workspace["configuration"]
+    snapshot = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration-snapshots",
+        json={
+            "source_workspace_id": workspace["workspace_id"],
+            "source_configuration_id": configuration["configuration_id"],
+            "source_configuration_revision": configuration["revision"],
+            "name": "frozen preview",
+        },
+    )
+    assert snapshot.status_code == 201
+
+    response = client.delete(f"/api/workspaces/{workspace['workspace_id']}")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"success": True, "deleted": True}
+    assert client.get(f"/api/workspaces/{workspace['workspace_id']}").status_code == 404
+    snapshots = research_configuration_snapshots.list_snapshots(
+        owner="alice", workspace_id=workspace["workspace_id"],
+    )
+    assert len(snapshots) == 1
+    assert snapshots[0]["name"] == "frozen preview"
+
+
 def test_run_preview_matches_submission_without_persisting(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)

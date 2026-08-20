@@ -91,7 +91,7 @@
   }
 
   function restoreWorkspace(state) {
-    const key = localStorage.getItem(`ft-${state.kind}-workspace`) || "";
+    const key = String(state.restoredWorkspaceID || "");
     if (!state.workspace || state.workspace.workspace_id !== key) {
       state.workspace = state.workspaces.find(item => item.workspace_id === key) || null;
     }
@@ -108,7 +108,7 @@
 
   function clearDraft(state) {
     state.workspace = null;
-    try { localStorage.removeItem(`ft-${state.kind}-workspace`); } catch (_) {}
+    state.restoredWorkspaceID = "";
     state.analysis = {};
     state.savedFactors = [];
     state.savedTemporaryObjects = {};
@@ -152,12 +152,18 @@
   function draftSnapshot(state) {
     const values = {};
     for (const key of draftKeys) values[key] = structuredClone(state[key]);
-    return {schemaVersion: 1, kind: state.kind, values};
+    return {
+      schemaVersion: 2,
+      kind: state.kind,
+      workspaceID: String(state.workspace?.workspace_id || ""),
+      values,
+    };
   }
 
   function restoreDraft(state, snapshot) {
-    if (snapshot?.schemaVersion !== 1 || snapshot.kind !== state.kind
+    if (snapshot?.schemaVersion !== 2 || snapshot.kind !== state.kind
         || !snapshot.values || typeof snapshot.values !== "object") return false;
+    state.restoredWorkspaceID = String(snapshot.workspaceID || "");
     for (const key of draftKeys) {
       if (key in snapshot.values) state[key] = structuredClone(snapshot.values[key]);
     }
