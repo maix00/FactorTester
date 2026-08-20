@@ -254,7 +254,7 @@
     const processPayload = payload => {
       if (!eventBelongsToCurrentTurn(state, payload)) return;
       const method = P.rawMethod(payload);
-      const delta = P.rawDelta(payload);
+      const delta = P.agentMessageDelta(payload);
       if (method === "app_server_exit" || payload?.type === "app_server_exit") {
         if (state.assistant?.text) finish("done");
         else {
@@ -276,7 +276,7 @@
       }
       const completed = P.completedText(payload);
       if (completed) appendAssistantText(state, controller, completed);
-      if (delta && /(agent.?message|assistant|delta|content)/i.test(method)) {
+      if (delta) {
         appendAssistantText(
           state,
           controller,

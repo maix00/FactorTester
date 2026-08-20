@@ -71,19 +71,10 @@
     );
   }
 
-  function rawDelta(payload) {
-    const params = payload?.params || {};
-    for (const value of [params.delta, params.text, payload?.delta, payload?.text]) {
-      if (typeof value === "string") return value;
-    }
-    const content = params.content ?? payload?.content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-      return content.map(item => typeof item === "string"
-        ? item
-        : String(item?.text || item?.content || "")).join("");
-    }
-    return "";
+  function agentMessageDelta(payload) {
+    if (rawMethod(payload) !== "item/agentMessage/delta") return "";
+    const delta = eventParams(payload).delta;
+    return typeof delta === "string" ? delta : "";
   }
 
   function eventTurnID(payload) {
@@ -274,6 +265,7 @@
 
   window.FTProfileChatKitProtocol = Object.freeze({
     assistantItem,
+    agentMessageDelta,
     chatLocale,
     completedText,
     errorMessage,
@@ -285,7 +277,6 @@
     page,
     parseBody,
     randomID,
-    rawDelta,
     rawMethod,
     eventTurnID,
     responseValue,
