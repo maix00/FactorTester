@@ -7,7 +7,9 @@
     }
     let factor = context.testObjectTemporary && context.testObjectInitialValue
       ? context.testObjectInitialValue
-      : data.factors.find(item => item.factor_ref === targetRef);
+      : data.factors.find(item => (
+        item.factor_ref === targetRef || item.factor_alias === targetRef
+      ));
     const frozen = factor ? null : model().decodeFrozenFactorRef(targetRef);
     if (!factor && !frozen) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));

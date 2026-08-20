@@ -94,20 +94,21 @@
 
   function sourceValues(adapter, state, item = null) {
     if (adapter === "selected_factors") {
-      const itemFactors = Array.isArray(item?.factorAliases)
-        ? item.factorAliases
-        : [item?.factorAlias || item?.factor_alias].filter(Boolean);
-      const aliases = itemFactors.length
-        ? itemFactors.map(value => String(value).trim()).filter(Boolean)
-        : selectedFactorAliases(state);
+      const itemRefs = Array.isArray(item?.factor_candidate_refs)
+        ? item.factor_candidate_refs.map(String).filter(Boolean) : [];
+      const factors = itemRefs.length
+        ? factorObjects(state, itemRefs)
+        : selectedFactorObjects(state);
       return {
-        factorAlias: aliases,
-        factor: factorObjects(state, aliases),
+        factorRef: factors.map(factorReference).filter(Boolean),
+        factorLabel: factors.map(factorLabel).filter(Boolean),
+        factor: factors,
       };
     }
     if (adapter === "selected_product_paths") {
-      const projections = item?.product_path_selection
-        ? [item.product_path_selection]
+      const itemSelection = itemProductSelection(item);
+      const projections = itemSelection
+        ? [itemSelection]
         : window.FTTestProducts?.selectedProjections?.(state) || [];
       return {
         product_path_selection: projections,
@@ -136,22 +137,53 @@
     return {};
   }
 
-  function selectedFactorAliases(state) {
+  function selectedFactorObjects(state) {
     if (!window.FTTestFactorSelection || !window.FTTestFactors) return [];
-    const factors = state.kind === "ic"
+    return state.kind === "ic"
       ? FTTestFactorSelection.selectedFactors(state)
       : [FTTestFactors.selectedFactor(state)].filter(Boolean);
-    return factors.map(FTTestFactorSelection.factorAlias).filter(Boolean);
   }
 
-  function factorObjects(state, aliases) {
-    const wanted = new Set(aliases || []);
+  function factorReference(value) {
+    if (typeof value === "string") return value;
+    return String(value?.factor_ref || value?.target_ref || "").trim();
+  }
+
+  function factorLabel(value) {
+    if (typeof value === "string") return value;
+    return String(value?.factor_alias || value?.alias || value?.name
+      || factorReference(value)).trim();
+  }
+
+  function factorObjects(state, refs) {
+    const wanted = new Set(refs || []);
     const candidates = window.FTTestFactorSelection?.candidates?.(state) || [];
-    return candidates.filter(item => wanted.has(FTTestFactorSelection.factorAlias(item)));
+    const matched = new Map(candidates
+      .filter(item => wanted.has(factorReference(item)))
+      .map(item => [factorReference(item), item]));
+    // Strategy rows are rendered before the catalog is necessarily loaded.
+    // Preserve their stable factor reference/alias so the detail overlay stays
+    // clickable; the catalog detail view resolves the full object lazily.
+    return [...wanted].map(ref => matched.get(ref) || {factor_ref: ref});
+  }
+
+  function itemProductSelection(item) {
+    if (!item) return null;
+    return item.product_path_selection
+      || item.product_group
+      || item.productGroup
+      || item.product_path_selection_id
+      || item.product_group_ref
+      || null;
   }
 
   function productObjects(state, item, projections) {
-    const explicit = [item?.product_group, item?.productGroup].filter(Boolean);
+    const explicit = [
+      item?.product_group,
+      item?.productGroup,
+      item?.product_path_selection_id,
+      item?.product_group_ref,
+    ].filter(Boolean);
     const catalog = Array.isArray(state.groups) ? state.groups : [];
     const values = [...explicit];
     for (const projection of projections || []) {
@@ -161,7 +193,10 @@
       else if (ref) values.push(projection);
     }
     const seen = new Set();
-    return values.filter(value => {
+    return values.map(value => {
+      const ref = productGroupID(value);
+      return catalog.find(group => productGroupID(group) === ref) || value;
+    }).filter(value => {
       const ref = productGroupID(value);
       if (!ref || seen.has(ref)) return false;
       seen.add(ref);

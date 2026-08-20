@@ -211,7 +211,6 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     for key in (
         "factor_candidates",
         "factor_source_selections",
-        "factor",
         "product_path_candidates",
         "product_path_selection",
     ):
@@ -380,7 +379,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         chip["module"] for chip in index["chip_fields"]
     } >= {"factor_execution", "product_selection", "group_strategy"}
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_alias",
+        "factor_ref",
         "product_path_selection",
         "group_index",
         "run_inputs",
@@ -389,7 +388,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert chips["split_count"]["display_scope"] == "strategy"
     assert chips["group_index"]["display_scope"] == "strategy"
     assert "product_mask" not in chips
-    assert chips["factor_alias"]["detail_overlay"] == {
+    assert chips["factor_ref"]["source_keys"] == ("factorRef", "factorLabel")
+    assert chips["factor_ref"]["detail_overlay"] == {
         "kind": "factor", "mode": "view", "source_key": "factor",
     }
     assert chips["product_path_selection"]["label"] == "产品组"
@@ -458,7 +458,6 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "setting_template",
         "factor_candidates",
         "factor_source_selections",
-        "factor_selections",
         "category_candidates",
         "product_path_candidates",
         "product_path_selections",
@@ -470,9 +469,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         key for key in (
             "factor_owner_ref", "factor_git_commit", "factor_family_ref",
             "factor_params", "factor_candidates", "factor_source_selections",
-            "factor_selections",
         ) if key in index["defaults"]
-    ] == ["factor_candidates", "factor_source_selections", "factor_selections"]
+        ] == ["factor_candidates", "factor_source_selections"]
     item_fields = index["defaults"]["factor_candidates"]["serialization"]["item_fields"]
     assert {
         "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
@@ -492,8 +490,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     )
     assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
-    assert chips["factor_alias"]["source_adapter"] == "selected_factors"
-    assert chips["factor_alias"]["detail_overlay"] == {
+    assert chips["factor_ref"]["source_adapter"] == "selected_factors"
+    assert chips["factor_ref"]["detail_overlay"] == {
         "kind": "factor", "mode": "view", "source_key": "factor",
     }
     assert chips["product_path_selection"]["source_adapter"] == (
@@ -533,7 +531,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "time_precision": ["exact"],
     }
     assert {chip["key"] for chip in index["chip_fields"]} >= {
-        "factor_alias",
+        "factor_ref",
         "product_path_selection",
     }
     assert [tab["key"] for tab in index["result_tabs"]][:3] == [
@@ -1310,8 +1308,11 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert [item["key"] for item in contract["pre_mounted_tabs"]] == expected
         assert not set(expected).intersection(contract["outer_only_tabs"])
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
-            "factor_selections", "factor",
+            "factor_candidates",
         ]
+        assert contract["factor_scope"]["strategy_selection_field"] == (
+            "factor_candidate_refs"
+        )
         assert contract["outer_scope_tabs"]["factor"]["scope_fields"] == [
             "factor_candidates",
         ]
@@ -1336,11 +1337,7 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert scoped["factor_candidates"]["inner"]["source_when_outer_mounted"] == (
             "outer_candidate_pool"
         )
-        assert scoped["factor"]["outer"]["resolution"] == {
-            "kind": "automatic",
-            "source": "factor_candidates",
-            "resolver": "primary_item",
-        }
+        assert "factor" not in scoped
         assert scoped["factor_role_bindings"]["outer"]["visible_when"] == {
             "min_items": {"factor_candidates": 2},
         }

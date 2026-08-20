@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.factor_authoring_contract import factor_identity_serialization
 
 
 class FactorModule(ExecutableModule):
@@ -41,21 +42,13 @@ class FactorModule(ExecutableModule):
                 "display_order": 10,
                 "item_kind": "factor",
                 "shared_page_field": "factor_candidates",
-                "selection_field": "factor",
-                "item_fields": (
-                    "factor_ref", "factor_alias", "factor_owner_ref",
-                    "factor_git_commit", "factor_family_ref", "factor_params",
-                    "owner_ref", "git_commit", "git_blob", "relative_path",
-                    "factor_family_alias", "family_ref", "params", "source_kind",
-                    "transient_factor_id",
-                ),
+                "selection_field": "factor_candidates",
+                **factor_identity_serialization(),
                 "factor_library_source": "user_factor_library_overview",
                 "fallback_policy": (
                     "copy_page_candidates",
                     "load_factor_library_when_page_empty",
                 ),
-                "id_keys": ("alias", "name", "factor_alias"),
-                "label_keys": ("alias", "name", "label"),
                 "mutation_scope": {
                     "page": "page_candidates_only",
                     "module": "module_candidates_only",
@@ -75,17 +68,11 @@ class FactorModule(ExecutableModule):
                 "multi": True,
                 "candidate_field": "factor_candidates",
                 "set_source_field": "factor_set_selections",
-                "selection_field": "factor_selections",
+                "selection_field": "factor_candidates",
                 "source_kind": "factor",
                 "catalog_source": "visible_factor_catalog",
                 "allow_inline_create": True,
-                "item_fields": (
-                    "factor_ref", "factor_alias", "factor_owner_ref",
-                    "factor_git_commit", "factor_family_ref", "factor_params",
-                    "owner_ref", "git_commit", "git_blob", "relative_path",
-                    "factor_family_alias", "family_ref", "params", "source_kind",
-                    "transient_factor_id",
-                ),
+                **factor_identity_serialization(),
             },
         ),
         "factor_set_selections": FieldDefinition(
@@ -101,7 +88,7 @@ class FactorModule(ExecutableModule):
                 "display_order": 15,
                 "multi": True,
                 "candidate_field": "factor_candidates",
-                "selection_field": "factor",
+                "selection_field": "factor_candidates",
                 "catalog_endpoint": "/api/catalog/factor-sets",
                 "detail_endpoint": "/api/catalog/factor-sets/detail",
                 "descriptor_endpoint": "/api/catalog/factor-sets/descriptor",
@@ -112,7 +99,10 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor": FieldDefinition(
-            public=True, label="因子", default="", editor="select", tab="factor",
+            # Runtime-only.  The authoring surface persists stable
+            # ``factor_candidate_refs`` on each strategy; the compiler
+            # resolves those references to Factor objects before execution.
+            public=False, label="因子", default="", editor="select", tab="factor",
             chip_template="因子: {value}", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
@@ -132,8 +122,7 @@ class FactorModule(ExecutableModule):
                     "resolver": "primary_item",
                     "editable": False,
                 },
-                "id_keys": ("alias", "name", "factor_alias"),
-                "label_keys": ("alias", "name", "label"),
+                **factor_identity_serialization(),
             },
         ),
         "factor_role_bindings": FieldDefinition(

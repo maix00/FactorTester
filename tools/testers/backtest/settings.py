@@ -95,8 +95,8 @@ def register_group_test_settings(app: Any) -> None:
 
     # ── ChipDefinitions ─────────────────────────────────────
     for chip in (
-        ChipDefinition("factor_alias", "因子", "identity",
-                       "因子: {factorAlias}", ("factorAlias",),
+        ChipDefinition("factor_ref", "因子", "identity",
+                       "因子: {factorLabel}", ("factorRef", "factorLabel"),
                        module="factor_execution", target_tab="factor", order=10,
                        inherit_from_root=True, batch_owned=True,
                        source_adapter="selected_factors", clickable=True,

@@ -193,7 +193,7 @@ assert.equal(productChip.children[1].textContent, "未设置（默认）");
 const overlayManifest = {
   chip_fields: [
     {
-      source_adapter: "selected_factors", source_keys: ["factorAlias"],
+      source_adapter: "selected_factors", source_keys: ["factorRef", "factorLabel"],
       detail_overlay: {source_key: "factor"},
     },
     {
@@ -207,11 +207,31 @@ const adapterSources = FTTestContentAdapters.chipSources({
   values: {factor_candidates: [{factor_ref: "factor:roc", factor_alias: "ROC 1m"}]},
   groups: [{group_ref: "group:day", name: "日盘"}],
 }, {
-  factorAlias: "ROC 1m",
+  factor_candidate_refs: ["factor:roc"],
   product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
 });
 assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
 assert.equal(adapterSources.product_group[0].group_ref, "group:day");
+
+const persistedStrategySources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: []},
+  groups: [{group_ref: "group:night", name: "夜盘"}],
+}, {
+  factor_candidate_refs: ["factor:sgccs-history"],
+  product_path_selection_id: "group:night",
+});
+assert.deepEqual(
+  persistedStrategySources.factor,
+  [{factor_ref: "factor:sgccs-history"}],
+  "a persisted strategy factor must remain a detail target before catalog loading",
+);
+assert.equal(
+  persistedStrategySources.product_path_selection[0],
+  "group:night",
+  "a persisted product-group reference must still produce the strategy chip",
+);
+assert.equal(persistedStrategySources.product_group[0].group_ref, "group:night");
 
 const advancedRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "高级");

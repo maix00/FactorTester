@@ -29,7 +29,7 @@
 
   function seedSavedCatalogs(state) {
     state.factors = [...(Array.isArray(state.savedFactors) ? state.savedFactors : [])];
-    state.families = [...(Array.isArray(state.savedFamilies) ? state.savedFamilies : [])];
+    state.families = [];
     const storedGroups = [
       ...(Array.isArray(state.savedTemporaryObjects?.product_groups)
         ? state.savedTemporaryObjects.product_groups : []),
@@ -58,8 +58,6 @@
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
     state.savedFactors = Array.isArray(payload.shared?.factors)
       ? structuredClone(payload.shared.factors) : [];
-    state.savedFamilies = Array.isArray(payload.shared?.factor_families)
-      ? structuredClone(payload.shared.factor_families) : [];
     state.savedTemporaryObjects = payload.shared?.temporary_objects
       && typeof payload.shared.temporary_objects === "object"
       ? structuredClone(payload.shared.temporary_objects) : {};

@@ -53,7 +53,7 @@ assert.equal(typeof view.openMany, "function");
 const hash = "a".repeat(64);
 const value = view.model({
   run_spec_hash: hash,
-  run_spec_version: 2,
+  run_spec_version: 3,
   configuration_id: "configuration-1",
   configuration_revision: 7,
   alias_zh: "日盘 IC 运行配置",
@@ -112,7 +112,7 @@ const inlineDialog = view.openMany(context, [{
   label: "预览任务",
   value: {
     run_spec_hash: hash,
-    run_spec_version: 2,
+    run_spec_version: 3,
     configuration_id: "preview-configuration",
     configuration_revision: 1,
     run_spec: {

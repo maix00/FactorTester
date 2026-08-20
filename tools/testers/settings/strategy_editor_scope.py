@@ -44,28 +44,6 @@ def build_scoped_fields() -> dict[str, Any]:
                 ),
             },
         },
-        "factor": {
-            "outer": {
-                "source": "factor_candidates",
-                "cardinality": "one",
-                "editable": False,
-                "resolution": {
-                    "kind": "automatic",
-                    "source": "factor_candidates",
-                    "resolver": "primary_item",
-                },
-            },
-            "inner": {
-                "source": "factor_candidates",
-                "cardinality": "one",
-                "editable": False,
-                "resolution": {
-                    "kind": "automatic",
-                    "source": "factor_candidates",
-                    "resolver": "primary_item",
-                },
-            },
-        },
         "factor_role_bindings": {
             "outer": {
                 "source": "factor_candidates",

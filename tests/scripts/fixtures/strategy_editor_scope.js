@@ -27,7 +27,7 @@ const state = {
       outer_scope_tabs: {
         factor: {
           mounted_tab: "factor", candidate_fields: ["factor_candidates"],
-          selection_fields: ["factor_selections", "factor"],
+          selection_fields: ["factor_candidates"],
         },
         product_path_selection: {
           mounted_tab: "product_path_selection", candidate_fields: ["product_path_candidates"],
@@ -41,13 +41,6 @@ const state = {
             cardinality: "many",
             filter_only_when_outer_mounted: true,
             source_when_outer_mounted: "outer_candidate_pool",
-          },
-        },
-        factor: {
-          outer: {
-            resolution: {
-              kind: "automatic", source: "factor_candidates", resolver: "primary_item",
-            },
           },
         },
         factor_role_bindings: {
@@ -81,13 +74,13 @@ assert.deepEqual(window.FTStrategyEditorScope.validate(state), []);
 const innerCandidates = window.FTStrategyEditorScope.scopedField(
   state, "factor_candidates", "inner",
 );
-const outerFactor = window.FTStrategyEditorScope.scopedField(
-  state, "factor", "outer",
-);
 assert.equal(innerCandidates?.cardinality, "many");
 assert.equal(innerCandidates?.filter_only_when_outer_mounted, true);
 assert.equal(innerCandidates?.source_when_outer_mounted, "outer_candidate_pool");
-assert.equal(outerFactor?.resolution?.resolver, "primary_item");
+assert.equal(
+  window.FTStrategyEditorScope.scopedField(state, "factor", "outer"),
+  null,
+);
 assert.equal(
   window.FTStrategyEditorScope.fieldVisible(
     state, "factor_role_bindings", "inner", {factor_candidates: [{alias: "A"}]},

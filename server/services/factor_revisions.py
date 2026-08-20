@@ -59,6 +59,11 @@ def freeze_factor_revisions(
             owner=owner,
         )
     shared["factor_revision_manifests"] = manifests
+    # The editable workspace uses a family catalog for authoring.  A frozen
+    # RunSpec already carries family provenance on each concrete factor and
+    # immutable revision manifests, so retaining the catalog would duplicate
+    # the same identity at the RunSpec root.
+    shared.pop("factor_families", None)
     return frozen
 
 
@@ -68,7 +73,7 @@ def build_factor_revision_manifests(
     owner: str,
     extra_factor_aliases: list[str] | tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
-    families = shared.get("factor_families")
+    families = shared.get("factor_families") or []
     factors = shared.get("factors")
     if not isinstance(families, list) or not isinstance(factors, list):
         raise ValueError("factor revision requires canonical shared factors")
@@ -144,7 +149,7 @@ def assert_run_spec_factor_revisions_current(
     *,
     owner: str,
 ) -> None:
-    """Fail closed when a v2 RunSpec no longer matches executable factors."""
+    """Fail closed when a versioned RunSpec no longer matches executable factors."""
     if int(run_spec.get("run_spec_version") or 0) < 2:
         return
     configuration = run_spec.get("configuration")
@@ -153,14 +158,11 @@ def assert_run_spec_factor_revisions_current(
         if isinstance(configuration, dict) else None
     )
     if not isinstance(shared, dict):
-        raise ValueError("RunSpec v2 requires configuration.shared")
+        raise ValueError("versioned RunSpec requires configuration.shared")
     stored = shared.get("factor_revision_manifests")
-    families = shared.get("factor_families")
-    if not isinstance(stored, list) or (
-        isinstance(families, list) and families and not stored
-    ):
+    if not isinstance(stored, list):
         raise ValueError(
-            "RunSpec v2 requires factor_revision_manifests"
+            "versioned RunSpec requires factor_revision_manifests"
         )
     current = build_factor_revision_manifests(
         shared=shared,
@@ -304,16 +306,16 @@ def _qualified_factor_alias(
 
 
 def _role_factor_aliases(configuration: dict[str, Any]) -> list[str]:
-    """Return source-free aliases bound to strategy roles in a RunSpec.
-
-    These aliases are intentionally not added to ``shared.factors``: a role
-    may be resolved from a Profile's transient run source.  They still need a
-    frozen revision manifest so the worker can fail closed if its transient
-    source differs from the RunSpec it is executing.
-    """
+    """Resolve role-bound factor refs to their frozen display aliases."""
     backtest = (configuration.get("analyses") or {}).get("backtest")
     if not isinstance(backtest, dict):
         return []
+    factors = (configuration.get("shared") or {}).get("factors") or []
+    aliases_by_ref = {
+        str(item.get("factor_ref") or item.get("target_ref") or "").strip():
+        str(item.get("alias") or item.get("factor_alias") or "").strip()
+        for item in factors if isinstance(item, dict)
+    }
     aliases: set[str] = set()
     for group in backtest.get("groups") or []:
         if not isinstance(group, dict):
@@ -325,13 +327,14 @@ def _role_factor_aliases(configuration: dict[str, Any]) -> list[str]:
             continue
         for binding in bindings.values():
             if isinstance(binding, dict):
-                binding = (
-                    binding.get("factorAlias")
-                    or binding.get("factor_alias")
-                    or binding.get("alias")
-                )
-            if isinstance(binding, str) and binding.strip():
-                aliases.add(binding.strip())
+                binding = binding.get("factor_ref") or binding.get("target_ref")
+            factor_ref = str(binding or "").strip()
+            if not factor_ref:
+                continue
+            alias = aliases_by_ref.get(factor_ref)
+            if not alias:
+                raise ValueError(f"role-bound factor reference was not frozen: {factor_ref}")
+            aliases.add(alias)
     return sorted(aliases)
 
 

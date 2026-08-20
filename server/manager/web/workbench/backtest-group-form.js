@@ -87,7 +87,7 @@
       defaults.factor_combination_mode || defaults.factorCombinationMode || "",
     );
     const selectedCandidateValues = () => factorItems.filter(item => (
-      factorRefs.includes(factorAlias(item))
+      factorRefs.includes(factorRef(item))
     ));
     innerScopeValues.factor_candidates = selectedCandidateValues();
     const renderProductPanel = () => FTTestProducts.selectionPanel(
@@ -103,15 +103,15 @@
         },
       },
     );
-    const storedFactors = selectedFactorAliases(state, defaults);
+    const storedFactors = selectedFactorRefs(state, defaults);
     const hasStoredFactors = Boolean(
-      (Array.isArray(defaults.factorAliases) && defaults.factorAliases.length)
-      || defaults.factorAlias,
+      Array.isArray(defaults.factor_candidate_refs)
+        && defaults.factor_candidate_refs.length,
     );
     const selectedFactors = factorScopeBlocked ? []
       : factorScope.source === "outer" && editor.mode === "base"
       && !hasStoredFactors
-      ? factorScope.items.map(item => factorAlias(item)).filter(Boolean)
+      ? factorScope.items.map(item => factorRef(item)).filter(Boolean)
       : storedFactors;
     factorRefs = selectedFactors;
     innerScopeValues.factor_candidates = selectedCandidateValues();
@@ -283,7 +283,7 @@
             || state.groups.find(item => productGroupID(item) === productGroupRef);
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
-            factorAliases: factorRefs, splitCount: splitCount.value,
+            factor_candidate_refs: factorRefs, splitCount: splitCount.value,
             factor_combination_mode: factorCombinationMode,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
             productMask,
@@ -302,8 +302,7 @@
           Object.assign(patch, {
             product_path_selection: productProjection(group || productGroupRef),
             product_path_selection_id: productGroupRef,
-            factorAlias: factorRefs[0] || "",
-            factorAliases: factorRefs,
+            factor_candidate_refs: factorRefs,
             factor_combination_mode: factorCombinationMode,
             splitCount: splitCount.value,
             groupIndex: groupIndex.value,
@@ -319,8 +318,7 @@
           model().addDerived(state, parent.id, {
             name: name.value.trim(), productMask, overrides: parsedOverrides,
             ...productPatch,
-            factorAlias: factorRefs[0] || "",
-            factorAliases: factorRefs,
+            factor_candidate_refs: factorRefs,
             factor_combination_mode: factorCombinationMode,
             splitCount: splitCount.value,
             groupIndex: groupIndex.value,
@@ -462,11 +460,12 @@
   }
 
   function strategyGroupPicker(...args) { return pickerTools().strategyGroupPicker(...args); }
-  function selectedFactorAliases(...args) {
-    return pickerTools().selectedFactorAliases(...args);
+  function selectedFactorRefs(...args) {
+    return pickerTools().selectedFactorRefs(...args);
   }
   function selectedFactorAlias(...args) { return pickerTools().selectedFactorAlias(...args); }
   function factorAlias(...args) { return pickerTools().factorAlias(...args); }
+  function factorRef(...args) { return pickerTools().factorRef(...args); }
   function choiceItems(descriptor) {
     const raw = Array.isArray(descriptor?.options) ? descriptor.options : [];
     return raw.map(item => Array.isArray(item)

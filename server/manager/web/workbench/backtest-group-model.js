@@ -1,7 +1,7 @@
 (() => {
   const structuralKeys = new Set([
     "id", "name", "parentId", "product_path_selection",
-    "product_path_selection_id", "factorAlias", "factorAliases",
+    "product_path_selection_id", "factor_candidate_refs",
     "factor_combination_mode", "factorCombinationMode", "splitCount", "groupIndex",
     "isAllGroups", "productMask", "needsRegenerate",
     "batchId", "override_mounted_tabs",
@@ -72,10 +72,10 @@
     return group?.name || group?.id || "";
   }
 
-  function normalizedFactorAliases(draft = {}) {
-    const raw = Array.isArray(draft.factorAliases)
-      ? draft.factorAliases
-      : [draft.factorAlias];
+  function normalizedFactorRefs(draft = {}) {
+    const raw = Array.isArray(draft.factor_candidate_refs)
+      ? draft.factor_candidate_refs
+      : [];
     return [...new Set(raw.map(value => String(value || "").trim()).filter(Boolean))];
   }
 
@@ -85,9 +85,9 @@
     ).trim();
   }
 
-  function validateFactorCandidates(factorAliases, mode) {
-    if (!factorAliases.length) throw new Error("factorAlias is required");
-    if (factorAliases.length > 1 && !mode) {
+  function validateFactorCandidates(factorRefs, mode) {
+    if (!factorRefs.length) throw new Error("factor_candidate_refs is required");
+    if (factorRefs.length > 1 && !mode) {
       throw new Error("多个因子候选需要组合方式");
     }
   }
@@ -102,9 +102,9 @@
     const selection = draft.product_path_selection;
     const selectionId = selectionID(selection);
     if (!selectionId) throw new Error("product_path_selection is required");
-    const factorAliases = normalizedFactorAliases(draft);
+    const factorRefs = normalizedFactorRefs(draft);
     const factorCombinationMode = combinationMode(draft);
-    validateFactorCandidates(factorAliases, factorCombinationMode);
+    validateFactorCandidates(factorRefs, factorCombinationMode);
     const indexes = draft.allGroups
       ? Array.from({length: splitCount}, (_, index) => index + 1)
       : [groupIndex];
@@ -129,7 +129,7 @@
         name, parentId: null,
         product_path_selection: projection(selection),
         product_path_selection_id: selectionId,
-        factorAlias: factorAliases[0], factorAliases: [...factorAliases],
+        factor_candidate_refs: [...factorRefs],
         factor_combination_mode: factorCombinationMode,
         splitCount, groupIndex: index, isAllGroups: false,
         productMask: productMaskFrom(draft.productMask),
@@ -149,17 +149,17 @@
     const parent = find(state, parentID);
     if (!parent) throw new Error("parent group is required");
     const productMask = productMaskFrom(draft.productMask);
-    const inheritedFactorAliases = normalizedFactorAliases(parent);
-    const factorAliases = normalizedFactorAliases(
-      Array.isArray(draft.factorAliases) || draft.factorAlias
-        ? draft : {factorAliases: inheritedFactorAliases},
+    const inheritedFactorRefs = normalizedFactorRefs(parent);
+    const factorRefs = normalizedFactorRefs(
+      Array.isArray(draft.factor_candidate_refs)
+        ? draft : {factor_candidate_refs: inheritedFactorRefs},
     );
     const factorCombinationMode = combinationMode(
       Object.prototype.hasOwnProperty.call(draft, "factor_combination_mode")
         || Object.prototype.hasOwnProperty.call(draft, "factorCombinationMode")
         ? draft : parent,
     );
-    validateFactorCandidates(factorAliases, factorCombinationMode);
+    validateFactorCandidates(factorRefs, factorCombinationMode);
     const requestedName = String(draft.name || "").trim();
     // A derived strategy is its own authoring event. It may inherit the
     // parent's settings, but it must not be folded into the parent's batch.
@@ -175,9 +175,7 @@
       ...(parent.product_path_selection_id ? {
         product_path_selection_id: parent.product_path_selection_id,
       } : {}),
-      ...(parent.factorAlias ? {factorAlias: parent.factorAlias} : {}),
-      ...(parent.factorAliases ? {factorAliases: [...parent.factorAliases]} : {}),
-      factorAlias: factorAliases[0], factorAliases: [...factorAliases],
+      factor_candidate_refs: [...factorRefs],
       factor_combination_mode: factorCombinationMode,
       ...(parent.splitCount ? {splitCount: parent.splitCount} : {}),
       ...(parent.groupIndex ? {groupIndex: parent.groupIndex} : {}),
@@ -212,11 +210,10 @@
     if (index < 0) throw new Error("group not found");
     const current = state.analysis.groups[index];
     const next = mergePatch(current, patch);
-    const factorAliases = normalizedFactorAliases(next);
+    const factorRefs = normalizedFactorRefs(next);
     const factorCombinationMode = combinationMode(next);
-    validateFactorCandidates(factorAliases, factorCombinationMode);
-    next.factorAliases = factorAliases;
-    next.factorAlias = factorAliases[0];
+    validateFactorCandidates(factorRefs, factorCombinationMode);
+    next.factor_candidate_refs = factorRefs;
     next.factor_combination_mode = factorCombinationMode;
     next.needsRegenerate = true;
     if (Object.prototype.hasOwnProperty.call(patch, "name")) {

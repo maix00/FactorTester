@@ -41,12 +41,8 @@ def load_workspace_factor_summary(
         return None
     payload = orjson.loads(row["payload_json"])
     shared = payload.get("shared") if isinstance(payload, dict) else {}
-    families = (
-        shared.get("factor_families")
-        if isinstance(shared, dict) else []
-    )
     factors = shared.get("factors") if isinstance(shared, dict) else []
-    family_refs = _bounded_family_refs(families)
+    family_refs = _bounded_family_refs_from_factors(factors)
     payload_hash = hashlib.sha256(
         orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
@@ -54,28 +50,34 @@ def load_workspace_factor_summary(
         "configuration_id": str(row["configuration_id"]),
         "revision": int(row["revision"]),
         "fingerprint": payload_hash,
-        "family_count": len(families) if isinstance(families, list) else 0,
+        "family_count": len(family_refs),
         "factor_count": len(factors) if isinstance(factors, list) else 0,
         "family_refs": family_refs,
         "omitted_family_count": max(
-            (len(families) if isinstance(families, list) else 0)
-            - len(family_refs),
-            0,
+            _factor_family_count(factors) - len(family_refs), 0,
         ),
     }
 
 
-def _bounded_family_refs(value: Any) -> list[str]:
+def _factor_family_refs(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
+    return list(dict.fromkeys(
+        str(item.get("factor_family_ref") or item.get("family_ref")
+            or item.get("factor_family_alias") or "")
+        for item in value if isinstance(item, dict)
+        and str(item.get("factor_family_ref") or item.get("family_ref")
+            or item.get("factor_family_alias") or "")
+    ))
+
+
+def _factor_family_count(value: Any) -> int:
+    return len(_factor_family_refs(value))
+
+
+def _bounded_family_refs_from_factors(value: Any) -> list[str]:
     result: list[str] = []
-    for item in value:
-        alias = (
-            str(item.get("alias") or "")
-            if isinstance(item, dict) else ""
-        )
-        if not alias:
-            continue
+    for alias in _factor_family_refs(value):
         candidate = [*result, alias]
         if (
             len(candidate) > _MAX_FAMILY_REFS

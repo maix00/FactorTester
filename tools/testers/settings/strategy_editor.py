@@ -70,7 +70,7 @@ def _contract(*, application: str) -> dict[str, Any]:
                     "factor_source_selections", "factor_set_selections",
                 ],
                 "scope_fields": ["factor_candidates"],
-                "selection_fields": ["factor_selections", "factor"],
+                "selection_fields": ["factor_candidates"],
                 "set_fields": ["factor_set_selections"],
                 "candidate_kind": "factor",
             },
@@ -102,6 +102,9 @@ def _contract(*, application: str) -> dict[str, Any]:
         "scoped_fields": scoped_fields,
         "factor_scope": {
             "selection_kind": "factor",
+            "identity_field": "factor_ref",
+            "strategy_selection_field": "factor_candidate_refs",
+            "runtime_resolution_field": "factor",
             "family_kind": "factor_family",
             "inline_create": True,
         },
