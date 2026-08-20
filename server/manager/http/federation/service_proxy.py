@@ -8,6 +8,8 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+from server.manager.http.streaming import read_available
 from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.responses import json_response
 
@@ -200,7 +202,7 @@ class FederationServiceProxyRoutesMixin:
             self.end_headers()
             self.close_connection = True
             try:
-                while chunk := upstream.read(4096):
+                while chunk := read_available(upstream):
                     self.wfile.write(chunk)
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, TimeoutError):

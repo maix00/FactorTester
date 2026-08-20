@@ -17,6 +17,7 @@ from server.manager.domain.federation import (
 from server.manager.http.gateway import GatewayResponse
 from server.manager.http.job_public_projection import read_principals
 from server.manager.http.responses import json_response
+from server.manager.http.streaming import read_available
 
 
 _SERVICE_WRITE_PATTERNS = {
@@ -632,38 +633,9 @@ class JobProxyRoutesMixin:
                 self.send_header("Connection", "close")
                 self.end_headers()
                 try:
-                    event_buffer = b""
-                    while chunk := upstream.read(4096):
+                    while chunk := read_available(upstream):
                         self.wfile.write(chunk)
                         self.wfile.flush()
-                        event_buffer = (event_buffer + chunk).replace(b"\r\n", b"\n")
-                        while b"\n\n" in event_buffer:
-                            frame, event_buffer = event_buffer.split(b"\n\n", 1)
-                            data = b"\n".join(
-                                line[5:].strip()
-                                for line in frame.splitlines()
-                                if line.startswith(b"data:")
-                            )
-                            if not data:
-                                continue
-                            try:
-                                event = json.loads(data.decode("utf-8"))
-                            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
-                                continue
-                            if isinstance(event, dict):
-                                self.state.job_index.upsert(principal, [{
-                                    **event,
-                                    "job_id": str(event.get("job_id") or job_id),
-                                    "port": route.port,
-                                    "service_port": route.port,
-                                    "server_id": route.server_id,
-                                    "server_endpoint": route.endpoint,
-                                    "server_host": urlparse(route.endpoint).hostname or "",
-                                    "server_role": route.role,
-                                    "server_branch": route.branch,
-                                    "server_revision": route.revision,
-                                    "updated_at": str(event.get("updated_at") or time.time()),
-                                }], emit_events=not route.remote)
                 except (BrokenPipeError, ConnectionResetError, TimeoutError):
                     pass
                 return True
