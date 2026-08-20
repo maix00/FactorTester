@@ -134,6 +134,27 @@ def test_cc_switch_gateway_routes_upstream_through_manager_proxy(tmp_path: Path)
     assert "localhost" in plan.environment["NO_PROXY"]
 
 
+def test_cc_switch_gateway_does_not_inherit_manager_secrets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_CONTROL_DB_PASSWORD", "database-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "manager-openai-secret")
+    monkeypatch.setenv("UNRELATED_DEPLOY_TOKEN", "deployment-secret")
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    gateway = CCSwitchGateway(
+        profile_state_root=tmp_path / "profile-a",
+        provider=_provider(),
+    )
+
+    plan = gateway.plan(port=17325)
+
+    assert plan.environment["PATH"] == "/usr/local/bin:/usr/bin"
+    assert "FACTORTESTER_CONTROL_DB_PASSWORD" not in plan.environment
+    assert "OPENAI_API_KEY" not in plan.environment
+    assert "UNRELATED_DEPLOY_TOKEN" not in plan.environment
+
+
 def test_two_profile_gateways_never_share_state_ports_or_credentials(
     tmp_path: Path,
 ) -> None:

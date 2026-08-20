@@ -23,6 +23,18 @@ CC_SWITCH_PROTOCOLS = {
     "anthropic_messages": "anthropic",
 }
 
+_CC_SWITCH_ENV_ALLOWLIST = frozenset({
+    "LANG",
+    "LANGUAGE",
+    "NIX_SSL_CERT_FILE",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+})
+
 
 @dataclass(frozen=True)
 class CCSwitchGatewayPlan:
@@ -133,7 +145,11 @@ class CCSwitchGateway:
         if not 1 <= listen_port <= 65535:
             raise AgentAppServerError("CC Switch loopback port is invalid")
         executable = self.binary
-        environment = dict(os.environ)
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key in _CC_SWITCH_ENV_ALLOWLIST or key.startswith("LC_")
+        }
         environment["CC_SWITCH_CONFIG_DIR"] = str(config_root)
         # CC Switch inspects native client configuration while constructing
         # its state.  Keep even those reads and any future writes inside this
