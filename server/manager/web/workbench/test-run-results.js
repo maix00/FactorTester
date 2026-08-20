@@ -27,9 +27,9 @@
   async function ensureResultCode(state, item, rerender) {
     const descriptor = resultCode(state);
     if (!descriptor || window[descriptor.global]) return true;
-    if (!item.resultCodePromise) {
+    if (!item.resultViewerPromise) {
       item.resultCodeLoading = true;
-      item.resultCodePromise = Promise.resolve(
+      item.resultViewerPromise = Promise.resolve(
         window.FTStaticLoader?.loadGroups?.([descriptor.group]),
       )
         .then(() => {
@@ -39,6 +39,7 @@
         })
         .catch(error => {
           item.resultError = error.message || String(error);
+          item.resultViewerPromise = null;
           throw error;
         })
         .finally(() => {
@@ -47,7 +48,7 @@
         });
     }
     try {
-      await item.resultCodePromise;
+      await item.resultViewerPromise;
       return true;
     } catch (_) {
       return false;

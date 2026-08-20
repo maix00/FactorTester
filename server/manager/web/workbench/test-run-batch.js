@@ -205,9 +205,9 @@
 
   function ensureResultCode(state, item, refresh) {
     if (window.FTTestRunResults) return Promise.resolve(true);
-    if (!item.resultCodePromise) {
+    if (!item.resultBridgePromise) {
       item.resultCodeLoading = true;
-      item.resultCodePromise = Promise.resolve(
+      item.resultBridgePromise = Promise.resolve(
         window.FTTestLazyCode?.loadGroup?.("workbench-run-results"),
       )
         .then(() => {
@@ -216,6 +216,7 @@
         })
         .catch(error => {
           item.resultError = error.message || String(error);
+          item.resultBridgePromise = null;
           return false;
         })
         .finally(() => {
@@ -223,7 +224,7 @@
           refresh?.();
         });
     }
-    return item.resultCodePromise;
+    return item.resultBridgePromise;
   }
 
   function resultPanel(context, state, item, refresh) {

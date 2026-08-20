@@ -51,6 +51,20 @@
     if (!item?.jobID || !window.FTJobProgress) return null;
     const key = [item.jobID, item.portQuery || "", item.serverID || ""].join("|");
     if (!terminal.has(item.phase) && item.progressStreamClosed && item.progressView) {
+      if (!item.progressResumePending) {
+        item.progressResumePending = true;
+        queueMicrotask(async () => {
+          try {
+            await window.FTTestRunResults?.refresh(context, _state, item, rerender);
+          } finally {
+            item.progressResumePending = false;
+            if (!terminal.has(item.phase)) {
+              item.progressStreamClosed = false;
+              rerender?.();
+            }
+          }
+        });
+      }
       return item.progressView.root;
     }
     if (!terminal.has(item.phase) && item.progressViewKey === key && item.progressView) {

@@ -1617,6 +1617,17 @@ def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
+    batch_source = (
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-run-batch.js"
+    ).read_text(encoding="utf-8")
+    result_source = (
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-run-results.js"
+    ).read_text(encoding="utf-8")
+    assert "item.resultBridgePromise" in batch_source
+    assert "item.resultViewerPromise" in result_source
+    assert "item.resultCodePromise" not in batch_source
+    assert "item.resultCodePromise" not in result_source
+
 
 def test_test_run_progress_finishes_and_refreshes_terminal_results() -> None:
     import subprocess
