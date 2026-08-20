@@ -8,6 +8,8 @@ from collections.abc import Callable, Mapping
 class AgentProviderProxyUnavailable(RuntimeError):
     """A Provider requires the Manager proxy, but it is not available."""
 
+    code = "proxy_unavailable"
+
 
 def resolve_provider_proxy(
     provider: Mapping[str, object],

@@ -597,7 +597,7 @@ class AgentProfileService:
                 self.proxy_url_provider,
             )
         except AgentProviderProxyUnavailable as exc:
-            raise ProviderStoreError(str(exc)) from exc
+            raise ProviderStoreError(str(exc), code=exc.code) from exc
         if proxy_url:
             return AgentProviderHealth.test(candidate, proxy_url=proxy_url)
         return AgentProviderHealth.test(candidate)

@@ -347,7 +347,7 @@ def test_provider_test_fails_when_required_manager_proxy_is_unavailable(
         proxy_url_provider=lambda: "",
     )
 
-    with pytest.raises(ProviderStoreError, match="Manager network proxy is unavailable"):
+    with pytest.raises(ProviderStoreError, match="Manager network proxy is unavailable") as error:
         service.test_provider(
             PRINCIPAL,
             {
@@ -360,6 +360,7 @@ def test_provider_test_fails_when_required_manager_proxy_is_unavailable(
                 "token": "secret-token",
             },
         )
+    assert error.value.code == "proxy_unavailable"
     assert called is False
 
 

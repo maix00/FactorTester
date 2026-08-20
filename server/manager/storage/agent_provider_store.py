@@ -35,6 +35,10 @@ SUPPORTED_NETWORK_ROUTES = frozenset({"direct", "manager_proxy"})
 class ProviderStoreError(ValueError):
     """A provider connection cannot be created or used safely."""
 
+    def __init__(self, message: str, *, code: str = "agent_request_invalid") -> None:
+        super().__init__(message)
+        self.code = str(code or "agent_request_invalid")
+
 
 class AgentProviderStore:
     """Persist provider metadata and encrypted tokens in local SQLite."""

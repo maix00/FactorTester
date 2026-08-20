@@ -606,6 +606,37 @@ def test_agent_routes_require_account_session_and_never_return_provider_token(tm
     assert '"token":' not in json.dumps(duplicate_response)
 
 
+def test_provider_test_route_classifies_unavailable_required_proxy(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        proxy_url_provider=lambda: "",
+    )
+    handler = _AgentRouteHandler(
+        service,
+        session={"username": PRINCIPAL, "role": "user"},
+        payload={
+            "label": "provider",
+            "runtime_kind": "server",
+            "protocol": "openai_responses",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "model",
+            "network_route": "manager_proxy",
+            "token": "hidden-token",
+        },
+    )
+
+    assert handler._post_agent_routes(
+        urlparse("/api/client/agent-models/test"),
+    ) is True
+    response = _route_payload(handler)
+
+    assert handler.response_status == 400
+    assert response["code"] == "proxy_unavailable"
+
+
 def test_agent_provider_listing_never_contacts_upstream_providers(
     tmp_path,
     monkeypatch,

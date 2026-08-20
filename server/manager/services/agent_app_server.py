@@ -78,7 +78,7 @@ class AgentAppServerSupervisor:
                     self.proxy_url_provider,
                 )
             except AgentProviderProxyUnavailable as exc:
-                raise AgentAppServerError(str(exc)) from exc
+                raise AgentAppServerError(str(exc), code=exc.code) from exc
             session = AgentAppServerSession(
                 runtime=context["skill_runtime"],
                 provider=context["provider"],
