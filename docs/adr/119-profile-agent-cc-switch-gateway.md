@@ -1,4 +1,4 @@
-# ADR 118: Profile Agent 通过 CC Switch CLI 适配 Provider 协议
+# ADR 119: Profile Agent 通过 CC Switch CLI 适配 Provider 协议
 
 ## 状态
 
