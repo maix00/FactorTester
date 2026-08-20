@@ -87,6 +87,7 @@
     isRouteCurrent: () => routeToken === activeRouteToken,
     languagePreference: state.languagePreference,
     setLanguagePreference,
+    checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
   });
 
   async function setLanguagePreference(language) {
@@ -352,6 +353,7 @@
   const auth = FTAuth.bind({
     state, api, t, loadLanguage, loadModules, renderRoute, appContext, navigate,
     refreshAfterSessionChange,
+    checkpointActiveSession: tabs.checkpointActiveSession,
     renderReport: publicationID => report(publicationID),
   });
   const openLogin = auth.openLogin;
@@ -426,6 +428,10 @@
   });
 
   window.addEventListener("popstate", renderRoute);
+  window.addEventListener("pagehide", () => tabs.checkpointActiveSession());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") tabs.checkpointActiveSession();
+  });
 
   (async () => {
     await restoreSession();

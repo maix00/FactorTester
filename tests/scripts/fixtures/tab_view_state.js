@@ -15,6 +15,7 @@ class FakeElement {
     this.textContent = "";
     this.value = "";
     this.parentNode = null;
+    this.controls = [];
   }
 
   get firstChild() { return this.children[0] || null; }
@@ -38,7 +39,21 @@ class FakeElement {
     if (selector === "[data-ft-rerender-on-tab-restore]") return null;
     return new FakeElement();
   }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) {
+    if (selector.includes("input") || selector.includes("data-ft-scroll-state")) {
+      const nested = [];
+      const visit = node => {
+        node.children?.forEach(child => {
+          if (["INPUT", "TEXTAREA", "SELECT", "DETAILS"].includes(child.tagName)
+              || child.dataset?.ftScrollState !== undefined) nested.push(child);
+          visit(child);
+        });
+      };
+      visit(this);
+      return nested.length ? nested : this.controls;
+    }
+    return [];
+  }
   addEventListener() {}
   setAttribute() {}
   removeAttribute(name) { if (name === "open") this.open = false; }
@@ -136,6 +151,8 @@ tabs.setWorkspace(workspace);
 
 const input = new FakeElement("input");
 input.value = "draft value";
+input.name = "factor_alias";
+content.controls = [input];
 content.append(input);
 title.textContent = "原始页面";
 const dialog = new FakeElement("dialog");
@@ -145,6 +162,7 @@ dialogs.push(dialog);
 
 tabs.navigate("/products/product/A.DCE");
 assert.strictEqual(renderCount, 1);
+
 assert.strictEqual(dialog.hidden, true);
 assert.strictEqual(dialog.open, false);
 assert.notStrictEqual(state.activeTabID, "home");
@@ -205,4 +223,31 @@ restoredTabs.setWorkspace(workspace);
 restoredTabs.initializeTabs(workspace.restore());
 assert(restoredState.tabs.some(tab => tab.path === "/products/product/D.DCE"));
 assert.strictEqual(restoredState.activeTabID, persistedActiveTabID);
+
+// Cold restoration identifies controls by a stable semantic key rather than
+// their DOM index. Lazy rendering may insert a new control before the saved
+// field between capture and restore.
+tabs.navigate("/products/product/KEYED-A.DCE");
+const keyedTabID = state.activeTabID;
+const keyed = new FakeElement("input");
+keyed.name = "factor_alias";
+keyed.value = "persist me";
+content.replaceChildren(keyed);
+content.controls = [keyed];
+tabs.navigate("/products/product/KEYED-B.DCE");
+state.tabSessions.get(keyedTabID).view.lastUsedAt = 1;
+tabs.navigate("/products/product/KEYED-C.DCE");
+tabs.navigate("/products/product/KEYED-D.DCE");
+const keyedSession = state.tabSessions.get(keyedTabID);
+assert(keyedSession.view?.coldKey);
+const inserted = new FakeElement("input");
+inserted.name = "lazy_control";
+const rerendered = new FakeElement("input");
+rerendered.name = "factor_alias";
+tabs.activateTab(keyedTabID);
+content.replaceChildren(inserted, rerendered);
+content.controls = [inserted, rerendered];
+tabs.markActiveViewReady();
+assert.strictEqual(inserted.value, "");
+assert.strictEqual(rerendered.value, "persist me");
 console.log("ok");

@@ -447,6 +447,7 @@
     const durable = context.tabSession.durable || (context.tabSession.durable = {});
     durable.testDrafts = durable.testDrafts || {};
     durable.testDrafts[state.kind] = FTTestState.draftSnapshot(state);
+    context.checkpointTabSession?.();
     installRunToolbar(context, state, () => render(context, state));
     if (!window.FTTestRunBatch && !state.runBatchCode?.error) {
       // The header owns the run actions. Load their small controller lazily;

@@ -27,6 +27,7 @@
     }
 
     async function logout() {
+      context.checkpointActiveSession?.();
       try { await api("/auth/logout", {method: "POST"}); } catch (_) {}
       localStorage.removeItem("ft-session");
       sessionStorage.removeItem("ft-session");
@@ -69,6 +70,7 @@
             password: document.querySelector("#password").value,
           }),
         });
+        context.checkpointActiveSession?.();
         state.token = result.token; state.session = result;
         const storage = document.querySelector("#keep-login").checked
           ? localStorage : sessionStorage;
@@ -116,6 +118,7 @@
             organization_id: document.querySelector("#register-organization").value,
           }),
         });
+        context.checkpointActiveSession?.();
         state.token = result.token; state.session = result;
         localStorage.setItem("ft-session", result.token);
         nativeAuthentication("session-updated");

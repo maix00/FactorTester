@@ -4,17 +4,34 @@
       state, embeddedPresentation, t, renderRoute,
       modulePath, isPinnedPath, titleForPath, tabIcon,
       content, title, eyebrow, toolbar, notice, beforeTabChange,
+      liveViewLimit,
     } = options;
     let workspace = null;
+    let checkpointTimer = null;
     const viewCache = window.FTTabViewCache.create({
       state, content, title, eyebrow, toolbar, notice,
       persistSession: (tabID, value) => workspace?.saveSession?.(tabID, value),
       restoreSession: tabID => workspace?.restoreSession?.(tabID),
       removeSession: tabID => workspace?.removeSession?.(tabID),
+      liveViewLimit,
     });
 
     function checkpointWorkspace() {
       workspace?.save?.({tabs: state.tabs, activeTabID: state.activeTabID});
+    }
+
+    function checkpointActiveSession() {
+      if (checkpointTimer) {
+        clearTimeout(checkpointTimer);
+        checkpointTimer = null;
+      }
+      viewCache.checkpointActiveSession();
+      checkpointWorkspace();
+    }
+
+    function scheduleActiveSessionCheckpoint() {
+      if (checkpointTimer) clearTimeout(checkpointTimer);
+      checkpointTimer = setTimeout(checkpointActiveSession, 250);
     }
 
     function setWorkspace(value) {
@@ -347,6 +364,7 @@
       renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
       updateActiveTab, discardViews, initializeTabs, currentTabContext,
       detailTabIDForPath, checkpointWorkspace, setWorkspace,
+      checkpointActiveSession, scheduleActiveSessionCheckpoint,
     };
   }
 
