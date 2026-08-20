@@ -93,9 +93,16 @@
       runValues: state?.runValues || {},
       outputRequests: state?.outputRequests || [],
       transientFactorSources: state?.transientFactorSources || [],
+      transientFactorFamilies: state?.transientFactorFamilies || [],
       transientStrategySources: state?.transientStrategySources || [],
       strategySpecs: state?.strategySpecs || [],
+      strategyInspections: state?.strategyInspections || [],
+      runInputDependencies: state?.runInputDependencies || [],
+      customStrategyOverrides: state?.customStrategyOverrides || {},
+      customStrategyMountedTabs: state?.customStrategyMountedTabs || [],
+      customStrategyProductMask: state?.customStrategyProductMask || [],
       settingsMountedTabs: state?.settingsMountedTabs || [],
+      groups: state?.groups || [],
       group: groupInput(group),
     };
     // IC and factor-evaluation analysis is rebuilt per task from the group.

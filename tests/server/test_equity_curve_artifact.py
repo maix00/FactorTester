@@ -122,8 +122,13 @@ def test_report_generation_owns_the_terminal_progress_tail(tmp_path) -> None:
         item["data"]["phases"] for item in events
         if item.get("event") == "activity_manifest"
     )
-    assert [item["key"] for item in manifest][-2:] == [
-        "report_build", "artifact_publish",
+    assert [item["key"] for item in manifest] == [
+        "pre_replay", "event_replay", "post_replay",
+    ]
+    post_replay = manifest[-1]
+    assert post_replay["weight"] == 20.0
+    assert [item["flow_key"] for item in post_replay["flows"]][-2:] == [
+        "build_requested_outputs", "publish_artifacts",
     ]
     engine_done = next(
         item["data"] for item in events
@@ -135,13 +140,25 @@ def test_report_generation_owns_the_terminal_progress_tail(tmp_path) -> None:
         item["data"]["phase"] for item in events
         if item.get("event") == "activity"
     ]
-    assert stages[-2:] == ["report_build", "artifact_publish"]
+    assert stages[-2:] == ["post_replay", "post_replay"]
+    output_flows = [
+        item["data"]["flow_key"] for item in events
+        if item.get("event") == "activity"
+        and item["data"].get("flow_key") in {
+            "build_requested_outputs", "publish_artifacts",
+        }
+    ]
+    assert output_flows == ["build_requested_outputs", "publish_artifacts"]
     tail = [
         item["data"] for item in events
         if item.get("event") == "progress"
-        and item["data"].get("phase") in {"report_build", "artifact_publish"}
+        and item["data"].get("phase") == "post_replay"
     ]
-    assert tail[-1]["phase"] == "artifact_publish"
+    assert all(item["percent_scope"] == "global" for item in tail)
+    assert [item["percent"] for item in tail] == sorted(
+        item["percent"] for item in tail
+    )
+    assert tail[-1]["percent"] == 100.0
     assert tail[-1]["completed"] == tail[-1]["total"]
     assert events[-1]["event"] == "result"
 

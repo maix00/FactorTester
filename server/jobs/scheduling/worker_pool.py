@@ -41,31 +41,28 @@ class WorkerUnavailable(RuntimeError):
 
 
 _EXECUTION_PROGRESS_SHARE = 85.0
+_REPORT_BUILD_PROGRESS_SHARE = 10.0
+_ARTIFACT_PUBLISH_PROGRESS_SHARE = 5.0
+_ARTIFACT_PUBLISH_PROGRESS_START = (
+    _EXECUTION_PROGRESS_SHARE + _REPORT_BUILD_PROGRESS_SHARE
+)
 _PROGRESS_PHASE_WEIGHTS = {
     "pre_replay": 5.0,
     "event_replay": 75.0,
-    "post_replay": 5.0,
+    # Native post-replay work owns the first 5%; result derivation and
+    # artifact publication continue in this same semantic phase for 15%.
+    "post_replay": 20.0,
 }
-_OUTPUT_PROGRESS_PHASES = (
+_OUTPUT_PROGRESS_FLOWS = (
     {
-        "key": "report_build",
-        "label": "结果派生与编码",
-        "weight": 10.0,
-        "flows": [{
-            "flow_key": "build_requested_outputs",
-            "flow_label": "构建所选结果",
-            "display_order": 1,
-        }],
+        "flow_key": "build_requested_outputs",
+        "flow_label": "构建所选结果",
+        "display_order": 10_000,
     },
     {
-        "key": "artifact_publish",
-        "label": "生成物登记",
-        "weight": 5.0,
-        "flows": [{
-            "flow_key": "publish_artifacts",
-            "flow_label": "写入并登记生成物",
-            "display_order": 1,
-        }],
+        "flow_key": "publish_artifacts",
+        "flow_label": "写入并登记生成物",
+        "display_order": 10_001,
     },
 )
 
@@ -167,9 +164,29 @@ class _WorkerSink:
             phase.setdefault("weight", _PROGRESS_PHASE_WEIGHTS.get(key, 1.0))
             declared.append(phase)
             seen.add(key)
-        for raw in _OUTPUT_PROGRESS_PHASES:
-            if raw["key"] not in seen:
-                declared.append({**raw, "flows": [dict(item) for item in raw["flows"]]})
+        post_replay = next(
+            (phase for phase in declared if phase["key"] == "post_replay"),
+            None,
+        )
+        if post_replay is None:
+            post_replay = {
+                "key": "post_replay",
+                "label": "结果整理",
+                "weight": _PROGRESS_PHASE_WEIGHTS["post_replay"],
+                "flows": [],
+            }
+            declared.append(post_replay)
+        post_replay["weight"] = _PROGRESS_PHASE_WEIGHTS["post_replay"]
+        flows = list(post_replay.get("flows") or [])
+        flow_keys = {
+            str(item.get("flow_key") or item.get("key") or "")
+            for item in flows
+        }
+        flows.extend(
+            dict(item) for item in _OUTPUT_PROGRESS_FLOWS
+            if item["flow_key"] not in flow_keys
+        )
+        post_replay["flows"] = flows
         self._emit("activity_manifest", {"phases": declared})
 
     def emit_activity(self, **payload: Any) -> None:
@@ -238,8 +255,8 @@ class _WorkerSink:
         merged_source = dict(self._source_payloads)
         merged_source.update(source or {})
         self.emit_activity(
-            phase="report_build",
-            phase_label="结果派生与编码",
+            phase="post_replay",
+            phase_label="结果整理",
             flow_key="build_requested_outputs",
             flow_label="构建所选结果",
             message=f"正在派生并编码 {len(requested)} 项所选结果",
@@ -248,15 +265,19 @@ class _WorkerSink:
         def report_progress(completed: int, total: int, name: str) -> None:
             label = str(OUTPUT_DEFINITIONS.get(name, {}).get("label") or name)
             self.emit_activity(
-                phase="report_build",
-                phase_label="结果派生与编码",
+                phase="post_replay",
+                phase_label="结果整理",
                 flow_key="build_requested_outputs",
                 flow_label="构建所选结果",
                 message=f"已构建 {label}",
             )
+            percent = (
+                _EXECUTION_PROGRESS_SHARE
+                + completed / max(1, total) * _REPORT_BUILD_PROGRESS_SHARE
+            )
             self.emit_progress(
-                completed, max(1, total), "report_build",
-                percent_scope="phase",
+                completed, max(1, total), "post_replay",
+                percent=percent, percent_scope="global",
                 message=f"已构建 {completed}/{total} 项结果：{label}",
             )
 
@@ -272,8 +293,8 @@ class _WorkerSink:
         bundles = bundle_reports(reports)
         publish_total = len(reports) + len(bundles) + int(retain_result)
         self.emit_activity(
-            phase="artifact_publish",
-            phase_label="生成物登记",
+            phase="post_replay",
+            phase_label="结果整理",
             flow_key="publish_artifacts",
             flow_label="写入并登记生成物",
             message=f"正在写入并登记 {publish_total} 项生成物",
@@ -288,8 +309,13 @@ class _WorkerSink:
             )
             published += 1
             self.emit_progress(
-                published, max(1, publish_total), "artifact_publish",
-                percent_scope="phase",
+                published, max(1, publish_total), "post_replay",
+                percent=(
+                    _ARTIFACT_PUBLISH_PROGRESS_START
+                    + published / max(1, publish_total)
+                    * _ARTIFACT_PUBLISH_PROGRESS_SHARE
+                ),
+                percent_scope="global",
                 message=f"已登记 {published}/{publish_total} 项生成物",
             )
         for bundle in bundles:
@@ -301,21 +327,31 @@ class _WorkerSink:
             )
             published += 1
             self.emit_progress(
-                published, max(1, publish_total), "artifact_publish",
-                percent_scope="phase",
+                published, max(1, publish_total), "post_replay",
+                percent=(
+                    _ARTIFACT_PUBLISH_PROGRESS_START
+                    + published / max(1, publish_total)
+                    * _ARTIFACT_PUBLISH_PROGRESS_SHARE
+                ),
+                percent_scope="global",
                 message=f"已登记 {published}/{publish_total} 项生成物",
             )
         if retain_result:
             self._write_artifact("result", data)
             published += 1
             self.emit_progress(
-                published, max(1, publish_total), "artifact_publish",
-                percent_scope="phase",
+                published, max(1, publish_total), "post_replay",
+                percent=(
+                    _ARTIFACT_PUBLISH_PROGRESS_START
+                    + published / max(1, publish_total)
+                    * _ARTIFACT_PUBLISH_PROGRESS_SHARE
+                ),
+                percent_scope="global",
                 message=f"已登记 {published}/{publish_total} 项生成物",
             )
         if publish_total == 0:
             self.emit_progress(
-                1, 1, "artifact_publish", percent_scope="phase",
+                1, 1, "post_replay", percent=100.0, percent_scope="global",
                 message="无需生成额外文件",
             )
         self._flush_live_events()
