@@ -228,6 +228,16 @@ def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp
     child = "GTHT@child@100000000002"
     store = AgentConversationStore(tmp_path / "manager.sqlite")
     conversation = store.create(child, "child-profile")
+    store.update_runtime_observation(
+        child,
+        "child-profile",
+        conversation["conversation_id"],
+        actual_model="research-model",
+        model_context_window=200000,
+        total_tokens=45000,
+        last_tokens=12000,
+        compaction_count=1,
+    )
     client = FakeClientState({child: [_profile(child, "child-profile")]})
     agent = FakeAgentProfiles(store, items={(
         child, "child-profile", conversation["conversation_id"],
@@ -246,6 +256,14 @@ def test_conversation_visibility_is_automatic_for_direct_parent(monkeypatch, tmp
     assert service.can_view_conversations(parent, child, {"conversation_sharing": False})
     store.set_parent_sharing(child, "child-profile", True)
     assert service.can_view_conversations(parent, child, {"conversation_sharing": True})
+    conversations = service.conversations(
+        parent,
+        "local-1::GTHT@child@100000000002::child-profile",
+        scope="subordinates",
+    )
+    assert conversations[0]["actual_model"] == "research-model"
+    assert conversations[0]["model_context_window"] == 200000
+    assert conversations[0]["last_tokens"] == 12000
     items = service.conversation_items(
         parent,
         "local-1::GTHT@child@100000000002::child-profile",

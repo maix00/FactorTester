@@ -239,6 +239,7 @@
     };
     const processPayload = payload => {
       if (!eventBelongsToCurrentTurn(state, payload)) return;
+      state.runtimeObserver?.(payload);
       const method = P.rawMethod(payload);
       const delta = P.agentMessageDelta(payload);
       const structuredItem = payload?.chatkit_item;

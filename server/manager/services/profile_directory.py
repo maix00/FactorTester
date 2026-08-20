@@ -673,6 +673,9 @@ class ProfileDirectoryService:
             for key in (
                 "conversation_id", "profile_id", "title", "preview",
                 "created_at", "updated_at", "active",
+                "model_id", "reasoning_effort", "service_tier",
+                "actual_model", "model_context_window", "total_tokens",
+                "last_tokens", "compaction_count",
             )
             if key in value
         } | {"read_only": bool(read_only)}

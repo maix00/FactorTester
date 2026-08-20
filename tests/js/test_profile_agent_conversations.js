@@ -47,17 +47,23 @@ async function main() {
   const state = window.FTProfileChatKitConversations.profileStateFor(
     profile, context, [],
   );
+  let selected = "";
+  state.onConversationChange = conversation => {
+    selected = conversation.conversationID;
+  };
   const first = window.FTProfileChatKitConversations.loadConversations(state);
   const second = window.FTProfileChatKitConversations.loadConversations(state);
   assert.equal(calls, 1, "concurrent history reads must share one request");
   release({conversations});
   await Promise.all([first, second]);
   assert.equal(state.selectedID, "conversation-a");
+  assert.equal(selected, "conversation-a");
 
   await window.FTProfileChatKitConversations.getConversation(
     state, "conversation-b", false,
   );
   assert.equal(state.selectedID, "conversation-b");
+  assert.equal(selected, "conversation-b");
 
   window.FTProfileChatKitConversations.dispose(state, () => {});
   const remounted = window.FTProfileChatKitConversations.profileStateFor(

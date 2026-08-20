@@ -35,12 +35,20 @@
     const skills = options.readOnly || options.historyOnly
       ? [] : await loadSkills(context, profile);
     await window.FTProfileChatKit.load();
+    if (!window.FTProfileAgentRuntimeControls) {
+      throw new Error(context.t("Agent 运行设置组件尚未加载"));
+    }
+    const runtimeControls = window.FTProfileAgentRuntimeControls.create(
+      profile, context, {readOnly: Boolean(options.readOnly)},
+    );
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
       readOnly: Boolean(options.readOnly),
       profileKey: options.profileKey,
       profileScope: options.profileScope,
       historyOnly: Boolean(options.historyOnly),
+      onConversationChange: runtimeControls.setConversation,
+      onRuntimeEvent: runtimeControls.observeEvent,
     });
     const viewActions = document.createElement("div");
     viewActions.className = "settings-inline-actions profile-agent-message-view";
@@ -112,7 +120,7 @@
     };
     resultsView.onclick = () => mountView("results");
     processView.onclick = () => mountView("process");
-    host.replaceChildren(viewActions, chatSlot);
+    host.replaceChildren(runtimeControls.element, viewActions, chatSlot);
     mountView("results");
     if (options.readOnly) {
       const composerNote = document.createElement("div");
@@ -124,7 +132,11 @@
       );
       host.append(composerNote);
     }
-    return {adapter, get chat() { return chat; }};
+    return {
+      adapter,
+      runtimeControls,
+      get chat() { return chat; },
+    };
   }
 
   async function render(context, profile, options = {}) {
@@ -197,6 +209,7 @@
 
     function disposeChat() {
       mounted?.adapter.dispose();
+      mounted?.runtimeControls.dispose();
       mounted = null;
       host.replaceChildren();
     }
