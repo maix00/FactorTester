@@ -902,7 +902,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-run-batch", "workbench-input-state", "workbench-run-submit",
     ]
     assert manifest["group_dependencies"]["workbench-run-results"] == [
-        "workbench-run", "jobs",
+        "workbench-run", "job-detail-core",
     ]
     assert set(manifest["groups"]["workbench-run"]) == {
         "workbench/test-run-fields.js",

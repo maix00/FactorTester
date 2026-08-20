@@ -226,9 +226,10 @@ matrix summary, batch model, and view, depends on it and on the product adapter,
 and is requested only when a saved or newly selected product path creates an
 actual task batch. `workbench-run-batch-actions` depends on that view and on
 `workbench-input-state`; it is requested only by the explicit preview/run
-action seam. `workbench-run-results` depends on `workbench-run` and contains only
-the submitted-Job result bridge, loaded after a Job exists rather than while the
-empty run panel is first painted. The backtest `FTTabListChip`
+action seam. `workbench-run-results` depends on `workbench-run` and
+`job-detail-core`: its submitted-Job result bridge reuses the same detail loader
+as the independent Job page. It is loaded after a Job exists rather than while
+the empty run panel is first painted. The backtest `FTTabListChip`
 and strategy editors belong to
 `workbench-backtest`, which is loaded only after the strategy-list tab is
 opened, rather than being pulled into every IC or factor-evaluation page.
