@@ -45,9 +45,10 @@ assert.deepStrictEqual(state.testRunBatch, []);
 assert.deepStrictEqual(state.runValues, {retention_mode: "summary"});
 assert.strictEqual(state.values, null);
 assert.strictEqual(state.settingsInitialized, false);
-assert.deepStrictEqual(removed, ["ft-backtest-workspace"]);
+assert.deepStrictEqual(removed, []);
 
 state.analysis = {groups: [{id: "restored"}]};
+state.workspace = {workspace_id: "workspace-tab-a"};
 state.values = {factor_candidates: [{factor_ref: "factor-restored"}]};
 state.settingsMountedTabs = ["factor"];
 state.settingsTabKey = "factor";
@@ -55,7 +56,13 @@ const snapshot = window.FTTestState.draftSnapshot(state);
 state.analysis = {};
 state.values = null;
 assert.strictEqual(window.FTTestState.restoreDraft(state, snapshot), true);
+assert.strictEqual(snapshot.schemaVersion, 2);
+assert.strictEqual(snapshot.workspaceID, "workspace-tab-a");
+assert.strictEqual(state.restoredWorkspaceID, "workspace-tab-a");
 assert.deepStrictEqual(state.analysis, {groups: [{id: "restored"}]});
 assert.deepStrictEqual(state.values, {factor_candidates: [{factor_ref: "factor-restored"}]});
 assert.strictEqual(state.settingsInitialized, false);
+assert.strictEqual(window.FTTestState.restoreDraft(state, {
+  schemaVersion: 1, kind: "backtest", values: {},
+}), false);
 console.log("ok");

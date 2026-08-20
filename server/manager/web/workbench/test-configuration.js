@@ -116,7 +116,6 @@
       method: "POST", body: JSON.stringify(body),
     });
     state.workspace = value.workspace;
-    localStorage.setItem(`ft-${state.kind}-workspace`, state.workspace.workspace_id);
     return state.workspace;
   }
 

@@ -5,6 +5,7 @@
       modulePath, isPinnedPath, titleForPath, tabIcon,
       content, title, eyebrow, toolbar, notice, beforeTabChange,
       liveViewLimit,
+      onTabClosed,
     } = options;
     let workspace = null;
     let checkpointTimer = null;
@@ -94,8 +95,11 @@
       if (index < 0) return;
       if (state.activeTabID === tabID) viewCache.saveActiveTabSession();
       else viewCache.discardView(tabID);
+      const closingTab = state.tabs[index];
+      const closingSession = state.tabSessions.get(tabID) || null;
       state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
       workspace?.removeSession?.(tabID);
+      Promise.resolve(onTabClosed?.(closingTab, closingSession)).catch(() => {});
       if (state.activeTabID !== tabID) {
         renderOpenedTabs();
         checkpointWorkspace();

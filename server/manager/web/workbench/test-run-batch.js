@@ -106,7 +106,11 @@
       ? context.t("运行当前测试配置下的全部任务")
       : missingScopeMessage(context, state);
     const clearButton = context.button(context.t("清空"), () => {
-      window.FTTests?.clearDraft?.(context, state, refresh);
+      void Promise.resolve(
+        window.FTTests?.clearDraft?.(context, state, refresh),
+      ).catch(error => {
+        context.showNotice?.(`${context.t("清空测试配置失败")}: ${error.message}`, true);
+      });
     }, context.t("清空当前测试配置，不删除模板、已提交任务或生成物"));
     clearButton.className = "test-workbench-header-action";
     return [runSpecButton, runButton, clearButton];
