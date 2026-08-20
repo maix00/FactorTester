@@ -32,34 +32,29 @@
     if (!window.FTProfileChatKit) {
       throw new Error(context.t("Agent 对话组件尚未加载"));
     }
-    const skills = options.readOnly ? [] : await loadSkills(context, profile);
+    const skills = options.readOnly || options.historyOnly
+      ? [] : await loadSkills(context, profile);
     await window.FTProfileChatKit.load();
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
       readOnly: Boolean(options.readOnly),
       profileKey: options.profileKey,
       profileScope: options.profileScope,
+      historyOnly: Boolean(options.historyOnly),
     });
-    const chat = document.createElement("openai-chatkit");
-    chat.className = "profile-chatkit";
-    chat.addEventListener("chatkit.ready", () => {
-      status.textContent = context.t("Agent 对话已连接");
-      if (options.readOnly && typeof chat.showHistory === "function") {
-        // Read-only entry is a history-list entry point, not a new-thread
-        // entry point.  ChatKit owns the list and will open a thread only
-        // after the viewer selects one.
-        Promise.resolve(chat.showHistory()).catch(error => {
-          status.textContent = `${context.t("历史会话读取失败")}: ${
-            error?.message || context.t("请重试")}`;
-        });
-      }
-    });
-    chat.addEventListener("chatkit.error", event => {
-      const error = event.detail?.error;
-      status.textContent = `${context.t("Agent 对话发生错误")}: ${
-        error?.message || context.t("请检查 Agent 状态")}`;
-    });
-    chat.setOptions({
+    const viewActions = document.createElement("div");
+    viewActions.className = "settings-inline-actions profile-agent-message-view";
+    const resultsView = document.createElement("button");
+    const processView = document.createElement("button");
+    resultsView.type = processView.type = "button";
+    resultsView.textContent = context.t("结果");
+    processView.textContent = context.t("过程");
+    viewActions.append(resultsView, processView);
+    const chatSlot = document.createElement("div");
+    chatSlot.className = "profile-chatkit-slot";
+    let chat = null;
+
+    const configureChat = target => target.setOptions({
       api: {
         // ChatKit is the UI protocol only. The Manager adapter owns the
         // Profile-scoped thread catalog and provider-thread mapping.
@@ -68,13 +63,8 @@
         fetch: adapter.fetch,
       },
       locale: adapter.locale || locale(context),
-      // Reuse ChatKit's built-in history view. Its thread operations are
-      // served by chatkit-adapter.js and filtered by the Manager API.
       history: {enabled: true},
-      // Do not restore or create a thread while entering read-only mode.  The
-      // history view opened above is the first screen; selecting a row then
-      // asks the adapter for that specific locked thread.
-      ...(options.readOnly ? {initialThread: null} : {}),
+      ...(options.readOnly || options.historyOnly ? {initialThread: null} : {}),
       header: {
         enabled: true,
         title: {enabled: true, text: context.t("研究身份 Agent")},
@@ -91,7 +81,39 @@
         attachments: {enabled: false},
       },
     });
-    host.replaceChildren(chat);
+
+    const mountView = view => {
+      adapter.setItemView(view);
+      resultsView.className = view === "results" ? "primary" : "secondary";
+      processView.className = view === "process" ? "primary" : "secondary";
+      const target = document.createElement("openai-chatkit");
+      target.className = "profile-chatkit";
+      target.addEventListener("chatkit.ready", () => {
+        status.textContent = context.t("Agent 对话已连接");
+        if ((options.readOnly || options.historyOnly)
+            && typeof target.showHistory === "function") {
+        // Read-only entry is a history-list entry point, not a new-thread
+        // entry point.  ChatKit owns the list and will open a thread only
+        // after the viewer selects one.
+          Promise.resolve(target.showHistory()).catch(error => {
+            status.textContent = `${context.t("历史会话读取失败")}: ${
+              error?.message || context.t("请重试")}`;
+          });
+        }
+      });
+      target.addEventListener("chatkit.error", event => {
+        const error = event.detail?.error;
+        status.textContent = `${context.t("Agent 对话发生错误")}: ${
+          error?.message || context.t("请检查 Agent 状态")}`;
+      });
+      configureChat(target);
+      chat = target;
+      chatSlot.replaceChildren(target);
+    };
+    resultsView.onclick = () => mountView("results");
+    processView.onclick = () => mountView("process");
+    host.replaceChildren(viewActions, chatSlot);
+    mountView("results");
     if (options.readOnly) {
       const composerNote = document.createElement("div");
       composerNote.className = "profile-chatkit-readonly-composer";
@@ -102,7 +124,7 @@
       );
       host.append(composerNote);
     }
-    return {adapter, chat};
+    return {adapter, get chat() { return chat; }};
   }
 
   async function render(context, profile, options = {}) {
@@ -142,11 +164,6 @@
       ));
       return root;
     }
-    if (!profile.active_claim) {
-      root.append(message(context, "请先认领这个服务器 Profile"));
-      return root;
-    }
-
     const note = document.createElement("p");
     note.className = "settings-muted";
     note.textContent = context.t(
@@ -195,12 +212,16 @@
       );
       if (!isCurrent()) return;
       running = Boolean(payload.status?.running);
-      start.disabled = running;
+      start.disabled = running || !profile.active_claim;
       stop.disabled = !running;
       if (!running) {
         disposeChat();
-        host.append(message(context, "Agent 尚未启动"));
-        status.textContent = context.t("Agent 尚未启动");
+        status.textContent = context.t(profile.active_claim
+          ? "Agent 尚未启动；历史会话仍可读取"
+          : "请先认领这个服务器 Profile；历史会话仍可读取");
+        mounted = await mountChatKit(
+          context, profile, host, status, {...options, historyOnly: true},
+        );
         return;
       }
       if (mounted) return;
@@ -217,6 +238,10 @@
           method: "POST",
           body: JSON.stringify({profile_id: profile.profile_id}),
         });
+        // Replace the locked history-only adapter with the live adapter after
+        // the Agent starts; keeping the old custom element would leave the
+        // composer intentionally disabled.
+        disposeChat();
         await refreshStatus();
       } catch (error) {
         status.textContent = `${context.t("Agent 启动失败")}: ${error.message || ""}`;

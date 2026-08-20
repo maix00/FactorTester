@@ -11,6 +11,7 @@ from server.manager.services.agent_app_server import (
     AgentAppServerError,
     AgentAppServerSupervisor,
 )
+from server.manager.services.provider_thread_chatkit import provider_item
 
 
 _SENSITIVE_EVENT_KEYS = frozenset({
@@ -115,6 +116,7 @@ class AgentAppServerRoutesMixin:
             "/api/client/profile-agent",
             "/api/client/profile-agent/events",
             "/api/client/profile-agent/conversations",
+            "/api/client/profile-agent/conversation-items",
         }:
             return False
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -142,6 +144,28 @@ class AgentAppServerRoutesMixin:
                             principal, identifier,
                         )
                     ],
+                })
+                return True
+            if parsed.path.endswith("/conversation-items"):
+                conversation_id = str(
+                    query.get("conversation_id", [""])[0] or ""
+                ).strip()
+                limit = int(query.get("limit", ["10"])[0] or 10)
+                after_cursor = str(query.get("after", [""])[0] or "")
+                view = str(query.get("view", ["results"])[0] or "results")
+                order = str(query.get("order", ["desc"])[0] or "desc")
+                page = supervisor.conversation_items(
+                    principal, identifier, conversation_id,
+                    limit=limit,
+                    after=after_cursor,
+                    view=view,
+                    order=order,
+                )
+                json_response(self, {
+                    "success": True,
+                    "profile_id": identifier,
+                    "conversation_id": conversation_id,
+                    **page,
                 })
                 return True
             after = int(query.get("after", ["0"])[0] or 0)
@@ -174,6 +198,9 @@ class AgentAppServerRoutesMixin:
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         cursor = max(0, int(after))
+        conversation_id = str(
+            status.get("active_conversation_id") or ""
+        ).strip()
         try:
             while True:
                 events = supervisor.events(
@@ -189,10 +216,15 @@ class AgentAppServerRoutesMixin:
                     sequence = int(event.get("sequence") or 0)
                     if sequence <= cursor:
                         continue
-                    payload = json.dumps(
-                        _public_value(event.get("payload") or {}),
-                        ensure_ascii=False,
-                    )
+                    public_payload = _public_value(event.get("payload") or {})
+                    if isinstance(public_payload, dict) and conversation_id:
+                        params = public_payload.get("params")
+                        raw_item = params.get("item") if isinstance(params, dict) else None
+                        if isinstance(raw_item, dict):
+                            projected = provider_item(raw_item, conversation_id)
+                            if projected is not None:
+                                public_payload["chatkit_item"] = projected
+                    payload = json.dumps(public_payload, ensure_ascii=False)
                     self._write_sse_chunk(
                         f"id: {sequence}\ndata: {payload}\n\n".encode("utf-8")
                     )

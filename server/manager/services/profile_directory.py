@@ -11,7 +11,7 @@ retain a canonical source key plus the complete source-server list.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Callable
 
 from tools.data.account_manage import (
     direct_subordinate_accounts_for,
@@ -39,11 +39,13 @@ class ProfileDirectoryService:
         client_state: object,
         agent_profiles: object,
         federated_public_data: object | None = None,
+        conversation_items_reader: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.server_id = str(server_id or "").strip() or "local"
         self.client_state = client_state
         self.agent_profiles = agent_profiles
         self.federated_public_data = federated_public_data
+        self.conversation_items_reader = conversation_items_reader
 
     @staticmethod
     def _username(value: object) -> str:
@@ -558,7 +560,7 @@ class ProfileDirectoryService:
             return self.agent_profiles.conversations(owner, profile_id)
         reader = getattr(self.federated_public_data, "profile_conversations", None)
         if not callable(reader):
-            return []
+            return {"items": [], "has_more": False, "after": None, "turn_count": 0}
         return reader(source, viewer, owner, profile_id)
 
     def _source_conversation_items(
@@ -568,10 +570,18 @@ class ProfileDirectoryService:
         owner: str,
         profile_id: str,
         conversation_id: str,
-    ) -> list[dict[str, Any]]:
+        *,
+        limit: int,
+        after: str,
+        view: str,
+        order: str,
+    ) -> dict[str, Any]:
         if source == self.server_id:
-            return self.agent_profiles.conversation_items(
+            if self.conversation_items_reader is None:
+                raise RuntimeError("authoritative Provider thread reader is unavailable")
+            return self.conversation_items_reader(
                 owner, profile_id, conversation_id,
+                limit=limit, after=after, view=view, order=order,
             )
         reader = getattr(
             self.federated_public_data,
@@ -580,7 +590,10 @@ class ProfileDirectoryService:
         )
         if not callable(reader):
             return []
-        return reader(source, viewer, owner, profile_id, conversation_id)
+        return reader(
+            source, viewer, owner, profile_id, conversation_id,
+            limit=limit, after=after, view=view, order=order,
+        )
 
     def conversations(self, viewer: str, profile_key: str, *, scope: str = "servers") -> list[dict[str, Any]]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
@@ -637,56 +650,21 @@ class ProfileDirectoryService:
         conversation_id: str,
         *,
         scope: str = "servers",
-    ) -> list[dict[str, Any]]:
+        limit: int = 10,
+        after: str = "",
+        view: str = "results",
+        order: str = "desc",
+    ) -> dict[str, Any]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
         if not item["capabilities"].get("view_conversations"):
             raise PermissionError("Profile conversations are not visible to this account")
-        sources = self._conversation_sources(item) or [self.server_id]
-        preferred = sources[0]
-        merged: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
-        successful = False
-        last_error: Exception | None = None
-        for source in sources:
-            try:
-                rows = self._source_conversation_items(
-                    source, viewer, owner, profile_id, conversation_id,
-                )
-                successful = True
-            except PermissionError:
-                raise
-            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
-                last_error = exc
-                continue
-            for row in rows or []:
-                if not isinstance(row, dict):
-                    continue
-                identifier = str(
-                    row.get("id") or row.get("item_id") or ""
-                ).strip()
-                if not identifier:
-                    identifier = (
-                        f"{row.get('role', '')}:{row.get('created_at', '')}:"
-                        f"{row.get('text', '')}"
-                    )
-                rank = (
-                    self._updated_rank({"updated_at": row.get("created_at")}),
-                    1 if source == preferred else 0,
-                )
-                current = merged.get(identifier)
-                if current is None or rank > current[0]:
-                    merged[identifier] = (rank, dict(row))
-        if not successful and last_error is not None:
-            raise last_error
-        return [
-            value[1]
-            for value in sorted(
-                merged.values(),
-                key=lambda value: (
-                    self._updated_rank({"updated_at": value[1].get("created_at")}),
-                    str(value[1].get("id") or value[1].get("item_id") or ""),
-                ),
-            )
-        ]
+        # Conversation content has exactly one authority: the Profile's
+        # executing/source Manager.  Do not fan out and merge stale replicas.
+        source = (self._conversation_sources(item) or [self.server_id])[0]
+        return self._source_conversation_items(
+            source, viewer, owner, profile_id, conversation_id,
+            limit=limit, after=after, view=view, order=order,
+        )
 
     @staticmethod
     def _public_conversation(value: dict[str, Any], *, read_only: bool) -> dict[str, Any]:

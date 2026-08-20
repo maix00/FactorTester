@@ -2,8 +2,8 @@
 
 Conversation identity belongs to an authenticated principal and Profile.  A
 provider-specific thread id is only a resumable runtime binding, so changing
-or stopping an Agent does not remove the conversation.  The catalog contains
-a bounded text projection rather than the Provider's complete thread state.
+or stopping an Agent does not remove the conversation.  Message content stays
+solely in the Provider thread and is never mirrored into this SQLite catalog.
 """
 
 from __future__ import annotations
@@ -34,20 +34,6 @@ _COLUMNS = {
     "updated_at",
     "active",
 }
-
-def sanitize_conversation_text(value: object, *, limit: int = 12_000) -> str:
-    """Prepare text for the bounded Manager projection.
-
-    The name is kept for API compatibility. Credential and path redaction is
-    intentionally not implemented yet; a future versioned policy can be
-    inserted at this boundary without changing the conversation schema.
-    """
-    # Keep the Provider's Markdown structure intact.  In particular, ChatKit
-    # needs newlines to render fenced code blocks and structured answers.
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    # Placeholder: add an explicit, versioned redaction policy here later.
-    return text[:limit]
-
 
 class AgentConversationStore:
     """Persist and list multiple conversations for one Profile."""
@@ -94,25 +80,9 @@ class AgentConversationStore:
             f"""CREATE INDEX IF NOT EXISTS {TABLE}_active
                 ON {TABLE}(principal, profile_id, active)"""
         )
-        db.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {ITEM_TABLE} (
-                conversation_id TEXT NOT NULL,
-                item_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                item_type TEXT NOT NULL DEFAULT 'message',
-                text TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (conversation_id, item_id),
-                FOREIGN KEY (conversation_id) REFERENCES {TABLE}(conversation_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        db.execute(
-            f"""CREATE INDEX IF NOT EXISTS {ITEM_TABLE}_conversation
-                ON {ITEM_TABLE}(conversation_id, created_at, item_id)"""
-        )
+        # Remove the legacy transcript mirror.  Provider threads are the sole
+        # authority and are read through the source Manager on demand.
+        db.execute(f"DROP TABLE IF EXISTS {ITEM_TABLE}")
         db.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {SHARING_TABLE} (
@@ -444,152 +414,6 @@ class AgentConversationStore:
             preview=preview or None,
         )
 
-    def append_item(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-        *,
-        role: str,
-        text: object,
-        item_id: str = "",
-        item_type: str = "message",
-        created_at: float | None = None,
-    ) -> dict[str, Any]:
-        """Persist one normalized user/assistant message for offline viewing."""
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        normalized_role = str(role or "").strip().lower()
-        if normalized_role not in {"user", "assistant"}:
-            raise ValueError("conversation item role is invalid")
-        normalized_text = sanitize_conversation_text(text)
-        if not normalized_text:
-            raise ValueError("conversation item text is required")
-        item_identifier = str(item_id or "").strip() or f"item-{uuid.uuid4().hex}"
-        item_identifier = self._required(item_identifier, "item_id", 256)
-        kind = str(item_type or "message").strip()[:64] or "message"
-        timestamp = float(time.time() if created_at is None else created_at)
-        with self._connection() as db:
-            owned = db.execute(
-                f"""SELECT 1 FROM {TABLE}
-                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
-                (identifier, owner, profile),
-            ).fetchone()
-            if owned is None:
-                raise ValueError("conversation not found")
-            db.execute(
-                f"""INSERT INTO {ITEM_TABLE}(
-                        conversation_id, item_id, role, item_type, text, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(conversation_id, item_id) DO UPDATE SET
-                        role=excluded.role, item_type=excluded.item_type,
-                        text=excluded.text, created_at=excluded.created_at""",
-                (identifier, item_identifier, normalized_role, kind,
-                 normalized_text, timestamp),
-            )
-            # Keep local transcript growth bounded.  The metadata catalog is
-            # still the source of truth for the full provider thread.
-            db.execute(
-                f"""DELETE FROM {ITEM_TABLE}
-                    WHERE conversation_id = ? AND rowid NOT IN (
-                        SELECT rowid FROM {ITEM_TABLE}
-                        WHERE conversation_id = ?
-                        ORDER BY created_at DESC, item_id DESC LIMIT 500
-                    )""",
-                (identifier, identifier),
-            )
-            row = db.execute(
-                f"""SELECT item_id, role, item_type, text, created_at
-                    FROM {ITEM_TABLE}
-                    WHERE conversation_id = ? AND item_id = ?""",
-                (identifier, item_identifier),
-            ).fetchone()
-        if row is None:  # pragma: no cover - guarded by the upsert above
-            raise RuntimeError("conversation item was not saved")
-        return {
-            "id": str(row["item_id"] or ""),
-            "role": str(row["role"] or ""),
-            "item_type": str(row["item_type"] or "message"),
-            "text": str(row["text"] or ""),
-            "created_at": float(row["created_at"] or 0),
-        }
-
-    def items(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-    ) -> list[dict[str, Any]]:
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        with self._connection() as db:
-            rows = db.execute(
-                f"""SELECT i.item_id, i.role, i.item_type, i.text, i.created_at
-                    FROM {ITEM_TABLE} i
-                    JOIN {TABLE} c ON c.conversation_id = i.conversation_id
-                    WHERE i.conversation_id = ? AND c.principal = ? AND c.profile_id = ?
-                    ORDER BY i.created_at, i.item_id""",
-                (identifier, owner, profile),
-            ).fetchall()
-        return [
-            {
-                "id": str(row["item_id"] or ""),
-                "role": str(row["role"] or ""),
-                "item_type": str(row["item_type"] or "message"),
-                "text": str(row["text"] or ""),
-                "created_at": float(row["created_at"] or 0),
-            }
-            for row in rows
-        ]
-
-    def replace_items(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-        items: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Replace one transcript projection with Provider-authoritative items."""
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        normalized: list[tuple[str, str, str, str, float]] = []
-        for raw in items[-500:]:
-            role = str(raw.get("role") or "").strip().lower()
-            if role not in {"user", "assistant"}:
-                raise ValueError("conversation item role is invalid")
-            text = sanitize_conversation_text(raw.get("text"))
-            if not text:
-                raise ValueError("conversation item text is required")
-            item_id = self._required(raw.get("item_id"), "item_id", 256)
-            item_type = str(raw.get("item_type") or "message").strip()[:64]
-            created_at = float(raw.get("created_at") or time.time())
-            normalized.append((item_id, role, item_type, text, created_at))
-        with self._connection() as db:
-            owned = db.execute(
-                f"""SELECT 1 FROM {TABLE}
-                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
-                (identifier, owner, profile),
-            ).fetchone()
-            if owned is None:
-                raise ValueError("conversation not found")
-            db.execute(
-                f"DELETE FROM {ITEM_TABLE} WHERE conversation_id = ?",
-                (identifier,),
-            )
-            db.executemany(
-                f"""INSERT INTO {ITEM_TABLE}(
-                        conversation_id, item_id, role, item_type, text, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)""",
-                [
-                    (identifier, item_id, role, item_type, text, created_at)
-                    for item_id, role, item_type, text, created_at in normalized
-                ],
-            )
-        return self.items(owner, profile, identifier)
-
     def set_parent_sharing(
         self, principal: str, profile_id: str, enabled: bool,
     ) -> bool:
@@ -636,5 +460,4 @@ __all__ = [
     "ITEM_TABLE",
     "SHARING_TABLE",
     "TABLE",
-    "sanitize_conversation_text",
 ]
