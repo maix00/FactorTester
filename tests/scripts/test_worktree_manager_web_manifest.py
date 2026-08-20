@@ -495,6 +495,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "jobs/highcharts-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/ic-result-view.js" in manifest["groups"]["job-detail-ic"]
+    assert "jobs/backtest-group-equity-chart.js" not in manifest["groups"]["job-detail-backtest"]
     assert "jobs/backtest-result-view.js" in manifest["groups"]["job-detail-backtest"]
     assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
     assert manifest["group_dependencies"]["job-detail-previews"] == [

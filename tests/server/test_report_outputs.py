@@ -71,6 +71,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
+    assert source_artifacts_for(["cash_detail"]) == {"order_audit"}
     group_detail = capabilities["group_research_detail"]
     assert group_detail["presentation"] == "detail"
     assert group_detail["viewer"] == "group_research_detail"
@@ -88,6 +89,10 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
         ("chart", "equity_curve"), ("table", "data_table"),
     ]
     assert declarations[0]["artifacts"][0] == "equity_curve_report"
+    assert declarations[0]["canonical_artifact"] == "equity_curve_data"
+    assert declarations[0]["rendition_artifacts"] == ["equity_curve_report"]
+    assert declarations[0]["receipt_artifact"] == "equity_curve_receipt"
+    assert "equity_curve_data_receipt" not in declarations[0]["artifacts"]
     assert "fee_detail_data" in declarations[1]["artifacts"]
     detail_declaration = output_declarations(["group_research_detail"])[0]
     assert detail_declaration == {
@@ -225,6 +230,129 @@ def test_requested_reports_include_images_tables_and_receipts() -> None:
     assert {"equity_curve_report", "returns_over_time_report", "metrics_over_time_report"} <= names
     assert {"fee_detail_csv", "margin_detail_csv", "ratio_detail_csv"} <= names
     assert all(item.raw for item in artifacts)
+
+
+def test_optional_execution_and_portfolio_outputs_share_retained_sources() -> None:
+    result, source = _sample()
+    source["engine_result"]["portfolios"]["A1"].update({
+        "cash_curve": {"1": 880.0, "2": 870.0},
+        "position_curve": {"1": {"CU.SHF": 2.0}, "2": {"CU.SHF": 3.0}},
+        "fill_turnover": {
+            "average": 0.25, "total": 0.5, "observations": 2,
+            "source": "fill_audit",
+        },
+    })
+    source["order_audit"]["strategies"]["A1"]["orders"] = [{
+        "order_id": "order-1", "product": "CU.SHF", "side": "BUY",
+        "requested_quantity": 2.0, "filled_quantity": 2.0,
+    }]
+    source["order_audit"]["strategies"]["A1"]["fills"][0].update({
+        "fill_id": "fill-1", "order_id": "order-1", "price": 500.0,
+        "quantity": 2.0,
+    })
+    source["order_audit"]["strategies"]["A1"]["settlements"] = [{
+        "fill_id": "fill-1", "cash_before": 900.0, "cash_after": 880.0,
+        "margin_before": 100.0, "margin_after": 120.0,
+        "realized_pnl": 1.0, "fee": 3.5,
+    }]
+
+    artifacts = build_report_artifacts(
+        result, source=source, requested=[
+            "order_detail", "fill_detail", "cash_detail", "position_detail",
+            "exposure_detail", "turnover_detail", "drawdown_detail",
+            "period_returns",
+        ],
+    )
+    payloads = {
+        item.name: json.loads(item.raw)
+        for item in artifacts if item.extension == "json"
+    }
+    assert payloads["order_detail_data"]["rows"][0]["order_id"] == "order-1"
+    fill = payloads["fill_detail_data"]["rows"][0]
+    assert fill["cash_change"] == -20.0
+    assert fill["margin_change"] == 20.0
+    assert payloads["cash_detail_data"]["rows"][0]["cash"] == 880.0
+    assert payloads["position_detail_data"]["rows"][0]["quantity"] == 2.0
+    assert payloads["exposure_detail_data"]["rows"][0]["gross_exposure"] == 1000.0
+    assert payloads["turnover_detail_data"]["rows"][0]["average"] == 0.25
+    assert payloads["drawdown_detail_data"]["rows"]
+    assert payloads["period_returns_data"]["rows"]
+
+    post_run = build_report_artifacts(
+        result,
+        source={
+            "group_execution": {"engine_result": source["engine_result"]},
+            "order_audit": source["order_audit"],
+        },
+        requested=["cash_detail", "margin_detail", "fill_detail"],
+    )
+    post_run_payloads = {
+        item.name: json.loads(item.raw)
+        for item in post_run if item.extension == "json"
+    }
+    assert post_run_payloads["cash_detail_data"]["rows"][0]["cash"] == 880.0
+    assert post_run_payloads["margin_detail_data"]["rows"][0]["margin"] == 120.0
+    assert post_run_payloads["fill_detail_data"]["rows"][0]["fill_id"] == "fill-1"
+
+
+def test_audit_only_output_skips_equity_projection(monkeypatch) -> None:
+    from server.jobs.report_outputs import dataset as dataset_module
+
+    result, source = _sample()
+    monkeypatch.setattr(
+        dataset_module, "extract_series",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("equity projection must remain lazy"),
+        ),
+    )
+
+    reports = build_report_artifacts(
+        result, source=source, requested=["fee_detail"],
+    )
+
+    assert {item.name for item in reports} == {"fee_detail_csv", "fee_detail_data"}
+
+
+def test_cash_detail_uses_retained_settlement_without_dense_engine_curve() -> None:
+    reports = build_report_artifacts(
+        {},
+        source={"order_audit": {"strategies": {"A1": {
+            "fills": [{"fill_id": "fill-1", "timestamp": "2024-01-02T09:00:00"}],
+            "settlements": [{
+                "fill_id": "fill-1", "cash_before": 1000.0,
+                "cash_after": 970.0,
+            }],
+        }}}},
+        requested=["cash_detail"],
+    )
+    payload = json.loads(next(
+        item.raw for item in reports if item.name == "cash_detail_data"
+    ))
+    assert payload["rows"] == [{
+        "strategy": "A1", "timestamp": "2024-01-02T09:00:00",
+        "fill_id": "fill-1", "cash_before": 1000.0,
+        "cash_after": 970.0, "cash_change": -30.0,
+    }]
+
+
+def test_report_builder_emits_monotonic_output_progress() -> None:
+    result, source = _sample()
+    observed = []
+
+    build_report_artifacts(
+        result,
+        source=source,
+        requested=["fee_detail", "order_detail", "period_returns"],
+        progress=lambda completed, total, name: observed.append(
+            (completed, total, name),
+        ),
+    )
+
+    assert observed == [
+        (1, 3, "fee_detail"),
+        (2, 3, "order_detail"),
+        (3, 3, "period_returns"),
+    ]
 
 
 def test_equity_svg_formats_epoch_timestamps_and_account_currency() -> None:

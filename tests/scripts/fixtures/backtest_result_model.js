@@ -33,12 +33,27 @@ const payloads = {
   ]},
   margin_detail_data: {rows: [{strategy: "A1", margin: 20}]},
   ratio_detail_data: {rows: [{series: "__aggregate__", fee_total: 5}]},
+  order_detail_data: {rows: [{strategy: "A1", order_id: "order-1"}]},
+  fill_detail_data: {rows: [{strategy: "A1", fill_id: "fill-1"}]},
+  cash_detail_data: {rows: [{strategy: "A1", cash: 90}]},
+  position_detail_data: {rows: [{strategy: "A1", product: "CU.SHF", quantity: 2}]},
+  exposure_detail_data: {rows: [{strategy: "A1", gross_exposure: 1000}]},
+  turnover_detail_data: {rows: [{strategy: "A1", average: 0.2}]},
+  drawdown_detail_data: {rows: [{series: "A1", depth: -0.1}]},
+  period_returns_data: {rows: [{series: "A1", period: "2025-01", return: 0.1}]},
 };
+
+assert.equal(
+  window.FTBacktestResultModel.payloadNames.includes("group_equity_data"), false,
+  "the direct result tab must not introduce a generated chart artifact",
+);
 
 const model = window.FTBacktestResultModel.build(payloads);
 assert.deepEqual(model.groups, ["A1", "A2"]);
 assert.deepEqual(model.tabs, [
   "summary", "equity", "returns", "metrics", "fees", "margin", "ratios",
+  "orders", "fills", "cash", "positions", "exposure", "turnover",
+  "drawdowns", "period_returns",
 ]);
 assert.equal(model.summaryRows[0].total_return, 0.1);
 assert.equal(model.summaryRows[0].annual_return, 0.2);
@@ -59,9 +74,11 @@ const retainedSummary = {
   base_currency: "CNY",
   groups: [
     {key: "A1", name: "第一组", metrics_key: "A1", group_id: "group-a1",
-      group_index: 0, product_path_selection_id: "night", timestamps: [1700000000000]},
+      group_index: 0, product_path_selection_id: "night",
+      timestamps: [1700000000000, 1700000060000], total_equity: [1000000, 1080000]},
     {key: "A2", name: "第二组", metrics_key: "A2", group_id: "group-a2",
-      group_index: 1, product_path_selection_id: "night", timestamps: [1700000000000]},
+      group_index: 1, product_path_selection_id: "night",
+      timestamps: [1700000000000, 1700000060000], total_equity: [1000000, 980000]},
   ],
   metrics: {
     A1: {"Total Return": 8, "Annual Return": 16, "Sharpe Ratio": 1.2,
@@ -82,6 +99,24 @@ assert.equal(window.FTBacktestResultModel.bestMetricIndex(
 assert.equal(window.FTBacktestResultModel.bestMetricIndex(
   retained.metricMatrix, "Max Drawdown",
 ), 0);
+assert.deepEqual(window.FTBacktestResultModel.build({}, {
+  groups: [{strategy_id: "curve-only", timestamps: [1], total_equity: [100]}],
+}).tabs, ["summary", "group_metrics"],
+"dense summary curves must not create a second equity result tab");
+assert.deepEqual(
+  window.FTBacktestResultModel.build({}, {}, [
+    "equity_curve_data", "order_detail_data", "cash_detail_data",
+  ]).tabs,
+  ["equity", "orders", "cash"],
+  "result tabs must exist before their canonical JSON is lazily fetched",
+);
+assert.deepEqual(
+  window.FTBacktestResultModel.build({}, {}, [
+    "equity_curve_report", "equity_curve_receipt", "order_detail_csv",
+  ]).tabs,
+  [],
+  "deleting canonical JSON must hide its result tab without hiding renditions",
+);
 const resolved = window.FTBacktestResultModel.resolveGroup(retainedSummary, "group-a2");
 assert.equal(resolved.label, "第二组");
 assert.deepEqual(window.FTBacktestResultModel.groupRequest(resolved, retainedSummary), {
@@ -96,9 +131,8 @@ const compactSummary = {
   ...retainedSummary,
   groups: retainedSummary.groups.map(({timestamps, ...group}) => group),
 };
-const retainedResult = {
-  groups: retainedSummary.groups,
-  metrics: retainedSummary.metrics,
+const runtimeSummary = {
+  ...compactSummary,
   runtime_info_rows: [{type: "产品范围", status: "提示", detail: "排除无覆盖产品"}],
   market_rule_warning: "两个市场规则单元格使用近似值",
   setting_fallback_warning: "一个设置被执行引擎替换",
@@ -112,15 +146,10 @@ const retainedResult = {
     }],
   },
 };
-const enriched = window.FTBacktestResultModel.build({
-  result: retainedResult,
-}, compactSummary);
-assert.equal(enriched.summary.groups[0].timestamps[0], 1700000000000);
-assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(enriched.summary), {
-  product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
-  timestamp_ms: 1700000000000,
-});
-assert.deepEqual(window.FTBacktestRuntimeModel.rows(enriched.summary), [
+const runtimeModel = window.FTBacktestResultModel.build({}, runtimeSummary);
+assert.equal(runtimeModel.payloads.result, undefined, "the retained result blob is not a viewer payload");
+assert.equal(runtimeModel.tabs[0], "runtime", "runtime summary is an independent result tab");
+assert.deepEqual(window.FTBacktestRuntimeModel.rows(runtimeModel.summary), [
   {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
   {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},
   {type: "产品范围", status: "提示", detail: "排除无覆盖产品"},

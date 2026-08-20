@@ -27,6 +27,7 @@ from server.jobs.input_artifacts import (
 from server.jobs.run_input_dependencies import dependency_input_bytes
 from server.jobs.report_outputs import (
     build_report_artifacts,
+    bundle_reports,
     normalize_output_requests,
     source_artifacts_for,
 )
@@ -169,32 +170,26 @@ def generate_test_job_artifacts(job_id: str):
             "success": False,
             "error": "the retained result does not contain data for the requested outputs",
         }), 409
-    planned: list[tuple[object, str, bytes]] = []
-    for report in reports:
-        receipt_name = (
-            "equity_curve_receipt"
-            if report.name == "equity_curve_report"
-            else f"{report.name}_receipt"
-        )
-        receipt_raw = json.dumps(
-            report.receipt, ensure_ascii=False, sort_keys=True,
+    bundles = bundle_reports(reports)
+    receipt_bytes = {
+        bundle.receipt_name: json.dumps(
+            bundle.receipt, ensure_ascii=False, sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        planned.append((report, receipt_name, receipt_raw))
+        for bundle in bundles
+    }
     existing = {
         str(item["name"]): int(item.get("size_bytes") or 0)
         for item in job_repository.list_artifacts(job_id=job.job_id, owner=job.owner)
         if item.get("state") == "active"
     }
     replacement_names = {
-        name
-        for report, receipt_name, _ in planned
-        for name in (report.name, receipt_name)
+        *(report.name for report in reports),
+        *receipt_bytes,
     }
     planned_bytes = sum(
-        len(report.raw) + len(receipt_raw)
-        for report, _receipt_name, receipt_raw in planned
-    )
+        len(report.raw) for report in reports
+    ) + sum(len(raw) for raw in receipt_bytes.values())
     retained_after = (
         job_repository.storage_usage(owner=job.owner)
         - sum(existing.get(name, 0) for name in replacement_names)
@@ -213,10 +208,10 @@ def generate_test_job_artifacts(job_id: str):
             "quota_bytes": quota,
         }), 507
     root = artifact_root()
+    target_dir = root / job.job_id
+    target_dir.mkdir(parents=True, exist_ok=True)
     generated: list[dict[str, object]] = []
-    for report, receipt_name, receipt_raw in planned:
-        target_dir = root / job.job_id
-        target_dir.mkdir(parents=True, exist_ok=True)
+    for report in reports:
         target = target_dir / f"{report.name}.{report.extension}"
         staging = target_dir / f".{target.name}.{os.getpid()}.tmp"
         staging.write_bytes(report.raw)
@@ -230,6 +225,7 @@ def generate_test_job_artifacts(job_id: str):
             size_bytes=len(report.raw),
         )
         generated.append(metadata)
+    for receipt_name, receipt_raw in receipt_bytes.items():
         receipt_target = target_dir / f"{receipt_name}.json"
         receipt_staging = target_dir / f".{receipt_target.name}.{os.getpid()}.tmp"
         receipt_staging.write_bytes(receipt_raw)
