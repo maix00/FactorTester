@@ -156,17 +156,24 @@ def _register_chips(app: ApplicationSettings) -> None:
         "factor_alias", "因子", "identity", "因子: {factorAlias}",
         ("factorAlias",), module="factor_execution", target_tab="factor",
         order=10, inherit_from_root=True, batch_owned=True,
-        source_adapter="selected_factors",
+        source_adapter="selected_factors", clickable=True,
+        detail_overlay={
+            "kind": "factor", "mode": "view", "source_key": "factor",
+        },
     ))
     app.register_chip_field(ChipDefinition(
-        "product_path_selection", "产品路径", "identity",
-        "产品路径: {productPathSelectionLabel}",
+        "product_path_selection", "产品组", "identity",
+        "产品组: {productPathSelectionLabel}",
         ("product_path_selection",), module="product_selection",
         target_tab="product_path_selection", order=20,
         value_resolvers={
             "productPathSelectionLabel": "product_path_selection_label",
         },
         clickable=True, source_adapter="selected_product_paths",
+        detail_overlay={
+            "kind": "product_group", "mode": "view",
+            "source_key": "product_group",
+        },
     ))
 
 

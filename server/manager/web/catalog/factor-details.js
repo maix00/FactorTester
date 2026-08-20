@@ -5,7 +5,9 @@
     if (mode === "create" || mode === "edit") {
       return FTFactorEditor.render(context, data, targetRef, mode);
     }
-    let factor = data.factors.find(item => item.factor_ref === targetRef);
+    let factor = context.testObjectTemporary && context.testObjectInitialValue
+      ? context.testObjectInitialValue
+      : data.factors.find(item => item.factor_ref === targetRef);
     const frozen = factor ? null : model().decodeFrozenFactorRef(targetRef);
     if (!factor && !frozen) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
@@ -22,7 +24,7 @@
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(factorRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
-    if (factor.can_edit && context.session) {
+    if (factor.can_edit && context.session && !context.testObjectViewOnly) {
       context.toolbar?.append(context.button(context.t("编辑"), () => {
         context.navigate(FTTabReturn.withSource(
           `/factors/factor/${encodeURIComponent(factor.factor_alias || factorRef)}?mode=edit`,

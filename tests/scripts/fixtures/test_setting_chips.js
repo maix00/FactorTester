@@ -168,6 +168,53 @@ assert.equal(timeChip.children[0].textContent, "开始日期");
 timeChip.listeners.click();
 assert.equal(opened, "time");
 
+const overlayManifest = {
+  ...manifest,
+  chip_fields: [
+    {
+      ...manifest.chip_fields[0],
+      clickable: true,
+      detail_overlay: {kind: "factor", mode: "view", source_key: "factor"},
+    },
+    {
+      ...manifest.chip_fields[1],
+      clickable: true,
+      detail_overlay: {
+        kind: "product_group", mode: "view", source_key: "product_group",
+      },
+    },
+  ],
+};
+let openedOverlay = null;
+const overlayRow = FTTestSettingChips.render({
+  manifest: overlayManifest,
+  mountedTabs: ["factor", "product_path_selection"],
+  sources: {
+    factorAlias: ["ROC 1m"],
+    factor: [{factor_ref: "factor:roc-1m", factor_alias: "ROC 1m"}],
+    product_path_selection: [{label: "日盘"}],
+    product_group: [{group_ref: "group:day", name: "日盘"}],
+  },
+  context: {t: value => value},
+  onOverlay: descriptor => { openedOverlay = descriptor; },
+});
+const factorOverlayChip = overlayRow.children
+  .flatMap(group => group.children)
+  .find(item => item.className?.includes("backend-setting-chip")
+    && item.children[0]?.textContent === "因子");
+assert.equal(factorOverlayChip.tagName, "button");
+factorOverlayChip.listeners.click();
+assert.equal(openedOverlay.detailOverlay.target.ref, "factor:roc-1m");
+assert.equal(openedOverlay.detailOverlay.kind, "factor");
+const productGroupOverlayChip = overlayRow.children
+  .flatMap(group => group.children)
+  .find(item => item.className?.includes("backend-setting-chip")
+    && item.children[0]?.textContent === "产品路径");
+assert.equal(productGroupOverlayChip.tagName, "button");
+productGroupOverlayChip.listeners.click();
+assert.equal(openedOverlay.detailOverlay.target.ref, "group:day");
+assert.equal(openedOverlay.detailOverlay.kind, "product_group");
+
 const runManifest = {
   run_settings: {key: "run_context", label: "任务提交"},
   run_fields: [
