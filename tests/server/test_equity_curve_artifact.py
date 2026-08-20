@@ -80,7 +80,7 @@ def test_summary_retention_keeps_complete_interactive_curve_not_full_result(
     }
     assert names == {
         "equity_curve_report", "equity_curve_receipt",
-        "equity_curve_data", "equity_curve_data_receipt",
+        "equity_curve_data",
     }
     assert not (tmp_path / "job-summary" / "result.json").exists()
     assert (tmp_path / "job-summary" / "equity_curve_report.svg").is_file()
@@ -91,6 +91,59 @@ def test_summary_retention_keeps_complete_interactive_curve_not_full_result(
     assert len(data["series"][0]["values"]) == len(
         data["series"][0]["drawdown"]
     )
+
+
+def test_report_generation_owns_the_terminal_progress_tail(tmp_path) -> None:
+    output = queue.Queue()
+    sink = _WorkerSink(
+        "job-progress-tail",
+        output,
+        artifact_root=str(tmp_path),
+        retention_mode="summary",
+        output_requests=["equity_curve"],
+    )
+    sink.emit_activity_manifest([
+        {"key": "pre_replay", "label": "回放准备", "flows": []},
+        {"key": "event_replay", "label": "事件回放", "flows": []},
+        {"key": "post_replay", "label": "结果整理", "flows": []},
+    ])
+    sink.emit_signal_progress(
+        completed=1, total=1, phase="done", percent=100.0,
+    )
+    sink.emit_result({
+        "groups": [{
+            "name": "main", "timestamps": [1, 2],
+            "total_equity": [100.0, 101.0],
+        }],
+    })
+
+    events = list(output.queue)
+    manifest = next(
+        item["data"]["phases"] for item in events
+        if item.get("event") == "activity_manifest"
+    )
+    assert [item["key"] for item in manifest][-2:] == [
+        "report_build", "artifact_publish",
+    ]
+    engine_done = next(
+        item["data"] for item in events
+        if item.get("event") == "signal_progress"
+    )
+    assert engine_done["percent"] == 85.0
+    assert engine_done["percent_scope"] == "global"
+    stages = [
+        item["data"]["phase"] for item in events
+        if item.get("event") == "activity"
+    ]
+    assert stages[-2:] == ["report_build", "artifact_publish"]
+    tail = [
+        item["data"] for item in events
+        if item.get("event") == "progress"
+        and item["data"].get("phase") in {"report_build", "artifact_publish"}
+    ]
+    assert tail[-1]["phase"] == "artifact_publish"
+    assert tail[-1]["completed"] == tail[-1]["total"]
+    assert events[-1]["event"] == "result"
 
 
 def test_summary_retention_does_not_downsample_interactive_curve(tmp_path) -> None:

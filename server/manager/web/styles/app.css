@@ -487,9 +487,21 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-projection-note { margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--soft) 58%, var(--panel)); }
 .profile-agent-chat { min-width: 0; }
 .profile-agent-actions-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-agent-message-view { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
+.profile-agent-runtime-controls { display: grid; gap: 9px; margin: 0 0 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 94%, var(--soft)); }
+.profile-agent-runtime-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.profile-agent-runtime-field { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
+.profile-agent-runtime-field select { width: 100%; min-width: 0; color: inherit; background: var(--panel); }
+.profile-agent-context-usage { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 12px; }
+.profile-agent-context-usage progress { width: min(220px, 36%); height: 7px; accent-color: var(--accent); }
+.profile-agent-runtime-status { min-height: 1.2em; margin: 0; }
+.profile-agent-runtime-notice { min-height: 1.2em; margin: 0; }
+.profile-agent-runtime-notice[data-kind="success"] { color: var(--success, #16803a); }
+.profile-agent-runtime-notice[data-kind="error"] { color: var(--danger, #b42318); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
-.profile-chatkit-host openai-chatkit { display: block; width: 100%; height: 600px; }
+.profile-chatkit-slot, .profile-chatkit-host openai-chatkit { display: block; width: 100%; }
+.profile-chatkit-host openai-chatkit { height: 600px; }
 .profile-directory { max-width: 1240px; }
 .profile-directory-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .profile-directory-section-heading { display: grid; gap: 4px; }
@@ -502,11 +514,12 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-row:hover, .profile-directory-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
 .profile-directory-identity { display: grid; gap: 2px; }
 .profile-directory-identity small { color: var(--muted); }
-.profile-directory-detail { max-width: 1180px; }
+.profile-directory-detail { width: 100%; max-width: none; min-width: 0; }
 .profile-directory-note { white-space: pre-line; }
 .profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 .profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }
 @media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host openai-chatkit { height: 500px; } }
+@media (max-width: 720px) { .profile-agent-runtime-fields { grid-template-columns: 1fr; } .profile-agent-context-usage { align-items: flex-start; flex-direction: column; } .profile-agent-context-usage progress { width: 100%; } }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }
 .topbar .research-section-tab { padding: 6px 11px; }
@@ -530,8 +543,43 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-graph-toolbar h2 { min-width: 0; overflow-wrap: anywhere; }
 .graph-version-picker { min-width: 150px; max-width: 45%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: var(--panel); color: inherit; }
 .job-progress { padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; }
+.job-progress-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.job-progress-header h2 { margin: 0; }
+.job-progress-status { flex: 0 0 auto; font-weight: 600; }
 .job-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
-.job-progress span { color: var(--muted); font-size: 13px; }
+.job-progress-current { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.job-progress-current-field { display: grid; min-width: 0; gap: 2px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--soft) 72%, var(--panel)); }
+.job-progress-current-field small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress-current-field strong { overflow: hidden; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress-current-field.count strong, .job-progress-current-field.percent strong { font-variant-numeric: tabular-nums; }
+.job-progress-message { min-height: 18px; overflow: hidden; padding: 2px 1px; color: var(--muted); font-size: 13px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress-phases { display: flex; align-items: stretch; gap: 8px; min-width: 0; overflow-x: auto; padding: 2px 0 3px; }
+.job-progress-phase { position: relative; display: grid; align-content: start; gap: 5px; min-width: 132px; padding: 8px 9px 8px 15px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--soft) 72%, var(--panel)); }
+.job-progress-phase::before { content: ""; position: absolute; left: 7px; top: 12px; width: 5px; height: 5px; border: 1px solid currentColor; border-radius: 50%; background: var(--panel); }
+.job-progress-phase strong { color: inherit; font-size: 12px; line-height: 1.35; }
+.job-progress-phase.active { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.job-progress-phase.active::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.job-progress-phase.done { color: #16713b; }
+.job-progress-phase.done::before { background: #16713b; }
+.job-progress-flow-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.job-progress-flow-list > span { max-width: 150px; overflow: hidden; padding: 2px 5px; border-radius: 999px; color: var(--muted); background: var(--panel); font-size: 10px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress-flow-list > span.active { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.job-progress-history { border-top: 1px solid var(--line); padding-top: 6px; }
+.job-progress-history > summary { width: fit-content; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+.job-progress-history-rows { display: grid; margin-top: 6px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.job-progress-history-row { display: grid; grid-template-columns: minmax(90px, .8fr) 70px 70px minmax(90px, 1fr) minmax(110px, 1fr) minmax(150px, 2fr); gap: 8px; align-items: center; min-width: 650px; padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.job-progress-history-row:last-child { border-bottom: 0; }
+.job-progress-history-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress-history-row > span:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+.job-progress-history-row.active > span:nth-child(3) { color: var(--accent); font-weight: 600; }
+.job-progress-history-row.completed > span:nth-child(3) { color: #16713b; font-weight: 600; }
+.job-progress-history-row.failed > span:nth-child(3) { color: #a2302a; font-weight: 600; }
+@media (max-width: 760px) {
+  .job-progress-current { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .job-progress-current-field.phase { grid-column: 1; }
+  .job-progress-current-field.flow { grid-column: 2; }
+  .job-progress-current-field.timestamp { grid-column: 1 / -1; }
+}
 .job-status { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 2px 7px; border-radius: 999px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
 .job-status.succeeded { color: #16713b; background: #e4f7eb; }
 .job-status.failed, .job-status.cancelled { color: #a2302a; background: #fde9e7; }

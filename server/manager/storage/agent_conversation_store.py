@@ -2,8 +2,8 @@
 
 Conversation identity belongs to an authenticated principal and Profile.  A
 provider-specific thread id is only a resumable runtime binding, so changing
-or stopping an Agent does not remove the conversation.  The catalog contains
-a bounded text projection rather than the Provider's complete thread state.
+or stopping an Agent does not remove the conversation.  Message content stays
+solely in the Provider thread and is never mirrored into this SQLite catalog.
 """
 
 from __future__ import annotations
@@ -34,20 +34,16 @@ _COLUMNS = {
     "updated_at",
     "active",
 }
-
-def sanitize_conversation_text(value: object, *, limit: int = 12_000) -> str:
-    """Prepare text for the bounded Manager projection.
-
-    The name is kept for API compatibility. Credential and path redaction is
-    intentionally not implemented yet; a future versioned policy can be
-    inserted at this boundary without changing the conversation schema.
-    """
-    # Keep the Provider's Markdown structure intact.  In particular, ChatKit
-    # needs newlines to render fenced code blocks and structured answers.
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    # Placeholder: add an explicit, versioned redaction policy here later.
-    return text[:limit]
-
+_RUNTIME_COLUMNS = {
+    "model_id": "TEXT NOT NULL DEFAULT ''",
+    "reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+    "service_tier": "TEXT NOT NULL DEFAULT ''",
+    "actual_model": "TEXT NOT NULL DEFAULT ''",
+    "model_context_window": "INTEGER NOT NULL DEFAULT 0",
+    "total_tokens": "INTEGER NOT NULL DEFAULT 0",
+    "last_tokens": "INTEGER NOT NULL DEFAULT 0",
+    "compaction_count": "INTEGER NOT NULL DEFAULT 0",
+}
 
 class AgentConversationStore:
     """Persist and list multiple conversations for one Profile."""
@@ -82,7 +78,15 @@ class AgentConversationStore:
                 preview TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
-                active INTEGER NOT NULL DEFAULT 0
+                active INTEGER NOT NULL DEFAULT 0,
+                model_id TEXT NOT NULL DEFAULT '',
+                reasoning_effort TEXT NOT NULL DEFAULT '',
+                service_tier TEXT NOT NULL DEFAULT '',
+                actual_model TEXT NOT NULL DEFAULT '',
+                model_context_window INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                last_tokens INTEGER NOT NULL DEFAULT 0,
+                compaction_count INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -94,25 +98,9 @@ class AgentConversationStore:
             f"""CREATE INDEX IF NOT EXISTS {TABLE}_active
                 ON {TABLE}(principal, profile_id, active)"""
         )
-        db.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {ITEM_TABLE} (
-                conversation_id TEXT NOT NULL,
-                item_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                item_type TEXT NOT NULL DEFAULT 'message',
-                text TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (conversation_id, item_id),
-                FOREIGN KEY (conversation_id) REFERENCES {TABLE}(conversation_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        db.execute(
-            f"""CREATE INDEX IF NOT EXISTS {ITEM_TABLE}_conversation
-                ON {ITEM_TABLE}(conversation_id, created_at, item_id)"""
-        )
+        # Remove the legacy transcript mirror.  Provider threads are the sole
+        # authority and are read through the source Manager on demand.
+        db.execute(f"DROP TABLE IF EXISTS {ITEM_TABLE}")
         db.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {SHARING_TABLE} (
@@ -167,6 +155,15 @@ class AgentConversationStore:
             # The auxiliary tables are idempotent and are created after the
             # legacy migration as well as for new Manager SQLite files.
             self._create_table(db)
+            columns = {
+                str(row[1])
+                for row in db.execute(f"PRAGMA table_info({TABLE})").fetchall()
+            }
+            for name, declaration in _RUNTIME_COLUMNS.items():
+                if name not in columns:
+                    db.execute(
+                        f"ALTER TABLE {TABLE} ADD COLUMN {name} {declaration}"
+                    )
 
     @staticmethod
     def _required(value: object, field: str, limit: int = 512) -> str:
@@ -192,6 +189,14 @@ class AgentConversationStore:
             "created_at": float(row["created_at"] or 0),
             "updated_at": float(row["updated_at"] or 0),
             "active": bool(row["active"]),
+            "model_id": str(row["model_id"] or ""),
+            "reasoning_effort": str(row["reasoning_effort"] or ""),
+            "service_tier": str(row["service_tier"] or ""),
+            "actual_model": str(row["actual_model"] or ""),
+            "model_context_window": int(row["model_context_window"] or 0),
+            "total_tokens": int(row["total_tokens"] or 0),
+            "last_tokens": int(row["last_tokens"] or 0),
+            "compaction_count": int(row["compaction_count"] or 0),
         }
 
     @classmethod
@@ -206,6 +211,9 @@ class AgentConversationStore:
         conversation_id: str = "",
         title: str = "",
         active: bool = True,
+        model_id: str = "",
+        reasoning_effort: str = "",
+        service_tier: str = "",
     ) -> dict[str, Any]:
         owner = self._required(principal, "principal")
         profile = self._required(profile_id, "profile_id")
@@ -215,6 +223,9 @@ class AgentConversationStore:
         identifier = self._required(identifier, "conversation_id", 256)
         now = time.time()
         label = str(title or "").strip()[:512]
+        model = str(model_id or "").strip()[:256]
+        effort = str(reasoning_effort or "").strip()[:64]
+        tier = str(service_tier or "").strip()[:64]
         with self._connection() as db:
             existing = db.execute(
                 f"SELECT principal, profile_id FROM {TABLE} WHERE conversation_id = ?",
@@ -234,13 +245,20 @@ class AgentConversationStore:
             db.execute(
                 f"""INSERT INTO {TABLE} (
                         conversation_id, principal, profile_id, title,
-                        created_at, updated_at, active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, active, model_id,
+                        reasoning_effort, service_tier
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(conversation_id) DO UPDATE SET
                         title = excluded.title,
                         updated_at = excluded.updated_at,
-                        active = excluded.active""",
-                (identifier, owner, profile, label, now, now, int(active)),
+                        active = excluded.active,
+                        model_id = excluded.model_id,
+                        reasoning_effort = excluded.reasoning_effort,
+                        service_tier = excluded.service_tier""",
+                (
+                    identifier, owner, profile, label, now, now, int(active),
+                    model, effort, tier,
+                ),
             )
             row = db.execute(
                 f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
@@ -277,6 +295,25 @@ class AgentConversationStore:
                 f"""SELECT * FROM {TABLE}
                     WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
                 (identifier, owner, profile),
+            ).fetchone()
+        return self._row(row)
+
+    def get_by_provider_thread(
+        self,
+        principal: str,
+        profile_id: str,
+        provider_thread_id: str,
+    ) -> dict[str, Any] | None:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        thread = self._required(provider_thread_id, "provider_thread_id", 512)
+        with self._connection() as db:
+            row = db.execute(
+                f"""SELECT * FROM {TABLE}
+                    WHERE principal = ? AND profile_id = ?
+                      AND provider_thread_id = ?
+                    ORDER BY updated_at DESC LIMIT 1""",
+                (owner, profile, thread),
             ).fetchone()
         return self._row(row)
 
@@ -429,6 +466,123 @@ class AgentConversationStore:
             raise RuntimeError("Agent conversation disappeared")
         return value
 
+    def update_runtime_settings(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        model_id: str,
+        reasoning_effort: str,
+        service_tier: str,
+    ) -> dict[str, Any]:
+        """Persist conversation-local model choices without changing Provider defaults."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        model = str(model_id or "").strip()[:256]
+        effort = str(reasoning_effort or "").strip()[:64]
+        tier = str(service_tier or "").strip()[:64]
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE} SET model_id = ?, reasoning_effort = ?,
+                            service_tier = ?, updated_at = ?
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (model, effort, tier, time.time(), identifier, owner, profile),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
+    def update_runtime_observation(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+        *,
+        actual_model: str | None = None,
+        model_context_window: int | None = None,
+        total_tokens: int | None = None,
+        last_tokens: int | None = None,
+        compaction_count: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist small runtime metadata used to restore conversation status UI."""
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        assignments: list[str] = []
+        values: list[object] = []
+        candidates = {
+            "actual_model": (
+                None if actual_model is None else str(actual_model).strip()[:256]
+            ),
+            "model_context_window": model_context_window,
+            "total_tokens": total_tokens,
+            "last_tokens": last_tokens,
+            "compaction_count": compaction_count,
+        }
+        for name, value in candidates.items():
+            if value is None:
+                continue
+            assignments.append(f"{name} = ?")
+            values.append(max(0, int(value)) if name != "actual_model" else value)
+        if not assignments:
+            current = self.get(owner, profile, identifier)
+            if current is None:
+                raise ValueError("conversation not found")
+            return current
+        values.extend((identifier, owner, profile))
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE} SET {', '.join(assignments)}
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
+    def increment_compaction(
+        self,
+        principal: str,
+        profile_id: str,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        owner = self._required(principal, "principal")
+        profile = self._required(profile_id, "profile_id")
+        identifier = self._required(conversation_id, "conversation_id", 256)
+        with self._connection() as db:
+            cursor = db.execute(
+                f"""UPDATE {TABLE}
+                    SET compaction_count = compaction_count + 1
+                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
+                (identifier, owner, profile),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation not found")
+            row = db.execute(
+                f"SELECT * FROM {TABLE} WHERE conversation_id = ?",
+                (identifier,),
+            ).fetchone()
+        value = self._row(row)
+        if value is None:  # pragma: no cover
+            raise RuntimeError("Agent conversation disappeared")
+        return value
+
     def touch(
         self,
         principal: str,
@@ -443,152 +597,6 @@ class AgentConversationStore:
             conversation_id,
             preview=preview or None,
         )
-
-    def append_item(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-        *,
-        role: str,
-        text: object,
-        item_id: str = "",
-        item_type: str = "message",
-        created_at: float | None = None,
-    ) -> dict[str, Any]:
-        """Persist one normalized user/assistant message for offline viewing."""
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        normalized_role = str(role or "").strip().lower()
-        if normalized_role not in {"user", "assistant"}:
-            raise ValueError("conversation item role is invalid")
-        normalized_text = sanitize_conversation_text(text)
-        if not normalized_text:
-            raise ValueError("conversation item text is required")
-        item_identifier = str(item_id or "").strip() or f"item-{uuid.uuid4().hex}"
-        item_identifier = self._required(item_identifier, "item_id", 256)
-        kind = str(item_type or "message").strip()[:64] or "message"
-        timestamp = float(time.time() if created_at is None else created_at)
-        with self._connection() as db:
-            owned = db.execute(
-                f"""SELECT 1 FROM {TABLE}
-                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
-                (identifier, owner, profile),
-            ).fetchone()
-            if owned is None:
-                raise ValueError("conversation not found")
-            db.execute(
-                f"""INSERT INTO {ITEM_TABLE}(
-                        conversation_id, item_id, role, item_type, text, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(conversation_id, item_id) DO UPDATE SET
-                        role=excluded.role, item_type=excluded.item_type,
-                        text=excluded.text, created_at=excluded.created_at""",
-                (identifier, item_identifier, normalized_role, kind,
-                 normalized_text, timestamp),
-            )
-            # Keep local transcript growth bounded.  The metadata catalog is
-            # still the source of truth for the full provider thread.
-            db.execute(
-                f"""DELETE FROM {ITEM_TABLE}
-                    WHERE conversation_id = ? AND rowid NOT IN (
-                        SELECT rowid FROM {ITEM_TABLE}
-                        WHERE conversation_id = ?
-                        ORDER BY created_at DESC, item_id DESC LIMIT 500
-                    )""",
-                (identifier, identifier),
-            )
-            row = db.execute(
-                f"""SELECT item_id, role, item_type, text, created_at
-                    FROM {ITEM_TABLE}
-                    WHERE conversation_id = ? AND item_id = ?""",
-                (identifier, item_identifier),
-            ).fetchone()
-        if row is None:  # pragma: no cover - guarded by the upsert above
-            raise RuntimeError("conversation item was not saved")
-        return {
-            "id": str(row["item_id"] or ""),
-            "role": str(row["role"] or ""),
-            "item_type": str(row["item_type"] or "message"),
-            "text": str(row["text"] or ""),
-            "created_at": float(row["created_at"] or 0),
-        }
-
-    def items(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-    ) -> list[dict[str, Any]]:
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        with self._connection() as db:
-            rows = db.execute(
-                f"""SELECT i.item_id, i.role, i.item_type, i.text, i.created_at
-                    FROM {ITEM_TABLE} i
-                    JOIN {TABLE} c ON c.conversation_id = i.conversation_id
-                    WHERE i.conversation_id = ? AND c.principal = ? AND c.profile_id = ?
-                    ORDER BY i.created_at, i.item_id""",
-                (identifier, owner, profile),
-            ).fetchall()
-        return [
-            {
-                "id": str(row["item_id"] or ""),
-                "role": str(row["role"] or ""),
-                "item_type": str(row["item_type"] or "message"),
-                "text": str(row["text"] or ""),
-                "created_at": float(row["created_at"] or 0),
-            }
-            for row in rows
-        ]
-
-    def replace_items(
-        self,
-        principal: str,
-        profile_id: str,
-        conversation_id: str,
-        items: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Replace one transcript projection with Provider-authoritative items."""
-        owner = self._required(principal, "principal")
-        profile = self._required(profile_id, "profile_id")
-        identifier = self._required(conversation_id, "conversation_id", 256)
-        normalized: list[tuple[str, str, str, str, float]] = []
-        for raw in items[-500:]:
-            role = str(raw.get("role") or "").strip().lower()
-            if role not in {"user", "assistant"}:
-                raise ValueError("conversation item role is invalid")
-            text = sanitize_conversation_text(raw.get("text"))
-            if not text:
-                raise ValueError("conversation item text is required")
-            item_id = self._required(raw.get("item_id"), "item_id", 256)
-            item_type = str(raw.get("item_type") or "message").strip()[:64]
-            created_at = float(raw.get("created_at") or time.time())
-            normalized.append((item_id, role, item_type, text, created_at))
-        with self._connection() as db:
-            owned = db.execute(
-                f"""SELECT 1 FROM {TABLE}
-                    WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
-                (identifier, owner, profile),
-            ).fetchone()
-            if owned is None:
-                raise ValueError("conversation not found")
-            db.execute(
-                f"DELETE FROM {ITEM_TABLE} WHERE conversation_id = ?",
-                (identifier,),
-            )
-            db.executemany(
-                f"""INSERT INTO {ITEM_TABLE}(
-                        conversation_id, item_id, role, item_type, text, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)""",
-                [
-                    (identifier, item_id, role, item_type, text, created_at)
-                    for item_id, role, item_type, text, created_at in normalized
-                ],
-            )
-        return self.items(owner, profile, identifier)
 
     def set_parent_sharing(
         self, principal: str, profile_id: str, enabled: bool,
@@ -636,5 +644,4 @@ __all__ = [
     "ITEM_TABLE",
     "SHARING_TABLE",
     "TABLE",
-    "sanitize_conversation_text",
 ]

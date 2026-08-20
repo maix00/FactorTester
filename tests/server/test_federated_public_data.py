@@ -19,11 +19,19 @@ class _Gateway:
         self.fail = False
         self.calls = 0
         self.rows = []
+        self.items = []
 
-    def public_data(self, _route, **_kwargs):
+    def public_data(self, _route, **kwargs):
         self.calls += 1
         if self.fail:
             raise ConnectionError("peer is offline")
+        if kwargs.get("operation") == "profile-conversation-items":
+            return {
+                "items": list(self.items),
+                "has_more": False,
+                "after": None,
+                "turn_count": 1,
+            }
         return {"conversations": list(self.rows)}
 
 
@@ -86,3 +94,35 @@ def test_remote_history_uses_bounded_request_cache_only_when_source_fails():
 
     assert actual == expected
     assert gateway.calls == 2
+
+
+def test_remote_conversation_content_is_never_served_from_stale_cache():
+    route = ServiceRoute(
+        server_id="remote-main",
+        role="manager",
+        branch="main",
+        revision="rev-1",
+        port=7998,
+    )
+    registry = _Registry(route)
+    gateway = _Gateway()
+    gateway.items = [{
+        "id": "assistant-1",
+        "type": "assistant_message",
+        "content": [{"type": "output_text", "text": "latest"}],
+    }]
+    service = _service(registry, gateway)
+
+    assert service.profile_conversation_items(
+        "remote-main", "GTHT@parent@1", "GTHT@child@2", "maxc", "c-1",
+    )["items"] == gateway.items
+
+    gateway.fail = True
+    try:
+        service.profile_conversation_items(
+            "remote-main", "GTHT@parent@1", "GTHT@child@2", "maxc", "c-1",
+        )
+    except ConnectionError as error:
+        assert "offline" in str(error)
+    else:  # pragma: no cover - stale content must never masquerade as current
+        raise AssertionError("stale conversation content was returned")

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from urllib.request import Request, urlopen
 
 import pytest
+import settings as Settings
 
 from server.manager import runtime as manager
 from server.manager.data_plane.context import DataPlaneRuntime
@@ -48,6 +49,12 @@ from server.services.federated_factor_sources import (
     source_transfer_manifest,
 )
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
+
+
+@pytest.fixture(autouse=True)
+def _isolated_manager_sqlite(tmp_path, monkeypatch):
+    """Keep transfer integration tests away from the live Manager SQLite."""
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "manager.sqlite")
 
 
 @contextmanager

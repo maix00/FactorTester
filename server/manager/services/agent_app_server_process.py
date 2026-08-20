@@ -10,7 +10,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 
 class AgentAppServerProcessError(RuntimeError):
@@ -27,6 +27,7 @@ class AgentAppServerProcess:
         cwd: str | Path,
         environment: Mapping[str, str],
         event_limit: int = 500,
+        event_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         if not command:
             raise AgentAppServerProcessError("app-server command is required")
@@ -34,6 +35,7 @@ class AgentAppServerProcess:
         self.cwd = str(Path(cwd).expanduser().resolve())
         self.environment = {str(key): str(value) for key, value in environment.items()}
         self.event_limit = max(20, int(event_limit))
+        self.event_observer = event_observer
         self._process: subprocess.Popen[bytes] | None = None
         self._reader: threading.Thread | None = None
         self._stderr_reader: threading.Thread | None = None
@@ -90,6 +92,12 @@ class AgentAppServerProcess:
                 "payload": payload,
             })
             self._condition.notify_all()
+        if self.event_observer is not None:
+            try:
+                self.event_observer(payload)
+            except Exception:
+                # Runtime telemetry must never interrupt the JSONL reader.
+                pass
 
     def _read_stdout(self) -> None:
         process = self._process

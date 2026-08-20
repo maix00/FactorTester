@@ -56,13 +56,21 @@ def _margin_row(strategy, timestamp, product, margin, notional, equity):
             "margin_utilization": float(margin or 0.0) / equity if equity else None}
 
 
-def ratio_rows(result: dict[str, Any], source: dict[str, Any], series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def ratio_rows(
+    result: dict[str, Any], source: dict[str, Any], series: list[dict[str, Any]],
+    *, fee_rows_value: list[dict[str, Any]] | None = None,
+    margin_rows_value: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     rows = []
     metrics = result.get("metrics") or {}
     if isinstance(metrics, dict):
         rows.extend({"series": name, **values} for name, values in metrics.items() if isinstance(values, dict))
-    fee_total = sum(finite_number(item.get("fee")) for item in fee_rows(source))
-    margin_total = sum(finite_number(item.get("margin")) for item in margin_rows(source))
+    fee_total = sum(finite_number(item.get("fee")) for item in (
+        fee_rows_value if fee_rows_value is not None else fee_rows(source)
+    ))
+    margin_total = sum(finite_number(item.get("margin")) for item in (
+        margin_rows_value if margin_rows_value is not None else margin_rows(source)
+    ))
     gross = sum(item["values"][-1] - item["values"][0] for item in series)
     rows.append({"series": "__aggregate__", "gross_change": gross, "fee_total": fee_total,
                  "gross_to_fee_ratio": gross / fee_total if fee_total else None,

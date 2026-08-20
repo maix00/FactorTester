@@ -106,7 +106,7 @@
         job: item.job || {},
       });
     }
-    const previews = artifactPreviewSection(
+    const previews = domain ? null : artifactPreviewSection(
       context, task, outputArtifacts, item.jobID, item.artifactQuery || "",
     );
     const outputs = artifactOutputSection(

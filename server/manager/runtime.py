@@ -441,6 +441,7 @@ class ManagerState(
             client_state=self.client_state,
             agent_profiles=self.agent_profiles,
             federated_public_data=self.federated_public_data,
+            conversation_items_reader=self.agent_app_server.conversation_items,
         )
         self.test_authoring = TestAuthoringService()
         # The Manager exposes several application projections from one Python

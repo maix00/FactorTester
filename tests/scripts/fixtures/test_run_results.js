@@ -121,4 +121,34 @@ const backtestContent = results.resultSection(
 );
 assert.ok(backtestContent);
 assert.equal(previewCalls, 1, "backtest results must reuse the old artifact preview path");
+
+let backtestOptions = null;
+window.FTBacktestResults = {
+  section: (_context, options) => {
+    backtestOptions = options;
+    return new MiniElement("domain-results");
+  },
+};
+const domainContent = results.resultSection(
+  {t: value => value}, {kind: "backtest"}, {
+    jobID: "job-backtest", artifactQuery: "?server_id=public-1",
+    detailPayload: {result_summary: {completed: true}},
+    job: {status: "succeeded"},
+    taskDetail: {
+      artifacts: [
+        {name: "factor_source__Demo", role: "input", state: "active"},
+        {name: "equity_curve_report", file_name: "equity_curve_report.svg", state: "active"},
+      ],
+      input_artifacts: [{name: "factor_source__Demo"}], output_declarations: [],
+    },
+  },
+);
+assert.ok(domainContent);
+assert.equal(previewCalls, 1, "domain viewer must suppress duplicate generic previews");
+assert.deepEqual(backtestOptions.resultSummary, {completed: true});
+assert.equal(
+  domainContent.children.some(child => child.className === "test-run-output-artifacts"),
+  true,
+  "domain viewer must keep the downloadable artifact list",
+);
 console.log("ok");

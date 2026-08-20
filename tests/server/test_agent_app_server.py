@@ -15,6 +15,9 @@ from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.agent_app_server_errors import AgentAppServerError
+from server.manager.services.agent_conversation_runtime import (
+    AgentConversationRuntimeObserver,
+)
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
     AgentProviderHealthError,
@@ -66,6 +69,22 @@ for raw in sys.stdin:
         result = {"data": [{"cwd": request.get("params", {}).get("cwds", [""])[0], "skills": []}]}
     elif method == "initialize":
         result = {"userAgent": "fake-codex"}
+    elif method == "model/list":
+        result = {"data": [{
+            "id": "research-model-fast",
+            "model": "research-model-fast",
+            "displayName": "Research Fast",
+            "description": "Fast research model",
+            "hidden": False,
+            "isDefault": False,
+            "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [
+                {"reasoningEffort": "medium", "description": "Balanced"},
+                {"reasoningEffort": "high", "description": "Deep"},
+            ],
+            "defaultServiceTier": None,
+            "serviceTiers": [{"id": "fast", "name": "Fast", "description": "Low latency"}],
+        }], "nextCursor": None}
     elif method == "thread/start":
         result = {
             "thread": {
@@ -76,7 +95,7 @@ for raw in sys.stdin:
                 "turns": HISTORY_TURNS,
             },
         }
-    elif method == "thread/resume":
+    elif method in {"thread/resume", "thread/read"}:
         thread_id = request.get("params", {}).get("threadId", "")
         result = {
             "thread": {
@@ -86,12 +105,12 @@ for raw in sys.stdin:
                 "updatedAt": 1,
                 "turns": HISTORY_TURNS,
             },
-            "resumed": True,
+            "resumed": method == "thread/resume",
         }
     elif method == "thread/delete":
         result = {"deleted": True}
     else:
-        result = {"accepted": method}
+        result = {"accepted": method, "params": request.get("params", {})}
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
@@ -116,6 +135,9 @@ def _provider_health_ok(provider, **_kwargs):
         "base_url": provider["base_url"],
         "default_model": provider["default_model"],
         "model_available": True,
+        "latency_ms": 125,
+        "available_models": ["research-model", "research-model-fast"],
+        "available_models_truncated": False,
     }
 
 
@@ -448,6 +470,14 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         {},
         conversation_id=conversation["conversation_id"],
     )
+    service.update_conversation_runtime_settings(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+        model_id="research-model-fast",
+        reasoning_effort="high",
+        service_tier="fast",
+    )
     with pytest.raises(AgentAppServerError, match="conversation catalog"):
         supervisor.request(
             PRINCIPAL,
@@ -468,6 +498,9 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert response["result"]["accepted"] == "turn/start"
+    assert response["result"]["params"]["model"] == "research-model-fast"
+    assert response["result"]["params"]["effort"] == "high"
+    assert response["result"]["params"]["serviceTier"] == "fast"
     config_path = (
         tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
         / ".codex" / "config.toml"
@@ -672,11 +705,11 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert started["result"]["thread"]["id"] == "provider-thread-1"
-    items = service.conversation_items(
+    items = supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )
-    assert [item["role"] for item in items] == ["user", "assistant"]
-    assert items[-1]["text"] == (
+    )["items"]
+    assert [item["type"] for item in items] == ["assistant_message", "user_message"]
+    assert items[0]["content"][0]["text"] == (
         "98 个期货品种，2846 个合约路径\n\n"
         "```bash\n"
         "factortester products list\n"
@@ -692,39 +725,30 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation["conversation_id"],
     )
     assert refreshed is True
-    assert len(service.conversation_items(
+    assert len(supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 2
-
-    service.append_conversation_item(
-        PRINCIPAL,
-        PROFILE_ID,
-        conversation["conversation_id"],
-        role="assistant",
-        text="第一句PRIVATE_REASONING",
-        item_id="stream-assistant-stale",
-    )
-    assert len(service.conversation_items(
-        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 3
-    assert supervisor.refresh_conversation_history(
-        PRINCIPAL,
-        PROFILE_ID,
-        conversation["conversation_id"],
-    ) is True
-    authoritative = service.conversation_items(
-        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )
-    assert len(authoritative) == 2
-    assert all(item["id"] != "stream-assistant-stale" for item in authoritative)
+    )["items"]) == 2
 
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+    # A stopped Agent remains readable through a short-lived, read-only
+    # Provider app-server.  No SQLite transcript fallback is involved.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
     service.release(
         PRINCIPAL,
         first_claim["claim"]["claim_id"],
         agent_id="agent-a",
     )
-    service.claim(
+    # A fresh reader must not depend on an active claim or model-provider
+    # network.  Conversation ownership plus the stored Provider binding is
+    # sufficient to read this Profile's local thread history.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
+    second_claim = service.claim(
         PRINCIPAL,
         PROFILE_ID,
         provider_id=provider["provider_id"],
@@ -740,10 +764,23 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert resumed["result"]["resumed"] is True
-    assert len(service.conversation_items(
+    assert len(supervisor.conversation_items(
         PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
-    )) == 2
+    )["items"]) == 2
     supervisor.stop(PRINCIPAL, PROFILE_ID)
+    service.release(
+        PRINCIPAL,
+        second_claim["claim"]["claim_id"],
+        agent_id="agent-b",
+    )
+    service.delete_provider(PRINCIPAL, provider["provider_id"])
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
+    # Local Provider threads stay readable even after their former model
+    # connection is removed; thread/read itself performs no model request.
+    assert len(supervisor.conversation_items(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )["items"]) == 2
+    supervisor.thread_reader.close(PRINCIPAL, PROFILE_ID)
 
 
 def test_profile_conversation_rejects_a_different_provider_on_resume(tmp_path):
@@ -799,7 +836,10 @@ class _SSESupervisor:
         self.calls = []
 
     def status(self, _principal, _profile_id):
-        return {"running": True}
+        return {
+            "running": True,
+            "active_conversation_id": "conversation-live",
+        }
 
     def events(self, _principal, _profile_id, *, after, timeout):
         self.calls.append((after, timeout))
@@ -809,6 +849,18 @@ class _SSESupervisor:
                 "payload": {
                     "method": "item/agentMessage/delta",
                     "params": {"delta": "hello"},
+                },
+            }, {
+                "sequence": 8,
+                "payload": {
+                    "method": "item/completed",
+                    "params": {"item": {
+                        "id": "command-1",
+                        "type": "commandExecution",
+                        "command": "factortester products list",
+                        "aggregatedOutput": "98 products",
+                        "status": "completed",
+                    }},
                 },
             }]
         raise ConnectionResetError
@@ -843,6 +895,8 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     chunk_length, chunk_body = raw.split(b"\r\n", 1)
     assert int(chunk_length, 16) > 0
     assert chunk_body.startswith(sse_payload)
+    assert b'"chatkit_item": {"id": "command-1"' in raw
+    assert b'"type": "workflow"' in raw
     assert supervisor.calls[0][0] == 0
 
 
@@ -876,7 +930,7 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     service.claim(PRINCIPAL, PROFILE_ID, provider_id=provider["provider_id"])
     supervisor = AgentAppServerSupervisor(
         service,
-        codex_binary=_fake_codex(tmp_path / "fake-codex"),
+        codex_binary=_fake_codex(tmp_path / "fake-codex", history=True),
     )
 
     handler = _AppHandler(service, supervisor, {"profile_id": PROFILE_ID})
@@ -899,8 +953,34 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     )
     listed = _response(handler)["conversations"]
     assert listed[0]["conversation_id"] == conversation["conversation_id"]
+    assert listed[0]["model_id"] == "research-model"
     assert "principal" not in listed[0]
     assert "provider_id" not in listed[0]
+
+    handler = _AppHandler(service, supervisor, {
+        "profile_id": PROFILE_ID,
+        "conversation_id": conversation["conversation_id"],
+        "model_id": "research-model-fast",
+        "reasoning_effort": "high",
+        "service_tier": "fast",
+    })
+    assert handler._post_agent_app_routes(urlparse(
+        "/api/client/profile-agent/conversations/settings",
+    ))
+    settings = _response(handler)["conversation"]
+    assert settings["model_id"] == "research-model-fast"
+    assert settings["reasoning_effort"] == "high"
+    assert settings["service_tier"] == "fast"
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(urlparse(
+        f"/api/client/profile-agent/models?profile_id={PROFILE_ID}",
+    ))
+    catalog = _response(handler)
+    assert catalog["latency_ms"] == 125
+    fast = next(item for item in catalog["models"] if item["id"] == "research-model-fast")
+    assert [item["id"] for item in fast["reasoning_efforts"]] == ["medium", "high"]
+    assert [item["id"] for item in fast["service_tiers"]] == ["fast"]
 
     handler = _AppHandler(service, supervisor, {
         "profile_id": PROFILE_ID,
@@ -909,7 +989,24 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
         "params": {"prompt": "hello", "threadId": "provider-thread-1", "skill_ids": []},
     })
     assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
-    assert _response(handler)["response"]["result"]["accepted"] == "turn/start"
+    turn = _response(handler)["response"]["result"]
+    assert turn["accepted"] == "turn/start"
+    assert turn["params"]["model"] == "research-model-fast"
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(urlparse(
+        "/api/client/profile-agent/conversation-items"
+        f"?profile_id={PROFILE_ID}"
+        f"&conversation_id={conversation['conversation_id']}"
+        "&limit=7&view=results",
+    ))
+    history = _response(handler)
+    assert history["success"] is True
+    assert history["turn_count"] == 1
+    assert history["has_more"] is False
+    assert [item["type"] for item in history["items"]] == [
+        "assistant_message", "user_message",
+    ]
 
     handler = _AppHandler(service, supervisor)
     assert handler._get_agent_app_routes(
@@ -917,6 +1014,108 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     )
     assert _response(handler)["status"]["running"] is True
     supervisor.stop_all()
+
+
+def test_profile_agent_routes_reject_client_managed_profile(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    service.bind_runtime(
+        PRINCIPAL,
+        PROFILE_ID,
+        runtime_kind="client",
+        executor_id="client-device-1",
+    )
+    supervisor = AgentAppServerSupervisor(service)
+
+    handler = _AppHandler(service, supervisor)
+    assert handler._get_agent_app_routes(
+        urlparse(f"/api/client/profile-agent?profile_id={PROFILE_ID}"),
+    )
+
+    assert handler.response_status == 400
+    assert "not bound to a server runtime" in _response(handler)["error"]
+
+
+def test_profile_agent_runtime_events_update_conversation_metadata(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    conversation = service.conversation_store.create(PRINCIPAL, PROFILE_ID)
+    service.conversation_store.save_thread(
+        PRINCIPAL,
+        PROFILE_ID,
+        conversation["conversation_id"],
+        "provider-thread-1",
+    )
+    observer = AgentConversationRuntimeObserver(
+        service.conversation_store, PRINCIPAL, PROFILE_ID,
+    )
+
+    observer.observe({
+        "method": "thread/tokenUsage/updated",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-1",
+            "tokenUsage": {
+                "modelContextWindow": 200000,
+                "last": {"totalTokens": 12000},
+                "total": {"totalTokens": 45000},
+            },
+        },
+    })
+    observer.observe({
+        "method": "thread/settings/updated",
+        "params": {
+            "threadId": "provider-thread-1",
+            "threadSettings": {"model": "research-model"},
+        },
+    })
+    observer.observe({
+        "method": "model/rerouted",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-1",
+            "fromModel": "research-model",
+            "toModel": "research-model-safe",
+        },
+    })
+    compaction = {
+        "method": "thread/compacted",
+        "params": {"threadId": "provider-thread-1", "turnId": "turn-1"},
+    }
+    observer.observe(compaction)
+    observer.observe(compaction)
+    context_compaction = {
+        "method": "item/completed",
+        "params": {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-2",
+            "item": {"id": "compaction-2", "type": "contextCompaction"},
+        },
+    }
+    observer.observe(context_compaction)
+    observer.observe(context_compaction)
+
+    updated = service.conversation_store.get(
+        PRINCIPAL, PROFILE_ID, conversation["conversation_id"],
+    )
+    assert updated is not None
+    assert updated["actual_model"] == "research-model-safe"
+    assert updated["model_context_window"] == 200000
+    assert updated["last_tokens"] == 12000
+    assert updated["total_tokens"] == 45000
+    assert updated["compaction_count"] == 2
 
 
 def test_provider_test_route_returns_safe_health_result(tmp_path, monkeypatch):

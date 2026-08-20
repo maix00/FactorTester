@@ -23,7 +23,9 @@ from server.jobs.json_artifact_writer import (
     write_json_mapping_artifact,
 )
 from server.jobs.report_outputs import (
+    OUTPUT_DEFINITIONS,
     build_report_artifacts,
+    bundle_reports,
     default_output_requests,
     normalize_output_requests,
     source_artifacts_for,
@@ -36,6 +38,36 @@ from server.jobs.scheduling.result_projection import (
 
 class WorkerUnavailable(RuntimeError):
     pass
+
+
+_EXECUTION_PROGRESS_SHARE = 85.0
+_PROGRESS_PHASE_WEIGHTS = {
+    "pre_replay": 5.0,
+    "event_replay": 75.0,
+    "post_replay": 5.0,
+}
+_OUTPUT_PROGRESS_PHASES = (
+    {
+        "key": "report_build",
+        "label": "结果派生与编码",
+        "weight": 10.0,
+        "flows": [{
+            "flow_key": "build_requested_outputs",
+            "flow_label": "构建所选结果",
+            "display_order": 1,
+        }],
+    },
+    {
+        "key": "artifact_publish",
+        "label": "生成物登记",
+        "weight": 5.0,
+        "flows": [{
+            "flow_key": "publish_artifacts",
+            "flow_label": "写入并登记生成物",
+            "display_order": 1,
+        }],
+    },
+)
 
 
 class _CancelFlag:
@@ -98,7 +130,13 @@ class _WorkerSink:
     def _flush_live_events(self) -> None:
         pending = self._pending_live_events
         self._pending_live_events = {}
-        for event, data in pending.items():
+        # Activity explains the current work; numeric progress is the final
+        # snapshot consumed after reconnect. Preserve both while ensuring the
+        # broker's latest_progress points at the measurable event.
+        priority = {"activity": 0, "signal_progress": 1, "progress": 2}
+        for event, data in sorted(
+            pending.items(), key=lambda item: priority.get(item[0], 1),
+        ):
             self._last_live_emit_at[event] = time.monotonic()
             self._emit(event, data)
 
@@ -118,7 +156,21 @@ class _WorkerSink:
         })
 
     def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None:
-        self._emit("activity_manifest", {"phases": phases})
+        declared: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in phases:
+            phase = dict(raw)
+            key = str(phase.get("key") or phase.get("phase") or "").strip()
+            if not key or key in seen:
+                continue
+            phase["key"] = key
+            phase.setdefault("weight", _PROGRESS_PHASE_WEIGHTS.get(key, 1.0))
+            declared.append(phase)
+            seen.add(key)
+        for raw in _OUTPUT_PROGRESS_PHASES:
+            if raw["key"] not in seen:
+                declared.append({**raw, "flows": [dict(item) for item in raw["flows"]]})
+        self._emit("activity_manifest", {"phases": declared})
 
     def emit_activity(self, **payload: Any) -> None:
         self._emit_live("activity", payload)
@@ -131,13 +183,21 @@ class _WorkerSink:
         phase: str = "event_replay",
         percent: float | None = None,
     ) -> None:
+        percent_scope = "phase"
         if percent is None:
             percent = 100.0 if total <= 0 else completed / total * 100.0
+        else:
+            # Native execution percentages describe the complete replay. The
+            # worker still has to derive, encode, write, and register requested
+            # outputs, so execution owns only the leading progress segment.
+            percent = float(percent) * _EXECUTION_PROGRESS_SHARE / 100.0
+            percent_scope = "global"
         self._emit_live("signal_progress", {
             "completed": completed,
             "total": total,
             "phase": phase,
             "percent": max(0.0, min(100.0, float(percent))),
+            "percent_scope": percent_scope,
         })
 
     def emit_runtime_info(
@@ -177,10 +237,48 @@ class _WorkerSink:
         )
         merged_source = dict(self._source_payloads)
         merged_source.update(source or {})
+        self.emit_activity(
+            phase="report_build",
+            phase_label="结果派生与编码",
+            flow_key="build_requested_outputs",
+            flow_label="构建所选结果",
+            message=f"正在派生并编码 {len(requested)} 项所选结果",
+        )
+
+        def report_progress(completed: int, total: int, name: str) -> None:
+            label = str(OUTPUT_DEFINITIONS.get(name, {}).get("label") or name)
+            self.emit_activity(
+                phase="report_build",
+                phase_label="结果派生与编码",
+                flow_key="build_requested_outputs",
+                flow_label="构建所选结果",
+                message=f"已构建 {label}",
+            )
+            self.emit_progress(
+                completed, max(1, total), "report_build",
+                percent_scope="phase",
+                message=f"已构建 {completed}/{total} 项结果：{label}",
+            )
+
         reports = build_report_artifacts(
-            data, source=merged_source, requested=requested, job_id=self.job_id,
+            data,
+            source=merged_source,
+            requested=requested,
+            job_id=self.job_id,
+            progress=report_progress,
         )
         has_equity_curve = any(report.name == "equity_curve_report" for report in reports)
+        retain_result = self.retention_mode == "full" or "result" in self._source_artifacts
+        bundles = bundle_reports(reports)
+        publish_total = len(reports) + len(bundles) + int(retain_result)
+        self.emit_activity(
+            phase="artifact_publish",
+            phase_label="生成物登记",
+            flow_key="publish_artifacts",
+            flow_label="写入并登记生成物",
+            message=f"正在写入并登记 {publish_total} 项生成物",
+        )
+        published = 0
         for report in reports:
             self._write_bytes_artifact(
                 report.name,
@@ -188,19 +286,38 @@ class _WorkerSink:
                 extension=report.extension,
                 content_type=report.content_type,
             )
-            receipt_name = (
-                "equity_curve_receipt"
-                if report.name == "equity_curve_report"
-                else f"{report.name}_receipt"
+            published += 1
+            self.emit_progress(
+                published, max(1, publish_total), "artifact_publish",
+                percent_scope="phase",
+                message=f"已登记 {published}/{publish_total} 项生成物",
             )
+        for bundle in bundles:
             self._write_bytes_artifact(
-                receipt_name,
-                receipt_bytes(report.receipt),
+                bundle.receipt_name,
+                receipt_bytes(bundle.receipt),
                 extension="json",
                 content_type="application/json",
             )
-        if self.retention_mode == "full" or "result" in self._source_artifacts:
+            published += 1
+            self.emit_progress(
+                published, max(1, publish_total), "artifact_publish",
+                percent_scope="phase",
+                message=f"已登记 {published}/{publish_total} 项生成物",
+            )
+        if retain_result:
             self._write_artifact("result", data)
+            published += 1
+            self.emit_progress(
+                published, max(1, publish_total), "artifact_publish",
+                percent_scope="phase",
+                message=f"已登记 {published}/{publish_total} 项生成物",
+            )
+        if publish_total == 0:
+            self.emit_progress(
+                1, 1, "artifact_publish", percent_scope="phase",
+                message="无需生成额外文件",
+            )
         self._flush_live_events()
         summary = _bounded_summary(data)
         if has_equity_curve:

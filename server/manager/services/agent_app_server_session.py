@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 import threading
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
@@ -29,6 +29,8 @@ class AgentAppServerSession:
         factor_tester_auth: Mapping[str, object] | None = None,
         proxy_url: str = "",
         cc_switch_binary: str = "cc-switch",
+        read_only: bool = False,
+        event_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.runtime = runtime
         self.provider = dict(provider)
@@ -41,6 +43,8 @@ class AgentAppServerSession:
         )
         self.protocol = AgentSkillProtocol(runtime)
         self.policy = AgentAppServerPolicy(runtime, self.protocol)
+        self.read_only = bool(read_only)
+        self.event_observer = event_observer
         self.process: AgentAppServerProcess | None = None
         self.cc_switch = (
             CCSwitchGateway(
@@ -49,7 +53,8 @@ class AgentAppServerSession:
                 binary=cc_switch_binary,
                 proxy_url=proxy_url,
             )
-            if str(self.provider.get("protocol") or "") != "openai_responses"
+            if not self.read_only
+            and str(self.provider.get("protocol") or "") != "openai_responses"
             else None
         )
         self.ready = False
@@ -69,7 +74,13 @@ class AgentAppServerSession:
         with self._lock:
             if self.ready and self.process is not None and self.process.is_running():
                 return
-            self.launch.preflight()
+            # Reading a persisted thread does not call the model provider.
+            # Avoid making historical access depend on provider network
+            # health, while still validating the local executables.
+            self.launch.preflight(
+                check_provider=not self.read_only,
+                require_factor_tester=not self.read_only,
+            )
             if self.cc_switch is not None:
                 self.launch.provider = self.cc_switch.start()
             self.launch.write_provider_config()
@@ -78,6 +89,7 @@ class AgentAppServerSession:
                 command=self.launch.command(),
                 cwd=self.runtime.workspace_root,
                 environment=self.launch.environment(),
+                event_observer=self.event_observer,
             )
             process.start()
             self.process = process
@@ -96,6 +108,9 @@ class AgentAppServerSession:
                 )
                 self._error(response, "initialize")
                 process.notify("initialized")
+                if self.read_only:
+                    self.ready = True
+                    return
                 skills_response = process.request(
                     "skills/list",
                     self.protocol.skills_list_params(),

@@ -189,6 +189,7 @@
     ],
     "job-detail-previews": [
       "core/market-data.js",
+      "jobs/highcharts-timeline.js",
       "jobs/highcharts-viewers.js",
       "jobs/job-artifact-viewers.js"
     ],
@@ -335,6 +336,7 @@
       "profile/agent-skills.js",
       "profile/chatkit-protocol.js",
       "profile/chatkit-conversations.js",
+      "profile/agent-runtime-controls.js",
       "profile/chatkit-stream.js",
       "profile/chatkit-adapter.js",
       "profile/agent-chat.js",
@@ -387,6 +389,7 @@
     "jobs/list-format.js",
     "jobs/page-tabs.js",
     "jobs/test-types.js",
+    "jobs/highcharts-timeline.js",
     "jobs/highcharts-viewers.js",
     "jobs/factor-series-model.js",
     "jobs/factor-series-chart.js",
@@ -518,6 +521,7 @@
     "profile/agent-skills.js",
     "profile/chatkit-protocol.js",
     "profile/chatkit-conversations.js",
+    "profile/agent-runtime-controls.js",
     "profile/chatkit-stream.js",
     "profile/chatkit-adapter.js",
     "profile/agent-chat.js",
