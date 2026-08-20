@@ -492,7 +492,7 @@ def test_manager_login_returns_json_when_authentication_crashes(
     }
 
 
-def test_job_detail_and_artifact_metadata_share_manager_gateway_paths(
+def test_job_detail_uses_worker_but_artifact_metadata_uses_manager_repository(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -511,6 +511,13 @@ def test_job_detail_and_artifact_metadata_share_manager_gateway_paths(
         )
 
     monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        "server.manager.http.job_transfer_routes.JobArtifactCatalog.list",
+        lambda _catalog, **_values: [{
+            "name": "curve.svg", "file_name": "curve.svg",
+            "state": "active", "artifact_role": "output",
+        }],
+    )
     headers = {"Authorization": "Bearer user-token"}
     with _running_manager(state) as base_url:
         with urlopen(Request(
@@ -525,11 +532,8 @@ def test_job_detail_and_artifact_metadata_share_manager_gateway_paths(
 
     assert detail["job_id"] == "job-1"
     assert detail["port"] == 8141
-    assert artifacts["job_id"] == "job-1"
-    assert [item["path"] for item in calls] == [
-        "/api/jobs/job-1",
-        "/api/jobs/job-1/artifacts",
-    ]
+    assert artifacts["artifacts"][0]["name"] == "curve.svg"
+    assert [item["path"] for item in calls] == ["/api/jobs/job-1"]
     assert all(item["principal"] == "user@1" for item in calls)
 
 

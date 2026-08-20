@@ -15,6 +15,7 @@ from server.manager.services.profile_directory import (
     PROFILE_DIRECTORY_PRINCIPAL,
     ProfileDirectoryService,
 )
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
 from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
@@ -73,6 +74,13 @@ class FederationPublicDataRoutesMixin:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
         if kind == "research":
             return self._research_data_value(operation, viewer, payload)
+        if kind == "job-artifacts" and operation == "list":
+            return {
+                "artifacts": JobArtifactCatalog(self.state).list(
+                    job_id=str(payload.get("job_id") or ""),
+                    principal=principal,
+                ),
+            }
         if kind == "catalog":
             if operation == "profiles":
                 return {

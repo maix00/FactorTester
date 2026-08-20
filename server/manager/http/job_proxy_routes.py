@@ -264,9 +264,10 @@ class JobProxyRoutesMixin:
             routes = self.state.service_routes(include_offline=True)
             if server_id:
                 routes = [item for item in routes if item.server_id == server_id]
-            online = [item for item in routes if item.online]
-            if online:
-                return sorted(online, key=self.state.route_selection_key)
+            if routes:
+                # The worker port may be stopped. Artifact control requests
+                # use only this source Manager identity and endpoint.
+                return sorted(routes, key=self.state.route_selection_key)
             if not routes:
                 # Keep the lightweight Manager/unit-test seam where a caller
                 # supplies a route resolver without populating the registry.
@@ -278,14 +279,34 @@ class JobProxyRoutesMixin:
                             self.state._local_route(port=value, online=True)
                             for value in legacy_ports
                         ]
+                if server_id in {self.state.server_id, "local"}:
+                    return [self.state._local_route(port=0, online=True)]
+                descriptor = self.state.federation_registry.describe(server_id)
+                if descriptor is not None:
+                    transfer_node = descriptor.get("transfer_node")
+                    transfer_node = (
+                        transfer_node if isinstance(transfer_node, dict) else {}
+                    )
+                    return [ServiceRoute(
+                        server_id=server_id,
+                        role=str(descriptor.get("role") or ""),
+                        branch=str(descriptor.get("branch") or ""),
+                        revision=str(descriptor.get("revision") or ""),
+                        port=0,
+                        endpoint=str(descriptor.get("endpoint") or ""),
+                        peer_control_endpoint=str(
+                            transfer_node.get("peer_control_endpoint") or ""
+                        ).rstrip("/"),
+                        peer_data_endpoint=str(
+                            transfer_node.get("peer_data_endpoint") or ""
+                        ).rstrip("/"),
+                        proxy_token=str(descriptor.get("proxy_token") or ""),
+                        remote=True,
+                        online=bool(descriptor.get("online", True)),
+                        public_server=bool(descriptor.get("public_server")),
+                    )]
                 fallback = self.state.route_for(server_id=server_id)
                 return [fallback]
-            if server_id:
-                raise TargetUnavailable(
-                    f"storage server {server_id} is offline or unavailable"
-                )
-            if routes:
-                raise TargetUnavailable("all storage servers are offline")
         explicit = bool(server_id or branch or feature or port is not None)
         has_peers = bool(
             self.state.federation_registry.servers(include_offline=True)
@@ -474,6 +495,27 @@ class JobProxyRoutesMixin:
             return True
         except (TargetNotFound, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        if method == "GET" and suffix == "/artifacts":
+            selected = self._job_artifact_manifest(
+                routes, job_id=unquote(match.group(1)), principal=principal,
+            )
+            if selected is None:
+                json_response(
+                    self, {"success": False, "error": "artifact was not found"}, 404,
+                )
+                return True
+            route, artifacts, lookup_principal = selected
+            if lookup_principal == "__public_jobs__":
+                artifacts = [
+                    item for item in artifacts
+                    if str(item.get("artifact_role") or "output") != "input"
+                ]
+            json_response(self, {
+                "success": True,
+                "artifacts": artifacts,
+                "storage_server_id": route.server_id,
+            })
             return True
         last_response: tuple[ServiceRoute, GatewayResponse] | None = None
         principals = (

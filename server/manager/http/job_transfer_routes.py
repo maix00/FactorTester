@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from server.manager.http.job_public_projection import (
     PUBLIC_JOB_PRINCIPAL,
@@ -13,6 +13,7 @@ from server.manager.http.job_public_projection import (
 from server.manager.http.responses import json_response
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
 
 
 _ACCESS_PATH = re.compile(
@@ -310,17 +311,14 @@ class JobTransferRoutesMixin:
         name: str,
         principal: str,
     ):
-        path = f"/api/jobs/{quote(job_id, safe='')}/artifacts"
         principals = read_principals(
             self.state, principal, job_id, routes=routes,
         )
         for route in routes:
             for lookup_principal in principals:
                 try:
-                    payload = self.state.route_json(
-                        route,
-                        path=path,
-                        principal=lookup_principal,
+                    payload = self._job_artifact_payload(
+                        route, job_id=job_id, principal=lookup_principal,
                     )
                 except (ConnectionError, OSError, TypeError, ValueError):
                     continue
@@ -342,6 +340,45 @@ class JobTransferRoutesMixin:
                         {**artifact, "name": artifact_name or name},
                         lookup_principal,
                     )
+        return None
+
+    def _job_artifact_payload(
+        self, route, *, job_id: str, principal: str,
+    ) -> dict[str, object]:
+        """Read metadata from the source Manager, never a worker port."""
+        if route.server_id in {self.state.server_id, "local"}:
+            return {
+                "artifacts": JobArtifactCatalog(self.state).list(
+                    job_id=job_id, principal=principal,
+                ),
+            }
+        return self.state.federation_gateway.public_data(
+            route,
+            kind="job-artifacts",
+            operation="list",
+            principal=principal,
+            payload={"job_id": job_id},
+        )
+
+    def _job_artifact_manifest(self, routes, *, job_id: str, principal: str):
+        principals = read_principals(
+            self.state, principal, job_id, routes=routes,
+        )
+        for route in routes:
+            for lookup_principal in principals:
+                try:
+                    payload = self._job_artifact_payload(
+                        route, job_id=job_id, principal=lookup_principal,
+                    )
+                except (ConnectionError, OSError, TypeError, ValueError):
+                    continue
+                artifacts = [
+                    dict(item) for item in payload.get("artifacts") or []
+                    if isinstance(item, dict)
+                    and str(item.get("state") or "") == "active"
+                ]
+                if artifacts:
+                    return route, artifacts, lookup_principal
         return None
 
 
