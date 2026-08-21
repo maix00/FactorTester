@@ -107,6 +107,8 @@
       assistant: null,
       active: false,
       threadPromise: null,
+      runtimePromise: null,
+      runtimeAttached: false,
       restored: false,
       runtimeObserver: profileState.runtimeObserver,
     };
@@ -136,6 +138,7 @@
         if (state.threadID !== providerThreadID) {
           state.threadID = providerThreadID;
           state.restored = false;
+          state.runtimeAttached = false;
           state.items = [];
         }
         state.threadTitle = String(conversation.title || state.threadTitle || "").trim();

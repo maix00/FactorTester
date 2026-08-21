@@ -93,6 +93,8 @@ vm.runInThisContext(source, {filename: 'chatkit-stream.js'});
 
 const chunks = [];
 const requestedURLs = [];
+const rpcMethods = [];
+let runtimeResumed = false;
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
 const state = {
   profileID: 'profile-main',
@@ -123,10 +125,15 @@ const state = {
         };
       }
       const body = JSON.parse(init.body || '{}');
+      rpcMethods.push(body.method);
       if (body.method === 'turn/start') {
+        if (!runtimeResumed) {
+          throw new Error('thread must be resumed before turn/start');
+        }
         return {success: true, response: {turn: {id: 'turn-1'}}};
       }
       if (body.method === 'thread/resume') {
+        runtimeResumed = true;
         return {
           success: true,
           response: {
@@ -186,6 +193,11 @@ const state = {
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=results')
   )));
+  assert.deepEqual(
+    rpcMethods.slice(0, 2),
+    ['thread/resume', 'turn/start'],
+    'an existing Provider thread must be resumed in the current runtime session before writing',
+  );
   console.log('PASS: missed Profile Agent SSE output is recovered from thread history');
 })().catch(error => {
   console.error(error);

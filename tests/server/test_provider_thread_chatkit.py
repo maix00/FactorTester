@@ -100,6 +100,18 @@ def test_provider_thread_pages_by_complete_turn_and_keeps_cursor_stable():
         "a-8", "u-8", "a-7", "u-7", "a-6", "u-6",
     ]
 
+    # ChatKit requests the next page using the final visible item id rather
+    # than the opaque page cursor returned by the backend.
+    chatkit_older = provider_thread_page(
+        {"turns": turns},
+        "conversation-page",
+        limit=3,
+        after=latest["items"][-1]["id"],
+    )
+    assert [item["id"] for item in chatkit_older["items"]] == [
+        "a-8", "u-8", "a-7", "u-7", "a-6", "u-6",
+    ]
+
     oldest = provider_thread_page(
         {"turns": turns}, "conversation-page", limit=2, order="asc",
     )
@@ -111,6 +123,13 @@ def test_provider_thread_pages_by_complete_turn_and_keeps_cursor_stable():
         after=oldest["after"], order="asc",
     )
     assert [item["id"] for item in newer["items"]] == [
+        "u-2", "a-2", "u-3", "a-3",
+    ]
+    chatkit_newer = provider_thread_page(
+        {"turns": turns}, "conversation-page", limit=2,
+        after=oldest["items"][-1]["id"], order="asc",
+    )
+    assert [item["id"] for item in chatkit_newer["items"]] == [
         "u-2", "a-2", "u-3", "a-3",
     ]
 
