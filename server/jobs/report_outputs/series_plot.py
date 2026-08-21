@@ -8,7 +8,8 @@ import re
 import textwrap
 from typing import Any
 
-from matplotlib import dates as mdates, rc_context
+from matplotlib import dates as mdates
+from matplotlib import rc_context
 from matplotlib.backends.backend_svg import FigureCanvasSVG
 from matplotlib.figure import Figure
 
@@ -214,7 +215,10 @@ def _draw_metric_axis(axis: Any, metric: str, items: list[dict[str, Any]]) -> No
     axis.tick_params(axis="both", colors="#4b5563", labelsize=8)
     uses_dates = False
     for item in items[:6]:
-        values = [float(value) for value in item.get("values") or ()]
+        values = [
+            float(value) if value is not None else math.nan
+            for value in item.get("values") or ()
+        ]
         timestamps = list(item.get("timestamps") or ())[:len(values)]
         dates = date_values(timestamps)
         x_values: list[Any] = dates if dates is not None else list(range(len(values)))

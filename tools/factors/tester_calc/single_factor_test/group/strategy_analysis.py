@@ -21,7 +21,6 @@ from .detail import (
 )
 from .monotonicity import build_group_ranking_detail
 
-
 ARTIFACT_VERSION = 1
 
 _DETAIL_KEYS = {
@@ -40,6 +39,11 @@ _DETAIL_KEYS = {
     "positive_runs": "positive_run_analysis",
     "intraday": "intraday_analysis",
 }
+
+STRATEGY_ANALYSIS_TABS = frozenset({
+    *_DETAIL_KEYS,
+    "robustness", "periods", "positive_runs", "intraday",
+})
 
 
 def _strategy_id(owner: dict[str, Any]) -> str:
@@ -131,14 +135,26 @@ def _products_by_timestamp(row: dict[str, Any], curve: pd.Series) -> dict[Any, l
     positions = row.get("position_curve") or {}
     result = {}
     for timestamp in curve.index:
-        values = positions.get(pd.Timestamp(timestamp).isoformat())
-        if values is None:
-            values = positions.get(str(timestamp), {})
+        values = _time_mapping_value(positions, timestamp) or {}
         result[timestamp] = [
             str(product) for product, quantity in (values or {}).items()
             if abs(float(quantity)) > 1e-12
         ]
     return result
+
+
+def _time_mapping_value(mapping: dict[Any, Any], timestamp: Any) -> Any:
+    """Read live Timestamp keys and their retained JSON string forms."""
+    stamp = pd.Timestamp(timestamp)
+    candidates = (
+        timestamp, stamp, stamp.isoformat(), str(stamp),
+        stamp.tz_convert("UTC").isoformat() if stamp.tzinfo else "",
+        str(int(stamp.timestamp() * 1000)),
+    )
+    for key in candidates:
+        if key != "" and key in mapping:
+            return mapping[key]
+    return None
 
 
 def _entry_frequency(products: dict[Any, list[str]], total: int) -> list[dict[str, Any]]:
@@ -193,9 +209,8 @@ def _product_analysis(row: dict[str, Any], curve: pd.Series) -> dict[str, Any]:
             else equity / previous_equity - 1.0
         )
         previous_equity = equity
-        key = pd.Timestamp(timestamp).isoformat()
-        position_row = positions.get(key) or positions.get(str(timestamp)) or {}
-        notional_row = notionals.get(key) or notionals.get(str(timestamp)) or {}
+        position_row = _time_mapping_value(positions, timestamp) or {}
+        notional_row = _time_mapping_value(notionals, timestamp) or {}
         active = {
             str(product): abs(float(notional_row.get(product) or quantity))
             for product, quantity in position_row.items()
@@ -269,6 +284,21 @@ def build_strategy_analysis_tab(
     tab = str(params.get("analysis_tab") or params.get("tab") or "overview")
     if tab == "ranking":
         return _ranking(source, params)
+    bundle = build_strategy_analysis_bundle(source, params)
+    if tab not in bundle:
+        raise ValueError(f"unsupported strategy-analysis tab: {tab}")
+    return bundle[tab]
+
+
+def build_strategy_analysis_bundle(
+    source: dict[str, Any], params: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build every strategy-local tab from one shared projection.
+
+    Parsing the retained curve and deriving common return/product projections
+    dominates these small analyses.  A supplemental task therefore computes
+    one strategy bundle and persists independently addressable tab artifacts.
+    """
     strategy_id = str(params.get("strategy_id") or params.get("group_id") or "")
     row = _strategy(source, strategy_id)
     curve = _curve(row)
@@ -280,69 +310,56 @@ def build_strategy_analysis_tab(
         str((row.get("result_group") or {}).get("metrics_key") or strategy_id),
         {},
     ))
-    values: dict[str, Any] = {}
-    if tab == "overview":
-        values["summary"] = summary
-    elif tab == "returns":
-        values["return_series"] = returns
-    elif tab == "membership":
-        values["entry_frequency"] = _entry_frequency(products, len(curve))
-    elif tab == "distribution":
-        values["distribution"] = _distribution(returns)
-    elif tab == "rolling":
-        values["rolling_analysis"] = _build_rolling_analysis(returns)
-    elif tab == "capacity":
-        values["capacity_analysis"] = _build_capacity_analysis(products, list(curve.index))
-    elif tab == "tradability":
-        turnover = row.get("fill_turnover") or {}
-        values["tradability_analysis"] = {
-            "avg_trade_notional_ratio": turnover.get("average"),
-            "turnover_observations": int(turnover.get("observations") or 0),
-            "turnover_source": str(turnover.get("source") or "unavailable"),
-        }
-    elif tab == "calendar":
-        values["calendar_analysis"] = _build_calendar_analysis(returns)
-    elif tab == "holding":
-        values["holding_analysis"] = _build_holding_analysis(products, list(curve.index))
-    elif tab == "products":
-        values["product_analysis"] = _product_analysis(row, curve)
-    elif tab == "daily":
-        values["daily_analysis"] = _build_daily_analysis(returns)
-    elif tab == "periods":
-        periods = [{
-            "timestamp": item["timestamp"], "return": item["return"],
-            "products": [
-                {"name": product, "desc": product}
-                for product in products.get(timestamp, [])
-            ],
-        } for item, timestamp in zip(returns, curve.index)]
-        ordered = sorted(periods, key=lambda item: item["return"], reverse=True)
-        values.update(top_periods=ordered[:10], bottom_periods=list(reversed(ordered[-10:])))
-    elif tab == "positive_runs":
-        values["positive_run_analysis"] = _build_positive_run_analysis(returns)
-    elif tab == "intraday":
-        values["intraday_analysis"] = _build_intraday_analysis(returns)
-    elif tab in {"robustness", "explanations"}:
-        positive = _build_positive_run_analysis(returns)
-        daily = _build_daily_analysis(returns)
-        period = _build_period_robustness(returns)
-        product = _product_analysis(row, curve)
-        calendar = _build_calendar_analysis(returns)
-        holding = _build_holding_analysis(products, list(curve.index))
-        capacity = _build_capacity_analysis(products, list(curve.index))
-        rolling = _build_rolling_analysis(returns)
-        tradability = {}
-        if tab == "robustness":
-            values["robustness_summary"] = _build_robustness_summary(
-                positive, daily, period, product, calendar, holding,
-                tradability, capacity, rolling,
-            )
-            values["period_robustness"] = period
-        else:
-            values["explanations"] = _build_explanations(
-                positive, daily, period, product, calendar, holding,
-                tradability, capacity, rolling,
-            )
-    elif tab not in _DETAIL_KEYS:
-        raise ValueError(f"unsupported strategy-analysis tab: {tab}")
-    return values
+    timestamps = list(curve.index)
+    entry_frequency = _entry_frequency(products, len(curve))
+    distribution = _distribution(returns)
+    rolling = _build_rolling_analysis(returns)
+    capacity = _build_capacity_analysis(products, timestamps)
+    turnover = row.get("fill_turnover") or {}
+    tradability = {
+        "avg_trade_notional_ratio": turnover.get("average"),
+        "turnover_observations": int(turnover.get("observations") or 0),
+        "turnover_source": str(turnover.get("source") or "unavailable"),
+    }
+    calendar = _build_calendar_analysis(returns)
+    holding = _build_holding_analysis(products, timestamps)
+    product = _product_analysis(row, curve)
+    daily = _build_daily_analysis(returns)
+    positive = _build_positive_run_analysis(returns)
+    period = _build_period_robustness(returns)
+    periods = [{
+        "timestamp": item["timestamp"], "return": item["return"],
+        "products": [
+            {"name": product_name, "desc": product_name}
+            for product_name in products.get(timestamp, [])
+        ],
+    } for item, timestamp in zip(returns, timestamps)]
+    ordered = sorted(periods, key=lambda item: item["return"], reverse=True)
+    common = (
+        positive, daily, period, product, calendar, holding,
+        tradability, capacity, rolling,
+    )
+    return {
+        "overview": {"summary": summary},
+        "returns": {"return_series": returns},
+        "membership": {"entry_frequency": entry_frequency},
+        "distribution": {"distribution": distribution},
+        "rolling": {"rolling_analysis": rolling},
+        "capacity": {"capacity_analysis": capacity},
+        "tradability": {"tradability_analysis": tradability},
+        "calendar": {"calendar_analysis": calendar},
+        "holding": {"holding_analysis": holding},
+        "explanations": {"explanations": _build_explanations(*common)},
+        "products": {"product_analysis": product},
+        "daily": {"daily_analysis": daily},
+        "robustness": {
+            "robustness_summary": _build_robustness_summary(*common),
+            "period_robustness": period,
+        },
+        "periods": {
+            "top_periods": ordered[:10],
+            "bottom_periods": list(reversed(ordered[-10:])),
+        },
+        "positive_runs": {"positive_run_analysis": positive},
+        "intraday": {"intraday_analysis": _build_intraday_analysis(returns)},
+    }

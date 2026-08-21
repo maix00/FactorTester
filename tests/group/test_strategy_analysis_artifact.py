@@ -1,6 +1,8 @@
 import pytest
 
 from tools.factors.tester_calc.single_factor_test.group.strategy_analysis import (
+    STRATEGY_ANALYSIS_TABS,
+    build_strategy_analysis_bundle,
     build_strategy_analysis_source,
     build_strategy_analysis_tab,
 )
@@ -104,6 +106,49 @@ def test_strategy_analysis_tab_computes_only_requested_payload():
 
     assert set(result) == {"return_series"}
     assert result["return_series"][-1]["return"] == pytest.approx(0.02)
+
+
+def test_strategy_analysis_bundle_fills_every_registered_strategy_tab():
+    source = build_strategy_analysis_source(
+        {
+            "group_owner": [{
+                "strategy_id": "strategy-0", "group_index": 0,
+                "product_path_selection_id": "products-a",
+                "strategy_configuration_id": "config-a",
+            }],
+            "engine_result": {"portfolios": {"strategy-0": {
+                "position_curve": {
+                    "2024-01-01T00:00:00+00:00": {"CU.SHF": 1.0},
+                    "2024-01-02T00:00:00+00:00": {"CU.SHF": 1.0},
+                    "2024-01-03T00:00:00+00:00": {"AL.SHF": 1.0},
+                },
+                "notional_curve": {
+                    "2024-01-01T00:00:00+00:00": {"CU.SHF": 100.0},
+                    "2024-01-02T00:00:00+00:00": {"CU.SHF": 100.0},
+                    "2024-01-03T00:00:00+00:00": {"AL.SHF": 100.0},
+                },
+                "fill_turnover": {"average": 0.25, "observations": 2},
+            }}},
+        },
+        {
+            "groups": [{
+                "strategy_id": "strategy-0", "metrics_key": "strategy-0",
+                "timestamps": [1704067200000, 1704153600000, 1704240000000],
+                "total_equity": [100.0, 102.0, 101.0],
+            }],
+            "metrics": {"strategy-0": {"Total Return": 0.01}},
+        },
+    )
+
+    bundle = build_strategy_analysis_bundle(source, {"strategy_id": "strategy-0"})
+
+    assert set(bundle) == STRATEGY_ANALYSIS_TABS
+    assert all(isinstance(bundle[tab], dict) and bundle[tab] for tab in STRATEGY_ANALYSIS_TABS)
+    assert bundle["overview"]["summary"]["Total Return"] == 0.01
+    assert bundle["returns"]["return_series"][-1]["cumulative_return"] == pytest.approx(1.01)
+    assert bundle["membership"]["entry_frequency"]
+    assert bundle["products"]["product_analysis"]["rows"]
+    assert bundle["tradability"]["tradability_analysis"]["avg_trade_notional_ratio"] == 0.25
 
 
 def test_strategy_ranking_uses_configuration_and_product_selection():

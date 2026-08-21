@@ -23,6 +23,7 @@ const context = {
     if (path.includes("supplementals/child-detail")) {
       return {success: true, job: {status: "succeeded"}, result_summary: {
         artifact_name: "strategy-analysis--detail",
+        artifact_names: {returns: "strategy-analysis--detail"},
       }};
     }
     if (path.includes("supplementals/child-ranking")) {

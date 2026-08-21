@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import gc
-import importlib
 import hashlib
+import importlib
 import multiprocessing
 import os
-from pathlib import Path
 import queue
 import resource
 import sys
@@ -15,6 +14,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from server.jobs.equity_curve_artifact import receipt_bytes
@@ -32,7 +32,7 @@ from server.jobs.report_outputs import (
 )
 from server.jobs.scheduling.result_projection import (
     _bounded_summary,
-    persisted_result_summary,
+    persisted_result_summary,  # noqa: F401 - scheduling compatibility export
 )
 
 
@@ -399,6 +399,20 @@ class _WorkerSink:
     ) -> None:
         """Persist a core JSON artifact at one validated Job-relative path."""
         self._write_artifact_at(str(name), value, relative_path=relative_path)
+
+    def emit_bytes_artifact(
+        self,
+        name: str,
+        raw: bytes,
+        *,
+        extension: str,
+        content_type: str,
+    ) -> None:
+        """Persist one trusted derived output under the Job artifact owner."""
+        self._write_bytes_artifact(
+            str(name), bytes(raw), extension=str(extension),
+            content_type=str(content_type),
+        )
 
     def emit_mapping_artifact(
         self,

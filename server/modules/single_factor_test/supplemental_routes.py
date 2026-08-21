@@ -86,6 +86,7 @@ def _summary(job) -> dict:
             "product_path_selection_id": str(
                 payload.get("product_path_selection_id") or ""
             ),
+            "output_requests": list(payload.get("output_requests") or ()),
         },
     })
     return value

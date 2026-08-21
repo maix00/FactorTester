@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from tools.factors.tester_calc.single_factor_test.ic_diagnostics import metric_semantics_catalog
 from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    metric_semantics_catalog,
+)
 
-from .models import GeneratedReport
 from .dataset import ReportDataset
 from .ic import (
     ic_holding_half_life_rows,
@@ -17,23 +18,24 @@ from .ic import (
     ic_statistics_rows,
     quantile_portfolio_statistics_rows,
 )
-from .ic_rolling import (
-    ROLLING_STABILITY_COLUMNS,
-    rolling_stability_payload_extra,
-    rolling_stability_rows,
-)
 from .ic_period import (
     PERIOD_DIAGNOSTICS_COLUMNS,
     period_diagnostics_payload_extra,
     period_diagnostics_rows,
 )
+from .ic_rolling import (
+    ROLLING_STABILITY_COLUMNS,
+    rolling_stability_payload_extra,
+    rolling_stability_rows,
+)
+from .models import GeneratedReport
 from .render import csv_bytes, json_bytes
+from .series import metrics_rows
 from .series_plot import (
     render_holding_half_life_svg,
     render_metrics_svg,
     render_series_svg,
 )
-from .series import metrics_rows
 
 
 def build_report_artifacts(
@@ -197,7 +199,7 @@ def metrics_reports(series):
                 "metric_label": label,
                 "label": item["label"],
                 "timestamps": item["timestamps"],
-                "values": [row.get(metric) or 0.0 for row in item_rows],
+                "values": [row.get(metric) for row in item_rows],
             })
     return [
         GeneratedReport(

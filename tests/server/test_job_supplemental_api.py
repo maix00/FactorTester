@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 import time
 
-from flask import Flask
 import orjson
 import pytest
+from flask import Flask
 
 import settings as Settings
 from server.jobs.models import JobRecord
+from server.jobs.report_outputs import build_report_artifacts
 from server.jobs.repository import JobRepository
 from server.jobs.scheduling import ResearchJobScheduler
 from server.jobs.states import JobStatus
@@ -95,7 +96,10 @@ def test_supplemental_routes_create_single_flight_and_page(tmp_path, monkeypatch
         "params": {"analysis_tab": "returns", "strategy_id": "strategy-1"},
     }
     created = client.post("/api/jobs/parent-1/supplementals", json=request)
-    duplicate = client.post("/api/jobs/parent-1/supplementals", json=request)
+    duplicate = client.post("/api/jobs/parent-1/supplementals", json={
+        "kind": "backtest_strategy_analysis",
+        "params": {"analysis_tab": "overview", "strategy_id": "strategy-1"},
+    })
     listed = client.get(
         "/api/jobs/parent-1/supplementals",
         query_string={"search": "backtest_strategy", "limit": 10},
@@ -174,6 +178,140 @@ def test_strategy_supplemental_executes_and_persists_under_parent(
         (tmp_path / "artifacts" / artifact["relative_path"]).read_bytes()
     )
     assert payload["return_series"][-1]["return"] == pytest.approx(0.01)
+    bundle_names = {
+        item["name"] for item in repository.list_artifacts(
+            job_id="parent-1", owner="alice",
+        )
+        if item["name"].startswith("strategy-analysis--strategy-strategy-1--")
+    }
+    assert len(bundle_names) == 16
+    assert {
+        "strategy-analysis--strategy-strategy-1--overview",
+        "strategy-analysis--strategy-strategy-1--returns",
+        "strategy-analysis--strategy-strategy-1--robustness",
+    } <= bundle_names
+
+
+def test_report_output_supplemental_generates_registered_outputs_in_one_job(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    root = tmp_path / "artifacts"
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(root))
+    monkeypatch.setenv("GTHT_DEPLOYMENT_ID", "supplemental-test")
+    repository = JobRepository()
+    _parent(repository, root)
+    retained = {
+        "result": {"groups": [{
+            "strategy_id": "strategy-1", "name": "A1",
+            "timestamps": [1704067200000, 1704153600000],
+            "total_equity": [100.0, 101.0],
+        }]},
+        "group_execution": {"engine_result": {"portfolios": {"A1": {
+            "equity_curve": {"1704067200000": 100.0, "1704153600000": 101.0},
+            "position_curve": {"1704067200000": {"CU.SHF": 2.0}},
+            "notional_curve": {"1704067200000": {"CU.SHF": 1000.0}},
+            "margin_curve": {"1704067200000": {"CU.SHF": 120.0}},
+            "fill_turnover": {"average": 0.25, "total": 0.5, "observations": 2},
+        }}}},
+        "order_audit": {"strategies": {"A1": {
+            "orders": [{"order_id": "order-1"}],
+            "fills": [{"fill_id": "fill-1", "fee": 2.0}],
+            "settlements": [{
+                "fill_id": "fill-1", "cash_before": 900.0, "cash_after": 880.0,
+                "margin_before": 100.0, "margin_after": 120.0,
+            }],
+        }}},
+    }
+    for name, value in retained.items():
+        raw = orjson.dumps(value)
+        target = root / "parent-1" / f"{name}.json"
+        target.write_bytes(raw)
+        repository.record_derived_artifact(
+            job_id="parent-1", name=name,
+            relative_path=f"parent-1/{name}.json",
+            content_type="application/json",
+            content_hash=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw),
+        )
+    app = Flask(__name__)
+    app.secret_key = "supplemental"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    requested = [
+        "equity_curve", "returns_over_time", "metrics_over_time",
+        "fee_detail", "margin_detail", "ratio_detail", "order_detail",
+        "fill_detail", "cash_detail", "position_detail", "exposure_detail",
+        "turnover_detail", "drawdown_detail", "period_returns",
+    ]
+    expected = {
+        report.name: report.raw
+        for report in build_report_artifacts(
+            retained["result"],
+            source={
+                "group_execution": retained["group_execution"],
+                "order_audit": retained["order_audit"],
+            },
+            requested=requested,
+        )
+        if report.name.endswith("_data")
+    }
+    response = client.post("/api/jobs/parent-1/supplementals", json={
+        "kind": "report_output_generation",
+        "params": {"output_requests": requested},
+    })
+    assert response.status_code == 201
+    child_id = response.get_json()["job"]["job_id"]
+
+    deadline = time.monotonic() + 8
+    with ResearchJobScheduler(
+        repository=repository, deployment_id="supplemental-test",
+        execution_workers=1, result_artifact_root=str(root),
+    ) as scheduler:
+        while time.monotonic() < deadline:
+            scheduler.tick()
+            child = repository.require(child_id)
+            if child.status in {JobStatus.SUCCEEDED, JobStatus.FAILED}:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("report supplemental job did not finish")
+
+    assert child.status is JobStatus.SUCCEEDED, child.error
+    names = {
+        item["name"] for item in repository.list_artifacts(
+            job_id="parent-1", owner="alice",
+        ) if item["state"] == "active"
+    }
+    for output in requested:
+        assert f"{output}_data" in names
+        actual = (root / "parent-1" / f"{output}_data.json").read_bytes()
+        assert orjson.loads(actual) == orjson.loads(expected[f"{output}_data"]), output
+    assert child.result_summary["output_requests"] == requested
+
+
+def test_report_output_supplemental_reports_missing_retained_sources(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    repository = JobRepository()
+    _parent(repository, tmp_path / "artifacts")
+    app = Flask(__name__)
+    app.secret_key = "supplemental"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    response = client.post("/api/jobs/parent-1/supplementals", json={
+        "kind": "report_output_generation",
+        "params": {"output_requests": ["position_detail"]},
+    })
+
+    assert response.status_code == 409
+    assert "group_execution" in response.get_json()["error"]
 
 
 def test_custom_analysis_tab_persists_source_runs_and_deletes_without_history(
