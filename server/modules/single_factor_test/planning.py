@@ -159,7 +159,9 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
         if isinstance(product_paths, list) and product_paths:
             selection_data = {**data, "selected_paths": product_paths}
     selection = selection_from_request(selection_data, page_uuid="")
-    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    settings = data.get("local_settings") if isinstance(
+        data.get("local_settings"), dict,
+    ) else {}
     start = settings.get("start_date") or settings.get("start") or data.get("start_date")
     end = settings.get("end_date") or settings.get("end") or data.get("end_date")
     aliases = [
