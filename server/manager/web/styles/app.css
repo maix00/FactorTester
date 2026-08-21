@@ -517,10 +517,13 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-filter { min-width: 140px; }
 .profile-directory-row { cursor: pointer; }
 .profile-directory-row td { white-space: pre-line; }
+.profile-directory-row-self td { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .profile-directory-row:hover, .profile-directory-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
 .profile-directory-identity { display: grid; gap: 2px; }
 .profile-directory-identity small { color: var(--muted); }
 .profile-directory-detail { width: 100%; max-width: none; min-width: 0; }
+.profile-directory-detail-self { padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.profile-self-badge { display: inline-flex; align-items: center; width: fit-content; min-height: 20px; padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line)); border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .profile-directory-note { white-space: pre-line; }
 .profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 .profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }

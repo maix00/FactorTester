@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import server.manager.services.profile_directory as directory_module
 from server.manager.services.profile_directory import ProfileDirectoryService
 from server.manager.storage.agent_conversation_store import AgentConversationStore
-import server.manager.services.profile_directory as directory_module
-
 
 ACCOUNTS = {
     "GTHT@parent@100000000001": {
@@ -162,6 +161,53 @@ def test_directory_uses_composite_identity_and_direct_subordinates(monkeypatch):
 
     mine = service.directory(parent, scope="mine")
     assert mine["items"][0]["profile_key"] == "local-1::GTHT@parent@100000000001::same"
+
+
+def test_reserved_self_profile_uses_viewer_relative_display_name(monkeypatch):
+    parent = "GTHT@parent@100000000001"
+    child = "GTHT@child@100000000002"
+    client = FakeClientState({
+        parent: [{**_profile(parent, "self"), "profile_kind": "self"}],
+        child: [{**_profile(child, "self"), "profile_kind": "self"}],
+    })
+    service = _service(monkeypatch, client, FakeAgentProfiles())
+
+    mine = service.directory(parent, scope="mine")["items"][0]
+    subordinate = service.directory(parent, scope="subordinates")["items"][0]
+
+    assert mine["display_name"] == "本人"
+    assert mine["profile_kind"] == "self"
+    assert mine["is_self_profile"] is True
+    assert mine["capabilities"]["edit"] is True
+    assert subordinate["display_name"] == "child"
+    assert subordinate["profile_kind"] == "self"
+    assert subordinate["is_self_profile"] is True
+    assert subordinate["capabilities"]["edit"] is False
+
+
+def test_mine_directory_lazily_ensures_reserved_self_profile(monkeypatch):
+    owner = "GTHT@parent@100000000001"
+
+    class EnsuringClientState(FakeClientState):
+        def __init__(self):
+            super().__init__({owner: []})
+            self.ensured = []
+
+        def ensure_self_profile(self, principal):
+            self.ensured.append(principal)
+            self._profiles[principal] = [{
+                **_profile(principal, "self"),
+                "profile_kind": "self",
+            }]
+
+    client = EnsuringClientState()
+    service = _service(monkeypatch, client, FakeAgentProfiles())
+
+    result = service.directory(owner, scope="mine")
+
+    assert client.ensured == [owner]
+    assert result["total"] == 1
+    assert result["items"][0]["profile_id"] == "self"
 
 
 def test_servers_scope_hides_private_profiles_for_regular_users(monkeypatch):

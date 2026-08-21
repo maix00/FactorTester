@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from server.manager.domain.organization_scope import (
@@ -21,20 +21,18 @@ from tools.data.account_manage import (
     ROLE_SUPER_ADMIN,
     ROLE_USER,
     ensure_root_levels,
-    normalize_account,
+    hash_password,
     normalize_accounts,
     normalize_levels,
     normalize_organization,
     root_level_id_for_org,
     slugify_org_id,
-    hash_password,
 )
 from tools.data.sqlite.account_manager.user import save_accounts
 from tools.data.sqlite.account_manager.user_level import (
     save_levels,
     save_organizations,
 )
-
 
 ROLE_LABELS = {
     ROLE_SUPER_ADMIN: "超级管理员",
@@ -53,8 +51,14 @@ class AccountAdministrationError(ValueError):
 class AccountAdministrationService:
     """Operate on the central directory and refresh the local SQLite mirror."""
 
-    def __init__(self, store: object) -> None:
+    def __init__(
+        self,
+        store: object,
+        *,
+        profile_initializer: Callable[[str], object] | None = None,
+    ) -> None:
         self.store = store
+        self.profile_initializer = profile_initializer
 
     def snapshot(self) -> dict[str, Any]:
         organizations = self._organizations()
@@ -141,6 +145,14 @@ class AccountAdministrationService:
         self.store.create_account(account)
         accounts.append(account)
         self._mirror_accounts(accounts)
+        if self.profile_initializer is not None:
+            try:
+                self.profile_initializer(username)
+            except (
+                AttributeError, ConnectionError, OSError, RuntimeError,
+                TypeError, ValueError,
+            ):
+                pass
         return self.safe_account(account)
 
     def update_user(
