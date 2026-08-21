@@ -16,6 +16,10 @@ function view() {
     bar,
     label: {textContent: ""},
     phaseTrack: {replaceChildren() {}},
+    diagnostics: {
+      removed: false,
+      remove() { this.removed = true; },
+    },
     progressState: null,
   };
 }
@@ -100,6 +104,8 @@ assert.equal(current.bar.value, 72);
 progress.updateProgress(current, {event: "result", seq: 8, data: {status: "succeeded"}});
 assert.equal(current.bar.value, 100);
 assert.equal(current.progressState.terminal, true);
+assert.equal(current.diagnostics.removed, true,
+  "successful tasks must remove current-stage fields and phase history");
 
 const failed = view();
 progress.updateProgress(failed, {
@@ -109,6 +115,8 @@ progress.updateProgress(failed, {
 progress.updateProgress(failed, {event: "error", seq: 2, data: {status: "failed"}});
 assert.equal(failed.bar.value, 50);
 assert.equal(failed.progressState.terminal, true);
+assert.equal(failed.diagnostics.removed, false,
+  "failed tasks must retain progress diagnostics");
 
 const earlyFailure = view();
 progress.updateProgress(earlyFailure, {
@@ -186,6 +194,38 @@ assert.equal(earlyFailure.bar.value, 0, "terminal progress must be latched");
     },
   }, "job-resumed", "?server_id=remote-1", resumedView);
   assert.match(resumedPath, /server_id=remote-1&after=27$/);
+
+  function domElement(tagName) {
+    return {
+      tagName, children: [], parentNode: null, className: "", textContent: "",
+      classList: {add() {}},
+      append(...nodes) {
+        nodes.forEach(node => {
+          node.parentNode = this;
+          this.children.push(node);
+        });
+      },
+      replaceChildren(...nodes) {
+        this.children = [];
+        this.append(...nodes);
+      },
+      remove() {
+        if (!this.parentNode) return;
+        this.parentNode.children = this.parentNode.children.filter(node => node !== this);
+        this.parentNode = null;
+      },
+      setAttribute() {},
+      removeAttribute() {},
+    };
+  }
+  global.document = {createElement: domElement};
+  const alreadySucceeded = progress.progressView({t: value => value}, "succeeded");
+  assert.equal(alreadySucceeded.root.children.includes(alreadySucceeded.diagnostics), false,
+    "opening an already successful task must not mount progress diagnostics");
+  assert.deepEqual(
+    alreadySucceeded.root.children.map(node => node.tagName),
+    ["div", "progress"],
+  );
   console.log("ok");
 })().catch(error => {
   console.error(error);
