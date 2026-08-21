@@ -44,6 +44,8 @@
 
   function series(payload) {
     return (Array.isArray(payload?.series) ? payload.series : []).map(item => ({
+      strategyID: String(item?.strategy_id || item?.strategy_ref || ""),
+      configurationID: String(item?.strategy_configuration_id || ""),
       label: String(item?.label || item?.series || "Series"),
       currency: String(item?.currency || "CNY").toUpperCase(),
       timestamps: Array.isArray(item?.timestamps) ? item.timestamps : [],
@@ -61,6 +63,8 @@
   function groupEntries(summary) {
     return (Array.isArray(summary?.groups) ? summary.groups : []).map((item, index) => ({
       ...item,
+      strategyID: String(item?.strategy_id || item?.group_id || item?.key || index),
+      configurationID: String(item?.strategy_configuration_id || ""),
       key: String(item?.strategy_id || item?.group_id || item?.key || item?.name || item?.metrics_key || index),
       label: String(item?.display_name || item?.name || item?.group_name || item?.strategy_id || item?.group_id || item?.key || item?.metrics_key || index),
     }));
@@ -85,6 +89,32 @@
       group_id: String(entry.strategy_id || entry.group_id || entry.key || ""),
       group_index: groupIndex,
     };
+  }
+
+  function diagnosticConfiguration(entry = {}, summary = {}) {
+    const explicit = String(
+      entry.configurationID || entry.strategy_configuration_id || "",
+    );
+    if (explicit) return {strategy_configuration_id: explicit};
+    const source = {...summary, ...entry};
+    const keys = [
+      "strategy_configuration_id", "strategy_template_ref", "product_path_selection_id",
+      "factor_ref", "factor_alias", "engine", "allocation_policy",
+      "rebalance_trigger", "position_policy", "split_count", "is_ls", "ls_info",
+    ];
+    return Object.fromEntries(keys.flatMap(key => (
+      source[key] == null || source[key] === "" ? [] : [[key, source[key]]]
+    )));
+  }
+
+  function diagnosticKey(entry = {}, summary = {}) {
+    return JSON.stringify(diagnosticConfiguration(entry, summary));
+  }
+
+  function relatedGroupEntries(summary = {}, entry = null) {
+    if (!entry) return [];
+    const key = diagnosticKey(entry, summary);
+    return groupEntries(summary).filter(candidate => diagnosticKey(candidate, summary) === key);
   }
 
   function initialSnapshot(summary = {}) {
@@ -121,27 +151,69 @@
     return [...values];
   }
 
-  function latestMetric(metricRowsValue, label) {
-    const selected = metricRowsValue.filter(row => String(row.series || "") === label);
+  function strategies(payloads, summary = {}) {
+    const result = new Map();
+    const summaryEntries = groupEntries(summary);
+    const labelToID = new Map(summaryEntries.map(entry => [entry.label, entry.strategyID]));
+    const add = (strategyID, strategyLabel, configurationID = "") => {
+      const id = String(strategyID || "").trim();
+      if (!id) return;
+      const previous = result.get(id) || {};
+      result.set(id, {
+        id,
+        label: String(strategyLabel || previous.label || id),
+        configurationID: String(configurationID || previous.configurationID || ""),
+      });
+    };
+    summaryEntries.forEach(entry => add(
+      entry.strategyID, entry.label, entry.configurationID,
+    ));
+    Object.values(payloads || {}).forEach(payload => {
+      series(payload).forEach(item => add(
+        item.strategyID || labelToID.get(item.label), item.label, item.configurationID,
+      ));
+      rows(payload).forEach(row => {
+        const strategyLabel = String(
+          row?.strategy_label || row?.series || row?.strategy || "",
+        );
+        const rawID = row?.strategy_id || row?.strategy_ref || row?.strategy;
+        add(
+          labelToID.get(String(rawID || "")) || labelToID.get(strategyLabel) || rawID,
+          strategyLabel, row?.strategy_configuration_id,
+        );
+      });
+    });
+    return [...result.values()];
+  }
+
+  function latestMetric(metricRowsValue, strategy) {
+    const selected = metricRowsValue.filter(row => (
+      String(row.strategy_id || row.series || "") === strategy.id
+      || String(row.series || "") === strategy.label
+    ));
     return selected[selected.length - 1] || null;
   }
 
   function summaryRows(payloads, summary = {}) {
     const equity = series(payloads.equity_curve_data);
     const metrics = metricRows(payloads.metrics_over_time_data);
-    const entries = new Map(groupEntries(summary).map(item => [item.label, item]));
-    return groups(payloads, summary).map(label => {
-      const curve = equity.find(item => item.label === label);
-      const latest = latestMetric(metrics, label) || {};
-      const entry = entries.get(label) || {};
-      const legacy = summary?.metrics?.[entry.metrics_key || entry.key || label]
-        || summary?.metrics?.[label] || {};
+    const entries = new Map(groupEntries(summary).map(item => [item.strategyID, item]));
+    return strategies(payloads, summary).map(strategy => {
+      const curve = equity.find(item => (
+        item.strategyID === strategy.id || item.label === strategy.label
+      ));
+      const latest = latestMetric(metrics, strategy) || {};
+      const entry = entries.get(strategy.id) || {};
+      const legacy = summary?.metrics?.[entry.metrics_key || entry.key || strategy.id]
+        || summary?.metrics?.[strategy.label] || {};
       const values = (curve?.values || []).filter(value => value != null);
       const initial = values[0] ?? finite(summary?.initial_capital);
       const final = values[values.length - 1] ?? null;
       const totalReturn = initial && final != null ? final / initial - 1 : null;
       return {
-        series: label,
+        strategy_id: strategy.id,
+        strategy_configuration_id: strategy.configurationID,
+        series: strategy.label,
         currency: curve?.currency || String(summary?.base_currency || "CNY").toUpperCase(),
         initial_equity: initial,
         final_equity: final,
@@ -225,9 +297,11 @@
 
   function metricMatrix(summary = {}) {
     const entries = groupEntries(summary);
-    const keys = entries.map(item => item.key);
+    const keys = new Set(entries.flatMap(item => (
+      [item.key, item.label, item.metrics_key].filter(Boolean).map(String)
+    )));
     for (const key of Object.keys(summary?.metrics || {})) {
-      if (!keys.includes(key)) entries.push({key, label: key});
+      if (!keys.has(String(key))) entries.push({key, label: key, strategyID: key});
     }
     const metrics = summary?.metrics || {};
     const available = new Set(entries.flatMap(item => Object.keys(
@@ -262,7 +336,7 @@
   }
 
   function rowScope(row) {
-    return String(row?.strategy || row?.series || "");
+    return String(row?.strategy_id || row?.strategy_ref || row?.strategy || row?.series || "");
   }
 
   function scopedRows(payload, activeGroup) {
@@ -286,9 +360,12 @@
   }
 
   function build(payloads = {}, summary = {}, artifactNames = []) {
+    const strategyLabels = groups(payloads, summary);
+    const strategyEntries = strategies(payloads, summary);
     return {
       payloads, summary,
-      groups: groups(payloads, summary),
+      groups: strategyLabels,
+      strategies: strategyEntries,
       groupEntries: groupEntries(summary),
       metricMatrix: metricMatrix(summary),
       summaryRows: summaryRows(payloads, summary),
@@ -298,8 +375,9 @@
 
   window.FTBacktestResultModel = Object.freeze({
     availableTabs, bestMetricIndex, build, evaluationWindow,
-    finite, metricValue,
+    diagnosticConfiguration, diagnosticKey, finite, metricValue,
     groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
+    relatedGroupEntries, strategies,
     tabPayloads,
     scopedRows, series,
   });

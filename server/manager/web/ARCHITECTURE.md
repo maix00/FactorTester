@@ -15,16 +15,20 @@ single source of truth for the script order and semantic module groups.
   `research/local.js` owns the client-download/local projection page and
   `research/shared.js` owns publication visibility and owned-report source
   resolution
-- `jobs/`: job lists, progress, detail fields, artifacts, and viewers;
+- `jobs/`: job lists, progress, detail fields, artifacts, and generic result
+  navigation; `jobs/result-tabs.js` owns only the reusable result-area tab
+  shell and its control slot, without knowing test-domain filters;
   `jobs/list-format.js` is the pure list/detail formatting seam (status,
   identity, artifact cells, and shared scalar helpers), while `jobs/jobs.js`
-  owns scope state, pagination, and navigation. Backtest group-detail
-  rendering is split at the product-analysis seam: `jobs/backtest-group-products.js`
+  owns scope state, pagination, and navigation
+- `test-modules/`: test-domain result and configuration behavior that generic
+  Job lifecycle code must not interpret. Backtest group-detail rendering is
+  split at the product-analysis seam: `test-modules/backtest/results/analysis/group-products.js`
   owns product identity, fee coverage, entry-frequency selection, and product
-  contribution views; `jobs/backtest-group-detail-parts.js` owns the remaining
-  group metrics and diagnostics. `jobs/backtest-group-detail.js` composes both
-  adapters without duplicating their helpers. `jobs/backtest-result-model.js`
-  owns persisted curve/metric normalization; `jobs/backtest-runtime-model.js`
+  contribution views; `test-modules/backtest/results/analysis/group-detail-parts.js` owns the remaining
+  group metrics and diagnostics. `test-modules/backtest/results/analysis/group-detail.js` composes both
+  adapters without duplicating their helpers. `test-modules/backtest/results/model.js`
+  owns persisted curve/metric normalization; `test-modules/backtest/results/runtime-model.js`
   owns runtime fallback, market-rule, and capital-diagnostic rows consumed by
   the result view
 - `catalog/`: source catalog, products, factors, product groups, and catalog
@@ -61,7 +65,8 @@ single source of truth for the script order and semantic module groups.
   final application coordinator (`app/coordinator.js`)
 - `styles/`: global shell and domain stylesheets; `styles/app.css` is the
   current shared shell stylesheet, while `styles/report.css` contains report
-  presentation rules. Output viewers are split under `styles/outputs/`:
+  presentation rules. Generic Job styles live under `styles/jobs/`; output
+  viewers are split under `styles/outputs/`:
   `artifacts.css` owns generic/IC artifact presentation and
   `backtest-results.css` owns backtest, snapshot, and factor-series results.
 

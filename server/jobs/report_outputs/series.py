@@ -42,6 +42,10 @@ def extract_series(result: dict[str, Any], source: dict[str, Any]) -> list[dict[
         timestamps = group.get("timestamps")
         timestamps = timestamps if isinstance(timestamps, list) else list(range(len(values)))
         series.append({
+            "strategy_id": str(group.get("strategy_id") or group.get("group_id") or ""),
+            "strategy_configuration_id": str(
+                group.get("strategy_configuration_id") or ""
+            ),
             "label": str(
                 group.get("display_name")
                 or group.get("name")
@@ -57,6 +61,8 @@ def extract_series(result: dict[str, Any], source: dict[str, Any]) -> list[dict[
 
 def return_series(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{
+        "strategy_id": item.get("strategy_id", ""),
+        "strategy_configuration_id": item.get("strategy_configuration_id", ""),
         "label": item["label"], "timestamps": item["timestamps"],
         "values": [value / (item["values"][0] or 1.0) - 1.0 for value in item["values"]],
         "currency": item.get("currency", ""),
@@ -81,6 +87,8 @@ def metrics_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
             volatility = math.sqrt(variance)
             sharpe = mean / volatility * math.sqrt(len(window)) if volatility else None
             rows.append({
+                "strategy_id": item.get("strategy_id", ""),
+                "strategy_configuration_id": item.get("strategy_configuration_id", ""),
                 "series": item["label"], "timestamp": timestamp, "equity": round(value, 8),
                 "period_return": round(period_return, 12),
                 "cumulative_return": round(value / (values[0] or 1.0) - 1.0, 12),
