@@ -15,7 +15,7 @@
     return button;
   }
 
-  function open(context, options, entry) {
+  function open(context, options, entry, initialTab = "") {
     const summary = options.resultSummary || {};
     const related = FTBacktestResultModel.relatedGroupEntries(summary, entry);
     const entries = related.length ? related : [entry];
@@ -25,16 +25,21 @@
     const content = document.createElement("div");
     content.className = "backtest-strategy-analysis-content";
     const cache = new Map();
-    let activeTab = "detail";
+    const detailTabs = FTBacktestGroupDetail.tabs || [{id: "overview", label: "概览"}];
+    const allTabs = [...detailTabs, {id: "ranking", label: "排序诊断"}];
+    let activeTab = allTabs.some(tab => tab.id === initialTab)
+      ? initialTab : detailTabs[0].id;
     let activeEntry = entries.find(item => item.key === entry?.key) || entries[0];
 
     async function renderDetail(target) {
-      const key = `detail:${activeEntry.key}`;
+      const key = `detail:${activeEntry.key}:${activeTab}`;
       if (!cache.has(key)) {
-        cache.set(key, FTBacktestGroupDetail.load(context, options, activeEntry));
+        cache.set(key, FTBacktestGroupDetail.load(
+          context, options, activeEntry, activeTab,
+        ));
       }
-      FTBacktestGroupDetail.render(
-        context, target, await cache.get(key), options, activeEntry,
+      FTBacktestGroupDetail.renderTab(
+        context, target, await cache.get(key), activeTab, options, activeEntry,
       );
     }
 
@@ -47,20 +52,17 @@
     }
 
     function render() {
-      navigation.replaceChildren(
-        tabButton(context, "分组详情", activeTab === "detail", () => {
-          activeTab = "detail"; render();
-        }),
-        tabButton(context, "排序诊断", activeTab === "ranking", () => {
-          activeTab = "ranking"; render();
-        }),
-      );
+      navigation.replaceChildren(...allTabs.map(tab => tabButton(
+        context, tab.label, activeTab === tab.id, () => {
+          activeTab = tab.id; render();
+        },
+      )));
       content.replaceChildren(FTUI.loading(context.t(
-        activeTab === "detail" ? "正在读取分组详情…" : "正在读取排序诊断…",
+        activeTab === "ranking" ? "正在读取排序诊断…" : "正在读取策略分析…",
       )));
       const target = document.createElement("div");
       target.className = "backtest-strategy-analysis-pane";
-      const task = activeTab === "detail" ? renderDetail(target) : renderRanking(target);
+      const task = activeTab === "ranking" ? renderRanking(target) : renderDetail(target);
       task.then(() => content.replaceChildren(target))
         .catch(error => content.replaceChildren(errorNode(error)));
     }
@@ -74,7 +76,7 @@
           [...strategies.children].forEach((button, index) => {
             button.classList.toggle("active", entries[index].key === activeEntry.key);
           });
-          if (activeTab === "detail") render();
+          if (activeTab !== "ranking") render();
         },
       )));
       view.body.append(strategies);

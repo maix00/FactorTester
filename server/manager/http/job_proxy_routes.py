@@ -279,7 +279,15 @@ class JobProxyRoutesMixin:
                             for value in legacy_ports
                         ]
                 if server_id in {self.state.server_id, "local"}:
-                    return [self.state._local_route(port=0, online=True)]
+                    running_ports = list(self.state.service_ports())
+                    if running_ports:
+                        return [
+                            self.state._local_route(port=value, online=True)
+                            for value in running_ports
+                        ]
+                    raise TargetUnavailable(
+                        "storage server has no available FactorTester service"
+                    )
                 descriptor = self.state.federation_registry.describe(server_id)
                 if descriptor is not None:
                     transfer_node = descriptor.get("transfer_node")
@@ -370,6 +378,8 @@ class JobProxyRoutesMixin:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
             r"(/result|/artifacts(?:/generate|/[A-Za-z0-9._%+-]{1,512})?"
+            r"|/supplementals(?:/[A-Za-z0-9._-]{1,128})?"
+            r"|/custom-analyses(?:/[A-Za-z0-9._-]{1,128})?"
             r"|/group-detail|/group-ranking-detail|/group-snapshot"
             r"|/group-order-flow)?",
             parsed.path,
@@ -377,13 +387,21 @@ class JobProxyRoutesMixin:
         if match is None:
             return False
         suffix = match.group(2) or ""
-        if method == "POST" and (
-            suffix != "/artifacts/generate"
-            and suffix not in _JOB_ANALYSIS_PATHS
+        supplemental_collection = suffix == "/supplementals"
+        custom_analysis_collection = suffix == "/custom-analyses"
+        custom_analysis_item = suffix.startswith("/custom-analyses/")
+        if method == "POST" and not (
+            suffix == "/artifacts/generate"
+            or suffix in _JOB_ANALYSIS_PATHS
+            or supplemental_collection
+            or custom_analysis_collection
         ):
+            return False
+        if method == "PATCH" and not custom_analysis_item:
             return False
         if method == "DELETE" and not (
             suffix == "/artifacts" or suffix.startswith("/artifacts/")
+            or custom_analysis_item
         ):
             return False
         session = self._session()
@@ -392,7 +410,11 @@ class JobProxyRoutesMixin:
         public = (
             session is None
             and method == "GET"
-            and suffix_value in {"", "/result", "/artifacts"}
+            and (
+                suffix_value in {"", "/result", "/artifacts"}
+                or suffix_value.startswith("/supplementals")
+                or suffix_value == "/custom-analyses"
+            )
         )
         if session is None and not public:
             json_response(
@@ -454,7 +476,7 @@ class JobProxyRoutesMixin:
             return True
         path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
-        if method == "POST":
+        if method in {"POST", "PATCH"}:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except (TypeError, ValueError):
@@ -487,7 +509,15 @@ class JobProxyRoutesMixin:
                 ),
             }
         try:
-            if suffix in {"/result", "/artifacts"} or suffix.startswith("/artifacts/"):
+            if (
+                suffix in {
+                    "/result", "/artifacts", "/supplementals",
+                    "/custom-analyses",
+                }
+                or suffix.startswith("/artifacts/")
+                or suffix.startswith("/supplementals/")
+                or suffix.startswith("/custom-analyses/")
+            ):
                 routes = self._job_routes(
                     parsed, principal, for_artifact_storage=True,
                 )

@@ -42,7 +42,8 @@ const view = FTJobDetailTabs.create({t: value => value}, "job:one");
 assert.equal(view.current(), "results");
 assert.equal(view.panels.results.hidden, false);
 assert.equal(view.panels.overview.hidden, true);
-assert.equal(view.root.children.length, 6);
+assert.equal(view.root.children.length, 7);
+assert.ok(view.panels.supplementals);
 
 let selected = "";
 view.root.addEventListener("job-detail-tab-change", event => {
@@ -53,4 +54,8 @@ assert.equal(selected, "artifacts");
 assert.equal(view.panels.artifacts.hidden, false);
 assert.equal(view.panels.results.hidden, true);
 assert.equal(stored.get("job:one"), "artifacts");
+view.select("supplementals", true);
+assert.equal(selected, "supplementals");
+assert.equal(view.panels.supplementals.hidden, false);
+assert.equal(stored.get("job:one"), "supplementals");
 console.log("ok");

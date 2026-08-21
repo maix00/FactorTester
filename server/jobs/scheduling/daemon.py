@@ -116,6 +116,8 @@ class ResearchJobScheduler:
             statuses=(JobStatus.SUBMITTED,),
         )
         for job in jobs:
+            if job.job_role != "primary":
+                continue
             try:
                 self.planners.submit(
                     job_id=job.job_id,
@@ -196,6 +198,10 @@ class ResearchJobScheduler:
                     pinned=pinned,
                     artifact_root=self.artifact_root,
                     retention_mode=job.retention_mode,
+                    artifact_job_id=(
+                        job.parent_job_id
+                        if job.job_role == "supplemental" else job.job_id
+                    ),
                 )
             except WorkerUnavailable:
                 return
@@ -268,8 +274,17 @@ class ResearchJobScheduler:
             return
         self.broker.publish(job_id, event, data)
         if event == "artifact" and stage == "execution":
-            self.repository.record_artifact(
-                job_id=job_id,
+            artifact_job_id = (
+                job.parent_job_id
+                if job.job_role == "supplemental" else job_id
+            )
+            artifact_recorder = (
+                self.repository.record_derived_artifact
+                if job.job_role == "supplemental"
+                else self.repository.record_artifact
+            )
+            artifact_recorder(
+                job_id=artifact_job_id,
                 name=str(data["name"]),
                 relative_path=str(data["relative_path"]),
                 content_type=str(data.get("content_type") or "application/octet-stream"),
@@ -299,7 +314,8 @@ class ResearchJobScheduler:
                         "message": "cancellation was requested before the result was committed",
                     },
                 )
-                self._register_terminal_evidence(cancelled)
+                if cancelled.job_role == "primary":
+                    self._register_terminal_evidence(cancelled)
                 self.broker.close(job_id)
                 return
             summary = persisted_result_summary(data)
@@ -309,7 +325,8 @@ class ResearchJobScheduler:
                 expected=JobStatus.RUNNING,
                 result_summary=summary,
             )
-            self._register_terminal_evidence(completed)
+            if completed.job_role == "primary":
+                self._register_terminal_evidence(completed)
             self.broker.close(job_id)
             return
         if event != "error":
@@ -324,7 +341,8 @@ class ResearchJobScheduler:
                 cancel_reason=job.cancel_reason if cancelled else "",
                 error=data,
             )
-            self._register_terminal_evidence(completed)
+            if completed.job_role == "primary":
+                self._register_terminal_evidence(completed)
             self.broker.close(job_id)
 
     def _register_terminal_evidence(self, job: Any) -> None:
@@ -383,7 +401,8 @@ class ResearchJobScheduler:
                 "worker_exitcode": message.get("worker_exitcode"),
             },
         )
-        self._register_terminal_evidence(completed)
+        if completed.job_role == "primary":
+            self._register_terminal_evidence(completed)
         self.broker.publish(job_id, "error", completed.error or {})
         self.broker.close(job_id)
 

@@ -39,6 +39,11 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             workspace_id TEXT NOT NULL,
             kind TEXT NOT NULL,
             status TEXT NOT NULL,
+            job_role TEXT NOT NULL DEFAULT 'primary',
+            parent_job_id TEXT NOT NULL DEFAULT '',
+            supplemental_kind TEXT NOT NULL DEFAULT '',
+            supplemental_identity TEXT NOT NULL DEFAULT '',
+            source_artifact_hash TEXT NOT NULL DEFAULT '',
             retry_of TEXT NOT NULL DEFAULT '',
             attempt INTEGER NOT NULL DEFAULT 1,
             step_mode INTEGER NOT NULL DEFAULT 0,
@@ -72,7 +77,15 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
                 'submitted', 'planning', 'awaiting_confirmation', 'queued',
                 'running', 'paused', 'succeeded', 'failed', 'cancelled'
             )),
-            CHECK (retention_mode IN ('summary', 'full'))
+            CHECK (retention_mode IN ('summary', 'full')),
+            CHECK (job_role IN ('primary', 'supplemental')),
+            CHECK (
+                (job_role='primary' AND parent_job_id=''
+                 AND supplemental_kind='' AND supplemental_identity='')
+                OR
+                (job_role='supplemental' AND parent_job_id!=''
+                 AND supplemental_kind!='' AND supplemental_identity!='')
+            )
         );
 
         CREATE INDEX IF NOT EXISTS idx_research_jobs_owner_updated
@@ -85,6 +98,16 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             ON research_jobs(deployment_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_research_jobs_run
             ON research_jobs(owner, run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_parent_updated
+            ON research_jobs(parent_job_id, updated_at DESC)
+            WHERE job_role='supplemental';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_supplemental_identity
+            ON research_jobs(
+                parent_job_id, supplemental_kind,
+                supplemental_identity, source_artifact_hash
+            )
+            WHERE job_role='supplemental'
+              AND status IN ('submitted', 'planning', 'queued', 'running', 'paused');
         CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_one_active_step
             ON research_jobs(owner)
             WHERE step_mode=1 AND status IN (
@@ -129,6 +152,22 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             CHECK (state IN ('staging', 'active', 'deleting', 'deleted', 'failed')),
             CHECK (size_bytes >= 0)
         );
+
+        CREATE TABLE IF NOT EXISTS research_job_custom_analyses (
+            parent_job_id TEXT NOT NULL,
+            tab_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            draft_source TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (parent_job_id, tab_id),
+            FOREIGN KEY (parent_job_id) REFERENCES research_jobs(job_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_research_job_custom_analyses_updated
+            ON research_job_custom_analyses(parent_job_id, updated_at DESC);
+
         """
     )
     create_maintenance_schema(conn)
@@ -149,6 +188,28 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN service_port INTEGER NOT NULL DEFAULT 0"
         )
+    for name, declaration in (
+        ("job_role", "TEXT NOT NULL DEFAULT 'primary'"),
+        ("parent_job_id", "TEXT NOT NULL DEFAULT ''"),
+        ("supplemental_kind", "TEXT NOT NULL DEFAULT ''"),
+        ("supplemental_identity", "TEXT NOT NULL DEFAULT ''"),
+        ("source_artifact_hash", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE research_jobs ADD COLUMN {name} {declaration}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_jobs_parent_updated "
+        "ON research_jobs(parent_job_id, updated_at DESC) "
+        "WHERE job_role='supplemental'"
+    )
+    conn.execute("DROP INDEX IF EXISTS idx_research_jobs_supplemental_identity")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_supplemental_identity "
+        "ON research_jobs(parent_job_id, supplemental_kind, "
+        "supplemental_identity, source_artifact_hash) "
+        "WHERE job_role='supplemental' "
+        "AND status IN ('submitted', 'planning', 'queued', 'running', 'paused')"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_jobs_port_updated "
         "ON research_jobs(service_port, updated_at DESC)"

@@ -243,6 +243,19 @@
   }
 
   function tabContent(context, state, rerender) {
+    if (state.customAnalyses) {
+      const customID = state.customAnalyses.tabIDFor(state.activeTab);
+      if (customID) {
+        const target = document.createElement("div");
+        state.customAnalyses.render(customID, target, {
+          onTabsChanged: rerender,
+          onDeleted: () => {
+            state.activeTab = tabs[0][0]; rerender();
+          },
+        });
+        return target;
+      }
+    }
     const factor = activeFactor(state);
     const descriptor = activeDescriptor(state);
     if (!factor) return empty(context, "暂无 IC 因子结果");
@@ -329,18 +342,33 @@
     state.model.matrix = window.FTICResultModel.statisticMatrix(
       ordered, state.rawModel.summaryRows, activeDescriptor(state), state.activeMethod,
     );
-    const nav = document.createElement("div"); nav.className = "ic-domain-tabs";
     const content = document.createElement("div"); content.className = "ic-domain-content";
     const rerender = () => renderLoaded(context, target, state);
-    tabs.forEach(([key, label]) => {
-      const button = document.createElement("button"); button.type = "button";
-      button.classList.toggle("active", state.activeTab === key);
-      button.textContent = context.t(label);
-      button.addEventListener("click", () => { state.activeTab = key; rerender(); });
-      nav.append(button);
-    });
+    const customTabs = state.customAnalyses?.tabs({
+      onDeleted: () => { state.activeTab = tabs[0][0]; rerender(); },
+    }) || [];
+    const nav = window.FTJobResultTabs.create(context, {
+      className: "ic-domain-header",
+      tabs: [
+        ...tabs.map(([key, label]) => ({key, label})),
+        ...customTabs,
+      ],
+      active: state.activeTab,
+      controls: [sliceControl(context, state, rerender)],
+      onChange: async key => {
+        if (key === "custom-analysis:new") {
+          try {
+            const analysis = await state.customAnalyses.add();
+            state.activeTab = state.customAnalyses.keyFor(analysis.tab_id);
+          } catch (error) {
+            context.showNotice?.(error.message || String(error), true);
+          }
+        } else state.activeTab = key;
+        rerender();
+      },
+    }).header;
     content.append(tabContent(context, state, rerender));
-    target.replaceChildren(sliceControl(context, state, rerender), nav, content);
+    target.replaceChildren(nav, content);
   }
 
   function section(context, options) {
@@ -359,8 +387,10 @@
         const factorOrder = rawModel.factors.map(item => item.key);
         renderLoaded(context, target, {
           rawModel, model: rawModel, factorOrder,
-          activeFactorKey: factorOrder[0] || "", activeTab: "summary",
+          activeFactorKey: factorOrder[0] || "",
+          activeTab: options.customAnalyses?.state?.requestedKey || "summary",
           activeMethod: rawModel.methods[0] || "rank", activeHorizon: "", activeDelay: 0,
+          customAnalyses: options.customAnalyses || null,
           productGroupRef: productGroupRef(
             options.configuration, options.productGroupRef,
           ),

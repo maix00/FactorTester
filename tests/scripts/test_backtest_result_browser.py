@@ -156,8 +156,15 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
             diagnosticKey() { return "same"; },
           };
           window.FTBacktestGroupDetail = {
+            tabs: [
+              {id: "overview", label: "概览"},
+              {id: "returns", label: "收益时序"},
+              {id: "products", label: "产品贡献"},
+            ],
             async load(_context, _options, entry) { return {entry: entry.key}; },
-            render(_context, target, detail) { target.textContent = `detail:${detail.entry}`; },
+            renderTab(_context, target, detail, tab) {
+              target.textContent = `${tab}:${detail.entry}`;
+            },
           };
           window.FTBacktestRankingView = {
             async load() { return {ranking: true}; },
@@ -171,10 +178,14 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
           FTBacktestStrategyAnalysis.open(
             {t: value => value}, {resultSummary: {}},
             {key: "g2", label: "第二组", configurationID: "same"},
+            "products",
           );
         """)
         assert page.get_by_role("dialog").count() == 1
-        assert page.get_by_role("button", name="分组详情").count() == 1
+        assert page.get_by_role("button", name="概览").count() == 1
+        assert page.get_by_role("button", name="收益时序").count() == 1
+        assert page.get_by_role("button", name="产品贡献").count() == 1
+        page.get_by_text("products:g2").wait_for()
         page.get_by_role("button", name="排序诊断").click()
         page.get_by_text("ranking:shared").wait_for()
         browser.close()

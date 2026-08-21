@@ -941,6 +941,116 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
     }]
 
 
+def test_job_supplementals_route_by_parent_storage_server_not_historical_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    state.job_index.upsert("user@1", [{
+        "job_id": "parent-one",
+        "port": 8999,
+        "storage_server_id": state.server_id,
+        "updated_at": 10.0,
+    }])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=201,
+            body=b'{"success":true,"created":true}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"kind":"backtest_strategy_analysis","params":{"analysis_tab":"returns"}}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/parent-one/supplementals?port=8999",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["created"] is True
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/jobs/parent-one/supplementals",
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    (
+        ("GET", "/custom-analyses", None),
+        ("POST", "/custom-analyses", b'{"title":"A","source":"result = 1"}'),
+        ("PATCH", "/custom-analyses/tab-one", b'{"title":"B","source":"result = 2"}'),
+        ("DELETE", "/custom-analyses/tab-one", None),
+    ),
+)
+def test_job_custom_analysis_routes_use_parent_storage_server(
+    tmp_path, monkeypatch, method: str, suffix: str, body: bytes | None,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    state.job_index.upsert("user@1", [{
+        "job_id": "parent-one",
+        "port": 8999,
+        "storage_server_id": state.server_id,
+        "updated_at": 10.0,
+    }])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"analyses":[]}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/parent-one{suffix}?port=8999",
+            data=body,
+            method=method,
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+
+    expected = {
+        "port": 8141,
+        "path": f"/api/jobs/parent-one{suffix}",
+        "principal": "user@1",
+        "method": method,
+    }
+    if body is not None:
+        expected.update({"body": body, "content_type": "application/json"})
+    assert calls == [expected]
+
+
 @pytest.mark.parametrize(
     ("path", "body"),
     (
@@ -1976,7 +2086,10 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "row.append(button, close)" in tabs
     assert "button.append(close)" not in tabs
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
-    assert "statusPill(job.status, context)" in jobs
+    assert "statusCell(job, context)" in jobs
+    list_format = (ROOT / "server" / "manager" / "web" / "jobs" / "list-format.js").read_text(encoding="utf-8")
+    assert 'analyzing: "分析中"' in list_format
+    assert 'active > 0 ? "analyzing" : job.status' in list_format
     assert "context.isRouteCurrent?.() !== false" in jobs
     assert "context.isRouteCurrent?.() !== false" in job_detail
     assert "payload.public === false" in jobs
@@ -1986,6 +2099,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert ".job-status.succeeded" in styles
     assert ".job-status.failed" in styles
     assert ".job-status.running" in styles
+    assert ".job-status.analyzing" in styles
     assert ".job-status.submitted" in styles
     assert "body.sidebar-collapsed .tab-label" in styles
     assert "body.sidebar-collapsed .nav-button,\nbody.sidebar-collapsed .opened-tab" in styles

@@ -49,6 +49,11 @@ class JobRecord:
     workspace_id: str
     kind: str
     status: JobStatus
+    job_role: str = "primary"
+    parent_job_id: str = ""
+    supplemental_kind: str = ""
+    supplemental_identity: str = ""
+    source_artifact_hash: str = ""
     retry_of: str = ""
     attempt: int = 1
     step_mode: bool = False
@@ -126,6 +131,11 @@ class JobRecord:
             "owner": self.owner,
             "workspace_id": self.workspace_id,
             "kind": self.kind,
+            "job_role": self.job_role,
+            "parent_job_id": self.parent_job_id,
+            "supplemental_kind": self.supplemental_kind,
+            "supplemental_identity": self.supplemental_identity,
+            "source_artifact_hash": self.source_artifact_hash,
             "task_name": task_name,
             "acting_profile_ref": acting_profile_ref,
             "acting_profile_name": acting_profile_name,

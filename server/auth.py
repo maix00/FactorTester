@@ -49,7 +49,8 @@ def _is_public_job_gateway_read() -> bool:
         return True
     return bool(re.fullmatch(
         r'/api/jobs/[A-Za-z0-9._-]{1,128}'
-        r'(?:/result|/artifacts)?',
+        r'(?:/result|/artifacts|/supplementals(?:/[A-Za-z0-9._-]{1,128})?'
+        r'|/custom-analyses)?',
         path,
     ))
 

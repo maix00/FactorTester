@@ -13,6 +13,7 @@ from tools.testers.backtest.modules.order_lifecycle.artifact import (
 
 from .projection import serialize_event_execution
 from .settings import silent_default_settings_for_run
+from ..strategy_analysis import build_strategy_analysis_source
 
 
 def emit_group_run_outputs(
@@ -63,6 +64,10 @@ def emit_group_run_outputs(
             "settings_by_strategy": execution["settings_by_strategy"],
         },
     }
+    sink.emit_core_artifact(
+        "strategy_analysis_source",
+        build_strategy_analysis_source(group_execution, serialized),
+    )
     sink.emit_artifact("group_execution", group_execution)
     emit_order_audit_artifact(sink, account, run_id)
     first_owner = group_owner[0]

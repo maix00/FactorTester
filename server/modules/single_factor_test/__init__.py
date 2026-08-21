@@ -22,7 +22,7 @@ def allow_same_host_job_reads(response):
     if origin and parsed.hostname == request.host.split(":", 1)[0]:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Vary"] = "Origin"
     return response
@@ -47,5 +47,6 @@ from . import (  # noqa: E402, F401
     research_jobs,
     run_input_routes,
     setting_instance_routes,
+    supplemental_routes,
     trial_plan_revision_routes,
 )
