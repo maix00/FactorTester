@@ -101,6 +101,108 @@ def test_repository_rejects_bypassing_terminalization_on_create(tmp_path) -> Non
         repository.create(_record("bypass", status=JobStatus.SUCCEEDED))
 
 
+def test_supplemental_jobs_share_table_without_polluting_primary_lists(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+    supplemental = replace(
+        _record("supplemental", status=JobStatus.QUEUED),
+        job_role="supplemental",
+        parent_job_id=parent.job_id,
+        supplemental_kind="custom_python_analysis",
+        supplemental_identity="identity-1",
+        source_artifact_hash="source-1",
+        execution_plan={"runner": "custom_python_analysis", "version": 1},
+    )
+
+    created, inserted = repository.create_or_load_supplemental(supplemental)
+    reused, inserted_again = repository.create_or_load_supplemental(
+        replace(supplemental, job_id="duplicate")
+    )
+
+    assert inserted is True
+    assert inserted_again is False
+    assert reused.job_id == created.job_id
+    assert repository.list(owner="alice") == [parent]
+    assert repository.list_supplemental(
+        parent_job_id=parent.job_id, owner="alice",
+    ) == [created]
+    assert repository.has_run_attempts(owner="alice", run_id="run-1") is True
+
+
+def test_terminal_supplemental_allows_a_new_attempt_with_same_identity(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+    first = replace(
+        _record("supplemental-1", status=JobStatus.QUEUED),
+        job_role="supplemental", parent_job_id=parent.job_id,
+        supplemental_kind="backtest_strategy_analysis",
+        supplemental_identity="tab-identity", source_artifact_hash="source-1",
+        execution_plan={"runner": "strategy-analysis", "version": 1},
+    )
+    repository.create_or_load_supplemental(first)
+    repository.transition(first.job_id, JobStatus.RUNNING)
+    repository.transition(
+        first.job_id, JobStatus.FAILED,
+        error={"code": "analysis_failed", "message": "failed"},
+    )
+
+    second, inserted = repository.create_or_load_supplemental(
+        replace(first, job_id="supplemental-2")
+    )
+
+    assert inserted is True
+    assert second.job_id == "supplemental-2"
+
+
+def test_custom_analysis_tabs_are_persistent_resources_not_job_history(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+
+    created = repository.create_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice",
+        title="风险检查", source="result = {'ok': True}", tab_id="analysis-1",
+    )
+    renamed = repository.update_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+        title="风险复核", source="result = {'ok': False}",
+    )
+
+    assert created["title"] == "风险检查"
+    assert renamed["title"] == "风险复核"
+    assert renamed["source"] == "result = {'ok': False}"
+    assert repository.list_custom_analyses(
+        parent_job_id=parent.job_id, owner="alice",
+    ) == [renamed]
+
+    deleted = repository.delete_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+    )
+
+    assert deleted["tab_id"] == "analysis-1"
+    assert repository.load_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+    ) is None
+    assert repository.require(parent.job_id).job_id == parent.job_id
+
+
+def test_custom_analysis_tabs_are_scoped_to_parent_owner(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+    repository.create_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice",
+        title="分析", source="result = 1", tab_id="analysis-1",
+    )
+
+    assert repository.list_custom_analyses(
+        parent_job_id=parent.job_id, owner="bob",
+    ) == []
+    with pytest.raises(KeyError):
+        repository.update_custom_analysis(
+            parent_job_id=parent.job_id, owner="bob", tab_id="analysis-1",
+            title="越权", source="result = 2",
+        )
+
+
 def test_repository_initializes_schema_once_per_instance(tmp_path, monkeypatch) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     original = repository._ensure_schema

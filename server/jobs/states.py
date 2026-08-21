@@ -32,6 +32,7 @@ ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     # that can never be executed.
     JobStatus.SUBMITTED: frozenset({
         JobStatus.PLANNING,
+        JobStatus.QUEUED,
         JobStatus.FAILED,
         JobStatus.CANCELLED,
     }),

@@ -127,8 +127,11 @@ const adapter = window.FTProfileChatKit.create(
     && url.includes("view=results") && url.includes("order=desc")
   )));
 
-  adapter.setItemView("process");
-  const processPage = await (await get({
+  const getProcess = async body => adapter.fetchForView("process")(
+    "/api/client/profile-agent/chatkit",
+    {method: "POST", body: JSON.stringify(body)},
+  );
+  const processPage = await (await getProcess({
     type: "items.list",
     params: {thread_id: conversation.conversation_id, limit: 5},
   })).json();
@@ -136,6 +139,15 @@ const adapter = window.FTProfileChatKit.create(
   assert.ok(requestedURLs.some(url => (
     url.includes("limit=5") && url.includes("view=process")
   )));
+  const resultsAgain = await (await get({
+    type: "items.list",
+    params: {thread_id: conversation.conversation_id, limit: 5},
+  })).json();
+  assert.deepEqual(
+    resultsAgain.data.map(item => item.id),
+    ["item-1", "item-2"],
+    "the process projection must not mutate the mounted results projection",
+  );
   console.log("PASS: read-only Profile Agent history uses valid locked threads and stable item ids");
 })().catch(error => {
   console.error(error);

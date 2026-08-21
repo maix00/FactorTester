@@ -107,6 +107,25 @@ def test_account_directory_create_and_update_mirrors_local(monkeypatch):
     assert mirrored["accounts"][-1]["username"] == created["username"]
 
 
+def test_account_directory_create_initializes_reserved_self_profile(monkeypatch):
+    store = _DirectoryStore()
+    initialized = []
+    monkeypatch.setattr(account_admin, "save_accounts", lambda value: None)
+    monkeypatch.setattr(account_admin, "save_organizations", lambda value: None)
+    monkeypatch.setattr(account_admin, "save_levels", lambda value: None)
+    service = account_admin.AccountAdministrationService(
+        store,
+        profile_initializer=initialized.append,
+    )
+
+    created = service.create_user({
+        "alias": "testA", "password": "secret1", "organization_id": "GTHT",
+        "role": "user", "level_id": "GTHT__ROOT",
+    })
+
+    assert initialized == [created["username"]]
+
+
 def test_account_directory_http_is_super_admin_only(tmp_path, monkeypatch):
     monkeypatch.setattr(account_admin, "save_accounts", lambda value: None)
     monkeypatch.setattr(account_admin, "save_organizations", lambda value: None)

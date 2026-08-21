@@ -46,6 +46,65 @@ class JobQueryImplementation:
             raise KeyError("research job not found")
         return record
 
+    def list_supplemental(
+        self, *, parent_job_id: str, owner: str, search: str = "",
+        statuses: Iterable[JobStatus | str] | None = None,
+        limit: int = 20, offset: int = 0,
+    ) -> list[JobRecord]:
+        clauses = ["job_role='supplemental'", "parent_job_id=?", "owner=?"]
+        args: list[Any] = [str(parent_job_id), str(owner)]
+        if search:
+            clauses.append(
+                "(supplemental_kind LIKE ? OR job_id LIKE ? OR error_json LIKE ?)"
+            )
+            pattern = f"%{str(search).strip()}%"
+            args.extend((pattern, pattern, pattern))
+        normalized = [
+            item.value if isinstance(item, JobStatus) else str(item)
+            for item in (statuses or ())
+        ]
+        if normalized:
+            clauses.append(f"status IN ({','.join('?' for _ in normalized)})")
+            args.extend(normalized)
+        args.extend((min(200, max(1, int(limit))), max(0, int(offset))))
+        with self._connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM research_jobs
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                args,
+            ).fetchall()
+        return [record for row in rows if (record := self._record(row)) is not None]
+
+    def count_supplemental(
+        self, *, parent_job_id: str, owner: str, search: str = "",
+        statuses: Iterable[JobStatus | str] | None = None,
+    ) -> int:
+        clauses = ["job_role='supplemental'", "parent_job_id=?", "owner=?"]
+        args: list[Any] = [str(parent_job_id), str(owner)]
+        if search:
+            clauses.append(
+                "(supplemental_kind LIKE ? OR job_id LIKE ? OR error_json LIKE ?)"
+            )
+            pattern = f"%{str(search).strip()}%"
+            args.extend((pattern, pattern, pattern))
+        normalized = [
+            item.value if isinstance(item, JobStatus) else str(item)
+            for item in (statuses or ())
+        ]
+        if normalized:
+            clauses.append(f"status IN ({','.join('?' for _ in normalized)})")
+            args.extend(normalized)
+        with self._connection() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM research_jobs WHERE {' AND '.join(clauses)}",
+                args,
+            ).fetchone()
+        return int(row["total"] or 0)
+
     def list(
         self,
         *,
@@ -58,7 +117,7 @@ class JobQueryImplementation:
         limit: int = 20,
         offset: int = 0,
     ) -> list[JobRecord]:
-        clauses = ["owner=?"]
+        clauses = ["owner=?", "job_role='primary'"]
         args: list[Any] = [str(owner)]
         for column, value in (
             ("workspace_id", workspace_id),
@@ -101,7 +160,7 @@ class JobQueryImplementation:
             row = conn.execute(
                 """
                 SELECT 1 FROM research_jobs
-                WHERE owner=? AND run_id=?
+                WHERE owner=? AND run_id=? AND job_role='primary'
                 LIMIT 1
                 """,
                 (str(owner), str(run_id)),
@@ -119,7 +178,7 @@ class JobQueryImplementation:
                        SUM(CASE WHEN status IN ({placeholders})
                                 THEN 0 ELSE 1 END) AS non_terminal
                 FROM research_jobs
-                WHERE owner=? AND run_id=?
+                WHERE owner=? AND run_id=? AND job_role='primary'
                 """,
                 (*terminal_values, str(owner), str(run_id)),
             ).fetchone()
@@ -142,6 +201,7 @@ class JobQueryImplementation:
         terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
         placeholders = ",".join("?" for _ in terminal_values)
         clauses = [
+            "job_role='primary'",
             f"status NOT IN ({placeholders})",
             "instr(job_spec_json, ?) > 0",
         ]
@@ -177,11 +237,12 @@ class JobQueryImplementation:
         normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
         if normalized_owners:
             clauses = [
+                "jobs.job_role='primary'",
                 f"jobs.owner IN ({','.join('?' for _ in normalized_owners)})"
             ]
             args: list[Any] = normalized_owners.copy()
         else:
-            clauses = ["jobs.owner=?"]
+            clauses = ["jobs.owner=?", "jobs.job_role='primary'"]
             args = [str(owner)]
         for column, value in (
             ("workspace_id", workspace_id),
@@ -221,7 +282,13 @@ class JobQueryImplementation:
                        COALESCE(artifacts.output_artifact_bytes, 0)
                            AS active_output_artifact_bytes,
                        COALESCE(artifacts.input_artifact_bytes, 0)
-                           AS active_input_artifact_bytes
+                           AS active_input_artifact_bytes,
+                       COALESCE(supplementals.total, 0) AS supplemental_count,
+                       COALESCE(supplementals.active, 0) AS supplemental_active_count,
+                       COALESCE(supplementals.failed, 0) AS supplemental_failed_count,
+                       supplementals.updated_at AS supplemental_updated_at,
+                       MAX(jobs.updated_at, COALESCE(supplementals.updated_at, 0))
+                           AS effective_updated_at
                 FROM research_jobs AS jobs
                 LEFT JOIN user_job_pins AS pins
                   ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner
@@ -243,8 +310,18 @@ class JobQueryImplementation:
                     WHERE state='active'
                     GROUP BY job_id
                 ) AS artifacts ON artifacts.job_id=jobs.job_id
+                LEFT JOIN (
+                    SELECT parent_job_id, COUNT(*) AS total,
+                           SUM(CASE WHEN status IN ('queued', 'running', 'paused')
+                                    THEN 1 ELSE 0 END) AS active,
+                           SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+                           MAX(updated_at) AS updated_at
+                    FROM research_jobs
+                    WHERE job_role='supplemental'
+                    GROUP BY parent_job_id
+                ) AS supplementals ON supplementals.parent_job_id=jobs.job_id
                 WHERE {' AND '.join(clauses)}
-                ORDER BY jobs.updated_at DESC, jobs.created_at DESC
+                ORDER BY effective_updated_at DESC, jobs.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
                 args,
@@ -267,6 +344,15 @@ class JobQueryImplementation:
                 "input_artifact_bytes": int(
                     row["active_input_artifact_bytes"] or 0
                 ),
+                "supplemental_count": int(row["supplemental_count"] or 0),
+                "supplemental_active_count": int(
+                    row["supplemental_active_count"] or 0
+                ),
+                "supplemental_failed_count": int(
+                    row["supplemental_failed_count"] or 0
+                ),
+                "supplemental_updated_at": row["supplemental_updated_at"],
+                "effective_updated_at": float(row["effective_updated_at"]),
             }
             for row in rows
             if (record := self._record(row)) is not None
@@ -287,11 +373,12 @@ class JobQueryImplementation:
         normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
         if normalized_owners:
             clauses = [
+                "job_role='primary'",
                 f"owner IN ({','.join('?' for _ in normalized_owners)})"
             ]
             args: list[Any] = normalized_owners.copy()
         else:
-            clauses = ["owner=?"]
+            clauses = ["owner=?", "job_role='primary'"]
             args = [str(owner)]
         for column, value in (
             ("workspace_id", workspace_id),
@@ -327,10 +414,14 @@ class JobQueryImplementation:
     ) -> tuple[list[dict[str, Any]], bool]:
         """Return a bounded, non-sensitive all-owner administrative view."""
         bounded_limit = min(100, max(1, int(limit)))
-        clauses: list[str] = []
+        clauses: list[str] = ["research_jobs.job_role='primary'"]
         args: list[Any] = []
         if before_updated_at is not None:
-            clauses.append("(research_jobs.updated_at, research_jobs.job_id) < (?, ?)")
+            clauses.append(
+                "(MAX(research_jobs.updated_at, "
+                "COALESCE(supplemental_stats.updated_at, 0)), "
+                "research_jobs.job_id) < (?, ?)"
+            )
             args.extend((
                 float(before_updated_at),
                 str(before_job_id),
@@ -339,6 +430,30 @@ class JobQueryImplementation:
         args.append(bounded_limit + 1)
         artifact_select = ""
         artifact_join = ""
+        supplemental_select = """
+                       , COALESCE(supplemental_stats.total, 0)
+                           AS supplemental_count,
+                       COALESCE(supplemental_stats.active, 0)
+                           AS supplemental_active_count,
+                       COALESCE(supplemental_stats.failed, 0)
+                           AS supplemental_failed_count,
+                       supplemental_stats.updated_at AS supplemental_updated_at,
+                       MAX(research_jobs.updated_at,
+                           COALESCE(supplemental_stats.updated_at, 0))
+                           AS effective_updated_at"""
+        supplemental_join = """
+                LEFT JOIN (
+                    SELECT parent_job_id, COUNT(*) AS total,
+                           SUM(CASE WHEN status IN ('queued', 'running', 'paused')
+                                    THEN 1 ELSE 0 END) AS active,
+                           SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+                           MAX(updated_at) AS updated_at
+                    FROM research_jobs
+                    WHERE job_role='supplemental'
+                    GROUP BY parent_job_id
+                ) AS supplemental_stats
+                  ON supplemental_stats.parent_job_id=research_jobs.job_id
+            """
         if include_artifacts:
             artifact_select = """
                        , COALESCE(artifact_stats.artifact_count, 0)
@@ -385,10 +500,12 @@ class JobQueryImplementation:
                        research_jobs.created_at, research_jobs.started_at,
                        research_jobs.finished_at, research_jobs.updated_at
                        {artifact_select}
+                       {supplemental_select}
                 FROM research_jobs
                 {artifact_join}
+                {supplemental_join}
                 {where}
-                ORDER BY research_jobs.updated_at DESC, research_jobs.job_id DESC
+                ORDER BY effective_updated_at DESC, research_jobs.job_id DESC
                 LIMIT ?
                 """,
                 args,
@@ -410,7 +527,16 @@ class JobQueryImplementation:
                 "created_at": float(row["created_at"]),
                 "started_at": row["started_at"],
                 "finished_at": row["finished_at"],
-                "updated_at": float(row["updated_at"]),
+                "parent_updated_at": float(row["updated_at"]),
+                "updated_at": float(row["effective_updated_at"]),
+                "supplemental_count": int(row["supplemental_count"] or 0),
+                "supplemental_active_count": int(
+                    row["supplemental_active_count"] or 0
+                ),
+                "supplemental_failed_count": int(
+                    row["supplemental_failed_count"] or 0
+                ),
+                "supplemental_updated_at": row["supplemental_updated_at"],
             }
             for row in rows
         ]
@@ -438,7 +564,7 @@ class JobQueryImplementation:
         """Return the number of durable jobs in the shared service store."""
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS total FROM research_jobs",
+                "SELECT COUNT(*) AS total FROM research_jobs WHERE job_role='primary'",
             ).fetchone()
         return int(row["total"] or 0) if row is not None else 0
 
@@ -495,6 +621,11 @@ class JobQueryImplementation:
             workspace_id=str(row["workspace_id"]),
             kind=str(row["kind"]),
             status=JobStatus(row["status"]),
+            job_role=str(row["job_role"] or "primary"),
+            parent_job_id=str(row["parent_job_id"] or ""),
+            supplemental_kind=str(row["supplemental_kind"] or ""),
+            supplemental_identity=str(row["supplemental_identity"] or ""),
+            source_artifact_hash=str(row["source_artifact_hash"] or ""),
             retry_of=str(row["retry_of"] or ""),
             attempt=int(row["attempt"] or 1),
             step_mode=bool(row["step_mode"]),

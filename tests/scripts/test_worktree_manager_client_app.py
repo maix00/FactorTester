@@ -47,7 +47,11 @@ def running_manager(state):
 
 
 def authenticated_state(tmp_path):
-    state = manager.ManagerState(tmp_path, "python")
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        session_db_path=tmp_path / "manager-sessions.sqlite",
+    )
     state._sessions[state._token_hash("user-token")] = (
         "user@1", "user", float("inf"),
     )
@@ -178,6 +182,11 @@ def test_offline_registration_is_local_and_queued_for_central_sync(
     assert organization_id == "GTHT"
     assert local.load_accounts()[0]["username"] == principal
     assert local.pending_accounts()[0]["username"] == principal
+    profiles = state.client_state.profiles(
+        principal, include_local_paths=False,
+    )
+    assert profiles[0]["profile_id"] == "self"
+    assert profiles[0]["profile_kind"] == "self"
 
 
 def test_two_offline_managers_can_use_the_same_alias_without_username_collision(
@@ -881,7 +890,7 @@ def test_remote_run_submission_uses_manager_frozen_authoring_context(
     )
 
 
-def test_job_output_generation_uses_job_port_and_forwards_body(
+def test_job_output_generation_uses_supplemental_route_and_forwards_body(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
@@ -897,10 +906,10 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
         )
 
     monkeypatch.setattr(state.gateway, "request", request)
-    body = b'{"output_requests":["ic_statistics"]}'
+    body = b'{"kind":"report_output_generation","params":{"output_requests":["equity_curve"]}}'
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/jobs/job-one/artifacts/generate?port=8141",
+            f"{base_url}/api/jobs/job-one/supplementals?port=8141",
             data=body,
             method="POST",
             headers={
@@ -924,12 +933,122 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
     assert rejected.value.code == 404
     assert calls == [{
         "port": 8141,
-        "path": "/api/jobs/job-one/artifacts/generate",
+        "path": "/api/jobs/job-one/supplementals",
         "principal": "user@1",
         "method": "POST",
         "body": body,
         "content_type": "application/json",
     }]
+
+
+def test_job_supplementals_route_by_parent_storage_server_not_historical_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    state.job_index.upsert("user@1", [{
+        "job_id": "parent-one",
+        "port": 8999,
+        "storage_server_id": state.server_id,
+        "updated_at": 10.0,
+    }])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=201,
+            body=b'{"success":true,"created":true}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"kind":"backtest_strategy_analysis","params":{"analysis_tab":"returns"}}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/parent-one/supplementals?port=8999",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["created"] is True
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/jobs/parent-one/supplementals",
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    (
+        ("GET", "/custom-analyses", None),
+        ("POST", "/custom-analyses", b'{"title":"A","source":"result = 1"}'),
+        ("PATCH", "/custom-analyses/tab-one", b'{"title":"B","source":"result = 2"}'),
+        ("DELETE", "/custom-analyses/tab-one", None),
+    ),
+)
+def test_job_custom_analysis_routes_use_parent_storage_server(
+    tmp_path, monkeypatch, method: str, suffix: str, body: bytes | None,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    state.job_index.upsert("user@1", [{
+        "job_id": "parent-one",
+        "port": 8999,
+        "storage_server_id": state.server_id,
+        "updated_at": 10.0,
+    }])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"analyses":[]}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/parent-one{suffix}?port=8999",
+            data=body,
+            method=method,
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+
+    expected = {
+        "port": 8141,
+        "path": f"/api/jobs/parent-one{suffix}",
+        "principal": "user@1",
+        "method": method,
+    }
+    if body is not None:
+        expected.update({"body": body, "content_type": "application/json"})
+    assert calls == [expected]
 
 
 @pytest.mark.parametrize(
@@ -1042,6 +1161,10 @@ def test_profiles_and_workspace_are_local_manager_projections(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
+    ensured = []
+    monkeypatch.setattr(
+        state.client_state, "ensure_self_profile", ensured.append,
+    )
     monkeypatch.setattr(
         state.client_state, "profiles",
         lambda principal: [{"profile_id": "maxa", "principal": principal}],
@@ -1063,6 +1186,7 @@ def test_profiles_and_workspace_are_local_manager_projections(
 
     assert profiles["profiles"][0]["profile_id"] == "maxa"
     assert profiles["profiles"][0]["principal"] == "user@1"
+    assert ensured == ["user@1"]
     assert workspace["workspace"]["principal_ref"] == "user@1"
 
 
@@ -1105,6 +1229,56 @@ def test_profile_projection_remains_available_when_postgres_is_offline(
     assert profiles[0]["session_binding"] == {"principal_ref": "user@1"}
     assert "workspace_root" not in profiles[0]
     assert "session_ref" not in profiles[0]
+
+
+def test_ensure_self_profile_creates_metadata_without_a_workspace(tmp_path) -> None:
+    client_root = tmp_path / "client"
+    service = ClientStateService(
+        client_root,
+        control_store=None,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+
+    receipt = service.ensure_self_profile("user@1")
+
+    assert receipt["status"] == "pending"
+    assert receipt["profile"]["profile_id"] == "self"
+    assert receipt["profile"]["profile_kind"] == "self"
+    assert receipt["profile"]["session_binding"] == {
+        "principal_ref": "user@1",
+    }
+    assert service.profile_cache.read("user@1") == [receipt["profile"]]
+    assert not client_root.exists()
+
+
+def test_ensure_self_profile_repairs_kind_without_losing_profile_content(
+    tmp_path,
+) -> None:
+    from server.manager.services.profile_projection import ProfileProjectionCache
+
+    cache = ProfileProjectionCache(tmp_path / "profile-cache")
+    cache.upsert("user@1", {
+        "schema_version": 9,
+        "profile_id": "self",
+        "display_name": "legacy",
+        "agents": [{"agent_id": "research-agent"}],
+        "research_records": [{"record_id": "report-one"}],
+        "session_binding": {"principal_ref": "user@1"},
+    })
+    service = ClientStateService(
+        tmp_path / "client",
+        control_store=None,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+
+    receipt = service.ensure_self_profile("user@1")
+
+    assert receipt["profile"]["profile_kind"] == "self"
+    assert receipt["profile"]["display_name"] == "self"
+    assert receipt["profile"]["agents"] == [{"agent_id": "research-agent"}]
+    assert receipt["profile"]["research_records"] == [
+        {"record_id": "report-one"},
+    ]
 
 
 def test_profile_projection_flushes_after_postgres_recovers(tmp_path) -> None:
@@ -1275,6 +1449,25 @@ def test_profile_create_endpoint_rejects_duplicate_identifier(tmp_path) -> None:
     assert raised.value.code == 409
     value = json.loads(raised.value.read())
     assert "profile already exists" in value["error"]
+
+
+def test_profile_create_rejects_reserved_self_identifier(tmp_path) -> None:
+    service = ClientStateService(tmp_path / "client", control_store=None)
+
+    with pytest.raises(ValueError, match="reserved"):
+        service.create_profile(
+            "user@1", profile_id="self", display_name="Pretend Self",
+        )
+
+
+def test_profile_sync_rejects_reserved_self_identifier(tmp_path) -> None:
+    service = ClientStateService(tmp_path / "client", control_store=None)
+
+    with pytest.raises(ValueError, match="reserved"):
+        service.sync_profile("user@1", {
+            "profile_id": "self",
+            "display_name": "Pretend Self",
+        })
 
 
 def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> None:
@@ -1893,7 +2086,10 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "row.append(button, close)" in tabs
     assert "button.append(close)" not in tabs
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
-    assert "statusPill(job.status, context)" in jobs
+    assert "statusCell(job, context)" in jobs
+    list_format = (ROOT / "server" / "manager" / "web" / "jobs" / "list-format.js").read_text(encoding="utf-8")
+    assert 'analyzing: "分析中"' in list_format
+    assert 'active > 0 ? "analyzing" : job.status' in list_format
     assert "context.isRouteCurrent?.() !== false" in jobs
     assert "context.isRouteCurrent?.() !== false" in job_detail
     assert "payload.public === false" in jobs
@@ -1903,6 +2099,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert ".job-status.succeeded" in styles
     assert ".job-status.failed" in styles
     assert ".job-status.running" in styles
+    assert ".job-status.analyzing" in styles
     assert ".job-status.submitted" in styles
     assert "body.sidebar-collapsed .tab-label" in styles
     assert "body.sidebar-collapsed .nav-button,\nbody.sidebar-collapsed .opened-tab" in styles
@@ -2374,7 +2571,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "/artifacts/${encodeURIComponent(artifact.name)}" in viewers
     assert "/preview" not in viewers
     assert "/api/jobs/artifact-capabilities" in generation
-    assert "/artifacts/generate" in generation
+    assert "/supplementals" in generation
+    assert "report_output_generation" in generation
     assert "output_requests" in generation
 
 
@@ -2623,6 +2821,28 @@ def test_backtest_configuration_freezes_groups_products_and_all_factors() -> Non
     assert "state.analysis?.groups" in source
     assert "product_selections: productSelections" in source
     assert "ls_configs: prior.ls_configs || []" in source
+
+
+def test_reserved_self_profile_has_distinct_web_presentation() -> None:
+    profile_root = ROOT / "server" / "manager" / "web" / "profile"
+    profiles = (profile_root / "profiles.js").read_text(encoding="utf-8")
+    directory = (profile_root / "profile-directory.js").read_text(
+        encoding="utf-8",
+    )
+    detail = (profile_root / "profile-directory-detail.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (
+        ROOT / "server" / "manager" / "web" / "styles" / "app.css"
+    ).read_text(encoding="utf-8")
+
+    assert 'identifier === "self"' in profiles
+    assert "profile-self-badge" in profiles
+    assert "profile-directory-row-self" in directory
+    assert "profile-self-badge" in directory
+    assert "profile-directory-detail-self" in detail
+    assert ".profile-directory-row-self" in styles
+    assert ".profile-directory-detail-self" in styles
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(

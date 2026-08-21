@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import gc
-import importlib
 import hashlib
+import importlib
 import multiprocessing
 import os
-from pathlib import Path
 import queue
 import resource
 import sys
@@ -15,6 +14,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from server.jobs.equity_curve_artifact import receipt_bytes
@@ -32,7 +32,7 @@ from server.jobs.report_outputs import (
 )
 from server.jobs.scheduling.result_projection import (
     _bounded_summary,
-    persisted_result_summary,
+    persisted_result_summary,  # noqa: F401 - scheduling compatibility export
 )
 
 
@@ -81,6 +81,7 @@ class _WorkerSink:
         job_id: str,
         output_queue: Any,
         *,
+        artifact_job_id: str = "",
         artifact_root: str = "",
         retention_mode: str = "summary",
         output_requests: list[str] | tuple[str, ...] = (),
@@ -88,6 +89,7 @@ class _WorkerSink:
         cancel_event: Any = None,
     ) -> None:
         self.job_id = str(job_id)
+        self.artifact_job_id = str(artifact_job_id or job_id)
         self.output_queue = output_queue
         self.artifact_root = Path(artifact_root) if artifact_root else None
         self.retention_mode = str(retention_mode)
@@ -383,6 +385,35 @@ class _WorkerSink:
                 self._source_payloads[str(name)] = value
             self._write_artifact(str(name), value)
 
+    def emit_core_artifact(self, name: str, value: Any) -> None:
+        """Persist a bounded Job result index independent of optional outputs.
+
+        Core artifacts back the standard Job result UI.  They are not an
+        opt-in report and must remain available under summary retention, while
+        large execution traces continue to obey ``output_requests``.
+        """
+        self._write_artifact(str(name), value)
+
+    def emit_core_artifact_at(
+        self, name: str, value: Any, *, relative_path: str,
+    ) -> None:
+        """Persist a core JSON artifact at one validated Job-relative path."""
+        self._write_artifact_at(str(name), value, relative_path=relative_path)
+
+    def emit_bytes_artifact(
+        self,
+        name: str,
+        raw: bytes,
+        *,
+        extension: str,
+        content_type: str,
+    ) -> None:
+        """Persist one trusted derived output under the Job artifact owner."""
+        self._write_bytes_artifact(
+            str(name), bytes(raw), extension=str(extension),
+            content_type=str(content_type),
+        )
+
     def emit_mapping_artifact(
         self,
         name: str,
@@ -405,7 +436,7 @@ class _WorkerSink:
             ch if ch.isalnum() or ch in "-_" else "-"
             for ch in name
         )
-        target = self.artifact_root / self.job_id / f"{safe_name}.json"
+        target = self.artifact_root / self.artifact_job_id / f"{safe_name}.json"
         receipt = write_json_mapping_artifact(
             target,
             fields=fields,
@@ -414,7 +445,7 @@ class _WorkerSink:
         )
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
             "content_type": "application/json",
             "content_hash": receipt.content_hash,
             "size_bytes": receipt.size_bytes,
@@ -445,12 +476,37 @@ class _WorkerSink:
             ch if ch.isalnum() or ch in "-_" else "-"
             for ch in name
         )
-        directory = self.artifact_root / self.job_id
+        directory = self.artifact_root / self.artifact_job_id
         target = directory / f"{safe_name}.json"
         receipt = write_json_artifact(target, value)
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
+            "content_type": "application/json",
+            "content_hash": receipt.content_hash,
+            "size_bytes": receipt.size_bytes,
+        })
+
+    def _write_artifact_at(
+        self, name: str, value: Any, *, relative_path: str,
+    ) -> None:
+        if self.artifact_root is None:
+            raise RuntimeError("artifact root is required for full retention")
+        relative = Path(str(relative_path))
+        if (
+            relative.is_absolute() or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.suffix.lower() != ".json"
+        ):
+            raise ValueError("artifact relative path must be a safe JSON path")
+        directory = (self.artifact_root / self.artifact_job_id).resolve()
+        target = (directory / relative).resolve()
+        if directory not in target.parents:
+            raise ValueError("artifact relative path escapes the Job directory")
+        receipt = write_json_artifact(target, value)
+        self._emit("artifact", {
+            "name": name,
+            "relative_path": f"{self.artifact_job_id}/{relative.as_posix()}",
             "content_type": "application/json",
             "content_hash": receipt.content_hash,
             "size_bytes": receipt.size_bytes,
@@ -467,7 +523,7 @@ class _WorkerSink:
         if self.artifact_root is None:
             raise RuntimeError("artifact root is required")
         safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name)
-        directory = self.artifact_root / self.job_id
+        directory = self.artifact_root / self.artifact_job_id
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{safe_name}.{extension}"
         staging = directory / f".{safe_name}.{os.getpid()}.tmp"
@@ -475,7 +531,7 @@ class _WorkerSink:
         staging.replace(target)
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
             "content_type": content_type,
             "content_hash": hashlib.sha256(raw).hexdigest(),
             "size_bytes": len(raw),
@@ -534,6 +590,7 @@ def _worker_entry(
             sink = _WorkerSink(
                 job_id,
                 output_queue,
+                artifact_job_id=str(task.get("artifact_job_id") or job_id),
                 artifact_root=str(task.get("artifact_root") or ""),
                 retention_mode=str(task.get("retention_mode") or "summary"),
                 output_requests=list(
@@ -655,6 +712,7 @@ class LongLivedWorkerPool:
         pinned: bool = False,
         artifact_root: str = "",
         retention_mode: str = "summary",
+        artifact_job_id: str = "",
     ) -> int:
         with self._lock:
             if self._closed:
@@ -684,6 +742,7 @@ class LongLivedWorkerPool:
                 "cache_keys": sorted(requested),
                 "artifact_root": str(artifact_root),
                 "retention_mode": str(retention_mode),
+                "artifact_job_id": str(artifact_job_id or job_id),
             })
             return worker.process.pid
 

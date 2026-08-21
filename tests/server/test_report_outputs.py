@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -79,11 +81,11 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert group_detail["viewer"] == "group_research_detail"
     assert group_detail["before_run"] is True
     assert group_detail["after_run"] is False
-    assert group_detail["result_retention_mode"] == "full"
+    assert "result_retention_mode" not in group_detail
     assert source_artifacts_for(["group_research_detail"]) == {
-        "result", "group_execution", "order_audit",
+        "strategy_analysis_source",
     }
-    assert result_retention_mode_for(["group_research_detail"]) == "full"
+    assert result_retention_mode_for(["group_research_detail"]) == "summary"
     assert result_retention_mode_for(["fee_detail"]) == "summary"
     assert result_retention_mode_for(["fee_detail"], requested="full") == "full"
     declarations = output_declarations(["equity", "fees"])
@@ -96,6 +98,45 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert declarations[0]["receipt_artifact"] == "equity_curve_receipt"
     assert "equity_curve_data_receipt" not in declarations[0]["artifacts"]
     assert "fee_detail_data" in declarations[1]["artifacts"]
+
+
+def test_registered_backtest_result_tabs_have_one_canonical_builder_path() -> None:
+    from server.jobs.report_outputs.definitions import OUTPUT_DEFINITIONS
+
+    model = Path(
+        "server/manager/web/test-modules/backtest/results/model.js"
+    ).read_text()
+    tab_artifacts = set(re.findall(
+        r'^\s*[a-z_]+:\s*"([a-z_]+_data)",?$', model, re.MULTILINE,
+    ))
+    definitions = {
+        name: value for name, value in OUTPUT_DEFINITIONS.items()
+        if "backtest" in value.get("analyses", ())
+        and value.get("canonical_artifact")
+    }
+    assert tab_artifacts == {
+        value["canonical_artifact"] for value in definitions.values()
+    }
+
+    result, source = _sample()
+    source["engine_result"]["portfolios"]["A1"].update({
+        "cash_curve": {"1": 880.0},
+        "position_curve": {"1": {"CU.SHF": 2.0}},
+        "fill_turnover": {"average": 0.25, "total": 0.5, "observations": 2},
+    })
+    source["order_audit"]["strategies"]["A1"].update({
+        "orders": [{"order_id": "order-1"}],
+        "settlements": [{
+            "fill_id": "fill-1", "cash_before": 900.0, "cash_after": 880.0,
+            "margin_before": 100.0, "margin_after": 120.0,
+        }],
+    })
+    generated = {
+        item.name for item in build_report_artifacts(
+            result, source=source, requested=list(definitions),
+        )
+    }
+    assert tab_artifacts <= generated
 
 
 def test_backtest_series_outputs_preserve_strategy_identity() -> None:
@@ -127,11 +168,9 @@ def test_backtest_series_outputs_preserve_strategy_identity() -> None:
         "before_run": True,
         "after_run": False,
         "required_sources": [
-            {"name": "result", "label": "回测结果摘要（运行完成后由服务器保留）"},
-            {"name": "group_execution", "label": "分组执行明细与组合曲线的原始数据"},
-            {"name": "order_audit", "label": "订单、成交和结算手续费审计明细"},
+            {"name": "strategy_analysis_source", "label": "按需计算策略分析所需的基础数据"},
         ],
-        "result_retention_mode": "full",
+        "result_retention_mode": "summary",
     }
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
@@ -315,6 +354,50 @@ def test_optional_execution_and_portfolio_outputs_share_retained_sources() -> No
     assert post_run_payloads["cash_detail_data"]["rows"][0]["cash"] == 880.0
     assert post_run_payloads["margin_detail_data"]["rows"][0]["margin"] == 120.0
     assert post_run_payloads["fill_detail_data"]["rows"][0]["fill_id"] == "fill-1"
+
+
+def test_fee_and_ratio_outputs_count_each_native_fill_once() -> None:
+    result = {"groups": [{
+        "name": "A1", "timestamps": [1, 2], "total_equity": [100.0, 110.0],
+    }]}
+    source = {"order_audit": {"strategies": {"A1": {
+        "fills": [{"fill_id": "fill-1", "timestamp": 1, "fee": 2.5}],
+        "settlements": [{"fill_id": "fill-1", "fee": 2.5}],
+    }}}}
+
+    artifacts = build_report_artifacts(
+        result, source=source, requested=["fee_detail", "ratio_detail"],
+    )
+    payloads = {
+        item.name: json.loads(item.raw)
+        for item in artifacts if item.extension == "json"
+    }
+    assert len(payloads["fee_detail_data"]["rows"]) == 1
+    aggregate = next(
+        row for row in payloads["ratio_detail_data"]["rows"]
+        if row["series"] == "__aggregate__"
+    )
+    assert aggregate["fee_total"] == 2.5
+    assert aggregate["gross_to_fee_ratio"] == 4.0
+
+
+def test_period_returns_include_the_first_move_after_previous_period_close() -> None:
+    result = {"groups": [{
+        "name": "A1",
+        "timestamps": [
+            "2025-01-31T00:00:00Z", "2025-02-01T00:00:00Z",
+            "2025-02-28T00:00:00Z",
+        ],
+        "total_equity": [100.0, 110.0, 121.0],
+    }]}
+
+    artifacts = build_report_artifacts(result, requested=["period_returns"])
+    rows = json.loads(next(
+        item.raw for item in artifacts if item.name == "period_returns_data"
+    ))["rows"]
+    monthly = {row["period"]: row["return"] for row in rows if row["frequency"] == "month"}
+    assert monthly["2025-01"] == 0.0
+    assert monthly["2025-02"] == pytest.approx(0.21)
 
 
 def test_audit_only_output_skips_equity_projection(monkeypatch) -> None:

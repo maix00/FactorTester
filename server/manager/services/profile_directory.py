@@ -10,16 +10,19 @@ retain a canonical source key plus the complete source-server list.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any, Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
+from server.manager.services.profile_projection import (
+    SELF_PROFILE_ID,
+    SELF_PROFILE_KIND,
+)
 from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
     is_super_admin_account,
     load_accounts,
 )
-
 
 READ_ONLY_SCOPES = {"subordinates", "servers"}
 PROFILE_DIRECTORY_PRINCIPAL = "__profile_directory__"
@@ -337,6 +340,23 @@ class ProfileDirectoryService:
             "conversation_sharing": conversation_sharing,
         }
         claim = self._claim(profile)
+        is_self_profile = (
+            profile_id == SELF_PROFILE_ID
+            or str(profile.get("profile_kind") or "").strip()
+            == SELF_PROFILE_KIND
+        )
+        profile_kind = (
+            SELF_PROFILE_KIND
+            if is_self_profile
+            else str(profile.get("profile_kind") or "profile").strip()
+        )
+        display_name = (
+            "本人"
+            if is_self_profile and owner == current
+            else self._account_label(owner)
+            if is_self_profile
+            else str(profile.get("display_name") or profile_id)
+        )
         conversation_count = profile.get("conversation_count")
         if conversation_count is None and source == self.server_id:
             try:
@@ -361,7 +381,9 @@ class ProfileDirectoryService:
             "owner_ref": owner,
             "owner_alias": self._account_label(owner),
             "profile_id": profile_id,
-            "display_name": str(profile.get("display_name") or profile_id),
+            "profile_kind": profile_kind,
+            "is_self_profile": is_self_profile,
+            "display_name": display_name,
             "source_server_id": source,
             "execution_server_id": runtime.get("executor_id", "") if runtime.get("runtime_kind") == "server" else "",
             "runtime_kind": runtime.get("runtime_kind", "client"),
@@ -407,6 +429,15 @@ class ProfileDirectoryService:
         if not viewer:
             raise ProfileDirectoryError("authenticated principal is required")
         scope = str(scope or "mine").strip().lower()
+        ensured_profile = None
+        if scope == "mine":
+            ensure_self = getattr(
+                self.client_state, "ensure_self_profile", None,
+            )
+            if callable(ensure_self):
+                receipt = ensure_self(viewer)
+                if isinstance(receipt, dict):
+                    ensured_profile = receipt.get("profile")
         owners, read_only_scope = self._owners_for_scope(viewer, scope)
         try:
             account = get_account(viewer)
@@ -414,6 +445,19 @@ class ProfileDirectoryService:
             account = None
         admin = is_super_admin_account(account)
         raw_profiles = self._profiles(owners)
+        if (
+            isinstance(ensured_profile, dict)
+            and not any(
+                self._profile_owner(item) == viewer
+                and self._profile_id(item.get("profile_id")) == SELF_PROFILE_ID
+                for item in raw_profiles
+                if isinstance(item, dict)
+            )
+        ):
+            raw_profiles = [
+                *raw_profiles,
+                {**ensured_profile, "source_server_id": self.server_id},
+            ]
         owner_set = set(owners)
         dedupe_by_profile = scope in {"mine", "subordinates"}
         projected: dict[str, dict[str, Any]] = {}

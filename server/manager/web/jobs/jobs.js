@@ -3,7 +3,7 @@
   // controller owns pagination, scope state, and navigation only.
   const {
     artifactCell, date, displayProfile, formatBytes, jobPort, kindTitle,
-    scalar, serverLabel, statusPill, table, taskCell, taskHash, taskTitle, text,
+    scalar, serverLabel, statusCell, statusPill, table, taskCell, taskHash, taskTitle, text,
   } = FTJobListFormat;
 
   const pageSize = 20;
@@ -298,7 +298,7 @@
       return;
     }
    const result = FTUI.table([context.t("任务"), context.t("服务器"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物"), context.t("提交物")], jobs.map(job => [
-      taskCell(job, context), serverLabel(job, context), jobPort(job.execution_port) || jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), artifactCell(job, "output", context), artifactCell(job, "input", context),
+      taskCell(job, context), serverLabel(job, context), jobPort(job.execution_port) || jobPort(job.port) || context.t("未知"), date(job.updated_at), statusCell(job, context), displayProfile(job, context), artifactCell(job, "output", context), artifactCell(job, "input", context),
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";

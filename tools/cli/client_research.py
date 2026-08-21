@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .client_base import ClientMixinBase
-from .http import BinaryResponse, DEFAULT_BINARY_LIMIT
+from .http import DEFAULT_BINARY_LIMIT, BinaryResponse
 
 
 class ResearchClientMixin(ClientMixinBase):
@@ -457,8 +457,11 @@ class ResearchClientMixin(ClientMixinBase):
         output_requests: list[str],
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            f"/api/jobs/{job_id}/artifacts/generate",
-            {"output_requests": list(output_requests)},
+            f"/api/jobs/{job_id}/supplementals",
+            {
+                "kind": "report_output_generation",
+                "params": {"output_requests": list(output_requests)},
+            },
         ))
 
     def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:

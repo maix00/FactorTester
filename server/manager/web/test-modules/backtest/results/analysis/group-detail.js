@@ -1,4 +1,15 @@
 (() => {
+  const TABS = Object.freeze([
+    ["overview", "概览"], ["returns", "收益时序"],
+    ["membership", "入组产品"], ["distribution", "收益分布"],
+    ["rolling", "滚动稳定性"], ["capacity", "组容量风险"],
+    ["tradability", "可交易性"], ["calendar", "日历结构"],
+    ["holding", "持有期画像"], ["explanations", "自动结论"],
+    ["products", "产品贡献"], ["daily", "日期贡献"],
+    ["robustness", "稳健性摘要"], ["periods", "极端时段"],
+    ["positive_runs", "正收益段贡献"], ["intraday", "日内时段贡献"],
+  ].map(([id, label]) => Object.freeze({id, label})));
+
   function summaryText(detail, key, fallback) {
     const values = {
       frequency: detail?.entry_frequency?.[0]
@@ -75,10 +86,46 @@
     );
   }
 
-  async function load(context, options, entry) {
+  function renderTab(context, target, detail, tabID, options = {}, entry = null) {
+    const p = Object.assign(
+      {}, window.FTBacktestGroupDetailParts, window.FTBacktestGroupDetailProducts,
+    );
+    const builders = {
+      overview: () => p.summary(context, detail.summary),
+      returns: () => p.returnChart(context, detail.return_series),
+      membership: () => p.frequency(context, detail.entry_frequency),
+      distribution: () => p.distribution(context, detail.distribution),
+      rolling: () => p.rolling(context, detail.rolling_analysis),
+      capacity: () => p.capacity(context, detail.capacity_analysis),
+      tradability: () => p.tradability(context, detail.tradability_analysis),
+      calendar: () => p.calendar(context, detail.calendar_analysis),
+      holding: () => p.holding(context, detail.holding_analysis),
+      explanations: () => p.explanations(context, detail.explanations),
+      products: () => p.productAnalysis(context, detail.product_analysis),
+      daily: () => p.daily(context, detail.daily_analysis),
+      robustness: () => p.robustness(
+        context, detail.robustness_summary, detail.period_robustness,
+      ),
+      periods: () => p.stack(
+        Object.assign(document.createElement("h4"), {textContent: context.t("最高时段")}),
+        p.periods(context, detail.top_periods),
+        Object.assign(document.createElement("h4"), {textContent: context.t("最低时段")}),
+        p.periods(context, detail.bottom_periods),
+      ),
+      positive_runs: () => p.positiveRuns(context, detail.positive_run_analysis),
+      intraday: () => p.intraday(context, detail.intraday_analysis),
+    };
+    const build = builders[tabID];
+    if (!build) throw new Error(`unknown strategy analysis tab: ${tabID}`);
+    target.replaceChildren(build());
+  }
+
+  async function load(context, options, entry, analysisTab = "overview") {
     const request = FTBacktestResultModel.groupRequest(entry, options.resultSummary);
     if (!request) throw new Error(context.t("该分组缺少可读取的执行身份"));
-    return FTBacktestAnalysisAPI.detail(context, options, request);
+    return FTBacktestAnalysisAPI.detail(context, options, {
+      ...request, analysis_tab: analysisTab,
+    });
   }
 
   async function open(context, options, entry) {
@@ -96,5 +143,7 @@
     }
   }
 
-  window.FTBacktestGroupDetail = Object.freeze({load, open, render});
+  window.FTBacktestGroupDetail = Object.freeze({
+    load, open, render, renderTab, tabs: TABS,
+  });
 })();

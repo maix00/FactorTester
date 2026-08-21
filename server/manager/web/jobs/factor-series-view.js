@@ -32,7 +32,10 @@
     queueMicrotask(async () => {
       try {
         const model = await loadResult(context, options);
-        render(context, target, model, options);
+        render(context, target, {
+          model, options,
+          activeTab: options.customAnalyses?.state?.requestedKey || "series",
+        });
       } catch (error) {
         target.replaceChildren(FTUI.empty(context.t("因子序列暂不可用"), error.message));
       }
@@ -40,9 +43,41 @@
     return root;
   }
 
-  function render(context, target, model, options) {
+  function render(context, target, state) {
+    const {model, options} = state;
+    const customTabs = options.customAnalyses?.tabs({
+      onDeleted: () => { state.activeTab = "series"; render(context, target, state); },
+    }) || [];
+    const header = window.FTJobResultTabs.create(context, {
+      className: "factor-series-result-header",
+      tabs: [{key: "series", label: "因子序列"}, ...customTabs],
+      active: state.activeTab,
+      onChange: async key => {
+        if (key === "custom-analysis:new") {
+          try {
+            const analysis = await options.customAnalyses.add();
+            state.activeTab = options.customAnalyses.keyFor(analysis.tab_id);
+          } catch (error) {
+            context.showNotice?.(error.message || String(error), true);
+          }
+        } else state.activeTab = key;
+        render(context, target, state);
+      },
+    }).header;
+    const content = document.createElement("div");
+    content.className = "factor-series-result-content";
+    const customID = options.customAnalyses?.tabIDFor(state.activeTab);
+    if (customID) {
+      options.customAnalyses.render(customID, content, {
+        onTabsChanged: () => render(context, target, state),
+        onDeleted: () => { state.activeTab = "series"; render(context, target, state); },
+      });
+      target.replaceChildren(header, content);
+      return;
+    }
     if (!model.series.length) {
-      target.replaceChildren(FTUI.empty(context.t("暂无因子序列"), ""));
+      content.append(FTUI.empty(context.t("暂无因子序列"), ""));
+      target.replaceChildren(header, content);
       return;
     }
     const root = document.createElement("div");
@@ -64,7 +99,8 @@
     const contracts = document.createElement("div");
     contracts.className = "factor-series-contracts";
     root.append(controls, chart, contracts);
-    target.replaceChildren(root);
+    content.append(root);
+    target.replaceChildren(header, content);
     const show = () => loadProduct(
       context, model, options, select.value, chart, contracts, source,
     );

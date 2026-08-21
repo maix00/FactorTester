@@ -1574,6 +1574,121 @@ def _group_execution_for_request(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _strategy_analysis_for_request(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve the retained primitives used by lazy strategy-analysis tabs."""
+    from server.jobs.artifacts import load_json_artifact
+    from server.jobs.repository import JobRepository
+    from server.jobs.states import JobStatus
+
+    job_id = str(data.get("job_id") or "").strip()
+    run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+    if not job_id and not run_id:
+        return None
+    owner = str(current_user() or "")
+    repository = JobRepository()
+    if job_id:
+        job = repository.require(job_id, owner=owner)
+    else:
+        jobs = repository.list(
+            owner=owner,
+            run_id=run_id,
+            kind="backtest",
+            statuses=(JobStatus.SUCCEEDED,),
+            limit=20,
+        )
+        if not jobs:
+            raise LookupError("指定 run 尚无成功的回测 job")
+        job = jobs[0]
+    artifact = repository.load_artifact(
+        job_id=job.job_id,
+        name="strategy_analysis_source",
+        owner=owner,
+    )
+    if not artifact or artifact["state"] != "active":
+        raise LookupError(
+            "该任务的运行配置版本未保存策略分析数据，请用当前版本重新运行"
+        )
+    value = load_json_artifact(
+        str(artifact["relative_path"]),
+        str(artifact["content_hash"]),
+    )
+    if not isinstance(value, dict) or value.get("artifact_version") != 1:
+        raise ValueError("策略分析数据版本不兼容，请用当前版本重新运行")
+    return value
+
+
+def _strategy_analysis_execution(source: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild the bounded execution view consumed by existing analyzers."""
+    strategies = source.get("strategies") or {}
+    portfolios = {}
+    owners = []
+    for strategy_id, row in strategies.items():
+        identity = dict(row.get("identity") or {})
+        identity.setdefault("strategy_id", strategy_id)
+        owners.append(identity)
+        group = row.get("result_group") or {}
+        timestamps = list(group.get("timestamps") or ())
+        equities = list(group.get("total_equity") or ())
+        curve = {
+            pd.Timestamp(int(timestamp), unit="ms", tz="UTC").isoformat(): float(value)
+            for timestamp, value in zip(timestamps, equities)
+        }
+        portfolios[strategy_id] = {
+            "equity_curve": curve,
+            "display_equity_curve": curve,
+            "position_curve": dict(row.get("position_curve") or {}),
+            "notional_curve": dict(row.get("notional_curve") or {}),
+            "margin_curve": dict(row.get("margin_curve") or {}),
+            "fill_turnover": dict(row.get("fill_turnover") or {}),
+        }
+    context = source.get("detail_context") or {}
+    return {
+        "engine_result": {
+            "engine": str(source.get("engine") or ""),
+            "portfolios": portfolios,
+        },
+        "group_owner": owners,
+        "serialized_execution": {
+            "groups": [dict(row.get("result_group") or {}) for row in strategies.values()],
+            "metrics": dict(source.get("metrics") or {}),
+        },
+        "detail_context": context,
+        "payload": dict(context.get("payload") or {}),
+        "settings_by_strategy": dict(context.get("settings_by_strategy") or {}),
+    }
+
+
+def _retained_strategy_detail(
+    source: dict[str, Any], data: dict[str, Any], group_index: int,
+) -> dict[str, Any]:
+    strategies = source.get("strategies") or {}
+    group_id = str(data.get("group_id") or "")
+    if group_id and group_id in strategies:
+        return _event_group_detail(
+            _strategy_analysis_execution(source),
+            str(data.get("product_path_selection_id") or ""),
+            group_index,
+            group_id=group_id,
+        )
+    product_selection = str(data.get("product_path_selection_id") or "")
+    matches = [
+        row for row in strategies.values()
+        if str((row.get("identity") or {}).get("product_path_selection_id") or "")
+        == product_selection
+        and int((row.get("identity") or {}).get("group_index") or 0)
+        == group_index
+    ]
+    if len(matches) != 1:
+        raise ValueError("无法在策略分析数据中唯一定位所选策略")
+    selected_id = str((matches[0].get("identity") or {}).get("strategy_id") or "")
+    return _event_group_detail(
+        _strategy_analysis_execution(source),
+        product_selection,
+        group_index,
+        group_id=selected_id,
+    )
+
+
 def _request_has_group_job_selector(data: dict[str, Any]) -> bool:
     return bool(
         str(data.get("job_id") or "").strip()
@@ -2440,6 +2555,14 @@ def get_group_detail():
         group_index = int(group_index)
         if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        retained_analysis = _strategy_analysis_for_request(data)
+        if retained_analysis:
+            return jsonify({
+                'success': True,
+                'detail': _retained_strategy_detail(
+                    retained_analysis, data, group_index,
+                ),
+            })
         event_execution = _group_execution_for_request(data)
         if not event_execution:
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
@@ -2471,6 +2594,19 @@ def get_group_ranking_detail():
     try:
         if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        retained_analysis = _strategy_analysis_for_request(data)
+        if retained_analysis:
+            key = "|".join((
+                str(product_path_selection_id), strategy_configuration_id,
+            ))
+            return jsonify({
+                'success': True,
+                'detail': _event_group_ranking_detail(
+                    _strategy_analysis_execution(retained_analysis),
+                    str(product_path_selection_id),
+                    strategy_configuration_id,
+                ),
+            })
         event_execution = _group_execution_for_request(data)
         if not event_execution:
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400

@@ -5,6 +5,33 @@
     return context.isRouteCurrent?.() !== false;
   }
 
+  function isSelfProfile(profile) {
+    return profile?.profile_kind === "self" || profile?.profile_id === "self";
+  }
+
+  function profileName(context, profile) {
+    return isSelfProfile(profile)
+      ? context.t("本人")
+      : (profile.display_name || profile.profile_id);
+  }
+
+  function selfBadge(context) {
+    const badge = document.createElement("span");
+    badge.className = "profile-self-badge";
+    badge.textContent = context.t("本人身份");
+    return badge;
+  }
+
+  function profileIdentity(context, profile) {
+    const identity = document.createElement("div");
+    identity.className = "profile-directory-identity";
+    const name = document.createElement("strong");
+    name.textContent = profileName(context, profile);
+    identity.append(name);
+    if (isSelfProfile(profile)) identity.append(selfBadge(context));
+    return identity;
+  }
+
   async function list(context, options = {}) {
     if (window.FTProfileDirectory?.list) {
       return window.FTProfileDirectory.list(context, options);
@@ -41,11 +68,14 @@
       return;
     }
     const view = FTUI.table([context.t("研究身份"), context.t("标识"), context.t("运行方式"), context.t("执行位置"), context.t("认领状态"), context.t("研究")], cached.map(item => [
-      item.display_name || item.profile_id, item.profile_id,
+      profileIdentity(context, item), item.profile_id,
       runtimeLabel(context, item.runtime), item.runtime?.executor_id || "",
       claimLabel(context, item.active_claim), (item.research_records || []).length,
     ]));
     [...view.body.rows].forEach((row, index) => {
+      if (isSelfProfile(cached[index])) {
+        row.classList.add("profile-directory-row-self");
+      }
       row.dataset.href = "true";
       row.addEventListener("click", () => {
         const profileID = encodeURIComponent(cached[index].profile_id);
@@ -74,10 +104,13 @@
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
     const root = document.createElement("div"); root.className = "detail-stack";
+    if (isSelfProfile(profile)) {
+      root.classList.add("profile-directory-detail-self");
+    }
     if (!embedded) {
-      context.setHeading(profile.display_name || profile.profile_id, `${context.t("研究身份")} · ${profile.profile_id}`);
+      context.setHeading(profileName(context, profile), `${context.t("研究身份")} · ${profile.profile_id}`);
       context.updateActiveTab?.({
-        title: profile.display_name || profile.profile_id,
+        title: profileName(context, profile),
       });
       context.toolbar.append(context.button(
         "‹", () => context.navigate("/research?section=profiles"),
@@ -95,6 +128,7 @@
     const runtime = profile.runtime || {};
     const claim = profile.active_claim || null;
     const selectedTab = selectedProfileTab();
+    if (isSelfProfile(profile)) root.append(selfBadge(context));
     root.append(profileTabBar(context, profileID, embedded, selectedTab));
     const refresh = async () => {
       const payload = await context.api("/api/client/profiles");
@@ -272,6 +306,10 @@
       event.preventDefault();
       const identifier = profileID.value.trim();
       const label = displayName.value.trim();
+      if (identifier === "self") {
+        status.textContent = context.t("self 是系统保留的本人研究身份标识");
+        return;
+      }
       if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(identifier) || !label) {
         status.textContent = context.t(
           "Profile 标识只能使用小写字母、数字、点、下划线或短横线；显示名称不能为空",

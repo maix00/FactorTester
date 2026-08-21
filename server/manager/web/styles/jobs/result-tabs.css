@@ -8,6 +8,8 @@
 
 .job-result-tabs-controls { margin-left: auto; }
 
+.job-result-tab-item { display: inline-flex; align-items: stretch; min-width: 0; }
+
 .job-result-tabs button {
   min-height: 30px;
   padding: 4px 10px;
@@ -22,4 +24,28 @@
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.job-result-tab-item > button:first-child { border-radius: 7px; }
+.job-result-tab-item:has(.job-result-tab-edit, .job-result-tab-close) > button:first-child {
+  border-radius: 7px 0 0 7px;
+}
+.job-result-tabs .job-result-tab-edit,
+.job-result-tabs .job-result-tab-close {
+  min-width: 28px;
+  padding: 4px 6px;
+  border-left: 0;
+  border-radius: 0;
+}
+.job-result-tabs .job-result-tab-item > :last-child { border-radius: 0 7px 7px 0; }
+.job-result-tabs .job-result-tab-close { color: var(--danger); }
+.job-result-tab-rename {
+  width: 150px;
+  min-height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: var(--panel);
+  color: inherit;
 }
