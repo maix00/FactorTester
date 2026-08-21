@@ -33,15 +33,32 @@
   }
 
   function factorIdentity(item, fallback = "") {
-    const factorRef = String(item?.factor_ref || "");
+    const factorRef = String(item?.factor_ref || item?.factorRef || "");
     const factorAlias = String(
-      item?.factor_alias || item?.label || item?.factor_name || fallback || factorRef,
+      item?.factor_alias || item?.factorAlias || item?.label
+        || item?.factor_name || fallback || factorRef,
     );
     return {
       key: factorRef || factorAlias,
       factorRef,
       factorAlias: factorAlias || "Factor",
     };
+  }
+
+  function ensureFactor(result, identity) {
+    const aliasMatch = [...result.entries()].find(([, item]) => (
+      item.factorAlias === identity.factorAlias
+    ));
+    const key = result.has(identity.key) ? identity.key : (aliasMatch?.[0] || identity.key);
+    if (!result.has(key)) {
+      result.set(key, {
+        ...identity, key, series: [], statistics: [], resample: [],
+        autocorrelation: [], rolling: [], periods: [], halfLife: [], portfolio: [],
+      });
+    } else if (!result.get(key).factorRef && identity.factorRef) {
+      result.get(key).factorRef = identity.factorRef;
+    }
+    return key;
   }
 
   function normalizedSeries(payload) {
@@ -69,22 +86,51 @@
     const result = new Map();
     const series = normalizedSeries(payloads.ic_series_data);
     const statistics = rows(payloads.ic_statistics_data);
+    const resample = rows(payloads.ic_resample_stability_data);
+    const autocorrelation = rows(payloads.ic_autocorrelation_data);
+    const rolling = rows(payloads.ic_rolling_stability_data);
+    const periods = rows(payloads.ic_period_diagnostics_data);
+    const halfLife = rows(payloads.ic_holding_half_life_data);
     const portfolio = rows(payloads.ic_quantile_portfolio_statistics_data);
-    for (const item of [...series, ...statistics, ...portfolio]) {
+    for (const item of [
+      ...series, ...statistics, ...resample, ...autocorrelation,
+      ...rolling, ...periods, ...halfLife, ...portfolio,
+    ]) {
       const identity = factorIdentity(item);
       if (!identity.key) continue;
-      if (!result.has(identity.key)) result.set(identity.key, {
-        ...identity, series: [], statistics: [], portfolio: [],
-      });
+      ensureFactor(result, identity);
     }
-    for (const item of series) result.get(item.key)?.series.push(item);
+    for (const item of series) {
+      const key = ensureFactor(result, factorIdentity(item));
+      result.get(key)?.series.push(item);
+    }
     for (const item of statistics) {
       const identity = factorIdentity(item);
-      result.get(identity.key)?.statistics.push(item);
+      result.get(ensureFactor(result, identity))?.statistics.push(item);
+    }
+    for (const item of resample) {
+      const identity = factorIdentity(item);
+      result.get(ensureFactor(result, identity))?.resample.push(item);
+    }
+    for (const item of autocorrelation) {
+      const identity = factorIdentity(item);
+      result.get(ensureFactor(result, identity))?.autocorrelation.push(item);
+    }
+    for (const item of rolling) {
+      const identity = factorIdentity(item);
+      result.get(ensureFactor(result, identity))?.rolling.push(item);
+    }
+    for (const item of periods) {
+      const identity = factorIdentity(item);
+      result.get(ensureFactor(result, identity))?.periods.push(item);
+    }
+    for (const item of halfLife) {
+      const identity = factorIdentity(item);
+      result.get(ensureFactor(result, identity))?.halfLife.push(item);
     }
     for (const item of portfolio) {
       const identity = factorIdentity(item);
-      result.get(identity.key)?.portfolio.push(item);
+      result.get(ensureFactor(result, identity))?.portfolio.push(item);
     }
     return [...result.values()];
   }
@@ -231,6 +277,17 @@
   function autocorrelation(
     factor, maximumLag = 20, summaryRows = [], descriptor = null, method = "",
   ) {
+    const persisted = (factor?.autocorrelation || []).filter(item => (
+      methodMatches(item, method) && item.lag != null
+    ));
+    if (persisted.length) {
+      return persisted
+        .slice(0, maximumLag)
+        .map(item => ({lag: Number(item.lag), value: finite(
+          item.autocorrelation ?? item.value,
+        )}))
+        .filter(item => item.value != null);
+    }
     const values = (primarySeries(factor, summaryRows, descriptor, method)?.values || [])
       .filter(value => value != null);
     if (values.length < 3) return [];
@@ -279,6 +336,7 @@
       summaryRows,
       rollingRows: rows(payloads.ic_rolling_stability_data),
       periodRows: rows(payloads.ic_period_diagnostics_data),
+      resampleRows: rows(payloads.ic_resample_stability_data),
       halfLifeRows: rows(payloads.ic_holding_half_life_data),
       portfolioRows: rows(payloads.ic_quantile_portfolio_statistics_data),
     };

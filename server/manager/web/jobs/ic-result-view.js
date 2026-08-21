@@ -1,27 +1,54 @@
 (() => {
-  const dataArtifactNames = new Set([
-    "ic_series_data", "ic_statistics_data", "ic_statistics_summary_data",
-    "ic_rolling_stability_data", "ic_period_diagnostics_data",
-    "ic_holding_half_life_data", "ic_quantile_portfolio_statistics_data",
-  ]);
-  const tabs = [
-    ["summary", "IC 汇总"], ["series", "IC 序列"], ["decay", "IC 衰减"],
-    ["autocorrelation", "自相关"], ["rolling", "Rolling IC"],
-    ["periods", "分期诊断"], ["holding_half_life", "持有期半衰期"],
-    ["quantile_portfolio", "分组组合统计"],
-    ["distribution", "IC 分布"],
-  ];
 
-  function relevantArtifacts(artifacts) {
-    return (artifacts || []).filter(item => (
-      item.state === "active" && dataArtifactNames.has(String(item.name || ""))
+  function declaredTabs(resultDeclarations) {
+    const seen = new Set();
+    const output = [];
+    (resultDeclarations || []).forEach(declaration => {
+      (declaration?.result_tabs || []).forEach(tab => {
+        const key = String(tab?.key || "");
+        if (!key || seen.has(key)) return;
+        seen.add(key); output.push({...tab, key});
+      });
+    });
+    return output.sort((left, right) => (
+      Number(left.order || 0) - Number(right.order || 0)
+        || left.key.localeCompare(right.key)
     ));
   }
 
-  function supports(artifacts) {
-    const names = new Set(relevantArtifacts(artifacts).map(item => item.name));
-    return names.has("ic_series_data") || names.has("ic_statistics_data")
-      || names.has("ic_quantile_portfolio_statistics_data");
+  function tabSourceNames(tabs) {
+    return new Set((tabs || []).flatMap(tab => (
+      Array.isArray(tab.source_artifacts) ? tab.source_artifacts : []
+    )));
+  }
+
+  function tabsForArtifacts(resultDeclarations, artifacts) {
+    const declared = declaredTabs(resultDeclarations);
+    const candidates = declared;
+    const active = new Set((artifacts || [])
+      .filter(item => item.state === "active")
+      .map(item => String(item.name || "")));
+    return candidates.filter(tab => {
+      const sources = Array.isArray(tab.source_artifacts)
+        ? tab.source_artifacts.map(String) : [];
+      if (!sources.length) return false;
+      const matches = tab.source_policy === "all"
+        ? sources.every(source => active.has(source))
+        : sources.some(source => active.has(source));
+      return matches;
+    });
+  }
+
+  function relevantArtifacts(artifacts, resultDeclarations = []) {
+    const declared = declaredTabs(resultDeclarations);
+    const names = tabSourceNames(declared);
+    return (artifacts || []).filter(item => (
+      item.state === "active" && names.has(String(item.name || ""))
+    ));
+  }
+
+  function supports(artifacts, resultDeclarations = []) {
+    return tabsForArtifacts(resultDeclarations, artifacts).length > 0;
   }
 
   function artifactPath(jobID, artifact, artifactQuery) {
@@ -51,8 +78,17 @@
     return `/factor-series?${params.toString()}`;
   }
 
-  async function payloads(context, artifacts, jobID, artifactQuery) {
-    const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
+  async function payloadsForTabs(
+    context, artifacts, jobID, artifactQuery, resultDeclarations, tabKeys = null,
+  ) {
+    const declared = declaredTabs(resultDeclarations);
+    const candidates = declared;
+    const selected = tabKeys == null
+      ? candidates : candidates.filter(tab => tabKeys.includes(tab.key));
+    const names = tabSourceNames(selected);
+    const selectedArtifacts = relevantArtifacts(artifacts, resultDeclarations)
+      .filter(item => names.has(String(item.name || "")));
+    const pairs = await Promise.all(selectedArtifacts.map(async artifact => {
       try {
         const response = await FTJobArtifacts.fetch(
           context, artifactPath(jobID, artifact, artifactQuery),
@@ -67,10 +103,52 @@
     return Object.fromEntries(pairs);
   }
 
+  async function ensureTabLoaded(context, state, key, rerender) {
+    const tab = state.tabs.find(item => item.key === key);
+    if (!tab) return;
+    const activeNames = new Set((state.artifacts || [])
+      .filter(item => item.state === "active")
+      .map(item => String(item.name || "")));
+    const required = (Array.isArray(tab.source_artifacts)
+      ? tab.source_artifacts : []).filter(name => activeNames.has(String(name)));
+    if (required.some(name => state.payloads[name] == null)) {
+      const token = ++state.loadToken;
+      state.loadingTab = key;
+      state.loadError = "";
+      rerender();
+      try {
+        const incoming = await payloadsForTabs(
+          context, state.artifacts, state.jobID, state.artifactQuery,
+          state.resultDeclarations, [key],
+        );
+        if (token !== state.loadToken) return;
+        state.payloads = {...state.payloads, ...incoming};
+        state.rawModel = window.FTICResultModel.build(state.payloads);
+        const discovered = state.rawModel.factors.map(item => item.key);
+        state.factorOrder = [
+          ...state.factorOrder.filter(item => discovered.includes(item)),
+          ...discovered.filter(item => !state.factorOrder.includes(item)),
+        ];
+        state.activeMethod = state.rawModel.methods.includes(state.activeMethod)
+          ? state.activeMethod : (state.rawModel.methods[0] || "rank");
+      } catch (error) {
+        if (token === state.loadToken) state.loadError = error.message || String(error);
+      } finally {
+        if (token === state.loadToken) state.loadingTab = "";
+      }
+      rerender();
+    }
+  }
+
   function empty(context, message) {
     const node = document.createElement("p");
     node.className = "ic-domain-empty"; node.textContent = context.t(message);
     return node;
+  }
+
+  function tabEmpty(context, state, key, fallback) {
+    const tab = (state.tabs || []).find(item => item.key === key);
+    return empty(context, tab?.empty_state || fallback);
   }
 
   function number(value) {
@@ -88,43 +166,39 @@
   }
 
   function summaryView(context, state, rerender) {
-    if (!state.model.matrix.metrics.length) return empty(context, "暂无 IC 统计");
+    const matrix = state.model.matrix;
+    if (!matrix.metrics.length) return tabEmpty(context, state, "summary", "暂无 IC 统计");
+    const columns = ["metric", ...matrix.factors.map(factor => factor.key)];
+    const rows = matrix.metrics.map(item => ({
+      metric: item.label,
+      values: item.values,
+      bestIndex: item.bestIndex,
+    }));
     const shell = document.createElement("div"); shell.className = "ic-domain-table-wrap";
-    const table = document.createElement("table"); table.className = "ic-domain-table";
-    const head = table.createTHead().insertRow();
-    const metric = document.createElement("th"); metric.textContent = context.t("统计量");
-    metric.className = "ic-domain-metric"; head.append(metric);
-    let dragged = null;
-    state.model.matrix.factors.forEach((factor, index) => {
-      const cell = document.createElement("th"); cell.draggable = true;
-      cell.classList.toggle("active", factor.key === state.activeFactorKey);
-      cell.append(factorReference(context, factor));
-      cell.addEventListener("click", () => {
-        state.activeFactorKey = factor.key; rerender();
-      });
-      cell.addEventListener("dragstart", () => { dragged = index; });
-      cell.addEventListener("dragover", event => event.preventDefault());
-      cell.addEventListener("drop", event => {
-        event.preventDefault();
-        if (dragged == null || dragged === index) return;
-        const [moved] = state.factorOrder.splice(dragged, 1);
-        state.factorOrder.splice(index, 0, moved); rerender();
-      });
-      head.append(cell);
-    });
-    const body = table.createTBody();
-    state.model.matrix.metrics.forEach(item => {
-      const row = body.insertRow();
-      const label = row.insertCell(); label.textContent = item.label;
-      label.className = "ic-domain-metric";
-      item.values.forEach((value, index) => {
-        const cell = row.insertCell(); cell.textContent = number(value);
-        cell.classList.toggle("best", index === item.bestIndex);
-      });
+    const table = window.FTReportTables.render({
+      columns, rows, context, className: "ic-domain-summary-table",
+      renderHeader: key => {
+        if (key === "metric") return document.createTextNode(context.t("统计量"));
+        const factor = matrix.factors.find(item => item.key === key);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ic-domain-factor-header";
+        button.classList.toggle("active", key === state.activeFactorKey);
+        button.append(factorReference(context, factor));
+        button.addEventListener("click", () => {
+          state.activeFactorKey = key; rerender();
+        });
+        return button;
+      },
+      renderCell: (value, row, key) => {
+        if (key === "metric") return document.createTextNode(String(value || ""));
+        return document.createTextNode(number(value));
+      },
+      values: row => [row.metric, ...row.values],
     });
     shell.append(table);
     const hint = document.createElement("small");
-    hint.textContent = context.t("点击表头切换因子，拖动表头调整比较顺序");
+    hint.textContent = context.t("点击表头切换因子");
     shell.append(hint); return shell;
   }
 
@@ -250,7 +324,7 @@
         state.customAnalyses.render(customID, target, {
           onTabsChanged: rerender,
           onDeleted: () => {
-            state.activeTab = tabs[0][0]; rerender();
+            state.activeTab = state.tabs[0]?.key || "summary"; rerender();
           },
         });
         return target;
@@ -258,21 +332,21 @@
     }
     const factor = activeFactor(state);
     const descriptor = activeDescriptor(state);
-    if (!factor) return empty(context, "暂无 IC 因子结果");
+    if (!factor) return tabEmpty(context, state, state.activeTab, "暂无 IC 因子结果");
     if (state.activeTab === "summary") return summaryView(context, state, rerender);
     if (state.activeTab === "series") {
       return window.FTICResultModel.seriesFor(factor, descriptor, state.activeMethod)
         ? chartView(context, window.FTICResultCharts.seriesOptions(
           factor, context, descriptor, state.activeMethod,
         ), true)
-        : empty(context, "暂无 IC 序列");
+        : tabEmpty(context, state, "series", "暂无 IC 序列");
     }
     if (state.activeTab === "decay") {
       return window.FTICResultModel.decay(factor, state.activeMethod).length
         ? chartView(context, window.FTICResultCharts.decayOptions(
           factor, context, state.activeMethod,
         ))
-        : empty(context, "暂无多周期 IC 衰减数据");
+        : tabEmpty(context, state, "decay", "暂无多周期 IC 衰减数据");
     }
     if (state.activeTab === "autocorrelation") {
       return window.FTICResultModel.autocorrelation(
@@ -281,7 +355,7 @@
         ? chartView(context, window.FTICResultCharts.autocorrelationOptions(
           factor, context, state.model.summaryRows, descriptor, state.activeMethod,
         ))
-        : empty(context, "IC 序列不足，无法估计自相关");
+        : tabEmpty(context, state, "autocorrelation", "IC 序列不足，无法估计自相关");
     }
     if (state.activeTab === "distribution") {
       return window.FTICResultModel.histogram(
@@ -290,19 +364,31 @@
         ? chartView(context, window.FTICResultCharts.histogramOptions(
           factor, context, state.model.summaryRows, descriptor, state.activeMethod,
         ))
-        : empty(context, "暂无 IC 分布数据");
+        : tabEmpty(context, state, "distribution", "暂无 IC 分布数据");
     }
     if (state.activeTab === "holding_half_life") {
       const selected = state.model.halfLifeRows.filter(row => (
         rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
       ));
-      return dataTable(context, selected.length ? selected : state.model.halfLifeRows);
+      return selected.length
+        ? dataTable(context, selected)
+        : tabEmpty(context, state, "holding_half_life", "暂无持有期半衰期数据");
     }
     if (state.activeTab === "quantile_portfolio") {
       const selected = window.FTICResultModel.portfolioRowsFor(
         factor, descriptor, state.activeMethod,
       ).filter(row => rowMatchesSlice(row, state));
-      return window.FTICPortfolioView.table(context, selected);
+      return selected.length
+        ? window.FTICPortfolioView.table(context, selected)
+        : tabEmpty(context, state, "quantile_portfolio", "暂无分组组合统计数据");
+    }
+    if (state.activeTab === "resample") {
+      const selected = state.model.resampleRows.filter(row => (
+        rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+      ));
+      return selected.length
+        ? dataTable(context, selected)
+        : tabEmpty(context, state, "resample", "暂无重采样稳定性数据");
     }
     const sourceRows = state.activeTab === "rolling"
       ? state.model.rollingRows : state.model.periodRows;
@@ -317,10 +403,17 @@
       );
       return root;
     }
-    return dataTable(context, selected.length ? selected : sourceRows);
+    return selected.length
+      ? dataTable(context, selected)
+      : tabEmpty(context, state, state.activeTab, "暂无 IC 诊断数据");
   }
 
   function renderLoaded(context, target, state) {
+    const standardTabs = state.tabs || [];
+    const customKey = state.customAnalyses?.tabIDFor(state.activeTab);
+    if (!customKey && !standardTabs.some(tab => tab.key === state.activeTab)) {
+      state.activeTab = standardTabs[0]?.key || "summary";
+    }
     const ordered = state.factorOrder.map(key => (
       state.rawModel.factors.find(item => item.key === key)
     )).filter(Boolean);
@@ -345,12 +438,12 @@
     const content = document.createElement("div"); content.className = "ic-domain-content";
     const rerender = () => renderLoaded(context, target, state);
     const customTabs = state.customAnalyses?.tabs({
-      onDeleted: () => { state.activeTab = tabs[0][0]; rerender(); },
+      onDeleted: () => { state.activeTab = standardTabs[0]?.key || "summary"; rerender(); },
     }) || [];
     const nav = window.FTJobResultTabs.create(context, {
       className: "ic-domain-header",
       tabs: [
-        ...tabs.map(([key, label]) => ({key, label})),
+        ...standardTabs,
         ...customTabs,
       ],
       active: state.activeTab,
@@ -365,14 +458,28 @@
           }
         } else state.activeTab = key;
         rerender();
+        if (key !== "custom-analysis:new") {
+          await ensureTabLoaded(context, state, key, rerender);
+        }
       },
     }).header;
-    content.append(tabContent(context, state, rerender));
+    if (state.loadError) {
+      content.append(empty(context, state.loadError));
+    } else if (state.loadingTab) {
+      content.append(window.FTUI.loading(context.t("正在读取此结果…")));
+    } else {
+      content.append(tabContent(context, state, rerender));
+    }
     target.replaceChildren(nav, content);
   }
 
   function section(context, options) {
-    if (!supports(options.artifacts)) return null;
+    const resultTabs = tabsForArtifacts(
+      options.resultDeclarations, options.artifacts,
+    );
+    if (!resultTabs.length || !supports(options.artifacts, options.resultDeclarations)) {
+      return null;
+    }
     const root = document.createElement("section"); root.className = "job-section ic-domain-results";
     const heading = document.createElement("h2"); heading.textContent = context.t("IC 测试结果");
     const target = document.createElement("div");
@@ -380,28 +487,35 @@
     root.append(heading, target);
     queueMicrotask(async () => {
       try {
-        const rawModel = window.FTICResultModel.build(await payloads(
-          context, options.artifacts, options.jobID,
-          options.artifactQuery || "",
-        ));
-        const factorOrder = rawModel.factors.map(item => item.key);
-        renderLoaded(context, target, {
-          rawModel, model: rawModel, factorOrder,
-          activeFactorKey: factorOrder[0] || "",
-          activeTab: options.customAnalyses?.state?.requestedKey || "summary",
-          activeMethod: rawModel.methods[0] || "rank", activeHorizon: "", activeDelay: 0,
+        const requested = options.customAnalyses?.state?.requestedKey || "";
+        const activeTab = resultTabs.some(tab => tab.key === requested)
+          ? requested : resultTabs[0]?.key || "summary";
+        const rawModel = window.FTICResultModel.build({});
+        const state = {
+          rawModel, model: rawModel, factorOrder: [], tabs: resultTabs,
+          activeFactorKey: "", activeTab,
+          activeMethod: "rank", activeHorizon: "", activeDelay: 0,
           customAnalyses: options.customAnalyses || null,
           productGroupRef: productGroupRef(
             options.configuration, options.productGroupRef,
           ),
-        });
+          artifacts: options.artifacts, jobID: options.jobID,
+          artifactQuery: options.artifactQuery || "",
+          resultDeclarations: options.resultDeclarations || [],
+          payloads: {}, loadToken: 0,
+          loadingTab: resultTabs.some(tab => tab.key === activeTab) ? activeTab : "",
+          loadError: "",
+        };
+        const rerender = () => renderLoaded(context, target, state);
+        renderLoaded(context, target, state);
+        await ensureTabLoaded(context, state, activeTab, rerender);
       } catch (error) { target.replaceChildren(empty(context, error.message)); }
     });
     return root;
   }
 
   window.FTICResults = Object.freeze({
-    dataArtifactNames, factorSeriesPath, productGroupRef,
-    relevantArtifacts, section, supports,
+    declaredTabs, factorSeriesPath, productGroupRef,
+    relevantArtifacts, section, supports, tabsForArtifacts,
   });
 })();

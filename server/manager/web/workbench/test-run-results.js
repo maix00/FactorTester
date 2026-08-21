@@ -95,6 +95,7 @@
       portQuery: item.portQuery || "",
       artifactQuery: item.artifactQuery || "",
       configuration: task.configuration || {}, productGroupRef: item.groupID || "",
+      resultDeclarations: task.output_declarations || [],
     };
     let domain = null;
     if (state.kind === "ic") domain = window.FTICResults?.section(context, options);

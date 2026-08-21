@@ -44,6 +44,7 @@
       artifactQuery: options.artifactQuery,
       portQuery: options.executionQuery,
       configuration: options.taskDetail.configuration || {},
+      resultDeclarations: options.taskDetail.output_declarations || [],
       customAnalyses: options.customAnalyses,
     };
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
