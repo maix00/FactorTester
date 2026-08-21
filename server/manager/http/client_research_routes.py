@@ -174,7 +174,21 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
             if profile_service is None:
                 profile_service = self.state.client_state
             principal = str(session["username"])
+            receipt = self.state.client_state.ensure_self_profile(principal)
             profiles = profile_service.profiles(principal)
+            reserved = (
+                receipt.get("profile")
+                if isinstance(receipt, dict) else None
+            )
+            if (
+                isinstance(reserved, dict)
+                and not any(
+                    str(item.get("profile_id") or "") == "self"
+                    for item in profiles
+                    if isinstance(item, dict)
+                )
+            ):
+                profiles = [*profiles, reserved]
             agent_service = getattr(self.state, "agent_profiles", None)
             if agent_service is not None:
                 profiles = agent_service.enrich(principal, profiles)

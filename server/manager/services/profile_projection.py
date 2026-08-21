@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+SELF_PROFILE_ID = "self"
+SELF_PROFILE_KIND = "self"
+
 
 _PROFILE_BLOCKED_KEYS = {
     "password", "password_hash", "secret", "token", "access_token",
@@ -18,6 +21,25 @@ _PROFILE_BLOCKED_KEYS = {
     "strategy_root", "path", "absolute_path", "local_path", "source_code",
     "session_ref",
 }
+
+
+def self_profile_projection(principal: str) -> dict[str, Any]:
+    """Return the minimal reserved Profile metadata for one account."""
+    owner = str(principal or "").strip()
+    if not owner:
+        raise ValueError("profile principal is required")
+    return {
+        "schema_version": 9,
+        "profile_id": SELF_PROFILE_ID,
+        "profile_kind": SELF_PROFILE_KIND,
+        "status": "active",
+        "display_name": SELF_PROFILE_ID,
+        "runtime_kind": "server",
+        "workspaces": [],
+        "agents": [],
+        "research_records": [],
+        "session_binding": {"principal_ref": owner},
+    }
 
 
 def safe_profile_value(value: Any, *, key: str = "", depth: int = 0) -> Any:

@@ -3,32 +3,33 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import threading
+from pathlib import Path
 from typing import Any
 
+from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
+from server.manager.services.client_product_catalog import ClientProductCatalogMixin
+from server.manager.services.profile_projection import (
+    SELF_PROFILE_ID,
+    SELF_PROFILE_KIND,
+    ProfileProjectionCache,
+    control_profile_projection,
+    safe_profile_value,
+    self_profile_projection,
+)
+from server.manager.storage.control_db import ControlDatabaseError
+from tools.cli.release.local_profile_contracts import validate_local_identifier
 from tools.cli.release.locations import default_client_root
 from tools.cli.release.user_layout import (
     default_user_factor_library,
     default_user_profile_root,
     default_user_root,
 )
-from tools.cli.release.local_profile_contracts import validate_local_identifier
-from server.manager.services.profile_projection import (
-    ProfileProjectionCache,
-    control_profile_projection,
-    safe_profile_value,
-)
-from server.manager.storage.control_db import ControlDatabaseError
-from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
-from server.manager.services.client_product_catalog import ClientProductCatalogMixin
 
 
 class ProfileAlreadyExistsError(ValueError):
     """Raised when an owner already has the requested Profile identifier."""
-
-
 
 
 class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
@@ -240,6 +241,15 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
     def sync_profile(
         self, principal: str, profile: dict[str, Any],
     ) -> dict[str, Any]:
+        return self._sync_profile(principal, profile, allow_reserved=False)
+
+    def _sync_profile(
+        self,
+        principal: str,
+        profile: dict[str, Any],
+        *,
+        allow_reserved: bool,
+    ) -> dict[str, Any]:
         """Durably project one local Profile and best-effort sync it to PG.
 
         The local projection is written before the database call.  A database
@@ -258,6 +268,8 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         profile_id = str(projected.get("profile_id") or "").strip()
         if not profile_id:
             raise ValueError("profile_id is required")
+        if profile_id == SELF_PROFILE_ID and not allow_reserved:
+            raise ValueError("profile_id is reserved")
         display_name = str(
             projected.get("display_name") or profile_id
         ).strip() or profile_id
@@ -296,6 +308,47 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             self.profile_cache.mark_synced(owner, profile_id)
         return self._profile_sync_receipt(owner, projected, synced=True)
 
+    def ensure_self_profile(self, principal: str) -> dict[str, Any]:
+        """Idempotently create the account's reserved Profile metadata."""
+        owner = str(principal or "").strip()
+        if not owner:
+            raise ValueError("profile principal is required")
+        existing = next(
+            (
+                item for item in self.profiles(
+                    owner, include_local_paths=False,
+                )
+                if str(item.get("profile_id") or "") == SELF_PROFILE_ID
+            ),
+            None,
+        )
+        if existing is not None:
+            normalized = self_profile_projection(owner)
+            normalized.update(existing)
+            normalized.update({
+                "profile_id": SELF_PROFILE_ID,
+                "profile_kind": SELF_PROFILE_KIND,
+                "display_name": SELF_PROFILE_ID,
+                "session_binding": {"principal_ref": owner},
+            })
+            if safe_profile_value(existing) != safe_profile_value(normalized):
+                return self._sync_profile(
+                    owner, normalized, allow_reserved=True,
+                )
+            pending = bool(
+                self.profile_cache is not None
+                and any(
+                    str(item.get("profile_id") or "") == SELF_PROFILE_ID
+                    for item in self.profile_cache.pending(owner)
+                )
+            )
+            return self._profile_sync_receipt(
+                owner, existing, synced=not pending,
+            )
+        return self._sync_profile(
+            owner, self_profile_projection(owner), allow_reserved=True,
+        )
+
     def create_profile(
         self,
         principal: str,
@@ -313,6 +366,8 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         if not owner:
             raise ValueError("profile principal is required")
         identifier = validate_local_identifier(profile_id, "profile_id")
+        if identifier == SELF_PROFILE_ID:
+            raise ValueError("profile_id is reserved")
         label = str(display_name or "").strip()
         if not label:
             raise ValueError("display_name is required")

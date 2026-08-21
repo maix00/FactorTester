@@ -26,7 +26,15 @@ class AccountAdministrationRoutesMixin:
                 "error": "central control database is not configured",
             }, 503)
             return None
-        return AccountAdministrationService(store)
+        initializer = getattr(
+            getattr(self.state, "client_state", None),
+            "ensure_self_profile",
+            None,
+        )
+        return AccountAdministrationService(
+            store,
+            profile_initializer=initializer if callable(initializer) else None,
+        )
 
     def _admin_account_directory(self) -> None:
         service = self._account_admin_service()
