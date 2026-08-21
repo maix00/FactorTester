@@ -168,3 +168,21 @@ def test_federation_does_not_forward_private_user_library():
     assert not FederationServiceProxyRoutesMixin._federation_path_allowed(
         "/api/research-graphs/user-library"
     )
+
+
+def test_federation_forwards_only_registered_backtest_analysis_routes():
+    from server.manager.http.federation.service_proxy import (
+        FederationServiceProxyRoutesMixin,
+    )
+
+    for path in (
+        "/get_group_detail",
+        "/get_group_ranking_detail",
+        "/get_group_snapshot",
+        "/get_group_order_flow",
+    ):
+        assert FederationServiceProxyRoutesMixin._federation_path_allowed(path)
+
+    assert not FederationServiceProxyRoutesMixin._federation_path_allowed(
+        "/get_unregistered_analysis"
+    )
