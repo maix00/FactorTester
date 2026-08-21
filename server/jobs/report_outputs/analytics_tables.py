@@ -18,6 +18,8 @@ def period_return_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for period, points in buckets.items():
                 start, end = points[0], points[-1]
                 rows.append({
+                    "strategy_id": item.get("strategy_id", ""),
+                    "strategy_configuration_id": item.get("strategy_configuration_id", ""),
                     "series": item["label"], "frequency": frequency,
                     "period": period, "start_timestamp": start[0],
                     "end_timestamp": end[0], "start_value": start[1],
@@ -37,7 +39,7 @@ def drawdown_episode_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for timestamp, value in zip(item["timestamps"], item["values"]):
             if value >= peak_value:
                 if active is not None:
-                    rows.append(_close_episode(item["label"], active, timestamp, True))
+                    rows.append(_close_episode(item, active, timestamp, True))
                     active = None
                 peak_value = value
                 peak_timestamp = timestamp
@@ -57,13 +59,15 @@ def drawdown_episode_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "depth": drawdown,
                     })
         if active is not None:
-            rows.append(_close_episode(item["label"], active, None, False))
+            rows.append(_close_episode(item, active, None, False))
     return rows
 
 
-def _close_episode(series: str, active: dict[str, Any], recovered_at: Any, recovered: bool):
+def _close_episode(item: dict[str, Any], active: dict[str, Any], recovered_at: Any, recovered: bool):
     return {
-        "series": series, **active,
+        "strategy_id": item.get("strategy_id", ""),
+        "strategy_configuration_id": item.get("strategy_configuration_id", ""),
+        "series": item["label"], **active,
         "recovered": recovered, "recovery_timestamp": recovered_at,
     }
 

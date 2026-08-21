@@ -501,6 +501,7 @@ def test_serialize_event_execution_keeps_duplicate_display_metrics_distinct():
     ]
     assert serialized["metrics"]["factor-a-a1"]["Total Return"] > 0
     assert serialized["metrics"]["factor-b-a1"]["Total Return"] < 0
+    assert all(group["strategy_configuration_id"] for group in serialized["groups"])
 
 
 def test_event_order_flow_detail_filters_by_group_and_timestamp_ms():

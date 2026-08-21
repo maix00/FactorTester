@@ -18,6 +18,7 @@ from .settings import (
     resolve_long_short_strategy_settings,
     resolve_run_datetimes,
 )
+from .strategy_identity import strategy_configuration_id
 from .strategy_plan_runtime import (
     apply_custom_strategy_overrides,
     strategy_aliases_for_plan,
@@ -97,6 +98,11 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
             selection_cache=selection_cache,
         )
     group_owner.extend(build_group_owner_rows(flat_groups, is_ls=False))
+    for row in group_owner:
+        strategy_id = str(row.get("strategy_id") or "")
+        row["strategy_configuration_id"] = strategy_configuration_id(
+            row, resolved_settings_by_alias[strategy_id],
+        )
     group_owner_by_id = {
         str(row.get("group_id")): row
         for row in group_owner
@@ -120,10 +126,16 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
                 local_settings=local_settings,
             )
         )
-    group_owner.extend(build_long_short_owner_rows(
+    long_short_owners = build_long_short_owner_rows(
         normalized_ls_configs,
         source_owner_by_id=group_owner_by_id,
-    ))
+    )
+    for row in long_short_owners:
+        strategy_id = str(row.get("strategy_id") or "")
+        row["strategy_configuration_id"] = strategy_configuration_id(
+            row, resolved_settings_by_alias[strategy_id],
+        )
+    group_owner.extend(long_short_owners)
     if not resolved_settings_by_alias:
         raise ValueError("没有有效的分组配置")
 

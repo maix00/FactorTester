@@ -11,32 +11,8 @@
   padding-bottom: 9px;
 }
 
-.backtest-domain-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-
-.backtest-domain-tabs button {
-  min-height: 30px;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--muted);
-  background: var(--panel);
-  cursor: pointer;
-}
-
-.backtest-domain-tabs button.active {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
-}
-
-.backtest-domain-header select {
-  min-width: 160px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 28px 6px 9px;
-  color: inherit;
-  background: var(--panel);
-}
+.backtest-result-strategy-filter { width: min(360px, 100%); flex: 0 1 360px; }
+.backtest-result-strategy-filter .ft-multi-select-summary { width: 100%; }
 
 .backtest-domain-chart { min-width: 0; }
 .backtest-domain-table { max-width: 100%; min-width: 0; }
@@ -204,6 +180,8 @@
 
 .backtest-analysis-switch button.active,
 .snapshot-main-tabs button.active { color: var(--accent); border-color: var(--accent); background: var(--soft); }
+.backtest-strategy-analysis-content,
+.backtest-strategy-analysis-pane { display: grid; gap: 10px; min-width: 0; }
 .snapshot-event-label { margin-left: auto; color: var(--muted); }
 .snapshot-tab-content { display: grid; gap: 10px; min-width: 0; }
 .snapshot-order-controls select { min-width: 220px; }

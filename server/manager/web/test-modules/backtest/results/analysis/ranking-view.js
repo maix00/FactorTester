@@ -64,15 +64,21 @@
     );
   }
 
-  async function open(context, options, entry) {
+  async function load(context, options, entry) {
     const request = FTBacktestResultModel.groupRequest(entry, options.resultSummary);
     if (!request) throw new Error(context.t("缺少产品路径选择"));
+    return FTBacktestAnalysisAPI.ranking(context, options, {
+      product_path_selection_id: request.product_path_selection_id,
+      strategy_configuration_id: entry.configurationID
+        || entry.strategy_configuration_id || "",
+    });
+  }
+
+  async function open(context, options, entry) {
     const view = FTBacktestAnalysisUI.dialog(context, "分组排序诊断", entry.label);
     view.body.append(FTUI.loading(context.t("正在读取排序诊断…")));
     try {
-      render(context, view.body, await FTBacktestAnalysisAPI.ranking(context, options, {
-        product_path_selection_id: request.product_path_selection_id,
-      }));
+      render(context, view.body, await load(context, options, entry));
     } catch (error) {
       view.body.replaceChildren(Object.assign(document.createElement("p"), {
         className: "backtest-domain-empty", textContent: error.message,
@@ -80,5 +86,5 @@
     }
   }
 
-  window.FTBacktestRankingView = Object.freeze({open, render});
+  window.FTBacktestRankingView = Object.freeze({load, open, render});
 })();

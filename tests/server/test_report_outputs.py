@@ -4,14 +4,14 @@ import pytest
 
 from server.jobs.report_outputs import (
     build_report_artifacts,
-    normalize_output_requests,
     default_output_requests,
-    output_declarations,
+    normalize_output_requests,
     output_capabilities,
+    output_declarations,
+    output_requests_for_analysis,
     output_requests_for_artifacts,
     result_retention_mode_for,
     source_artifacts_for,
-    output_requests_for_analysis,
     validate_output_requests,
 )
 from server.jobs.report_outputs.series import metrics_rows
@@ -20,6 +20,8 @@ from server.jobs.report_outputs.series import metrics_rows
 def _sample():
     result = {
         "groups": [{
+            "strategy_id": "strategy-a1",
+            "strategy_configuration_id": "configuration-a",
             "name": "A1",
             "timestamps": [1, 2, 3],
             "total_equity": [100.0, 103.0, 101.0],
@@ -94,6 +96,26 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert declarations[0]["receipt_artifact"] == "equity_curve_receipt"
     assert "equity_curve_data_receipt" not in declarations[0]["artifacts"]
     assert "fee_detail_data" in declarations[1]["artifacts"]
+
+
+def test_backtest_series_outputs_preserve_strategy_identity() -> None:
+    result, source = _sample()
+    artifacts = build_report_artifacts(
+        result, source=source,
+        requested=("equity_curve", "metrics_over_time", "period_returns"),
+    )
+    payloads = {
+        artifact.name: json.loads(artifact.raw)
+        for artifact in artifacts
+        if artifact.name.endswith("_data")
+    }
+    equity = payloads["equity_curve_data"]["series"][0]
+    assert equity["strategy_id"] == "strategy-a1"
+    assert equity["strategy_configuration_id"] == "configuration-a"
+    metrics = payloads["metrics_over_time_data"]["rows"][0]
+    assert metrics["strategy_id"] == "strategy-a1"
+    period = payloads["period_returns_data"]["rows"][0]
+    assert period["strategy_id"] == "strategy-a1"
     detail_declaration = output_declarations(["group_research_detail"])[0]
     assert detail_declaration == {
         "name": "group_research_detail",

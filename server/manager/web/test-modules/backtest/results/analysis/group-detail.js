@@ -75,15 +75,18 @@
     );
   }
 
-  async function open(context, options, entry) {
+  async function load(context, options, entry) {
     const request = FTBacktestResultModel.groupRequest(entry, options.resultSummary);
     if (!request) throw new Error(context.t("该分组缺少可读取的执行身份"));
+    return FTBacktestAnalysisAPI.detail(context, options, request);
+  }
+
+  async function open(context, options, entry) {
     const view = FTBacktestAnalysisUI.dialog(context, "分组详情", entry.label);
     view.body.append(FTUI.loading(context.t("正在读取分组详情…")));
     try {
       render(
-        context, view.body,
-        await FTBacktestAnalysisAPI.detail(context, options, request),
+        context, view.body, await load(context, options, entry),
         options, entry,
       );
     } catch (error) {
@@ -93,5 +96,5 @@
     }
   }
 
-  window.FTBacktestGroupDetail = Object.freeze({open, render});
+  window.FTBacktestGroupDetail = Object.freeze({load, open, render});
 })();
