@@ -41,6 +41,7 @@
     const runtimeControls = window.FTProfileAgentRuntimeControls.create(
       profile, context, {readOnly: Boolean(options.readOnly)},
     );
+    options.settingsHost?.replaceChildren(runtimeControls.element);
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
       readOnly: Boolean(options.readOnly),
@@ -120,7 +121,7 @@
     };
     resultsView.onclick = () => mountView("results");
     processView.onclick = () => mountView("process");
-    host.replaceChildren(runtimeControls.element, viewActions, chatSlot);
+    host.replaceChildren(viewActions, chatSlot);
     mountView("results");
     if (options.readOnly) {
       const composerNote = document.createElement("div");
@@ -152,13 +153,17 @@
       const status = document.createElement("p");
       status.className = "settings-muted profile-agent-status";
       status.setAttribute("aria-live", "polite");
+      const settingsHost = document.createElement("div");
+      settingsHost.className = "profile-agent-settings-host";
       const host = document.createElement("div");
       host.className = "profile-chatkit-host profile-chatkit-readonly";
       host.setAttribute("aria-readonly", "true");
-      root.append(note, status, host);
+      root.append(note, status, settingsHost, host);
       try {
         status.textContent = context.t("正在读取只读会话…");
-        await mountChatKit(context, profile, host, status, options);
+        await mountChatKit(
+          context, profile, host, status, {...options, settingsHost},
+        );
         status.textContent = context.t("只读会话");
       } catch (error) {
         host.replaceChildren(message(
@@ -202,7 +207,9 @@
     // the tab cache to remount this host when the tab is activated again.
     host.dataset.ftRerenderOnTabRestore = "true";
     host.setAttribute("aria-live", "polite");
-    root.append(note, status, actions, host);
+    const settingsHost = document.createElement("div");
+    settingsHost.className = "profile-agent-settings-host";
+    root.append(note, status, actions, settingsHost, host);
 
     let mounted = null;
     let running = false;
@@ -211,6 +218,7 @@
       mounted?.adapter.dispose();
       mounted?.runtimeControls.dispose();
       mounted = null;
+      settingsHost.replaceChildren();
       host.replaceChildren();
     }
 
@@ -233,13 +241,16 @@
           ? "Agent 尚未启动；历史会话仍可读取"
           : "请先认领这个服务器 Profile；历史会话仍可读取");
         mounted = await mountChatKit(
-          context, profile, host, status, {...options, historyOnly: true},
+          context, profile, host, status,
+          {...options, historyOnly: true, settingsHost},
         );
         return;
       }
       if (mounted) return;
       status.textContent = context.t("正在加载 Agent 对话…");
-      mounted = await mountChatKit(context, profile, host, status, options);
+      mounted = await mountChatKit(
+        context, profile, host, status, {...options, settingsHost},
+      );
       if (!isCurrent()) disposeChat();
     }
 

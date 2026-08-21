@@ -43,12 +43,29 @@
 
   function create(profile, context, options = {}) {
     const readOnly = Boolean(options.readOnly);
-    const root = document.createElement("section");
+    const root = document.createElement("details");
     root.className = "profile-agent-runtime-controls";
+    const summary = document.createElement("summary");
+    summary.textContent = context.t("Agent 运行设置");
+    const body = document.createElement("div");
+    body.className = "profile-agent-runtime-body";
     const fields = document.createElement("div");
     fields.className = "profile-agent-runtime-fields";
-    const status = document.createElement("p");
-    status.className = "settings-muted profile-agent-runtime-status";
+    const actions = document.createElement("div");
+    actions.className = "settings-inline-actions profile-agent-runtime-actions";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "secondary profile-agent-runtime-refresh";
+    refresh.textContent = context.t("重新读取模型");
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "primary profile-agent-runtime-apply";
+    apply.textContent = context.t("应用并验证");
+    actions.append(refresh, apply);
+    const catalogStatus = document.createElement("p");
+    catalogStatus.className = "settings-muted profile-agent-catalog-status";
+    const runtimeStatus = document.createElement("p");
+    runtimeStatus.className = "settings-muted profile-agent-runtime-status";
     const notice = document.createElement("p");
     notice.className = "settings-muted profile-agent-runtime-notice";
     notice.setAttribute("aria-live", "polite");
@@ -59,7 +76,8 @@
     progress.value = 0;
     const usageText = document.createElement("span");
     usage.append(progress, usageText);
-    root.append(fields, usage, status, notice);
+    body.append(fields, actions, catalogStatus, runtimeStatus, usage, notice);
+    root.append(summary, body);
 
     const controls = {};
     for (const [key, label] of [
@@ -79,8 +97,10 @@
     }
 
     let current = null;
+    let draft = null;
     let models = [];
     let catalogLoaded = false;
+    let catalogValidated = false;
     let catalogPromise = null;
     let providerLatency = 0;
     let saving = false;
@@ -92,13 +112,27 @@
       select.append(item);
     }
 
+    function settingsOf(conversation = {}) {
+      return {
+        model_id: String(conversation.model_id || ""),
+        reasoning_effort: String(conversation.reasoning_effort || ""),
+        service_tier: String(conversation.service_tier || ""),
+      };
+    }
+
     function selectedModel() {
       return models.find(item => String(item.id || "") === controls.model.value);
     }
 
+    function addSelectedFallback(control, selected) {
+      if (selected && ![...control.children].some(item => item.value === selected)) {
+        option(control, selected, selected);
+      }
+      control.value = selected;
+    }
+
     function renderDependentChoices() {
       const model = selectedModel() || {};
-      const conversation = current?.conversation || {};
       controls.effort.replaceChildren();
       controls.tier.replaceChildren();
       option(controls.effort, "", context.t("默认推理强度"));
@@ -113,25 +147,33 @@
           item.name || item.id || "",
         ));
       }
-      controls.effort.value = String(conversation.reasoning_effort || "");
-      controls.tier.value = String(conversation.service_tier || "");
-      for (const [control, value] of [
-        [controls.effort, conversation.reasoning_effort],
-        [controls.tier, conversation.service_tier],
-      ]) {
-        const selected = String(value || "");
-        if (selected && ![...control.children].some(item => item.value === selected)) {
-          option(control, selected, selected);
-          control.value = selected;
-        }
-      }
+      addSelectedFallback(controls.effort, String(draft?.reasoning_effort || ""));
+      addSelectedFallback(controls.tier, String(draft?.service_tier || ""));
       controls.effort.disabled = readOnly || !current || saving;
       controls.tier.disabled = readOnly || !current || saving;
     }
 
+    function renderRuntimeStatus(conversation) {
+      const selected = String(conversation.model_id || "");
+      const actual = String(conversation.actual_model || "");
+      let modelStatus = context.t("实际模型尚未由运行时确认");
+      if (actual && selected && actual === selected) {
+        modelStatus = `${context.t("运行时已确认实际模型")}: ${actual}`;
+      } else if (actual) {
+        modelStatus = `${context.t("实际模型")}: ${actual} · ${context.t("已发生模型重路由")}`;
+      }
+      const requested = [
+        conversation.reasoning_effort
+          ? `${context.t("请求推理强度")}: ${conversation.reasoning_effort}` : "",
+        conversation.service_tier
+          ? `${context.t("请求速度档位")}: ${conversation.service_tier}` : "",
+      ].filter(Boolean).join(" · ");
+      runtimeStatus.textContent = [modelStatus, requested].filter(Boolean).join(" · ");
+    }
+
     function renderConversation() {
       const conversation = current?.conversation || {};
-      const selected = String(conversation.model_id || "");
+      const selected = String(draft?.model_id || conversation.model_id || "");
       controls.model.replaceChildren();
       if (!current) {
         option(controls.model, "", context.t("请先选择会话"));
@@ -145,12 +187,12 @@
             String(item.display_name || item.id || ""),
           );
         }
-        if (selected && !models.some(item => String(item.id || "") === selected)) {
-          option(controls.model, selected, selected);
-        }
+        addSelectedFallback(controls.model, selected);
       }
       controls.model.value = selected;
       controls.model.disabled = readOnly || !current || saving;
+      refresh.disabled = readOnly || saving;
+      apply.disabled = readOnly || !current || saving || !selected;
       renderDependentChoices();
       const measured = contextUsage(conversation);
       progress.value = measured.percent;
@@ -163,13 +205,11 @@
           .replace("%@", measured.total.toLocaleString())
           .replace("%@", number(conversation.compaction_count).toLocaleString())
         : context.t("上下文容量将在首次响应后显示");
-      const actual = String(conversation.actual_model || "");
-      const modelStatus = actual && selected && actual !== selected
-        ? `${context.t("实际模型")}: ${actual} · ${context.t("已发生模型重路由")}`
-        : actual ? `${context.t("实际模型")}: ${actual}` : "";
-      const latencyStatus = providerLatency
-        ? `${context.t("Provider 延迟")}: ${providerLatency} ms` : "";
-      status.textContent = [modelStatus, latencyStatus].filter(Boolean).join(" · ");
+      catalogStatus.textContent = catalogValidated
+        ? `${context.t("模型目录已验证")}${providerLatency
+          ? ` · ${context.t("Provider 延迟")}: ${providerLatency} ms` : ""}`
+        : context.t("模型目录尚未验证");
+      renderRuntimeStatus(conversation);
     }
 
     function showNotice(message, kind = "info") {
@@ -177,101 +217,105 @@
       notice.dataset.kind = message ? kind : "";
     }
 
-    async function loadModels(refresh = false) {
-      if (readOnly || catalogPromise || catalogLoaded && !refresh) {
-        return catalogPromise;
-      }
-      const suffix = refresh ? "&refresh=1" : "";
+    async function loadModels(refreshCatalog = false) {
+      if (readOnly) return null;
+      if (catalogPromise) return catalogPromise;
+      if (catalogLoaded && !refreshCatalog) return models;
       showNotice(context.t("正在读取模型目录…"));
+      const suffix = refreshCatalog ? "&refresh=1" : "";
       catalogPromise = context.api(
         `/api/client/profile-agent/models?profile_id=${
           encodeURIComponent(profile.profile_id)}${suffix}`,
       ).then(payload => {
         models = Array.isArray(payload.models) ? payload.models : [];
         catalogLoaded = true;
+        catalogValidated = true;
         providerLatency = Number(payload.latency_ms) || 0;
         showNotice("");
         renderConversation();
+        return models;
       }).catch(error => {
         showNotice(
           `${context.t("模型目录读取失败")}: ${error.message || ""}`,
           "error",
         );
+        throw error;
       }).finally(() => { catalogPromise = null; });
       return catalogPromise;
     }
 
-    function saveSettings(previous) {
-      if (readOnly || saving || !current || !controls.model.value) return;
+    async function applySettings() {
+      if (readOnly || saving || !current || !draft?.model_id) return;
       const conversationID = current.conversationID;
-      const snapshot = {
-        profile_id: profile.profile_id,
-        conversation_id: conversationID,
-        model_id: String(current.conversation.model_id || ""),
-        reasoning_effort: String(current.conversation.reasoning_effort || ""),
-        service_tier: String(current.conversation.service_tier || ""),
-      };
       saving = true;
-      showNotice(context.t("正在保存会话模型设置…"));
+      showNotice(context.t("正在刷新目录并验证会话模型设置…"));
       renderConversation();
-      context.api(
-        "/api/client/profile-agent/conversations/settings",
-        {method: "POST", body: JSON.stringify(snapshot)},
-      ).then(payload => {
+      try {
+        const payload = await context.api(
+          "/api/client/profile-agent/conversations/settings",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              profile_id: profile.profile_id,
+              conversation_id: conversationID,
+              ...draft,
+              refresh_catalog: true,
+            }),
+          },
+        );
         if (payload.conversation && current?.conversationID === conversationID) {
           current.conversation = {...current.conversation, ...payload.conversation};
+          draft = settingsOf(current.conversation);
         }
-        showNotice(context.t("会话模型设置已保存；将在下一次提问时生效"), "success");
-      }).catch(error => {
+        catalogValidated = true;
+        showNotice(
+          context.t("目录验证通过，设置已保存；将在下一次提问时确认实际模型"),
+          "success",
+        );
+      } catch (error) {
         if (current?.conversationID === conversationID) {
-          current.conversation = {...current.conversation, ...previous};
+          draft = settingsOf(current.conversation);
         }
         showNotice(
           `${context.t("会话模型设置保存失败")}: ${error.message || ""}`,
           "error",
         );
-      }).finally(() => {
+      } finally {
         saving = false;
         renderConversation();
-      });
+      }
     }
 
-    controls.model.addEventListener("focus", () => loadModels());
-    controls.model.addEventListener("pointerdown", () => loadModels());
+    controls.model.addEventListener("focus", () => loadModels().catch(() => {}));
+    controls.model.addEventListener("pointerdown", () => loadModels().catch(() => {}));
     controls.model.addEventListener("change", () => {
+      if (!draft) return;
       const model = selectedModel() || {};
-      const previous = current ? {
-        model_id: current.conversation.model_id,
-        reasoning_effort: current.conversation.reasoning_effort,
-        service_tier: current.conversation.service_tier,
-      } : {};
-      if (current) {
-        current.conversation.model_id = controls.model.value;
-        current.conversation.reasoning_effort = String(
-          model.default_reasoning_effort || "",
-        );
-        current.conversation.service_tier = String(
-          model.default_service_tier || "",
-        );
-      }
+      draft = {
+        model_id: controls.model.value,
+        reasoning_effort: String(model.default_reasoning_effort || ""),
+        service_tier: String(model.default_service_tier || ""),
+      };
       renderDependentChoices();
-      saveSettings(previous);
+      showNotice(context.t("设置尚未应用"));
     });
     controls.effort.addEventListener("change", () => {
-      if (!current) return;
-      const previous = {...current.conversation};
-      current.conversation.reasoning_effort = controls.effort.value;
-      saveSettings(previous);
+      if (!draft) return;
+      draft.reasoning_effort = controls.effort.value;
+      showNotice(context.t("设置尚未应用"));
     });
     controls.tier.addEventListener("change", () => {
-      if (!current) return;
-      const previous = {...current.conversation};
-      current.conversation.service_tier = controls.tier.value;
-      saveSettings(previous);
+      if (!draft) return;
+      draft.service_tier = controls.tier.value;
+      showNotice(context.t("设置尚未应用"));
     });
+    refresh.addEventListener("click", () => loadModels(true).catch(() => {}));
+    apply.addEventListener("click", applySettings);
 
     function setConversation(state) {
       current = state || null;
+      draft = current ? settingsOf(current.conversation) : null;
+      showNotice("");
       renderConversation();
     }
 
@@ -289,7 +333,8 @@
       loadModels,
       observeEvent,
       setConversation,
-      dispose() { current = null; },
+      currentConversation: () => current?.conversation || null,
+      dispose() { current = null; draft = null; },
     };
   }
 

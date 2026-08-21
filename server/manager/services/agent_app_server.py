@@ -219,8 +219,13 @@ class AgentAppServerSupervisor:
         model_id: str,
         reasoning_effort: str,
         service_tier: str,
+        refresh_catalog: bool = False,
     ) -> dict[str, Any]:
-        catalog = self.model_capabilities(principal, profile_id)
+        catalog = self.model_capabilities(
+            principal,
+            profile_id,
+            refresh=refresh_catalog,
+        )
         model, effort, tier = validate_model_settings(
             catalog,
             model_id=model_id,
@@ -259,6 +264,10 @@ class AgentAppServerSupervisor:
             raise AgentAppServerError("conversation not found")
         thread_id = str(conversation.get("provider_thread_id") or "").strip()
         if not thread_id:
+            if conversation.get("title") or conversation.get("preview"):
+                raise AgentAppServerError(
+                    "conversation Provider thread binding is missing"
+                )
             return {
                 "items": [], "has_more": False, "after": None,
                 "turn_count": 0, "view": view, "order": order,
