@@ -52,11 +52,16 @@
     const historyRows = document.createElement("div");
     historyRows.className = "job-progress-history-rows";
     history.append(historySummary, historyRows);
-    root.append(header, bar, current, label, phaseTrack, history);
+    const diagnostics = document.createElement("div");
+    diagnostics.className = "job-progress-diagnostics";
+    diagnostics.append(current, label, phaseTrack, history);
+    root.append(header, bar);
+    if (status !== "succeeded") root.append(diagnostics);
     if (status === "succeeded") bar.value = 100;
     else if (!["running", "planning"].includes(status)) bar.value = 0;
     return {
       root, bar, current, currentFields, label, phaseTrack, historyRows,
+      diagnostics,
       statusLabel, context,
       progressState: {
         lastSeq: 0,
@@ -334,6 +339,10 @@
     }
     if (status === "succeeded") {
       Object.values(state.phaseHistory).forEach(record => { record.status = "completed"; });
+      // A successful task needs only its terminal status and full progress
+      // bar.  Current-stage fields and phase history are runtime diagnostics;
+      // retain them for failures/cancellations, but remove them after success.
+      view.diagnostics?.remove?.();
     }
     renderCurrentInfo(view, state);
     renderActivity(view, state);
