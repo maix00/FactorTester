@@ -100,6 +100,31 @@ def _decode_cursor(value: object, order: str) -> str:
     return result
 
 
+def _cursor_turn_id(
+    turns: list[Mapping[str, object]],
+    value: object,
+    order: str,
+) -> str:
+    """Accept both our opaque page cursor and ChatKit's boundary item id."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return _decode_cursor(raw, order)
+    except ValueError:
+        matches: list[str] = []
+        for turn_index, turn in enumerate(turns):
+            items = turn.get("items")
+            for item_index, item in enumerate(items if isinstance(items, list) else []):
+                if isinstance(item, Mapping) and _item_id(
+                    item, turn_index, item_index,
+                ) == raw:
+                    matches.append(_turn_id(turn, turn_index))
+        if len(matches) == 1:
+            return matches[0]
+        raise
+
+
 def _base(
     item: Mapping[str, object],
     *,
@@ -404,7 +429,7 @@ def provider_thread_page(
     selected_order = str(order or "desc").strip().casefold()
     if selected_order not in {"asc", "desc"}:
         raise ValueError("conversation item order is invalid")
-    anchor_turn_id = _decode_cursor(after, selected_order)
+    anchor_turn_id = _cursor_turn_id(turns, after, selected_order)
     anchor_index = None
     if anchor_turn_id:
         matches = [

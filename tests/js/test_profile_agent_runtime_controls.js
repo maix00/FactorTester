@@ -68,6 +68,7 @@ class Element {
   setAttribute() {}
   addEventListener(name, listener) { this.listeners[name] = listener; }
   dispatch(name) { this.listeners[name]?.({target: this}); }
+  click() { this.listeners.click?.({target: this}); this.onclick?.({target: this}); }
 }
 
 function findByClass(root, className) {
@@ -89,9 +90,10 @@ global.document = {createElement: tagName => new Element(tagName)};
 
 async function testSaveNoticeAndRollback() {
   let rejectSave = false;
+  const writes = [];
   const context = {
     t: value => value,
-    api: (url) => {
+    api: (url, init = {}) => {
       if (url.includes("/models?")) return Promise.resolve({
         models: [{
           id: "model-a",
@@ -106,8 +108,10 @@ async function testSaveNoticeAndRollback() {
         }],
       });
       if (rejectSave) return Promise.reject(new Error("save rejected"));
+      writes.push(JSON.parse(init.body || "{}"));
       return Promise.resolve({conversation: {
         model_id: "model-b", reasoning_effort: "", service_tier: "",
+        actual_model: "",
       }});
     },
   };
@@ -116,24 +120,42 @@ async function testSaveNoticeAndRollback() {
     model_id: "model-a", reasoning_effort: "high", service_tier: "fast",
   };
   component.setConversation({conversationID: "conversation-1", conversation});
+  assert.equal(component.element.tagName, "details");
   const selects = findByClass(component.element, "profile-agent-runtime-fields")
     .children.map(field => field.children[1]);
   selects[0].dispatch("focus");
   await flush();
   selects[0].value = "model-b";
   selects[0].dispatch("change");
+  assert.equal(conversation.model_id, "model-a", "draft changes must not mutate persisted state");
+  assert.equal(writes.length, 0, "draft changes must not auto-save");
+  const apply = findByClass(component.element, "profile-agent-runtime-apply");
+  apply.click();
   assert.equal(selects.every(select => select.disabled), true);
   await flush();
   const notice = findByClass(component.element, "profile-agent-runtime-notice");
-  assert.equal(notice.textContent, "会话模型设置已保存；将在下一次提问时生效");
+  assert.equal(
+    notice.textContent,
+    "目录验证通过，设置已保存；将在下一次提问时确认实际模型",
+  );
+  assert.deepEqual(writes[0], {
+    profile_id: "profile-1",
+    conversation_id: "conversation-1",
+    model_id: "model-b",
+    reasoning_effort: "",
+    service_tier: "",
+    refresh_catalog: true,
+  });
   assert.equal(selects.every(select => !select.disabled), true);
 
   rejectSave = true;
   selects[0].value = "model-a";
   selects[0].dispatch("change");
+  apply.click();
   await flush();
   assert.match(notice.textContent, /会话模型设置保存失败: save rejected/);
-  assert.equal(selects[0].value, "model-b");
+  assert.equal(component.currentConversation().model_id, "model-b");
+  assert.equal(selects[0].value, "model-b", "failed Apply must restore the persisted selection");
 }
 
 testSaveNoticeAndRollback().then(() => {

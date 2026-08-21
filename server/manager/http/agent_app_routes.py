@@ -321,6 +321,7 @@ class AgentAppServerRoutesMixin:
                         payload.get("reasoning_effort") or ""
                     ).strip(),
                     service_tier=str(payload.get("service_tier") or "").strip(),
+                    refresh_catalog=bool(payload.get("refresh_catalog")),
                 )
                 json_response(self, {
                     "success": True,

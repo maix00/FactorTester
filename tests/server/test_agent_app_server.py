@@ -798,6 +798,30 @@ def test_profile_conversation_rejects_a_different_provider_on_resume(tmp_path):
         )
 
 
+def test_profile_conversation_with_history_reports_missing_thread_binding(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+        skill_source_root=REPO_ROOT,
+        skill_manifest_path=REPO_ROOT / "server/manager/skills/catalog.json",
+    )
+    conversation = service.create_conversation(
+        PRINCIPAL,
+        PROFILE_ID,
+        title="Persisted conversation",
+    )
+    supervisor = AgentAppServerSupervisor(service, codex_binary="codex")
+
+    with pytest.raises(AgentAppServerError, match="thread binding is missing"):
+        supervisor.conversation_items(
+            PRINCIPAL,
+            PROFILE_ID,
+            conversation["conversation_id"],
+        )
+
+
 class _AppHandler(AgentAppServerRoutesMixin, AgentRoutesMixin):
     def __init__(self, service, supervisor, payload=None):
         self.state = SimpleNamespace(
@@ -957,12 +981,23 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     assert "principal" not in listed[0]
     assert "provider_id" not in listed[0]
 
+    original_capabilities = supervisor.model_capabilities
+    catalog_refreshes = []
+    monkeypatch.setattr(
+        supervisor,
+        "model_capabilities",
+        lambda principal, profile_id, *, refresh=False: (
+            catalog_refreshes.append(refresh)
+            or original_capabilities(principal, profile_id, refresh=refresh)
+        ),
+    )
     handler = _AppHandler(service, supervisor, {
         "profile_id": PROFILE_ID,
         "conversation_id": conversation["conversation_id"],
         "model_id": "research-model-fast",
         "reasoning_effort": "high",
         "service_tier": "fast",
+        "refresh_catalog": True,
     })
     assert handler._post_agent_app_routes(urlparse(
         "/api/client/profile-agent/conversations/settings",
@@ -971,6 +1006,7 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
     assert settings["model_id"] == "research-model-fast"
     assert settings["reasoning_effort"] == "high"
     assert settings["service_tier"] == "fast"
+    assert catalog_refreshes[-1] is True
 
     handler = _AppHandler(service, supervisor)
     assert handler._get_agent_app_routes(urlparse(

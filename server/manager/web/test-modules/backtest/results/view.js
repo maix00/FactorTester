@@ -338,21 +338,28 @@
     target.append(window.FTUI.loading(context.t("正在准备回测结果选项卡…")));
     root.append(heading, target);
     queueMicrotask(() => {
-      const relevant = relevantArtifacts(options.artifacts);
-      const artifactsByName = new Map(relevant.map(item => [String(item.name), item]));
-      const model = window.FTBacktestResultModel.build(
-        {}, options.resultSummary || {}, [...artifactsByName.keys()],
-      );
-      renderLoaded(context, target, {
-        model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
-        tablePages: {}, activeTab: model.tabs[0] || "summary",
-        strategySelection: [window.FTBacktestStrategySelection.ALL_STRATEGIES],
-        evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
-          model.summary, options.configuration || {},
-        ),
-        showOutOfSample: false,
-        options: {...options, resultSummary: model.summary},
-      });
+      try {
+        const relevant = relevantArtifacts(options.artifacts);
+        const artifactsByName = new Map(relevant.map(item => [String(item.name), item]));
+        const model = window.FTBacktestResultModel.build(
+          {}, options.resultSummary || {}, [...artifactsByName.keys()],
+        );
+        renderLoaded(context, target, {
+          model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
+          tablePages: {}, activeTab: model.tabs[0] || "summary",
+          strategySelection: [window.FTBacktestStrategySelection.ALL_STRATEGIES],
+          evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
+            model.summary, options.configuration || {},
+          ),
+          showOutOfSample: false,
+          options: {...options, resultSummary: model.summary},
+        });
+      } catch (error) {
+        const failure = message(context, "回测结果初始化失败");
+        const detail = String(error?.message || error || "").trim();
+        if (detail) failure.append(document.createTextNode(`: ${detail}`));
+        target.replaceChildren(failure);
+      }
     });
     return root;
   }

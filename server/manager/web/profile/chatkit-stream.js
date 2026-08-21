@@ -158,7 +158,12 @@
     const providerThreadID = String(
       state.conversation?.provider_thread_id || state.threadID || "",
     ).trim();
-    if (!providerThreadID) return "";
+    if (!providerThreadID) {
+      if (state.conversation?.title || state.conversation?.preview) {
+        throw new Error("Conversation Provider thread binding is missing");
+      }
+      return "";
+    }
     if (!state.threadPromise) {
       state.threadPromise = authoritativePage(state).then(page => {
         state.threadID = providerThreadID;
@@ -172,12 +177,36 @@
     return state.threadPromise;
   }
 
+  async function resumeThread(state) {
+    const threadID = await restoreThread(state);
+    if (!threadID) {
+      throw new Error("Conversation has no Provider thread binding");
+    }
+    if (state.runtimeAttached) return threadID;
+    if (!state.runtimePromise) {
+      state.runtimePromise = rpc(state, "thread/resume", {
+        threadId: threadID,
+      }).then(payload => {
+        const resumedID = P.threadIDFrom(payload);
+        if (resumedID && resumedID !== threadID) {
+          throw new Error("Profile Agent resumed a different Provider thread");
+        }
+        state.runtimeAttached = true;
+        return threadID;
+      }).finally(() => { state.runtimePromise = null; });
+    }
+    return state.runtimePromise;
+  }
+
   async function ensureThread(state) {
-    if (state.threadID && state.restored) return state.threadID;
-    if (state.conversation?.provider_thread_id) return restoreThread(state);
+    if (state.conversation?.provider_thread_id || state.threadID) {
+      return resumeThread(state);
+    }
     if (!state.threadPromise) {
       state.threadPromise = rpc(state, "thread/start", {}).then(payload => {
-        return syncThread(state, payload);
+        const threadID = syncThread(state, payload);
+        state.runtimeAttached = true;
+        return threadID;
       }).finally(() => { state.threadPromise = null; });
     }
     return state.threadPromise;
@@ -425,6 +454,7 @@
     closeSource,
     authoritativePage,
     restoreThread,
+    resumeThread,
     rpc,
     streamTurn,
     writeError,

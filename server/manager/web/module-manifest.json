@@ -32,7 +32,7 @@
     "job-detail-previews": ["job-detail-core", "report", "charts"],
     "job-detail-factor-series": ["job-detail-core", "charts"],
     "job-detail-ic": ["job-detail-core", "report"],
-    "job-detail-backtest": ["job-detail-previews"],
+    "job-detail-backtest": ["job-detail-previews", "catalog-core"],
     "catalog": ["catalog-core", "charts"],
     "workbench-core": [],
     "workbench-settings": ["workbench-core", "catalog-core"],

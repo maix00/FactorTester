@@ -1191,6 +1191,28 @@ def test_backtest_strategy_selection_filters_by_stable_identity() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
+    manifest = json.loads(
+        (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
+    )
+
+    dependencies = manifest["group_dependencies"]["job-detail-backtest"]
+    assert "catalog-core" in dependencies
+    assert (
+        "catalog/shared/multi-select-filter.js"
+        in manifest["groups"]["catalog-core"]
+    )
+
+
+def test_backtest_result_view_reports_initialization_errors() -> None:
+    source = (
+        WEB_ROOT / "test-modules" / "backtest" / "results" / "view.js"
+    ).read_text(encoding="utf-8")
+
+    assert "catch (error)" in source
+    assert "回测结果初始化失败" in source
+
+
 def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
     import subprocess
 

@@ -486,7 +486,7 @@ class AgentConversationStore:
         with self._connection() as db:
             cursor = db.execute(
                 f"""UPDATE {TABLE} SET model_id = ?, reasoning_effort = ?,
-                            service_tier = ?, updated_at = ?
+                            service_tier = ?, actual_model = '', updated_at = ?
                     WHERE conversation_id = ? AND principal = ? AND profile_id = ?""",
                 (model, effort, tier, time.time(), identifier, owner, profile),
             )

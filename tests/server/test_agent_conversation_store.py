@@ -72,6 +72,12 @@ def test_conversation_runtime_settings_are_isolated_and_persisted(tmp_path):
     store = AgentConversationStore(tmp_path / "manager.sqlite")
     first = store.create("user-a", "profile-a", title="First")
     second = store.create("user-a", "profile-a", title="Second")
+    store.update_runtime_observation(
+        "user-a",
+        "profile-a",
+        first["conversation_id"],
+        actual_model="gpt-5.4-mini",
+    )
 
     updated = store.update_runtime_settings(
         "user-a",
@@ -85,6 +91,7 @@ def test_conversation_runtime_settings_are_isolated_and_persisted(tmp_path):
     assert updated["model_id"] == "gpt-5.4"
     assert updated["reasoning_effort"] == "high"
     assert updated["service_tier"] == "fast"
+    assert updated["actual_model"] == ""
     untouched = store.get("user-a", "profile-a", second["conversation_id"])
     assert untouched["model_id"] == ""
     assert untouched["reasoning_effort"] == ""
