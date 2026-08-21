@@ -18,6 +18,13 @@ class FederationServiceProxyRoutesMixin:
     @staticmethod
     def _federation_path_allowed(path: str) -> bool:
         return (
+            path in {
+                "/get_group_detail",
+                "/get_group_ranking_detail",
+                "/get_group_snapshot",
+                "/get_group_order_flow",
+            }
+            or
             path == "/api/jobs"
             or path.startswith("/api/jobs/")
             or path == "/api/runs"
