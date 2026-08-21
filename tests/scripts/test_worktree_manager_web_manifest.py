@@ -1441,6 +1441,19 @@ def test_job_detail_internal_tabs_preserve_the_selected_section() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_job_detail_supplemental_history_is_lazy_searchable_and_paged() -> None:
+    detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    supplemental = (WEB_ROOT / "jobs" / "supplementals.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id === "supplementals"' in detail
+    assert "supplementalView.load()" in detail
+    assert "FTUI.pagedTable" in supplemental
+    assert 'search.type = "search"' in supplemental
+    assert 'remote: true' in supplemental
+
+
 def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> None:
     artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(
         encoding="utf-8"

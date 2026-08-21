@@ -397,6 +397,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .job-detail-tabs { width: 100%; box-sizing: border-box; }
 .job-detail-panel { display: grid; gap: 14px; min-width: 0; }
 .job-detail-panel[hidden] { display: none; }
+.job-supplemental-toolbar { display: flex; align-items: center; gap: 10px; }
+.job-supplemental-toolbar input { flex: 1 1 320px; min-width: 0; }
 .job-detail .field-table { max-height: min(300px, 34vh); }
 .job-detail .field-table th, .job-detail .field-table td { padding: 5px 8px; font-size: 12px; }
 .job-detail .field-table table { min-width: 0; table-layout: fixed; }

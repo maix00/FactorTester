@@ -5,6 +5,7 @@
     ["configuration", "运行配置"],
     ["inputs", "提交物"],
     ["artifacts", "生成物"],
+    ["supplementals", "补充任务"],
   ];
 
   function create(context, storageKey = "") {

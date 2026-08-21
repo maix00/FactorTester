@@ -270,7 +270,10 @@
     const detailTabs = FTJobDetailTabs.create(
       context, `job-detail-section:${resolvedServerID}:${jobID}`,
     );
-    const {overview, results: resultsPanel, configuration, inputs, artifacts: artifactPanel}
+    const {
+      overview, results: resultsPanel, configuration, inputs,
+      artifacts: artifactPanel, supplementals,
+    }
       = detailTabs.panels;
     root.append(detailTabs.root);
     const progress = FTJobProgress.progressView(context, job.status);
@@ -388,6 +391,10 @@
     ));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
     artifactPanel.append(artifactSection);
+    const supplementalView = FTJobSupplementals.create(context, {
+      jobID, artifactQuery,
+    });
+    supplementals.append(supplementalView.root);
     // Paint the overview and artifact metadata immediately. Configuration,
     // result runtimes, and generation capabilities load only when selected.
     context.content.replaceChildren(root);
@@ -431,6 +438,7 @@
       if (id === "configuration") loadConfiguration();
       if (id === "results") loadResults();
       if (id === "artifacts") loadGeneration();
+      if (id === "supplementals") supplementalView.load();
     };
     detailTabs.root.addEventListener("job-detail-tab-change", event => {
       loadSelectedSection(event.detail?.id || "overview");

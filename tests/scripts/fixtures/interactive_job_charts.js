@@ -167,6 +167,18 @@ function fakeElement() {
   };
 }
 global.document = {createElement: fakeElement};
+const analyzingStatus = window.FTJobListFormat.statusCell({
+  status: "succeeded", supplemental_active_count: 1,
+}, context);
+assert.equal(analyzingStatus.textContent, "分析中");
+const completedStatus = window.FTJobListFormat.statusCell({
+  status: "succeeded", supplemental_active_count: 0,
+  supplemental_failed_count: 3,
+}, context);
+assert.equal(
+  completedStatus.textContent, "成功",
+  "supplemental failures belong in Job detail and must not complicate list status",
+);
 const previewAttempts = [];
 global.FTJobArtifactViewers = {
   async mount(_context, _target, options) {

@@ -183,6 +183,7 @@
       "jobs/generation.js",
       "jobs/actions.js",
       "jobs/detail-tabs.js",
+      "jobs/supplementals.js",
       "jobs/result-tabs.js",
       "jobs/detail.js"
     ],
@@ -444,6 +445,7 @@
     "jobs/actions.js",
     "jobs/input-detail.js",
     "jobs/detail-tabs.js",
+    "jobs/supplementals.js",
     "jobs/result-tabs.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
