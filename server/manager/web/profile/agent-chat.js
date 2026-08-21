@@ -42,13 +42,21 @@
       profile, context, {readOnly: Boolean(options.readOnly)},
     );
     options.settingsHost?.replaceChildren(runtimeControls.element);
+    let selectedConversationID = "";
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
       readOnly: Boolean(options.readOnly),
       profileKey: options.profileKey,
       profileScope: options.profileScope,
       historyOnly: Boolean(options.historyOnly),
-      onConversationChange: runtimeControls.setConversation,
+      onConversationChange: conversation => {
+        selectedConversationID = String(
+          conversation?.conversationID
+          || conversation?.conversation?.conversation_id
+          || "",
+        ).trim();
+        runtimeControls.setConversation(conversation);
+      },
       onRuntimeEvent: runtimeControls.observeEvent,
     });
     const viewActions = document.createElement("div");
@@ -59,21 +67,26 @@
     resultsView.textContent = context.t("结果");
     processView.textContent = context.t("过程");
     viewActions.append(resultsView, processView);
-    const chatSlot = document.createElement("div");
-    chatSlot.className = "profile-chatkit-slot";
-    let chat = null;
+    const chatStage = document.createElement("div");
+    chatStage.className = "profile-chatkit-stage";
+    const chats = new Map();
+    const slots = new Map();
+    let activeView = "results";
 
-    const configureChat = target => target.setOptions({
+    const configureChat = (target, view) => target.setOptions({
       api: {
         // ChatKit is the UI protocol only. The Manager adapter owns the
         // Profile-scoped thread catalog and provider-thread mapping.
         url: adapter.endpoint,
         domainKey: "factor-tester-profile-agent",
-        fetch: adapter.fetch,
+        fetch: typeof adapter.fetchForView === "function"
+          ? adapter.fetchForView(view) : adapter.fetch,
       },
       locale: adapter.locale || locale(context),
       history: {enabled: true},
-      ...(options.readOnly || options.historyOnly ? {initialThread: null} : {}),
+      ...(selectedConversationID
+        ? {initialThread: selectedConversationID}
+        : (options.readOnly || options.historyOnly ? {initialThread: null} : {})),
       header: {
         enabled: true,
         title: {enabled: true, text: context.t("研究身份 Agent")},
@@ -91,8 +104,12 @@
       },
     });
 
-    const mountView = view => {
-      adapter.setItemView(view);
+    const ensureView = view => {
+      if (chats.has(view)) return chats.get(view);
+      const slot = document.createElement("div");
+      slot.className = "profile-chatkit-slot";
+      slot.dataset.itemView = view;
+      slot.hidden = view !== activeView;
       resultsView.className = view === "results" ? "primary" : "secondary";
       processView.className = view === "process" ? "primary" : "secondary";
       const target = document.createElement("openai-chatkit");
@@ -115,14 +132,34 @@
         status.textContent = `${context.t("Agent 对话发生错误")}: ${
           error?.message || context.t("请检查 Agent 状态")}`;
       });
-      configureChat(target);
-      chat = target;
-      chatSlot.replaceChildren(target);
+      target.addEventListener("chatkit.thread.change", event => {
+        const identifier = String(event.detail?.threadId || "").trim();
+        if (identifier) selectedConversationID = identifier;
+      });
+      configureChat(target, view);
+      slot.append(target);
+      slots.set(view, slot);
+      chats.set(view, target);
+      chatStage.append(slot);
+      return target;
     };
-    resultsView.onclick = () => mountView("results");
-    processView.onclick = () => mountView("process");
-    host.replaceChildren(viewActions, chatSlot);
-    mountView("results");
+    const selectView = view => {
+      activeView = view === "process" ? "process" : "results";
+      const target = ensureView(activeView);
+      resultsView.className = activeView === "results" ? "primary" : "secondary";
+      processView.className = activeView === "process" ? "primary" : "secondary";
+      for (const [name, slot] of slots) slot.hidden = name !== activeView;
+      if (selectedConversationID && typeof target.setThreadId === "function") {
+        Promise.resolve(target.setThreadId(selectedConversationID)).catch(error => {
+          status.textContent = `${context.t("历史会话读取失败")}: ${
+            error?.message || context.t("请重试")}`;
+        });
+      }
+    };
+    resultsView.onclick = () => selectView("results");
+    processView.onclick = () => selectView("process");
+    host.replaceChildren(viewActions, chatStage);
+    selectView("results");
     if (options.readOnly) {
       const composerNote = document.createElement("div");
       composerNote.className = "profile-chatkit-readonly-composer";
@@ -136,7 +173,7 @@
     return {
       adapter,
       runtimeControls,
-      get chat() { return chat; },
+      get chat() { return chats.get(activeView) || null; },
     };
   }
 

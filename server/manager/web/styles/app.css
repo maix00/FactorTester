@@ -4,6 +4,7 @@
   --text: #1d1d1f; --muted: #74747a; --line: #d9d9de;
   --accent: #087cff; --soft: #eef5ff; --danger: #d92d20;
   --test-workbench-section-gap: 12px;
+  --page-inline-padding: 28px;
   --sidebar-width: 230px;
   --sidebar-collapsed-width: 64px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -80,7 +81,7 @@ main { min-width: 0; }
 .product-catalog-tabs .product-header-tab { border: 0; border-radius: 7px; padding: 7px 12px; background: transparent; color: inherit; white-space: nowrap; }
 .product-catalog-tabs .product-header-tab.active { color: #fff; background: var(--accent); }
 .product-catalog-tabs .product-header-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.content { padding: 28px; max-width: 1500px; margin: 0 auto; }
+.content { width: 100%; min-width: 0; max-width: none; padding: 28px var(--page-inline-padding); margin: 0; }
 .module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
 .notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
 .hero { margin-bottom: 22px; }
@@ -391,7 +392,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .authorized-user { display: flex; gap: 8px; }
 .authorized-user input { flex: 1; }
 .authorized-user button { border: 0; background: transparent; color: var(--danger); }
-.job-detail { display: grid; gap: 20px; max-width: 1180px; min-width: 0; margin: 0 auto; }
+.job-detail { display: grid; gap: 20px; width: 100%; max-width: none; min-width: 0; margin: 0; }
 .job-detail-tabs-shell { display: grid; gap: 14px; min-width: 0; }
 .job-detail-tabs { width: 100%; box-sizing: border-box; }
 .job-detail-panel { display: grid; gap: 14px; min-width: 0; }
@@ -400,8 +401,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .job-detail .field-table th, .job-detail .field-table td { padding: 5px 8px; font-size: 12px; }
 .job-detail .field-table table { min-width: 0; table-layout: fixed; }
 .job-detail .field-table th:first-child, .job-detail .field-table td:first-child { width: 31%; }
-.detail-stack { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
-.library-page { display: grid; gap: 14px; max-width: 1240px; margin: 0 auto; }
+.detail-stack { display: grid; gap: 20px; width: 100%; max-width: none; min-width: 0; margin: 0; }
+.library-page { display: grid; gap: 14px; width: 100%; max-width: none; min-width: 0; margin: 0; }
 .factor-catalog-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(220px, 1fr); gap: 10px; align-items: start; }
 .factor-catalog-controls > * { min-width: 0; }
 .factor-catalog-controls .toolbar-search { width: 100%; min-height: 0; box-sizing: border-box; padding: 5px 9px; border-radius: 7px; }
@@ -504,9 +505,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-runtime-notice[data-kind="error"] { color: var(--danger, #b42318); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
-.profile-chatkit-slot, .profile-chatkit-host openai-chatkit { display: block; width: 100%; }
+.profile-chatkit-stage, .profile-chatkit-slot, .profile-chatkit-host openai-chatkit { display: block; width: 100%; min-width: 0; }
+.profile-chatkit-slot[hidden] { display: none; }
 .profile-chatkit-host openai-chatkit { height: 600px; }
-.profile-directory { max-width: 1240px; }
+.profile-directory { width: 100%; max-width: none; min-width: 0; }
 .profile-directory-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .profile-directory-section-heading { display: grid; gap: 4px; }
 .profile-directory-section-heading h2, .profile-directory-section-heading p { margin: 0; }
@@ -607,7 +609,7 @@ form[hidden] { display: none !important; }
 .settings-sidebar button { border: 0; border-radius: 8px; background: transparent; color: inherit; display: flex; gap: 9px; padding: 9px 10px; text-align: left; }
 .settings-sidebar-icon { width: 16px; height: 16px; display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; }
 .settings-sidebar button.active { color: white; background: var(--accent); }
-.settings-content { max-width: 900px; display: grid; align-content: start; gap: 22px; }
+.settings-content { width: 100%; max-width: none; min-width: 0; display: grid; align-content: start; gap: 22px; }
 .settings-page-header { display: flex; gap: 14px; align-items: center; }
 .settings-page-header h2, .settings-page-header p, .settings-section h3 { margin: 0; }
 .settings-page-header p { margin-top: 4px; color: var(--muted); }
@@ -622,20 +624,20 @@ form[hidden] { display: none !important; }
 .settings-value { text-align: right; color: var(--muted); overflow-wrap: anywhere; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .row-actions button { border: 0; border-radius: 7px; padding: 6px 9px; background: #e9e9ed; color: inherit; }
-.manager-page { max-width: 1400px; }
+.manager-page { width: 100%; max-width: none; min-width: 0; }
 .manager-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .manager-tab { border: 0; border-radius: 7px; padding: 7px 12px; background: transparent; color: inherit; white-space: nowrap; }
 .manager-tab.active { color: #fff; background: var(--accent); }
 .manager-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .manager-tab-content { display: grid; gap: 16px; min-width: 0; }
-.manager-access-section { max-width: 1400px; }
+.manager-access-section { width: 100%; max-width: none; min-width: 0; }
 .manager-access-toolbar { display: flex; gap: 8px; margin: 0 0 10px; }
 .manager-access-toolbar .toolbar-search { min-width: min(360px, 100%); }
 .manager-access-table-shell { max-height: min(560px, 65vh); }
 .manager-access-table-shell table { min-width: 860px; }
 .manager-access-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 42px; }
 .manager-directory-content { display: grid; gap: 16px; }
-.manager-directory-section { max-width: 1400px; }
+.manager-directory-section { width: 100%; max-width: none; min-width: 0; }
 .manager-directory-dialog { border: 0; padding: 0; background: transparent; }
 .manager-directory-form { width: min(560px, 94vw); max-height: min(760px, 90vh); overflow: auto; }
 .manager-directory-form-fields { display: grid; gap: 10px; }
@@ -692,7 +694,7 @@ button.reference-item { cursor: pointer; }
 .research-graph-detail-field small, .research-graph-detail-list > small { color: var(--muted); }
 .research-graph-detail-field div, .research-graph-detail-list li { overflow-wrap: anywhere; }
 .research-graph-detail-list ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; }
-.test-workbench { display: grid; gap: var(--test-workbench-section-gap); max-width: 1240px; margin: 0 auto; }
+.test-workbench { display: grid; gap: var(--test-workbench-section-gap); width: 100%; max-width: none; min-width: 0; margin: 0; }
 .test-template-section { display: grid; gap: 10px; }
 .test-template-section h2 { margin: 0; font-size: 15px; }
 .test-template-toolbar { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -775,7 +777,8 @@ button.reference-item { cursor: pointer; }
   .app-shell { grid-template-columns: 72px 1fr; }
   .sidebar-title, .sidebar-caption, .nav-label, #account-title { display: none; }
   .nav-button, .account-button { justify-content: center; }
-  .content { padding: 18px; }
+  :root { --page-inline-padding: 18px; }
+  .content { padding-block: 18px; }
   .jobs-page { min-height: calc(100vh - 124px); }
   .job-scope-tabs { width: 100%; }
   .job-user-picker { align-items: stretch; flex-direction: column; }

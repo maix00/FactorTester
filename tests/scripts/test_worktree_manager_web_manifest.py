@@ -799,6 +799,24 @@ def test_dialog_cards_have_shared_viewport_scroll_fallback() -> None:
     assert "overflow: hidden" not in run_spec_rule
 
 
+def test_all_pages_share_responsive_inline_padding_without_width_caps() -> None:
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+    root_rule = styles.split(":root {", 1)[1].split("}", 1)[0]
+    content_rule = styles.split(".content {", 1)[1].split("}", 1)[0]
+    assert "--page-inline-padding: 28px" in root_rule
+    assert "padding: 28px var(--page-inline-padding)" in content_rule
+    assert "max-width: none" in content_rule
+    for selector in (
+        ".job-detail", ".detail-stack", ".library-page",
+        ".profile-directory", ".settings-content", ".manager-page",
+        ".manager-access-section", ".manager-directory-section",
+        ".test-workbench",
+    ):
+        rule = styles.split(f"{selector} {{", 1)[1].split("}", 1)[0]
+        assert "width: 100%" in rule
+        assert "max-width: none" in rule
+
+
 def test_outer_inner_and_ic_settings_use_one_manager_contract() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(
         encoding="utf-8",
