@@ -4,68 +4,6 @@
     formatBytes, taskTitle,
   } = FTJobs;
 
-  function resultGroup(job, artifacts = [], result = null) {
-    const kind = String(job?.kind || job?.job_type || job?.application || "")
-      .toLowerCase();
-    if (kind.includes("factor_evaluation")
-      || (kind.includes("factor") && kind.includes("series"))) {
-      return "job-detail-factor-series";
-    }
-    if (kind.includes("ic") || kind.includes("information_coefficient")) {
-      return "job-detail-ic";
-    }
-    if (kind.includes("backtest") || kind.includes("group_test")
-      || kind.includes("portfolio")) {
-      return "job-detail-backtest";
-    }
-    const names = new Set((artifacts || []).map(item => String(item.name || "").toLowerCase()));
-    if ([...names].some(name => name.startsWith("ic_") || name.includes("ic_statistics"))) {
-      return "job-detail-ic";
-    }
-    if ([...names].some(name => name.includes("equity") || name.includes("margin")
-      || name.includes("group_execution"))) {
-      return "job-detail-backtest";
-    }
-    if (result && typeof result === "object"
-      && (result.equity_curve || result.portfolios || result.groups)) {
-      return "job-detail-backtest";
-    }
-    return "";
-  }
-
-  async function loadResultGroup(job, artifacts, result) {
-    const group = resultGroup(job, artifacts, result);
-    if (group) await window.FTStaticLoader?.loadGroups?.([group]);
-    return group;
-  }
-
-  function resultSections(context, job, taskDetail, payload, activeArtifacts,
-    results, jobID, artifactQuery, executionQuery) {
-    const content = document.createDocumentFragment();
-    const factorSeries = window.FTFactorSeriesResults?.section(context, {
-      artifacts: activeArtifacts, jobID, artifactQuery,
-      portQuery: executionQuery, jobKind: job.kind,
-      configuration: taskDetail.configuration || {},
-      resultSummary: results || payload.result_summary || {},
-    });
-    if (factorSeries) content.append(factorSeries);
-    const icResults = window.FTICResults?.section(context, {
-      artifacts: activeArtifacts, jobID, artifactQuery,
-      portQuery: executionQuery,
-      configuration: taskDetail.configuration || {},
-    });
-    if (icResults) content.append(icResults);
-    const backtestResults = window.FTBacktestResults?.section(context, {
-      artifacts: activeArtifacts, jobID, artifactQuery,
-      portQuery: executionQuery,
-      configuration: taskDetail.configuration || {},
-      resultSummary: payload.result_summary || taskDetail.results?.summary || {},
-      job,
-    });
-    if (backtestResults) content.append(backtestResults);
-    return content;
-  }
-
   function fieldSection(context, title, value) {
     const section = document.createElement("section"); section.className = "job-section";
     const heading = document.createElement("h2"); heading.textContent = title; section.append(heading);
@@ -328,34 +266,22 @@
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = localRun
       ? [] : outputArtifacts.filter(item => item.state === "active");
-    const resultGroupName = resultGroup(job, activeArtifacts, results);
+    const resultGroupName = FTJobResultViewers.group(
+      job, activeArtifacts, results,
+    );
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
-    if (resultGroupName) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
+    if (!localRun) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
     resultsPanel.append(resultHost);
     // Domain result viewers own their result tabs and load canonical JSON on
     // demand. Generic artifact previews here would duplicate those tabs and
     // eagerly introduce a second, inconsistent rendering path.
-    if (!resultGroupName) {
-      declarations.forEach(declaration => {
-        const previewArtifacts = FTJobArtifacts.declarationArtifacts(
-          declaration, activeArtifacts,
-        );
-        if (previewArtifacts.length) {
-          resultsPanel.append(FTJobArtifacts.lazyArtifactPreview(
-            context, declaration, previewArtifacts, jobID, artifactQuery,
-          ));
-        }
-      });
-      if (results != null) resultsPanel.append(FTJobArtifacts.collapsible(
-        context.t("结果预览"), FTUI.code(results),
-      ));
-    }
-    if (!resultGroupName && results == null && !declarations.length) {
-      resultsPanel.append(FTUI.empty(
-        context.t("暂无测试结果"), context.t("任务尚未生成可展示的结果"),
-      ));
-    }
+    if (!resultGroupName && localRun) resultHost.replaceChildren(
+      FTJobResultViewers.genericSection(context, {
+        declarations, activeArtifacts, results, jobID, artifactQuery,
+        customAnalyses: null,
+      }),
+    );
     const generationHost = document.createElement("div");
     if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
       generationHost.className = "job-generation-host";
@@ -391,8 +317,33 @@
     ));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
     artifactPanel.append(artifactSection);
+    const customAnalyses = FTJobCustomAnalyses.create(context, {
+      jobID, artifactQuery,
+    });
     const supplementalView = FTJobSupplementals.create(context, {
       jobID, artifactQuery,
+      onOpen: job => {
+        detailTabs.select("results", true);
+        if (job.recoverable === false) {
+          resultHost.replaceChildren(FTUI.empty(
+            context.t("提交物已删除，无法恢复"),
+            context.t("补充任务历史仍保留，但对应的提交物已经被显式删除"),
+          ));
+          return;
+        }
+        if (job.supplemental_kind === "custom_python_analysis") {
+          const tabID = String(job.target?.tab_id || "");
+          if (tabID) {
+            customAnalyses.request(tabID);
+            resultsLoaded = false;
+            loadResults();
+          }
+          return;
+        }
+        customAnalyses.state.requestedSupplemental = job;
+        resultsLoaded = false;
+        loadResults();
+      },
     });
     supplementals.append(supplementalView.root);
     // Paint the overview and artifact metadata immediately. Configuration,
@@ -400,14 +351,31 @@
     context.content.replaceChildren(root);
     let resultsLoaded = false;
     const loadResults = () => {
-      if (resultsLoaded || !resultGroupName || localRun) return;
+      if (resultsLoaded || localRun) return;
       resultsLoaded = true;
-      loadResultGroup(job, activeArtifacts, results).then(() => {
+      Promise.all([
+        resultGroupName
+          ? FTJobResultViewers.loadGroup(job, activeArtifacts, results)
+          : Promise.resolve(),
+        customAnalyses.load(),
+      ]).then(() => {
         if (!isCurrent()) return;
-        resultHost.replaceChildren(resultSections(
-          context, job, taskDetail, payload, activeArtifacts, results, jobID,
-          artifactQuery, executionQuery,
-        ));
+        if (resultGroupName) {
+          resultHost.replaceChildren(FTJobResultViewers.domainSections(
+            context, {
+              job, taskDetail, payload, activeArtifacts, results, jobID,
+              artifactQuery, executionQuery, customAnalyses,
+            },
+          ));
+        } else {
+          resultHost.replaceChildren(FTJobResultViewers.genericSection(context, {
+            declarations, activeArtifacts, results, jobID, artifactQuery,
+            customAnalyses,
+            state: {
+              activeTab: customAnalyses.state.requestedKey || "result",
+            },
+          }));
+        }
       }).catch(error => {
         if (isCurrent()) resultHost.replaceChildren(FTUI.empty(
           context.t("结果查看器不可用"), error.message || String(error),

@@ -15,7 +15,7 @@
     return button;
   }
 
-  function open(context, options, entry) {
+  function open(context, options, entry, initialTab = "") {
     const summary = options.resultSummary || {};
     const related = FTBacktestResultModel.relatedGroupEntries(summary, entry);
     const entries = related.length ? related : [entry];
@@ -27,7 +27,8 @@
     const cache = new Map();
     const detailTabs = FTBacktestGroupDetail.tabs || [{id: "overview", label: "概览"}];
     const allTabs = [...detailTabs, {id: "ranking", label: "排序诊断"}];
-    let activeTab = detailTabs[0].id;
+    let activeTab = allTabs.some(tab => tab.id === initialTab)
+      ? initialTab : detailTabs[0].id;
     let activeEntry = entries.find(item => item.key === entry?.key) || entries[0];
 
     async function renderDetail(target) {

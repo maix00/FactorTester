@@ -185,6 +185,8 @@
       "jobs/detail-tabs.js",
       "jobs/supplementals.js",
       "jobs/result-tabs.js",
+      "jobs/custom-analyses.js",
+      "jobs/result-viewers.js",
       "jobs/detail.js"
     ],
     "job-detail-input": [
@@ -447,6 +449,8 @@
     "jobs/detail-tabs.js",
     "jobs/supplementals.js",
     "jobs/result-tabs.js",
+    "jobs/custom-analyses.js",
+    "jobs/result-viewers.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",

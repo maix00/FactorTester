@@ -178,12 +178,14 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
           FTBacktestStrategyAnalysis.open(
             {t: value => value}, {resultSummary: {}},
             {key: "g2", label: "第二组", configurationID: "same"},
+            "products",
           );
         """)
         assert page.get_by_role("dialog").count() == 1
         assert page.get_by_role("button", name="概览").count() == 1
         assert page.get_by_role("button", name="收益时序").count() == 1
         assert page.get_by_role("button", name="产品贡献").count() == 1
+        page.get_by_text("products:g2").wait_for()
         page.get_by_role("button", name="排序诊断").click()
         page.get_by_text("ranking:shared").wait_for()
         browser.close()

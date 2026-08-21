@@ -75,6 +75,17 @@
           totalLabel: total => `${context.t("共")} ${total}`,
           onPageChange: load,
         });
+        [...view.body.rows].forEach((row, index) => {
+          const job = (payload.jobs || [])[index];
+          row.classList.add("job-supplemental-row");
+          row.tabIndex = 0;
+          row.addEventListener("click", () => options.onOpen?.(job));
+          row.addEventListener("keydown", event => {
+            if (["Enter", " "].includes(event.key)) {
+              event.preventDefault(); options.onOpen?.(job);
+            }
+          });
+        });
         host.replaceChildren(view.shell);
       } catch (error) {
         host.replaceChildren(FTUI.empty(

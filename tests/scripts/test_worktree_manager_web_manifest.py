@@ -514,9 +514,13 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     })
     artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(encoding="utf-8")
     detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    result_viewers = (WEB_ROOT / "jobs" / "result-viewers.js").read_text(
+        encoding="utf-8"
+    )
     run_results = (WEB_ROOT / "workbench" / "test-run-results.js").read_text(encoding="utf-8")
     assert 'loadGroups?.(["job-detail-previews"])' in artifacts
-    assert 'loadGroups?.([group])' in detail
+    assert 'loadGroups?.([name])' in result_viewers
+    assert "FTJobResultViewers.loadGroup" in detail
     assert 'loadGroups?.(["job-detail"])' not in run_results
     assert 'job-detail-ic' in run_results and 'job-detail-backtest' in run_results
     assert "FTTestRunProgress" in run_results
@@ -1413,13 +1417,16 @@ def test_shared_paged_table_keeps_pager_outside_scroll_container() -> None:
 
 def test_job_detail_uses_the_shared_run_spec_view() -> None:
     detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    result_viewers = (WEB_ROOT / "jobs" / "result-viewers.js").read_text(
+        encoding="utf-8"
+    )
     detail_page, configuration_page = detail.split(
         "async function configuration", 1
     )
 
     assert 'context.t("查看运行配置")' in detail_page
     assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" in detail_page
-    assert 'context.t("结果预览")' in detail_page
+    assert 'context.t("结果预览")' in result_viewers
     assert "FTJobDetailTabs.create" in detail_page
     assert 'context.t("冻结运行配置")' in detail_page
     assert "loadSelectedSection(detailTabs.current())" in detail_page
@@ -1428,6 +1435,7 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
     assert 'kind: "run-spec"' in configuration_page
     assert 'context.t("结果预览")' not in configuration_page
     assert "FTJobArtifacts.lazyArtifactPreview" not in configuration_page
+    assert "FTJobArtifacts.lazyArtifactPreview" in result_viewers
 
 
 def test_job_detail_internal_tabs_preserve_the_selected_section() -> None:
@@ -1452,6 +1460,38 @@ def test_job_detail_supplemental_history_is_lazy_searchable_and_paged() -> None:
     assert "FTUI.pagedTable" in supplemental
     assert 'search.type = "search"' in supplemental
     assert 'remote: true' in supplemental
+    assert "requestedSupplemental = job" in detail
+    assert 'resultHost.dispatchEvent(new CustomEvent(' not in detail
+
+
+def test_custom_analysis_tabs_are_shared_by_all_job_result_viewers() -> None:
+    custom = (WEB_ROOT / "jobs" / "custom-analyses.js").read_text(
+        encoding="utf-8"
+    )
+    backtest = (
+        WEB_ROOT / "test-modules" / "backtest" / "results" / "view.js"
+    ).read_text(encoding="utf-8")
+    ic = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
+    factor = (WEB_ROOT / "jobs" / "factor-series-view.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "if (context.session)" in custom
+    for source in (backtest, ic, factor):
+        assert "customAnalyses?.tabs" in source
+        assert 'key === "custom-analysis:new"' in source
+        assert "customAnalyses.render" in source
+
+
+def test_custom_analysis_tab_edit_and_close_do_not_compete_with_activation() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "job_custom_analysis_tabs.js"
+    module = WEB_ROOT / "jobs" / "result-tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
 
 
 def test_artifact_capabilities_never_forward_cookies_or_redirect_bearers() -> None:

@@ -216,6 +216,20 @@
   }
 
   function tabContent(context, state) {
+    if (state.customAnalyses) {
+      const customID = state.customAnalyses.tabIDFor(state.activeTab);
+      if (customID) {
+        const target = document.createElement("div");
+        state.customAnalyses.render(customID, target, {
+          onTabsChanged: () => renderLoaded(context, state.target, state),
+          onDeleted: () => {
+            state.activeTab = state.model.tabs[0] || "summary";
+            renderLoaded(context, state.target, state);
+          },
+        });
+        return target;
+      }
+    }
     const payloads = state.model.payloads;
     if (state.activeTab === "runtime") {
       return runtimeTable(context, state) || message(context, "暂无策略运行摘要");
@@ -307,12 +321,31 @@
       ), {variant: "secondary"}));
       controls.push(actions);
     }
+    const customTabs = state.customAnalyses?.tabs({
+      onDeleted: () => {
+        state.activeTab = state.model.tabs[0] || "summary";
+        renderLoaded(context, target, state);
+      },
+    }) || [];
     const header = window.FTJobResultTabs.create(context, {
       className: "backtest-domain-header",
-      tabs: state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+      tabs: [
+        ...state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+        ...customTabs,
+      ],
       active: state.activeTab,
       controls,
-      onChange: key => {
+      onChange: async key => {
+        if (key === "custom-analysis:new") {
+          try {
+            const analysis = await state.customAnalyses.add();
+            state.activeTab = state.customAnalyses.keyFor(analysis.tab_id);
+          } catch (error) {
+            context.showNotice?.(error.message || String(error), true);
+          }
+          renderLoaded(context, target, state);
+          return;
+        }
         state.activeTab = key;
         renderLoaded(context, target, state);
       },
@@ -327,6 +360,21 @@
       queueMicrotask(() => loadActiveTab(context, state));
     } else content.append(tabContent(context, state));
     target.replaceChildren(header, content);
+    const requested = state.requestedSupplemental;
+    if (requested && !state.supplementalRequestConsumed) {
+      state.supplementalRequestConsumed = true;
+      const targetInfo = requested.target || {};
+      const entry = window.FTBacktestResultModel.resolveGroup(
+        state.model.summary, targetInfo.strategy_id,
+      );
+      if (entry) {
+        queueMicrotask(() => window.FTBacktestStrategyAnalysis.open(
+          context, state.options, entry, targetInfo.analysis_tab || "overview",
+        ));
+      } else {
+        context.showNotice?.(context.t("无法定位补充任务对应的策略"), true);
+      }
+    }
   }
 
   function section(context, options) {
@@ -346,12 +394,17 @@
         );
         renderLoaded(context, target, {
           model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
-          tablePages: {}, activeTab: model.tabs[0] || "summary",
+          tablePages: {},
+          activeTab: options.customAnalyses?.state?.requestedKey
+            || model.tabs[0] || "summary",
           strategySelection: [window.FTBacktestStrategySelection.ALL_STRATEGIES],
           evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
             model.summary, options.configuration || {},
           ),
           showOutOfSample: false,
+          customAnalyses: options.customAnalyses || null,
+          requestedSupplemental: options.supplementalRequest || null,
+          supplementalRequestConsumed: false,
           options: {...options, resultSummary: model.summary},
         });
       } catch (error) {
