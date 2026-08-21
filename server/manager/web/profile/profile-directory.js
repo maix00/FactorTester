@@ -113,7 +113,14 @@
     name.textContent = text(item.display_name || item.profile_id);
     const id = document.createElement("small");
     id.textContent = text(item.profile_id);
-    identity.append(name, id);
+    identity.append(name);
+    if (item.is_self_profile || item.profile_kind === "self") {
+      const badge = document.createElement("span");
+      badge.className = "profile-self-badge";
+      badge.textContent = context.t("本人身份");
+      identity.append(badge);
+    }
+    identity.append(id);
     const owner = `${text(item.owner_alias || item.owner_ref)}\n${text(item.owner_ref)}`;
     const sourceServers = Array.isArray(item.source_server_ids) && item.source_server_ids.length
       ? item.source_server_ids
@@ -153,6 +160,9 @@
       const item = payload.items[index];
       if (!item) return;
       row.classList.add("profile-directory-row");
+      if (item.is_self_profile || item.profile_kind === "self") {
+        row.classList.add("profile-directory-row-self");
+      }
       row.tabIndex = 0;
       const open = () => context.navigate(profilePath(item, state.scope));
       row.addEventListener("click", open);

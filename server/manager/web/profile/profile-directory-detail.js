@@ -80,6 +80,7 @@
     root.className = "detail-stack";
     root.append(fields(context, {
       profile_id: profile.profile_id,
+      profile_kind: profile.profile_kind,
       display_name: profile.display_name,
       owner_ref: profile.owner_ref,
       owner_alias: profile.owner_alias,
@@ -183,6 +184,9 @@
           capabilities: payload.profile.capabilities,
           read_only: payload.read_only,
         });
+        if (profile.is_self_profile || profile.profile_kind === "self") {
+          profile.display_name = context.t("本人");
+        }
       } catch (_) {
         // The safe directory projection remains usable if the compatibility
         // owner endpoint is temporarily unavailable.
@@ -220,6 +224,13 @@
     ));
     const root = document.createElement("div");
     root.className = "detail-stack profile-directory-detail";
+    if (profile.is_self_profile || profile.profile_kind === "self") {
+      root.classList.add("profile-directory-detail-self");
+      const badge = document.createElement("span");
+      badge.className = "profile-self-badge";
+      badge.textContent = context.t("本人身份");
+      root.append(badge);
+    }
     root.append(tabBar(context, profile, scope, tab));
     if (tab === "overview") root.append(overview(context, profile));
     else if (tab === "binding") root.append(binding(context, profile));

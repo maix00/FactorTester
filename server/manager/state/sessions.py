@@ -21,10 +21,10 @@ from server.manager.domain.organization_scope import (
     organization_descriptor,
     validate_alias,
 )
-from server.manager.system import write_owner_only_once as _write_owner_only_once
-from server.manager.storage.control_db import ControlDatabaseError, ControlDatabaseUnavailable
+from server.manager.storage.control_db import ControlDatabaseError
 from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.session_store import ManagerSessionStore
+from server.manager.system import write_owner_only_once as _write_owner_only_once
 
 
 class SessionStateMixin:
@@ -353,14 +353,22 @@ class SessionStateMixin:
 
     def register(self, alias: str, password: str, organization_id: str = "") -> tuple[str, str, str, str]:
         if self.control_store is not None:
-            return self._register_with_control_outbox(
+            result = self._register_with_control_outbox(
                 alias, password, organization_id,
             )
+            self._initialize_registered_profile(result[0])
+            return result
         from tools.data.account_manage import (
-            DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
-            ROLE_SUPER_ADMIN, ROLE_USER, accounts_lock, hash_password,
-            list_organizations_with_default, load_accounts,
-            next_account_username, root_level_id_for_org, save_accounts,
+            DEFAULT_ORGANIZATION_NAME,
+            ROLE_SUPER_ADMIN,
+            ROLE_USER,
+            accounts_lock,
+            hash_password,
+            list_organizations_with_default,
+            load_accounts,
+            next_account_username,
+            root_level_id_for_org,
+            save_accounts,
         )
         alias = validate_alias(alias)
         password = str(password or "")
@@ -389,7 +397,29 @@ class SessionStateMixin:
                 "parent_username": "",
             })
             save_accounts(accounts)
-        return full_name, role, alias, organization_id
+        result = (full_name, role, alias, organization_id)
+        self._initialize_registered_profile(full_name)
+        return result
+
+    def _initialize_registered_profile(self, principal: str) -> None:
+        initializer = getattr(
+            getattr(self, "client_state", None),
+            "ensure_self_profile",
+            None,
+        )
+        if not callable(initializer):
+            return
+        try:
+            initializer(principal)
+        except (
+            AttributeError, ConnectionError, OSError, RuntimeError,
+            TypeError, ValueError,
+        ) as exc:
+            # Account registration has already committed. The owner's first
+            # Profile-directory read retries this idempotent initialization.
+            sys.stderr.write(
+                f"[manager] reserved self Profile initialization pending: {exc}\n"
+            )
 
     def _register_with_control_outbox(
         self,
@@ -399,7 +429,6 @@ class SessionStateMixin:
     ) -> tuple[str, str, str, str]:
         """Register locally when PG is down and push it on a later request."""
         from tools.data.account_manage import (
-            DEFAULT_ORGANIZATION_ID,
             DEFAULT_ORGANIZATION_NAME,
             ROLE_USER,
             hash_password,

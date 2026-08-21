@@ -47,7 +47,11 @@ def running_manager(state):
 
 
 def authenticated_state(tmp_path):
-    state = manager.ManagerState(tmp_path, "python")
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        session_db_path=tmp_path / "manager-sessions.sqlite",
+    )
     state._sessions[state._token_hash("user-token")] = (
         "user@1", "user", float("inf"),
     )
@@ -178,6 +182,11 @@ def test_offline_registration_is_local_and_queued_for_central_sync(
     assert organization_id == "GTHT"
     assert local.load_accounts()[0]["username"] == principal
     assert local.pending_accounts()[0]["username"] == principal
+    profiles = state.client_state.profiles(
+        principal, include_local_paths=False,
+    )
+    assert profiles[0]["profile_id"] == "self"
+    assert profiles[0]["profile_kind"] == "self"
 
 
 def test_two_offline_managers_can_use_the_same_alias_without_username_collision(
@@ -1152,6 +1161,10 @@ def test_profiles_and_workspace_are_local_manager_projections(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
+    ensured = []
+    monkeypatch.setattr(
+        state.client_state, "ensure_self_profile", ensured.append,
+    )
     monkeypatch.setattr(
         state.client_state, "profiles",
         lambda principal: [{"profile_id": "maxa", "principal": principal}],
@@ -1173,6 +1186,7 @@ def test_profiles_and_workspace_are_local_manager_projections(
 
     assert profiles["profiles"][0]["profile_id"] == "maxa"
     assert profiles["profiles"][0]["principal"] == "user@1"
+    assert ensured == ["user@1"]
     assert workspace["workspace"]["principal_ref"] == "user@1"
 
 
@@ -1215,6 +1229,56 @@ def test_profile_projection_remains_available_when_postgres_is_offline(
     assert profiles[0]["session_binding"] == {"principal_ref": "user@1"}
     assert "workspace_root" not in profiles[0]
     assert "session_ref" not in profiles[0]
+
+
+def test_ensure_self_profile_creates_metadata_without_a_workspace(tmp_path) -> None:
+    client_root = tmp_path / "client"
+    service = ClientStateService(
+        client_root,
+        control_store=None,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+
+    receipt = service.ensure_self_profile("user@1")
+
+    assert receipt["status"] == "pending"
+    assert receipt["profile"]["profile_id"] == "self"
+    assert receipt["profile"]["profile_kind"] == "self"
+    assert receipt["profile"]["session_binding"] == {
+        "principal_ref": "user@1",
+    }
+    assert service.profile_cache.read("user@1") == [receipt["profile"]]
+    assert not client_root.exists()
+
+
+def test_ensure_self_profile_repairs_kind_without_losing_profile_content(
+    tmp_path,
+) -> None:
+    from server.manager.services.profile_projection import ProfileProjectionCache
+
+    cache = ProfileProjectionCache(tmp_path / "profile-cache")
+    cache.upsert("user@1", {
+        "schema_version": 9,
+        "profile_id": "self",
+        "display_name": "legacy",
+        "agents": [{"agent_id": "research-agent"}],
+        "research_records": [{"record_id": "report-one"}],
+        "session_binding": {"principal_ref": "user@1"},
+    })
+    service = ClientStateService(
+        tmp_path / "client",
+        control_store=None,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+
+    receipt = service.ensure_self_profile("user@1")
+
+    assert receipt["profile"]["profile_kind"] == "self"
+    assert receipt["profile"]["display_name"] == "self"
+    assert receipt["profile"]["agents"] == [{"agent_id": "research-agent"}]
+    assert receipt["profile"]["research_records"] == [
+        {"record_id": "report-one"},
+    ]
 
 
 def test_profile_projection_flushes_after_postgres_recovers(tmp_path) -> None:
@@ -1385,6 +1449,25 @@ def test_profile_create_endpoint_rejects_duplicate_identifier(tmp_path) -> None:
     assert raised.value.code == 409
     value = json.loads(raised.value.read())
     assert "profile already exists" in value["error"]
+
+
+def test_profile_create_rejects_reserved_self_identifier(tmp_path) -> None:
+    service = ClientStateService(tmp_path / "client", control_store=None)
+
+    with pytest.raises(ValueError, match="reserved"):
+        service.create_profile(
+            "user@1", profile_id="self", display_name="Pretend Self",
+        )
+
+
+def test_profile_sync_rejects_reserved_self_identifier(tmp_path) -> None:
+    service = ClientStateService(tmp_path / "client", control_store=None)
+
+    with pytest.raises(ValueError, match="reserved"):
+        service.sync_profile("user@1", {
+            "profile_id": "self",
+            "display_name": "Pretend Self",
+        })
 
 
 def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> None:
@@ -2737,6 +2820,28 @@ def test_backtest_configuration_freezes_groups_products_and_all_factors() -> Non
     assert "state.analysis?.groups" in source
     assert "product_selections: productSelections" in source
     assert "ls_configs: prior.ls_configs || []" in source
+
+
+def test_reserved_self_profile_has_distinct_web_presentation() -> None:
+    profile_root = ROOT / "server" / "manager" / "web" / "profile"
+    profiles = (profile_root / "profiles.js").read_text(encoding="utf-8")
+    directory = (profile_root / "profile-directory.js").read_text(
+        encoding="utf-8",
+    )
+    detail = (profile_root / "profile-directory-detail.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (
+        ROOT / "server" / "manager" / "web" / "styles" / "app.css"
+    ).read_text(encoding="utf-8")
+
+    assert 'identifier === "self"' in profiles
+    assert "profile-self-badge" in profiles
+    assert "profile-directory-row-self" in directory
+    assert "profile-self-badge" in directory
+    assert "profile-directory-detail-self" in detail
+    assert ".profile-directory-row-self" in styles
+    assert ".profile-directory-detail-self" in styles
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(
