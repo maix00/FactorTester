@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from tools.testers.ic_test.result_projection_contract import (
+    ic_result_projection_contracts,
+)
 from tools.testers.settings.contracts import (
+    ResultProjectionDefinition,
     ResultTabDefinition,
     SettingsSurface,
     SurfaceFlow,
@@ -13,6 +17,7 @@ from tools.testers.settings.registry import ApplicationSettings
 
 def register_result_contracts(app: ApplicationSettings) -> None:
     _register_result_tabs(app)
+    _register_result_projections(app)
     _register_surfaces(app)
 
 
@@ -36,6 +41,26 @@ def _register_result_tabs(app: ApplicationSettings) -> None:
         ),
     ):
         app.register_result_tab(tab)
+
+
+def ic_result_projections() -> tuple[ResultProjectionDefinition, ...]:
+    """Return the canonical IC result surface consumed by every client.
+
+    A projection names only persisted canonical artifacts.  A tab is therefore
+    unavailable when its source was not requested or the computation produced
+    no rows; the frontend never has to invent an empty capability from a
+    setting or an analysis-node name.
+    """
+
+    return tuple(
+        ResultProjectionDefinition(**item)
+        for item in ic_result_projection_contracts()
+    )
+
+
+def _register_result_projections(app: ApplicationSettings) -> None:
+    for projection in ic_result_projections():
+        app.register_result_projection(projection)
 
 
 def _register_surfaces(app: ApplicationSettings) -> None:

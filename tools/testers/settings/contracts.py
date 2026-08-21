@@ -7,8 +7,8 @@ from enum import Enum
 from typing import Any
 
 from tools.testers.field_spec import (
-    FieldSpec,
     FieldRules,
+    FieldSpec,
     RunRole,
     RuntimeRole,
     SettingRole,
@@ -283,6 +283,58 @@ class ResultTabDefinition:
             key: list(values)
             for key, values in self.requires.items()
         }
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class ResultProjectionDefinition:
+    """Backend-owned projection of one persisted result into a result Tab.
+
+    ``ResultTabDefinition`` describes an authoring capability.  A projection
+    is deliberately separate: it describes what a completed Job can show,
+    which persisted data it needs, and which domain viewer owns its content.
+    Keeping the two contracts separate prevents an enabled analysis option
+    from becoming an empty result tab by accident.
+    """
+
+    key: str
+    label: str
+    module: str
+    order: int
+    group: str
+    viewer: str
+    source_artifacts: tuple[str, ...]
+    output_requests: tuple[str, ...]
+    presentation: str = "table"
+    default: bool = False
+    content_key: str = ""
+    empty_state: str = "暂无可展示结果"
+    source_policy: str = "any"
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.module:
+            raise ValueError(
+                "result projection requires key, label, and module"
+            )
+        if not self.group or not self.viewer:
+            raise ValueError("result projection requires group and viewer")
+        if not self.source_artifacts:
+            raise ValueError("result projection requires source artifacts")
+        if not self.output_requests:
+            raise ValueError("result projection requires output requests")
+        if self.presentation not in {"chart", "table", "detail"}:
+            raise ValueError(
+                f"result projection presentation is invalid: {self.presentation}"
+            )
+        if self.source_policy not in {"any", "all"}:
+            raise ValueError(
+                f"result projection source policy is invalid: {self.source_policy}"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["source_artifacts"] = list(self.source_artifacts)
+        value["output_requests"] = list(self.output_requests)
         return value
 
 
