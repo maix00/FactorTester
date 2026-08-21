@@ -8,7 +8,6 @@ import re
 from typing import Any
 
 from server.jobs.artifacts import artifact_root, resolve_artifact_path
-from server.jobs.assurance import canonical_hash
 from server.jobs.supplemental.custom_python import run_custom_python, validate_source
 from server.jobs.supplemental.registry import SupplementalAdapter, register
 
@@ -105,7 +104,6 @@ def prepare(repository, parent, params: dict[str, Any]) -> dict[str, Any]:
         }
     snapshot = _write_source_snapshot(repository, parent, tab)
     artifacts = _input_artifacts(repository, parent)
-    input_hash = canonical_hash({"tab_id": tab_id})
     _source_prefix, result_prefix = artifact_prefixes(tab_id)
     artifact_name = result_prefix
     return {
@@ -113,7 +111,7 @@ def prepare(repository, parent, params: dict[str, Any]) -> dict[str, Any]:
             "version": 1, "tab_id": tab_id,
         },
         "reuse_artifact": False,
-        "source_artifact_hash": input_hash,
+        "source_artifact_hash": str(snapshot["content_hash"]),
         "artifact_name": artifact_name,
         "cache_keys": [],
         "payload": {

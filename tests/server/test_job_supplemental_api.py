@@ -236,6 +236,7 @@ def test_custom_analysis_tab_persists_source_runs_and_deletes_without_history(
     )
     assert source_artifact["artifact_role"] == "input"
     assert result_artifact["artifact_role"] == "output"
+    assert child.source_artifact_hash == source_artifact["content_hash"]
     assert source_artifact["relative_path"] == (
         f"parent-1/custom-analyses/{tab['tab_id']}/source.py"
     )
@@ -285,6 +286,8 @@ def test_custom_analysis_tab_persists_source_runs_and_deletes_without_history(
     assert source_after["relative_path"] == source_artifact["relative_path"]
     assert result_after["relative_path"] == result_artifact["relative_path"]
     assert source_after["content_hash"] != source_artifact["content_hash"]
+    assert rerun_job.source_artifact_hash == source_after["content_hash"]
+    assert rerun_job.source_artifact_hash != child.source_artifact_hash
     result_payload = orjson.loads(
         (tmp_path / "artifacts" / result_after["relative_path"]).read_bytes()
     )
