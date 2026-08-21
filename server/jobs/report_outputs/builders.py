@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
@@ -13,7 +14,9 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
 
 from .dataset import ReportDataset
 from .ic import (
+    ic_autocorrelation_rows,
     ic_holding_half_life_rows,
+    ic_resample_stability_rows,
     ic_series,
     ic_statistics_rows,
     quantile_portfolio_statistics_rows,
@@ -103,9 +106,18 @@ def build_report_artifacts(
     if "ic_statistics" in names:
         output.extend(ic_statistics_reports(result, job_id=job_id))
         done("ic_statistics")
+    elif "ic_statistics_summary" in names:
+        output.extend(ic_statistics_summary_reports(result, job_id=job_id))
+        done("ic_statistics_summary")
     elif "ic_quantile_portfolio_statistics" in names:
         output.extend(ic_quantile_portfolio_statistics_reports(result, job_id=job_id))
         done("ic_quantile_portfolio_statistics")
+    if "ic_resample_stability" in names and "ic_statistics" not in names:
+        output.extend(ic_resample_stability_reports(result))
+        done("ic_resample_stability")
+    if "ic_autocorrelation" in names and "ic_statistics" not in names:
+        output.extend(ic_autocorrelation_reports(result))
+        done("ic_autocorrelation")
     if "ic_rolling_stability" in names or "ic_statistics" in names:
         output.extend(ic_rolling_stability_reports(result, job_id=job_id))
         if "ic_rolling_stability" in names:
@@ -500,6 +512,8 @@ def ic_statistics_reports(result, *, job_id=None):
         columns=ordered_ic_statistics_columns(full_rows),
     )
     reports.extend(ic_statistics_summary_reports(result, job_id=job_id))
+    reports.extend(ic_resample_stability_reports(result))
+    reports.extend(ic_autocorrelation_reports(result))
     quick_rows = quantile_portfolio_statistics_rows(result)
     if quick_rows:
         reports.extend(table_reports(
@@ -529,6 +543,40 @@ def ic_statistics_reports(result, *, job_id=None):
             },
         ))
     return reports
+
+
+def ic_resample_stability_reports(result):
+    """Build the persisted resampling projection from the IC response."""
+
+    rows = ic_resample_stability_rows(result)
+    if not rows:
+        return []
+    return table_reports(
+        "ic_resample_stability",
+        rows,
+        payload_extra={
+            "artifact_role": "ic_statistics_category",
+            "category": "resample_stability",
+            "source_artifacts": ["result"],
+        },
+    )
+
+
+def ic_autocorrelation_reports(result):
+    """Build the cached autocorrelation projection without recomputation."""
+
+    rows = ic_autocorrelation_rows(result)
+    if not rows:
+        return []
+    return table_reports(
+        "ic_autocorrelation",
+        rows,
+        payload_extra={
+            "artifact_role": "ic_statistics_category",
+            "category": "autocorrelation",
+            "source_artifacts": ["result"],
+        },
+    )
 
 
 def ic_quantile_portfolio_statistics_reports(result, *, job_id=None):

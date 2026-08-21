@@ -88,6 +88,20 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
 
     selection_id = str(data.get("product_path_selection_id") or data.get("selection_id") or "")
     if selection_id:
+        # RunSpecs freeze product projections once under shared
+        # ``product_selections``.  Resolve that immutable copy before the
+        # mutable owner catalog so IC/evaluation execution does not need to
+        # duplicate paths in its analysis payload.
+        selections = data.get("product_selections")
+        if isinstance(selections, dict) and isinstance(selections.get(selection_id), dict):
+            return selection_from_request(
+                {
+                    **data,
+                    **selections[selection_id],
+                    "product_path_selection_id": selection_id,
+                },
+                page_uuid=page_uuid,
+            )
         username = str(
             data.get("_group_owner_username")
             or data.get("owner_username")

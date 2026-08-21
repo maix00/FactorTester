@@ -6,6 +6,9 @@ global.window = {};
 const factor = {
   factor_alias: "ROC", factor_ref: "factor:v1:roc", family_ref: "family:v1:roc",
 };
+const secondFactor = {
+  factor_alias: "Momentum", factor_ref: "factor:v1:momentum", family_ref: "family:v1:momentum",
+};
 global.FTTestFactors = {
   selectedFactor: state => state.noOuterFactor ? null : factor,
   selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
@@ -25,7 +28,10 @@ global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => structuredClone(values),
   executionSettings: (_manifest, values) => structuredClone(values),
   sanitizeExecutionPayload: (_manifest, payload) => structuredClone(payload),
-  factorSubjects: () => [{alias: "ROC", factor_ref: "factor:v1:roc"}],
+  factorSubjects: factors => (factors || []).map(item => ({
+    alias: item.factor_alias || item.alias,
+    factor_ref: item.factor_ref,
+  })),
 };
 global.FTTestRunFields = {selection: () => [{name: "ic_statistics_data"}]};
 vm.runInThisContext(fs.readFileSync(
@@ -39,12 +45,13 @@ const state = {
   kind: "ic", manifest: {defaults: {}}, values: {
     factor_candidates: [{
       ...factor, temporary: true, source_origin: "test_inline",
-    }],
+    }, secondFactor],
+    factor_selections: [factor],
     category_candidates: [{
       id: "inline-category:session", temporary: true, title_zh: "会话分类",
     }],
   },
-  factors: [factor], families: [], groups: [{
+  factors: [factor, secondFactor], families: [], groups: [{
     id: "inline-product-group:session", temporary: true,
     paths: ["CNFutures/**"],
   }, {
@@ -59,6 +66,15 @@ const state = {
   }],
   workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
 };
+
+assert.deepEqual(
+  window.FTTestConfiguration.executionFactors({
+    ...state,
+    values: {...state.values, factor_selections: []},
+  }),
+  [],
+  "an explicitly empty IC selection must not execute the whole candidate pool",
+);
 const context = {t: value => value, api: async (path, options) => {
   requests.push({path, body: JSON.parse(options.body)});
   return {configuration: {revision: 2, payload: JSON.parse(options.body).payload}};
@@ -71,6 +87,28 @@ const context = {t: value => value, api: async (path, options) => {
     ["factor", "delay"],
   );
   const temporary = requests[0].body.payload.shared.temporary_objects;
+  assert.deepEqual(
+    requests[0].body.payload.shared.factors.map(item => item.factor_ref),
+    [factor.factor_ref],
+    "workspace subjects must contain only the registered IC factor selection",
+  );
+  assert.deepEqual(
+    requests[0].body.payload.analyses.ic.factors.map(item => item.factor_ref),
+    [factor.factor_ref],
+    "the compiled IC analysis must use the same selected factor references",
+  );
+  const icAnalysis = requests[0].body.payload.analyses.ic;
+  assert.deepEqual(Object.keys(icAnalysis).sort(), [
+    "factors", "local_settings", "product_path_selection_id", "product_selections",
+  ], "IC authoring must retain one local settings object and one product projection");
+  assert.equal(icAnalysis.product_path_selection, undefined);
+  assert.equal(icAnalysis.paths, undefined);
+  assert.equal(icAnalysis.settings, undefined);
+  assert.deepEqual(
+    requests[0].body.payload.ui.ic.settings.factor_selections.map(item => item.factor_ref),
+    [factor.factor_ref],
+    "authoring settings must persist the registered selection field",
+  );
   assert.equal(temporary.factors[0].factor_ref, factor.factor_ref);
   assert.equal(temporary.product_groups[0].id, "inline-product-group:session");
   assert.equal(temporary.categories[0].id, "inline-category:session");

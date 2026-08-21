@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from .backtest_tables import BACKTEST_TABLE_DEFINITIONS, BACKTEST_TABLE_DESCRIPTIONS
-
 
 OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "equity_curve": {
@@ -110,6 +110,10 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "ic_period_diagnostics_receipt",
             "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
             "ic_quantile_portfolio_statistics_receipt",
+            "ic_resample_stability_csv", "ic_resample_stability_data",
+            "ic_resample_stability_receipt",
+            "ic_autocorrelation_csv", "ic_autocorrelation_data",
+            "ic_autocorrelation_receipt",
         ],
         "canonical_artifact": "ic_statistics_data",
         "rendition_artifacts": ["ic_statistics_csv"],
@@ -117,6 +121,22 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         "default": True,
+    },
+    "ic_statistics_summary": {
+        "label": "IC 统计摘要表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_statistics_summary_csv", "ic_statistics_summary_data",
+            "ic_statistics_summary_receipt",
+        ],
+        "canonical_artifact": "ic_statistics_summary_data",
+        "rendition_artifacts": ["ic_statistics_summary_csv"],
+        "receipt_artifact": "ic_statistics_summary_receipt",
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"], "auto_when": "ic_statistics",
+        # This category is emitted by the aggregate IC statistics builder;
+        # artifact recovery should retain the historical aggregate owner.
+        "artifact_owner": "ic_statistics",
     },
     "ic_rolling_stability": {
         "label": "滚动 IC 稳定性表", "formats": ["csv", "json"],
@@ -133,6 +153,7 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         # IC statistics auto-emits this artifact when rolling summaries exist;
         # keep the standalone request opt-in so legacy default declarations
         # remain stable and empty tables are never created.
+        "auto_when": "ic_statistics",
     },
     "ic_period_diagnostics": {
         "label": "IC 周期诊断表", "formats": ["csv", "json"],
@@ -146,6 +167,7 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "receipt_artifact": "ic_period_diagnostics_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
+        "auto_when": "ic_statistics",
     },
     "ic_quantile_portfolio_statistics": {
         "label": "IC 分组组合统计表", "formats": ["csv", "json"],
@@ -159,6 +181,7 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "receipt_artifact": "ic_quantile_portfolio_statistics_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
+        "auto_when": "ic_statistics",
     },
     "ic_holding_half_life": {
         "label": "真实持有期 IC 半衰期图", "formats": ["svg", "json"],
@@ -176,6 +199,32 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         # this O(H) diagnostic.  Keep it in the default IC report whitelist;
         # callers can still omit it by explicitly supplying output_requests.
         "default": True,
+    },
+    "ic_resample_stability": {
+        "label": "IC 重采样稳定性表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_resample_stability_csv", "ic_resample_stability_data",
+            "ic_resample_stability_receipt",
+        ],
+        "canonical_artifact": "ic_resample_stability_data",
+        "rendition_artifacts": ["ic_resample_stability_csv"],
+        "receipt_artifact": "ic_resample_stability_receipt",
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+    },
+    "ic_autocorrelation": {
+        "label": "IC 自相关表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_autocorrelation_csv", "ic_autocorrelation_data",
+            "ic_autocorrelation_receipt",
+        ],
+        "canonical_artifact": "ic_autocorrelation_data",
+        "rendition_artifacts": ["ic_autocorrelation_csv"],
+        "receipt_artifact": "ic_autocorrelation_receipt",
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
     },
 }
 
@@ -227,6 +276,12 @@ _ARTIFACT_DESCRIPTIONS = {
     "ic_quantile_portfolio_statistics_csv": "IC 分组组合统计表（CSV）",
     "ic_quantile_portfolio_statistics_data": "IC 分组组合统计数据（JSON）",
     "ic_quantile_portfolio_statistics_receipt": "IC 分组组合统计生成说明（JSON）",
+    "ic_resample_stability_csv": "IC 重采样稳定性表（CSV）",
+    "ic_resample_stability_data": "IC 重采样稳定性数据（JSON）",
+    "ic_resample_stability_receipt": "IC 重采样稳定性生成说明（JSON）",
+    "ic_autocorrelation_csv": "IC 自相关表（CSV）",
+    "ic_autocorrelation_data": "IC 自相关数据（JSON）",
+    "ic_autocorrelation_receipt": "IC 自相关生成说明（JSON）",
     "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
     "ic_holding_half_life_data": "真实持有期 IC 半衰期数据（JSON）",
     "ic_holding_half_life_receipt": "真实持有期 IC 半衰期生成说明（JSON）",
@@ -250,10 +305,53 @@ def output_capabilities() -> list[dict[str, Any]]:
     return capabilities
 
 
+def _expanded_output_names(requests: Iterable[str]) -> list[str]:
+    """Expand aggregate requests using the output definition registry.
+
+    Derived IC tables used to be appended by a second procedural list in
+    ``output_declarations``.  ``auto_when`` keeps the relationship beside the
+    canonical definition so capabilities, declarations, and artifact lookup
+    cannot silently drift apart.
+    """
+
+    normalized = normalize_output_requests(list(requests))
+    expanded: list[str] = []
+    for name in normalized:
+        if name not in expanded:
+            expanded.append(name)
+        for candidate, definition in OUTPUT_DEFINITIONS.items():
+            if definition.get("auto_when") == name and candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
+
+
+def _ic_result_tabs_for_requests(requests: Iterable[str]) -> list[dict[str, Any]]:
+    # Import lazily: the tester settings package composes its application
+    # registries at import time, so importing its IC registration slice from
+    # this low-level report-definition module would create a cycle.
+    from tools.testers.ic_test.result_projection_contract import (
+        ic_result_projection_contracts,
+    )
+
+    requested = set(requests)
+    if not requested:
+        return []
+    return [
+        {
+            **projection,
+            "source_artifacts": list(projection["source_artifacts"]),
+            "output_requests": list(projection["output_requests"]),
+        }
+        for projection in ic_result_projection_contracts()
+        if requested.intersection(projection["output_requests"])
+    ]
+
+
 def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
     """Return the viewer contract stored with a Job detail response."""
     declarations = []
-    for name in normalize_output_requests(list(requests)):
+    expanded_names = _expanded_output_names(requests)
+    for name in expanded_names:
         definition = OUTPUT_DEFINITIONS[name]
         declaration = {
             "name": name,
@@ -284,68 +382,17 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
                 "receipt_artifact": definition["receipt_artifact"],
             })
         declarations.append(declaration)
-    # IC statistics produces the complete diagnostics table, curated summary,
-    # period diagnostics, and vectorized portfolio category. Declare these so
-    # the Job detail result
-    # preview exposes the stability evidence instead of leaving it artifact-only.
-    if any(item["name"] == "ic_statistics" for item in declarations):
-        additions = [{
-            "name": "ic_statistics_summary",
-            "label": "IC 统计摘要表",
-            "presentation": "table",
-            "viewer": "data_table",
-            "formats": ["csv", "json"],
-            "artifacts": [
-                "ic_statistics_summary_csv", "ic_statistics_summary_data",
-                "ic_statistics_summary_receipt",
-            ],
-            "canonical_artifact": "ic_statistics_summary_data",
-            "rendition_artifacts": ["ic_statistics_summary_csv"],
-            "receipt_artifact": "ic_statistics_summary_receipt",
-        }, {
-            "name": "ic_rolling_stability",
-            "label": "滚动 IC 稳定性表",
-            "presentation": "table",
-            "viewer": "data_table",
-            "formats": ["csv", "json"],
-            "artifacts": [
-                "ic_rolling_stability_csv", "ic_rolling_stability_data",
-                "ic_rolling_stability_receipt",
-            ],
-            "canonical_artifact": "ic_rolling_stability_data",
-            "rendition_artifacts": ["ic_rolling_stability_csv"],
-            "receipt_artifact": "ic_rolling_stability_receipt",
-        }, {
-            "name": "ic_period_diagnostics",
-            "label": "IC 周期诊断表",
-            "presentation": "table",
-            "viewer": "data_table",
-            "formats": ["csv", "json"],
-            "artifacts": [
-                "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
-                "ic_period_diagnostics_receipt",
-            ],
-            "canonical_artifact": "ic_period_diagnostics_data",
-            "rendition_artifacts": ["ic_period_diagnostics_csv"],
-            "receipt_artifact": "ic_period_diagnostics_receipt",
-        }, {
-            "name": "ic_quantile_portfolio_statistics",
-            "label": "IC 分组组合统计表",
-            "presentation": "table",
-            "viewer": "data_table",
-            "formats": ["csv", "json"],
-            "artifacts": [
-                "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
-                "ic_quantile_portfolio_statistics_receipt",
-            ],
-            "canonical_artifact": "ic_quantile_portfolio_statistics_data",
-            "rendition_artifacts": ["ic_quantile_portfolio_statistics_csv"],
-            "receipt_artifact": "ic_quantile_portfolio_statistics_receipt",
-        }]
-        declared_names = {item["name"] for item in declarations}
-        declarations.extend(
-            item for item in additions if item["name"] not in declared_names
+    ic_names = [
+        name for name in expanded_names
+        if "ic" in (OUTPUT_DEFINITIONS[name].get("analyses") or ())
+    ]
+    result_tabs = _ic_result_tabs_for_requests(ic_names)
+    if result_tabs:
+        first_ic = next(
+            item for item in declarations
+            if item["name"] in ic_names
         )
+        first_ic["result_tabs"] = result_tabs
     return declarations
 
 
@@ -359,7 +406,7 @@ def normalize_output_requests(value: Any) -> list[str]:
     if isinstance(value, str):
         value = [part.strip() for part in value.split(",") if part.strip()]
     if not isinstance(value, list):
-        raise ValueError("output_requests must be an array of names")
+        raise TypeError("output_requests must be an array of names")
     normalized: list[str] = []
     for item in value:
         raw = item.get("name") if isinstance(item, dict) else item
@@ -422,10 +469,18 @@ def output_requests_for_artifacts(artifacts: Iterable[str]) -> list[str]:
             name for name in OUTPUT_DEFINITIONS
             if artifact == name or artifact.startswith(f"{name}_")
         ]
-        owner = max(prefixed, key=len) if prefixed else next((
+        explicit_owner = next(
+            (
+                OUTPUT_DEFINITIONS[name].get("artifact_owner")
+                for name in prefixed
+                if OUTPUT_DEFINITIONS[name].get("artifact_owner")
+            ),
+            "",
+        )
+        owner = explicit_owner or (max(prefixed, key=len) if prefixed else next((
             name for name, definition in OUTPUT_DEFINITIONS.items()
             if artifact in (definition.get("artifacts") or ())
-        ), "")
+        ), ""))
         if owner and owner not in recovered:
             recovered.append(owner)
     return recovered

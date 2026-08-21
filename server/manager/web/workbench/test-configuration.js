@@ -12,9 +12,24 @@
       const factors = factorCatalog(state).filter(item => refs.has(factorRef(item)));
       return factors.length ? factors : [selectedFactor(state)].filter(Boolean);
     }
-    const selected = Array.isArray(state.values.factor_candidates)
+    // IC keeps a candidate pool for authoring and a registered multi-selection
+    // for execution.  They are deliberately different fields: removing a
+    // candidate from the selected set must remove it from both the workspace
+    // subjects and the compiled IC analysis.  An empty, explicitly registered
+    // selection is an invalid run input and must not silently fall back to the
+    // whole candidate pool.
+    if (Object.prototype.hasOwnProperty.call(state.values || {}, "factor_selections")) {
+      const selected = Array.isArray(state.values.factor_selections)
+        ? state.values.factor_selections : [];
+      const catalog = new Map(factorCatalog(state).map(item => [factorRef(item), item]));
+      return selected.map(item => {
+        if (item && typeof item === "object") return item;
+        return catalog.get(String(item || ""));
+      }).filter(Boolean);
+    }
+    const candidates = Array.isArray(state.values?.factor_candidates)
       ? state.values.factor_candidates : [];
-    return selected.length ? selected : [selectedFactor(state)].filter(Boolean);
+    return candidates.length ? candidates : [selectedFactor(state)].filter(Boolean);
   }
 
   function factorRef(value) {

@@ -237,6 +237,59 @@ def ic_series(result: dict[str, Any]) -> list[dict[str, Any]]:
     return output
 
 
+def ic_resample_stability_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the IC response's deterministic resampling diagnostics."""
+
+    rows: list[dict[str, Any]] = []
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        alias = str(factor.get("factor_alias") or factor.get("alias") or "")
+        ref = str(factor.get("factor_ref") or "")
+        method = str(factor.get("ic_method") or "rank")
+        values = factor.get("ic_resample_stability")
+        if not isinstance(values, list):
+            values = (factor.get("ic_statistics") or {}).get("resample_stability")
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            rows.append({
+                "factor_alias": alias,
+                "factor_ref": ref,
+                "ic_method": method,
+                **item,
+            })
+    return rows
+
+
+def ic_autocorrelation_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the cached IC-series autocorrelation for the table artifact."""
+
+    rows: list[dict[str, Any]] = []
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        alias = str(factor.get("factor_alias") or factor.get("alias") or "")
+        ref = str(factor.get("factor_ref") or "")
+        method = str(factor.get("ic_method") or "rank")
+        values = factor.get("autocorr")
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            rows.append({
+                "factor_alias": alias,
+                "factor_ref": ref,
+                "ic_method": method,
+                "lag": item.get("lag"),
+                "autocorrelation": item.get("ac", item.get("value")),
+            })
+    return rows
+
+
 def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     selection = normalize_ic_metric_selection(result.get("ic_metric_selection"))
