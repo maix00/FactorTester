@@ -75,13 +75,12 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "group_research_detail": {
         "label": "分组研究详情", "formats": ["json"],
         "presentation": "detail", "viewer": "group_research_detail",
-        # This interactive domain view reads the retained sources directly;
-        # it does not create a second copy of those large payloads.
+        # The standard result UI reads a compact core artifact produced once
+        # during post_replay.  It never requires the full execution trace.
         "artifacts": [],
         "before_run": True, "after_run": False,
-        "requires": ["result", "group_execution", "order_audit"],
+        "requires": ["strategy_analysis_source"],
         "analyses": ["backtest"],
-        "result_retention_mode": "full",
     },
     "ic_series": {
         "label": "IC 序列", "formats": ["svg", "json"],
@@ -194,6 +193,7 @@ _ALIASES = {
 _ARTIFACT_DESCRIPTIONS = {
     "result": "回测结果摘要（运行完成后由服务器保留）",
     "group_execution": "分组执行明细与组合曲线的原始数据",
+    "strategy_analysis_source": "按需计算策略分析所需的基础数据",
     "order_audit": "订单、成交和结算手续费审计明细",
     "net_returns": "按时间记录的净收益序列",
     "equity_curve_report": "净值曲线图（SVG）",

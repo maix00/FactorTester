@@ -86,6 +86,11 @@ def artifact_runner(payload, sink, cancel_event) -> None:
     })
 
 
+def supplemental_artifact_runner(payload, sink, cancel_event) -> None:
+    sink.emit_core_artifact("derived-analysis", {"value": 42})
+    sink.emit_result({"success": True, "artifact": "derived-analysis"})
+
+
 def domain_object_artifact_runner(payload, sink, cancel_event) -> None:
     sink.emit_artifact("domain", {"factor": StringIdentifiedValue()})
     sink.emit_result({"success": True, "pid": os.getpid()})

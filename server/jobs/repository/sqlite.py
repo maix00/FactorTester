@@ -16,7 +16,7 @@ import orjson
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
-from ..assurance import BackendAssuranceValidator
+from ..assurance import BackendAssuranceValidator, canonical_hash
 from ..models import JobRecord
 from ..states import JobStatus, NON_TERMINAL_STATUSES, TERMINAL_STATUSES, require_transition
 from .artifacts import JobArtifactImplementation
@@ -115,11 +115,14 @@ class JobRepository(
                     """
                     INSERT INTO research_jobs (
                         job_id, run_id, owner, workspace_id, kind, status,
+                        job_role, parent_job_id, supplemental_kind,
+                        supplemental_identity, source_artifact_hash,
                         retry_of, attempt, step_mode, retention_mode,
                         deployment_id, service_port, source_revision, runner_path,
                         job_spec_json, job_spec_hash, run_spec_hash,
-                        entitlement_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        entitlement_json, execution_plan_json,
+                        execution_plan_hash, queued_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
@@ -128,6 +131,11 @@ class JobRepository(
                         record.workspace_id,
                         record.kind,
                         record.status.value,
+                        record.job_role,
+                        record.parent_job_id,
+                        record.supplemental_kind,
+                        record.supplemental_identity,
+                        record.source_artifact_hash,
                         record.retry_of,
                         max(1, record.attempt),
                         int(record.step_mode),
@@ -140,6 +148,9 @@ class JobRepository(
                         hashlib.sha256(job_spec_raw).hexdigest(),
                         record.run_spec_hash,
                         _dumps(record.entitlement.to_dict()),
+                        _dumps(record.execution_plan) if record.execution_plan is not None else None,
+                        canonical_hash(record.execution_plan) if record.execution_plan is not None else "",
+                        now if record.status is JobStatus.QUEUED else None,
                         now,
                         now,
                     ),
@@ -149,6 +160,32 @@ class JobRepository(
                     raise ValueError("step job already active") from exc
                 raise
         return self.require(record.job_id, owner=record.owner)
+
+    def create_or_load_supplemental(self, record: JobRecord) -> tuple[JobRecord, bool]:
+        """Create one idempotent supplemental JobAttempt in research_jobs."""
+        if record.job_role != "supplemental":
+            raise ValueError("supplemental job_role is required")
+        if record.status is not JobStatus.QUEUED:
+            raise ValueError("supplemental jobs must enter the queue directly")
+        try:
+            return self.create(record), True
+        except sqlite3.IntegrityError:
+            with self._connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT * FROM research_jobs
+                    WHERE job_role='supplemental' AND parent_job_id=?
+                      AND supplemental_kind=? AND supplemental_identity=?
+                      AND source_artifact_hash=?
+                      AND status IN ('submitted', 'planning', 'queued', 'running', 'paused')
+                    """,
+                    (record.parent_job_id, record.supplemental_kind,
+                     record.supplemental_identity, record.source_artifact_hash),
+                ).fetchone()
+            existing = self._record(row)
+            if existing is None:
+                raise
+            return existing, False
 
     def transition(
         self,

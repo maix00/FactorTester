@@ -587,7 +587,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .job-status { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 2px 7px; border-radius: 999px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
 .job-status.succeeded { color: #16713b; background: #e4f7eb; }
 .job-status.failed, .job-status.cancelled { color: #a2302a; background: #fde9e7; }
-.job-status.running, .job-status.planning { color: #1769aa; background: #e6f2ff; }
+.job-status.running, .job-status.planning, .job-status.analyzing { color: #1769aa; background: #e6f2ff; }
 .job-status.queued, .job-status.submitted, .job-status.created { color: #93620d; background: #fff3d6; }
 .job-status.paused { color: #6a4ca3; background: #f0eaff; }
 .job-status.unknown { color: var(--muted); background: #ececf0; }

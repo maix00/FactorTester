@@ -10,6 +10,7 @@
       succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中",
       planning: "规划中", cancelled: "已取消", paused: "已暂停",
       submitted: "已提交", created: "已创建",
+      analyzing: "分析中",
       awaiting_confirmation: "等待确认",
     }[value];
     return title ? context.t(title) : value || context.t("未知");
@@ -22,6 +23,11 @@
     pill.className = `job-status ${normalized || "unknown"}`;
     pill.textContent = statusTitle(value, context);
     return pill;
+  }
+
+  function statusCell(job, context) {
+    const active = Number(job.supplemental_active_count || 0);
+    return statusPill(active > 0 ? "analyzing" : job.status, context);
   }
 
   function kindTitle(value, context) {
@@ -115,7 +121,7 @@
 
   window.FTJobListFormat = Object.freeze({
     artifactCell, date, displayProfile, formatBytes, jobPort, kindTitle,
-    referenceURL, scalar, serverLabel, statusPill, table, taskCell, taskHash,
+    referenceURL, scalar, serverLabel, statusCell, statusPill, table, taskCell, taskHash,
     taskTitle, text,
   });
 })();

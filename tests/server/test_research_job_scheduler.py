@@ -107,6 +107,48 @@ def test_scheduler_plans_and_executes_real_job_in_child_process(tmp_path) -> Non
     assert events["latest_progress"]["event"] == "progress"
 
 
+def test_supplemental_job_skips_planning_and_writes_artifact_to_parent(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+    repository.transition(parent.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        parent.job_id, plan={"runner": parent.runner_path}, notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition(parent.job_id, JobStatus.RUNNING)
+    parent = repository.transition(
+        parent.job_id, JobStatus.SUCCEEDED, result_summary={"success": True},
+    )
+    child = replace(
+        _record("supplemental", runner="supplemental_artifact_runner"),
+        status=JobStatus.QUEUED,
+        job_role="supplemental",
+        parent_job_id=parent.job_id,
+        supplemental_kind="custom_python_analysis",
+        supplemental_identity="analysis-1",
+        source_artifact_hash="source-1",
+        execution_plan={"runner": "custom_python_analysis", "version": 1},
+    )
+    repository.create_or_load_supplemental(child)
+
+    with ResearchJobScheduler(
+        repository=repository, deployment_id="test", planner_workers=1,
+        execution_workers=1, result_artifact_root=str(tmp_path / "artifacts"),
+    ) as scheduler:
+        completed, seen = _drive(
+            scheduler, repository, child.job_id, {JobStatus.SUCCEEDED},
+        )
+
+    assert JobStatus.PLANNING not in seen
+    assert completed.parent_job_id == parent.job_id
+    assert repository.require(parent.job_id).status is JobStatus.SUCCEEDED
+    artifact = repository.require_artifact(
+        job_id=parent.job_id, name="derived-analysis",
+    )
+    assert artifact["relative_path"].startswith(f"{parent.job_id}/")
+    assert not (tmp_path / "artifacts" / child.job_id).exists()
+
+
 def test_explicit_result_outputs_are_not_generated_during_planning(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     job = _record("declared-outputs", runner="blocking_runner", seconds=30)

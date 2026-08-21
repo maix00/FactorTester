@@ -335,6 +335,24 @@ class JobArtifactImplementation:
         args = [str(owner), str(workspace_id), *terminal]
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            active_child = conn.execute(
+                f"""
+                SELECT child.job_id FROM research_jobs AS child
+                JOIN research_jobs AS parent
+                  ON parent.job_id=child.parent_job_id
+                WHERE parent.owner=? AND parent.workspace_id=?
+                  AND parent.job_role='primary'
+                  AND parent.status IN ({placeholders})
+                  AND child.job_role='supplemental'
+                  AND child.status NOT IN ({placeholders})
+                LIMIT 1
+                """,
+                [str(owner), str(workspace_id), *terminal, *terminal],
+            ).fetchone()
+            if active_child is not None:
+                raise RuntimeError(
+                    "active supplemental job must finish or be cancelled before deleting history"
+                )
             jobs = conn.execute(
                 f"""
                 SELECT job_id FROM research_jobs

@@ -81,6 +81,7 @@ class _WorkerSink:
         job_id: str,
         output_queue: Any,
         *,
+        artifact_job_id: str = "",
         artifact_root: str = "",
         retention_mode: str = "summary",
         output_requests: list[str] | tuple[str, ...] = (),
@@ -88,6 +89,7 @@ class _WorkerSink:
         cancel_event: Any = None,
     ) -> None:
         self.job_id = str(job_id)
+        self.artifact_job_id = str(artifact_job_id or job_id)
         self.output_queue = output_queue
         self.artifact_root = Path(artifact_root) if artifact_root else None
         self.retention_mode = str(retention_mode)
@@ -383,6 +385,15 @@ class _WorkerSink:
                 self._source_payloads[str(name)] = value
             self._write_artifact(str(name), value)
 
+    def emit_core_artifact(self, name: str, value: Any) -> None:
+        """Persist a bounded Job result index independent of optional outputs.
+
+        Core artifacts back the standard Job result UI.  They are not an
+        opt-in report and must remain available under summary retention, while
+        large execution traces continue to obey ``output_requests``.
+        """
+        self._write_artifact(str(name), value)
+
     def emit_mapping_artifact(
         self,
         name: str,
@@ -405,7 +416,7 @@ class _WorkerSink:
             ch if ch.isalnum() or ch in "-_" else "-"
             for ch in name
         )
-        target = self.artifact_root / self.job_id / f"{safe_name}.json"
+        target = self.artifact_root / self.artifact_job_id / f"{safe_name}.json"
         receipt = write_json_mapping_artifact(
             target,
             fields=fields,
@@ -414,7 +425,7 @@ class _WorkerSink:
         )
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
             "content_type": "application/json",
             "content_hash": receipt.content_hash,
             "size_bytes": receipt.size_bytes,
@@ -445,12 +456,12 @@ class _WorkerSink:
             ch if ch.isalnum() or ch in "-_" else "-"
             for ch in name
         )
-        directory = self.artifact_root / self.job_id
+        directory = self.artifact_root / self.artifact_job_id
         target = directory / f"{safe_name}.json"
         receipt = write_json_artifact(target, value)
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
             "content_type": "application/json",
             "content_hash": receipt.content_hash,
             "size_bytes": receipt.size_bytes,
@@ -467,7 +478,7 @@ class _WorkerSink:
         if self.artifact_root is None:
             raise RuntimeError("artifact root is required")
         safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name)
-        directory = self.artifact_root / self.job_id
+        directory = self.artifact_root / self.artifact_job_id
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{safe_name}.{extension}"
         staging = directory / f".{safe_name}.{os.getpid()}.tmp"
@@ -475,7 +486,7 @@ class _WorkerSink:
         staging.replace(target)
         self._emit("artifact", {
             "name": name,
-            "relative_path": f"{self.job_id}/{target.name}",
+            "relative_path": f"{self.artifact_job_id}/{target.name}",
             "content_type": content_type,
             "content_hash": hashlib.sha256(raw).hexdigest(),
             "size_bytes": len(raw),
@@ -534,6 +545,7 @@ def _worker_entry(
             sink = _WorkerSink(
                 job_id,
                 output_queue,
+                artifact_job_id=str(task.get("artifact_job_id") or job_id),
                 artifact_root=str(task.get("artifact_root") or ""),
                 retention_mode=str(task.get("retention_mode") or "summary"),
                 output_requests=list(
@@ -655,6 +667,7 @@ class LongLivedWorkerPool:
         pinned: bool = False,
         artifact_root: str = "",
         retention_mode: str = "summary",
+        artifact_job_id: str = "",
     ) -> int:
         with self._lock:
             if self._closed:
@@ -684,6 +697,7 @@ class LongLivedWorkerPool:
                 "cache_keys": sorted(requested),
                 "artifact_root": str(artifact_root),
                 "retention_mode": str(retention_mode),
+                "artifact_job_id": str(artifact_job_id or job_id),
             })
             return worker.process.pid
 

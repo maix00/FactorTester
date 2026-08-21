@@ -589,6 +589,12 @@ def list_test_jobs():
                 "output_artifact_bytes": item["output_artifact_bytes"],
                 "input_artifact_count": item["input_artifact_count"],
                 "input_artifact_bytes": item["input_artifact_bytes"],
+                "updated_at": item["effective_updated_at"],
+                "parent_updated_at": item["job"].updated_at,
+                "supplemental_count": item["supplemental_count"],
+                "supplemental_active_count": item["supplemental_active_count"],
+                "supplemental_failed_count": item["supplemental_failed_count"],
+                "supplemental_updated_at": item["supplemental_updated_at"],
                 "server_context": _server_context(item["job"]),
                 "research_binding": _list_research_binding(
                     job_repository, item["job"], item["job"].owner,

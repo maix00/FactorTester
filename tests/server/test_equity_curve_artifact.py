@@ -226,7 +226,7 @@ def test_declared_outputs_retain_only_required_sources_and_generate_reports(tmp_
     assert (tmp_path / "job-declared" / "result.json").exists()
 
 
-def test_group_research_detail_retains_drilldown_sources_without_extra_report(
+def test_group_research_detail_uses_compact_core_artifact_without_full_sources(
     tmp_path,
 ) -> None:
     output = queue.Queue()
@@ -234,28 +234,29 @@ def test_group_research_detail_retains_drilldown_sources_without_extra_report(
         "job-group-detail",
         output,
         artifact_root=str(tmp_path),
-        retention_mode="full",
+        retention_mode="summary",
         output_requests=["group_research_detail"],
     )
-    group_execution = {
-        "engine_result": {
-            "portfolios": {"A1": {"equity_curve": {"1": 100.0}}},
-        },
-        "group_owner": [{"group_id": "A1", "group_index": 0}],
-    }
-    sink.emit_artifact("group_execution", group_execution)
+    sink.emit_core_artifact("strategy_analysis_source", {
+        "artifact_version": 1,
+        "strategies": {"A1": {"result_group": {}, "position_curve": {}}},
+        "metrics": {},
+    })
+    sink.emit_artifact("group_execution", {"large": True})
     sink.emit_artifact("order_audit", {"strategies": {"A1": {"fills": []}}})
     sink.emit_result({
         "success": True,
         "groups": [{"name": "A1", "timestamps": [1], "total_equity": [100.0]}],
-    }, source=group_execution)
+    })
 
     names = {
         item["data"]["name"]
         for item in list(output.queue)
         if item.get("event") == "artifact"
     }
-    assert {"result", "group_execution", "order_audit"} <= names
+    assert "strategy_analysis_source" in names
+    assert "group_execution" not in names
+    assert "order_audit" not in names
     assert not any(name.endswith("_report") for name in names)
 
 

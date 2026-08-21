@@ -79,11 +79,11 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert group_detail["viewer"] == "group_research_detail"
     assert group_detail["before_run"] is True
     assert group_detail["after_run"] is False
-    assert group_detail["result_retention_mode"] == "full"
+    assert "result_retention_mode" not in group_detail
     assert source_artifacts_for(["group_research_detail"]) == {
-        "result", "group_execution", "order_audit",
+        "strategy_analysis_source",
     }
-    assert result_retention_mode_for(["group_research_detail"]) == "full"
+    assert result_retention_mode_for(["group_research_detail"]) == "summary"
     assert result_retention_mode_for(["fee_detail"]) == "summary"
     assert result_retention_mode_for(["fee_detail"], requested="full") == "full"
     declarations = output_declarations(["equity", "fees"])
@@ -127,11 +127,9 @@ def test_backtest_series_outputs_preserve_strategy_identity() -> None:
         "before_run": True,
         "after_run": False,
         "required_sources": [
-            {"name": "result", "label": "回测结果摘要（运行完成后由服务器保留）"},
-            {"name": "group_execution", "label": "分组执行明细与组合曲线的原始数据"},
-            {"name": "order_audit", "label": "订单、成交和结算手续费审计明细"},
+            {"name": "strategy_analysis_source", "label": "按需计算策略分析所需的基础数据"},
         ],
-        "result_retention_mode": "full",
+        "result_retention_mode": "summary",
     }
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
