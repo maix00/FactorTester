@@ -32,7 +32,7 @@
     return scriptLoad;
   }
 
-  async function fetchAdapter(profileState, input, init = {}) {
+  async function fetchAdapter(profileState, itemView, input, init = {}) {
     const body = await P.parseBody(input, init);
     const operation = P.operation(body);
     if (!operation) return window.fetch(input, init);
@@ -53,16 +53,17 @@
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), !profileState.historyOnly,
       );
-      await S.restoreThread(state);
+      const page = await S.authoritativePage(state, {}, itemView);
       return P.jsonResponse(P.threadObject(
-        state, {locked: profileState.historyOnly},
+        {...state, items: page.items, itemPage: page},
+        {locked: profileState.historyOnly},
       ));
     }
     if (operation === "items.list") {
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
-      const page = await S.authoritativePage(state, params);
+      const page = await S.authoritativePage(state, params, itemView);
       return P.jsonResponse(P.page(page.items, page));
     }
     if (operation === "threads.update") {
@@ -199,7 +200,9 @@
     };
   }
 
-  function readOnlyURL(path, profileState, conversationID = "", pageParams = {}) {
+  function readOnlyURL(
+    path, profileState, itemView, conversationID = "", pageParams = {},
+  ) {
     const params = new URLSearchParams({
       profile_key: profileState.profileKey,
       scope: profileState.profileScope,
@@ -208,26 +211,27 @@
     if (pageParams.limit) params.set("limit", String(pageParams.limit));
     if (pageParams.after) params.set("after", pageParams.after);
     if (pageParams.order) params.set("order", pageParams.order);
-    params.set("view", profileState.itemView || "results");
+    params.set("view", itemView);
     return `${path}?${params}`;
   }
 
   async function readOnlyJSON(
-    profileState, path, conversationID = "", pageParams = {},
+    profileState, itemView, path, conversationID = "", pageParams = {},
   ) {
     const payload = await profileState.context.api(
-      readOnlyURL(path, profileState, conversationID, pageParams),
+      readOnlyURL(path, profileState, itemView, conversationID, pageParams),
     );
     return payload || {};
   }
 
-  async function readOnlyConversations(profileState) {
+  async function readOnlyConversations(profileState, itemView) {
     if (profileState.conversationCache
         && Date.now() - profileState.conversationCacheAt < 5000) {
       return profileState.conversationCache;
     }
     const payload = await readOnlyJSON(
       profileState,
+      itemView,
       "/api/client/profile-directory/conversations",
     );
     profileState.conversationCache = Array.isArray(payload.conversations)
@@ -236,9 +240,12 @@
     return profileState.conversationCache;
   }
 
-  async function readOnlyItems(profileState, conversationID, params = {}) {
+  async function readOnlyItems(
+    profileState, itemView, conversationID, params = {},
+  ) {
     const payload = await readOnlyJSON(
       profileState,
+      itemView,
       "/api/client/profile-directory/conversation-items",
       conversationID,
       P.itemPageParams(params),
@@ -251,7 +258,7 @@
     };
   }
 
-  async function fetchReadOnlyAdapter(profileState, input, init = {}) {
+  async function fetchReadOnlyAdapter(profileState, itemView, input, init = {}) {
     const body = await P.parseBody(input, init);
     const operation = P.operation(body);
     if (!operation) return window.fetch(input, init);
@@ -259,13 +266,13 @@
       ? body.params : (body || {});
     const conversationID = readOnlyConversationID(params);
     if (operation === "threads.list") {
-      const conversations = await readOnlyConversations(profileState);
+      const conversations = await readOnlyConversations(profileState, itemView);
       return P.jsonResponse(P.page(conversations.map(item => (
         readOnlyThread(profileState.profileKey, item)
       ))));
     }
     if (operation === "threads.get_by_id") {
-      const conversations = await readOnlyConversations(profileState);
+      const conversations = await readOnlyConversations(profileState, itemView);
       const conversation = conversations.find(
         item => String(item.conversation_id || "") === conversationID,
       );
@@ -277,12 +284,14 @@
       return P.jsonResponse(readOnlyThread(
         profileState.profileKey,
         conversation,
-        await readOnlyItems(profileState, conversationID),
+        await readOnlyItems(profileState, itemView, conversationID),
       ));
     }
     if (operation === "items.list") {
-      const page = await readOnlyItems(profileState, conversationID, params);
-      const conversations = await readOnlyConversations(profileState);
+      const page = await readOnlyItems(
+        profileState, itemView, conversationID, params,
+      );
+      const conversations = await readOnlyConversations(profileState, itemView);
       const conversation = conversations.find(
         item => String(item.conversation_id || "") === conversationID,
       );
@@ -313,39 +322,47 @@
         profileKey,
         profileScope: options.profileScope || "servers",
         context,
-        itemView: "results",
         onConversationChange: options.onConversationChange,
         conversationCache: null,
         conversationCacheAt: 0,
       };
+      let defaultView = "results";
+      const fetchForView = value => {
+        const view = value === "process" ? "process" : "results";
+        return (input, init) => fetchReadOnlyAdapter(
+          profileState, view, input, init,
+        );
+      };
       return {
-        fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
+        fetch: (input, init) => fetchForView(defaultView)(input, init),
+        fetchForView,
         endpoint: CHATKIT_ENDPOINT,
         locale: P.chatLocale(context),
         setItemView(value) {
-          profileState.itemView = value === "process" ? "process" : "results";
+          defaultView = value === "process" ? "process" : "results";
         },
         dispose() {},
       };
     }
     const profileState = C.profileStateFor(profile, context, options.skills || []);
-    profileState.itemView = "results";
     profileState.historyOnly = Boolean(options.historyOnly);
     profileState.onConversationChange = options.onConversationChange;
     profileState.runtimeObserver = options.onRuntimeEvent;
     for (const state of profileState.conversations.values()) {
       state.runtimeObserver = profileState.runtimeObserver;
     }
+    let defaultView = "results";
+    const fetchForView = value => {
+      const view = value === "process" ? "process" : "results";
+      return (input, init) => fetchAdapter(profileState, view, input, init);
+    };
     return {
-      fetch: (input, init) => fetchAdapter(profileState, input, init),
+      fetch: (input, init) => fetchForView(defaultView)(input, init),
+      fetchForView,
       endpoint: CHATKIT_ENDPOINT,
       locale: P.chatLocale(context),
       setItemView(value) {
-        profileState.itemView = value === "process" ? "process" : "results";
-        for (const state of profileState.conversations?.values?.() || []) {
-          state.restored = false;
-          state.itemPage = null;
-        }
+        defaultView = value === "process" ? "process" : "results";
       },
       dispose() {
         C.dispose(profileState, S.closeSource);
