@@ -4,6 +4,7 @@
   function kindLabel(value, context) {
     const labels = {
       backtest_strategy_analysis: "策略分析",
+      report_output_generation: "结果生成",
       custom_python_analysis: "自定义分析",
     };
     return context.t(labels[String(value || "")] || value || "补充任务");

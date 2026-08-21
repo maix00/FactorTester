@@ -13,6 +13,26 @@
     return Array.isArray(payload.outputs) ? payload.outputs : [];
   }
 
+  const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+  async function waitForGeneration(context, options, child) {
+    const childID = encodeURIComponent(String(child?.job_id || ""));
+    if (!childID) throw new Error(context.t("补充任务缺少 Job ID"));
+    const query = options.artifactQuery || options.executionQuery || options.portQuery || "";
+    for (;;) {
+      const payload = await context.api(
+        `/api/jobs/${encodeURIComponent(options.jobID)}/supplementals/${childID}${query}`,
+      );
+      const job = payload?.job || {};
+      if (job.status === "succeeded") return payload;
+      if (["failed", "cancelled"].includes(job.status)) {
+        const error = payload?.error || {};
+        throw new Error(error.message || error.code || context.t("结果生成失败"));
+      }
+      await delay(500);
+    }
+  }
+
   function panel(context, options) {
     const section = document.createElement("section");
     section.className = "job-section job-output-generation";
@@ -42,7 +62,7 @@
       ])],
       "after_run",
     );
-    const executionQuery = options.executionQuery || options.portQuery || "";
+    const executionQuery = options.artifactQuery || options.executionQuery || options.portQuery || "";
     const status = document.createElement("span");
     status.className = "output-generation-status";
     const generate = context.button(context.t("生成所选结果"), async () => {
@@ -53,10 +73,17 @@
       generate.disabled = true;
       status.textContent = context.t("正在生成…");
       try {
-        await context.api(
-          `/api/jobs/${encodeURIComponent(options.jobID)}/artifacts/generate${executionQuery}`,
-          {method: "POST", body: JSON.stringify({output_requests: selected})},
+        const created = await context.api(
+          `/api/jobs/${encodeURIComponent(options.jobID)}/supplementals${executionQuery}`,
+          {method: "POST", body: JSON.stringify({
+            kind: "report_output_generation",
+            params: {output_requests: selected},
+          })},
         );
+        if (created.job) {
+          status.textContent = context.t("已加入补充任务队列…");
+          await waitForGeneration(context, options, created.job);
+        }
         status.textContent = context.t("已生成，正在刷新任务详情…");
         await options.onGenerated();
       } catch (error) {

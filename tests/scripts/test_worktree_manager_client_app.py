@@ -890,7 +890,7 @@ def test_remote_run_submission_uses_manager_frozen_authoring_context(
     )
 
 
-def test_job_output_generation_uses_job_port_and_forwards_body(
+def test_job_output_generation_uses_supplemental_route_and_forwards_body(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
@@ -906,10 +906,10 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
         )
 
     monkeypatch.setattr(state.gateway, "request", request)
-    body = b'{"output_requests":["ic_statistics"]}'
+    body = b'{"kind":"report_output_generation","params":{"output_requests":["equity_curve"]}}'
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/jobs/job-one/artifacts/generate?port=8141",
+            f"{base_url}/api/jobs/job-one/supplementals?port=8141",
             data=body,
             method="POST",
             headers={
@@ -933,7 +933,7 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
     assert rejected.value.code == 404
     assert calls == [{
         "port": 8141,
-        "path": "/api/jobs/job-one/artifacts/generate",
+        "path": "/api/jobs/job-one/supplementals",
         "principal": "user@1",
         "method": "POST",
         "body": body,
@@ -2571,7 +2571,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "/artifacts/${encodeURIComponent(artifact.name)}" in viewers
     assert "/preview" not in viewers
     assert "/api/jobs/artifact-capabilities" in generation
-    assert "/artifacts/generate" in generation
+    assert "/supplementals" in generation
+    assert "report_output_generation" in generation
     assert "output_requests" in generation
 
 

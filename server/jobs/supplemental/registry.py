@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-
 Prepare = Callable[[Any, Any, dict[str, Any]], dict[str, Any]]
 Execute = Callable[[dict[str, Any], Any, Any], None]
 
@@ -45,4 +44,5 @@ def _load_builtin_adapters() -> None:
     from server.modules.single_factor_test.supplemental import (  # noqa: F401
         backtest_strategy_analysis,
         custom_python_analysis,
+        report_output_generation,
     )

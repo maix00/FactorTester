@@ -377,7 +377,7 @@ class JobProxyRoutesMixin:
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
-            r"(/result|/artifacts(?:/generate|/[A-Za-z0-9._%+-]{1,512})?"
+            r"(/result|/artifacts(?:/[A-Za-z0-9._%+-]{1,512})?"
             r"|/supplementals(?:/[A-Za-z0-9._-]{1,128})?"
             r"|/custom-analyses(?:/[A-Za-z0-9._-]{1,128})?"
             r"|/group-detail|/group-ranking-detail|/group-snapshot"
@@ -391,8 +391,7 @@ class JobProxyRoutesMixin:
         custom_analysis_collection = suffix == "/custom-analyses"
         custom_analysis_item = suffix.startswith("/custom-analyses/")
         if method == "POST" and not (
-            suffix == "/artifacts/generate"
-            or suffix in _JOB_ANALYSIS_PATHS
+            suffix in _JOB_ANALYSIS_PATHS
             or supplemental_collection
             or custom_analysis_collection
         ):

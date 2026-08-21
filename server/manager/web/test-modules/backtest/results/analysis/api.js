@@ -65,7 +65,9 @@
       return loadSupplementalArtifact(context, options, created.artifact);
     }
     const completed = await waitForSupplemental(context, options, created.job);
-    const artifactName = completed?.result_summary?.artifact_name;
+    const result = completed?.result_summary || {};
+    const artifactName = result?.artifact_names?.[String(params?.analysis_tab || "")]
+      || result?.artifact_name;
     return loadSupplementalArtifact(context, options, {name: artifactName});
   }
 

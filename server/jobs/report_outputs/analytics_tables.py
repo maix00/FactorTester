@@ -15,6 +15,7 @@ def period_return_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 dt = _datetime(timestamp)
                 key = dt.strftime("%Y-%m") if frequency == "month" else dt.strftime("%Y")
                 buckets.setdefault(key, []).append((timestamp, value))
+            previous_close = item["values"][0] if item["values"] else None
             for period, points in buckets.items():
                 start, end = points[0], points[-1]
                 rows.append({
@@ -24,9 +25,17 @@ def period_return_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "period": period, "start_timestamp": start[0],
                     "end_timestamp": end[0], "start_value": start[1],
                     "end_value": end[1],
-                    "return": end[1] / start[1] - 1.0 if start[1] else None,
+                    # Calendar-period performance includes the move from the
+                    # previous period's close to this period's first point.
+                    # Using this period's first observation as the denominator
+                    # silently dropped every month/year boundary return.
+                    "return": (
+                        end[1] / previous_close - 1.0
+                        if previous_close else None
+                    ),
                     "observations": len(points),
                 })
+                previous_close = end[1]
     return rows
 
 

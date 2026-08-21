@@ -14,18 +14,28 @@ def fee_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
     for strategy, payload in (strategies or {}).items():
         if not isinstance(payload, dict):
             continue
-        for kind in ("fills", "settlements"):
-            for index, item in enumerate(payload.get(kind) or ()):
-                if not isinstance(item, dict):
-                    continue
-                rows.append({
-                    "strategy": strategy, "event_type": kind, "row": index,
-                    "timestamp": item.get("timestamp"),
-                    "product": item.get("instrument", item.get("product")),
-                    "side": item.get("side"), "offset": item.get("offset"),
-                    "fee": item.get("fee", item.get("fees", item.get("fee_amount", 0.0))),
-                    "raw": item,
-                })
+        fills = [item for item in payload.get("fills") or () if isinstance(item, dict)]
+        fill_ids = {str(item.get("fill_id")) for item in fills if item.get("fill_id")}
+        events = [("fills", index, item) for index, item in enumerate(fills)]
+        # Native accounting records the same fee on Fill and FillSettlement.
+        # Settlement-only rows remain a compatibility source, but a paired
+        # settlement must not double count the authoritative fill fee.
+        events.extend(
+            ("settlements", index, item)
+            for index, item in enumerate(payload.get("settlements") or ())
+            if isinstance(item, dict)
+            and (not item.get("fill_id") or str(item.get("fill_id")) not in fill_ids)
+        )
+        for kind, index, item in events:
+            rows.append({
+                "strategy": strategy, "event_type": kind, "row": index,
+                "fill_id": item.get("fill_id"),
+                "timestamp": item.get("timestamp"),
+                "product": item.get("instrument", item.get("product")),
+                "side": item.get("side"), "offset": item.get("offset"),
+                "fee": item.get("fee", item.get("fees", item.get("fee_amount", 0.0))),
+                "raw": item,
+            })
     return rows
 
 
