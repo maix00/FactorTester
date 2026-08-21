@@ -1,5 +1,6 @@
 from server.services.frozen_product_scope import freeze_product_scope
 from server.modules.shared.factor_tester_runtime import (
+    selection_from_request,
     selection_for_product_path_selection,
 )
 from server.modules.single_factor_test.research_jobs import _execution_payload
@@ -189,6 +190,53 @@ def test_freeze_product_scope_is_shared_by_ic_and_backtest() -> None:
     ]
     assert "product_selections" not in payload["analyses"]["ic"]
     assert payload["analyses"]["ic"]["product_path_selection_id"] == "scope-a"
+
+
+def test_ic_frozen_scope_and_settings_have_one_runspec_source(monkeypatch) -> None:
+    configuration = {
+        "configuration_id": "config-ic",
+        "revision": 3,
+        "fingerprint": "sha256:config-ic",
+        "payload": {
+            "schema_version": 1,
+            "shared": {"factors": []},
+            "analyses": {"ic": {
+                "product_path_selection_id": "scope-a",
+                "product_selections": {"scope-a": {"paths": ["Product/A"]}},
+                "start_date": "2026-01-01",
+                "local_settings": {
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-01-31",
+                },
+                "settings": {
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-01-31",
+                },
+            }},
+            "ui": {"ic": {"settings": {"start_date": "2026-01-01"}}},
+        },
+    }
+    frozen = freeze_product_scope(configuration, owner="alice", analyses=["ic"])
+    analysis = frozen["payload"]["analyses"]["ic"]
+    assert analysis == {
+        "product_path_selection_id": "scope-a",
+        "local_settings": {
+            "start_date": "2026-01-01", "end_date": "2026-01-31",
+        },
+    }
+    assert "settings" not in frozen["payload"]["ui"]["ic"]
+
+    execution = _execution_payload(frozen, "ic")
+    assert execution["start_date"] == "2026-01-01"
+    assert execution["end_date"] == "2026-01-31"
+    product = object()
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (paths, [product]),
+    )
+    selection = selection_from_request(execution, page_uuid="")
+    assert selection.selected_paths == ["Product/A"]
+    assert selection.products == [product]
 
 
 def test_frozen_shared_selection_reaches_backtest_runtime(monkeypatch) -> None:
