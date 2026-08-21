@@ -379,6 +379,7 @@ class JobProxyRoutesMixin:
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
             r"(/result|/artifacts(?:/generate|/[A-Za-z0-9._%+-]{1,512})?"
             r"|/supplementals(?:/[A-Za-z0-9._-]{1,128})?"
+            r"|/custom-analyses(?:/[A-Za-z0-9._-]{1,128})?"
             r"|/group-detail|/group-ranking-detail|/group-snapshot"
             r"|/group-order-flow)?",
             parsed.path,
@@ -387,14 +388,20 @@ class JobProxyRoutesMixin:
             return False
         suffix = match.group(2) or ""
         supplemental_collection = suffix == "/supplementals"
+        custom_analysis_collection = suffix == "/custom-analyses"
+        custom_analysis_item = suffix.startswith("/custom-analyses/")
         if method == "POST" and not (
             suffix == "/artifacts/generate"
             or suffix in _JOB_ANALYSIS_PATHS
             or supplemental_collection
+            or custom_analysis_collection
         ):
+            return False
+        if method == "PATCH" and not custom_analysis_item:
             return False
         if method == "DELETE" and not (
             suffix == "/artifacts" or suffix.startswith("/artifacts/")
+            or custom_analysis_item
         ):
             return False
         session = self._session()
@@ -406,6 +413,7 @@ class JobProxyRoutesMixin:
             and (
                 suffix_value in {"", "/result", "/artifacts"}
                 or suffix_value.startswith("/supplementals")
+                or suffix_value == "/custom-analyses"
             )
         )
         if session is None and not public:
@@ -468,7 +476,7 @@ class JobProxyRoutesMixin:
             return True
         path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
-        if method == "POST":
+        if method in {"POST", "PATCH"}:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except (TypeError, ValueError):
@@ -502,9 +510,13 @@ class JobProxyRoutesMixin:
             }
         try:
             if (
-                suffix in {"/result", "/artifacts", "/supplementals"}
+                suffix in {
+                    "/result", "/artifacts", "/supplementals",
+                    "/custom-analyses",
+                }
                 or suffix.startswith("/artifacts/")
                 or suffix.startswith("/supplementals/")
+                or suffix.startswith("/custom-analyses/")
             ):
                 routes = self._job_routes(
                     parsed, principal, for_artifact_storage=True,

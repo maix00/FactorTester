@@ -44,4 +44,5 @@ def _load_builtin_adapters() -> None:
         return
     from server.modules.single_factor_test.supplemental import (  # noqa: F401
         backtest_strategy_analysis,
+        custom_python_analysis,
     )

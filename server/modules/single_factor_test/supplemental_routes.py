@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import uuid
+
 from flask import jsonify, request, session
 
+from server.jobs.artifacts import artifact_root
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.states import JobStatus
 from server.jobs.supplemental import SupplementalRequest, request_supplemental
@@ -42,8 +46,26 @@ def _parent(parent_job_id: str, *, mutate: bool = False):
     return parent, None
 
 
+def _supplemental_payload(job) -> dict:
+    value = job.job_spec.get("supplemental_payload")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _recoverable(job) -> bool:
+    if job.supplemental_kind != "custom_python_analysis":
+        return True
+    name = str(_supplemental_payload(job).get("source_artifact_name") or "")
+    if not name:
+        return False
+    artifact = repository().load_artifact(
+        job_id=job.parent_job_id, owner=job.owner, name=name,
+    )
+    return bool(artifact and artifact.get("state") == "active")
+
+
 def _summary(job) -> dict:
     value = job.summary()
+    payload = _supplemental_payload(job)
     value.update({
         "job_role": job.job_role,
         "parent_job_id": job.parent_job_id,
@@ -52,8 +74,140 @@ def _summary(job) -> dict:
         "status_url": f"/api/jobs/{job.parent_job_id}/supplementals/{job.job_id}",
         "stream_url": f"/api/jobs/{job.job_id}/stream",
         "cancel_url": f"/api/jobs/{job.job_id}/cancel",
+        "recoverable": _recoverable(job),
+        "target": {
+            "kind": job.supplemental_kind,
+            "tab_id": str(payload.get("tab_id") or ""),
+            "analysis_tab": str(payload.get("analysis_tab") or ""),
+            "strategy_id": str(payload.get("strategy_id") or ""),
+            "strategy_configuration_id": str(
+                payload.get("strategy_configuration_id") or ""
+            ),
+            "product_path_selection_id": str(
+                payload.get("product_path_selection_id") or ""
+            ),
+        },
     })
     return value
+
+
+def _can_manage(actor: str, owner: str) -> bool:
+    return actor == owner or is_super_admin_account(get_account(actor))
+
+
+def _analysis_parent(parent_job_id: str):
+    parent, error = _parent(parent_job_id, mutate=True)
+    if error:
+        return None, error
+    if not _can_manage(require_user(), parent.owner):
+        return None, (jsonify({
+            "success": False, "error": "无权修改该任务的自定义分析",
+        }), 403)
+    return parent, None
+
+
+@sft_bp.get("/api/jobs/<parent_job_id>/custom-analyses")
+def list_job_custom_analyses(parent_job_id: str):
+    parent, error = _parent(parent_job_id)
+    if error:
+        return error
+    analyses = repository().list_custom_analyses(
+        parent_job_id=parent.job_id, owner=parent.owner,
+    )
+    if session.get("manager_gateway_public_jobs"):
+        analyses = [
+            {key: value for key, value in item.items() if key != "source"}
+            for item in analyses
+        ]
+    return jsonify({
+        "success": True,
+        "analyses": analyses,
+    })
+
+
+@sft_bp.post("/api/jobs/<parent_job_id>/custom-analyses")
+def create_job_custom_analysis(parent_job_id: str):
+    parent, error = _analysis_parent(parent_job_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("title") or "自定义分析").strip()
+    source = str(data.get("source") or "result = {'artifacts': artifacts.list()}")
+    try:
+        from server.jobs.supplemental.custom_python import validate_source
+
+        validate_source(source)
+        value = repository().create_custom_analysis(
+            parent_job_id=parent.job_id, owner=parent.owner,
+            title=title, source=source, tab_id=uuid.uuid4().hex,
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "analysis": value}), 201
+
+
+@sft_bp.patch("/api/jobs/<parent_job_id>/custom-analyses/<tab_id>")
+def update_job_custom_analysis(parent_job_id: str, tab_id: str):
+    parent, error = _analysis_parent(parent_job_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    try:
+        current = repository().require_custom_analysis(
+            parent_job_id=parent.job_id, owner=parent.owner, tab_id=tab_id,
+        )
+        title = str(data.get("title", current["title"]))
+        source = str(data.get("source", current["source"]))
+        from server.jobs.supplemental.custom_python import validate_source
+
+        validate_source(source)
+        value = repository().update_custom_analysis(
+            parent_job_id=parent.job_id, owner=parent.owner, tab_id=tab_id,
+            title=title, source=source,
+        )
+    except KeyError:
+        return jsonify({"success": False, "error": "custom analysis tab not found"}), 404
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "analysis": value})
+
+
+@sft_bp.delete("/api/jobs/<parent_job_id>/custom-analyses/<tab_id>")
+def delete_job_custom_analysis(parent_job_id: str, tab_id: str):
+    parent, error = _analysis_parent(parent_job_id)
+    if error:
+        return error
+    try:
+        deleted = repository().delete_custom_analysis(
+            parent_job_id=parent.job_id, owner=parent.owner, tab_id=tab_id,
+        )
+    except KeyError:
+        return jsonify({"success": False, "error": "custom analysis tab not found"}), 404
+    from server.modules.single_factor_test.supplemental.custom_python_analysis import (
+        artifact_prefixes,
+    )
+
+    prefixes = artifact_prefixes(tab_id)
+    root = artifact_root()
+    removed = 0
+    for artifact in repository().list_artifacts(
+        job_id=parent.job_id, owner=parent.owner,
+    ):
+        if str(artifact["name"]) not in prefixes:
+            continue
+        metadata = repository().mark_artifact_deleted(
+            job_id=parent.job_id, owner=parent.owner,
+            name=str(artifact["name"]),
+        )
+        if metadata is None:
+            continue
+        path = (root / str(metadata["relative_path"])).resolve()
+        if root in path.parents and path.is_file():
+            path.unlink()
+            removed += 1
+    return jsonify({
+        "success": True, "analysis": deleted, "deleted_files": removed,
+    })
 
 
 def _status_filter() -> set[JobStatus] | None:
@@ -153,4 +307,5 @@ def get_job_supplemental(parent_job_id: str, supplemental_job_id: str):
     return jsonify({
         "success": True, "job": _summary(child),
         "result_summary": child.result_summary, "error": child.error,
+        "recoverable": _recoverable(child),
     })

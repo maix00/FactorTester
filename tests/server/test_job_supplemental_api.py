@@ -174,3 +174,139 @@ def test_strategy_supplemental_executes_and_persists_under_parent(
         (tmp_path / "artifacts" / artifact["relative_path"]).read_bytes()
     )
     assert payload["return_series"][-1]["return"] == pytest.approx(0.01)
+
+
+def test_custom_analysis_tab_persists_source_runs_and_deletes_without_history(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("GTHT_DEPLOYMENT_ID", "supplemental-test")
+    repository = JobRepository()
+    _parent(repository, tmp_path / "artifacts")
+    app = Flask(__name__)
+    app.secret_key = "supplemental"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    created_tab = client.post("/api/jobs/parent-1/custom-analyses", json={
+        "title": "收益检查",
+        "source": (
+            "source = artifacts.load_json('strategy_analysis_source')\n"
+            "result = {'strategies': len(source['strategies'])}"
+        ),
+    })
+    assert created_tab.status_code == 201
+    tab = created_tab.get_json()["analysis"]
+    renamed = client.patch(
+        f"/api/jobs/parent-1/custom-analyses/{tab['tab_id']}",
+        json={"title": "收益复核", "source": tab["source"]},
+    )
+    assert renamed.get_json()["analysis"]["title"] == "收益复核"
+
+    created_job = client.post("/api/jobs/parent-1/supplementals", json={
+        "kind": "custom_python_analysis", "params": {"tab_id": tab["tab_id"]},
+    })
+    assert created_job.status_code == 201
+    child_id = created_job.get_json()["job"]["job_id"]
+    deadline = time.monotonic() + 8
+    with ResearchJobScheduler(
+        repository=repository, deployment_id="supplemental-test",
+        execution_workers=1, result_artifact_root=str(tmp_path / "artifacts"),
+    ) as scheduler:
+        while time.monotonic() < deadline:
+            scheduler.tick()
+            child = repository.require(child_id)
+            if child.status in {JobStatus.SUCCEEDED, JobStatus.FAILED}:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("custom supplemental job did not finish")
+
+    assert child.status is JobStatus.SUCCEEDED, child.error
+    source_name = child.result_summary["source_artifact_name"]
+    result_name = child.result_summary["artifact_name"]
+    source_artifact = repository.require_artifact(
+        job_id="parent-1", name=source_name,
+    )
+    result_artifact = repository.require_artifact(
+        job_id="parent-1", name=result_name,
+    )
+    assert source_artifact["artifact_role"] == "input"
+    assert result_artifact["artifact_role"] == "output"
+    assert source_artifact["relative_path"] == (
+        f"parent-1/custom-analyses/{tab['tab_id']}/source.py"
+    )
+    assert result_artifact["relative_path"] == (
+        f"parent-1/custom-analyses/{tab['tab_id']}/result.json"
+    )
+
+    updated_source = (
+        "source = artifacts.load_json('strategy_analysis_source')\n"
+        "result = {'strategies': len(source['strategies']) + 1}"
+    )
+    updated = client.patch(
+        f"/api/jobs/parent-1/custom-analyses/{tab['tab_id']}",
+        json={"title": "收益复核", "source": updated_source},
+    )
+    assert updated.status_code == 200
+    rerun = client.post("/api/jobs/parent-1/supplementals", json={
+        "kind": "custom_python_analysis", "params": {"tab_id": tab["tab_id"]},
+    })
+    assert rerun.status_code == 201
+    rerun_id = rerun.get_json()["job"]["job_id"]
+    assert rerun_id != child_id
+    deadline = time.monotonic() + 8
+    with ResearchJobScheduler(
+        repository=repository, deployment_id="supplemental-test",
+        execution_workers=1, result_artifact_root=str(tmp_path / "artifacts"),
+    ) as scheduler:
+        while time.monotonic() < deadline:
+            scheduler.tick()
+            rerun_job = repository.require(rerun_id)
+            if rerun_job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED}:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("custom supplemental rerun did not finish")
+
+    assert rerun_job.status is JobStatus.SUCCEEDED, rerun_job.error
+    assert repository.count_supplemental(
+        parent_job_id="parent-1", owner="alice",
+    ) == 2
+    source_after = repository.require_artifact(
+        job_id="parent-1", name=source_name,
+    )
+    result_after = repository.require_artifact(
+        job_id="parent-1", name=result_name,
+    )
+    assert source_after["relative_path"] == source_artifact["relative_path"]
+    assert result_after["relative_path"] == result_artifact["relative_path"]
+    assert source_after["content_hash"] != source_artifact["content_hash"]
+    result_payload = orjson.loads(
+        (tmp_path / "artifacts" / result_after["relative_path"]).read_bytes()
+    )
+    assert result_payload["result"]["strategies"] == 2
+
+    deleted_result = client.delete(
+        f"/api/jobs/parent-1/artifacts/{result_name}"
+    )
+    assert deleted_result.status_code == 200
+    assert client.get("/api/jobs/parent-1/custom-analyses").get_json()[
+        "analyses"
+    ][0]["tab_id"] == tab["tab_id"]
+
+    deleted_tab = client.delete(
+        f"/api/jobs/parent-1/custom-analyses/{tab['tab_id']}"
+    )
+    assert deleted_tab.status_code == 200
+    assert repository.load(child_id) is not None
+    assert repository.load_artifact(
+        job_id="parent-1", owner="alice", name=source_name,
+    )["state"] == "deleted"
+    detail = client.get(
+        f"/api/jobs/parent-1/supplementals/{child_id}"
+    ).get_json()
+    assert detail["recoverable"] is False

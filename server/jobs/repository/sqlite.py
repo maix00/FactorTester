@@ -20,6 +20,7 @@ from ..assurance import BackendAssuranceValidator, canonical_hash
 from ..models import JobRecord
 from ..states import JobStatus, NON_TERMINAL_STATUSES, TERMINAL_STATUSES, require_transition
 from .artifacts import JobArtifactImplementation
+from .custom_analyses import JobCustomAnalysisImplementation
 from .detail import JobDetailQueryImplementation
 from .queries import JobQueryImplementation
 from .schema import ensure_job_schema
@@ -41,6 +42,7 @@ class JobRepository(
     JobQueryImplementation,
     JobDetailQueryImplementation,
     JobArtifactImplementation,
+    JobCustomAnalysisImplementation,
 ):
     """Own the durable queue and terminal metadata, never live progress."""
 

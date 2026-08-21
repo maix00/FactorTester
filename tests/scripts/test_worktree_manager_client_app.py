@@ -984,6 +984,65 @@ def test_job_supplementals_route_by_parent_storage_server_not_historical_port(
 
 
 @pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    (
+        ("GET", "/custom-analyses", None),
+        ("POST", "/custom-analyses", b'{"title":"A","source":"result = 1"}'),
+        ("PATCH", "/custom-analyses/tab-one", b'{"title":"B","source":"result = 2"}'),
+        ("DELETE", "/custom-analyses/tab-one", None),
+    ),
+)
+def test_job_custom_analysis_routes_use_parent_storage_server(
+    tmp_path, monkeypatch, method: str, suffix: str, body: bytes | None,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path, "python", session_db_path=tmp_path / "manager.sqlite",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    state.job_index.upsert("user@1", [{
+        "job_id": "parent-one",
+        "port": 8999,
+        "storage_server_id": state.server_id,
+        "updated_at": 10.0,
+    }])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"analyses":[]}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/parent-one{suffix}?port=8999",
+            data=body,
+            method=method,
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+
+    expected = {
+        "port": 8141,
+        "path": f"/api/jobs/parent-one{suffix}",
+        "principal": "user@1",
+        "method": method,
+    }
+    if body is not None:
+        expected.update({"body": body, "content_type": "application/json"})
+    assert calls == [expected]
+
+
+@pytest.mark.parametrize(
     ("path", "body"),
     (
         ("/api/jobs/job-one/approve", b"{}"),

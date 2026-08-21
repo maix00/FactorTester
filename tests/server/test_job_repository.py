@@ -154,6 +154,55 @@ def test_terminal_supplemental_allows_a_new_attempt_with_same_identity(tmp_path)
     assert second.job_id == "supplemental-2"
 
 
+def test_custom_analysis_tabs_are_persistent_resources_not_job_history(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+
+    created = repository.create_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice",
+        title="风险检查", source="result = {'ok': True}", tab_id="analysis-1",
+    )
+    renamed = repository.update_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+        title="风险复核", source="result = {'ok': False}",
+    )
+
+    assert created["title"] == "风险检查"
+    assert renamed["title"] == "风险复核"
+    assert renamed["source"] == "result = {'ok': False}"
+    assert repository.list_custom_analyses(
+        parent_job_id=parent.job_id, owner="alice",
+    ) == [renamed]
+
+    deleted = repository.delete_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+    )
+
+    assert deleted["tab_id"] == "analysis-1"
+    assert repository.load_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice", tab_id="analysis-1",
+    ) is None
+    assert repository.require(parent.job_id).job_id == parent.job_id
+
+
+def test_custom_analysis_tabs_are_scoped_to_parent_owner(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    parent = repository.create(_record("parent"))
+    repository.create_custom_analysis(
+        parent_job_id=parent.job_id, owner="alice",
+        title="分析", source="result = 1", tab_id="analysis-1",
+    )
+
+    assert repository.list_custom_analyses(
+        parent_job_id=parent.job_id, owner="bob",
+    ) == []
+    with pytest.raises(KeyError):
+        repository.update_custom_analysis(
+            parent_job_id=parent.job_id, owner="bob", tab_id="analysis-1",
+            title="越权", source="result = 2",
+        )
+
+
 def test_repository_initializes_schema_once_per_instance(tmp_path, monkeypatch) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     original = repository._ensure_schema

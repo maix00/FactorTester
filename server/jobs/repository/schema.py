@@ -153,6 +153,21 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             CHECK (size_bytes >= 0)
         );
 
+        CREATE TABLE IF NOT EXISTS research_job_custom_analyses (
+            parent_job_id TEXT NOT NULL,
+            tab_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            draft_source TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (parent_job_id, tab_id),
+            FOREIGN KEY (parent_job_id) REFERENCES research_jobs(job_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_research_job_custom_analyses_updated
+            ON research_job_custom_analyses(parent_job_id, updated_at DESC);
+
         """
     )
     create_maintenance_schema(conn)

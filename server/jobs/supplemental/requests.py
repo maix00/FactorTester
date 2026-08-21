@@ -43,11 +43,12 @@ def request_supplemental(repository, parent, request: SupplementalRequest):
     artifact_name = str(prepared.get("artifact_name") or "").strip()
     if not artifact_name:
         raise ValueError("supplemental adapter did not provide an artifact name")
-    existing_artifact = repository.load_artifact(
-        job_id=parent.job_id, name=artifact_name, owner=parent.owner,
-    )
-    if existing_artifact and existing_artifact.get("state") == "active":
-        return {"artifact": existing_artifact, "job": None, "created": False}
+    if prepared.get("reuse_artifact", True):
+        existing_artifact = repository.load_artifact(
+            job_id=parent.job_id, name=artifact_name, owner=parent.owner,
+        )
+        if existing_artifact and existing_artifact.get("state") == "active":
+            return {"artifact": existing_artifact, "job": None, "created": False}
     identity = canonical_hash(identity_payload)
     run_spec = parent.job_spec.get("run_spec")
     if not isinstance(run_spec, dict):

@@ -394,6 +394,12 @@ class _WorkerSink:
         """
         self._write_artifact(str(name), value)
 
+    def emit_core_artifact_at(
+        self, name: str, value: Any, *, relative_path: str,
+    ) -> None:
+        """Persist a core JSON artifact at one validated Job-relative path."""
+        self._write_artifact_at(str(name), value, relative_path=relative_path)
+
     def emit_mapping_artifact(
         self,
         name: str,
@@ -462,6 +468,31 @@ class _WorkerSink:
         self._emit("artifact", {
             "name": name,
             "relative_path": f"{self.artifact_job_id}/{target.name}",
+            "content_type": "application/json",
+            "content_hash": receipt.content_hash,
+            "size_bytes": receipt.size_bytes,
+        })
+
+    def _write_artifact_at(
+        self, name: str, value: Any, *, relative_path: str,
+    ) -> None:
+        if self.artifact_root is None:
+            raise RuntimeError("artifact root is required for full retention")
+        relative = Path(str(relative_path))
+        if (
+            relative.is_absolute() or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.suffix.lower() != ".json"
+        ):
+            raise ValueError("artifact relative path must be a safe JSON path")
+        directory = (self.artifact_root / self.artifact_job_id).resolve()
+        target = (directory / relative).resolve()
+        if directory not in target.parents:
+            raise ValueError("artifact relative path escapes the Job directory")
+        receipt = write_json_artifact(target, value)
+        self._emit("artifact", {
+            "name": name,
+            "relative_path": f"{self.artifact_job_id}/{relative.as_posix()}",
             "content_type": "application/json",
             "content_hash": receipt.content_hash,
             "size_bytes": receipt.size_bytes,
