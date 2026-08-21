@@ -1,0 +1,25 @@
+.job-result-tabs,
+.job-result-tabs-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.job-result-tabs-controls { margin-left: auto; }
+
+.job-result-tabs button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.job-result-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}

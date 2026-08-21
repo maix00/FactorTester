@@ -16,6 +16,8 @@ from tools.factors.tester_calc.single_factor_test.portfolio_metrics import (
     infer_periods_per_year,
 )
 
+from .strategy_identity import strategy_configuration_id
+
 
 def _safe_float(value: Any) -> float | None:
     try:
@@ -225,11 +227,16 @@ def serialize_event_execution(
             else strategy_id
         )
         settings = settings_by_group[strategy_id]
+        configuration_id = str(
+            owner.get("strategy_configuration_id")
+            or strategy_configuration_id(owner, settings)
+        )
         strategy_target_trace = target_trace.get(strategy_id, {})
         execution_trace = portfolio.get("execution_trace") or {}
         turnover = _portfolio_turnover(portfolio)
         comparison_strategies.append({
             "strategy_id": strategy_id,
+            "strategy_configuration_id": configuration_id,
             "display_name": display_name,
             "final_value": round(float(equity[-1]), 10),
             "equity_points": int(len(equity)),
@@ -260,6 +267,7 @@ def serialize_event_execution(
             # `key` and `name` are not strategy fields and are intentionally
             # not emitted by this new writer.
             "strategy_id": strategy_id,
+            "strategy_configuration_id": configuration_id,
             "display_name": display_name,
             "group_id": strategy_id,
             "metrics_key": metrics_key,

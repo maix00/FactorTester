@@ -75,16 +75,19 @@
     return number.toLocaleString(undefined, {maximumFractionDigits: 4});
   }
 
-  function summaryTable(context, model) {
-    if (!model.summaryRows.length) return message(context, "暂无回测汇总");
+  function summaryTable(context, state) {
+    const rows = state.strategyScope.filterRows(
+      state.model.summaryRows, row => row.series,
+    );
+    if (!rows.length) return message(context, "暂无回测汇总");
     const columns = [
-      ["series", "组合", "text"], ["initial_equity", "初始权益", "currency"],
+      ["series", "策略", "text"], ["initial_equity", "初始权益", "currency"],
       ["final_equity", "期末权益", "currency"], ["total_return", "总收益率", "percent"],
       ["annual_return", "年化收益率", "percent"], ["sharpe_ratio", "Sharpe ratio", "number"],
       ["max_drawdown", "历史最大回撤", "percent"],
     ];
     return window.FTReportTables.render({
-      columns: columns.map(item => item[0]), rows: model.summaryRows, context,
+      columns: columns.map(item => item[0]), rows, context,
       className: "backtest-domain-table",
       renderHeader: key => document.createTextNode(
         context.t(columns.find(item => item[0] === key)?.[1] || key),
@@ -97,39 +100,57 @@
     });
   }
 
-  function runtimeTable(context, model) {
-    const rows = window.FTBacktestRuntimeModel.rows(model.summary);
+  function runtimeTable(context, state) {
+    const rows = state.strategyScope.filterRows(
+      window.FTBacktestRuntimeModel.rows(state.model.summary),
+    );
     if (!rows.length) return null;
     const section = document.createElement("section");
     section.className = "backtest-runtime-summary";
     const heading = document.createElement("h3");
     heading.textContent = context.t("策略运行摘要");
-    const table = window.FTReportTables.render({
-      columns: ["type", "status", "detail"], rows, context,
-      className: "backtest-domain-table backtest-runtime-table",
-      renderHeader: key => document.createTextNode(context.t({
-        type: "类型", status: "状态", detail: "说明",
-      }[key])),
-      renderCell: value => window.FTRichText.inline(String(value ?? ""), context),
-      values: row => [row.type, row.status, row.detail],
-    });
-    section.append(heading, table);
+    const page = Number(state.tablePages.runtime || 1);
+    const table = window.FTUI.pagedTable(
+      [context.t("类型"), context.t("状态"), context.t("说明")],
+      rows.map(row => [row.type, row.status, row.detail].map(value => (
+        window.FTRichText.inline(String(value ?? ""), context)
+      ))),
+      {
+        page, pageSize: 20,
+        previousLabel: context.t("上一页"), nextLabel: context.t("下一页"),
+        pageLabel: (current, total) => `${current} / ${total}`,
+        totalLabel: total => `${context.t("共")} ${total} ${context.t("行")}`,
+        onPageChange: next => {
+          state.tablePages.runtime = next;
+          renderLoaded(context, state.target, state);
+        },
+      },
+    );
+    table.shell.classList.add(
+      "backtest-domain-table", "backtest-runtime-table",
+    );
+    section.append(heading, table.shell);
     return section;
   }
 
-  function chart(context, viewer, payload, displayOptions = {}) {
+  function chart(context, viewer, payload, strategyScope, displayOptions = {}) {
     if (!payload) return message(context, "暂无曲线数据");
+    const filtered = strategyScope.filterPayload(payload);
     const target = document.createElement("div");
     target.className = "backtest-domain-chart interactive-artifact-chart";
     queueMicrotask(() => {
-      try { window.FTJobHighcharts.mount(context, target, payload, viewer, displayOptions); }
+      try { window.FTJobHighcharts.mount(context, target, filtered, viewer, displayOptions); }
       catch (error) { target.replaceChildren(message(context, error.message)); }
     });
     return target;
   }
 
   function groupMetricsTable(context, state) {
-    const matrix = state.model.metricMatrix;
+    const baseMatrix = state.model.metricMatrix;
+    const matrix = {
+      ...baseMatrix,
+      entries: state.strategyScope.filterEntries(baseMatrix.entries),
+    };
     if (!matrix.entries.length) return message(context, "暂无分组指标");
     const result = window.FTUI.table([
       context.t("指标"), ...matrix.entries.map(item => item.label),
@@ -139,11 +160,10 @@
       const entry = matrix.entries[index];
       const button = document.createElement("button");
       button.type = "button"; button.textContent = entry.label;
-      button.title = context.t("查看分组详情");
+      button.title = context.t("查看策略分析");
       button.className = "backtest-group-heading";
-      button.classList.toggle("active", state.activeGroup === entry.label);
       button.addEventListener("click", () => {
-        window.FTBacktestGroupDetail.open(context, state.options, entry);
+        window.FTBacktestStrategyAnalysis.open(context, state.options, entry);
       });
       cell.replaceChildren(button);
     });
@@ -165,9 +185,6 @@
             metric, window.FTBacktestResultModel.metricValue(matrix, entry, metric),
           );
           if (index === best) cell.classList.add("best");
-          if (state.activeGroup && state.activeGroup === entry.label) {
-            cell.classList.add("selected-group");
-          }
         });
       });
     });
@@ -201,28 +218,28 @@
   function tabContent(context, state) {
     const payloads = state.model.payloads;
     if (state.activeTab === "runtime") {
-      return runtimeTable(context, state.model) || message(context, "暂无策略运行摘要");
+      return runtimeTable(context, state) || message(context, "暂无策略运行摘要");
     }
-    if (state.activeTab === "summary") return summaryTable(context, state.model);
+    if (state.activeTab === "summary") return summaryTable(context, state);
     if (state.activeTab === "group_metrics") return groupMetricsTable(context, state);
     if (state.activeTab === "equity") {
-      return chart(context, "equity_curve", payloads.equity_curve_data, {
+      return chart(context, "equity_curve", payloads.equity_curve_data, state.strategyScope, {
         ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
       });
     }
     if (state.activeTab === "returns") {
-      return chart(context, "line_chart", payloads.returns_over_time_data, {
+      return chart(context, "line_chart", payloads.returns_over_time_data, state.strategyScope, {
         ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
       });
     }
     if (state.activeTab === "metrics") {
-      return chart(context, "metrics_chart", payloads.metrics_over_time_data, {
+      return chart(context, "metrics_chart", payloads.metrics_over_time_data, state.strategyScope, {
         ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
       });
     }
     const artifact = window.FTBacktestResultModel.tabPayloads[state.activeTab];
-    return dataTable(context, window.FTBacktestResultModel.scopedRows(
-      payloads[artifact], state.activeGroup,
+    return dataTable(context, state.strategyScope.filterRows(
+      window.FTBacktestResultModel.rows(payloads[artifact]),
     ), state);
   }
 
@@ -253,31 +270,27 @@
 
   function renderLoaded(context, target, state) {
     state.target = target;
-    const header = document.createElement("div");
-    header.className = "backtest-domain-header";
-    const tabs = document.createElement("div"); tabs.className = "backtest-domain-tabs";
-    state.model.tabs.forEach(key => {
-      const button = document.createElement("button"); button.type = "button";
-      button.textContent = context.t(tabLabels[key]);
-      button.classList.toggle("active", state.activeTab === key);
-      button.addEventListener("click", () => {
-        state.activeTab = key; renderLoaded(context, target, state);
+    state.strategySelection = window.FTBacktestStrategySelection.normalize(
+      state.strategySelection, state.model.strategies,
+    );
+    state.strategyScope = window.FTBacktestStrategySelection.createScope(
+      state.model.strategies, state.strategySelection,
+    );
+    const controls = [];
+    if (state.model.strategies.length) {
+      const filter = window.FTBacktestStrategySelection.control(context, {
+        strategies: state.model.strategies,
+        selected: state.strategySelection,
+        onApply: values => {
+          state.strategySelection = values;
+          state.tablePages = {};
+          queueMicrotask(() => renderLoaded(context, target, state));
+        },
       });
-      tabs.append(button);
-    });
-    header.append(tabs);
-    if (state.model.groups.length > 1) {
-      const select = document.createElement("select");
-      select.append(new Option(context.t("全部组合"), ""));
-      state.model.groups.forEach(group => select.append(new Option(group, group)));
-      select.value = state.activeGroup;
-      select.addEventListener("change", () => {
-        state.activeGroup = select.value; renderLoaded(context, target, state);
-      });
-      header.append(select);
+      controls.push(filter.element);
     }
     if (state.evaluationWindow) {
-      header.append(window.FTUI.actionButton(
+      controls.push(window.FTUI.actionButton(
         context.t(state.showOutOfSample ? "仅显示样本内" : "显示样本外"),
         () => {
           state.showOutOfSample = !state.showOutOfSample;
@@ -286,27 +299,24 @@
         {variant: "secondary"},
       ));
     }
-    const activeEntry = window.FTBacktestResultModel.resolveGroup(
-      state.model.summary, state.activeGroup || state.model.groupEntries[0]?.label,
-    );
-    if (activeEntry) {
+    if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
       const actions = document.createElement("div");
       actions.className = "backtest-domain-actions";
-      actions.append(
-        window.FTUI.actionButton(context.t("分组详情"), () => (
-          window.FTBacktestGroupDetail.open(context, state.options, activeEntry)
-        ), {variant: "secondary"}),
-        window.FTUI.actionButton(context.t("排序诊断"), () => (
-          window.FTBacktestRankingView.open(context, state.options, activeEntry)
-        ), {variant: "secondary"}),
-      );
-      if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
-        actions.append(window.FTUI.actionButton(context.t("持仓快照"), () => (
-          window.FTBacktestSnapshotView.open(context, state.options)
-        ), {variant: "secondary"}));
-      }
-      header.append(actions);
+      actions.append(window.FTUI.actionButton(context.t("持仓快照"), () => (
+        window.FTBacktestSnapshotView.open(context, state.options)
+      ), {variant: "secondary"}));
+      controls.push(actions);
     }
+    const header = window.FTJobResultTabs.create(context, {
+      className: "backtest-domain-header",
+      tabs: state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+      active: state.activeTab,
+      controls,
+      onChange: key => {
+        state.activeTab = key;
+        renderLoaded(context, target, state);
+      },
+    }).header;
     const content = document.createElement("div"); content.className = "backtest-domain-content";
     const artifact = activeArtifact(state);
     const payloadName = window.FTBacktestResultModel.tabPayloads[state.activeTab];
@@ -335,7 +345,8 @@
       );
       renderLoaded(context, target, {
         model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
-        tablePages: {}, activeTab: model.tabs[0] || "summary", activeGroup: "",
+        tablePages: {}, activeTab: model.tabs[0] || "summary",
+        strategySelection: [window.FTBacktestStrategySelection.ALL_STRATEGIES],
         evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
           model.summary, options.configuration || {},
         ),
