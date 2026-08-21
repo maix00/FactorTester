@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from .audit import audit_application_mounts
 from .contracts import (
     ChipDefinition,
+    ResultProjectionDefinition,
     ResultTabDefinition,
     RunFieldDefinition,
     ScopePolicy,
@@ -18,7 +20,6 @@ from .contracts import (
     SurfaceFlow,
     TabMountPoint,
 )
-from .audit import audit_application_mounts
 
 
 @dataclass(slots=True)
@@ -29,6 +30,7 @@ class ApplicationSettings:
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
     result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
+    result_projections: dict[str, ResultProjectionDefinition] = field(default_factory=dict)
     run_fields: dict[str, RunFieldDefinition] = field(default_factory=dict)
     surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
     flows: list[SurfaceFlow] = field(default_factory=list)
@@ -166,6 +168,16 @@ class ApplicationSettings:
             )
         self.result_tabs[tab.key] = tab
 
+    def register_result_projection(self, projection: ResultProjectionDefinition) -> None:
+        if projection.key in self.result_projections:
+            raise ValueError(f"duplicate result projection: {projection.key}")
+        if projection.module not in self.modules:
+            raise ValueError(
+                f"result projection {projection.key} references unknown module "
+                f"{projection.module}"
+            )
+        self.result_projections[projection.key] = projection
+
     def register_run_field(self, run_field: RunFieldDefinition) -> None:
         if run_field.key in self.run_fields:
             raise ValueError(f"duplicate run field: {run_field.key}")
@@ -263,6 +275,13 @@ class ApplicationSettings:
             "result_tabs": [
                 tab.to_dict()
                 for tab in sorted(self.result_tabs.values(), key=lambda item: item.order)
+            ],
+            "result_projections": [
+                projection.to_dict()
+                for projection in sorted(
+                    self.result_projections.values(),
+                    key=lambda item: (item.order, item.key),
+                )
             ],
             "run_fields": [
                 run_field.to_dict()

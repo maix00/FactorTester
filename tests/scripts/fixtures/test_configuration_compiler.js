@@ -203,15 +203,22 @@ const analysis = FTICConfiguration.compileAnalysis({
   fallbackFamilyAlias: "ROC",
 });
 assert.equal(analysis.product_path_selection_id, "day");
-assert.deepEqual(analysis.paths, ["CNFutures/day"]);
+assert.deepEqual(analysis.product_selections.day, {
+  product_path_selection_id: "day",
+  selected_paths: ["CNFutures/day"],
+});
+assert.equal(analysis.paths, undefined);
+assert.equal(analysis.settings, undefined);
+assert.equal("product_path_selection" in analysis, false);
 assert.deepEqual(analysis.factors, [
   {alias: factor.factor_alias, factor_ref: factor.factor_ref},
   {alias: another.factor_alias, factor_ref: another.factor_ref},
 ]);
 assert.equal("product_path_selections" in analysis, false);
 assert.equal("factor_family_alias" in analysis, false);
-assert.deepEqual(analysis.ic_lags, [0, 1]);
-assert.deepEqual(analysis.settings, analysis.local_settings);
+assert.deepEqual(analysis.local_settings.ic_lags, [0, 1]);
+assert.equal(analysis.local_settings.start_date, "2025-01-02");
+assert.equal("ic_correlation" in analysis, false);
 
 const oneFamily = FTICConfiguration.compileAnalysis({
   prior: {}, manifest, values, factors: [factor], productSelection: product,

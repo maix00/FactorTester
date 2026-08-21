@@ -93,26 +93,25 @@
 
   function compileAnalysis(options) {
     const {
-      prior, manifest, values, factors, productSelection,
+      manifest, values, factors, productSelection,
     } = options;
     const settings = normalizeSettings(
       manifest,
       FTTestConfigurationCompiler.executionSettings(manifest, values),
     );
     const selection = productScope(productSelection);
-    const result = {
-      ...clone(prior || {}),
-      ...settings,
+    // A saved IC configuration records only execution references plus one
+    // local-settings object.  The selected product projection is authoring
+    // input for the freezer; it moves to shared.product_selections before a
+    // RunSpec is created.  Do not retain flat/settings/path aliases here.
+    return {
       product_path_selection_id: selection.product_path_selection_id,
-      product_path_selection: selection,
-      paths: [...selection.selected_paths],
+      product_selections: {
+        [selection.product_path_selection_id]: selection,
+      },
       factors: FTTestConfigurationCompiler.factorSubjects(factors),
-      settings: clone(settings),
       local_settings: clone(settings),
     };
-    delete result.product_path_selections;
-    delete result.factor_family_alias;
-    return result;
   }
 
   function evaluationPlan(options) {

@@ -1,9 +1,11 @@
-"""Fee, margin, and ratio table projections."""
+"""Fee, margin, ratio, and generic table report projections."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from .models import GeneratedReport
+from .render import csv_bytes, json_bytes
 from .series import finite_number
 
 
@@ -86,3 +88,51 @@ def ratio_rows(
                  "gross_to_fee_ratio": gross / fee_total if fee_total else None,
                  "margin_observation_sum": margin_total})
     return rows
+
+
+def table_reports(name, rows, *, payload_extra=None, columns=None):
+    """Create the canonical CSV/JSON pair for a paginated report table."""
+
+    declared_columns = list(columns) if columns is not None else list(dict.fromkeys(
+        key for row in rows for key in row if key != "raw"
+    ))
+    column_presentations = {}
+    if any(row.get("factor_alias") and row.get("factor_ref") for row in rows):
+        column_presentations["factor_alias"] = {
+            "presentation": "reference",
+            "kind": "factor",
+            "target_ref_field": "factor_ref",
+        }
+    receipt = {
+        "schema_version": 1,
+        "artifact_kind": name,
+        "row_count": len(rows),
+        "columns": declared_columns,
+        "column_presentations": column_presentations,
+    }
+    json_columns = declared_columns or ["value"]
+    payload = {
+        "schema_version": 1,
+        "artifact_kind": name,
+        "columns": json_columns,
+        "column_presentations": column_presentations,
+        "rows": rows,
+    }
+    if isinstance(payload_extra, dict):
+        payload.update(payload_extra)
+        for key in ("artifact_role", "source_artifacts", "link_columns", "aggregation"):
+            if key in payload_extra:
+                receipt[key] = payload_extra[key]
+    return [
+        GeneratedReport(
+            f"{name}_csv", csv_bytes(rows, columns=declared_columns),
+            "csv", "text/csv; charset=utf-8", receipt,
+        ),
+        GeneratedReport(
+            f"{name}_data", json_bytes(payload),
+            "json", "application/json", receipt,
+        ),
+    ]
+
+
+__all__ = ["fee_rows", "margin_rows", "ratio_rows", "table_reports"]

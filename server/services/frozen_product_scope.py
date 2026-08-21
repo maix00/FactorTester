@@ -116,29 +116,35 @@ def freeze_product_scope(
         shared["data_source_declarations"] = _freeze_source_declarations(
             source_ids, temporary_sources
         )
-    backtest = analysis_map.get("backtest")
-    if isinstance(backtest, dict):
-        _compact_execution_projections(shared, backtest, payload.get("ui"))
+    _compact_execution_projections(shared, analysis_map, payload.get("ui"))
     _strip_ui_catalogs(payload.get("ui"))
     return frozen
 
 
 def _compact_execution_projections(
-    shared: dict[str, Any], backtest: dict[str, Any], ui: object
+    shared: dict[str, Any], analyses: dict[str, Any], ui: object
 ) -> None:
     """Delete aliases that repeat the same frozen semantic value."""
-    local_settings = backtest.get("local_settings")
-    if isinstance(local_settings, dict):
-        for key, value in tuple(local_settings.items()):
-            if key in backtest and backtest[key] == value:
-                backtest.pop(key, None)
-    for group in backtest.get("groups") or []:
-        if not isinstance(group, dict):
+    for analysis in analyses.values():
+        if not isinstance(analysis, dict):
             continue
-        for legacy_key in (
-            "factorAlias", "factorAliases", "factor_alias", "factor_aliases",
-        ):
-            group.pop(legacy_key, None)
+        local_settings = analysis.get("local_settings")
+        if isinstance(local_settings, dict):
+            for key, value in tuple(local_settings.items()):
+                if key in analysis and analysis[key] == value:
+                    analysis.pop(key, None)
+        # ``settings`` was an older duplicate of ``local_settings``.  New
+        # configurations never write it; remove the duplicate during freeze
+        # rather than accepting it as a second executable source.
+        if analysis.get("settings") == local_settings:
+            analysis.pop("settings", None)
+        for group in analysis.get("groups") or []:
+            if not isinstance(group, dict):
+                continue
+            for legacy_key in (
+                "factorAlias", "factorAliases", "factor_alias", "factor_aliases",
+            ):
+                group.pop(legacy_key, None)
     for factor in shared.get("factors") or []:
         if not isinstance(factor, dict):
             continue
@@ -151,9 +157,9 @@ def _compact_execution_projections(
             if canonical in factor and factor.get(duplicate) == factor[canonical]:
                 factor.pop(duplicate, None)
     if isinstance(ui, dict):
-        backtest_ui = ui.get("backtest")
-        if isinstance(backtest_ui, dict):
-            backtest_ui.pop("settings", None)
+        for state in ui.values():
+            if isinstance(state, dict):
+                state.pop("settings", None)
 
 
 def _selection_id(group: dict[str, Any]) -> str:

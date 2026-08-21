@@ -417,6 +417,11 @@ const strategyScopedBacktest = {
     "a rejected submission must restore the run action without a full page render");
   assert.ok(notices.some(item => item.isError && /运行测试失败/.test(item.message)));
 
+  await batch.previewAll(context, state, () => {});
+  const icPreviewBodies = previewRequests
+    .filter(item => item.body.analyses?.[0] === "ic")
+    .slice(-state.groups.length)
+    .map(item => item.body);
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
   assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1", "job-2"],
@@ -433,6 +438,12 @@ const strategyScopedBacktest = {
     "repainting must preserve the task object observed by progress and result callbacks",
   );
   await batch.previewAll(context, backtest, () => {});
+  const backtestHeader = batch.headerActions(context, backtest, () => {});
+  assert.deepEqual(
+    backtestHeader.map(item => item.textContent),
+    ["查看运行配置", "运行", "清空"],
+    "backtest must use the same shared header action component as IC",
+  );
   assert.equal(backtest.testRunBatch[0].groupLabel, "回测任务");
   assert.match(backtest.testRunBatch[0].runSpecHash, /^[a-f0-9]{64}$/,
     "backtest preview must persist a RunSpec before submission");
@@ -502,6 +513,11 @@ const strategyScopedBacktest = {
     "submitting a test must not wait for the unrelated report/profile/research UI bundle");
   const runRequests = requests.filter(item => item.path.endsWith("/api/runs"));
   const icRequests = runRequests.filter(item => item.body.analyses[0] === "ic");
+  assert.deepEqual(
+    icRequests.map(item => item.body),
+    icPreviewBodies,
+    "formal IC submission must reuse the exact preview RunSpec request",
+  );
   assert.ok(icRequests.every(item => item.body.retention_mode === "full"));
   assert.ok(icRequests.every(item => (
     JSON.stringify(item.body.output_requests) === JSON.stringify(["ic_series", "ic_statistics"])

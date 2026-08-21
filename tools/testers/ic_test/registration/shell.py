@@ -6,6 +6,7 @@ from tools.testers._shared import (
     CATEGORY_CANDIDATE_KEYS,
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
+    FACTOR_SELECTIONS_KEYS,
     FACTOR_SET_SELECTION_KEYS,
     FACTOR_SOURCE_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,
@@ -16,6 +17,7 @@ from tools.testers._shared import (
     register_category_selection_base,
     register_factor_candidate_list_base,
     register_factor_execution_base,
+    register_factor_selections_base,
     register_factor_set_selections_base,
     register_factor_source_selections_base,
     register_market_data_base,
@@ -27,8 +29,8 @@ from tools.testers._shared import (
 from tools.testers.settings.contracts import (
     ChipDefinition,
     SettingModule,
-    SettingTab,
     SettingsSection,
+    SettingTab,
     TabMountPoint,
 )
 from tools.testers.settings.registry import ApplicationSettings
@@ -50,6 +52,7 @@ def _register_global_keys(app: ApplicationSettings) -> None:
         *PRODUCT_PATH_CANDIDATE_KEYS,
         *PRODUCT_PATH_SELECTIONS_KEYS,
         *FACTOR_CANDIDATE_KEYS,
+        *FACTOR_SELECTIONS_KEYS,
         *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SOURCE_SELECTION_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
@@ -188,11 +191,14 @@ def _register_chips(app: ApplicationSettings) -> None:
 def _register_shared_inputs(app: ApplicationSettings) -> None:
     register_factor_execution_base(app)
     register_factor_candidate_list_base(app)
+    register_factor_selections_base(app)
     register_factor_set_selections_base(app)
     register_factor_source_selections_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selections_base(app)
     register_category_candidate_list_base(app)
     register_category_selection_base(app)
-    register_market_data_base(app, include_price_type=False)
+    register_market_data_base(
+        app, include_price_type=False, automatic_only=True,
+    )
     register_run_window_base(app)

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingOption
+from tools.testers.field_spec import ValueDescriptor
+from tools.testers.settings.contracts import (
+    ScopePolicy,
+    SettingDefinition,
+    SettingOption,
+)
 from tools.testers.settings.registry import ApplicationSettings
 
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
@@ -12,7 +17,48 @@ def register_market_data_base(
     app: ApplicationSettings,
     *,
     include_price_type: bool,
+    automatic_only: bool = False,
 ) -> None:
+    if automatic_only:
+        # IC currently resolves both dimensions from the selected factor and
+        # product data.  Keep the row in the shared settings-grid renderer,
+        # but expose an enum rather than the backtest multi-source catalog:
+        # the IC parser rejects an explicit source/frequency override.
+        automatic = ValueDescriptor(
+            "enum", editor="select", option_source="manifest.options",
+            options=(("auto", "自动"),),
+        )
+        app.register_setting(SettingDefinition(
+            "data_source",
+            "数据源",
+            "data_source",
+            "select",
+            "auto",
+            ScopePolicy.LOCAL_ONLY,
+            module="market_data_source",
+            options=(SettingOption("auto", "自动"),),
+            chip_template="数据源: {value}",
+            serialization={
+                "kind": "data_source_selection", "automatic_only": True,
+                "display_order": 10,
+            },
+            value_descriptor=automatic,
+        ))
+        app.register_setting(SettingDefinition(
+            "frequency",
+            "频率",
+            "frequency",
+            "select",
+            "auto",
+            ScopePolicy.LOCAL_ONLY,
+            module="market_data_frequency",
+            options=(SettingOption("auto", "自动"),),
+            chip_template="频率: {value}",
+            serialization={"automatic_only": True, "display_order": 20},
+            value_descriptor=automatic,
+        ))
+        return
+
     app.register_setting(SettingDefinition(
         "data_source",
         "数据源",

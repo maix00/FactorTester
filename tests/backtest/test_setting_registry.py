@@ -469,9 +469,18 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert [
         key for key in (
             "factor_owner_ref", "factor_git_commit", "factor_family_ref",
-            "factor_params", "factor_candidates", "factor_source_selections",
+            "factor_params", "factor_candidates", "factor_selections",
+            "factor_source_selections",
         ) if key in index["defaults"]
-        ] == ["factor_candidates", "factor_source_selections"]
+        ] == ["factor_candidates", "factor_selections", "factor_source_selections"]
+    assert index["defaults"]["factor_selections"]["execution_policy"] == "authoring_only"
+    assert index["defaults"]["factor_selections"]["serialization"] == {
+        "kind": "factor_selection_list", "display_order": 30,
+        "item_kind": "factor", "multi": True,
+        "candidate_field": "factor_candidates", "fallback": "candidates",
+        "id_keys": ("alias", "name", "factor_alias"),
+        "label_keys": ("alias", "name", "label"),
+    }
     item_fields = index["defaults"]["factor_candidates"]["serialization"]["item_fields"]
     assert {
         "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
@@ -1375,7 +1384,12 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert "time" in contract["outer_only_tabs"]
         assert "data_source" in contract["outer_only_tabs"]
         data_source = backtest_setting_registry.get(application_name).manifest()["defaults"]["data_source"]
-        assert data_source["value_descriptor"]["cardinality"] == "many"
+        if application_name == "group_test":
+            assert data_source["value_descriptor"]["cardinality"] == "many"
+        else:
+            assert data_source["value"] == "auto"
+            assert data_source["value_descriptor"]["cardinality"] == "one"
+            assert data_source["value_descriptor"]["editor"] == "select"
         assert contract["candidate_constraints"]["category_candidates"] == {
             "source_field": "data_source",
             "mode_field": "data_source_mode",
