@@ -98,16 +98,6 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             ON research_jobs(deployment_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_research_jobs_run
             ON research_jobs(owner, run_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_research_jobs_parent_updated
-            ON research_jobs(parent_job_id, updated_at DESC)
-            WHERE job_role='supplemental';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_supplemental_identity
-            ON research_jobs(
-                parent_job_id, supplemental_kind,
-                supplemental_identity, source_artifact_hash
-            )
-            WHERE job_role='supplemental'
-              AND status IN ('submitted', 'planning', 'queued', 'running', 'paused');
         CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_one_active_step
             ON research_jobs(owner)
             WHERE step_mode=1 AND status IN (
@@ -188,15 +178,17 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN service_port INTEGER NOT NULL DEFAULT 0"
         )
-    for name, declaration in (
-        ("job_role", "TEXT NOT NULL DEFAULT 'primary'"),
-        ("parent_job_id", "TEXT NOT NULL DEFAULT ''"),
-        ("supplemental_kind", "TEXT NOT NULL DEFAULT ''"),
-        ("supplemental_identity", "TEXT NOT NULL DEFAULT ''"),
-        ("source_artifact_hash", "TEXT NOT NULL DEFAULT ''"),
-    ):
-        if name not in columns:
-            conn.execute(f"ALTER TABLE research_jobs ADD COLUMN {name} {declaration}")
+    supplemental_columns = {
+        "job_role", "parent_job_id", "supplemental_kind",
+        "supplemental_identity", "source_artifact_hash",
+    }
+    missing_supplemental_columns = sorted(supplemental_columns - columns)
+    if missing_supplemental_columns:
+        raise RuntimeError(
+            "research_jobs requires the explicit supplemental Job schema "
+            "migration before startup; missing columns: "
+            + ", ".join(missing_supplemental_columns)
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_jobs_parent_updated "
         "ON research_jobs(parent_job_id, updated_at DESC) "

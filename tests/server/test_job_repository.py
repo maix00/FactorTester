@@ -241,6 +241,58 @@ def test_schema_upgrade_backfills_active_job_run_spec_hash(tmp_path) -> None:
     assert loaded.terminal_assurance is None
 
 
+def test_schema_requires_explicit_supplemental_job_migration(tmp_path) -> None:
+    path = tmp_path / "legacy-jobs.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE research_jobs (
+                job_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                retry_of TEXT NOT NULL DEFAULT '',
+                attempt INTEGER NOT NULL DEFAULT 1,
+                step_mode INTEGER NOT NULL DEFAULT 0,
+                retention_mode TEXT NOT NULL DEFAULT 'summary',
+                deployment_id TEXT NOT NULL DEFAULT '',
+                service_port INTEGER NOT NULL DEFAULT 0,
+                source_revision TEXT NOT NULL DEFAULT '',
+                runner_path TEXT NOT NULL DEFAULT '',
+                job_spec_json TEXT NOT NULL,
+                job_spec_hash TEXT NOT NULL,
+                run_spec_hash TEXT NOT NULL DEFAULT '',
+                worker_pid INTEGER,
+                worker_exitcode INTEGER,
+                cancel_requested_at REAL,
+                cancel_reason TEXT NOT NULL DEFAULT '',
+                entitlement_json TEXT NOT NULL,
+                execution_plan_json TEXT,
+                execution_plan_hash TEXT NOT NULL DEFAULT '',
+                plan_notices_json TEXT NOT NULL DEFAULT '[]',
+                result_summary_json TEXT,
+                error_json TEXT,
+                terminal_assurance_json TEXT,
+                created_at REAL NOT NULL,
+                planned_at REAL,
+                approved_at REAL,
+                queued_at REAL,
+                started_at REAL,
+                finished_at REAL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="explicit supplemental Job schema migration",
+    ):
+        JobRepository(path).ensure_schema()
+
+
 def test_repository_freezes_plan_and_enforces_transitions(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     created = repository.create(_record("job-1"))
