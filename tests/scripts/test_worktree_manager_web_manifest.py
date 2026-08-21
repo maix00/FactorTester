@@ -28,7 +28,8 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
     assert manifest["styles"] == [
-        "styles/app.css", "styles/report.css", "styles/outputs/artifacts.css",
+        "styles/app.css", "styles/jobs/result-tabs.css", "styles/report.css",
+        "styles/outputs/artifacts.css",
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
         "styles/task-inputs.css",
@@ -496,7 +497,8 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "jobs/job-artifact-viewers.js" in manifest["groups"]["job-detail-previews"]
     assert "jobs/ic-result-view.js" in manifest["groups"]["job-detail-ic"]
     assert "jobs/backtest-group-equity-chart.js" not in manifest["groups"]["job-detail-backtest"]
-    assert "jobs/backtest-result-view.js" in manifest["groups"]["job-detail-backtest"]
+    assert "test-modules/backtest/results/view.js" in manifest["groups"]["job-detail-backtest"]
+    assert "jobs/result-tabs.js" in manifest["groups"]["job-detail-core"]
     assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
     assert manifest["group_dependencies"]["job-detail-previews"] == [
         "job-detail-core", "report", "charts",
@@ -507,7 +509,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "jobs/detail.js" in core_detail
     assert not core_detail.intersection({
         "jobs/highcharts-viewers.js", "jobs/job-artifact-viewers.js",
-        "jobs/ic-result-view.js", "jobs/backtest-result-view.js",
+        "jobs/ic-result-view.js", "test-modules/backtest/results/view.js",
         "jobs/factor-series-view.js", "core/market-data.js",
     })
     artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(encoding="utf-8")
@@ -1152,9 +1154,9 @@ def test_test_templates_restore_inline_objects_without_catalog_rows() -> None:
 def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
     import subprocess
 
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_model.js"
-    model = WEB_ROOT / "jobs" / "backtest-result-model.js"
-    runtime = WEB_ROOT / "jobs" / "backtest-runtime-model.js"
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "result_model.js"
+    model = WEB_ROOT / "test-modules" / "backtest" / "results" / "model.js"
+    runtime = WEB_ROOT / "test-modules" / "backtest" / "results" / "runtime-model.js"
     result = subprocess.run(
         ["node", str(fixture), str(model), str(runtime)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -1166,10 +1168,23 @@ def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
 def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
     import subprocess
 
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_view.js"
-    view = WEB_ROOT / "jobs" / "backtest-result-view.js"
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "result_view.js"
+    view = WEB_ROOT / "test-modules" / "backtest" / "results" / "view.js"
     result = subprocess.run(
         ["node", str(fixture), str(view)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_backtest_strategy_selection_filters_by_stable_identity() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "strategy_selection.js"
+    module = WEB_ROOT / "test-modules" / "backtest" / "results" / "strategy-selection.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -1179,8 +1194,8 @@ def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
 def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
     import subprocess
 
-    module = ROOT / "server" / "manager" / "web" / "jobs" / "backtest-analysis-api.js"
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_analysis_api.js"
+    module = WEB_ROOT / "test-modules" / "backtest" / "results" / "analysis" / "api.js"
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "analysis_api.js"
     result = subprocess.run(
         ["node", str(fixture), str(module)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -1192,12 +1207,13 @@ def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
 def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None:
     import subprocess
 
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_detail_parts.js"
-    detail = (WEB_ROOT / "jobs" / "backtest-group-detail.js").read_text(encoding="utf-8")
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "group_detail_parts.js"
+    base = WEB_ROOT / "test-modules" / "backtest" / "results" / "analysis"
+    detail = (base / "group-detail.js").read_text(encoding="utf-8")
     assert "FTBacktestGroupDetailProducts" in detail
     modules = [
-        WEB_ROOT / "jobs" / "backtest-group-products.js",
-        WEB_ROOT / "jobs" / "backtest-group-detail-parts.js",
+        base / "group-products.js",
+        base / "group-detail-parts.js",
     ]
     result = subprocess.run(
         ["node", str(fixture), *(str(module) for module in modules)], cwd=ROOT,

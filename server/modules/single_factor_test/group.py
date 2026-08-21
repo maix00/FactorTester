@@ -2390,11 +2390,20 @@ def _event_group_detail(
     return detail
 
 
-def _event_group_ranking_detail(execution: dict, product_path_selection_id: str) -> dict:
+def _event_group_ranking_detail(
+    execution: dict,
+    product_path_selection_id: str,
+    strategy_configuration_id: str = "",
+) -> dict:
     owners = sorted(
         (
             owner for owner in execution.get("group_owner") or []
             if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
+            and (
+                not strategy_configuration_id
+                or str(owner.get("strategy_configuration_id") or "")
+                == strategy_configuration_id
+            )
             and not owner.get("is_ls")
         ),
         key=lambda owner: int(owner.get("group_index") or 0),
@@ -2453,6 +2462,9 @@ def get_group_ranking_detail():
     """Return second-phase whole-test ranking analytics from the latest run."""
     data = request.get_json() or {}
     product_path_selection_id = data.get('product_path_selection_id')
+    strategy_configuration_id = str(
+        data.get('strategy_configuration_id') or ''
+    )
     page_uuid = str(data.get('page_uuid') or '')
     if product_path_selection_id is None:
         return jsonify({'success': False, 'error': '缺少 product_path_selection_id'}), 400
@@ -2464,7 +2476,11 @@ def get_group_ranking_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_ranking_detail(event_execution, str(product_path_selection_id)),
+            'detail': _event_group_ranking_detail(
+                event_execution,
+                str(product_path_selection_id),
+                strategy_configuration_id,
+            ),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
