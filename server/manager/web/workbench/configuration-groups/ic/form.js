@@ -9,13 +9,11 @@
     title.textContent = context.t(current ? "编辑配置组" : "新增配置组");
     form.append(title);
 
-    const factorScope = window.FTStrategyEditorScope?.scope(state, "factor")
-      || {items: state.factors || [], required: false, ready: true};
-    const productScope = window.FTStrategyEditorScope?.scope(
-      state, "product_path_selection",
-    ) || {items: state.groups || [], required: false, ready: true};
-    const factorItems = factorScope.required && !factorScope.ready ? [] : factorScope.items || [];
-    const productItems = productScope.required && !productScope.ready ? [] : productScope.items || [];
+    // An IC configuration group owns its factor and product-group selections.
+    // The legacy outer workbench tabs are catalog launchers only for grouped IC;
+    // an empty outer selection must not erase the group-owned candidate lists.
+    const factorItems = Array.isArray(state.factors) ? state.factors : [];
+    const productItems = Array.isArray(state.groups) ? state.groups : [];
     let factorRef = current?.factor_ref || "";
     let productScopeRef = current?.product_scope_ref || "";
 
@@ -71,7 +69,7 @@
       multi: false,
       loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
-      canCreate: !(factorScope.required && !factorScope.ready),
+      canCreate: true,
       name: "ic-configuration-group-factor",
       onChange: values => {
         factorRef = values[0] || "";
@@ -91,7 +89,7 @@
         groups: productItems,
         selectedRefs: productScopeRef ? [productScopeRef] : [],
         multi: false,
-        canCreate: !(productScope.required && !productScope.ready),
+        canCreate: true,
         onChange: values => {
           productScopeRef = values[0] || "";
           editorTabs?.refreshChips();
@@ -122,10 +120,6 @@
     form.append(editorTabs || structure);
     appendActions(context, form, () => {
       try {
-        const scopeErrors = window.FTStrategyEditorScope?.validate(state) || [];
-        if (scopeErrors.length) {
-          throw new Error(scopeErrors.map(item => context.t(item.message)).join("；"));
-        }
         if (!factorItems.some(item => factorIdentity(item) === factorRef)) {
           throw new Error(context.t("请选择一个当前范围内的因子"));
         }
