@@ -13,13 +13,7 @@ from typing import Any
 from .strategy_editor_scope import build_scoped_fields
 
 
-_INNER_DEFAULT_TABS = (
-    {
-        "key": "__strategy__",
-        "label": "分组",
-        "kind": "structure",
-        "mount_policy": "default",
-    },
+_SHARED_INNER_DEFAULT_TABS = (
     {
         "key": "factor",
         "label": "因子执行",
@@ -28,14 +22,24 @@ _INNER_DEFAULT_TABS = (
     },
     {
         "key": "product_path_selection",
-        "label": "产品路径",
+        "label": "产品组",
         "kind": "product_scope",
         "mount_policy": "default",
     },
 )
 
 
-_INNER_MANUAL_TABS = (
+def _inner_default_tabs(application: str) -> tuple[dict[str, Any], ...]:
+    structure = {
+        "key": "__configuration__" if application == "ic_test" else "__strategy__",
+        "label": "配置" if application == "ic_test" else "分组",
+        "kind": "structure",
+        "mount_policy": "default",
+    }
+    return (structure, *_SHARED_INNER_DEFAULT_TABS)
+
+
+_SHARED_INNER_MANUAL_TABS = (
     {
         "key": "category",
         "label": "产品分类",
@@ -55,20 +59,47 @@ _INNER_MANUAL_TABS = (
 )
 
 
-def _contract(*, application: str) -> dict[str, Any]:
+def _inner_manual_tabs(application: str, app: Any | None = None) -> tuple[dict[str, Any], ...]:
+    if application != "ic_test":
+        return _SHARED_INNER_MANUAL_TABS
+    projections = []
+    for tab_key, field_key in (
+        ("delay", "ic_lags"),
+        ("quantile_portfolio_statistics", "quantile_portfolio_statistics"),
+    ):
+        tab = app.tabs.get(tab_key) if app is not None else None
+        field = app.settings.get(field_key) if app is not None else None
+        if tab is None or field is None or field.tab != tab_key:
+            continue
+        projection = {
+            "key": tab.key, "label": tab.label,
+            "kind": "registered_setting", "field": field.key,
+            "mount_policy": "manual", "scope_policy": "overridable",
+            "registration_source": {"tab": tab.key, "field": field.key},
+        }
+        if field_key == "ic_lags":
+            projection.update(cardinality="one", minimum=0)
+        projections.append(projection)
+    return tuple(projections)
+
+
+def _contract(*, application: str, app: Any | None = None) -> dict[str, Any]:
     scoped_fields = build_scoped_fields()
     inner_factor_candidates = scoped_fields["factor_candidates"]["inner"]
     inner_combination = scoped_fields["factor_combination_mode"]["inner"]
+    inner_default_tabs = _inner_default_tabs(application)
     return {
         "schema_version": 2,
         "editor": "nested_strategy",
         "application": application,
         # Keep the pre-mounted set explicit.  Clients must not infer it from
         # whichever fields happen to be visible in the current manifest.
-        "outer_pre_mounted_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
-        "pre_mounted_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
-        "inner_default_tabs": [dict(item) for item in _INNER_DEFAULT_TABS],
-        "inner_manual_tabs": [dict(item) for item in _INNER_MANUAL_TABS],
+        "outer_pre_mounted_tabs": [dict(item) for item in inner_default_tabs],
+        "pre_mounted_tabs": [dict(item) for item in inner_default_tabs],
+        "inner_default_tabs": [dict(item) for item in inner_default_tabs],
+        "inner_manual_tabs": [
+            dict(item) for item in _inner_manual_tabs(application, app)
+        ],
         "outer_scope_tabs": {
             "factor": {
                 "mounted_tab": "factor",
@@ -235,7 +266,7 @@ def register_strategy_editor_contract(app: Any) -> None:
         raise ValueError(f"nested strategy editor is not supported by {application!r}")
     app.register_manifest_extension(
         "strategy_editor",
-        _contract(application=application),
+        _contract(application=application, app=app),
     )
 
 

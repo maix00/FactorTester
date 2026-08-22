@@ -1311,13 +1311,37 @@ def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() ->
 
 
 def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
-    expected = ["__strategy__", "factor", "product_path_selection"]
-    for application_name in ("group_test", "ic_test"):
+    expected_by_application = {
+        "group_test": ["__strategy__", "factor", "product_path_selection"],
+        "ic_test": ["__configuration__", "factor", "product_path_selection"],
+    }
+    for application_name, expected in expected_by_application.items():
         contract = backtest_setting_registry.get(application_name).manifest()["strategy_editor"]
         assert [item["key"] for item in contract["inner_default_tabs"]] == expected
         assert [item["key"] for item in contract["outer_pre_mounted_tabs"]] == expected
         assert [item["key"] for item in contract["pre_mounted_tabs"]] == expected
         assert not set(expected).intersection(contract["outer_only_tabs"])
+        manual_keys = [item["key"] for item in contract["inner_manual_tabs"]]
+        if application_name == "ic_test":
+            assert manual_keys == ["delay", "quantile_portfolio_statistics"]
+            assert "category" not in manual_keys
+            assert "trading_product_filter" not in manual_keys
+            delay = next(item for item in contract["inner_manual_tabs"] if item["key"] == "delay")
+            assert delay["field"] == "ic_lags"
+            assert delay["cardinality"] == "one"
+            assert delay["minimum"] == 0
+            assert delay["registration_source"] == {
+                "tab": "delay", "field": "ic_lags",
+            }
+            portfolio = next(item for item in contract["inner_manual_tabs"]
+                             if item["key"] == "quantile_portfolio_statistics")
+            assert portfolio["field"] == "quantile_portfolio_statistics"
+            assert portfolio["registration_source"] == {
+                "tab": "quantile_portfolio_statistics",
+                "field": "quantile_portfolio_statistics",
+            }
+        else:
+            assert "delay" not in manual_keys
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
             "factor_candidates",
         ]

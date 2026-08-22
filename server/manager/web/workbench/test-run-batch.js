@@ -117,9 +117,11 @@
   }
 
   function missingScopeMessage(context, state) {
-    return state?.kind === "backtest"
-      ? context.t("请先在策略组设置中为策略选择产品组")
-      : context.t("请先选择产品组");
+    if (state?.kind === "backtest") {
+      return context.t("请先在策略组设置中为策略选择产品组");
+    }
+    if (state?.kind === "ic") return context.t("请先选择配置组");
+    return context.t("请先选择产品组");
   }
 
   function showRunSpecError(context, error) {

@@ -197,6 +197,38 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
     return resolved, []
 
 
+def _typed_ic_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Plan the already frozen IC compiler output, without catalog resolution.
+
+    ``typed_ic`` is deliberately the authority at this boundary.  In
+    particular, do not call ``selection_from_request`` here: preview and the
+    worker must hash the same immutable RunSpec even when the product catalog
+    changes between them.
+    """
+    run_spec = data["run_spec"]
+    typed = deepcopy(run_spec["typed_ic"])
+    configuration = run_spec.get("configuration") or {}
+    shared = configuration.get("shared") or {}
+    selections = deepcopy(shared.get("product_selections") or {})
+    groups = deepcopy(typed.get("group_provenance") or typed.get("groups") or [])
+    products: list[str] = []
+    paths: list[Any] = []
+    for selection in selections.values() if isinstance(selections, dict) else ():
+        if not isinstance(selection, dict):
+            continue
+        paths.extend(deepcopy(selection.get("selected_paths") or selection.get("paths") or []))
+        products.extend(str(x) for x in selection.get("products") or () if x)
+    return {
+        "kind": "ic",
+        "typed_ic": typed,
+        "product_selections": selections,
+        "selected_paths": paths,
+        "products": sorted(set(products)),
+        "group_provenance": groups,
+        "external_factor_artifacts": _artifact_plan_rows(data),
+    }, []
+
+
 def _artifact_plan_rows(data: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(
         (
@@ -223,7 +255,9 @@ def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
             run_spec,
             owner=str(data.get("_owner") or ""),
         )
-    if kind == "backtest":
+    if kind == "ic" and isinstance(run_spec, dict) and isinstance(run_spec.get("typed_ic"), dict):
+        resolved, notices = _typed_ic_plan(data)
+    elif kind == "backtest":
         resolved, notices = _backtest_plan(data)
     elif kind in {"ic", "factor_evaluation", "factor_type_analysis"}:
         resolved, notices = _analysis_plan(kind, data)

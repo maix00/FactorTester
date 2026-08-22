@@ -109,6 +109,12 @@ global.FTBacktestGroupModel = {
   },
 };
 
+vm.runInThisContext(fs.readFileSync(
+  require("node:path").join(require("node:path").dirname(process.argv[2]), "configuration-groups/common/surface.js"),
+  "utf8",
+), {filename: "configuration-groups/common/surface.js"});
+global.FTConfigurationGroupSurface = window.FTConfigurationGroupSurface;
+
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "backtest-groups.js",
 });

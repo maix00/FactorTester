@@ -59,10 +59,14 @@
       "workbench-factors", "workbench-products", "workbench-templates",
       "workbench-run"
     ],
-    "workbench-backtest": [
+    "workbench-configuration-groups": [
       "workbench-settings", "workbench-settings-controls",
       "workbench-products", "workbench-factors"
     ],
+    "workbench-ic-groups": [
+      "workbench-configuration-groups", "workbench-ic-controls"
+    ],
+    "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core"],
     "settings": ["core"],
     "manager": ["core"]
@@ -84,7 +88,7 @@
     "job": ["job-detail-core"],
     "job-configuration": ["job-detail-core"],
     "job-input": ["job-detail-input"],
-    "ic-test": ["workbench-test-ui"],
+    "ic-test": ["workbench-test-ui", "workbench-ic-groups"],
     "backtest": ["workbench-test-ui", "workbench-backtest"],
     "factor-evaluation": ["workbench-test-ui"],
     "factor-series": ["workbench-core"],
@@ -321,18 +325,26 @@
       "workbench/test-products.js",
       "workbench/test-categories.js"
     ],
-    "workbench-backtest": [
+    "workbench-configuration-groups": [
       "workbench/tab-list-chip.js",
-      "workbench/backtest-group-overrides.js",
+      "workbench/configuration-groups/common/surface.js",
       "workbench/strategy-editor-scope.js",
       "workbench/strategy-editor-tabs.js",
+      "workbench/strategy-editor-pickers.js",
+      "workbench/strategy-list.js"
+    ],
+    "workbench-ic-groups": [
+      "workbench/configuration-groups/ic/model.js",
+      "workbench/configuration-groups/ic/form.js",
+      "workbench/configuration-groups/ic/adapter.js"
+    ],
+    "workbench-backtest": [
+      "workbench/backtest-group-overrides.js",
       "workbench/strategy-editor-overrides.js",
       "workbench/strategy-editor-custom-source.js",
-      "workbench/strategy-editor-pickers.js",
       "workbench/strategy-editor-product-filter.js",
       "workbench/backtest-group-batches.js",
       "workbench/backtest-group-model.js",
-      "workbench/strategy-list.js",
       "workbench/backtest-group-form.js",
       "workbench/backtest-groups.js"
     ],
@@ -495,6 +507,10 @@
     "workbench/tab-chip-content.js",
     "workbench/test-setting-fields.js",
     "workbench/tab-list-chip.js",
+    "workbench/configuration-groups/common/surface.js",
+    "workbench/configuration-groups/ic/model.js",
+    "workbench/configuration-groups/ic/form.js",
+    "workbench/configuration-groups/ic/adapter.js",
     "workbench/test-settings.js",
     "workbench/test-settings-schema.js",
     "workbench/backtest-group-overrides.js",

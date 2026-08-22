@@ -24,6 +24,12 @@ global.FTTestProducts = {
   groupLabel: group => group.label,
 };
 window.FTTestProducts = global.FTTestProducts;
+global.FTICConfigurationGroupModel = {
+  selected: state => (state.analysis?.configuration_groups || []).filter(item => (
+    (state.selectedICConfigurationGroupIDs || []).includes(item.config_group_id)
+  )),
+};
+window.FTICConfigurationGroupModel = global.FTICConfigurationGroupModel;
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/test-lazy-code.js", "utf8",
 ), {filename: "test-lazy-code.js"});
@@ -33,7 +39,7 @@ global.FTTestConfiguration = {
     revision += 1;
     state.workspace = state.workspace || {workspace_id: "workspace-one"};
     return {
-      revision, group_id: group.id,
+      revision, group_id: group.config_group_id || group.id,
       configuration_id: `configuration-${revision}`,
     };
   },
@@ -145,6 +151,18 @@ const state = {
     {id: "day", label: "日盘"},
     {id: "night", label: "夜盘"},
   ],
+  analysis: {configuration_groups: [{
+    config_group_id: "icg-day",
+    batch_id: "icb-day",
+    name: "日盘 ROC",
+    factor_ref: "factor:v1:profile-maxa:path:roc:commit:blob",
+    product_scope_ref: "product-group:day",
+    entry_delay_bars: 0,
+    horizon: {sampling: "scale_aware"},
+    methods: ["rank"],
+    return_price_basis: "next_open_to_open_adjusted",
+  }]},
+  selectedICConfigurationGroupIDs: ["icg-day"],
   outputRequests: ["ic_series", "ic_statistics"],
   manifest: {run_fields: [
     {
@@ -230,8 +248,8 @@ const strategyScopedBacktest = {
 (async () => {
   const batch = window.FTTestRunBatch;
   assert.equal(actionLoaded, false, "submission code must not load while creating header actions");
-  assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
-  assert.equal(state.activeRunGroupID, "day");
+  assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["icg-day"]);
+  assert.equal(state.activeRunGroupID, "icg-day");
   let cleared = 0;
   window.FTTests = {clearDraft: () => { cleared += 1; }};
   const header = batch.headerActions(context, state, () => {});
@@ -240,23 +258,32 @@ const strategyScopedBacktest = {
   assert.equal(header[1].disabled, false);
   header[2].listeners.click();
   assert.equal(cleared, 1);
-  const emptyHeader = batch.headerActions(context, {...state, groups: []}, () => {});
+  const emptyState = {
+    ...state,
+    selectedICConfigurationGroupIDs: [],
+    testRunBatch: [],
+  };
+  const emptyHeader = batch.headerActions(context, emptyState, () => {});
   assert.equal(emptyHeader[0].disabled, false,
     "view RunSpec must remain clickable without a product group");
   assert.equal(emptyHeader[1].disabled, true,
     "run action stays disabled without a product group");
   emptyHeader[0].listeners.click();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.ok(notices.some(item => item.isError && /请先选择产品组/.test(item.message)),
-    "missing product selection must be explained by the header action");
+  assert.ok(notices.some(item => item.isError && /请先选择配置组/.test(item.message)),
+    "missing IC configuration-group selection must be explained by the header action");
 
-  const lateState = {...state, groups: [], testRunBatch: []};
+  const lateState = {
+    ...state,
+    selectedICConfigurationGroupIDs: [],
+    testRunBatch: [],
+  };
   let lateRuns = 0;
   window.FTTestRunBatchActions = {
     async runAll() { lateRuns += 1; },
   };
   const lateHeader = batch.headerActions(context, lateState, () => {});
-  lateState.groups = [{id: "late", label: "延迟加载产品组"}];
+  lateState.selectedICConfigurationGroupIDs = ["icg-day"];
   lateHeader[1].listeners.click();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(lateRuns, 1,
@@ -272,7 +299,7 @@ const strategyScopedBacktest = {
   delete window.FTTestRunBatchActions;
 
   await batch.previewAll(context, state, () => {});
-  assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
+  assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
 
   const nestedPreviewItem = {phase: "freezing", runSpecHash: ""};
@@ -290,7 +317,7 @@ const strategyScopedBacktest = {
 
   const frozenHeader = batch.headerActions(context, state, () => {});
   frozenHeader[0].listeners.click();
-  assert.deepEqual(openedRunSpecs.map(item => item.label), ["任务 1 · 日盘", "任务 2 · 夜盘"],
+  assert.deepEqual(openedRunSpecs.map(item => item.label), ["任务 1 · 日盘 ROC"],
     "view run configuration must open one overlay tab per task");
   assert.ok(openedRunSpecs.every(item => /^runspec:sha256:/.test(item.target)),
     "overlay tabs must use the frozen RunSpec references");
@@ -310,9 +337,9 @@ const strategyScopedBacktest = {
   state.runValues.retention_mode = "summary";
   frozenHeader[0].listeners.click();
   await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(previewRequests.length, previewsBeforeMutation + state.groups.length,
+  assert.equal(previewRequests.length, previewsBeforeMutation + state.analysis.configuration_groups.length,
     "viewing RunSpec after editing the page must freeze the current configuration again");
-  assert.ok(previewRequests.slice(-state.groups.length).every(item => (
+  assert.ok(previewRequests.slice(-state.analysis.configuration_groups.length).every(item => (
     item.body.retention_mode === "summary"
   )), "the refreshed RunSpec preview must serialize the edited field values");
   assert.notDeepEqual(openedRunSpecs.map(item => item.target), firstPreviewTargets,
@@ -322,7 +349,7 @@ const strategyScopedBacktest = {
   state.customStrategyOverrides = {strategy_one: {factor_mode: "rank"}};
   frozenHeader[0].listeners.click();
   await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(previewRequests.length, previewsBeforeInputMutation + state.groups.length,
+  assert.equal(previewRequests.length, previewsBeforeInputMutation + state.analysis.configuration_groups.length,
     "editing an input-state field serialized into RunSpec must invalidate the preview");
   assert.deepEqual(
     previewRequests.at(-1).body.custom_strategy_overrides,
@@ -420,14 +447,14 @@ const strategyScopedBacktest = {
   await batch.previewAll(context, state, () => {});
   const icPreviewBodies = previewRequests
     .filter(item => item.body.analyses?.[0] === "ic")
-    .slice(-state.groups.length)
+    .slice(-state.analysis.configuration_groups.length)
     .map(item => item.body);
   await batch.runAll(context, state, () => {});
-  assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
-  assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1", "job-2"],
+  assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1"]);
+  assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1"],
     "submitted jobs must remain available to the test-page progress/result observer");
-  assert.equal(state.activeRunGroupID, "night");
-  assert.deepEqual(state.testRunBatch.map(item => item.port), [8141, 8141]);
+  assert.equal(state.activeRunGroupID, "icg-day");
+  assert.deepEqual(state.testRunBatch.map(item => item.port), [8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
@@ -451,8 +478,8 @@ const strategyScopedBacktest = {
     item.path.endsWith("/preview")
   )).at(-1).body;
   await batch.runAll(context, backtest, () => {});
-  assert.equal(backtest.testRunBatch[0].jobID, "job-3");
-  assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3?server_id=public-1");
+  assert.equal(backtest.testRunBatch[0].jobID, "job-2");
+  assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-2?server_id=public-1");
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(requests.at(-1).body.retention_mode, "summary");
   assert.deepEqual(requests.at(-1).body.output_requests, ["equity_curve"]);
@@ -466,7 +493,7 @@ const strategyScopedBacktest = {
     "UploadedMomentum");
   assert.deepEqual(batch.synchronize(factorEvaluation).map(item => item.groupID), ["all"]);
   await batch.runAll(context, factorEvaluation, () => {});
-  assert.equal(factorEvaluation.testRunBatch[0].jobID, "job-4");
+  assert.equal(factorEvaluation.testRunBatch[0].jobID, "job-3");
   const factorEvaluationPreview = requests.filter(item => (
     item.path.endsWith("/preview") && item.body.analyses[0] === "factor_evaluation"
   )).at(-1).body;
@@ -479,7 +506,7 @@ const strategyScopedBacktest = {
   "strategy-owned product scopes must create one backtest task");
   assert.equal(strategyScopedBacktest.testRunBatch[0].groupLabel, "回测任务");
   await batch.runAll(context, strategyScopedBacktest, () => {});
-  assert.equal(strategyScopedBacktest.testRunBatch[0].jobID, "job-5");
+  assert.equal(strategyScopedBacktest.testRunBatch[0].jobID, "job-4");
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
 
   const refreshDuringSubmission = {
@@ -491,12 +518,12 @@ const strategyScopedBacktest = {
     refreshDuringSubmission.testRunBatch = refreshDuringSubmission.testRunBatch
       .map(item => ({...item}));
   });
-  assert.equal(refreshDuringSubmission.testRunBatch[0].jobID, "job-6",
+  assert.equal(refreshDuringSubmission.testRunBatch[0].jobID, "job-5",
     "submission must publish the Job identity after a repaint replaces batch entries");
-  assert.deepEqual(batch.submittedItems(refreshDuringSubmission).map(item => item.jobID), ["job-6"],
+  assert.deepEqual(batch.submittedItems(refreshDuringSubmission).map(item => item.jobID), ["job-5"],
     "a repainted test page must retain the Job consumed by its progress/result observer");
   assert.equal(navigated, false, "submission must keep the test page visible");
-  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 6);
+  assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
   assert.ok(actionsSource.includes("state.runValues?.service_port"));
   assert.ok(actionsSource.includes(
     'serviceRunPath(context, state, "/api/runs/preview")',

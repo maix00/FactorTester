@@ -9,6 +9,18 @@ const factor = {
 const secondFactor = {
   factor_alias: "Momentum", factor_ref: "factor:v1:momentum", family_ref: "family:v1:momentum",
 };
+const configurationGroup = {
+  config_group_id: "icg-day-roc",
+  batch_id: "icb-day-roc",
+  name: "日盘 ROC",
+  factor_ref: factor.factor_ref,
+  product_scope_ref: "product-group:persisted",
+  entry_delay_bars: 0,
+  horizon: {sampling: "scale_aware"},
+  methods: ["rank"],
+  return_price_basis: "next_open_to_open_adjusted",
+  editor_mounted_tabs: ["__configuration__", "factor", "product_path_selection"],
+};
 global.FTTestFactors = {
   selectedFactor: state => state.noOuterFactor ? null : factor,
   selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
@@ -57,7 +69,9 @@ const state = {
   }, {
     group_ref: "product-group:persisted", name: "持久产品组",
     paths: ["CNFutures/day/**"],
-  }], analysis: {}, settingsMountedTabs: ["factor", "delay"],
+  }], analysis: {configuration_groups: [configurationGroup]},
+  selectedICConfigurationGroupIDs: [configurationGroup.config_group_id],
+  settingsMountedTabs: ["factor", "delay"],
   factorRef: factor.factor_ref, groupRef: "day", groupRefs: ["day"],
   outputCapabilities: [], outputRequests: [],
   transientFactorSources: [{
@@ -71,9 +85,9 @@ assert.deepEqual(
   window.FTTestConfiguration.executionFactors({
     ...state,
     values: {...state.values, factor_selections: []},
-  }),
-  [],
-  "an explicitly empty IC selection must not execute the whole candidate pool",
+  }).map(item => item.factor_ref),
+  [factor.factor_ref],
+  "grouped IC execution must use the group's frozen factor, not the legacy global selection",
 );
 const context = {t: value => value, api: async (path, options) => {
   requests.push({path, body: JSON.parse(options.body)});
@@ -81,7 +95,7 @@ const context = {t: value => value, api: async (path, options) => {
 }};
 
 (async () => {
-  await window.FTTestConfiguration.save(context, state, {id: "day", paths: ["CNFutures"]});
+  await window.FTTestConfiguration.save(context, state, configurationGroup);
   assert.deepEqual(
     requests[0].body.payload.ui.ic.mounted_tabs,
     ["factor", "delay"],
@@ -92,15 +106,16 @@ const context = {t: value => value, api: async (path, options) => {
     [factor.factor_ref],
     "workspace subjects must contain only the registered IC factor selection",
   );
-  assert.deepEqual(
-    requests[0].body.payload.analyses.ic.factors.map(item => item.factor_ref),
-    [factor.factor_ref],
-    "the compiled IC analysis must use the same selected factor references",
-  );
   const icAnalysis = requests[0].body.payload.analyses.ic;
   assert.deepEqual(Object.keys(icAnalysis).sort(), [
-    "factors", "local_settings", "product_path_selection_id", "product_selections",
-  ], "IC authoring must retain one local settings object and one product projection");
+    "configuration_groups", "local_settings", "product_selections", "schema_version",
+  ], "IC authoring must persist the grouped typed shape");
+  assert.deepEqual(icAnalysis.configuration_groups, [configurationGroup]);
+  assert.deepEqual(icAnalysis.product_selections, {
+    "product-group:persisted": {
+      product_path_selection_id: "product-group:persisted",
+    },
+  }, "persistent groups must write only their stable reference");
   assert.equal(icAnalysis.product_path_selection, undefined);
   assert.equal(icAnalysis.paths, undefined);
   assert.equal(icAnalysis.settings, undefined);
