@@ -287,6 +287,9 @@ assert.equal(
 const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: []},
+  savedFactors: [{
+    factor_ref: "factor:sgccs-history", factor_alias: "SGCCS 历史版本",
+  }],
   groups: [{group_ref: "group:night", name: "夜盘"}],
 }, {
   factor_candidate_refs: ["factor:sgccs-history"],
@@ -294,10 +297,11 @@ const persistedStrategySources = FTTestContentAdapters.chipSources({
 });
 assert.deepEqual(
   persistedStrategySources.factor,
-  [{factor_ref: "factor:sgccs-history"}],
+  [{factor_ref: "factor:sgccs-history", factor_alias: "SGCCS 历史版本"}],
   "a persisted strategy factor must remain a detail target before catalog loading",
 );
-assert.equal(persistedStrategySources.factorCandidateLabel, "factor:sgccs-history");
+assert.equal(persistedStrategySources.factorCandidateLabel, "SGCCS 历史版本",
+  "a frozen factor ref must resolve through the saved factor descriptor");
 assert.equal(
   persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
   "factor:sgccs-history",

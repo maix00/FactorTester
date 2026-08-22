@@ -285,12 +285,32 @@
 
   function factorObjects(state, refs) {
     const wanted = new Set(refs || []);
-    const candidates = window.FTTestFactorSelection?.candidates?.(state) || [];
+    const candidates = mergeFactorCatalogs(
+      state.savedFactors,
+      state.factors,
+      state.analysis?.factors,
+      state.values?.factor_candidates,
+      window.FTTestFactorSelection?.candidates?.(state),
+    );
     const matched = indexedValues(candidates, candidateIndexes, factorReference);
     // Strategy rows are rendered before the catalog is necessarily loaded.
     // Preserve their stable factor reference/alias so the detail overlay stays
     // clickable; the catalog detail view resolves the full object lazily.
     return [...wanted].map(ref => matched.get(ref) || {factor_ref: ref});
+  }
+
+  function mergeFactorCatalogs(...catalogs) {
+    const values = new Map();
+    for (const catalog of catalogs) {
+      for (const value of Array.isArray(catalog) ? catalog : []) {
+        const ref = factorReference(value);
+        if (!ref) continue;
+        const previous = values.get(ref);
+        values.set(ref, previous && typeof previous === "object"
+          && typeof value === "object" ? {...previous, ...value} : value);
+      }
+    }
+    return [...values.values()];
   }
 
   function itemProductSelection(item) {

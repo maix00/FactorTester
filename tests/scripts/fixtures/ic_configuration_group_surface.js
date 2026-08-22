@@ -76,6 +76,10 @@ load(`${workbench}/tab-list-chip.js`);
 global.FTTabListChip = window.FTTabListChip;
 load(`${workbench}/strategy-list.js`);
 global.FTStrategyList = window.FTStrategyList;
+load(`${workbench}/test-content-adapters.js`);
+global.FTTestContentAdapters = window.FTTestContentAdapters;
+load(`${workbench}/test-setting-chips.js`);
+global.FTTestSettingChips = window.FTTestSettingChips;
 load(`${workbench}/configuration-groups/common/surface.js`);
 global.FTConfigurationGroupSurface = window.FTConfigurationGroupSurface;
 load(`${workbench}/configuration-groups/ic/model.js`);
@@ -98,7 +102,30 @@ const state = {
   kind: "ic",
   analysis: {configuration_groups: [group]},
   selectedICConfigurationGroupIDs: [],
+  values: {factor_candidates: []},
+  savedFactors: [{factor_ref: factorRef, factor_alias: "ROC 1m"}],
+  groups: [{group_ref: "product-group:day", name: "日盘产品组"}],
   manifest: {
+    tab_lists: {"local-settings": [
+      {key: "factor", label: "因子执行"},
+      {key: "product_path_selection", label: "产品组"},
+    ]},
+    defaults: {},
+    chip_fields: [
+      {
+        key: "factor_candidates", label: "因子候选",
+        chip_template: "因子候选: {factorCandidateLabel}",
+        source_keys: ["factorCandidateLabel"], target_tab: "factor",
+        source_adapter: "selected_factor_candidates",
+      },
+      {
+        key: "product_path_selection", label: "产品组",
+        chip_template: "产品组: {productPathSelectionLabel}",
+        source_keys: ["product_group"], target_tab: "product_path_selection",
+        source_adapter: "selected_product_paths",
+        value_resolvers: {productPathSelectionLabel: "product_path_selection_label"},
+      },
+    ],
     surfaces: [{
       key: "ic_configs", label: "配置组设置", mount: "group-settings",
       kind: "list", selection: "single", item_label: "配置组",
@@ -136,7 +163,18 @@ assert.equal(displaySettings?.textContent, "显示设置");
 displaySettings.listeners.click();
 assert.equal(state.icConfigurationGroupShowConfigOpen, true);
 root = window.FTICConfigurationGroups.render(context, state, refresh);
-assert.ok(find(root, node => node.className === "strategy-list-chips"));
+const chipRow = find(root, node => node.className === "strategy-list-chips");
+assert.ok(chipRow);
+const renderedChips = [];
+(function collect(node) {
+  if (String(node.className).split(/\s+/).includes("backend-setting-chip")) {
+    renderedChips.push(node);
+  }
+  for (const child of node.children || []) collect(child);
+})(chipRow);
+assert.deepEqual(renderedChips.map(chip => (
+  chip.children.map(child => child.textContent).join(": ")
+)), ["因子候选: ROC 1m", "产品组: 日盘产品组"]);
 const selection = find(root, node => node.tagName === "input");
 assert.equal(selection.type, "radio");
 selection.checked = true;
