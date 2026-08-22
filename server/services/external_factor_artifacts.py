@@ -14,11 +14,8 @@ def _resolve_cn_futures(symbol: str) -> Any | None:
     return CNFutures.get_by_product_name(symbol)
 
 
-def validate_and_freeze(manifest_path: str) -> dict[str, Any]:
-    """Validate the full panel and return the bounded metadata frozen in RunSpec."""
-    artifact = PrecomputedFactorArtifact.load(
-        Path(manifest_path), product_resolver=_resolve_cn_futures,
-    )
+def _frozen_descriptor(artifact: PrecomputedFactorArtifact) -> dict[str, Any]:
+    """Project one validated artifact into its immutable RunSpec descriptor."""
     provenance = dict(artifact.provenance)
     return {
         "artifact_id": (
@@ -38,6 +35,14 @@ def validate_and_freeze(manifest_path: str) -> dict[str, Any]:
         "products": int(artifact.signals.shape[1]),
         "finite_observations": int(artifact.data_present_mask.to_numpy().sum()),
     }
+
+
+def validate_and_freeze(manifest_path: str) -> dict[str, Any]:
+    """Validate the full panel and return the bounded metadata frozen in RunSpec."""
+    artifact = PrecomputedFactorArtifact.load(
+        Path(manifest_path), product_resolver=_resolve_cn_futures,
+    )
+    return _frozen_descriptor(artifact)
 
 
 def freeze_configured_artifacts(shared: dict[str, Any]) -> list[dict[str, Any]]:
@@ -76,13 +81,14 @@ def load_frozen_artifacts(raw: Any) -> list[PrecomputedFactorArtifact]:
     for descriptor in raw:
         if not isinstance(descriptor, dict):
             raise ValueError("each external factor artifact must be an object")
-        current = validate_and_freeze(str(descriptor.get("manifest_path") or ""))
+        artifact = PrecomputedFactorArtifact.load(
+            Path(str(descriptor.get("manifest_path") or "")),
+            product_resolver=_resolve_cn_futures,
+        )
+        current = _frozen_descriptor(artifact)
         for field in ("artifact_id", "manifest_sha256", "factor_sha256"):
             if str(descriptor.get(field) or "") != str(current[field]):
                 raise ValueError(f"external factor artifact {field} changed after submission")
-        artifact = PrecomputedFactorArtifact.load(
-            current["manifest_path"], product_resolver=_resolve_cn_futures,
-        )
         if artifact.alias in seen:
             raise ValueError(f"duplicate external factor alias: {artifact.alias}")
         seen.add(artifact.alias)

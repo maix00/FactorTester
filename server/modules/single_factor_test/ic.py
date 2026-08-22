@@ -17,7 +17,7 @@ from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonI
 from tools.factors.tester_calc.NextReturns import NextReturns
 from tools.factors.tester_calc.single_factor_test.ic import (
     annotate_ic_temporal_support, build_ic_factor, collect_ic_result,
-    discard_ic_factor, ic_evaluation_end_dt, run_ic_for_factor,
+    discard_ic_factor, ic_evaluation_end_dt,
 )
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     expected_sign_for_factor,
@@ -439,54 +439,59 @@ def _compute_ic_groups(
 
     total_groups = len(param_items)
 
-    # ── node-level 进度统计 ──
-    if emitter is not None:
-        total_nodes = 0
-        from tools.factors.tester_calc import CrossSectionIC as _CSI
-        for key, _ in param_items:
-            payload = param_payloads[key]
-            fe_param = payload.get('FE')
-            if fe_param is not None and hasattr(fe_param, '_expr'):
-                total_nodes += count_nodes(fe_param._expr)
-            # Private (`_`-prefixed) keys carry method metadata, not factor-family
-            # params — strip them and use the per-method family class, mirroring
-            # run_ic_for_factor().
-            ic_family_cls = payload.get('_ic_family_cls') or _CSI
-            clean_payload = {k: v for k, v in payload.items() if not str(k).startswith('_')}
-            tmp = ic_family_cls().get_factor(**clean_payload)
-            if hasattr(tmp, '_expr'):
-                total_nodes += count_nodes(tmp._expr)
-        setup_progress(total_nodes, lambda c, t: emitter.emit_progress(c, t, 'eval'))
-        emitter.emit_start(total=total_nodes, groups=total_groups, phase='init')
-
+    # Construct each executable root once.  The same object is used for progress
+    # sizing and evaluation; progress reporting must not rebuild the factor DAG.
+    from collections import defaultdict
+    batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
+    fallback_items: list[tuple[tuple, List[Factor], Factor, Any | None]] = []
+    pending_roots: dict[int, Factor] = {}
     try:
+        for key, factor_list in param_items:
+            _check_cancelled()
+            ic_factor, source_freq = build_ic_factor(param_payloads[key], factor_list)
+            pending_roots[id(ic_factor)] = ic_factor
+            temporal_support = _temporal_support_for_payload(
+                param_payloads[key], factor_list,
+            )
+            if source_freq is None:
+                fallback_items.append(
+                    (key, factor_list, ic_factor, temporal_support),
+                )
+            else:
+                batch_partitions[source_freq.name].append(
+                    (key, factor_list, ic_factor, source_freq, temporal_support),
+                )
+
+        # ── node-level 进度统计 ──
+        if emitter is not None:
+            total_nodes = 0
+            roots_by_key = {
+                item[0]: item[2]
+                for partition in batch_partitions.values()
+                for item in partition
+            }
+            roots_by_key.update({item[0]: item[2] for item in fallback_items})
+            for key, _ in param_items:
+                payload = param_payloads[key]
+                fe_param = payload.get('FE')
+                if fe_param is not None and hasattr(fe_param, '_expr'):
+                    total_nodes += count_nodes(fe_param._expr)
+                root = roots_by_key.get(key)
+                if root is not None and hasattr(root, '_expr'):
+                    total_nodes += count_nodes(root._expr)
+            setup_progress(total_nodes, lambda c, t: emitter.emit_progress(c, t, 'eval'))
+            emitter.emit_start(total=total_nodes, groups=total_groups, phase='init')
+
         # All roots in one source-frequency partition share the same products,
         # run window and preload.  Evaluate them serially inside a batch so
         # structurally identical FE subtrees can use one run-scoped cache.
         # Roots without an explicit source frequency retain the old isolated
         # path because their compatible context cannot be asserted safely.
-        from collections import defaultdict
         from tools.factors.evaluation import (
             evaluate_factors,
             prepare_evaluation_batch,
             release_evaluation_batch,
         )
-
-        batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
-        fallback_items: list[Tuple[tuple, List[Factor]]] = []
-        for key, factor_list in param_items:
-            _check_cancelled()
-            ic_factor, source_freq = build_ic_factor(param_payloads[key], factor_list)
-            if source_freq is None:
-                discard_ic_factor(tester, ic_factor)
-                fallback_items.append((key, factor_list))
-            else:
-                temporal_support = _temporal_support_for_payload(
-                    param_payloads[key], factor_list,
-                )
-                batch_partitions[source_freq.name].append(
-                    (key, factor_list, ic_factor, source_freq, temporal_support),
-                )
 
         group_done = 0
         for partition in batch_partitions.values():
@@ -568,6 +573,7 @@ def _compute_ic_groups(
                     finally:
                         for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
                             discard_ic_factor(tester, ic_factor)
+                            pending_roots.pop(id(ic_factor), None)
                     # Drop the temporary root list before the next chunk.  The
                     # partition metadata remains lightweight and is needed only to
                     # derive the next slice.
@@ -578,10 +584,39 @@ def _compute_ic_groups(
                     del prepared
 
         # This branch is expected only for legacy factors that do not declare
-        # a source frequency.  It keeps old inference behaviour intact.
-        for key, factor_list in fallback_items:
+        # a source frequency.  Evaluate the prebuilt root directly so progress
+        # sizing and execution still share one DAG construction.
+        for key, factor_list, ic_factor, temporal_support in fallback_items:
             _check_cancelled()
-            result = run_ic_for_factor(tester, param_payloads[key], factor_list)
+            try:
+                evaluate_kwargs: Dict[str, Any] = {
+                    "freq": None,
+                    "start_dt": tester.start_dt,
+                    "end_dt": ic_evaluation_end_dt(tester, temporal_support),
+                }
+                warmup_seconds = getattr(
+                    temporal_support, "factor_input_support_seconds", None,
+                )
+                if warmup_seconds is not None and warmup_seconds > 0:
+                    evaluate_kwargs["warmup_window"] = pd.Timedelta(
+                        seconds=warmup_seconds,
+                    )
+                ic_factor.evaluate(tester.products, **evaluate_kwargs)
+                expected_sign, expected_sign_source = (
+                    expected_sign_for_factor(factor_list[0])
+                    if factor_list else (None, None)
+                )
+                result = collect_ic_result(
+                    tester,
+                    ic_factor,
+                    factor_list,
+                    temporal_support=temporal_support,
+                    expected_sign=expected_sign,
+                    expected_sign_source=expected_sign_source,
+                )
+            finally:
+                discard_ic_factor(tester, ic_factor)
+                pending_roots.pop(id(ic_factor), None)
             group_done += 1
             if emitter is not None:
                 emitter.emit_progress(group_done, total_groups, 'group_done')
@@ -591,6 +626,11 @@ def _compute_ic_groups(
                 quantile_portfolio_config=quantile_portfolio_config,
             )
     finally:
+        # A build, progress setup, or prepared-batch failure may happen before a
+        # chunk reaches its local cleanup.  Release every root still owned by
+        # this call; successfully processed chunks remove themselves above.
+        for ic_factor in pending_roots.values():
+            discard_ic_factor(tester, ic_factor)
         if emitter is not None:
             teardown_progress()
 
