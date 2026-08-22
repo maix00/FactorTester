@@ -127,7 +127,7 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
         ("group_test", ["test_template", "engine", "time"]),
         (
             "ic_test",
-            ["test_template", "factor", "product_path_selection", "time"],
+            ["test_template", "time"],
         ),
         ("single_factor_page", ["setting_template", "time"]),
         (
@@ -486,9 +486,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
     }.issubset(item_fields)
     assert index["default_mounted_tabs"] == {
-        "local-settings": [
-            "test_template", "factor", "product_path_selection", "time",
-        ],
+        "local-settings": ["test_template", "time"],
         "group-settings": [],
     }
     tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}

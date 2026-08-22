@@ -65,7 +65,7 @@ def test_ic_configuration_reuses_registered_common_tabs_and_run_contract() -> No
         }
 
     assert ic_manifest["default_mounted_tabs"]["local-settings"] == [
-        "test_template", "factor", "product_path_selection", "time",
+        "test_template", "time",
     ]
     assert ic_manifest["run_settings"] == backtest_manifest["run_settings"]
     assert [item["key"] for item in ic_manifest["run_fields"]] == [
