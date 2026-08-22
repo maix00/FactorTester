@@ -7,7 +7,7 @@ global.FTStrategyEditorScope={
   scope:()=>({items:[],required:true,ready:false,source:"outer"}),
   validate:()=>[{message:"outer selection is empty"}],
 }; window.FTStrategyEditorScope=global.FTStrategyEditorScope;
-global.FTTestFactorCandidateSources={candidatePicker:()=>new E("picker"),innerPanel:()=>new E("factor")};
+let factorOptions; global.FTTestFactorCandidateSources={candidatePicker:(_c,_s,o)=>{factorOptions=o;return new E("picker")},innerPanel:()=>new E("factor")};
 global.FTTestObjectPicker={lazyLoading:()=>false};
 global.FTTestFieldRow={create:(label,control,help)=>{const row=new E("field");row.label=label;row.help=help;row.append(control);return row;}};
 let productOptions;
@@ -30,4 +30,11 @@ const unrelated=tabOptions.renderOverrides({tab:{key:"category",field:"productMa
 tabOptions.renderProduct();
 assert.deepEqual(productOptions.groups,state.groups,"group-owned product picker must not be emptied by the legacy outer product tab");
 assert.equal(productOptions.constrain,false,"group-owned picker must bypass legacy outer candidate constraints");
+const editor={mode:"create"};
+window.FTICConfigurationGroupForm.render({t:x=>x,button:()=>new E("button")},state,editor,()=>{});
+tabOptions.renderProduct();
+productOptions.onChange(["product-group:day"]);
+factorOptions.onChange(["factor:v1:roc"]);
+assert.equal(editor.draft.product_scope_ref,"product-group:day","group selections survive tab refresh/re-render");
+assert.equal(editor.draft.factor_ref,"factor:v1:roc","factor selections survive tab refresh/re-render");
 assert.equal(form.tagName,"form"); console.log("ok");
