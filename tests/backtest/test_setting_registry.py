@@ -1320,6 +1320,10 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert [item["key"] for item in contract["inner_default_tabs"]] == expected
         assert [item["key"] for item in contract["outer_pre_mounted_tabs"]] == expected
         assert [item["key"] for item in contract["pre_mounted_tabs"]] == expected
+        labels = {item["key"]: item["label"] for item in contract["inner_default_tabs"]}
+        assert labels["factor"] == (
+            "因子" if application_name == "ic_test" else "因子执行"
+        )
         assert not set(expected).intersection(contract["outer_only_tabs"])
         manual_keys = [item["key"] for item in contract["inner_manual_tabs"]]
         if application_name == "ic_test":
