@@ -822,8 +822,8 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         end_dt=end_dt,
         user=user_obj_for_name(owner),
     )
-    aliases = [
-        str(item.get("alias") or "").strip()
+    factor_descriptors = [
+        item
         for item in (data.get("factors") or [])
         if isinstance(item, dict) and item.get("alias")
     ]
@@ -833,10 +833,17 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         factor.alias: factor
         for factor in load_frozen_artifacts(data.get("external_factor_artifacts"))
     }
-    resolved = [
-        external.get(alias) or factor_from_alias(alias, username=owner)
-        for alias in aliases
-    ]
+    resolved = []
+    for descriptor in factor_descriptors:
+        alias = str(descriptor.get("alias") or "").strip()
+        factor_owner = str(
+            descriptor.get("factor_owner_ref")
+            or descriptor.get("owner_ref")
+            or owner
+        ).strip()
+        resolved.append(
+            external.get(alias) or factor_from_alias(alias, username=factor_owner)
+        )
 
     class _ResolvedFactorCollection:
         """Run-local lookup for independently resolved FactorExpr instances."""
