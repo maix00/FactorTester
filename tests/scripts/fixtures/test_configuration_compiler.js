@@ -5,6 +5,7 @@ global.window = globalThis;
 global.structuredClone = global.structuredClone || (value => JSON.parse(JSON.stringify(value)));
 
 const source = process.argv[2];
+const configurationSource = process.argv[3];
 eval(fs.readFileSync(
   "server/manager/web/workbench/setting-rules.js", "utf8",
 ));
@@ -12,6 +13,14 @@ eval(fs.readFileSync(source, "utf8"));
 eval(fs.readFileSync(
   "server/manager/web/workbench/ic-configuration.js", "utf8",
 ));
+if (configurationSource) {
+  global.FTTestProducts = {
+    groupID: group => group.product_path_selection_id || group.id,
+    projection: group => group.product_path_selection,
+  };
+  global.FTTestFactors = {};
+  eval(fs.readFileSync(configurationSource, "utf8"));
+}
 
 const manifest = {
   defaults: {
@@ -88,17 +97,64 @@ assert.equal("stale_unknown_field" in execution, false);
 const scopedPayload = FTTestConfigurationCompiler.sanitizeExecutionPayload(
   manifest,
   {
+    category: "industry",
+    start_date: "2025-01-02",
     split_count: 5,
     settings: {split_count: 5},
-    local_settings: {split_count: 5},
+    local_settings: {
+      category: "industry", start_date: "2025-01-02", split_count: 5,
+    },
     groups: [{id: "group-1", split_count: 5}],
   },
   values,
+  {stripRootRegistered: true},
 );
 assert.equal("split_count" in scopedPayload, false);
+assert.equal("category" in scopedPayload, false);
+assert.equal("start_date" in scopedPayload, false);
 assert.equal("split_count" in scopedPayload.settings, false);
 assert.equal("split_count" in scopedPayload.local_settings, false);
+assert.equal(scopedPayload.local_settings.category, "industry");
+assert.equal(scopedPayload.local_settings.start_date, "2025-01-02");
 assert.equal(scopedPayload.groups[0].split_count, 5);
+
+if (configurationSource) {
+  const backtestState = {
+    kind: "backtest",
+    manifest,
+    values,
+    factors: [factor],
+    savedFactors: [factor],
+    groups: [{
+      product_path_selection_id: "day",
+      selected_paths: ["CNFutures/day"],
+    }],
+    analysis: {
+      ...values,
+      groups: [{
+        id: "group-1", factor_candidate_refs: [factor.factor_ref],
+        split_count: 5,
+        product_path_selection_id: "day",
+        product_path_selection: {
+          product_path_selection_id: "day",
+          selected_paths: ["CNFutures/day"],
+        },
+      }],
+    },
+  };
+  const compiledBacktest = FTTestConfiguration.buildAnalysis(
+    backtestState, [factor], factor, backtestState.analysis.groups[0],
+  );
+  for (const key of Object.keys(manifest.defaults)) {
+    assert.equal(
+      key in compiledBacktest, false,
+      `backtest RunSpec must not retain registered root field: ${key}`,
+    );
+  }
+  assert.equal(compiledBacktest.local_settings.category, "industry");
+  assert.equal(compiledBacktest.local_settings.start_date, "2025-01-02");
+  assert.equal(compiledBacktest.groups[0].split_count, 5);
+}
 
 const conditionalManifest = {
   defaults: {
