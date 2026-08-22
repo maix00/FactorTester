@@ -154,6 +154,94 @@ def test_catalog_product_group_is_resolved_authoritatively_by_owner(monkeypatch)
     assert selection["origin"] == "catalog"
 
 
+def test_product_group_index_includes_authoritative_domain_mirror(
+    monkeypatch,
+) -> None:
+    legacy = {
+        "id": "pg-day",
+        "name": "Stale legacy day group",
+        "paths": ["Product/Stale"],
+    }
+    authoritative = {
+        "id": "pg-day",
+        "name": "CNFuturesDay",
+        "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
+    }
+    monkeypatch.setattr(
+        "server.modules.products.product_group_store.load_product_groups",
+        lambda owner: [legacy],
+    )
+
+    class _Store:
+        def __init__(self, path) -> None:
+            pass
+
+        def list_entities(self, **kwargs):
+            return [{
+                "entity_id": "pg-day",
+                "payload": authoritative,
+                "deleted": False,
+            }]
+
+    monkeypatch.setattr(
+        "server.manager.storage.account_domain.local.LocalAccountDomainStore",
+        _Store,
+    )
+
+    groups = __import__(
+        "server.services.frozen_product_scope", fromlist=["_product_group_index"]
+    )._product_group_index("alice")
+
+    assert groups["product-group:pg-day"] == authoritative
+
+
+def test_load_account_domain_product_groups_excludes_tombstones(
+    monkeypatch, tmp_path,
+) -> None:
+    import settings as Settings
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    from server.modules.products import product_group_store
+
+    database = tmp_path / "account-domain.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
+    store = LocalAccountDomainStore(database)
+    store.upsert_local(
+        principal="alice",
+        entity_type="product_group",
+        entity_id="pg-live",
+        payload={"id": "pg-live", "paths": ["Product/A"]},
+        manager_id="test",
+    )
+    store.upsert_local(
+        principal="alice",
+        entity_type="product_group",
+        entity_id="pg-deleted",
+        payload={"id": "pg-deleted", "paths": ["Product/Deleted"]},
+        manager_id="test",
+        deleted=True,
+    )
+    store.upsert_local(
+        principal="bob",
+        entity_type="product_group",
+        entity_id="pg-other-owner",
+        payload={"id": "pg-other-owner", "paths": ["Product/B"]},
+        manager_id="test",
+    )
+
+    assert product_group_store.load_account_domain_product_groups("alice") == [
+        {"id": "pg-live", "paths": ["Product/A"]},
+    ]
+    monkeypatch.setattr(
+        product_group_store, "load_product_groups", lambda owner: [
+            {"id": "pg-deleted", "paths": ["Product/StaleLegacy"]},
+            {"id": "pg-live", "paths": ["Product/StaleLive"]},
+        ],
+    )
+    assert product_group_store.load_authoritative_product_groups("alice") == [
+        {"id": "pg-live", "paths": ["Product/A"]},
+    ]
+
+
 def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> None:
     configuration = {
         "payload": {

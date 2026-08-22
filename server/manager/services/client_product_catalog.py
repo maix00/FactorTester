@@ -27,8 +27,8 @@ class ClientProductCatalogMixin:
     def product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return account groups projected against the server catalog."""
         self._refresh_account_domain_async(principal)
-        from tools.data.account_manage import load_product_groups
         from server.modules.products.product_group_store import (
+            load_authoritative_product_groups,
             product_group_path_bindings,
         )
         from server.services.product_catalog_projection import catalog_product_records
@@ -38,30 +38,7 @@ class ClientProductCatalogMixin:
 
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        groups = load_product_groups(principal)
-        if self.account_domain_sync is not None:
-            try:
-                remote_groups = self.account_domain_sync.entities(
-                    principal,
-                    entity_type="product_group",
-                    include_shared=False,
-                    sync=False,
-                )
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                remote_groups = []
-            known = {
-                str(item.get("id") or item.get("name") or "")
-                for item in groups
-                if isinstance(item, dict)
-            }
-            for row in remote_groups:
-                payload = row.get("payload") if isinstance(row, dict) else None
-                if not isinstance(payload, dict) or row.get("deleted"):
-                    continue
-                key = str(payload.get("id") or payload.get("name") or "")
-                if key and key not in known:
-                    groups.append(dict(payload))
-                    known.add(key)
+        groups = load_authoritative_product_groups(principal)
         for group in groups:
             if "path_bindings" not in group:
                 group["path_bindings"] = product_group_path_bindings(
