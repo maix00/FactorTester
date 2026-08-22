@@ -376,7 +376,10 @@
   function deduplicate(items) {
     const seen = new Set();
     return items.filter(item => {
-      const identity = `${item.label}\u0000${item.value}`;
+      // The same default text may legitimately appear once for every
+      // mounted tab.  De-duplicate repeated declarations inside one tab,
+      // but never collapse two tab groups into one summary chip.
+      const identity = `${item.tabKey || ""}\u0000${item.label}\u0000${item.value}`;
       if (seen.has(identity)) return false;
       seen.add(identity); return true;
     });

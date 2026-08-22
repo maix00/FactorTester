@@ -157,6 +157,8 @@
         includeEmpty: true,
         includeRun: false,
         includeStrategyChips: true,
+        includeTabFallbacks: true,
+        fallbackTabs: [...mounted],
         sources: typeof chipSources === "function" ? chipSources() : (chipSources || {}),
         groupBy: "tab",
         onOpen: key => {

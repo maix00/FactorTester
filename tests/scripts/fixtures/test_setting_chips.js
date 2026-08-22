@@ -307,6 +307,21 @@ assert.deepEqual(adapterFallback.map(item => [item.label, item.value, item.tabKe
   ["默认", "未设置（默认）", "product_path_selection"],
 ]);
 
+const fallbackOnly = FTTestSettingChips.descriptors({
+  manifest: {tab_lists: {"local-settings": [
+    {key: "factor", label: "因子"},
+    {key: "product_path_selection", label: "产品组"},
+    {key: "time", label: "时间范围"},
+  ]}},
+  mountedTabs: ["factor", "product_path_selection", "time"],
+  includeTabFallbacks: true,
+  fallbackTabs: ["factor", "product_path_selection", "time"],
+  context: {t: value => value},
+});
+assert.deepEqual(fallbackOnly.map(item => item.tabKey), [
+  "factor", "product_path_selection", "time",
+], "every mounted tab keeps a chip group before registered fields load");
+
 const grouped = FTTestSettingChips.render({
   manifest: runManifest,
   runValues: {task_name: "", acting_profile_ref: "", retention_mode: "summary"},

@@ -535,9 +535,11 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert manifest["route_groups"]["product-categories"] == ["catalog"]
+    assert manifest["route_groups"]["report"] == ["report"]
     assert manifest["group_dependencies"]["research"] == [
-        "report", "profile", "catalog-core",
+        "profile", "catalog-core",
     ]
+    assert "report" not in manifest["group_dependencies"]["research"]
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/page-tabs.js",
         "jobs/test-types.js", "jobs/jobs.js",
