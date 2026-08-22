@@ -451,6 +451,11 @@ const strategyScopedBacktest = {
     .map(item => item.body);
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1"]);
+  assert.deepEqual(
+    requests.at(-1).body,
+    icPreviewBodies[0],
+    "IC submission must execute the exact RunSpec request shown by preview",
+  );
   assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1"],
     "submitted jobs must remain available to the test-page progress/result observer");
   assert.equal(state.activeRunGroupID, "icg-day");
