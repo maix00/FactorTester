@@ -87,6 +87,7 @@
     const renderProduct = () => FTTestProducts.selectionPanel(
       context, state, () => editorTabs?.refreshChips(), {
         groups: productItems,
+        constrain: false,
         selectedRefs: productScopeRef ? [productScopeRef] : [],
         multi: false,
         canCreate: true,
