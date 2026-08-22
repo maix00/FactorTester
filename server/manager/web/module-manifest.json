@@ -26,7 +26,7 @@
     "workbench-settings-controls": ["workbench-core"],
     "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core"],
-    "research": ["report", "profile", "catalog-core"],
+    "research": ["profile", "catalog-core"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
     "job-detail-input": ["job-detail-core"],
     "job-detail-previews": ["job-detail-core", "report", "charts"],
@@ -79,7 +79,7 @@
     "custom_product_overrides": {"group": "workbench-product-controls", "global": "FTCustomProductOverrides"}
   },
   "route_groups": {
-    "report": ["report", "research"],
+    "report": ["report"],
     "public-reference": ["research-reference"],
     "reference": ["research-reference"],
     "research": ["research"],

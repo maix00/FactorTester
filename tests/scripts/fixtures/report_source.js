@@ -53,5 +53,12 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(remote.chapterLazy, false);
   assert.equal(remote.reportAssetPath("asset-1"), "/api/public-research/publication-1/assets/asset-1");
   assert.equal(remote.localResourcePath("resource-1"), "/api/public-research/publication-1/local-resources/resource-1?inline=1");
+
+  const encoded = window.FTReportSource.create("publication%201", async path => {
+    assert.equal(path, "/api/public-research/publication%201/index");
+    return {title: "编码报告", assets: [], local_resources: [], related_objects: [], attachments: []};
+  });
+  await encoded.load();
+  assert.equal(encoded.publicationID, "publication 1");
   console.log("ok");
 })();

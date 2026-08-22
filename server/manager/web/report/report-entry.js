@@ -1,6 +1,7 @@
 (() => {
   async function render(publicationID, context) {
-    publicationID = decodeURIComponent(publicationID);
+    try { publicationID = decodeURIComponent(String(publicationID || "")); }
+    catch (_) { publicationID = String(publicationID || ""); }
     const {state, api, t, content, toolbar} = context;
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
