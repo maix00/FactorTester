@@ -58,7 +58,7 @@ def _validate_partitions(cores, partitions) -> None:
 
 def _validate_subjects(subjects, executable_factors) -> None:
     for subject in subjects:
-        if subject.startswith("factor:v1:"):
+        if subject.startswith("factor:v1:") or subject.startswith("factor:sha256:"):
             if subject not in executable_factors:
                 raise ValueError("standalone factor subject is not executable")
             continue

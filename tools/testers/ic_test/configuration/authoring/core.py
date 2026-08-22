@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..horizon import ICHorizonPolicy
 from .normalization import entry_delays, required_texts
+
+
+def _is_frozen_factor_ref(value: str) -> bool:
+    return value.startswith("factor:v1:") or bool(
+        re.fullmatch(r"factor:sha256:[0-9a-f]{64}", value)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +34,7 @@ class ICCoreTestRequest:
             required_texts(self.product_scope_refs, "product_scope_refs"),
         )
         factors = required_texts(self.factor_refs, "factor_refs")
-        if any(not value.startswith("factor:v1:") for value in factors):
+        if any(not _is_frozen_factor_ref(value) for value in factors):
             raise ValueError("factor_refs must contain frozen factor identities")
         object.__setattr__(self, "factor_refs", factors)
         policy = self.horizon

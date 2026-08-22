@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Mapping
 
 
@@ -12,7 +13,10 @@ def factor_refs(value: Any) -> tuple[str, ...]:
         factor_ref = str(
             item.get("factor_ref") or item.get("target_ref") or ""
         ).strip() if isinstance(item, dict) else str(item or "").strip()
-        if not factor_ref.startswith("factor:v1:"):
+        if not (
+            factor_ref.startswith("factor:v1:")
+            or re.fullmatch(r"factor:sha256:[0-9a-f]{64}", factor_ref)
+        ):
             raise ValueError("each IC core test requires a frozen factor_ref")
         refs.append(factor_ref)
     if not refs:
