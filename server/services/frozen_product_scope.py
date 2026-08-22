@@ -58,24 +58,28 @@ def freeze_product_scope(
         or _embedded_selection(analysis_values, selection_id)
         for selection_id in referenced_ids
     }
-    # A self-contained RunSpec must not consult mutable catalog storage when
-    # the selected paths are already frozen in the request. Only unresolved
-    # references need the owner's persisted product-group catalog.
+    # Inline selections are authoritative request objects. Persisted product
+    # groups are not: the client submits their stable reference and the origin
+    # Manager freezes the owner's current catalog definition. This prevents a
+    # stale or forged client-side path projection from becoming execution
+    # authority while keeping genuinely inline/template-local scopes portable.
+    catalog_refs = {
+        selection_id: _catalog_group_reference(selection_id, embedded.get(selection_id))
+        for selection_id in referenced_ids
+    }
     product_groups = (
-        _product_group_index(owner)
-        if any(
-            not isinstance(value, dict)
-            or not (value.get("paths") or value.get("selected_paths"))
-            for value in embedded.values()
-        )
-        else {}
+        _product_group_index(owner) if any(catalog_refs.values()) else {}
     )
     unresolved: set[str] = set()
     canonical_selections: dict[str, dict[str, Any]] = {}
     for selection_id in sorted(referenced_ids):
         raw = embedded.get(selection_id)
-        group = product_groups.get(selection_id)
-        if not raw and group:
+        catalog_ref = catalog_refs.get(selection_id)
+        group = product_groups.get(catalog_ref) if catalog_ref else None
+        if catalog_ref and not group:
+            unresolved.add(selection_id)
+            continue
+        if group:
             raw = group
         if not raw:
             unresolved.add(selection_id)
@@ -259,12 +263,39 @@ def _product_group_index(owner: str) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _catalog_group_reference(
+    selection_id: str,
+    raw: dict[str, Any] | None,
+) -> str:
+    """Return the owner-catalog key when a selection claims catalog identity."""
+    source = raw if isinstance(raw, dict) else {}
+    template_ref = str(
+        source.get("product_group_template_id")
+        or source.get("product_group_ref")
+        or ""
+    ).strip()
+    source_type = str(source.get("source_type") or "").strip()
+    candidates = (template_ref, str(selection_id or "").strip())
+    for candidate in candidates:
+        if candidate.startswith("product-group:"):
+            return candidate
+    if source_type == "user_product_group_template":
+        return template_ref or str(selection_id or "").strip()
+    # A reference without an embedded definition is the legacy catalog form.
+    if not source or not (source.get("paths") or source.get("selected_paths")):
+        return template_ref or str(selection_id or "").strip()
+    return ""
+
+
 def _canonical_selection(
     selection_id: str,
     raw: dict[str, Any],
     stored_group: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    source = {**(stored_group or {}), **raw}
+    # Once a catalog group is resolved, every execution-semantic field comes
+    # from that owner-controlled row. Client projections remain input/display
+    # hints only and cannot override paths or category bindings.
+    source = dict(stored_group) if stored_group else dict(raw)
     paths = (
         source.get("paths")
         or source.get("selected_paths")
