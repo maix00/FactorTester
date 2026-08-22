@@ -107,9 +107,14 @@
       mountedTabs: current?.editor_mounted_tabs || [],
       chipValues: () => ({
         ...state.values,
+        ic_lags: [delayValue],
         factor_candidates: factorItems.filter(item => factorIdentity(item) === factorRef),
         product_path_selection: productScopeRef,
       }),
+      chipSources: () => window.FTTestContentAdapters?.chipSources?.(state, {
+        factor_candidate_refs: factorRef ? [factorRef] : [],
+        product_path_selection_id: productScopeRef,
+      }) || {},
       renderStructure: () => structure,
       renderFactor,
       renderProduct,

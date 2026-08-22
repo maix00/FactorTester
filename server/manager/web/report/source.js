@@ -14,7 +14,8 @@
   }
 
   function basePath(publicationID) {
-    const decoded = decodeURIComponent(publicationID);
+    let decoded = String(publicationID || "");
+    try { decoded = decodeURIComponent(decoded); } catch (_) {}
     const isLocal = decoded.startsWith("local:");
     const localRef = isLocal ? decoded.slice("local:".length) : "";
     return {
@@ -23,7 +24,7 @@
       localRef,
       path: isLocal
         ? `/api/client/research/${encodeURIComponent(localRef)}`
-        : `/api/public-research/${decoded}`,
+        : `/api/public-research/${encodeURIComponent(decoded)}`,
     };
   }
 
