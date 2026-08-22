@@ -52,6 +52,7 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         for alias in aliases
     }
     captured: dict[str, object] = {}
+    resolved_owners: list[str] = []
 
     monkeypatch.setattr(ic, "selection_from_request", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
@@ -62,7 +63,9 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
     monkeypatch.setattr(
         ic,
         "factor_from_alias",
-        lambda alias, **_kwargs: factors[alias],
+        lambda alias, **kwargs: (
+            resolved_owners.append(kwargs["username"]) or factors[alias]
+        ),
     )
     monkeypatch.setattr(
         "server.services.external_factor_artifacts.load_frozen_artifacts",
@@ -82,7 +85,10 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         "_owner": "18717974771",
         "run_id": "multi-family-ic",
         "product_path_selection_id": "strict-day",
-        "factors": [{"alias": alias} for alias in aliases],
+        "factors": [
+            {"alias": aliases[0], "factor_owner_ref": "GTHT@owner-a@1"},
+            {"alias": aliases[1], "factor_owner_ref": "GTHT@owner-b@2"},
+        ],
         "start_date": "2024-01-01",
         "end_date": "2024-01-31",
     }
@@ -98,6 +104,7 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
     )
 
     assert captured == {"aliases": aliases, "resolved": aliases}
+    assert resolved_owners == ["GTHT@owner-a@1", "GTHT@owner-b@2"]
 
 
 def test_ic_run_spec_uses_frozen_top_level_window(monkeypatch) -> None:
