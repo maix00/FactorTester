@@ -15,12 +15,6 @@ from .strategy_editor_scope import build_scoped_fields
 
 _SHARED_INNER_DEFAULT_TABS = (
     {
-        "key": "factor",
-        "label": "因子执行",
-        "kind": "factor_scope",
-        "mount_policy": "default",
-    },
-    {
         "key": "product_path_selection",
         "label": "产品组",
         "kind": "product_scope",
@@ -36,7 +30,17 @@ def _inner_default_tabs(application: str) -> tuple[dict[str, Any], ...]:
         "kind": "structure",
         "mount_policy": "default",
     }
-    return (structure, *_SHARED_INNER_DEFAULT_TABS)
+    factor = {
+        "key": "factor",
+        # The IC page already has an outer “因子执行” catalog launcher.  The
+        # grouped editor owns the selected concrete factor, so repeating the
+        # outer label here is ambiguous.  Backtest keeps its established
+        # execution-oriented label.
+        "label": "因子" if application == "ic_test" else "因子执行",
+        "kind": "factor_scope",
+        "mount_policy": "default",
+    }
+    return (structure, factor, *_SHARED_INNER_DEFAULT_TABS)
 
 
 _SHARED_INNER_MANUAL_TABS = (
