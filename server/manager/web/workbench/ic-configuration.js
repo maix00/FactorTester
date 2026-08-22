@@ -142,7 +142,7 @@
         throw new Error(`IC configuration group requires ${key}`);
       }
     }
-    if (!String(group.factor_ref).startsWith("factor:v1:")) {
+    if (!/^factor:(?:v1:|sha256:[0-9a-f]{64}$)/.test(String(group.factor_ref))) {
       throw new Error("IC configuration group requires a frozen factor_ref");
     }
     if (Array.isArray(group.entry_delay_bars)) {
