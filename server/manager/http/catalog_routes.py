@@ -527,7 +527,6 @@ class CatalogRoutesMixin:
                 )
                 value = {"success": True, "origin": "server", "category": category}
             elif category_refresh is not None and method == "POST":
-                from urllib.parse import unquote
                 from server.modules.products.product_category_store import (
                     refresh_product_category_composition,
                 )
@@ -544,7 +543,6 @@ class CatalogRoutesMixin:
                     "success": True, "origin": "server", "category": category,
                 }
             elif category_delete is not None and method in {"PUT", "PATCH"}:
-                from urllib.parse import unquote
                 from server.modules.products.product_category_store import (
                     update_product_category,
                 )
@@ -569,7 +567,6 @@ class CatalogRoutesMixin:
                     "success": True, "origin": "server", "category": category,
                 }
             elif category_delete is not None and method == "DELETE":
-                from urllib.parse import unquote
                 from server.modules.products.product_category_store import (
                     delete_product_category,
                 )
