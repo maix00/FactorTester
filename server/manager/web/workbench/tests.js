@@ -456,7 +456,13 @@
   }
 
   async function ensureFactorsForExecution(context, state) {
-    await FTTestLazyCode.loadGroup("workbench-factors");
+    // Grouped IC opens from a module that already depends on the factor
+    // picker. Avoid re-entering the manifest loader in that path: on a fresh
+    // editor the redundant load could reject before the catalog request and
+    // leave `lazy.factors` permanently idle/loading in the rendered picker.
+    if (!window.FTTestFactors) {
+      await FTTestLazyCode.loadGroup("workbench-factors");
+    }
     await ensureLazyKey(context, state, "factors");
   }
 
