@@ -66,6 +66,22 @@ let sharedFactorPickers = 0;
 let sharedFactorPanels = 0;
 let sharedFactorPanelUpdates = 0;
 let factorPickerOptions;
+let tabOptions;
+let chipSourceItem;
+global.FTStrategyEditorTabs = {
+  create: options => {
+    tabOptions = options;
+    return Object.assign(new Element("shared-editor-tabs"), {
+      refreshChips: () => {},
+      value: () => ({mountedTabs: []}),
+    });
+  },
+};
+window.FTStrategyEditorTabs = global.FTStrategyEditorTabs;
+global.FTTestContentAdapters = {
+  chipSources: (_state, item) => { chipSourceItem = item; return {}; },
+};
+window.FTTestContentAdapters = global.FTTestContentAdapters;
 global.FTTestProducts = {
   groupID: value => value?.id || "",
   groupLabel: value => value?.name || value?.id || "",
@@ -143,6 +159,7 @@ const state = {
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "base"}, () => {},
 ), "opening the base-group form must mount picker elements");
+tabOptions.renderProduct();
 assert.equal(sharedProductPanels, 1,
   "the nested product tab must use the outer shared product selection renderer");
 assert.equal(sharedFactorPickers, 1,
@@ -154,6 +171,11 @@ assert.equal(sharedFactorPanels, 1,
   "changing a factor must not replace the shared picker panel during its click event");
 assert.equal(sharedFactorPanelUpdates, 1,
   "changing a factor must update only dependent shared factor fields");
+tabOptions.chipSources();
+assert.deepEqual(chipSourceItem.factor_candidate_refs, ["ROC"],
+  "backtest chip sources use the selected factor references");
+assert.equal(chipSourceItem.product_path_selection_id, "g1",
+  "backtest chip sources use the selected product group");
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "ls", groupIDs: ["g1", "g2"]}, () => {},
 ), "opening the Long-Short form must mount picker elements");

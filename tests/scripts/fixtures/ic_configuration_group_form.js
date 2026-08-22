@@ -13,6 +13,9 @@ global.FTTestFieldRow={create:(label,control,help)=>{const row=new E("field");ro
 let productOptions;
 global.FTTestProducts={groupID:x=>x.id,selectionPanel:(_c,_s,_r,o)=>{productOptions=o;return new E("products")}}; window.FTTestProducts=global.FTTestProducts;
 let tabOptions; global.FTStrategyEditorTabs={create:o=>{tabOptions=o;return Object.assign(new E("tabs"),{refreshChips(){},value:()=>({mountedTabs:[]})});}}; window.FTStrategyEditorTabs=global.FTStrategyEditorTabs;
+let chipSourceItem;
+global.FTTestContentAdapters={chipSources:(_state,item)=>{chipSourceItem=item;return {}}};
+window.FTTestContentAdapters=global.FTTestContentAdapters;
 vm.runInThisContext(fs.readFileSync(process.argv[2],"utf8"));
 const manifest={defaults:{return_price_basis:{value:"next_open_to_open_adjusted",value_descriptor:{options:[{value:"next_open_to_open_adjusted",label:"Open"},{value:"next_close_to_close_adjusted",label:"Close"}]}}}};
 const state={
@@ -37,4 +40,9 @@ productOptions.onChange(["product-group:day"]);
 factorOptions.onChange(["factor:v1:roc"]);
 assert.equal(editor.draft.product_scope_ref,"product-group:day","group selections survive tab refresh/re-render");
 assert.equal(editor.draft.factor_ref,"factor:v1:roc","factor selections survive tab refresh/re-render");
+const chipValues=tabOptions.chipValues();
+assert.deepEqual(chipValues.ic_lags,[2],"IC delay remains available to the shared chip renderer");
+tabOptions.chipSources();
+assert.deepEqual(chipSourceItem.factor_candidate_refs,["factor:v1:roc"],"IC chip sources use the selected factor reference");
+assert.equal(chipSourceItem.product_path_selection_id,"product-group:day","IC chip sources use the selected product group");
 assert.equal(form.tagName,"form"); console.log("ok");

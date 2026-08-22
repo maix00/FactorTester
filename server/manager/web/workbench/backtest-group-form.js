@@ -242,6 +242,13 @@
         ...innerScopeValues,
         ...(overrideEditor?.value?.() || {}),
       }),
+      chipSources: () => window.FTTestContentAdapters?.chipSources?.(state, {
+        factor_candidate_refs: factorRefs,
+        product_path_selection_id: productGroupRef,
+        splitCount: Number(splitCount?.value || 0),
+        groupIndex: Number(groupIndex?.value || 0),
+        productMask,
+      }) || {},
       renderStructure: () => structure,
       renderFactor: () => { renderFactorPanel(); return factorHost; },
       renderProduct: renderProductPanel,
