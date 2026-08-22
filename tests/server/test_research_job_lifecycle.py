@@ -24,6 +24,84 @@ from tools.data.sqlite.db import connect_sqlite
 from tests.server.trial_plan_fixtures import trial_plan
 
 
+def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
+    client, monkeypatch, tmp_path,
+) -> None:
+    """The grouped IC contract stays immutable across preview, submit, and retry."""
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    shared = payload["shared"]
+    shared["factors"] = [{
+        "factor_ref": "factor:v1:profile:p:factor:commit:blob",
+        "alias": "MmRet|P:CA|N:10d|$F:5m",
+        "factor_family_alias": "MmRet",
+    }]
+    shared["temporary_objects"] = {
+        "product_selections": [{
+            "id": "product-scope:core8", "selected_paths": ["/canonical/products/core8"],
+            "products": ["core8"],
+        }],
+    }
+    payload["analyses"]["ic"] = {
+        "schema_version": 2,
+        "configuration_groups": [{
+            "config_group_id": "cg-alpha",
+            "product_scope_ref": "product-scope:core8",
+            "factor_ref": "factor:v1:profile:p:factor:commit:blob",
+            "horizon": {"sampling": "scale_aware"},
+            "entry_delay_bars": 1,
+            "methods": ["rank"],
+            "return_price_basis": "next_open_to_open_adjusted",
+        }],
+    }
+    _update(client, workspace, payload)
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "retention_mode": "full",
+    }
+    preview = client.post("/api/runs/preview", json=request_payload)
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    preview_json = preview.get_json()
+    submitted = client.post("/api/runs", json=request_payload)
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    submitted_json = submitted.get_json()
+    assert submitted_json["run"]["run_spec_hash"] == preview_json["run_spec_hash"]
+    assert len(submitted_json["jobs"]) == 1
+    job = JobRepository().require(submitted_json["jobs"][0]["job_id"], owner="alice")
+    typed = job.job_spec["run_spec"]["typed_ic"]
+    assert typed["group_provenance"][0]["config_group_id"] == "cg-alpha"
+    assert typed["group_provenance"][0]["core_ref"].startswith("ic-core-request:v1:")
+    core_request = typed["authoring_core_tests"][0]
+    frozen_horizons = typed["resolved_horizons_by_request"][
+        core_request["request_ref"]
+    ][core_request["factor_refs"][0]]
+    assert len(frozen_horizons) > 1
+    from server.modules.single_factor_test.process_runners import (
+        _typed_ic_execution_payload,
+    )
+    projected = _typed_ic_execution_payload(job.job_spec)
+    assert projected["forward_return_horizons"]["bases"] == [
+        item["physical_frequency"] for item in frozen_horizons
+    ]
+    assert job.job_spec["product_selections"]["product-scope:core8"]["paths"] == [
+        "/canonical/products/core8"
+    ]
+    assert job.job_spec["execution_plan"]["kind"] == "ic"
+
+    called = []
+    from server.modules.single_factor_test import ic
+    monkeypatch.setattr(ic, "selection_from_request", lambda *a, **k: called.append(1))
+    repository = JobRepository()
+    repository.transition(job.job_id, "failed", expected="submitted", error={"code": "test"})
+    retry = client.post(f"/api/jobs/{job.job_id}/retry")
+    assert retry.status_code == 202, retry.get_data(as_text=True)
+    retried = repository.require(retry.get_json()["job_id"], owner="alice")
+    assert retried.job_spec["run_spec"]["typed_ic"] == typed
+    assert called == []
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")

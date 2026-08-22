@@ -53,6 +53,9 @@ def test_ic_declares_single_select_select_then_run_list() -> None:
     assert ic["selection"] == "single"
     assert ic["run_mode"] == "select_then_run"
     assert ic["editable"] is True
+    assert ic["label"] == "配置组设置"
+    assert ic["item_label"] == "配置组"
+    assert ic["content_adapter"] == "ic_configuration_groups"
 
 
 def test_group_test_flows_declared_with_selection_gating() -> None:
@@ -86,6 +89,7 @@ def test_ic_flows_declared() -> None:
     flows = _flows("ic_test")
     assert set(flows) == {"add_config", "edit", "delete"}
     assert flows["add_config"]["kind"] == "create"
+    assert flows["add_config"]["label"] == "新增配置组"
     assert (flows["edit"]["min_selected"], flows["edit"]["max_selected"]) == (1, 1)
 
 

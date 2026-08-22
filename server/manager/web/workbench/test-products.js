@@ -29,9 +29,15 @@
   }
 
   function restoreReferences(analysis = {}, ui = {}) {
+    const groupedRefs = (analysis.configuration_groups || [])
+      .map(item => item?.product_scope_ref).filter(Boolean);
+    const frozenSelections = analysis.product_selections || {};
     const values = [
       ...(ui.product_group_refs || []),
       ...(analysis.product_path_selections || []),
+      ...groupedRefs,
+      ...Object.keys(frozenSelections),
+      ...Object.values(frozenSelections),
       ...(analysis.local_settings?.product_path_selections || []),
       analysis.product_path_selection,
       analysis.product_path_selection_id,

@@ -439,4 +439,24 @@ def test_classifier_owned_category_view_path_expands_to_concrete_products() -> N
     )
     assert paths
     assert all("ProductCategory/" not in path for path in paths)
-    assert all(path.startswith("Product/") for path in paths)
+    assert all(
+        path.startswith("Product/Futures/CNFutures/") for path in paths
+    ), "a category mounted under Futures must not leak FuturesContract members"
+
+
+def test_cnfutures_day_group_does_not_expand_to_listed_contracts() -> None:
+    paths = canonicalize_product_paths(
+        [
+            "Product/Futures/CNFutures/ProductCategory/"
+            f"{DAY_NIGHT_ID}/cnfutures_day_night_4"
+        ],
+        category_ids=[DAY_NIGHT_ID],
+        infer_legacy_categories=False,
+    )
+
+    assert len(paths) == 30
+    assert all(
+        path.startswith("Product/Futures/CNFutures/_products/")
+        for path in paths
+    )
+    assert not any("FuturesContract" in path for path in paths)

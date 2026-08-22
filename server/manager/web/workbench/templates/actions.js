@@ -1,8 +1,15 @@
 (() => {
   function selectedExecutionGroup(context, state) {
+    if (state.kind === "ic") {
+      const groups = window.FTICConfigurationGroupModel?.selected?.(state) || [];
+      if (groups.length !== 1) {
+        throw new Error(context.t("IC 只能选择一个配置组"));
+      }
+      return groups[0];
+    }
     const groups = window.FTTestProducts?.selectedGroups?.(state) || [];
     if (!groups.length) throw new Error(context.t("请选择产品组"));
-    const requested = state.kind === "ic" ? state.groupRefs : [state.groupRef];
+    const requested = [state.groupRef];
     if (groups.length !== requested.filter(Boolean).length) {
       throw new Error(context.t("所选产品组已不可用，请重新选择"));
     }

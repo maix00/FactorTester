@@ -18,12 +18,16 @@
 
   function groupIdentity(group) {
     if (String(group?.id || "") === BACKTEST_TASK_ID) return BACKTEST_TASK_ID;
+    if (group?.config_group_id) return String(group.config_group_id);
     return String(FTTestProducts.groupID(group) || "");
   }
 
   function groupLabel(group) {
     if (String(group?.id || "") === BACKTEST_TASK_ID) {
       return String(group.label || "回测任务");
+    }
+    if (group?.config_group_id) {
+      return String(group.name || group.config_group_id);
     }
     return String(FTTestProducts.groupLabel(group) || group?.label || "");
   }
@@ -73,6 +77,18 @@
 
   function groupInput(group) {
     if (!group || typeof group !== "object") return group || null;
+    if (group?.config_group_id) {
+      return {
+        config_group_id: group.config_group_id,
+        batch_id: group.batch_id || "",
+        factor_ref: group.factor_ref || "",
+        product_scope_ref: group.product_scope_ref || "",
+        entry_delay_bars: group.entry_delay_bars,
+        horizon: group.horizon || null,
+        methods: group.methods || [],
+        return_price_basis: group.return_price_basis || "",
+      };
+    }
     return {
       id: group.id || "",
       product_path_selection_id: group.product_path_selection_id || "",
@@ -138,6 +154,9 @@
       // is only for the task matrix and is never persisted as a product group.
       return backtestStrategyGroups(state).length
         ? [{id: BACKTEST_TASK_ID, label: "回测任务"}] : [];
+    }
+    if (state?.kind === "ic") {
+      return window.FTICConfigurationGroupModel?.selected?.(state) || [];
     }
     const products = window.FTTestProducts;
     products?.synchronize?.(state);

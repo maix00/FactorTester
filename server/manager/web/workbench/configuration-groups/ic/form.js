@@ -1,0 +1,215 @@
+(() => {
+  const model = () => window.FTICConfigurationGroupModel;
+
+  function render(context, state, editor, onFinish) {
+    const current = editor.groupID ? model().find(state, editor.groupID) : null;
+    const form = document.createElement("form");
+    form.className = "backtest-group-form ic-configuration-group-form";
+    const title = document.createElement("h3");
+    title.textContent = context.t(current ? "编辑配置组" : "新增配置组");
+    form.append(title);
+
+    const factorScope = window.FTStrategyEditorScope?.scope(state, "factor")
+      || {items: state.factors || [], required: false, ready: true};
+    const productScope = window.FTStrategyEditorScope?.scope(
+      state, "product_path_selection",
+    ) || {items: state.groups || [], required: false, ready: true};
+    const factorItems = factorScope.required && !factorScope.ready ? [] : factorScope.items || [];
+    const productItems = productScope.required && !productScope.ready ? [] : productScope.items || [];
+    let factorRef = current?.factor_ref || "";
+    let productScopeRef = current?.product_scope_ref || "";
+
+    const name = input("text", current?.name || "");
+    name.placeholder = context.t("配置组名称");
+    let delayValue = current?.entry_delay_bars ?? firstDelay(state.values?.ic_lags);
+    const delay = input("number", delayValue);
+    delay.min = "0";
+    delay.step = "1";
+    const inheritedHorizon = window.FTICConfiguration?.normalizeHorizon
+      ? FTICConfiguration.normalizeHorizon(state.values?.forward_return_horizons)
+      : {sampling: "scale_aware"};
+    let horizon = structuredClone(current?.horizon || inheritedHorizon);
+    const horizonMode = document.createElement("select");
+    for (const [value, label] of [["scale_aware", "按因子周期"], ["explicit", "显式网格"]]) {
+      const option = document.createElement("option");
+      option.value = value; option.textContent = context.t(label);
+      horizonMode.append(option);
+    }
+    horizonMode.value = horizon.sampling || "scale_aware";
+    const horizonBases = input("text", (horizon.bases || ["signal"]).join(", "));
+    const horizonMultipliers = input("text", (horizon.multipliers || [1]).join(", "));
+    const rank = input("checkbox", (current?.methods || inheritedMethods(state)).includes("rank"));
+    const pearson = input(
+      "checkbox", (current?.methods || inheritedMethods(state)).includes("pearson"),
+    );
+    const basis = document.createElement("select");
+    const basisDefinition = state.manifest?.defaults?.return_price_basis || {};
+    const basisOptions = basisDefinition.value_descriptor?.options || [];
+    for (const optionValue of basisOptions) {
+      const option = document.createElement("option");
+      option.value = String(optionValue.value);
+      option.textContent = context.t(optionValue.label || optionValue.value);
+      basis.append(option);
+    }
+    basis.value = current?.return_price_basis || state.values?.return_price_basis
+      || basisDefinition.value || "next_open_to_open_adjusted";
+    const structure = document.createElement("div");
+    structure.className = "backtest-group-form-rows ic-configuration-group-structure";
+    structure.append(
+      field(context.t("名称"), name),
+      field(context.t("Horizon 模式"), horizonMode),
+      field(context.t("Horizon 基准"), horizonBases),
+      field(context.t("Horizon 倍数"), horizonMultipliers),
+      field(context.t("Rank IC"), rank),
+      field(context.t("Pearson IC"), pearson),
+      field(context.t("收益率定义"), basis),
+    );
+
+    const factor = FTTestFactorCandidateSources.candidatePicker(context, state, {
+      items: factorItems,
+      selected: factorRef ? [factorRef] : [],
+      multi: false,
+      loading: FTTestObjectPicker.lazyLoading(state, "factors"),
+      loadingText: context.t("正在读取因子候选…"),
+      canCreate: !(factorScope.required && !factorScope.ready),
+      name: "ic-configuration-group-factor",
+      onChange: values => {
+        factorRef = values[0] || "";
+        editorTabs?.refreshChips();
+      },
+    });
+    const renderFactor = () => FTTestFactorCandidateSources.innerPanel?.(
+      context, state, () => {}, {
+        candidateControl: factor,
+        candidateLabel: context.t("因子"),
+        candidateHelp: context.t("每个 IC 配置组只选择一个冻结因子"),
+        combinationVisible: false,
+      },
+    ) || field(context.t("因子"), factor);
+    const renderProduct = () => FTTestProducts.selectionPanel(
+      context, state, () => editorTabs?.refreshChips(), {
+        groups: productItems,
+        selectedRefs: productScopeRef ? [productScopeRef] : [],
+        multi: false,
+        canCreate: !(productScope.required && !productScope.ready),
+        onChange: values => {
+          productScopeRef = values[0] || "";
+          editorTabs?.refreshChips();
+        },
+      },
+    );
+    let editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
+      context, state,
+      activeKey: editor.activeTabKey || "",
+      onActivate: key => { editor.activeTabKey = key || ""; },
+      mountedTabs: current?.editor_mounted_tabs || [],
+      chipValues: () => ({
+        ...state.values,
+        factor_candidates: factorItems.filter(item => factorIdentity(item) === factorRef),
+        product_path_selection: productScopeRef,
+      }),
+      renderStructure: () => structure,
+      renderFactor,
+      renderProduct,
+      renderOverrides: ({tab}) => {
+        if (tab.field !== "ic_lags") return document.createElement("div");
+        delay.value = delayValue;
+        delay.onchange = () => { delayValue = Number(delay.value); };
+        return field(context.t(tab.label || "Delay"), delay,
+          context.t("每个配置组只允许一个非负 Delay"));
+      },
+    }) : null;
+    form.append(editorTabs || structure);
+    appendActions(context, form, () => {
+      try {
+        const scopeErrors = window.FTStrategyEditorScope?.validate(state) || [];
+        if (scopeErrors.length) {
+          throw new Error(scopeErrors.map(item => context.t(item.message)).join("；"));
+        }
+        if (!factorItems.some(item => factorIdentity(item) === factorRef)) {
+          throw new Error(context.t("请选择一个当前范围内的因子"));
+        }
+        if (!productItems.some(item => productIdentity(item) === productScopeRef)) {
+          throw new Error(context.t("请选择一个当前范围内的产品组"));
+        }
+        horizon = horizonMode.value === "scale_aware"
+          ? {sampling: "scale_aware"}
+          : {
+            sampling: "explicit",
+            bases: tokens(horizonBases.value),
+            multipliers: tokens(horizonMultipliers.value).map(Number),
+          };
+        const methods = [rank.checked ? "rank" : "", pearson.checked ? "pearson" : ""]
+          .filter(Boolean);
+        const draft = {
+          name: name.value.trim(), factor_ref: factorRef,
+          product_scope_ref: productScopeRef,
+          entry_delay_bars: Number(delayValue), horizon, methods,
+          return_price_basis: basis.value.trim(),
+          editor_mounted_tabs: editorTabs?.value?.().mountedTabs,
+        };
+        if (current) model().update(state, current.config_group_id, draft);
+        else model().add(state, draft);
+        onFinish();
+      } catch (error) { showError(form, error.message); }
+    }, onFinish);
+    return form;
+  }
+
+  function inheritedMethods(state) {
+    const value = String(state.values?.ic_correlation || "rank");
+    return value === "both" ? ["rank", "pearson"]
+      : [value === "pearson" ? "pearson" : "rank"];
+  }
+
+  function firstDelay(value) {
+    const values = Array.isArray(value) ? value : [value ?? 0];
+    const delay = Number(values[0]);
+    return Number.isInteger(delay) && delay >= 0 ? delay : 0;
+  }
+
+  function factorIdentity(value) {
+    return String(value?.factor_ref || value?.target_ref || "");
+  }
+
+  function productIdentity(value) {
+    return String(window.FTTestProducts?.groupID?.(value)
+      || value?.group_ref || value?.product_group_ref || value?.id || "");
+  }
+
+  function tokens(value) {
+    return String(value || "").split(/[\s,，;；]+/).map(item => item.trim()).filter(Boolean);
+  }
+
+  function appendActions(context, form, saveAction, cancelAction) {
+    const status = document.createElement("span");
+    status.className = "backtest-group-form-error";
+    const actions = document.createElement("div");
+    actions.className = "backtest-group-form-actions";
+    const save = context.button(context.t("保存"), saveAction);
+    save.type = "button";
+    const cancel = context.button(context.t("取消"), cancelAction);
+    cancel.type = "button";
+    actions.append(cancel, save);
+    form.append(status, actions);
+  }
+
+  function showError(form, message) {
+    const status = form.querySelector?.(".backtest-group-form-error");
+    if (status) status.textContent = message;
+  }
+
+  function field(label, control, help = "") {
+    return FTTestFieldRow.create(label, control?.element || control, help);
+  }
+
+  function input(type, value) {
+    const control = document.createElement("input");
+    control.type = type;
+    if (type === "checkbox") control.checked = Boolean(value);
+    else control.value = value ?? "";
+    return control;
+  }
+
+  window.FTICConfigurationGroupForm = Object.freeze({render});
+})();

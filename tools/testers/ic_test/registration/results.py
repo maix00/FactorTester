@@ -69,13 +69,14 @@ def _register_surfaces(app: ApplicationSettings) -> None:
         kind="panel", order=10,
     ))
     app.register_surface(SettingsSurface(
-        "ic_configs", "IC 配置", TabMountPoint.GROUP_SETTINGS,
+        "ic_configs", "配置组设置", TabMountPoint.GROUP_SETTINGS,
         kind="list", order=20, selection="single",
-        run_mode="select_then_run", editable=True, item_label="IC 配置",
+        run_mode="select_then_run", editable=True, item_label="配置组",
+        content_adapter="ic_configuration_groups",
     ))
     for flow in (
         SurfaceFlow(
-            "ic_configs", "add_config", "新增 IC 配置", "create", order=0,
+            "ic_configs", "add_config", "新增配置组", "create", order=0,
         ),
         SurfaceFlow(
             "ic_configs", "edit", "编辑", "edit", order=10,

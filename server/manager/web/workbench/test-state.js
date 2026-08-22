@@ -56,15 +56,31 @@
   function applyWorkspaceConfiguration(state) {
     const payload = state.workspace?.configuration?.payload || {};
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
+    const applicationUI = payload.ui?.[state.kind] || {};
+    if (state.kind === "ic") {
+      if (Array.isArray(applicationUI.selected_configuration_group_ids)) {
+        state.selectedICConfigurationGroupIDs = [
+          ...applicationUI.selected_configuration_group_ids,
+        ];
+      } else {
+        // Do not carry a prior workspace's selection into this payload. The
+        // grouped model selects the sole Slice-1 group when no UI hint exists.
+        delete state.selectedICConfigurationGroupIDs;
+      }
+      window.FTICConfigurationGroupModel?.initialize?.(state);
+    }
     state.savedFactors = Array.isArray(payload.shared?.factors)
       ? structuredClone(payload.shared.factors) : [];
     state.savedTemporaryObjects = payload.shared?.temporary_objects
       && typeof payload.shared.temporary_objects === "object"
       ? structuredClone(payload.shared.temporary_objects) : {};
-    state.factorRef = state.savedFactors[0]?.factor_ref || "";
+    const selectedICGroup = state.kind === "ic"
+      ? window.FTICConfigurationGroupModel?.selected?.(state)?.[0] : null;
+    state.factorRef = selectedICGroup?.factor_ref
+      || state.savedFactors[0]?.factor_ref || "";
     state.groupRefs = window.FTTestProducts?.restoreReferences
-      ? FTTestProducts.restoreReferences(state.analysis, payload.ui?.[state.kind] || {})
-      : FTTestLazyCode.fallbackGroupReferences(state.analysis, payload.ui?.[state.kind] || {});
+      ? FTTestProducts.restoreReferences(state.analysis, applicationUI)
+      : FTTestLazyCode.fallbackGroupReferences(state.analysis, applicationUI);
     state.groupRef = state.groupRefs[0] || "";
     const savedOutputs = payload.ui?.[state.kind]?.output_requests;
     state.outputRequestsExplicit = Array.isArray(savedOutputs);
@@ -135,6 +151,10 @@
     state.backtestExpandedBatches = {};
     state.backtestGroupEditor = null;
     state.backtestGroupsOpen = false;
+    state.selectedICConfigurationGroupIDs = [];
+    state.icConfigurationGroupSurfaceKey = "";
+    state.icConfigurationGroupEditor = null;
+    state.icConfigurationGroupsOpen = false;
     state.runValues = defaultRunValues(state.manifest);
     return state;
   }
@@ -147,6 +167,8 @@
     "transientFactorFamilies", "transientStrategySources", "strategySpecs",
     "strategyInspections", "runInputDependencies", "selectedBacktestGroupIDs",
     "selectedBacktestLongShortIDs", "backtestExpandedBatches",
+    "selectedICConfigurationGroupIDs", "icConfigurationGroupSurfaceKey",
+    "icConfigurationGroupEditor", "icConfigurationGroupsOpen",
   ]);
 
   function draftSnapshot(state) {

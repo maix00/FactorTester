@@ -59,14 +59,19 @@
   }
 
   function groupID(value) {
+    if (typeof value === "string") return value;
     return window.FTTestProducts?.groupID?.(value)
       || value?.group_ref || value?.product_group_ref || value?.id
       || value?.product_group_template_id || value?.product_path_selection_id || "";
   }
 
   function fallbackGroupReferences(analysis = {}, ui = {}) {
+    const groupedRefs = (analysis.configuration_groups || [])
+      .map(item => item?.product_scope_ref).filter(Boolean);
+    const frozenSelections = analysis.product_selections || {};
     const values = [
       ...(ui.product_group_refs || []), ...(analysis.product_path_selections || []),
+      ...groupedRefs, ...Object.keys(frozenSelections), ...Object.values(frozenSelections),
       ...(analysis.local_settings?.product_path_selections || []),
       analysis.product_path_selection, analysis.product_path_selection_id,
       analysis.local_settings?.product_group_ref, ui.product_group_ref,
