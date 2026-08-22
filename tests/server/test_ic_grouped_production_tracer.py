@@ -96,3 +96,45 @@ def test_run_ic_invokes_worker_once_with_frozen_grouped_execution_view(monkeypat
         "sampling": "explicit", "bases": ["MIN10"], "multipliers": [1],
     }
     assert execution["typed_ic_core_ref"].startswith("ic-core-request:v1:")
+
+
+def test_grouped_ic_planner_uses_only_the_group_owned_frozen_scope(monkeypatch):
+    """Unrelated shared selections must not widen an IC core or its cache key."""
+    from server.modules.single_factor_test.planning import build_execution_plan
+    from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
+
+    factor_ref = "factor:v1:profile:p:factor:commit:blob"
+    typed = compile_ic_grouped_configuration({"configuration_groups": [{
+        "config_group_id": "cg-alpha",
+        "product_scope_ref": "product-scope:core8",
+        "factor_ref": factor_ref,
+        "horizon": {"sampling": "explicit", "bases": ["signal"], "multipliers": [1]},
+        "entry_delay_bars": 0,
+        "methods": ["rank"],
+        "return_price_basis": "next_open_to_open_adjusted",
+    }]}, factor_frequencies={factor_ref: "MIN5"})
+    monkeypatch.setattr(
+        "server.services.factor_revisions.assert_run_spec_factor_revisions_current",
+        lambda *args, **kwargs: None,
+    )
+    plan = build_execution_plan("ic", {
+        "_owner": "alice",
+        "run_spec": {
+            "typed_ic": typed,
+            "configuration": {"shared": {"product_selections": {
+                "product-scope:core8": {
+                    "paths": ["/canonical/products/core8", "/canonical/products/core8"],
+                    "products": ["core8"],
+                },
+                "product-scope:unrelated": {
+                    "paths": ["/must/not/run"],
+                    "products": ["unrelated"],
+                },
+            }}},
+        },
+    })
+
+    assert plan["kind"] == "ic"
+    assert plan["resolved"]["selected_paths"] == ["/canonical/products/core8"]
+    assert plan["resolved"]["products"] == ["core8"]
+    assert [row["config_group_id"] for row in plan["resolved"]["group_provenance"]] == ["cg-alpha"]
