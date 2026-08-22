@@ -55,9 +55,16 @@ assert.equal(window.FTICResults.supports(
 ), false);
 assert.equal(window.FTICResults.productGroupRef({
   payload: {
-    analyses: {ic: {product_path_selection_id: "product-group:night"}},
+    analyses: {ic: {configuration_groups: [{
+      config_group_id: "icg-night", product_scope_ref: "product-group:night",
+    }]}},
   },
 }), "product-group:night");
+assert.equal(window.FTICResults.productGroupRef({
+  payload: {
+    analyses: {ic: {configuration_groups: [{config_group_id: "icg-not-a-product"}]}},
+  },
+}), "", "config_group_id must never be used as a product-group reference");
 assert.equal(window.FTICResults.productGroupRef({
   configuration: {
     payload: {ui: {ic: {product_group_ref: "product-group:day"}}},

@@ -301,6 +301,55 @@ def test_test_configuration_compiler_separates_authoring_and_execution_state() -
     assert result.stdout.strip() == "ok"
 
 
+def test_ic_template_actions_use_selected_configuration_group() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "template_actions_ic_group.js"
+    source = WEB_ROOT / "workbench" / "templates" / "actions.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_grouped_ic_save_uses_group_owned_factor_and_product_scope() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_configuration_save.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_grouped_and_legacy_ic_configuration_state_restores_authoring_identity() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_configuration_state.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_ic_configuration_group_surface_uses_shared_shell_for_crud_flows() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_configuration_group_surface.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None:
     import subprocess
 
@@ -476,7 +525,9 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["job"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
     assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
-    assert manifest["route_groups"]["ic-test"] == ["workbench-test-ui"]
+    assert manifest["route_groups"]["ic-test"] == [
+        "workbench-test-ui", "workbench-ic-groups",
+    ]
     assert manifest["route_groups"]["backtest"] == [
         "workbench-test-ui", "workbench-backtest",
     ]
@@ -975,7 +1026,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert manifest["group_dependencies"]["workbench-source-inputs"] == [
         "workbench-input-state",
     ]
-    assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-backtest"]
+    assert "workbench/tab-list-chip.js" in manifest["groups"]["workbench-configuration-groups"]
     assert "workbench/tab-list-chip.js" not in research_static._initial_scripts(manifest)
     assert not set(manifest["groups"]["workbench-run"]) & set(
         research_static._initial_scripts(manifest)
@@ -996,6 +1047,9 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     ]
     assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
     assert manifest["group_dependencies"]["workbench-backtest"] == [
+        "workbench-configuration-groups",
+    ]
+    assert manifest["group_dependencies"]["workbench-configuration-groups"] == [
         "workbench-settings", "workbench-settings-controls",
         "workbench-products", "workbench-factors",
     ]
@@ -1065,6 +1119,45 @@ def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_template_panel.js"
     source = WEB_ROOT / "workbench" / "test-templates.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_ic_configuration_group_form_uses_registered_delay_and_return_basis() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_configuration_group_form.js"
+    source = WEB_ROOT / "workbench" / "configuration-groups" / "ic" / "form.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_ic_configuration_group_model_enforces_single_scope_factor_and_delay() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_configuration_group_model.js"
+    source = WEB_ROOT / "workbench" / "configuration-groups" / "ic" / "model.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_configuration_group_surface_is_shared_infrastructure() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "configuration_group_surface.js"
+    source = WEB_ROOT / "workbench" / "configuration-groups" / "common" / "surface.js"
     result = subprocess.run(
         ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -1518,6 +1611,9 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
     groups = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(encoding="utf-8")
+    group_surface = (WEB_ROOT / "workbench" / "configuration-groups" / "common" / "surface.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "FTTabChipContent.createSettings" in settings
     assert "function createSettings(options = {})" in tab_content
@@ -1534,8 +1630,9 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     overrides = (WEB_ROOT / "workbench" / "backtest-group-overrides.js").read_text(
         encoding="utf-8"
     )
-    assert "FTTabListChip.create" in groups
-    assert "actionsFor: surfaceKey" in groups
+    assert "FTConfigurationGroupSurface.render" in groups
+    assert "FTTabListChip.create" in group_surface
+    assert "actionsFor: surfaceKey" in group_surface
     assert "FTTabChipContent.create" in overrides
     assert "backtest-group-tabs" not in groups
     assert "backtest-group-toolbar" not in groups

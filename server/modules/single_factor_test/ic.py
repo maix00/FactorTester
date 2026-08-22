@@ -2,6 +2,7 @@
 import hashlib
 import threading
 import traceback
+from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -781,6 +782,19 @@ def _run_ic_compute_to_sink(
         response["external_factor_artifacts"] = result_metadata(
             data.get("external_factor_artifacts")
         )
+        run_spec = data.get("run_spec") or {}
+        typed_ic = run_spec.get("typed_ic") or {}
+        response["provenance"] = {
+            "run_spec_hash": data.get("run_spec_hash") or "",
+            "group_provenance": deepcopy(
+                typed_ic.get("group_provenance") or typed_ic.get("groups") or []
+            ),
+            "product_selections": deepcopy(
+                (run_spec.get("configuration") or {}).get("shared", {}).get(
+                    "product_selections", {}
+                )
+            ),
+        }
         sink.emit_result(response)
     except _ICCancelled as exc:
         sink.emit_error(str(exc), cancelled=True)

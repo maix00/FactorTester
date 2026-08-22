@@ -78,39 +78,102 @@
     return values;
   }
 
-  function productScope(selection) {
+  const GROUP_OWNED_SETTING_KEYS = new Set([
+    "forward_return_horizons", "ic_lags", "ic_correlation", "return_price_basis",
+    "ic_decay_lags", "rolling_window", "rolling_step", "summary_frequency",
+    "quantiles", "quantile_count",
+  ]);
+
+  function productScope(selection, requestedRef = "") {
     const value = clone(selection || {});
     const id = String(
-      value.product_path_selection_id || value.selection_id || value.id || "",
+      requestedRef || value.product_path_selection_id || value.selection_id
+      || value.group_ref || value.product_group_ref || value.id || "",
     ).trim();
     if (!id) throw new Error("产品范围缺少稳定标识");
-    value.product_path_selection_id = id;
-    value.selected_paths = unique((value.selected_paths || value.paths || [])
+    const persisted = id.startsWith("product-group:")
+      || value.origin === "catalog" || value.source_origin === "catalog";
+    if (persisted) return {product_path_selection_id: id};
+    const paths = unique((value.selected_paths || value.paths || [])
       .map(item => String(item).trim()).filter(Boolean));
-    delete value.paths;
-    return value;
+    if (!paths.length) throw new Error(`inline 产品范围没有自包含路径: ${id}`);
+    return {
+      product_path_selection_id: id,
+      selected_paths: paths,
+      origin: String(value.origin || "inline"),
+      ...(Array.isArray(value.category_ids) && value.category_ids.length
+        ? {category_ids: unique(value.category_ids.map(String).filter(Boolean))} : {}),
+    };
   }
 
   function compileAnalysis(options) {
-    const {
-      manifest, values, factors, productSelection,
-    } = options;
+    const {manifest, values, configurationGroups, productCatalog = []} = options;
+    if (!Array.isArray(configurationGroups) || configurationGroups.length !== 1) {
+      throw new Error("Slice 1 requires exactly one configuration group");
+    }
+    const groups = configurationGroups.map(normalizeConfigurationGroup);
+    const catalog = new Map(productCatalog.map(item => [
+      String(item?.product_path_selection_id || item?.group_ref
+        || item?.product_group_ref || item?.id || ""), item,
+    ]));
+    const selections = {};
+    for (const group of groups) {
+      selections[group.product_scope_ref] = productScope(
+        catalog.get(group.product_scope_ref), group.product_scope_ref,
+      );
+    }
     const settings = normalizeSettings(
       manifest,
       FTTestConfigurationCompiler.executionSettings(manifest, values),
     );
-    const selection = productScope(productSelection);
-    // A saved IC configuration records only execution references plus one
-    // local-settings object.  The selected product projection is authoring
-    // input for the freezer; it moves to shared.product_selections before a
-    // RunSpec is created.  Do not retain flat/settings/path aliases here.
+    for (const key of GROUP_OWNED_SETTING_KEYS) delete settings[key];
     return {
-      product_path_selection_id: selection.product_path_selection_id,
-      product_selections: {
-        [selection.product_path_selection_id]: selection,
-      },
-      factors: FTTestConfigurationCompiler.factorSubjects(factors),
+      schema_version: 2,
+      configuration_groups: groups,
+      product_selections: selections,
       local_settings: clone(settings),
+    };
+  }
+
+  function normalizeConfigurationGroup(value) {
+    const group = clone(value || {});
+    for (const key of ["config_group_id", "batch_id", "factor_ref", "product_scope_ref"] ) {
+      if (!String(group[key] || "").trim()) {
+        throw new Error(`IC configuration group requires ${key}`);
+      }
+    }
+    if (!String(group.factor_ref).startsWith("factor:v1:")) {
+      throw new Error("IC configuration group requires a frozen factor_ref");
+    }
+    if (Array.isArray(group.entry_delay_bars)) {
+      throw new Error("IC configuration group requires one Delay");
+    }
+    const delay = Number(group.entry_delay_bars);
+    if (!Number.isInteger(delay) || delay < 0) {
+      throw new Error("IC configuration group Delay must be a non-negative integer");
+    }
+    const methods = unique((group.methods || []).map(String))
+      .filter(item => item === "rank" || item === "pearson");
+    if (!methods.length) throw new Error("IC configuration group requires a method");
+    if (Array.isArray(group.analysis_attachments) && group.analysis_attachments.length) {
+      throw new Error("supplemental IC analyses are disabled in Slice 1");
+    }
+    return {
+      config_group_id: String(group.config_group_id),
+      batch_id: String(group.batch_id),
+      name: String(group.name || group.config_group_id),
+      factor_ref: String(group.factor_ref),
+      product_scope_ref: String(group.product_scope_ref),
+      entry_delay_bars: delay,
+      horizon: normalizeHorizon(group.horizon),
+      methods,
+      return_price_basis: String(
+        group.return_price_basis || "next_open_to_open_adjusted",
+      ),
+      editor_mounted_tabs: unique([
+        "__configuration__", "factor", "product_path_selection",
+        ...(group.editor_mounted_tabs || []),
+      ]),
     };
   }
 

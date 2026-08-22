@@ -65,8 +65,14 @@
     const payload = configurationPayload(configuration);
     const analysis = payload.analyses?.ic || payload.analysis?.ic || payload.ic || {};
     const ui = payload.ui?.ic || {};
+    const configurationGroup = Array.isArray(analysis.configuration_groups)
+      ? analysis.configuration_groups.find(group => (
+        String(group?.config_group_id || "") === String(ui.configuration_group_id || "")
+      )) || analysis.configuration_groups[0]
+      : null;
     return String(
-      ui.product_group_ref || analysis.product_path_selection_id
+      configurationGroup?.product_scope_ref || ui.product_group_ref
+        || analysis.product_path_selection_id
         || analysis.product_path_selection?.product_path_selection_id
         || analysis.product_path_selection?.product_group_template_id || "",
     );

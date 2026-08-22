@@ -12,12 +12,25 @@
       const factors = factorCatalog(state).filter(item => refs.has(factorRef(item)));
       return factors.length ? factors : [selectedFactor(state)].filter(Boolean);
     }
-    // IC keeps a candidate pool for authoring and a registered multi-selection
-    // for execution.  They are deliberately different fields: removing a
-    // candidate from the selected set must remove it from both the workspace
-    // subjects and the compiled IC analysis.  An empty, explicitly registered
-    // selection is an invalid run input and must not silently fall back to the
-    // whole candidate pool.
+    // Grouped IC owns the frozen factor reference at configuration-group level.
+    // The legacy global factor selection remains authoring/catalog state only
+    // and must never override the factor that identifies the selected group.
+    window.FTICConfigurationGroupModel?.initialize?.(state);
+    const groups = window.FTICConfigurationGroupModel?.selected?.(state)
+      || (Array.isArray(state.analysis?.configuration_groups)
+        ? state.analysis.configuration_groups : []);
+    const refs = [...new Set(groups.map(item => factorRef(item)).filter(Boolean))];
+    if (refs.length) {
+      const catalog = new Map(factorCatalog(state).map(item => [factorRef(item), item]));
+      return refs.map(ref => {
+        const factor = catalog.get(ref);
+        if (!factor) throw new Error(`factor reference was not found: ${ref}`);
+        return factor;
+      });
+    }
+    // Before a group is authored, keep enough legacy behavior for workspace
+    // creation and one-time flat migration; no execution task is available in
+    // that state because the run-batch model requires a selected group.
     if (Object.prototype.hasOwnProperty.call(state.values || {}, "factor_selections")) {
       const selected = Array.isArray(state.values.factor_selections)
         ? state.values.factor_selections : [];
@@ -178,22 +191,31 @@
       settings: FTTestConfigurationCompiler.authoringSettings(
         state.manifest, state.values,
       ),
-      factor_ref: state.factorRef,
+      factor_ref: state.kind === "ic" ? group?.factor_ref : state.factorRef,
       output_requests: FTTestRunFields.selection(state),
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
     };
+    if (state.kind === "ic" && group?.config_group_id) {
+      ui.selected_configuration_group_ids = [String(group.config_group_id)];
+      if (group.product_scope_ref) {
+        ui.product_group_ref = String(group.product_scope_ref);
+        ui.product_group_refs = [String(group.product_scope_ref)];
+      }
+    }
     // Backtest execution is scoped by each strategy group's product
     // selection. The optional outer selection is retained only as authoring
     // state so it can continue to filter candidate choices after reload.
     const syntheticBacktestTask = isBacktest && group?.id === "__backtest__";
-    const authoringGroupRef = syntheticBacktestTask
-      ? state.groupRef : FTTestProducts.groupID(group);
-    const authoringGroupRefs = syntheticBacktestTask
-      ? state.groupRefs : [authoringGroupRef];
-    if (authoringGroupRef) ui.product_group_ref = authoringGroupRef;
-    if (Array.isArray(authoringGroupRefs) && authoringGroupRefs.length) {
-      ui.product_group_refs = [...authoringGroupRefs];
+    if (state.kind !== "ic") {
+      const authoringGroupRef = syntheticBacktestTask
+        ? state.groupRef : FTTestProducts.groupID(group);
+      const authoringGroupRefs = syntheticBacktestTask
+        ? state.groupRefs : [authoringGroupRef];
+      if (authoringGroupRef) ui.product_group_ref = authoringGroupRef;
+      if (Array.isArray(authoringGroupRefs) && authoringGroupRefs.length) {
+        ui.product_group_refs = [...authoringGroupRefs];
+      }
     }
     payload.ui[state.kind] = ui;
     const value = await context.api(
@@ -218,12 +240,10 @@
       || factor.factor_family_alias || factor.family_alias || alias;
     if (state.kind === "ic") {
       return FTICConfiguration.compileAnalysis({
-        prior,
         manifest: state.manifest,
         values: state.values,
-        factors,
-        productSelection: FTTestProducts.projection(group),
-        fallbackFamilyAlias: family,
+        configurationGroups: group ? [group] : [],
+        productCatalog: state.groups || [],
       });
     }
     if (state.kind === "factor_evaluation") {

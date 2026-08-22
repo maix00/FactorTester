@@ -154,6 +154,62 @@ def test_catalog_product_group_is_resolved_authoritatively_by_owner(monkeypatch)
     assert selection["origin"] == "catalog"
 
 
+def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> None:
+    configuration = {
+        "payload": {
+            "shared": {},
+            "analyses": {"ic": {
+                "schema_version": 2,
+                "configuration_groups": [{
+                    "config_group_id": "icg-day",
+                    "batch_id": "icb-day",
+                    "factor_ref": "factor:v1:owner:path:roc:commit:blob",
+                    "product_scope_ref": "product-group:pg-day",
+                    "entry_delay_bars": 0,
+                    "horizon": {"sampling": "scale_aware"},
+                    "methods": ["rank"],
+                    "return_price_basis": "next_open_to_open_adjusted",
+                }],
+                "product_selections": {
+                    "product-group:pg-day": {
+                        "product_path_selection_id": "product-group:pg-day",
+                        "paths": ["Product/ForgedClientPath"],
+                    },
+                },
+                "local_settings": {},
+            }},
+            "ui": {},
+        },
+    }
+    monkeypatch.setattr(
+        "server.services.frozen_product_scope._product_group_index",
+        lambda owner: {
+            "product-group:pg-day": {
+                "id": "pg-day",
+                "name": "CNFuturesDay",
+                "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
+            },
+        },
+    )
+
+    frozen = freeze_product_scope(configuration, owner="alice", analyses=["ic"])
+    payload = frozen["payload"]
+
+    assert payload["analyses"]["ic"]["configuration_groups"][0][
+        "product_scope_ref"
+    ] == "product-group:pg-day"
+    assert "product_selections" not in payload["analyses"]["ic"]
+    assert payload["shared"]["product_selections"] == {
+        "product-group:pg-day": {
+            "id": "product-group:pg-day",
+            "label": "CNFuturesDay",
+            "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
+            "origin": "catalog",
+            "product_group_template_id": "pg-day",
+        },
+    }
+
+
 def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
     configuration = {
         "payload": {

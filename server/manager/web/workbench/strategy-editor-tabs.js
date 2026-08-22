@@ -97,7 +97,9 @@
         label: context.t(tab.label || tab.key),
         description: tab.description ? context.t(tab.description) : "",
         render: () => {
-          if (tab.key === "__strategy__") return renderStructure?.() || document.createElement("div");
+          if (tab.kind === "structure") {
+            return renderStructure?.() || document.createElement("div");
+          }
           if (tab.key === "factor") return renderFactor?.() || document.createElement("div");
           if (tab.key === "product_path_selection") {
             return renderProduct?.() || document.createElement("div");

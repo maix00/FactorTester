@@ -338,6 +338,28 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    ic_payload = run_spec["configuration"].get("analyses", {}).get("ic", {})
+    if "ic" in analyses and ic_payload.get("schema_version") == 2:
+        from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
+        frequencies = {}
+        for item in run_spec["configuration"].get("shared", {}).get("factors", []):
+            if not isinstance(item, dict) or not item.get("factor_ref"):
+                continue
+            frequency = str(
+                item.get("frequency")
+                or item.get("default_return_freq")
+                or item.get("freq")
+                or ""
+            ).strip()
+            if not frequency:
+                alias = str(item.get("factor_alias") or item.get("alias") or "")
+                match = re.search(r"(?:^|\|)\$F:([^|]+)", alias)
+                frequency = match.group(1).strip() if match else ""
+            if frequency:
+                frequencies[str(item["factor_ref"])] = frequency
+        run_spec["typed_ic"] = compile_ic_grouped_configuration(
+            ic_payload, factor_frequencies=frequencies,
+        )
     # ``step_mode`` is a backtest-only run field.  Do not put a synthetic
     # false value into IC/evaluation RunSpecs: the registry is the closed
     # contract for which submitted fields become executable RunSpec fields.
@@ -1127,6 +1149,10 @@ def submit_research_run():
                 "step_mode": step_mode,
                 "output_requests": output_requests,
                 "run_spec": run_spec,
+                "execution_plan": deepcopy(next(
+                    (plan for plan in (_plans or ()) if plan.get("kind") == kind),
+                    {},
+                )),
                 "factor_refs": dict(run_spec.get("factor_refs") or {}),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),

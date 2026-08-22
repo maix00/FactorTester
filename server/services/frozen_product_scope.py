@@ -191,6 +191,14 @@ def _analysis_selection_ids(analysis: dict[str, Any]) -> set[str]:
     for group in analysis.get("groups") or []:
         if isinstance(group, dict) and _selection_id(group):
             result.add(_selection_id(group))
+    # IC schema 2 keeps product scope ownership on each typed configuration
+    # group; it is intentionally not flattened into a global analysis field.
+    for group in analysis.get("configuration_groups") or []:
+        if not isinstance(group, dict):
+            continue
+        selection_id = str(group.get("product_scope_ref") or "").strip()
+        if selection_id:
+            result.add(selection_id)
     return result
 
 

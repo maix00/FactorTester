@@ -25,7 +25,7 @@ WEB_TAB_CONTENT_ADAPTERS = frozenset({
 
 WEB_SURFACE_CONTENT_ADAPTERS = frozenset({
     "settings", "backtest_groups", "backtest_long_short",
-    "backtest_custom_strategies",
+    "backtest_custom_strategies", "ic_configuration_groups",
 })
 
 

@@ -396,12 +396,26 @@
       const catalog = Array.isArray(value.groups) ? value.groups : [];
       const selected = state.groups.filter(group => (
         group.temporary === true || group.source_kind === "transient"
+        || ["inline", "test_inline"].includes(group.origin)
+        || ["inline", "test_inline"].includes(group.source_origin)
         || (group._savedPlaceholder
           && state.groupRefs.includes(FTTestLazyCode.groupID(group)))
       ));
-      // Replace placeholders while preserving unresolved selected references
-      // and template-owned inline groups that do not exist in the user catalog.
-      state.groups = FTTestState.mergeByID(selected, catalog);
+      // Merge refreshed catalog fields into inline/test-inline objects without
+      // erasing their authoring origin; unresolved inline-only objects remain.
+      const selectedByID = new Map(selected.map(group => [
+        FTTestLazyCode.groupID(group), group,
+      ]));
+      const mergedCatalog = catalog.map(group => {
+        const inline = selectedByID.get(FTTestLazyCode.groupID(group));
+        if (!inline) return group;
+        return {
+          ...inline, ...group,
+          ...(inline.origin ? {origin: inline.origin} : {}),
+          ...(inline.source_origin ? {source_origin: inline.source_origin} : {}),
+        };
+      });
+      state.groups = FTTestState.mergeByID(selected, mergedCatalog);
       FTTestProducts.synchronize(state);
       if (state.kind === "backtest") FTBacktestGroups.initialize(state);
       applyPendingSelection(state, key);
@@ -551,15 +565,19 @@
         () => render(context, state),
       );
     }
-    if (state.kind === "backtest") {
-      if (window.FTBacktestGroups?.render) {
-        root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
+    const groupSurfaces = (state.manifest?.surfaces || []).some(surface => (
+      surface.kind === "list" && surface.mount === "group-settings"
+    ));
+    if (groupSurfaces) {
+      const groupRenderer = window.FTConfigurationGroupSurface?.renderer?.(state.kind);
+      if (groupRenderer?.render) {
+        root.append(groupRenderer.render(context, state, () => render(context, state)));
       } else {
         const code = state.backtestCode || {};
         root.append(code.status === "error"
-          ? FTUI.empty(context.t("读取策略列表失败"), code.error)
-          : FTUI.loading(context.t("正在读取策略列表…")));
-        ensureBacktestCode(context, state, () => render(context, state));
+          ? FTUI.empty(context.t("读取配置组列表失败"), code.error)
+          : FTUI.loading(context.t("正在读取配置组列表…")));
+        if (state.kind === "backtest") ensureBacktestCode(context, state, () => render(context, state));
       }
     }
     if (window.FTTestRunBatch?.renderSubmitted) {

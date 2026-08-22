@@ -194,35 +194,48 @@ const another = {
   factor_alias: "SgCCS|N:20d|$F:1m",
   factor_family_alias: "SgCCS",
 };
+const configurationGroup = {
+  config_group_id: "icg-day-roc",
+  batch_id: "icb-day-roc",
+  name: "日盘 ROC",
+  factor_ref: factor.factor_ref,
+  product_scope_ref: "product-group:day",
+  entry_delay_bars: 1,
+  horizon: {sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5]},
+  methods: ["rank", "pearson"],
+  return_price_basis: "next_open_to_open_adjusted",
+  editor_mounted_tabs: ["__configuration__", "factor", "product_path_selection"],
+};
 const analysis = FTICConfiguration.compileAnalysis({
   prior: {product_path_selections: [{product_path_selection_id: "stale"}]},
   manifest,
   values,
-  factors: [factor, another],
-  productSelection: product,
-  fallbackFamilyAlias: "ROC",
+  configurationGroups: [configurationGroup],
+  productCatalog: [{...product, product_path_selection_id: "product-group:day"}],
 });
-assert.equal(analysis.product_path_selection_id, "day");
-assert.deepEqual(analysis.product_selections.day, {
-  product_path_selection_id: "day",
-  selected_paths: ["CNFutures/day"],
+assert.equal(analysis.schema_version, 2);
+assert.deepEqual(analysis.configuration_groups, [configurationGroup]);
+assert.deepEqual(analysis.product_selections, {
+  "product-group:day": {product_path_selection_id: "product-group:day"},
 });
 assert.equal(analysis.paths, undefined);
 assert.equal(analysis.settings, undefined);
+assert.equal("product_path_selection_id" in analysis, false);
 assert.equal("product_path_selection" in analysis, false);
-assert.deepEqual(analysis.factors, [
-  {alias: factor.factor_alias, factor_ref: factor.factor_ref},
-  {alias: another.factor_alias, factor_ref: another.factor_ref},
-]);
+assert.equal("factors" in analysis, false);
 assert.equal("product_path_selections" in analysis, false);
-assert.equal("factor_family_alias" in analysis, false);
-assert.deepEqual(analysis.local_settings.ic_lags, [0, 1]);
-assert.equal(analysis.local_settings.start_date, "2025-01-02");
-assert.equal("ic_correlation" in analysis, false);
-
-const oneFamily = FTICConfiguration.compileAnalysis({
-  prior: {}, manifest, values, factors: [factor], productSelection: product,
+assert.deepEqual(analysis.local_settings, {
+  category: "industry",
+  custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
+  start_date: "2025-01-02",
 });
-assert.equal("factor_family_alias" in oneFamily, false);
+assert.equal("ic_lags" in analysis.local_settings, false);
+assert.equal("forward_return_horizons" in analysis.local_settings, false);
+assert.equal("ic_decay_lags" in analysis.local_settings, false);
+assert.equal("editor_mounted_tabs" in analysis.configuration_groups[0], true);
+
+assert.throws(() => FTICConfiguration.compileAnalysis({
+  manifest, values, configurationGroups: [], productCatalog: [],
+}), /exactly one configuration group/);
 
 console.log("ok");

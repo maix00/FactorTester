@@ -111,3 +111,31 @@ def test_authoring_core_request_order_and_duplicates_do_not_change_identity() ->
 
     assert left == right
     assert left.to_dict() == right.to_dict()
+
+
+def test_schema2_grouped_payload_maps_each_group_to_one_typed_core() -> None:
+    payload = {
+        "schema_version": 2,
+        "configuration_groups": [{
+            "config_group_id": "g-day",
+            "factor_ref": "factor:v1:owner:path:roc:commit:blob",
+            "product_scope_ref": "product-group:day",
+            "entry_delay_bars": 2,
+            "horizon": {"sampling": "scale_aware"},
+            "methods": ["rank"],
+            "return_price_basis": "next_open_to_open_adjusted",
+        }],
+    }
+    authoring = ICRunAuthoringConfiguration.from_dict(payload)
+    assert len(authoring.core_tests) == 1
+    assert authoring.core_tests[0].product_scope_refs == ("product-group:day",)
+    assert authoring.core_tests[0].entry_delay_bars == (2,)
+
+
+def test_schema2_grouped_payload_rejects_more_than_one_slice1_group() -> None:
+    payload = {"schema_version": 2, "configuration_groups": [
+        {"config_group_id": "first", "factor_ref": "factor:v1:a", "product_scope_ref": "s", "entry_delay_bars": 0, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
+        {"config_group_id": "second", "factor_ref": "factor:v1:b", "product_scope_ref": "s", "entry_delay_bars": 1, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
+    ]}
+    with pytest.raises(ValueError, match="exactly one"):
+        ICRunAuthoringConfiguration.from_dict(payload)

@@ -45,26 +45,14 @@
   }
 
   function render(context, state, refresh) {
-    initialize(state);
-    const available = surfaces(state);
-    if (!available.length) {
-      return FTUI.empty(
-        context.t("暂无策略组设置"), context.t("后端没有为该测试注册策略组 surface"),
-      );
-    }
-    const collapsed = state.backtestGroupSurfaceKey === null;
-    const active = collapsed
-      ? null
-      : (available.find(item => item.key === state.backtestGroupSurfaceKey) || available[0]);
-    if (active) state.backtestGroupSurfaceKey = active.key;
-    const items = available.map(surface => ({
-      key: surface.key,
-      label: context.t(surface.label || surface.key),
-      description: surface.help_text ? context.t(surface.help_text) : "",
-      panelClass: "backtest-group-panel",
-      render: () => adapterFor(surface).render(context, state, surface, refresh),
-    }));
-    const list = FTTabListChip.create({
+    return FTConfigurationGroupSurface.render({
+      context, state, refresh, adapters, initialize,
+      title: "策略组设置",
+      description: "下方策略与组合会冻结在同一次回测任务中",
+      count: `${strategyCount(state)} ${context.t("项策略")}`,
+      activeKey: "backtestGroupSurfaceKey",
+      openKey: "backtestGroupsOpen",
+      editorKey: "backtestGroupEditor",
       className: "backtest-groups",
       summaryClass: "backtest-group-summary",
       countClass: "backtest-group-count",
@@ -72,37 +60,28 @@
       shellClass: "backtest-group-shell",
       barClass: "backend-settings-tab-bar backtest-group-tab-bar",
       hostClass: "backend-settings-host backtest-group-host",
-      title: context.t("策略组设置"),
-      description: context.t("下方策略与组合会冻结在同一次回测任务中"),
-      count: `${strategyCount(state)} ${context.t("项策略")}`,
-      open: state.backtestGroupsOpen !== false,
-      onToggle: open => { state.backtestGroupsOpen = open; },
-      items,
-      activeKey: collapsed ? null : active?.key,
-      actionsFor: surfaceKey => {
-        const surface = available.find(item => item.key === surfaceKey) || active || available[0];
-        if (!surface) return [];
-        const selected = adapterFor(surface).selected(state);
-        return flows(state, surface.key).filter(flow => flow.kind !== "rename").map(flow => ({
-          label: context.t(flow.label),
-          buttonClass: flow.button_class,
-          disabled: !enabled(flow, selected.length),
-          onClick: () => runFlow(context, state, surface, flow, selected, refresh),
-        }));
-      },
-      onActivate: key => {
-        state.backtestGroupSurfaceKey = key;
-        refresh();
-      },
+      panelClass: "backtest-group-panel",
+      emptyTitle: "暂无策略组设置",
+      emptyDescription: "后端没有为该测试注册策略组 surface",
+      renderEditor: (ctx, current, editor, onFinish) => (
+        FTBacktestGroupForm.render(ctx, current, editor, onFinish)
+      ),
+      onEditorOpened: ({flow}) => loadEditorCatalogs(context, state, flow, refresh),
     });
-    if (state.backtestGroupEditor) {
-      const form = FTBacktestGroupForm.render(
-        context, state, state.backtestGroupEditor,
-        () => { state.backtestGroupEditor = null; refresh(); },
-      );
-      list.shell.append(form);
-    }
-    return list.root;
+  }
+
+  function loadEditorCatalogs(context, state, flow, refresh) {
+    // The editor is intentionally lightweight on first paint, but its fallback
+    // scope is the same visible catalog used by the factor/product tabs.
+    if (!["create", "derive", "edit"].includes(flow.kind)) return;
+    const loaders = [
+      window.FTTests?.ensureProductsForExecution?.(context, state, refresh),
+      window.FTTests?.ensureFactorsForExecution?.(context, state, refresh),
+    ];
+    if (loaders.some(Boolean)) void Promise.all(loaders).then(refresh).catch(error => {
+      state.backtestGroupCatalogError = error.message || String(error);
+      refresh();
+    });
   }
 
   function groupList(context, state, surface, refresh) {
@@ -199,45 +178,21 @@
   }
 
   function runFlow(context, state, surface, flow, selected, refresh) {
-    const adapter = adapterFor(surface);
-    if (flow.kind === "delete") {
-      if (!confirm(context.t(`确定删除选中的${surface.item_label || "项目"}`))) return;
-      adapter.removeSelected(state);
-      refresh(); return;
-    }
-    if (flow.kind === "swap") {
-      adapter.actions.swap?.(state, selected);
-      refresh(); return;
-    }
-    const action = adapter.actions[flow.kind];
-    if (!action) throw new Error(`内容适配器不支持操作: ${flow.kind}`);
-    state.backtestGroupEditor = action(state, selected, flow);
-    refresh();
-    // The editor is intentionally lightweight on first paint, but its
-    // fallback scope is the same visible catalog used by the factor/product
-    // tabs. Load those catalogs after opening the editor so a cold workspace
-    // does not present an empty candidate list or block the UI.
-    const loaders = [];
-    if (flow.kind === "create" || flow.kind === "derive" || flow.kind === "edit") {
-      loaders.push(window.FTTests?.ensureProductsForExecution?.(context, state, refresh));
-      loaders.push(window.FTTests?.ensureFactorsForExecution?.(context, state, refresh));
-    }
-    if (loaders.some(Boolean)) void Promise.all(loaders).then(refresh).catch(error => {
-      state.backtestGroupCatalogError = error.message || String(error);
-      refresh();
+    return FTConfigurationGroupSurface.runFlow({
+      context, state, surface, flow, selected,
+      adapter: adapterFor(surface),
+      editorKey: "backtestGroupEditor",
+      refresh,
+      onEditorOpened: () => loadEditorCatalogs(context, state, flow, refresh),
     });
   }
 
   function flows(state, surfaceKey) {
-    return (state.manifest.flows || []).filter(flow => (
-      flow.surface === surfaceKey
-    )).sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    return FTConfigurationGroupSurface.flows(state, surfaceKey);
   }
 
   function surfaces(state) {
-    return (state.manifest.surfaces || []).filter(surface => (
-      surface.kind === "list" && surface.mount === "group-settings"
-    )).sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    return FTConfigurationGroupSurface.surfaces(state);
   }
 
   function adapterFor(surface) {
@@ -347,5 +302,7 @@
     }[kind] || "square.and.pencil";
   }
 
-  window.FTBacktestGroups = Object.freeze({adapterFor, flows, initialize, render, surfaces});
+  const renderer = Object.freeze({adapterFor, flows, initialize, render, surfaces});
+  FTConfigurationGroupSurface.register("backtest", renderer);
+  window.FTBacktestGroups = renderer;
 })();

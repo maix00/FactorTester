@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 
@@ -65,6 +66,81 @@ def run_factor_type_analysis(payload: dict[str, Any], sink: Any, cancel_event: A
     _run_analysis(payload, sink, cancel_event, kind="factor_type_analysis")
 
 
+def _typed_ic_execution_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project one frozen Slice-1 core onto the established IC runtime view.
+
+    This is an execution-only projection.  The immutable grouped configuration
+    remains authoritative in ``run_spec.typed_ic`` and is never written back to
+    the authoring configuration.
+    """
+    run_spec = payload.get("run_spec") or {}
+    typed = run_spec.get("typed_ic")
+    if not isinstance(typed, dict):
+        return payload
+    requests = typed.get("authoring_core_tests") or []
+    if not isinstance(requests, list) or len(requests) != 1:
+        raise ValueError("Slice 1 typed IC execution requires exactly one core request")
+    core = requests[0]
+    scope_refs = core.get("product_scope_refs") or []
+    factor_refs = core.get("factor_refs") or []
+    if len(scope_refs) != 1 or len(factor_refs) != 1:
+        raise ValueError("Slice 1 typed IC core requires one scope and one factor")
+    scope_ref, factor_ref = str(scope_refs[0]), str(factor_refs[0])
+    selections = (run_spec.get("configuration") or {}).get("shared", {}).get(
+        "product_selections", {}
+    )
+    selection = selections.get(scope_ref) if isinstance(selections, dict) else None
+    if not isinstance(selection, dict):
+        raise ValueError(f"typed IC scope is not frozen: {scope_ref}")
+    paths = deepcopy(selection.get("paths") or selection.get("selected_paths") or [])
+    if not paths:
+        raise ValueError(f"typed IC scope has no frozen paths: {scope_ref}")
+
+    execution = deepcopy(payload)
+    execution["product_path_selection_id"] = scope_ref
+    execution["product_path_selection"] = {
+        **deepcopy(selection),
+        "product_path_selection_id": scope_ref,
+        "paths": paths,
+    }
+    execution["paths"] = paths
+    factors = [
+        deepcopy(item) for item in execution.get("factors") or []
+        if isinstance(item, dict) and str(item.get("factor_ref") or "") == factor_ref
+    ]
+    if len(factors) != 1:
+        raise ValueError(f"typed IC factor descriptor is not frozen: {factor_ref}")
+    execution["factors"] = factors
+    execution["ic_lags"] = list(core.get("entry_delay_bars") or [0])
+    methods = [str(value) for value in core.get("methods") or []]
+    execution["ic_correlation"] = (
+        "both" if set(methods) == {"rank", "pearson"}
+        else methods[0] if methods else "rank"
+    )
+    execution["return_price_basis"] = str(
+        core.get("return_price_basis") or "next_open_to_open_adjusted"
+    )
+    resolved_by_factor = (
+        (typed.get("resolved_horizons_by_request") or {})
+        .get(str(core.get("request_ref") or ""), {})
+        .get(factor_ref, [])
+    )
+    resolved_horizons = list(dict.fromkeys(
+        str(item.get("physical_frequency") or "").strip()
+        for item in resolved_by_factor
+        if isinstance(item, dict) and item.get("physical_frequency")
+    ))
+    if not resolved_horizons:
+        raise ValueError(f"typed IC core has no frozen horizons: {core.get('request_ref')}")
+    execution["forward_return_horizons"] = {
+        "sampling": "explicit",
+        "bases": resolved_horizons,
+        "multipliers": [1],
+    }
+    execution["typed_ic_core_ref"] = str(core.get("request_ref") or "")
+    return execution
+
+
 def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
     from server.modules.single_factor_test.ic import execute_ic_run_spec
@@ -72,4 +148,8 @@ def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     scope = _factor_runtime_scope(payload)
     with scope:
         verify_execution_plan("ic", payload)
-        execute_ic_run_spec(payload, sink=sink, cancel_event=cancel_event)
+        execute_ic_run_spec(
+            _typed_ic_execution_payload(payload),
+            sink=sink,
+            cancel_event=cancel_event,
+        )
