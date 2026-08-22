@@ -50,8 +50,9 @@ def canonicalize_product_paths(
         signed = raw.strip()
         negative_path = signed.startswith("-")
         path = signed[1:].strip() if negative_path else signed
-        view_category_ref, view_label_ref = _split_category_view_path(path)
-        if view_category_ref:
+        view = _category_view_components(path)
+        if view is not None:
+            class_path, view_category_ref, view_label_ref = view
             view_category_id, view_label = _resolve_category_label_reference(
                 view_category_ref, view_label_ref, username,
             )
@@ -65,9 +66,14 @@ def canonicalize_product_paths(
                     f"产品路径引用的分类 {view_category_id} 未绑定到当前定义"
                 )
             members = _category_members(view_category_id, username)
+            prefix = class_path.rstrip("/") + "/"
             canonical = [
-                classifier_object_path(product)
+                product_path
                 for product in members.get(view_label, [])
+                if (
+                    (product_path := classifier_object_path(product)) == class_path
+                    or product_path.startswith(prefix)
+                )
             ]
             if not canonical:
                 raise ValueError(f"无法解析产品分类 Label: {view_label}")

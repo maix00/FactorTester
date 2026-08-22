@@ -108,6 +108,52 @@ def test_embedded_product_scope_does_not_reopen_mutable_catalog(monkeypatch) -> 
     ] == ["Product/A"]
 
 
+def test_catalog_product_group_is_resolved_authoritatively_by_owner(monkeypatch) -> None:
+    configuration = {
+        "payload": {
+            "shared": {},
+            "analyses": {"ic": {
+                "product_path_selection_id": "product-group:pg-day",
+                "product_selections": {
+                    "product-group:pg-day": {
+                        "product_path_selection_id": "product-group:pg-day",
+                        "product_group_template_id": "product-group:pg-day",
+                        "source_type": "user_product_group_template",
+                        "paths": ["Product/StaleClientPath"],
+                    },
+                },
+            }},
+            "ui": {},
+        },
+    }
+    monkeypatch.setattr(
+        "server.services.frozen_product_scope._product_group_index",
+        lambda owner: {
+            "product-group:pg-day": {
+                "id": "pg-day",
+                "name": "CNFuturesDay",
+                "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
+                "category_ids": ["cnfutures_day_night"],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "server.services.frozen_product_scope._freeze_categories",
+        lambda **_kwargs: {},
+    )
+
+    frozen = freeze_product_scope(configuration, owner="alice", analyses=["ic"])
+
+    selection = frozen["payload"]["shared"]["product_selections"][
+        "product-group:pg-day"
+    ]
+    assert selection["paths"] == [
+        "Product/Futures/CNFutures/_products/AP.CZC",
+    ]
+    assert selection["label"] == "CNFuturesDay"
+    assert selection["origin"] == "catalog"
+
+
 def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
     configuration = {
         "payload": {
