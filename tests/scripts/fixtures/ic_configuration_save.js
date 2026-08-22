@@ -10,7 +10,7 @@ function load(path) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
 }
 
-const selectedFactorRef = "factor:v1:profile-max:path:roc:commit:blob";
+const selectedFactorRef = `factor:sha256:${"a".repeat(64)}`;
 const staleGlobalFactorRef = "factor:v1:profile-max:path:stale:commit:blob";
 const selectedFactor = {
   factor_ref: selectedFactorRef,
