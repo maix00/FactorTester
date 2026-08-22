@@ -82,7 +82,7 @@
           return true;
         },
         selected: state.selectedICConfigurationGroupIDs.includes(group.config_group_id),
-        chips: summaryChips(context, group),
+        chips: summaryChips(context, state, group),
       })),
       onToggle: (item, checked) => {
         FTICConfigurationGroupModel.toggle(
@@ -93,25 +93,22 @@
     });
   }
 
-  function summaryChips(context, group) {
-    const root = document.createElement("span");
-    root.className = "test-setting-chip-row";
-    for (const text of [
-      `${context.t("因子")}: ${shortRef(group.factor_ref)}`,
-      `${context.t("产品组")}: ${shortRef(group.product_scope_ref)}`,
-      `Delay: ${group.entry_delay_bars}`,
-    ]) {
-      const chip = document.createElement("span");
-      chip.className = "test-setting-chip";
-      chip.textContent = text;
-      root.append(chip);
-    }
-    return root;
-  }
-
-  function shortRef(value) {
-    const text = String(value || "");
-    return text.length > 36 ? `${text.slice(0, 33)}…` : text;
+  function summaryChips(context, state, group) {
+    const item = {
+      factor_candidate_refs: [group.factor_ref],
+      product_path_selection_id: group.product_scope_ref,
+    };
+    return FTTestSettingChips.render({
+      context,
+      manifest: state.manifest,
+      values: {...(state.values || {}), ic_lags: [group.entry_delay_bars]},
+      mountedTabs: ["factor", "product_path_selection", "delay"],
+      sources: FTTestContentAdapters.chipSources(state, item),
+      includeRun: false,
+      includeStrategyChips: true,
+      groupBy: "none",
+      inline: true,
+    });
   }
 
   function loadEditorCatalogs(context, state, flow, refresh) {

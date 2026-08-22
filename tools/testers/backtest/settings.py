@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.settings.contracts import ChipDefinition, SettingModule, SettingsSection
+from tools.testers._shared.category import (
+    CATEGORY_CANDIDATE_KEYS,
+    CATEGORY_SELECTION_KEYS,
+)
+from tools.testers._shared.factor import FACTOR_SOURCE_SELECTION_KEYS
+from tools.testers._shared.run_inputs import register_run_inputs_base
+from tools.testers._shared.scope_chips import register_factor_product_scope_chips
+from tools.testers._shared.template import register_test_template_base
 from tools.testers.settings.applications import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTION_KEYS,
@@ -18,13 +25,11 @@ from tools.testers.settings.applications import (
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
 )
-from tools.testers._shared.category import (
-    CATEGORY_CANDIDATE_KEYS,
-    CATEGORY_SELECTION_KEYS,
+from tools.testers.settings.contracts import (
+    ChipDefinition,
+    SettingModule,
+    SettingsSection,
 )
-from tools.testers._shared.factor import FACTOR_SOURCE_SELECTION_KEYS
-from tools.testers._shared.template import register_test_template_base
-from tools.testers._shared.run_inputs import register_run_inputs_base
 
 
 def register_group_test_settings(app: Any) -> None:
@@ -94,30 +99,8 @@ def register_group_test_settings(app: Any) -> None:
     _register_category_selection(app)
 
     # ── ChipDefinitions ─────────────────────────────────────
+    register_factor_product_scope_chips(app)
     for chip in (
-        ChipDefinition("factor_candidates", "因子候选", "identity",
-                       "因子候选: {factorCandidateLabel}",
-                       ("factorCandidateLabel",),
-                       module="factor_execution", target_tab="factor", order=10,
-                       inherit_from_root=True, batch_owned=True,
-                       source_adapter="selected_factor_candidates", clickable=True,
-                       detail_overlay={
-                           "kind": "factor_set", "mode": "view",
-                           "source_key": "factor_candidates",
-                           "ref_key": "target_ref",
-                       }),
-        ChipDefinition("product_path_selection", "产品组", "identity",
-                       "产品组: {productPathSelectionLabel}",
-                       ("product_path_selection",),
-                       module="product_selection", target_tab="product_path_selection", order=20,
-                       inherit_from_root=True,
-                       value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
-                       clickable=True, batch_owned=True,
-                       source_adapter="selected_product_paths",
-                       detail_overlay={
-                           "kind": "product_group", "mode": "view",
-                           "source_key": "product_group",
-                       }),
         ChipDefinition("split_count", "分组数", "identity",
                        "分组数: {n_groups}", ("n_groups",),
                        module="group_strategy", target_tab="group_strategy", order=30,

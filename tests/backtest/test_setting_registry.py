@@ -394,6 +394,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "source_key": "factor_candidates", "ref_key": "target_ref",
     }
     assert chips["product_path_selection"]["label"] == "产品组"
+    assert chips["product_path_selection"]["source_keys"] == ("product_group",)
     assert chips["product_path_selection"]["detail_overlay"] == {
         "kind": "product_group", "mode": "view", "source_key": "product_group",
     }
@@ -499,6 +500,13 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert tabs["factor"].get("content_options") == {}
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
     assert chips["factor_candidates"]["source_adapter"] == "selected_factor_candidates"
+    assert chips["product_path_selection"]["source_keys"] == ("product_group",)
+    backtest_chips = {
+        chip["key"]: chip
+        for chip in backtest_setting_registry.get("group_test").manifest()["chip_fields"]
+    }
+    for key in ("factor_candidates", "product_path_selection"):
+        assert chips[key] == backtest_chips[key]
     assert chips["factor_candidates"]["detail_overlay"] == {
         "kind": "factor_set", "mode": "view",
         "source_key": "factor_candidates", "ref_key": "target_ref",
