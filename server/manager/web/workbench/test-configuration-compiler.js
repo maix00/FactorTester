@@ -69,8 +69,14 @@
     return String(field?.scope_policy || "").toLowerCase() === "group_only";
   }
 
-  function sanitizeObject(manifest, object, values, {localScope = false} = {}) {
+  function sanitizeObject(
+    manifest, object, values, {localScope = false, stripRegistered = false} = {},
+  ) {
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      if (stripRegistered) {
+        deleteField(object, key, field);
+        continue;
+      }
       if (localScope && groupOnly(field)) {
         deleteField(object, key, field);
         continue;
@@ -93,12 +99,17 @@
     return result;
   }
 
-  function sanitizeExecutionPayload(manifest, payload, values) {
+  function sanitizeExecutionPayload(
+    manifest, payload, values, {stripRootRegistered = false} = {},
+  ) {
     const result = clone(payload || {}) || {};
-    // The analysis root and local settings represent the shared/local layer.
-    // GROUP_ONLY fields are serialized on each strategy group below; keeping
-    // a second copy here makes the backend resolver reject the RunSpec.
-    sanitizeObject(manifest, result, values || {}, {localScope: true});
+    // The analysis root is an authoring merge of prior state and current
+    // values. Registered local fields belong only in local_settings, while
+    // GROUP_ONLY fields belong only on strategy groups below. Strip the
+    // root copy before this object becomes the frozen RunSpec.
+    sanitizeObject(manifest, result, values || {}, {
+      localScope: true, stripRegistered: stripRootRegistered,
+    });
     for (const key of ["settings", "local_settings"]) {
       if (result[key] && typeof result[key] === "object") {
         sanitizeObject(manifest, result[key], values || {}, {localScope: true});

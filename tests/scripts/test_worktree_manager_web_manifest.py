@@ -293,8 +293,9 @@ def test_test_configuration_compiler_separates_authoring_and_execution_state() -
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_configuration_compiler.js"
     compiler = WEB_ROOT / "workbench" / "test-configuration-compiler.js"
+    configuration = WEB_ROOT / "workbench" / "test-configuration.js"
     result = subprocess.run(
-        ["node", str(fixture), str(compiler)], cwd=ROOT,
+        ["node", str(fixture), str(compiler), str(configuration)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

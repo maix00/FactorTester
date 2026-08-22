@@ -258,7 +258,7 @@
         factor_ref: factor.factor_ref || factor.target_ref || "",
         settings,
         local_settings: settings,
-      }, state.values);
+      }, state.values, {stripRootRegistered: true});
     }
     let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
     if (!groups.length) groups = [{
@@ -297,7 +297,7 @@
     return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
       ...prior, ...settings, local_settings: settings, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
-    }, state.values);
+    }, state.values, {stripRootRegistered: true});
   }
 
   window.FTTestConfiguration = Object.freeze({
