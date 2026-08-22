@@ -24,7 +24,10 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
 )
 from tools.factors.temporal_support import temporal_support_for_ic
 
-from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
+from server.services.eval_progress import (
+    count_evaluation_nodes, setup as setup_progress,
+    teardown as teardown_progress,
+)
 from server.services.factor_registry import factor_from_alias
 from server.services.session_runtime import user_obj_for_name
 from server.modules.shared.factor_tester_runtime import (
@@ -445,6 +448,34 @@ def _compute_ic_groups(
     batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
     fallback_items: list[tuple[tuple, List[Factor], Factor, Any | None]] = []
     pending_roots: dict[int, Factor] = {}
+
+    def _cleanup_preserving_active_failure(cleanup: Any) -> None:
+        """Run cleanup without replacing an exception already in flight."""
+        import sys
+
+        active_failure = sys.exc_info()[0] is not None
+        try:
+            cleanup()
+        except Exception:
+            if not active_failure:
+                raise
+
+    def _discard_owned_roots(roots: Iterable[Factor]) -> None:
+        """Release every owned root once without hiding an active run failure."""
+        import sys
+
+        active_failure = sys.exc_info()[0] is not None
+        cleanup_failure: Exception | None = None
+        for root in roots:
+            pending_roots.pop(id(root), None)
+            try:
+                discard_ic_factor(tester, root)
+            except Exception as exc:
+                if cleanup_failure is None:
+                    cleanup_failure = exc
+        if cleanup_failure is not None and not active_failure:
+            raise cleanup_failure
+
     try:
         for key, factor_list in param_items:
             _check_cancelled()
@@ -465,20 +496,24 @@ def _compute_ic_groups(
         # ── node-level 进度统计 ──
         if emitter is not None:
             total_nodes = 0
-            roots_by_key = {
-                item[0]: item[2]
-                for partition in batch_partitions.values()
-                for item in partition
-            }
-            roots_by_key.update({item[0]: item[2] for item in fallback_items})
-            for key, _ in param_items:
-                payload = param_payloads[key]
-                fe_param = payload.get('FE')
-                if fe_param is not None and hasattr(fe_param, '_expr'):
-                    total_nodes += count_nodes(fe_param._expr)
-                root = roots_by_key.get(key)
-                if root is not None and hasattr(root, '_expr'):
-                    total_nodes += count_nodes(root._expr)
+            # Each bounded chunk gets one shared expression cache.  Count the
+            # DAG union inside those exact boundaries; summing roots separately
+            # advertises nodes that cache sharing means will never execute.
+            for partition in batch_partitions.values():
+                batch_size = _evaluation_batch_size(
+                    partition[0][3], partition_size=len(partition),
+                )
+                for offset in range(0, len(partition), batch_size):
+                    total_nodes += count_evaluation_nodes([
+                        item[2]
+                        for item in partition[offset:offset + batch_size]
+                        if hasattr(item[2], '_expr')
+                    ])
+            total_nodes += sum(
+                count_evaluation_nodes([item[2]])
+                for item in fallback_items
+                if hasattr(item[2], '_expr')
+            )
             setup_progress(total_nodes, lambda c, t: emitter.emit_progress(c, t, 'eval'))
             emitter.emit_start(total=total_nodes, groups=total_groups, phase='init')
 
@@ -571,17 +606,20 @@ def _compute_ic_groups(
                                 quantile_portfolio_config=quantile_portfolio_config,
                             )
                     finally:
-                        for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
-                            discard_ic_factor(tester, ic_factor)
-                            pending_roots.pop(id(ic_factor), None)
+                        _discard_owned_roots(item[2] for item in chunk)
                     # Drop the temporary root list before the next chunk.  The
                     # partition metadata remains lightweight and is needed only to
                     # derive the next slice.
                     del roots, chunk
             finally:
                 if prepared is not None:
-                    release_evaluation_batch(prepared)
-                    del prepared
+                    prepared_batch = prepared
+                    try:
+                        _cleanup_preserving_active_failure(
+                            lambda: release_evaluation_batch(prepared_batch),
+                        )
+                    finally:
+                        del prepared
 
         # This branch is expected only for legacy factors that do not declare
         # a source frequency.  Evaluate the prebuilt root directly so progress
@@ -615,8 +653,7 @@ def _compute_ic_groups(
                     expected_sign_source=expected_sign_source,
                 )
             finally:
-                discard_ic_factor(tester, ic_factor)
-                pending_roots.pop(id(ic_factor), None)
+                _discard_owned_roots((ic_factor,))
             group_done += 1
             if emitter is not None:
                 emitter.emit_progress(group_done, total_groups, 'group_done')
@@ -629,10 +666,11 @@ def _compute_ic_groups(
         # A build, progress setup, or prepared-batch failure may happen before a
         # chunk reaches its local cleanup.  Release every root still owned by
         # this call; successfully processed chunks remove themselves above.
-        for ic_factor in pending_roots.values():
-            discard_ic_factor(tester, ic_factor)
-        if emitter is not None:
-            teardown_progress()
+        try:
+            _discard_owned_roots(tuple(pending_roots.values()))
+        finally:
+            if emitter is not None:
+                _cleanup_preserving_active_failure(teardown_progress)
 
     return state
 
