@@ -14,8 +14,9 @@
     // an empty outer selection must not erase the group-owned candidate lists.
     const factorItems = Array.isArray(state.factors) ? state.factors : [];
     const productItems = Array.isArray(state.groups) ? state.groups : [];
-    let factorRef = current?.factor_ref || "";
-    let productScopeRef = current?.product_scope_ref || "";
+    const draft = editor.draft || (editor.draft = {});
+    let factorRef = draft.factor_ref ?? current?.factor_ref ?? "";
+    let productScopeRef = draft.product_scope_ref ?? current?.product_scope_ref ?? "";
 
     const name = input("text", current?.name || "");
     name.placeholder = context.t("配置组名称");
@@ -73,6 +74,7 @@
       name: "ic-configuration-group-factor",
       onChange: values => {
         factorRef = values[0] || "";
+        draft.factor_ref = factorRef;
         editorTabs?.refreshChips();
       },
     });
@@ -93,6 +95,7 @@
         canCreate: true,
         onChange: values => {
           productScopeRef = values[0] || "";
+          draft.product_scope_ref = productScopeRef;
           editorTabs?.refreshChips();
         },
       },
@@ -136,15 +139,15 @@
           };
         const methods = [rank.checked ? "rank" : "", pearson.checked ? "pearson" : ""]
           .filter(Boolean);
-        const draft = {
+        const value = {
           name: name.value.trim(), factor_ref: factorRef,
           product_scope_ref: productScopeRef,
           entry_delay_bars: Number(delayValue), horizon, methods,
           return_price_basis: basis.value.trim(),
           editor_mounted_tabs: editorTabs?.value?.().mountedTabs,
         };
-        if (current) model().update(state, current.config_group_id, draft);
-        else model().add(state, draft);
+        if (current) model().update(state, current.config_group_id, value);
+        else model().add(state, value);
         onFinish();
       } catch (error) { showError(form, error.message); }
     }, onFinish);
