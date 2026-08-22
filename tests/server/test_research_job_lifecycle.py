@@ -552,6 +552,11 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     assert planned_hashes == [
         preview_payload["run_spec_hash"], preview_payload["run_spec_hash"],
     ]
+    jobs = JobRepository().list(owner="alice", run_id=run["run_id"])
+    assert {job.kind for job in jobs} == {"ic", "backtest"}
+    for job in jobs:
+        assert job.run_spec_hash == run["run_spec_hash"]
+        assert job.job_spec["run_spec"] == run["run_spec"]
 
 
 def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
@@ -1428,8 +1433,10 @@ def test_run_dependency_is_frozen_retained_and_copied_on_retry(
         owner="alice", run_id=submitted.get_json()["run_id"],
     )[0]
     assert original.job_spec["retention_mode"] == "summary"
-    assert original.job_spec["result_retention_mode"] == "full"
-    assert original.retention_mode == "full"
+    # #298 changed this viewer to the compact strategy_analysis_source
+    # artifact, so it no longer forces full replay retention.
+    assert original.job_spec["result_retention_mode"] == "summary"
+    assert original.retention_mode == "summary"
     policy = original.job_spec["run_spec"]["run_input_dependency_policy"]
     assert policy["mode"] == "retained_job_input"
     assert policy["files"][0]["path"] == dependency["path"]
