@@ -9,6 +9,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
 const model = window.FTICConfigurationGroupModel;
 
 const factorRef = "factor:v1:profile-max:path:roc:commit:blob";
+const catalogFactorRef = `factor:sha256:${"a".repeat(64)}`;
 const state = {kind: "ic", analysis: {}};
 model.initialize(state);
 assert.deepEqual(state.analysis.configuration_groups, []);
@@ -47,6 +48,13 @@ assert.throws(() => model.normalize({
   horizon: {sampling: "scale_aware"}, methods: ["rank"],
   return_price_basis: "next_open_to_open_adjusted",
 }), /frozen factor_ref/);
+assert.equal(model.normalize({
+  factor_ref: catalogFactorRef,
+  product_scope_ref: "product-group:pg-day",
+  entry_delay_bars: 0,
+  horizon: {sampling: "scale_aware"}, methods: ["rank"],
+  return_price_basis: "next_open_to_open_adjusted",
+}).factor_ref, catalogFactorRef);
 assert.throws(() => model.normalize({
   factor_ref: factorRef,
   product_scope_ref: "product-group:pg-day",
