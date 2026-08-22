@@ -26,7 +26,7 @@
     "workbench-settings-controls": ["workbench-core"],
     "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core"],
-    "research": ["profile", "catalog-core"],
+    "research": ["catalog-core"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
     "job-detail-input": ["job-detail-core"],
     "job-detail-previews": ["job-detail-core", "report", "charts"],
