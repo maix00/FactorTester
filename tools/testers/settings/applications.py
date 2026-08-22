@@ -570,9 +570,12 @@ def ic_test_settings() -> ApplicationSettings:
     from tools.testers.settings.strategy_editor import register_strategy_editor_contract
     register_strategy_editor_contract(app)
     register_run_fields(app, backtest=False)
+    # Match the backtest configuration page: scope tabs are mounted only
+    # after the user explicitly enables them from the left-side settings
+    # manager.  The IC group editor owns its own factor/product pickers.
     app.set_default_mounted_tabs(
         TabMountPoint.LOCAL_SETTINGS,
-        ("test_template", "factor", "product_path_selection", "time"),
+        ("test_template", "time"),
     )
 
     return app
