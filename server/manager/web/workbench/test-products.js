@@ -132,7 +132,8 @@
 
   function selectionPanel(context, state, refresh, options = {}) {
     const allGroups = Array.isArray(options.groups) ? options.groups : state.groups;
-    const groups = window.FTStrategyEditorScope?.constrainedCandidates
+    const groups = options.constrain !== false
+      && window.FTStrategyEditorScope?.constrainedCandidates
       ? FTStrategyEditorScope.constrainedCandidates(
           state, "product_path_candidates", allGroups,
         )

@@ -29,4 +29,5 @@ const delay=tabOptions.renderOverrides({tab:{key:"delay",field:"ic_lags",label:"
 const unrelated=tabOptions.renderOverrides({tab:{key:"category",field:"productMask"}}); assert.equal(unrelated.children.length,0,"backtest-only blank tab has no IC form field");
 tabOptions.renderProduct();
 assert.deepEqual(productOptions.groups,state.groups,"group-owned product picker must not be emptied by the legacy outer product tab");
+assert.equal(productOptions.constrain,false,"group-owned picker must bypass legacy outer candidate constraints");
 assert.equal(form.tagName,"form"); console.log("ok");
