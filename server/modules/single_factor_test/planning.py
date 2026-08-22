@@ -213,10 +213,21 @@ def _typed_ic_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     groups = deepcopy(typed.get("group_provenance") or typed.get("groups") or [])
     products: list[str] = []
     paths: list[Any] = []
-    for selection in selections.values() if isinstance(selections, dict) else ():
+    seen_paths: set[str] = set()
+    scope_refs = [
+        str(group.get("product_scope_ref") or "").strip()
+        for group in groups
+        if isinstance(group, dict)
+    ]
+    for scope_ref in scope_refs:
+        selection = selections.get(scope_ref) if isinstance(selections, dict) else None
         if not isinstance(selection, dict):
-            continue
-        paths.extend(deepcopy(selection.get("selected_paths") or selection.get("paths") or []))
+            raise ValueError(f"typed IC scope is not frozen: {scope_ref}")
+        for path in selection.get("selected_paths") or selection.get("paths") or ():
+            path_key = str(path)
+            if path_key not in seen_paths:
+                seen_paths.add(path_key)
+                paths.append(deepcopy(path))
         products.extend(str(x) for x in selection.get("products") or () if x)
     return {
         "kind": "ic",
