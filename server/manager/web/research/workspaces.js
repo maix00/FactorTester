@@ -36,6 +36,7 @@
       // branch used to leave a blank research page during cold start.
       body.replaceChildren();
       if (selected === "profiles") {
+        await window.FTStaticLoader?.loadGroups?.(["profile"]);
         if (profileID) {
           // Older links may still carry the embedded query form.  Normalize
           // them to the same independent Profile tab used by row clicks.
@@ -45,6 +46,7 @@
           await FTProfiles.list({...context, content: body}, {embedded: true});
         }
       } else if (selected === "agent-models") {
+        await window.FTStaticLoader?.loadGroups?.(["profile"]);
         await FTAgentModels.list({...context, content: body});
       } else if (selected === "reports") {
         await FTResearchReports.render(context, body, embedded);
