@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import time
+from copy import deepcopy
 from pathlib import Path
 
 from flask import Response, jsonify, request, session, stream_with_context
@@ -790,10 +791,15 @@ def get_test_job_result(job_id: str):
     if evidence_warning:
         base["detail_warning"] = evidence_warning
     if job.status is JobStatus.SUCCEEDED:
+        result = deepcopy(job.result_summary)
+        if job.kind == "ic" and isinstance(result, dict):
+            provenance = result.get("provenance")
+            if isinstance(provenance, dict):
+                provenance["run_spec_hash"] = str(job.run_spec_hash or "")
         return jsonify({
             "success": True,
             **base,
-            "result": job.result_summary,
+            "result": result,
         })
     if job.status is JobStatus.PAUSED:
         return jsonify({"success": True, **base, "paused": True})
