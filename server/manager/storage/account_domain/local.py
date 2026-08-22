@@ -379,8 +379,9 @@ class LocalAccountDomainStore:
         principal: str = "",
         entity_type: str = "",
         include_shared: bool = True,
+        include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
-        clauses = ["deleted=0"]
+        clauses = [] if include_deleted else ["deleted=0"]
         params: list[Any] = []
         if principal:
             if include_shared:
@@ -398,7 +399,7 @@ class LocalAccountDomainStore:
                 SELECT principal, entity_type, entity_id, payload_json,
                        deleted, remote_revision, origin_manager_id, updated_at
                 FROM account_domain_entities
-                WHERE {' AND '.join(clauses)}
+                {('WHERE ' + ' AND '.join(clauses)) if clauses else ''}
                 ORDER BY updated_at DESC, entity_id
                 """,
                 tuple(params),

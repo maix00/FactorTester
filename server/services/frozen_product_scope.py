@@ -257,10 +257,12 @@ def _object_index(value: object) -> dict[str, dict[str, Any]]:
 
 
 def _product_group_index(owner: str) -> dict[str, dict[str, Any]]:
-    from server.modules.products.product_group_store import load_product_groups
+    from server.modules.products.product_group_store import (
+        load_authoritative_product_groups,
+    )
 
     result = {}
-    for item in load_product_groups(owner):
+    for item in load_authoritative_product_groups(owner):
         if not isinstance(item, dict):
             continue
         raw_id = str(item.get("id") or "").strip()

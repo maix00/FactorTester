@@ -111,6 +111,59 @@ def load_product_groups(username: str) -> list:
     return groups
 
 
+def load_account_domain_product_groups(username: str) -> list[dict]:
+    """Read the owner's non-deleted groups from the shared domain mirror."""
+    import settings as Settings
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+
+    rows = LocalAccountDomainStore(Settings.CACHE_DB_PATH).list_entities(
+        principal=username,
+        entity_type="product_group",
+        include_shared=False,
+        include_deleted=False,
+    )
+    return [
+        dict(payload)
+        for row in rows
+        if isinstance(row, dict)
+        and isinstance((payload := row.get("payload")), dict)
+    ]
+
+
+def load_authoritative_product_groups(username: str) -> list[dict]:
+    """Return one owner catalog, preferring domain-mirror rows by stable ID."""
+    merged: dict[str, dict] = {}
+    for group in load_product_groups(username):
+        if not isinstance(group, dict):
+            continue
+        key = str(group.get("id") or group.get("name") or "").strip()
+        if key:
+            merged[key] = group
+    import settings as Settings
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+
+    rows = LocalAccountDomainStore(Settings.CACHE_DB_PATH).list_entities(
+        principal=username,
+        entity_type="product_group",
+        include_shared=False,
+        include_deleted=True,
+    )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        payload = row.get("payload")
+        key = str(
+            (payload or {}).get("id") if isinstance(payload, dict) else ""
+        ).strip() or str(row.get("entity_id") or "").strip()
+        if not key:
+            continue
+        if row.get("deleted"):
+            merged.pop(key, None)
+        elif isinstance(payload, dict):
+            merged[key] = dict(payload)
+    return list(merged.values())
+
+
 def save_product_groups(username: str, groups: list) -> None:
     _save_product_groups(username, groups)
 
