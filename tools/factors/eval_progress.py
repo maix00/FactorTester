@@ -6,7 +6,7 @@ but core evaluation code must not import server modules directly.
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from typing import Any, Callable, Iterable, Sequence
 
 from tools.factors.FactorExpr import FactorExpr
 
@@ -51,8 +51,13 @@ def bump() -> None:
 
 def count_nodes(expr: FactorExpr) -> int:
     """Count unique expression nodes by structural key."""
+    return count_nodes_many((expr,))
+
+
+def count_nodes_many(exprs: Iterable[FactorExpr]) -> int:
+    """Count the structural-key union for roots sharing one evaluation cache."""
     seen: set = set()
-    stack = [expr]
+    stack = list(exprs)
     count = 0
     while stack:
         node = stack.pop()
@@ -61,6 +66,27 @@ def count_nodes(expr: FactorExpr) -> int:
             continue
         seen.add(sk)
         count += 1
-        for opnd in reversed(list(getattr(node, "operands", ()))):
+        operands = getattr(node, "_operands", getattr(node, "operands", ()))
+        for opnd in reversed(list(operands)):
             stack.append(opnd)
     return count
+
+
+def count_evaluation_nodes(factors: Sequence[Any]) -> int:
+    """Count cache misses using the same policy as batch factor evaluation."""
+    from tools.factors.evaluation import shared_cache_keys_for_factors
+
+    shared_keys = shared_cache_keys_for_factors(factors)
+    cached: set = set()
+
+    def visit(node: FactorExpr) -> int:
+        key = node._structural_key()
+        cacheable = bool(getattr(node, "_is_intermediate", False)) or key in shared_keys
+        if cacheable and key in cached:
+            return 0
+        count = sum(visit(child) for child in getattr(node, "_operands", ())) + 1
+        if cacheable:
+            cached.add(key)
+        return count
+
+    return sum(visit(factor._expr) for factor in factors)

@@ -94,7 +94,8 @@ def _walk_keys(expr: Any) -> Iterable[tuple]:
     yield from visit(expr)
 
 
-def _shared_keys(factors: Sequence[Any]) -> frozenset[tuple]:
+def shared_cache_keys_for_factors(factors: Sequence[Any]) -> frozenset[tuple]:
+    """Return the structural keys cached across these evaluation roots."""
     counts: Counter[tuple] = Counter()
     for factor in factors:
         counts.update(_walk_keys(factor._expr))
@@ -244,7 +245,7 @@ def evaluate_factors(
         products=prepared.products, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
         warmup_window=warmup_window, preloaded=preloaded,
         panel_timeline=prepared.panel_timeline,
-        shared_cache={}, shared_cache_keys=_shared_keys(factors),
+        shared_cache={}, shared_cache_keys=shared_cache_keys_for_factors(factors),
     )
     for factor in factors:
         factor.evaluate(

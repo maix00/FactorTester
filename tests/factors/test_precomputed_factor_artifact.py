@@ -97,6 +97,31 @@ def test_frozen_descriptor_reloads_executable_factor(tmp_path: Path, monkeypatch
     }]
 
 
+def test_frozen_descriptor_loads_artifact_once(tmp_path: Path, monkeypatch) -> None:
+    from server.services import external_factor_artifacts
+
+    manifest, products = _write_artifact(tmp_path)
+    monkeypatch.setattr(
+        external_factor_artifacts,
+        "_resolve_cn_futures",
+        products.get,
+    )
+    frozen = external_factor_artifacts.validate_and_freeze(str(manifest))
+    real_load = PrecomputedFactorArtifact.load
+    calls = []
+
+    def counted_load(*args, **kwargs):
+        calls.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(PrecomputedFactorArtifact, "load", counted_load)
+
+    loaded = external_factor_artifacts.load_frozen_artifacts([frozen])
+
+    assert [factor.alias for factor in loaded] == ["external_momentum"]
+    assert [str(path) for path in calls] == [frozen["manifest_path"]]
+
+
 def test_frozen_descriptor_rejects_post_submission_change(
     tmp_path: Path, monkeypatch,
 ) -> None:

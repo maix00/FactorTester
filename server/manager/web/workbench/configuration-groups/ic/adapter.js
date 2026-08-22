@@ -38,6 +38,10 @@
       barClass: "backend-settings-tab-bar backtest-group-tab-bar",
       hostClass: "backend-settings-host backtest-group-host",
       panelClass: "backtest-group-panel ic-configuration-group-panel",
+      onToggleConfig: open => {
+        state.icConfigurationGroupShowConfigOpen = open;
+        refresh();
+      },
       emptyTitle: "暂无配置组设置",
       emptyDescription: "后端没有为 IC 注册配置组 surface",
       renderEditor: (ctx, current, editor, onFinish) => (
@@ -60,7 +64,12 @@
       count: `${groups.length} ${context.t("个配置组")}`,
       selection: surface.selection === "single" ? "single" : "multi",
       batchSelection: false,
-      showConfig: false,
+      showConfig: true,
+      showConfigOpen: state.icConfigurationGroupShowConfigOpen === true,
+      onToggleConfig: open => {
+        state.icConfigurationGroupShowConfigOpen = open;
+        refresh();
+      },
       items: groups.map(group => ({
         key: group.config_group_id,
         label: group.name || group.config_group_id,

@@ -6,6 +6,7 @@ from .batch import (
     evaluate_factors,
     prepare_evaluation_batch,
     release_evaluation_batch,
+    shared_cache_keys_for_factors,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "evaluate_factors",
     "prepare_evaluation_batch",
     "release_evaluation_batch",
+    "shared_cache_keys_for_factors",
 ]

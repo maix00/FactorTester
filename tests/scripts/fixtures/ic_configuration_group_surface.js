@@ -129,6 +129,14 @@ assert.deepEqual(state.analysis.configuration_groups[0].editor_mounted_tabs, [
   "__configuration__", "factor", "product_path_selection",
 ]);
 assert.equal(find(root, node => node.tagName === "strong")?.textContent, "IC 配置组");
+const displaySettings = find(
+  root, node => node.className === "strategy-list-config-toggle",
+);
+assert.equal(displaySettings?.textContent, "显示设置");
+displaySettings.listeners.click();
+assert.equal(state.icConfigurationGroupShowConfigOpen, true);
+root = window.FTICConfigurationGroups.render(context, state, refresh);
+assert.ok(find(root, node => node.className === "strategy-list-chips"));
 const selection = find(root, node => node.tagName === "input");
 assert.equal(selection.type, "radio");
 selection.checked = true;

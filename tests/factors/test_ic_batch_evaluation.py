@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from tools.data.types import DataFreq
 from server.modules.single_factor_test import ic as ic_module
@@ -57,3 +58,321 @@ def test_ic_groups_batch_roots_with_the_same_source_frequency(monkeypatch):
     assert evaluated[0][0] == roots
     assert evaluated[0][1]["freq"] == DataFreq.MIN1
     assert discarded == roots
+
+
+def test_ic_progress_counts_the_chunk_dag_union(monkeypatch):
+    roots = []
+    evaluated = []
+    starts = []
+
+    class _Expr:
+        def __init__(self, key, *operands):
+            self.key = key
+            self._operands = operands
+
+        def _structural_key(self):
+            return self.key
+
+    shared = _Expr(("shared", "operand"))
+
+    class _Root:
+        def __init__(self, index):
+            self._expr = _Expr(("root", index), shared)
+
+    class _Factor:
+        _source_freq = DataFreq.MIN1
+        _expr = shared
+
+    class _Tester:
+        products = ["P"]
+        start_dt = None
+        end_dt = None
+
+    class _Emitter:
+        def emit_progress(self, *_args):
+            pass
+
+        def emit_start(self, **kwargs):
+            starts.append(kwargs)
+
+    def build(_params, _factor_list):
+        root = _Root(len(roots))
+        roots.append(root)
+        return root, DataFreq.MIN1
+
+    monkeypatch.setattr(ic_module, "build_ic_factor", build)
+    monkeypatch.setattr(
+        ic_module,
+        "collect_ic_result",
+        lambda *_args: (
+            [], pd.Series(dtype=float), pd.Series(dtype=float),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        ),
+    )
+    monkeypatch.setattr(ic_module, "discard_ic_factor", lambda *_args: None)
+    monkeypatch.setattr(
+        "tools.factors.evaluation.evaluate_factors",
+        lambda factors, **_kwargs: evaluated.extend(factors),
+    )
+
+    keys = [
+        ("A", "MIN1", 0, "OPEN", "MIN1", 0, "rank", "F"),
+        ("A", "MIN1", 0, "OPEN", "MIN5", 0, "rank", "F"),
+    ]
+    ic_module._compute_ic_groups(
+        _Tester(), [(key, [_Factor()]) for key in keys],
+        {key: {"FE": _Factor()} for key in keys},
+        0, {"F": "MIN1"}, emitter=_Emitter(),
+    )
+
+    assert len(roots) == len(keys)
+    assert evaluated == roots
+    # Two roots plus one shared subtree are three actual chunk-cache misses.
+    # FE is already part of each executable root DAG.
+    assert starts == [{"total": 3, "groups": 2, "phase": "init"}]
+
+
+def test_progress_count_retains_repeated_nodes_excluded_by_batch_cache():
+    from tools.factors.eval_progress import count_evaluation_nodes
+
+    class _Expr:
+        _is_intermediate = False
+
+        def __init__(self, key, *operands):
+            self.key = key
+            self._operands = operands
+
+        def _structural_key(self):
+            return self.key
+
+    # A one-element key is intentionally excluded by the evaluator's shared-key
+    # policy.  It therefore executes once under each root and must count twice.
+    repeated_uncached = _Expr(("leaf",))
+    roots = [
+        SimpleNamespace(_expr=_Expr(("root", index), repeated_uncached))
+        for index in range(2)
+    ]
+
+    assert count_evaluation_nodes(roots) == 4
+
+
+def test_ic_cleanup_failure_does_not_mask_run_failure_or_double_discard(monkeypatch):
+    roots = []
+    discarded = []
+
+    class _Root:
+        pass
+
+    class _Factor:
+        _source_freq = DataFreq.MIN1
+
+    class _Tester:
+        products = ["P"]
+        start_dt = None
+        end_dt = None
+
+    def build(_params, _factor_list):
+        root = _Root()
+        roots.append(root)
+        return root, DataFreq.MIN1
+
+    def discard(_tester, root):
+        discarded.append(root)
+        if root is roots[0]:
+            raise RuntimeError("cleanup failed")
+
+    def fail_evaluation(*_args, **_kwargs):
+        raise ValueError("evaluation failed")
+
+    monkeypatch.setattr(ic_module, "build_ic_factor", build)
+    monkeypatch.setattr(ic_module, "discard_ic_factor", discard)
+    monkeypatch.setattr(
+        "tools.factors.evaluation.evaluate_factors", fail_evaluation,
+    )
+
+    keys = [
+        ("A", "MIN1", 0, "OPEN", "MIN1", 0, "rank", "F"),
+        ("A", "MIN1", 0, "OPEN", "MIN5", 0, "rank", "F"),
+    ]
+    with pytest.raises(ValueError, match="evaluation failed"):
+        ic_module._compute_ic_groups(
+            _Tester(), [(key, [_Factor()]) for key in keys],  # type: ignore[arg-type]
+            {key: {} for key in keys}, 0, {"F": "MIN1"},
+        )
+
+    assert discarded == roots
+
+
+@pytest.mark.parametrize("failing_cleanup", ["release", "teardown"])
+def test_ic_late_cleanup_failure_does_not_mask_evaluation_failure(
+    monkeypatch, failing_cleanup,
+):
+    class _Root:
+        pass
+
+    class _Factor:
+        _source_freq = DataFreq.MIN1
+
+    class _Product:
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    class _Tester:
+        products = [_Product()]
+        start_dt = None
+        end_dt = None
+
+    class _Emitter:
+        def emit_progress(self, *_args):
+            pass
+
+        def emit_start(self, **_kwargs):
+            pass
+
+    key = ("A", "MIN1", 0, "OPEN", "MIN1", 0, "rank", "F")
+    prepared = object()
+    cleanup_calls = []
+
+    monkeypatch.setattr(
+        ic_module, "build_ic_factor", lambda *_args: (_Root(), DataFreq.MIN1),
+    )
+    monkeypatch.setattr(ic_module, "discard_ic_factor", lambda *_args: None)
+    monkeypatch.setattr(
+        "tools.factors.evaluation.prepare_evaluation_batch",
+        lambda *_args, **_kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        "tools.factors.evaluation.evaluate_factors",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("evaluation failed")),
+    )
+
+    def release(value):
+        cleanup_calls.append(("release", value))
+        if failing_cleanup == "release":
+            raise RuntimeError("release failed")
+
+    def teardown():
+        cleanup_calls.append(("teardown", None))
+        if failing_cleanup == "teardown":
+            raise RuntimeError("teardown failed")
+
+    monkeypatch.setattr(
+        "tools.factors.evaluation.release_evaluation_batch", release,
+    )
+    monkeypatch.setattr(ic_module, "teardown_progress", teardown)
+
+    with pytest.raises(ValueError, match="evaluation failed"):
+        ic_module._compute_ic_groups(
+            _Tester(), [(key, [_Factor()])],  # type: ignore[arg-type]
+            {key: {}}, 0, {"F": "MIN1"}, emitter=_Emitter(),
+        )
+
+    assert cleanup_calls == [("release", prepared), ("teardown", None)]
+
+
+def test_ic_root_build_failure_discards_already_constructed_roots(monkeypatch):
+    roots = []
+    discarded = []
+
+    class _Root:
+        pass
+
+    class _Factor:
+        _source_freq = DataFreq.MIN1
+
+    class _Tester:
+        products = ["P"]
+        start_dt = None
+        end_dt = None
+
+    def build(_params, _factor_list):
+        if roots:
+            raise RuntimeError("second root failed")
+        root = _Root()
+        roots.append(root)
+        return root, DataFreq.MIN1
+
+    monkeypatch.setattr(ic_module, "build_ic_factor", build)
+    monkeypatch.setattr(
+        ic_module,
+        "discard_ic_factor",
+        lambda _tester, root: discarded.append(root),
+    )
+
+    keys = [
+        ("A", "MIN1", 0, "OPEN", "MIN1", 0, "rank", "F"),
+        ("A", "MIN1", 0, "OPEN", "MIN5", 0, "rank", "F"),
+    ]
+    with pytest.raises(RuntimeError, match="second root failed"):
+        ic_module._compute_ic_groups(
+            _Tester(), [(key, [_Factor()]) for key in keys],  # type: ignore[arg-type]
+            {key: {} for key in keys}, 0, {"F": "MIN1"},
+        )
+
+    assert discarded == roots
+
+
+def test_ic_progress_reuses_legacy_root_without_source_frequency(monkeypatch):
+    built = []
+    evaluated = []
+    discarded = []
+
+    class _Expr:
+        def _structural_key(self):
+            return "legacy-root"
+
+        def iter_children(self):
+            return []
+
+    class _Root:
+        _expr = _Expr()
+
+        def evaluate(self, products, **kwargs):
+            evaluated.append((self, products, kwargs))
+
+    class _Factor:
+        _source_freq = None
+        _expr = _Expr()
+
+    class _Tester:
+        products = ["P"]
+        start_dt = None
+        end_dt = None
+
+    class _Emitter:
+        def emit_progress(self, *_args):
+            pass
+
+        def emit_start(self, **_kwargs):
+            pass
+
+    def build(_params, _factor_list):
+        root = _Root()
+        built.append(root)
+        return root, None
+
+    monkeypatch.setattr(ic_module, "build_ic_factor", build)
+    monkeypatch.setattr(ic_module, "_temporal_support_for_payload", lambda *_args: None)
+    monkeypatch.setattr(
+        ic_module,
+        "collect_ic_result",
+        lambda *_args, **_kwargs: (
+            [], pd.Series(dtype=float), pd.Series(dtype=float),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        ),
+    )
+    monkeypatch.setattr(
+        ic_module,
+        "discard_ic_factor",
+        lambda _tester, root: discarded.append(root),
+    )
+
+    key = ("A", "", 0, "OPEN", "MIN1", 0, "rank", "F")
+    ic_module._compute_ic_groups(
+        _Tester(), [(key, [_Factor()])],  # type: ignore[arg-type]
+        {key: {"FE": _Factor()}}, 0, {"F": "MIN1"}, emitter=_Emitter(),
+    )
+
+    assert len(built) == 1
+    assert [item[0] for item in evaluated] == built
+    assert discarded == built
