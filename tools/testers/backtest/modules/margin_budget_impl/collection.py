@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from typing import Any
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
@@ -73,12 +71,6 @@ def collect_target_items(
 
 
 def cash_pool_equity(state: Any, ctx: Any, items: list[TargetItem]) -> float:
-    unique: dict[int, TargetItem] = {}
-    for item in items:
-        unique.setdefault(id(item.ledger), item)
-    first = next(iter(unique.values()))
-    cash = cash_for_ledger(state, first.ledger)
-    cash_major = float(cash.to_major()) if cash is not None else 0.0
-    return cash_major + math.fsum(
-        item.equity - cash_major for item in unique.values()
-    )
+    from tools.testers.backtest.modules.ledger_impl.valuation import cash_pool_equity as value_pool
+
+    return value_pool(state, ctx, items[0].ledger)

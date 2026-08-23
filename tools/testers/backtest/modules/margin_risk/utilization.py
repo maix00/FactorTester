@@ -17,7 +17,11 @@ def margin_limit_states(
     required_by_ledger: Mapping[Any, float],
 ) -> dict[Any, tuple[float, float]]:
     """Value each affected cash pool once for a batch of margin checks."""
-    from tools.testers.backtest.modules.cash_pool import cash_for_ledger
+    from tools.testers.backtest.modules.cash_pool import (
+        account_cash_or_zero,
+        cash_amount_to_pool_base,
+        cash_pool_cash_major,
+    )
     from tools.testers.backtest.modules.ledger_module import LedgerModule, _ledger_equity
     from tools.testers.backtest.modules.margin import (
         _required_margin_for_position,
@@ -49,8 +53,9 @@ def margin_limit_states(
             if item in state.ledgers
         ] or requested_ledgers
         prices = _pool_valuation_prices(ctx, pool_ledgers, LedgerModule, MarketDataModule)
-        cash = cash_for_ledger(state, requested_ledgers[0])
-        cash_major = float(cash.to_major()) if cash is not None else 0.0
+        cash_major = cash_pool_cash_major(
+            state, requested_ledgers[0], timestamp=ctx.timestamp,
+        )
         equity_parts: list[float] = []
         required_parts: list[float] = []
         owners: dict[Any, Any] = {}
@@ -59,9 +64,12 @@ def margin_limit_states(
             if item_owner is None:
                 continue
             owners[item.ledger] = item_owner
-            equity_parts.append(float(_ledger_equity(
-                state, ctx, item_owner, item, prices,
-            )) - cash_major)
+            account_cash = float(account_cash_or_zero(state, item).to_major())
+            equity_parts.append(cash_amount_to_pool_base(
+                state, item,
+                float(_ledger_equity(state, ctx, item_owner, item, prices)) - account_cash,
+                timestamp=ctx.timestamp,
+            ))
             item_required = requested.get(item.ledger)
             if item_required is None:
                 item_required = sum(
@@ -71,7 +79,9 @@ def margin_limit_states(
                     for product, position in item.get(LedgerModule.positions, {}).items()
                     if abs(float(getattr(position, "quantity", 0.0) or 0.0)) > 1e-12
                 )
-            required_parts.append(item_required)
+            required_parts.append(cash_amount_to_pool_base(
+                state, item, item_required, timestamp=ctx.timestamp,
+            ))
 
         total_equity = cash_major + math.fsum(equity_parts)
         total_required = math.fsum(required_parts)

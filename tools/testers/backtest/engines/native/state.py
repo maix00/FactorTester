@@ -162,8 +162,9 @@ class BacktestRunState:
 
         ledger = ledger_identity(ledger)
         pool_config = cash_pool_config_for_ledger(self, ledger)
-        base_currency = pool_config.base_currency or "CNY"
-        ledger_state = LedgerState(strategy=strategy, base_currency=base_currency, ledger=ledger)
+        ledger_config = self.ledger_configs.get(ledger, LedgerConfig())
+        account_currency = ledger_config.account_currency or pool_config.base_currency or "CNY"
+        ledger_state = LedgerState(strategy=strategy, base_currency=account_currency, ledger=ledger)
         if getattr(self, "_store_guards_enabled", False):
             ledger_state.set_guarded_writes_enabled(True)
         audit = getattr(self, "_flow_contract_audit", None)

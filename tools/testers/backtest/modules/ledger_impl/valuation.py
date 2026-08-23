@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     contract_notional,
@@ -12,18 +11,46 @@ from tools.testers.backtest.modules.trading_rule import mark_to_market
 
 def basic_equity(state, ctx, *, equity_fn=None) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger
 
     equity_fn = equity_fn or ledger_equity
-    equity_by_ledger: dict[int, float] = {}
+    equity_by_pool: dict[str, float] = {}
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy)
-        cache_key = id(ledger)
-        value = equity_by_ledger.get(cache_key)
+        cache_key = cash_pool_id_for_ledger(state, ledger)
+        value = equity_by_pool.get(cache_key)
         if value is None:
-            prices = valuation_prices_for_equity(ctx, ledger=ledger)
-            value = equity_fn(state, ctx, strategy, ledger, prices)
-            equity_by_ledger[cache_key] = value
+            value = cash_pool_equity(state, ctx, ledger, equity_fn=equity_fn)
+            equity_by_pool[cache_key] = value
         ctx.set_for(LedgerModule.equity, strategy, value)
+
+
+def cash_pool_equity(state, ctx, anchor_ledger, *, equity_fn=None) -> float:
+    """Value one pool once in its base currency, including every account."""
+    from tools.testers.backtest.modules.cash_pool import (
+        account_cash_or_zero,
+        cash_amount_to_pool_base,
+        cash_pool_cash_major,
+    )
+    from tools.testers.backtest.modules.margin import _strategy_for_ledger
+    from tools.testers.backtest.modules.strategy_book import ledgers_for_cash_pool
+
+    equity_fn = equity_fn or ledger_equity
+    total = cash_pool_cash_major(state, anchor_ledger, timestamp=ctx.timestamp)
+    for ledger_ref in ledgers_for_cash_pool(state, anchor_ledger):
+        ledger = state.ledgers.get(ledger_ref)
+        if ledger is None:
+            continue
+        owner = _strategy_for_ledger(state, ledger.ledger)
+        if owner is None:
+            continue
+        prices = valuation_prices_for_equity(ctx, ledger=ledger)
+        account_cash = float(account_cash_or_zero(state, ledger).to_major())
+        non_cash = float(equity_fn(state, ctx, owner, ledger, prices)) - account_cash
+        total += cash_amount_to_pool_base(
+            state, ledger, non_cash, timestamp=ctx.timestamp,
+        )
+    return total
 
 
 def valuation_prices_for_equity(ctx, *, ledger=None) -> dict:
@@ -90,10 +117,9 @@ def ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
 
 
 def required_cash_for_ledger(state, ledger):
-    cash = cash_for_ledger(state, ledger)
-    if cash is None:
-        raise RuntimeError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash pool")
-    return cash
+    from tools.testers.backtest.modules.cash_pool import account_cash_or_zero
+
+    return account_cash_or_zero(state, ledger)
 
 
 def required_current_price(prices: dict, product, timestamp) -> float:

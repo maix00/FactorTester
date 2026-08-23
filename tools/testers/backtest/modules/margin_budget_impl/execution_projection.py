@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from tools.testers.backtest.modules.cash_constraint.orders import split_reducing_and_increasing
-from tools.testers.backtest.modules.ledger_module import _ledger_equity
-from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.market_data import historical_fields_for_product
 
 from .simulation import OrderComponent, project_components
@@ -25,6 +23,7 @@ def order_components(entries, positions) -> list[OrderComponent]:
 
 
 def pool_equity(state, ctx, entries, cash_major: float) -> float:
+    from tools.testers.backtest.modules.ledger_impl.valuation import cash_pool_equity
     # ORDER events expose ``current_prices`` using the requested execution
     # basis (for example next open), which may contain only the instruments
     # with an executable row at that future price timestamp.  Existing
@@ -32,16 +31,7 @@ def pool_equity(state, ctx, entries, cash_major: float) -> float:
     # settlement prices belong exclusively to the DMTM flow.  The order's
     # effective execution price is still used by ``_apply_quantity`` below for
     # the incremental projection.
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
-    prices = snapshot.get("close") if isinstance(snapshot, dict) else None
-    prices = prices or ctx.get(MarketDataModule.current_prices, {}) or {}
-    unique = {}
-    for strategy, _order, ledger, _historical in entries:
-        unique.setdefault(id(ledger), (strategy, ledger))
-    return cash_major + sum(
-        _ledger_equity(state, ctx, strategy, ledger, prices) - cash_major
-        for strategy, ledger in unique.values()
-    )
+    return cash_pool_equity(state, ctx, entries[0][2])
 
 
 def find_scale(state, ctx, components, reduced, maximum, observer=None, observer_token=None) -> float:

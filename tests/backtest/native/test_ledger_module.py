@@ -23,7 +23,11 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.fee import FeeModule
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
+from tools.testers.backtest.modules.cash_pool import (
+    cash_for_ledger,
+    cash_pool_cash_major,
+    set_cash_for_ledger_pool,
+)
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBook,
     StrategyBookModule,
@@ -1082,7 +1086,7 @@ def test_strategy_book_declares_cash_pool_across_distinct_ledgers():
     _initialize_ledgers(account, ctx)
 
     assert account.ledger_for_strategy(s1) is not account.ledger_for_strategy(s2)
-    assert _cash(account, s1) is _cash(account, s2)
+    assert _cash(account, s1) is not _cash(account, s2)
 
     ts = pd.Timestamp("2024-01-01")
     order = Order(instrument=p1, timestamp=ts, quantity=2.0, intent_quantity=2.0, strategy=s1)
@@ -1100,15 +1104,18 @@ def test_strategy_book_declares_cash_pool_across_distinct_ledgers():
     assert account.ledger_for_strategy(s1).get(LedgerModule.positions)[p1].quantity == pytest.approx(2.0)
     assert p1 not in account.ledger_for_strategy(s2).get(LedgerModule.positions)
     assert _cash_major(account, s1) == pytest.approx(999_980.0)
-    assert _cash_major(account, s2) == pytest.approx(999_980.0)
+    assert _cash_major(account, s2) == pytest.approx(0.0)
+    assert cash_pool_cash_major(
+        account, account.ledger_for_strategy(s1), timestamp=ts,
+    ) == pytest.approx(999_980.0)
 
 
-def test_strategy_book_cash_pool_rejects_mixed_currencies_without_fx_event():
+def test_strategy_book_cash_pool_keeps_distinct_account_currency_balances():
     s1 = Strategy(alias="S1")
     s2 = Strategy(alias="S2")
     configs = {
         s1: _strategy_config(s1, engine_mode="custom", margin_mode="none", base_currency="CNY"),
-        s2: _strategy_config(s2, engine_mode="custom", margin_mode="none", base_currency="USD"),
+        s2: _strategy_config(s2, engine_mode="custom", margin_mode="none", base_currency="CNY"),
     }
     account = BacktestRunState(strategy_configs=configs)
     book = StrategyBook.from_dict({
@@ -1120,17 +1127,94 @@ def test_strategy_book_cash_pool_rejects_mixed_currencies_without_fx_event():
             "book-a": "main-cash",
             "book-b": "main-cash",
         },
+        "cash_pool_configs": {
+            "main-cash": {
+                "initial_capital_major": 1_000_000.0,
+                "base_currency": "CNY",
+            },
+        },
     })
     materialize_strategy_book_store(account, book, {s1.alias: s1, s2.alias: s2})
     account.ledger_configs[ledger_identity("book-a")] = LedgerConfig(
-        margin_mode="none",
+        margin_mode="none", account_currency="CNY",
     )
     account.ledger_configs[ledger_identity("book-b")] = LedgerConfig(
-        margin_mode="none",
+        margin_mode="none", account_currency="USD",
     )
 
-    with pytest.raises(ValueError, match="FX trade events"):
-        _initialize_ledgers(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+    _initialize_ledgers(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    cny_cash = cash_for_ledger(account, account.ledger_for_strategy(s1))
+    usd_cash = cash_for_ledger(account, account.ledger_for_strategy(s2))
+    assert cny_cash is not usd_cash
+    assert cny_cash.currency == "CNY"
+    assert usd_cash.currency == "USD"
+    assert cny_cash.to_major() == pytest.approx(1_000_000.0)
+    assert usd_cash.to_major() == pytest.approx(0.0)
+
+
+def test_mixed_currency_account_fill_updates_account_cash_and_pool_base_value():
+    cny_strategy, usd_strategy = Strategy(alias="CNY"), Strategy(alias="USD")
+    usd_product = Product(name=f"USD-{uuid.uuid4().hex}", point_value=1, currency="USD")
+    configs = {
+        cny_strategy: _strategy_config(
+            cny_strategy, engine_mode="custom", margin_mode="none", base_currency="CNY",
+        ),
+        usd_strategy: _strategy_config(
+            usd_strategy, engine_mode="custom", margin_mode="none", base_currency="CNY",
+        ),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    book = StrategyBook.from_dict({
+        "strategies": {cny_strategy.alias: "cny-account", usd_strategy.alias: "usd-account"},
+        "cash_pools": {"cny-account": "pool", "usd-account": "pool"},
+        "cash_pool_configs": {
+            "pool": {"initial_capital_major": 1_000_000.0, "base_currency": "CNY"},
+        },
+    })
+    materialize_strategy_book_store(
+        account, book, {cny_strategy.alias: cny_strategy, usd_strategy.alias: usd_strategy},
+    )
+    account.ledger_configs[ledger_identity("cny-account")] = LedgerConfig(
+        margin_mode="none", account_currency="CNY",
+    )
+    account.ledger_configs[ledger_identity("usd-account")] = LedgerConfig(
+        margin_mode="none", account_currency="USD",
+    )
+    init_ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    init_ctx.set_for(ProductSelectionModule.products, usd_strategy, frozenset({usd_product}))
+    _initialize_ledgers(account, init_ctx)
+    account.cash_pool_store.fx_rate_provider = (
+        lambda source, target, _timestamp: 7.0
+        if (source, target) == ("USD", "CNY") else None
+    )
+    timestamp = pd.Timestamp("2025-01-02 09:30")
+    order = Order(
+        instrument=usd_product, timestamp=timestamp, quantity=2.0,
+        intent_quantity=2.0, strategy=usd_strategy,
+    )
+    order_ctx = FlowContext(
+        timestamp=timestamp, event_queue=EventQueue(),
+        active_strategies=frozenset({usd_strategy}),
+        drafts_by_strategy={
+            usd_strategy: [EventDraft(EventKind.ORDER, timestamp, usd_strategy, order)],
+        },
+    )
+    order_ctx.set(MarketDataModule.current_prices, {usd_product: 10.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {usd_product: {}})
+
+    _apply_order_fill(account, order_ctx)
+
+    usd_ledger = account.ledger_for_strategy(usd_strategy)
+    assert cash_for_ledger(account, usd_ledger).to_major() == pytest.approx(-20.0)
+    assert cash_pool_cash_major(
+        account, usd_ledger, timestamp=timestamp,
+    ) == pytest.approx(999_860.0)
+    settlement = next(iter(account.order_store.settlements_by_fill.values()))
+    assert settlement.account_id == "usd-account"
+    assert settlement.cash_pool_id == "pool"
+    assert settlement.account_currency == "USD"
+    assert settlement.cash_pool_base_currency == "CNY"
 
 
 def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer_wins():

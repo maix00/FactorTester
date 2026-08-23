@@ -21,7 +21,7 @@ def build_ledger_flows(module):
             module._engine_mode_ref, module._accounting_mode_ref,
             module._cost_basis_method_ref, module._daily_mark_to_market_enabled_ref,
             module._use_int_position_ref, MinorUnitModule.use_minor_units,
-            module.initial_capital_major, module.base_currency,
+            module.initial_capital_major, module.base_currency, module.account_currency,
             ProductSelectionModule.products, StrategyBookModule.strategy_book_mode,
             module._margin_mode_ref,
         ),
