@@ -10,7 +10,7 @@
   const coreSources = Object.freeze(sources.slice(0, 2));
 
   function number(value) {
-    const result = new Date(value).getTime();
+    const result = window.FTChartTimeline.timestamp(value, Number.NaN);
     if (Number.isFinite(result)) return result;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;

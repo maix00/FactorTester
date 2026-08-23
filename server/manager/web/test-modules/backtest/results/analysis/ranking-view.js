@@ -3,7 +3,7 @@
     const target = FTBacktestAnalysisUI.chartNode();
     const points = (key, scale = 1) => (rows || []).flatMap((row, index) => {
       const value = FTBacktestAnalysisUI.finite(row?.[key]);
-      const timestamp = Date.parse(String(row?.timestamp || ""));
+      const timestamp = window.FTChartTimeline.timestamp(row?.timestamp, Number.NaN);
       return value == null ? [] : [[Number.isFinite(timestamp) ? timestamp : index, value * scale]];
     });
     const options = FTBacktestAnalysisUI.baseChart([
