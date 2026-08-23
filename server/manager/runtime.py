@@ -45,6 +45,7 @@ from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
+from server.manager.http.server_research_routes import ServerResearchRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.mihomo_routes import MihomoDashboardRoutesMixin
@@ -57,6 +58,7 @@ from server.manager.http.auth_routes import AuthenticationRoutesMixin
 from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.server_research import ServerResearchService
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.profile_directory import ProfileDirectoryService
 from server.manager.services.federated_public_data import (
@@ -413,6 +415,11 @@ class ManagerState(
             agent_session_revoker=self.revoke_agent_session,
             manager_endpoint_provider=lambda: self.agent_manager_endpoint,
         )
+        self.server_research = ServerResearchService(
+            self.data_root,
+            self.agent_profiles.runtime_store,
+            server_id=self.server_id,
+        )
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,
             codex_binary=os.environ.get("FACTORTESTER_CODEX_BINARY", "codex"),
@@ -514,6 +521,7 @@ class Handler(
     JobListRoutesMixin,
     AgentAppServerRoutesMixin,
     AgentRoutesMixin,
+    ServerResearchRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,
     WriteRoutesMixin,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
@@ -229,10 +230,25 @@ class PublicResearchRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
+            owner = str(session["username"])
+            try:
+                reports = research.list_owner(owner)
+                server_research = getattr(self.state, "server_research", None)
+                if server_research is not None:
+                    published_report_ids = {
+                        str(item.get("report_id") or "")
+                        for item in reports
+                        if isinstance(item, dict)
+                    }
+                    reports.extend(
+                        item for item in server_research.list_owner(owner)
+                        if str(item.get("report_id") or "") not in published_report_ids
+                    )
+            except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return True
             json_response(self, {
-                "reports": research.list_owner(
-                    str(session["username"]),
-                ),
+                "reports": reports,
             })
             return True
         return False
