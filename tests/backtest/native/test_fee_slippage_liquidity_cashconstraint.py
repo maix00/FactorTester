@@ -57,6 +57,13 @@ def _set_cash(account: BacktestRunState, ledger: LedgerState, amount: float) -> 
         amount, currency="CNY", use_minor_units=False))
 
 
+def _zero_fee_config(strategy: Strategy) -> StrategyConfig:
+    return StrategyConfig(
+        strategy=strategy,
+        field_values={EngineModule.engine_mode: "basic"},
+    )
+
+
 def _cash_major(account: BacktestRunState, ledger: LedgerState) -> float:
     cash = cash_for_ledger(account, ledger)
     assert cash is not None
@@ -404,7 +411,7 @@ def test_fee_mode_auto_uses_configured_lot_close_order_for_today_split():
     assert order.get("fee_cost") == pytest.approx(10.0 * 0.02)
 
 
-def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_cost():
+def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_with_high_risk_runtime_info():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -417,7 +424,41 @@ def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_cost():
     ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 10.0}})
 
     _resolve_fee_cost(account, ctx)
+
     assert order.get("fee_cost") == 0.0
+    assert len(account.runtime_info_rows) == 1
+    warning = account.runtime_info_rows[0]
+    assert warning["code"] == "fee_auto_missing_history"
+    assert warning["level"] == "error"
+    assert warning["status"] == "高风险回退"
+    assert warning["details"]["strategy"] == "S"
+    assert "OpenRatioByMoney" in warning["details"]["missing_fields"]
+
+
+def test_fee_mode_zero_records_explicit_zero_fee_assumption():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=1.0, intent_quantity=1.0, strategy=s,
+    )
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom", FeeModule.fee_mode: "zero",
+    })
+    account = _account_with_ledger(s, config)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}), drafts_by_strategy={
+            s: [EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)],
+        },
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+
+    _resolve_fee_cost(account, ctx)
+
+    assert account.runtime_info_rows[0]["code"] == "fee_zero_mode"
+    assert account.runtime_info_rows[0]["level"] == "warning"
+    assert account.runtime_info_rows[0]["status"] == "研究假设"
 
 
 def test_slippage_zero_means_unadjusted_price():
@@ -611,7 +652,7 @@ def test_cash_constraint_haircuts_buy_orders_proportionally():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: _zero_fee_config(s)})
     _set_cash(account, ledger, 100.0)
 
     buy1 = Order(instrument=p1, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -629,7 +670,7 @@ def test_cash_constraint_does_not_touch_sell_orders():
     s = Strategy(alias="S")
     p = _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: _zero_fee_config(s)})
     _set_cash(account, ledger, 0.0)
 
     sell = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
@@ -645,7 +686,7 @@ def test_cash_constraint_counts_same_batch_sell_proceeds_before_scaling_buys():
     s = Strategy(alias="S")
     p_sell, p_buy = _product(), _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: _zero_fee_config(s)})
     _set_cash(account, ledger, 0.0)
 
     sell = Order(instrument=p_sell, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
@@ -667,7 +708,7 @@ def test_cash_constraint_isolates_strategies():
     l2 = LedgerState(strategy=s2, base_currency="CNY", ledger_id="private:B")
     account = BacktestRunState(
         ledgers={"private:A": l1, "private:B": l2},
-        strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
+        strategy_configs={s1: _zero_fee_config(s1), s2: _zero_fee_config(s2)},
     )
     _set_cash(account, l1, 10.0)
     _set_cash(account, l2, 1000.0)
@@ -694,7 +735,7 @@ def test_cash_constraint_combines_buys_across_strategies_sharing_one_ledger():
     ledger = LedgerState(strategy=s1, base_currency="CNY", ledger_id="shared-book")
     account = BacktestRunState(
         ledgers={"shared-book": ledger},
-        strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
+        strategy_configs={s1: _zero_fee_config(s1), s2: _zero_fee_config(s2)},
     )
     _set_cash(account, ledger, 100.0)
     strategy_book_store = strategy_book_store_for(account)
@@ -723,7 +764,7 @@ def test_signal_cash_constraint_combines_distinct_ledgers_in_one_cash_pool() -> 
     l2 = LedgerState(strategy=s2, base_currency="CNY", ledger_id="book-b")
     account = BacktestRunState(
         ledgers={"book-a": l1, "book-b": l2},
-        strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
+        strategy_configs={s1: _zero_fee_config(s1), s2: _zero_fee_config(s2)},
     )
     store = strategy_book_store_for(account)
     store.register_strategy_ledgers(

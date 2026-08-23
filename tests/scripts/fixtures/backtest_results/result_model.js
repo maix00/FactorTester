@@ -133,7 +133,10 @@ const compactSummary = {
 };
 const runtimeSummary = {
   ...compactSummary,
-  runtime_info_rows: [{type: "产品范围", status: "提示", detail: "排除无覆盖产品"}],
+  runtime_info_rows: [{
+    type: "交易费用", status: "高风险回退", level: "error",
+    detail: "缺少历史费率，已按零手续费计算",
+  }],
   market_rule_warning: "两个市场规则单元格使用近似值",
   setting_fallback_warning: "一个设置被执行引擎替换",
   setting_fallbacks: [{setting_key: "fee_mode", requested_value: "auto", applied_value: "fixed"}],
@@ -152,7 +155,10 @@ assert.equal(runtimeModel.tabs[0], "runtime", "runtime summary is an independent
 assert.deepEqual(window.FTBacktestRuntimeModel.rows(runtimeModel.summary), [
   {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
   {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},
-  {type: "产品范围", status: "提示", detail: "排除无覆盖产品"},
+  {
+    type: "交易费用", status: "高风险回退",
+    detail: "缺少历史费率，已按零手续费计算", level: "error",
+  },
   {type: "市场规则", status: "近似", detail: "两个市场规则单元格使用近似值"},
   {type: "资金约束", status: "诊断", detail: "未开仓组数: 1；组 A1，最便宜品种 尿素，需求约 12001，预算约 9000"},
 ]);

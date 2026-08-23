@@ -34,7 +34,10 @@
       }
       if (!detail) return [];
       const status = item.status || ({warning: "提示", error: "异常"}[item.level] || "信息");
-      return [{type: String(item.type || "运行信息"), status: String(status), detail}];
+      return [{
+        type: String(item.type || "运行信息"), status: String(status), detail,
+        level: String(item.level || "info"),
+      }];
     }));
     if (summary.capital_warning) {
       result.push({type: "资金约束", status: "提示", detail: String(summary.capital_warning)});

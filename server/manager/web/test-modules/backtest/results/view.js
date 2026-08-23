@@ -129,6 +129,11 @@
     table.shell.classList.add(
       "backtest-domain-table", "backtest-runtime-table",
     );
+    const visibleRows = rows.slice(table.start, table.start + table.pageSize);
+    Array.from(table.body.rows).forEach((row, index) => {
+      const level = String(visibleRows[index]?.level || "info");
+      row.dataset.level = level;
+    });
     section.append(heading, table.shell);
     return section;
   }

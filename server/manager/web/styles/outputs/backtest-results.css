@@ -23,6 +23,15 @@
 .backtest-runtime-table td:first-child { width: 140px; }
 .backtest-runtime-table th:nth-child(2),
 .backtest-runtime-table td:nth-child(2) { width: 120px; }
+.backtest-runtime-table tbody tr[data-level="warning"] td {
+  color: #8a4b08;
+  background: color-mix(in srgb, #d97706 9%, var(--panel));
+}
+.backtest-runtime-table tbody tr[data-level="error"] td {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--panel));
+  font-weight: 650;
+}
 
 .backtest-metric-matrix { max-width: 100%; overflow: auto; }
 .backtest-metric-matrix table { min-width: max-content; }
