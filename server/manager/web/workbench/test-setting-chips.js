@@ -3,7 +3,7 @@
     const manifest = options.manifest || {};
     const context = options.context || {t: value => value};
     const onlyKeys = options.onlyKeys ? new Set(options.onlyKeys) : null;
-    const declaredTabs = manifest.tab_lists?.["local-settings"] || [];
+    const declaredTabs = tabDefinitions(manifest);
     const tabs = new Set(declaredTabs.map(item => item.key));
     const mounted = new Set(options.mountedTabs || []);
     const identity = (manifest.chip_fields || []).map(chip => identityChip(
@@ -36,6 +36,25 @@
         || left._descriptorOrder - right._descriptorOrder
       ))
       .map(({_descriptorOrder, ...item}) => item);
+  }
+
+  function tabDefinitions(manifest) {
+    const definitions = [
+      ...(manifest.tab_lists?.["local-settings"] || []),
+      ...(manifest.tab_lists?.["group-settings"] || []),
+      // Nested strategy editors declare their structure and default tabs in
+      // the backend-owned strategy_editor contract. They are not ordinary
+      // local-settings tabs, but their chips still need the same target-tab
+      // and fallback treatment as every other mounted tab.
+      ...(manifest.strategy_editor?.inner_default_tabs || []),
+      ...(manifest.strategy_editor?.inner_manual_tabs || []),
+    ];
+    const seen = new Set();
+    return definitions.filter(item => {
+      if (!item?.key || seen.has(item.key)) return false;
+      seen.add(item.key);
+      return true;
+    });
   }
 
   function matchesOnlyKey(key, field, onlyKeys) {
@@ -264,8 +283,7 @@
       if (manifest.run_settings?.key === group) {
         return context.t(manifest.run_settings.label || group);
       }
-      const tabs = Object.values(manifest.tab_lists || {}).flat();
-      const tab = tabs.find(item => item.key === group);
+      const tab = tabDefinitions(manifest).find(item => item.key === group);
       return context.t(tab?.label || items[0]?.tabLabel || group);
     }
     return context.t(group);

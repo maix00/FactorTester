@@ -322,6 +322,46 @@ assert.deepEqual(fallbackOnly.map(item => item.tabKey), [
   "factor", "product_path_selection", "time",
 ], "every mounted tab keeps a chip group before registered fields load");
 
+const nestedEditorFallback = FTTestSettingChips.descriptors({
+  manifest: {
+    tab_lists: {
+      "local-settings": [{key: "factor", label: "因子执行"}],
+      "group-settings": [{key: "product_path_selection", label: "产品组"}],
+    },
+    strategy_editor: {
+      inner_default_tabs: [
+        {key: "__strategy__", label: "分组", kind: "structure"},
+        {key: "factor", label: "因子执行", kind: "factor_scope"},
+        {key: "product_path_selection", label: "产品组", kind: "product_scope"},
+      ],
+      inner_manual_tabs: [{key: "category", label: "产品分类", mount_policy: "manual"}],
+    },
+  },
+  mountedTabs: ["__strategy__", "factor", "product_path_selection", "category"],
+  includeTabFallbacks: true,
+  fallbackTabs: ["__strategy__", "factor", "product_path_selection", "category"],
+  context: {t: value => value},
+});
+assert.deepEqual(nestedEditorFallback.map(item => [item.tabKey, item.fullValue]), [
+  ["__strategy__", "分组: 未设置（默认）"],
+  ["factor", "因子执行: 未设置（默认）"],
+  ["product_path_selection", "产品组: 未设置（默认）"],
+  ["category", "产品分类: 未设置（默认）"],
+], "contract-only nested tabs must participate in the shared chip row");
+
+const nestedEditorRow = FTTestSettingChips.render({
+  manifest: {
+    strategy_editor: {
+      inner_default_tabs: [{key: "__configuration__", label: "配置", kind: "structure"}],
+    },
+  },
+  mountedTabs: ["__configuration__"],
+  includeTabFallbacks: true,
+  fallbackTabs: ["__configuration__"],
+  context: {t: value => value},
+});
+assert.equal(nestedEditorRow.children[0].children[0].textContent, "配置");
+
 const grouped = FTTestSettingChips.render({
   manifest: runManifest,
   runValues: {task_name: "", acting_profile_ref: "", retention_mode: "summary"},
