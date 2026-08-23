@@ -59,6 +59,9 @@ def emit_group_run_outputs(
         settings_by_strategy=execution["settings_by_strategy"],
         products=prepared["all_products"],
     )
+    setting_fallbacks = _setting_fallbacks_for_result(
+        prepared["resolved_backtest_settings"],
+    )
     group_execution = {
         "run_id": execution["payload"]["run_id"],
         "engine_result": execution["engine_result"],
@@ -105,6 +108,11 @@ def emit_group_run_outputs(
             "groups": prepared["resolved_backtest_settings"],
         },
         "effective_runtime_settings": effective_runtime_settings,
+        "setting_fallbacks": setting_fallbacks,
+        "setting_fallback_warning": (
+            "部分请求值未在当前执行模式下生效"
+            if setting_fallbacks else ""
+        ),
         "silent_default_settings": silent_default_settings_for_run(
             payload,
             prepared["flat_groups"],
@@ -113,3 +121,19 @@ def emit_group_run_outputs(
         ),
     }
     sink.emit_result(result, source=group_execution)
+
+
+def _setting_fallbacks_for_result(
+    settings_by_strategy: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose resolver fallbacks at the result summary boundary."""
+    result: list[dict[str, Any]] = []
+    for strategy_id, settings in settings_by_strategy.items():
+        for item in settings.get("_setting_fallbacks") or []:
+            if not isinstance(item, dict):
+                continue
+            result.append({
+                "strategy_id": str(strategy_id),
+                **item,
+            })
+    return result

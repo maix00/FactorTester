@@ -85,6 +85,9 @@ from tools.testers.backtest.engines.native.performance_profile import (
 from tools.testers.backtest.modules.margin_budget_impl.observability import (
     normalize_margin_execution_profile,
 )
+from tools.testers.settings.runtime_intent import (
+    normalize_backtest_runtime_setting_intent,
+)
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
@@ -327,6 +330,17 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
             "或先执行持久化授权同步",
             details={"code": "factor_source_unavailable", "detail": str(exc)},
         ) from exc
+    runtime_setting_changes: list[dict] = []
+    if "backtest" in analyses:
+        normalized_payload, runtime_setting_changes = (
+            normalize_backtest_runtime_setting_intent(
+                frozen_configuration.get("payload") or {},
+            )
+        )
+        frozen_configuration = {
+            **frozen_configuration,
+            "payload": normalized_payload,
+        }
     run_spec = {
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
         "workspace_id": workspace_id,
@@ -338,6 +352,11 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if "backtest" in analyses:
+        run_spec["runtime_setting_normalization"] = {
+            "schema_version": 1,
+            "changes": deepcopy(runtime_setting_changes),
+        }
     ic_payload = run_spec["configuration"].get("analyses", {}).get("ic", {})
     if "ic" in analyses and ic_payload.get("schema_version") == 2:
         from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
