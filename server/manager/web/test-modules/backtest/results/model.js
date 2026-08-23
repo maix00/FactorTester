@@ -16,6 +16,39 @@
     period_returns: "period_returns_data",
   });
   const payloadNames = Object.freeze(Object.values(tabPayloads));
+  const fallbackResultViews = Object.freeze({
+    equity_curve_data: {surface: "time_series", view: "equity", label: "净值与回撤", order: 10},
+    returns_over_time_data: {surface: "time_series", view: "returns", label: "收益率", order: 20},
+    metrics_over_time_data: {surface: "time_series", view: "metrics", label: "滚动指标", order: 30},
+    exposure_detail_data: {surface: "time_series", view: "exposure", label: "风险敞口", order: 60},
+    turnover_detail_data: {surface: "time_series", view: "turnover", label: "换手率", order: 70},
+    order_detail_data: {surface: "execution_account", view: "orders", label: "订单", order: 10},
+    fill_detail_data: {surface: "execution_account", view: "fills", label: "成交与结算", order: 20},
+    cash_detail_data: {surface: "execution_account", view: "cash", label: "现金", order: 30},
+    position_detail_data: {surface: "execution_account", view: "positions", label: "持仓", order: 40},
+    margin_detail_data: {surface: "execution_account", view: "margin", label: "保证金", order: 50},
+    fee_detail_data: {surface: "execution_account", view: "fees", label: "手续费", order: 60},
+    ratio_detail_data: {surface: "return_analysis", view: "cost_ratios", label: "收益与成本", order: 10},
+    drawdown_detail_data: {surface: "return_analysis", view: "drawdown_episodes", label: "回撤区间", order: 20},
+    period_returns_data: {surface: "return_analysis", view: "period_returns", label: "周期收益", order: 30},
+  });
+
+  function resultViews(declarations = []) {
+    const registered = new Map();
+    (Array.isArray(declarations) ? declarations : []).forEach(item => {
+      const artifact = String(item?.canonical_artifact || "");
+      if (!artifact || !item?.result_surface || !item?.result_view) return;
+      registered.set(artifact, {
+        surface: String(item.result_surface), view: String(item.result_view),
+        label: String(item.label || item.result_view),
+        order: Number(item.result_order || 0),
+        bundle: String(item.supplemental_bundle || ""),
+      });
+    });
+    return new Map(Object.entries(fallbackResultViews).map(([artifact, value]) => [
+      artifact, {...value, ...(registered.get(artifact) || {})},
+    ]));
+  }
 
   const metricSections = Object.freeze([
     {title: "收益", metrics: ["Total Return", "Annual Return", "Mean Return", "Win Rate"]},
@@ -346,20 +379,24 @@
     return scoped.length ? scoped : values;
   }
 
-  function availableTabs(payloads, summary = {}, artifactNames = []) {
+  function availableTabs(payloads, summary = {}, artifactNames = [], declarations = []) {
     const availableArtifacts = new Set(artifactNames.map(String));
     const hasPayload = name => Boolean(payloads[name]) || availableArtifacts.has(name);
     const result = [];
-    if (window.FTBacktestRuntimeModel?.rows?.(summary).length) result.push("runtime");
-    if (summaryRows(payloads, summary).length) result.push("summary");
-    if (metricMatrix(summary).entries.length) result.push("group_metrics");
-    Object.entries(tabPayloads).forEach(([tab, payload]) => {
-      if (hasPayload(payload)) result.push(tab);
+    if (window.FTBacktestRuntimeModel?.rows?.(summary).length
+      || summaryRows(payloads, summary).length) result.push("overview");
+    if (metricMatrix(summary).entries.length) result.push("strategy_stats");
+    const surfaces = new Set();
+    for (const [artifact, definition] of resultViews(declarations)) {
+      if (hasPayload(artifact)) surfaces.add(definition.surface);
+    }
+    ["time_series", "execution_account", "return_analysis"].forEach(surface => {
+      if (surfaces.has(surface)) result.push(surface);
     });
     return result;
   }
 
-  function build(payloads = {}, summary = {}, artifactNames = []) {
+  function build(payloads = {}, summary = {}, artifactNames = [], declarations = []) {
     const strategyLabels = groups(payloads, summary);
     const strategyEntries = strategies(payloads, summary);
     return {
@@ -369,7 +406,8 @@
       groupEntries: groupEntries(summary),
       metricMatrix: metricMatrix(summary),
       summaryRows: summaryRows(payloads, summary),
-      tabs: availableTabs(payloads, summary, artifactNames),
+      resultViews: resultViews(declarations),
+      tabs: availableTabs(payloads, summary, artifactNames, declarations),
     };
   }
 
@@ -377,7 +415,7 @@
     availableTabs, bestMetricIndex, build, evaluationWindow,
     diagnosticConfiguration, diagnosticKey, finite, metricValue,
     groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
-    relatedGroupEntries, strategies,
+    relatedGroupEntries, resultViews, strategies,
     tabPayloads,
     scopedRows, series,
   });

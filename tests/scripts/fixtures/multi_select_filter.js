@@ -107,9 +107,10 @@ const filter = window.FTMultiSelectFilter.create({t: value => value}, {
   selected: ["day", "industry"],
 });
 assert.deepEqual(filter.values, ["day", "industry"]);
+assert.equal(filter.summary.children[0].textContent, "已选 2 项");
 filter.setValues(["day", "none"]);
 assert.deepEqual(filter.values, ["none"]);
-assert.equal(filter.summary.children[0].textContent, "已选 1 个");
+assert.equal(filter.summary.children[0].textContent, "未绑定");
 const exclusiveRow = filter.optionList.children.find(item => (
   item.className.includes("is-exclusive")
 ));

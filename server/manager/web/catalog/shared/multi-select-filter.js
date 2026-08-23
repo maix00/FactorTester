@@ -48,7 +48,7 @@
   }
 
   function countLabel(context, count) {
-    return translate(context, "已选 %lld 个", "已选%lld个")
+    return translate(context, "已选 %lld 项", "已选%lld项")
       .replace(/%lld/g, String(count));
   }
 
@@ -313,7 +313,7 @@
     function render() {
       const labels = labelsFor();
       const summaryValue = labels.length
-        ? (multi ? countLabel(context, labels.length) : labels[0])
+        ? (labels.length === 1 ? labels[0] : countLabel(context, labels.length))
         : "";
       summaryText.textContent = summaryValue || translate(context, "未筛选");
       selectedLabel.textContent = labels.length ? labels.join("、")

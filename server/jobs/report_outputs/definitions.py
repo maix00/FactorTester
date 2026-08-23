@@ -17,6 +17,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "receipt_artifact": "equity_curve_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
+        "result_surface": "time_series", "result_view": "equity",
+        "supplemental_bundle": "time_series", "result_order": 10,
     },
     "returns_over_time": {
         "label": "收益率随时间变化", "formats": ["svg", "json"],
@@ -27,6 +29,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "receipt_artifact": "returns_over_time_receipt",
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
+        "result_surface": "time_series", "result_view": "returns",
+        "supplemental_bundle": "time_series", "result_order": 20,
     },
     "metrics_over_time": {
         "label": "指标随时间变化", "formats": ["svg", "json"],
@@ -38,6 +42,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
         "result_retention_mode": "full",
+        "result_surface": "time_series", "result_view": "metrics",
+        "supplemental_bundle": "time_series", "result_order": 30,
     },
     "fee_detail": {
         "label": "手续费明细", "formats": ["csv", "json"],
@@ -48,6 +54,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "receipt_artifact": "fee_detail_receipt",
         "before_run": True, "after_run": True, "requires": ["order_audit"],
         "analyses": ["backtest"],
+        "result_surface": "execution_account", "result_view": "fees",
+        "supplemental_bundle": "execution_account", "result_order": 60,
     },
     "margin_detail": {
         "label": "保证金明细", "formats": ["csv", "json"],
@@ -59,6 +67,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
         "result_retention_mode": "full",
+        "result_surface": "execution_account", "result_view": "margin",
+        "supplemental_bundle": "execution_account", "result_order": 50,
     },
     "ratio_detail": {
         "label": "收益、手续费、保证金占比", "formats": ["csv", "json"],
@@ -71,6 +81,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "requires": ["result", "group_execution", "order_audit"],
         "analyses": ["backtest"],
         "result_retention_mode": "full",
+        "result_surface": "return_analysis", "result_view": "cost_ratios",
+        "supplemental_bundle": "return_risk", "result_order": 10,
     },
     "group_research_detail": {
         "label": "分组研究详情", "formats": ["json"],
@@ -381,6 +393,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
                 ),
                 "receipt_artifact": definition["receipt_artifact"],
             })
+        for key in (
+            "result_surface", "result_view", "supplemental_bundle", "result_order",
+        ):
+            if key in definition:
+                declaration[key] = definition[key]
         declarations.append(declaration)
     ic_names = [
         name for name in expanded_names

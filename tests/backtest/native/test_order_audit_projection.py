@@ -50,6 +50,8 @@ def test_order_audit_projection_is_json_safe_and_preserves_fill_links():
         fill_id="F1", realized_pnl=10.0, fee=1.0,
         cash_before=100.0, cash_after=109.0,
         margin_before=20.0, margin_after=8.0,
+        account_id="ledger-usd", cash_pool_id="pool-global",
+        account_currency="USD", cash_pool_base_currency="CNY",
     ))
 
     audit = project_strategy_order_audit(state, strategy)
@@ -59,6 +61,8 @@ def test_order_audit_projection_is_json_safe_and_preserves_fill_links():
     assert audit["orders"][0]["active_leaves"] == 2.0
     assert audit["attempts"][0]["attempt_id"] == attempt.attempt_id
     assert audit["settlements"][0]["margin_after"] == 8.0
+    assert audit["settlements"][0]["account_currency"] == "USD"
+    assert audit["settlements"][0]["cash_pool_base_currency"] == "CNY"
     assert audit["actions"][0]["action"] == "submit"
 
 

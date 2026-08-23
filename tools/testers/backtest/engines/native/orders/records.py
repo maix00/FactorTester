@@ -78,3 +78,7 @@ class FillSettlement:
     cash_after: float
     margin_before: float
     margin_after: float
+    account_id: str = ""
+    cash_pool_id: str = ""
+    account_currency: str = ""
+    cash_pool_base_currency: str = ""

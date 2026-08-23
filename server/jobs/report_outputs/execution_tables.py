@@ -39,9 +39,20 @@ def fill_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
             cash_after = _number(settlement.get("cash_after"))
             margin_before = _number(settlement.get("margin_before"))
             margin_after = _number(settlement.get("margin_after"))
+            dimensions = {
+                key: settlement.get(key, item.get(key))
+                for key in (
+                    "account_id", "account_ref", "account", "ledger_id", "ledger",
+                    "cash_pool_id", "cash_pool", "pool_id",
+                    "account_currency", "ledger_currency", "currency",
+                    "cash_pool_base_currency", "pool_base_currency", "base_currency",
+                )
+                if settlement.get(key, item.get(key)) not in (None, "")
+            }
             rows.append({
                 "strategy": str(strategy),
                 **item,
+                **dimensions,
                 "realized_pnl": settlement.get("realized_pnl"),
                 "cash_before": settlement.get("cash_before"),
                 "cash_after": settlement.get("cash_after"),
@@ -85,6 +96,14 @@ def cash_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
             "strategy": item.get("strategy"),
             "timestamp": item.get("timestamp"),
             "fill_id": item.get("fill_id"),
+            **{
+                key: item.get(key) for key in (
+                    "account_id", "account_ref", "account", "ledger_id", "ledger",
+                    "cash_pool_id", "cash_pool", "pool_id",
+                    "account_currency", "ledger_currency", "currency",
+                    "cash_pool_base_currency", "pool_base_currency", "base_currency",
+                ) if item.get(key) not in (None, "")
+            },
             "cash_before": item.get("cash_before"),
             "cash_after": item.get("cash_after"),
             "cash_change": item.get("cash_change"),
@@ -132,7 +151,16 @@ def turnover_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
     for strategy, portfolio in _portfolios(source):
         turnover = portfolio.get("fill_turnover")
         if isinstance(turnover, dict):
-            rows.append({"strategy": strategy, **turnover})
+            rows.append({
+                "strategy": strategy,
+                **{key: value for key, value in turnover.items() if key != "series"},
+            })
+            rows.extend({
+                "strategy": strategy,
+                "timestamp": item.get("timestamp"),
+                "turnover": item.get("turnover"),
+                "source": turnover.get("source"),
+            } for item in turnover.get("series") or () if isinstance(item, dict))
     return rows
 
 

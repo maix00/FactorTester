@@ -23,10 +23,17 @@
     const sourceNote = sources.length
       ? `${context.t("需保留")}：${sources.join("、")}`
       : "";
+    const bundleLabels = {
+      time_series: "时变指标批次",
+      execution_account: "交易与账户批次",
+      return_risk: "收益与风险批次",
+    };
+    const bundle = bundleLabels[String(definition.supplemental_bundle || "")];
     return {
       value: definition.name,
       label: context.t(definition.label || definition.name),
-      description: [formats.join(" / "), sourceNote].filter(Boolean).join(" · "),
+      description: [bundle ? context.t(bundle) : "", formats.join(" / "), sourceNote]
+        .filter(Boolean).join(" · "),
     };
   }
 

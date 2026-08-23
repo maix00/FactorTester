@@ -1,6 +1,6 @@
 (() => {
   const TABS = Object.freeze([
-    ["overview", "概览"], ["returns", "收益时序"],
+    ["overview", "概览"],
     ["membership", "入组产品"], ["distribution", "收益分布"],
     ["rolling", "滚动稳定性"], ["capacity", "组容量风险"],
     ["tradability", "可交易性"], ["calendar", "日历结构"],
@@ -92,7 +92,6 @@
     );
     const builders = {
       overview: () => p.summary(context, detail.summary),
-      returns: () => p.returnChart(context, detail.return_series),
       membership: () => p.frequency(context, detail.entry_frequency),
       distribution: () => p.distribution(context, detail.distribution),
       rolling: () => p.rolling(context, detail.rolling_analysis),
