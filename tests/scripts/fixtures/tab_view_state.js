@@ -193,6 +193,18 @@ const renderCountBeforeHomeRefresh = renderCount;
 tabs.navigate("/");
 assert.strictEqual(renderCount, renderCountBeforeHomeRefresh + 1);
 
+// A report tab created by the pre-dedicated-tab implementation may still
+// contain a cached view without report heading metadata. It must re-render
+// once, allowing the report entry to restore its reading state and heading.
+tabs.navigate("/research/legacy-report");
+const legacyReportTabID = state.activeTabID;
+title.textContent = "主页";
+eyebrow.textContent = "FTClient";
+tabs.navigate("/products/product/LEGACY-REPORT.DCE");
+const renderCountBeforeLegacyReportRestore = renderCount;
+tabs.activateTab(legacyReportTabID);
+assert.strictEqual(renderCount, renderCountBeforeLegacyReportRestore + 1);
+
 // A fourth inactive view causes the oldest inactive view to be coldified. Its
 // DOM is released, while the route is re-rendered and control state is restored
 // when the tab is selected again.

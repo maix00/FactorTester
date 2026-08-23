@@ -29,6 +29,10 @@
     state.report = value;
     state.activePublicationID = publicationID;
     context.setHeading(value.title, t("研究报告"));
+    session.durable.heading = {
+      title: value.title,
+      eyebrow: t("研究报告"),
+    };
     context.updateActiveTab({title: value.title});
     const transferContext = {api, t};
     const branches = Array.isArray(value.branches) ? value.branches : [];
