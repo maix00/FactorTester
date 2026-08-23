@@ -37,20 +37,26 @@ const equity = window.FTJobHighcharts.optionsFor("equity_curve", {
   }],
 }, context);
 assert.equal(equity.series[0].name, "A1");
-assert.equal(equity.series[2].name, "A1 · 当前回撤");
-assert.equal(equity.series[2].yAxis, 2);
+assert.equal(equity.series.length, 2, "the equity chart must not embed drawdown series");
 assert.equal(equity.time.timezone, "Asia/Taipei", "timestamps must render in the user's browser timezone");
 assert.equal(equity.navigator.enabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
 assert.equal(equity.xAxis.ordinal, true, "non-trading gaps must be compressed");
-assert.equal(equity.yAxis.length, 3, "equity and drawdown share one chart with two panes");
-assert.equal(equity.yAxis[0].top, "0%");
-assert.equal(equity.yAxis[0].height, "64%");
+assert.equal(equity.yAxis.length, 2, "equity keeps only amount and cumulative-return axes");
 assert.equal(equity.yAxis[1].linkedTo, 0);
-assert.equal(equity.yAxis[2].top, "72%");
-assert.equal(equity.yAxis[2].height, "28%");
-assert.equal(equity.yAxis[2].max, 0);
+const drawdown = window.FTJobHighcharts.optionsFor("drawdown_curve", {
+  artifact_kind: "equity_curve",
+  series: [{
+    label: "A1", currency: "CNY", timestamps: ["2025-01-02", "2025-01-03"],
+    values: [1_000_000, 990_000], drawdown: [0, -0.01],
+  }],
+}, context);
+assert.equal(drawdown.series.length, 1);
+assert.equal(drawdown.series[0].name, "A1 · 当前回撤");
+assert.equal(drawdown.series[0].data[1][1], -1);
+assert.equal(drawdown.yAxis.length, 1);
+assert.equal(drawdown.yAxis[0].max, 0);
 assert.ok(Number.isFinite(equity.series[0].data[0][0]));
 assert.equal(
   window.FTChartTimeline.timestamp("2025-01-02"),
@@ -78,11 +84,40 @@ assert.deepEqual(
   ["annual_return", "sharpe_ratio"],
 );
 const metricChart = window.FTJobHighcharts.optionsFor(
-  "metrics_chart", metrics, context, "sharpe_ratio",
+  "metrics_chart", metrics, context, "sharpe_ratio", {hideTitle: true},
 );
 assert.equal(metricChart.series[0].name, "A1 · Sharpe ratio");
 assert.equal(metricChart.yAxis[0].title.text, "Sharpe ratio");
+assert.equal(metricChart.title.text, null, "the result card owns the only visible chart title");
 assert.equal(metricChart.series[0].data.length, 2, "missing metrics must not render as zero");
+
+const marginChart = window.FTJobHighcharts.rowSeriesOptions({rows: [
+  {strategy: "A1", timestamp: "2025-01-02", product: "A", margin: 10, equity: 100,
+    margin_utilization: 0.1},
+  {strategy: "A1", timestamp: "2025-01-02", product: "B", margin: 10, equity: 100,
+    margin_utilization: 0.1},
+  {strategy: "A1", timestamp: "2025-01-02", product: "C", margin: 10, equity: 100,
+    margin_utilization: 0.1},
+]}, context, {
+  label: "保证金占用率", fields: ["margin_utilization"],
+  labels: {margin_utilization: "保证金占用率"}, percentFields: ["margin_utilization"],
+  aggregate: "strategy_margin_equity_ratio",
+});
+assert.equal(marginChart.series.length, 1);
+assert.deepEqual(marginChart.series[0].data.map(point => point[1]), [30],
+  "product-level margin rows must render the strategy total utilization");
+const marginWithTotal = window.FTJobHighcharts.rowSeriesOptions({rows: [
+  {strategy: "A1", timestamp: "2025-01-02", product: "__total__", margin: 30,
+    equity: 100, margin_utilization: 0.3},
+  {strategy: "A1", timestamp: "2025-01-02", product: "A", margin: 10,
+    equity: 100, margin_utilization: 0.1},
+]}, context, {
+  label: "保证金占用率", fields: ["margin_utilization"],
+  labels: {margin_utilization: "保证金占用率"}, percentFields: ["margin_utilization"],
+  aggregate: "strategy_margin_equity_ratio",
+});
+assert.deepEqual(marginWithTotal.series[0].data.map(point => point[1]), [30],
+  "an authoritative total row must not be added to product rows again");
 
 const splitMs = Date.parse("2025-01-03T00:00:00Z");
 const inSample = window.FTJobHighcharts.optionsFor(

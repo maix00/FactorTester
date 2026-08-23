@@ -94,55 +94,50 @@
   function timeSeriesOptions(viewer, payload, context) {
     const items = Array.isArray(payload?.series) ? payload.series : [];
     const artifact = String(payload?.artifact_kind || "");
-    const equity = viewer === "equity_curve" || artifact === "equity_curve";
+    const drawdown = viewer === "drawdown_curve";
+    const equity = !drawdown && (viewer === "equity_curve" || artifact === "equity_curve");
     const returns = artifact === "returns_over_time";
-    const kind = equity ? "currency" : returns ? "percent" : "number";
+    const kind = equity ? "currency" : drawdown || returns ? "percent" : "number";
     const currency = items.find(item => item?.currency)?.currency || "";
-    const title = equity ? context.t("净值曲线与回撤")
+    const title = equity ? context.t("净值曲线")
+      : drawdown ? context.t("回撤曲线")
       : returns ? context.t("收益率随时间变化")
         : context.t("序列图");
     const yTitle = equity ? `${context.t("金额")}（${currency || "CNY"}）`
-      : returns ? context.t("收益率（%）") : context.t("数值");
-    const timeline = equity ? window.FTChartTimeline.observed(items) : [];
+      : drawdown ? context.t("回撤（%）")
+        : returns ? context.t("收益率（%）") : context.t("数值");
+    const timeline = equity || drawdown ? window.FTChartTimeline.observed(items) : [];
     const series = items.map(item => {
       const format = valueFormat(kind, item?.currency || currency);
       return {
         id: String(item.factor_ref || item.series_ref || item.label || ""),
-        name: String(item.label || context.t("序列")),
-        type: "line",
-        data: equity
-          ? window.FTChartTimeline.aligned(item, timeline, "values", format.scale)
+        name: drawdown
+          ? `${item.label || context.t("序列")} · ${context.t("当前回撤")}`
+          : String(item.label || context.t("序列")),
+        type: drawdown ? "area" : "line",
+        data: equity || drawdown
+          ? window.FTChartTimeline.aligned(
+            item, timeline, drawdown ? "drawdown" : "values", drawdown ? 100 : format.scale,
+          )
           : scaledPoints(item, kind),
         connectNulls: true,
         custom: {seriesRef: String(item.factor_ref || item.series_ref || "")},
-        tooltip: {valueSuffix: format.suffix},
+        tooltip: {valueSuffix: drawdown ? "%" : format.suffix},
       };
-    });
-    if (equity) items.forEach(item => {
-      if (!Array.isArray(item.drawdown)) return;
-      series.push({
-        name: `${item.label || context.t("序列")} · ${context.t("当前回撤")}`,
-        type: "area", yAxis: 2,
-        data: window.FTChartTimeline.aligned(item, timeline, "drawdown", 100),
-        connectNulls: true,
-        custom: {seriesRef: String(item.factor_ref || item.series_ref || "")},
-        tooltip: {valueSuffix: "%"},
-      });
-    });
+    }).filter(item => !drawdown || item.data.some(([, value]) => value != null));
     const options = baseOptions(title, yTitle, series, kind, currency);
     if (equity) {
       const initial = items.flatMap(item => item?.values || [])
         .map(number).find(value => value != null) || 1;
       options.rangeSelector = {enabled: false};
-      options.yAxis = [{
-        title: {text: yTitle}, opposite: false, top: "0%", height: "64%",
-      }, {
+      options.yAxis = [{title: {text: yTitle}, opposite: false}, {
         title: {text: context.t("累计收益率（%）")}, opposite: true,
-        linkedTo: 0, top: "0%", height: "64%",
+        linkedTo: 0,
         labels: {formatter() { return `${(((this.value / initial) - 1) * 100).toFixed(2)}%`; }},
-      }, {
-        title: {text: context.t("回撤（%）")}, opposite: false,
-        top: "72%", height: "28%", offset: 0, max: 0,
+      }];
+    } else if (drawdown) {
+      options.yAxis = [{
+        title: {text: yTitle}, opposite: false, max: 0,
         labels: {format: "{value}%"},
       }];
     }
@@ -201,17 +196,42 @@
   function optionsFor(viewer, payload, context, selectedMetric = "", displayOptions = {}) {
     const artifact = String(payload?.artifact_kind || "");
     if (viewer === "metrics_chart" || artifact === "metrics_over_time") {
-      return attachInteractions(applyEvaluationWindow(
+      const options = attachInteractions(applyEvaluationWindow(
         metricOptions(payload, context, selectedMetric), context, displayOptions,
       ), displayOptions);
+      if (displayOptions.hideTitle) options.title.text = null;
+      return options;
     }
-    return attachInteractions(applyEvaluationWindow(
+    const options = attachInteractions(applyEvaluationWindow(
       timeSeriesOptions(viewer, payload, context), context, displayOptions,
     ), displayOptions);
+    if (displayOptions.hideTitle) options.title.text = null;
+    return options;
   }
 
   function rowSeriesOptions(payload, context, definition = {}, displayOptions = {}) {
-    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    let rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    if (definition.aggregate === "strategy_margin_equity_ratio") {
+      const grouped = new Map();
+      rows.forEach(row => {
+        const strategy = String(row?.strategy_id || row?.strategy || row?.series || "");
+        const key = `${strategy}\u0000${String(row?.timestamp ?? "")}`;
+        const group = grouped.get(key) || [];
+        group.push(row); grouped.set(key, group);
+      });
+      rows = [...grouped.values()].map(group => {
+        const total = group.find(row => String(row?.product || "") === "__total__");
+        if (total) return total;
+        const margin = group.reduce((sum, row) => sum + (number(row?.margin) || 0), 0);
+        const equity = number(group.find(row => number(row?.equity) != null)?.equity);
+        return {
+          ...group[0], margin, equity,
+          margin_utilization: equity ? margin / equity : group.reduce(
+            (sum, row) => sum + (number(row?.margin_utilization) || 0), 0,
+          ),
+        };
+      });
+    }
     const fields = Array.isArray(definition.fields) ? definition.fields : [];
     const labels = definition.labels || {};
     const grouped = new Map();
@@ -236,6 +256,7 @@
     const options = baseOptions(
       context.t(definition.label || "时变指标"), context.t(definition.yTitle || "数值"), series,
     );
+    if (displayOptions.hideTitle) options.title.text = null;
     return attachInteractions(applyEvaluationWindow(options, context, displayOptions), displayOptions);
   }
 
@@ -266,8 +287,9 @@
     const choices = viewer === "metrics_chart" ? metricChoices(payload) : [];
     const chart = document.createElement("div");
     chart.className = "interactive-artifact-chart-canvas";
-    let selected = choices[0]?.key || "";
-    if (choices.length > 1) {
+    let selected = choices.some(item => item.key === displayOptions.selectedMetric)
+      ? displayOptions.selectedMetric : choices[0]?.key || "";
+    if (choices.length > 1 && !displayOptions.hideMetricControl) {
       const controls = document.createElement("div");
       controls.className = "interactive-artifact-chart-controls";
       const label = document.createElement("label");
