@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from tools.data.types.data_money import DataMoney
-from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
+from tools.testers.backtest.modules.cash_pool import (
+    cash_pool_config_for_ledger,
+    set_cash_for_ledger_pool,
+)
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     contract_multiplier_from_product_fields,
@@ -139,11 +142,18 @@ def apply_order_fill(state, ctx) -> None:
                 cash_after_major - float(cash_before) + fee
                 + margin_after - margin_before
             )
+        cash_pool_id = cash_pool_id_for_ledger(state, ledger)
+        pool_config = cash_pool_config_for_ledger(state, ledger)
+        account_currency = str(getattr(cash.currency, "code", cash.currency))
         fill = record_fill_settlement(
             state, order, timestamp=ctx.timestamp, price=price, fee=fee,
             realized_pnl=realized_pnl,
             cash_before=float(cash_before), cash_after=cash_after_major,
             margin_before=margin_before, margin_after=margin_after,
+            account_id=ledger.ledger_id,
+            cash_pool_id=cash_pool_id,
+            account_currency=account_currency,
+            cash_pool_base_currency=str(pool_config.base_currency or ""),
         )
         current_quantity = float(
             getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
@@ -177,7 +187,9 @@ def apply_order_fill(state, ctx) -> None:
             details={
                 "fill_id": fill.fill_id,
                 "ledger_id": ledger.ledger_id,
-                "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
+                "cash_pool_id": cash_pool_id,
+                "account_currency": account_currency,
+                "cash_pool_base_currency": str(pool_config.base_currency or ""),
                 "price": price,
                 "fee_cost": fee,
                 "cash_before": float(cash_before),

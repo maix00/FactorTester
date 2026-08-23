@@ -51,9 +51,7 @@ assert.equal(
 const model = window.FTBacktestResultModel.build(payloads);
 assert.deepEqual(model.groups, ["A1", "A2"]);
 assert.deepEqual(model.tabs, [
-  "summary", "equity", "returns", "metrics", "fees", "margin", "ratios",
-  "orders", "fills", "cash", "positions", "exposure", "turnover",
-  "drawdowns", "period_returns",
+  "overview", "time_series", "execution_account", "return_analysis",
 ]);
 assert.equal(model.summaryRows[0].total_return, 0.1);
 assert.equal(model.summaryRows[0].annual_return, 0.2);
@@ -89,7 +87,7 @@ const retainedSummary = {
 };
 const retained = window.FTBacktestResultModel.build({}, retainedSummary);
 assert.deepEqual(retained.groups, ["第一组", "第二组"]);
-assert.deepEqual(retained.tabs, ["summary", "group_metrics"]);
+assert.deepEqual(retained.tabs, ["overview", "strategy_stats"]);
 assert.equal(retained.summaryRows[0].initial_equity, 1000000);
 assert.equal(retained.summaryRows[0].total_return, 0.08);
 assert.equal(retained.summaryRows[0].max_drawdown, -0.04);
@@ -101,13 +99,13 @@ assert.equal(window.FTBacktestResultModel.bestMetricIndex(
 ), 0);
 assert.deepEqual(window.FTBacktestResultModel.build({}, {
   groups: [{strategy_id: "curve-only", timestamps: [1], total_equity: [100]}],
-}).tabs, ["summary", "group_metrics"],
+}).tabs, ["overview", "strategy_stats"],
 "dense summary curves must not create a second equity result tab");
 assert.deepEqual(
   window.FTBacktestResultModel.build({}, {}, [
     "equity_curve_data", "order_detail_data", "cash_detail_data",
   ]).tabs,
-  ["equity", "orders", "cash"],
+  ["time_series", "execution_account"],
   "result tabs must exist before their canonical JSON is lazily fetched",
 );
 assert.deepEqual(
@@ -151,7 +149,7 @@ const runtimeSummary = {
 };
 const runtimeModel = window.FTBacktestResultModel.build({}, runtimeSummary);
 assert.equal(runtimeModel.payloads.result, undefined, "the retained result blob is not a viewer payload");
-assert.equal(runtimeModel.tabs[0], "runtime", "runtime summary is an independent result tab");
+assert.equal(runtimeModel.tabs[0], "overview", "runtime summary belongs to the consolidated overview");
 assert.deepEqual(window.FTBacktestRuntimeModel.rows(runtimeModel.summary), [
   {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
   {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},

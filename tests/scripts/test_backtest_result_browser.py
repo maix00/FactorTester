@@ -36,6 +36,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/test-modules/backtest/results/runtime-model.js",
             "server/manager/web/test-modules/backtest/results/model.js",
             "server/manager/web/test-modules/backtest/results/strategy-selection.js",
+            "server/manager/web/test-modules/backtest/results/analysis/ui.js",
+            "server/manager/web/test-modules/backtest/results/event-flow.js",
+            "server/manager/web/test-modules/backtest/results/surfaces.js",
         ):
             page.add_script_tag(path=str(ROOT / path))
         page.evaluate("""
@@ -43,14 +46,20 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.FTBacktestStrategyAnalysis = {open() {}};
           window.FTBacktestSnapshotView = {open() {}};
           window.FTJobHighcharts = {
-            mount(_context, target, payload, viewer) {
+            mount(_context, target, payload, viewer, display) {
               target.dataset.mountedViewer = viewer;
               target.dataset.seriesCount = String(payload.series?.length || 0);
-            },
+              window.__pointClick = display?.onPointClick;
+            }, mountRows(_context, target) { target.dataset.mountedViewer = "rows"; },
           };
           window.__artifactFetches = [];
           const orderRows = Array.from({length: 25}, (_, index) => ({
             strategy: "A1", order_id: `order-${index + 1}`,
+            timestamp: 1700000000000 + index * 60000,
+            account_id: `account-${(index % 2) + 1}`,
+            cash_pool_id: `pool-${(index % 2) + 1}`,
+            account_currency: index % 2 ? "HKD" : "USD",
+            cash_pool_base_currency: "CNY",
           }));
           const payloads = {
             equity_curve_data: {
@@ -91,13 +100,13 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           });
           document.querySelector("#root").append(section);
         """)
-        page.wait_for_function("document.querySelectorAll('.job-result-tabs button').length >= 4")
+        page.wait_for_function("document.querySelectorAll('.job-result-tabs button').length >= 3")
         assert page.evaluate("window.__artifactFetches") == []
 
         page.get_by_role("button", name="策略统计").click()
         page.get_by_role("button", name="A1").click()
 
-        page.get_by_role("button", name="净值与回撤").click()
+        page.get_by_role("button", name="时变指标").click()
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"equity_curve\"]') !== null"
         )
@@ -112,27 +121,52 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"equity_curve\"]')?.dataset.seriesCount === '1'"
         )
+        page.evaluate("window.__pointClick(1700000000000)")
+        page.get_by_role("dialog").locator("strong", has_text="order-1").wait_for()
+        page.get_by_role("dialog").get_by_title("关闭").click()
 
-        page.get_by_role("button", name="订单").click()
+        page.get_by_role("button", name="交易与账户").click()
+        assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "全部策略"
+        page.get_by_role("button", name="事件流", exact=True).click()
+        page.locator(".backtest-event-flow strong", has_text="order-25").wait_for()
+        assert page.get_by_role("button", name="上一时刻").is_enabled()
+        page.get_by_role("button", name="订单", exact=True).click()
+        page.get_by_text("策略、账户与资金池关系").wait_for()
+        assert page.get_by_text("account-1", exact=True).count() >= 1
+        page.get_by_role("button", name="按账户").click()
+        page.locator(".backtest-relation-table").get_by_text(
+            "USD", exact=True,
+        ).wait_for()
+        page.get_by_role("button", name="按资金池").click()
+        page.locator(".backtest-relation-table").get_by_text(
+            "CNY", exact=True,
+        ).first.wait_for()
         page.wait_for_function(
-            "document.querySelectorAll('.backtest-domain-content tbody tr').length === 20"
+            "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 20"
         )
         assert page.evaluate("window.__artifactFetches") == [
             "equity_curve_data", "order_detail_data",
         ]
-        page.get_by_role("button", name="下一页").click()
+        page.locator(
+            ".backtest-result-lazy-target > .backtest-domain-table"
+        ).get_by_role("button", name="下一页").click()
         page.wait_for_function(
-            "document.querySelectorAll('.backtest-domain-content tbody tr').length === 5"
+            "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 5"
         )
         assert page.locator(".backtest-domain-content").get_by_text("order-25").count() == 1
+        page.get_by_label("账户", exact=True).click()
+        page.locator('input[data-filter-value="account-1"]').check()
+        page.get_by_role("button", name="保存").click()
+        page.get_by_text("共 13 行").wait_for()
 
-        page.get_by_role("button", name="净值与回撤").click()
+        page.get_by_role("button", name="时变指标").click()
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"equity_curve\"]') !== null"
         )
         assert page.evaluate("window.__artifactFetches") == [
             "equity_curve_data", "order_detail_data",
         ], "returning to a result tab must reuse its loaded payload"
+        assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "A1"
         assert errors == []
         browser.close()
 

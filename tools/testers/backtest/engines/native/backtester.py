@@ -108,6 +108,10 @@ def _fill_turnover_for(
         "observations": len(values),
         "total": float(np.sum(values)) if values else 0.0,
         "source": "fill_audit" if values else "unavailable",
+        "series": [
+            {"timestamp": timestamp, "turnover": value}
+            for timestamp, value in sorted(by_timestamp.items())
+        ],
     }
 
 

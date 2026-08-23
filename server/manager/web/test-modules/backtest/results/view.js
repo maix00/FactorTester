@@ -1,11 +1,7 @@
 (() => {
   const tabLabels = Object.freeze({
-    runtime: "策略运行摘要", summary: "回测汇总", group_metrics: "策略统计",
-    equity: "净值与回撤", returns: "收益率",
-    metrics: "时变指标", fees: "手续费", margin: "保证金",
-    ratios: "收益与费用", orders: "订单", fills: "成交与结算",
-    cash: "现金", positions: "持仓", exposure: "风险敞口",
-    turnover: "换手率", drawdowns: "回撤区间", period_returns: "周期收益",
+    overview: "概览", strategy_stats: "策略统计", time_series: "时变指标",
+    execution_account: "交易与账户", return_analysis: "收益与风险",
   });
 
   function relevantArtifacts(artifacts) {
@@ -138,18 +134,6 @@
     return section;
   }
 
-  function chart(context, viewer, payload, strategyScope, displayOptions = {}) {
-    if (!payload) return message(context, "暂无曲线数据");
-    const filtered = strategyScope.filterPayload(payload);
-    const target = document.createElement("div");
-    target.className = "backtest-domain-chart interactive-artifact-chart";
-    queueMicrotask(() => {
-      try { window.FTJobHighcharts.mount(context, target, filtered, viewer, displayOptions); }
-      catch (error) { target.replaceChildren(message(context, error.message)); }
-    });
-    return target;
-  }
-
   function groupMetricsTable(context, state) {
     const baseMatrix = state.model.metricMatrix;
     const matrix = {
@@ -196,23 +180,25 @@
     return result.shell;
   }
 
-  function dataTable(context, rows, state) {
+  function dataTable(context, rows, state, pageKey = state.activeTab) {
     if (!rows.length) return message(context, "暂无明细");
     const columns = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
-    const page = Number(state.tablePages[state.activeTab] || 1);
-    const values = rows.map(row => columns.map(key => {
+    const page = Number(state.tablePages[pageKey] || 1);
+    const pageSize = 20;
+    const start = Math.max(0, (page - 1) * pageSize);
+    const values = rows.slice(start, start + pageSize).map(row => columns.map(key => {
       const value = row[key];
       return value && typeof value === "object"
         ? window.FTUI.code(value)
         : window.FTRichText.inline(String(value ?? ""), context);
     }));
     const table = window.FTUI.pagedTable(columns.map(key => context.t(key)), values, {
-      page, pageSize: 20,
+      page, pageSize, remote: true, total: rows.length,
       previousLabel: context.t("上一页"), nextLabel: context.t("下一页"),
       pageLabel: (current, total) => `${current} / ${total}`,
       totalLabel: total => `${context.t("共")} ${total} ${context.t("行")}`,
       onPageChange: next => {
-        state.tablePages[state.activeTab] = next;
+        state.tablePages[pageKey] = next;
         renderLoaded(context, state.target, state);
       },
     });
@@ -228,107 +214,105 @@
         state.customAnalyses.render(customID, target, {
           onTabsChanged: () => renderLoaded(context, state.target, state),
           onDeleted: () => {
-            state.activeTab = state.model.tabs[0] || "summary";
+            state.activeTab = state.model.tabs[0] || "overview";
             renderLoaded(context, state.target, state);
           },
         });
         return target;
       }
     }
-    const payloads = state.model.payloads;
-    if (state.activeTab === "runtime") {
-      return runtimeTable(context, state) || message(context, "暂无策略运行摘要");
+    if (state.activeTab === "overview") {
+      const root = document.createElement("div");
+      root.className = "backtest-overview-surface";
+      root.append(window.FTBacktestResultSurfaces.toolbar(context, state));
+      const runtime = runtimeTable(context, state);
+      if (runtime) root.append(runtime);
+      if (state.model.summaryRows.length) root.append(summaryTable(context, state));
+      if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
+        const actions = document.createElement("div");
+        actions.className = "backtest-domain-actions";
+        actions.append(window.FTUI.actionButton(context.t("持仓快照"), () => (
+          window.FTBacktestSnapshotView.open(context, state.options)
+        ), {variant: "secondary"}));
+        root.prepend(actions);
+      }
+      return root.childElementCount ? root : message(context, "暂无回测汇总");
     }
-    if (state.activeTab === "summary") return summaryTable(context, state);
-    if (state.activeTab === "group_metrics") return groupMetricsTable(context, state);
-    if (state.activeTab === "equity") {
-      return chart(context, "equity_curve", payloads.equity_curve_data, state.strategyScope, {
-        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
-      });
-    }
-    if (state.activeTab === "returns") {
-      return chart(context, "line_chart", payloads.returns_over_time_data, state.strategyScope, {
-        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
-      });
-    }
-    if (state.activeTab === "metrics") {
-      return chart(context, "metrics_chart", payloads.metrics_over_time_data, state.strategyScope, {
-        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
-      });
-    }
-    const artifact = window.FTBacktestResultModel.tabPayloads[state.activeTab];
-    return dataTable(context, state.strategyScope.filterRows(
-      window.FTBacktestResultModel.rows(payloads[artifact]),
-    ), state);
-  }
-
-  function activeArtifact(state) {
-    const name = window.FTBacktestResultModel.tabPayloads[state.activeTab];
-    if (!name || state.payloads[name]) return null;
-    return state.artifactsByName.get(name) || null;
-  }
-
-  function loadActiveTab(context, state) {
-    const artifact = activeArtifact(state);
-    if (!artifact || state.loading.has(artifact.name)) return;
-    state.loading.add(artifact.name);
-    loadPayload(
-      context, artifact, state.options.jobID, state.options.artifactQuery || "",
-    ).then(payload => {
-      state.payloads[artifact.name] = payload;
-      state.model = window.FTBacktestResultModel.build(
-        state.payloads, state.model.summary, [...state.artifactsByName.keys()],
+    if (state.activeTab === "strategy_stats") {
+      const root = document.createElement("div");
+      root.className = "backtest-overview-surface";
+      root.append(
+        window.FTBacktestResultSurfaces.toolbar(context, state),
+        groupMetricsTable(context, state),
       );
-    }).catch(error => {
-      state.errors[artifact.name] = error;
-    }).finally(() => {
-      state.loading.delete(artifact.name);
-      if (state.target?.isConnected !== false) renderLoaded(context, state.target, state);
-    });
+      return root;
+    }
+    if (state.activeTab === "time_series") {
+      return window.FTBacktestResultSurfaces.timeSeries(context, state);
+    }
+    if (state.activeTab === "execution_account") {
+      return window.FTBacktestResultSurfaces.executionAccount(context, state);
+    }
+    if (state.activeTab === "return_analysis") {
+      return window.FTBacktestResultSurfaces.returnAnalysis(context, state);
+    }
+    return message(context, "暂无结果");
+  }
+
+  async function ensurePayloads(context, state, names) {
+    const pending = [...new Set(names)].filter(name => (
+      state.artifactsByName.has(name) && !state.payloads[name] && !state.loading.has(name)
+    ));
+    if (!pending.length) return;
+    pending.forEach(name => state.loading.add(name));
+    await Promise.all(pending.map(async name => {
+      try {
+        state.payloads[name] = await loadPayload(
+          context, state.artifactsByName.get(name), state.options.jobID,
+          state.options.artifactQuery || "",
+        );
+        delete state.errors[name];
+      } catch (error) {
+        state.errors[name] = error;
+      } finally {
+        state.loading.delete(name);
+      }
+    }));
+    state.model = window.FTBacktestResultModel.build(
+      state.payloads, state.model.summary, [...state.artifactsByName.keys()],
+      state.options.resultDeclarations || [],
+    );
+    if (state.target?.isConnected !== false) renderLoaded(context, state.target, state);
   }
 
   function renderLoaded(context, target, state) {
     state.target = target;
     state.strategySelection = window.FTBacktestStrategySelection.normalize(
-      state.strategySelection, state.model.strategies,
+      state.strategySelections[state.activeTab]
+        || [window.FTBacktestStrategySelection.ALL_STRATEGIES],
+      state.model.strategies,
     );
+    state.strategySelections[state.activeTab] = state.strategySelection;
     state.strategyScope = window.FTBacktestStrategySelection.createScope(
       state.model.strategies, state.strategySelection,
     );
-    const controls = [];
-    if (state.model.strategies.length) {
-      const filter = window.FTBacktestStrategySelection.control(context, {
-        strategies: state.model.strategies,
-        selected: state.strategySelection,
-        onApply: values => {
-          state.strategySelection = values;
-          state.tablePages = {};
-          queueMicrotask(() => renderLoaded(context, target, state));
-        },
+    state.rerender = () => renderLoaded(context, target, state);
+    state.ensurePayloads = names => ensurePayloads(context, state, names);
+    state.openEventFlow = timestamp => {
+      const view = window.FTBacktestAnalysisUI.dialog(context, "交易事件", "");
+      view.body.append(window.FTUI.loading(context.t("正在读取交易事件…")));
+      const names = window.FTBacktestEventFlow.coreSources
+        .map(([name]) => name).filter(name => state.artifactsByName.has(name));
+      void ensurePayloads(context, state, names).then(() => {
+        if (view.root.isConnected) window.FTBacktestEventFlow.render(
+          context, view.body, state.payloads, state.strategyScope, {timestamp},
+        );
       });
-      controls.push(filter.element);
-    }
-    if (state.evaluationWindow) {
-      controls.push(window.FTUI.actionButton(
-        context.t(state.showOutOfSample ? "仅显示样本内" : "显示样本外"),
-        () => {
-          state.showOutOfSample = !state.showOutOfSample;
-          renderLoaded(context, target, state);
-        },
-        {variant: "secondary"},
-      ));
-    }
-    if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
-      const actions = document.createElement("div");
-      actions.className = "backtest-domain-actions";
-      actions.append(window.FTUI.actionButton(context.t("持仓快照"), () => (
-        window.FTBacktestSnapshotView.open(context, state.options)
-      ), {variant: "secondary"}));
-      controls.push(actions);
-    }
+    };
+    state.helpers = {dataTable, message};
     const customTabs = state.customAnalyses?.tabs({
       onDeleted: () => {
-        state.activeTab = state.model.tabs[0] || "summary";
+        state.activeTab = state.model.tabs[0] || "overview";
         renderLoaded(context, target, state);
       },
     }) || [];
@@ -339,7 +323,6 @@
         ...customTabs,
       ],
       active: state.activeTab,
-      controls,
       onChange: async key => {
         if (key === "custom-analysis:new") {
           try {
@@ -356,14 +339,7 @@
       },
     }).header;
     const content = document.createElement("div"); content.className = "backtest-domain-content";
-    const artifact = activeArtifact(state);
-    const payloadName = window.FTBacktestResultModel.tabPayloads[state.activeTab];
-    const error = payloadName ? state.errors[payloadName] : null;
-    if (error) content.append(message(context, error.message));
-    else if (artifact) {
-      content.append(window.FTUI.loading(context.t("正在读取所选结果…")));
-      queueMicrotask(() => loadActiveTab(context, state));
-    } else content.append(tabContent(context, state));
+    content.append(tabContent(context, state));
     target.replaceChildren(header, content);
     const requested = state.requestedSupplemental;
     if (requested && !state.supplementalRequestConsumed) {
@@ -396,17 +372,20 @@
         const artifactsByName = new Map(relevant.map(item => [String(item.name), item]));
         const model = window.FTBacktestResultModel.build(
           {}, options.resultSummary || {}, [...artifactsByName.keys()],
+          options.resultDeclarations || [],
         );
         renderLoaded(context, target, {
           model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
           tablePages: {},
           activeTab: options.customAnalyses?.state?.requestedKey
             || model.tabs[0] || "summary",
-          strategySelection: [window.FTBacktestStrategySelection.ALL_STRATEGIES],
+          strategySelections: {},
           evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
             model.summary, options.configuration || {},
           ),
           showOutOfSample: false,
+          chartSelection: [], executionView: "orders", returnView: "cost_ratios",
+          dimensionSelections: {},
           customAnalyses: options.customAnalyses || null,
           requestedSupplemental: options.supplementalRequest || null,
           supplementalRequestConsumed: false,

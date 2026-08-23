@@ -17,6 +17,11 @@ def fee_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(payload, dict):
             continue
         fills = [item for item in payload.get("fills") or () if isinstance(item, dict)]
+        settlements = {
+            str(item.get("fill_id")): item
+            for item in payload.get("settlements") or ()
+            if isinstance(item, dict) and item.get("fill_id")
+        }
         fill_ids = {str(item.get("fill_id")) for item in fills if item.get("fill_id")}
         events = [("fills", index, item) for index, item in enumerate(fills)]
         # Native accounting records the same fee on Fill and FillSettlement.
@@ -29,12 +34,21 @@ def fee_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
             and (not item.get("fill_id") or str(item.get("fill_id")) not in fill_ids)
         )
         for kind, index, item in events:
+            settlement = settlements.get(str(item.get("fill_id") or ""), {})
             rows.append({
                 "strategy": strategy, "event_type": kind, "row": index,
                 "fill_id": item.get("fill_id"),
                 "timestamp": item.get("timestamp"),
                 "product": item.get("instrument", item.get("product")),
                 "side": item.get("side"), "offset": item.get("offset"),
+                **{
+                    key: settlement.get(key, item.get(key)) for key in (
+                        "account_id", "account_ref", "account", "ledger_id", "ledger",
+                        "cash_pool_id", "cash_pool", "pool_id",
+                        "account_currency", "ledger_currency", "currency",
+                        "cash_pool_base_currency", "pool_base_currency", "base_currency",
+                    ) if settlement.get(key, item.get(key)) not in (None, "")
+                },
                 "fee": item.get("fee", item.get("fees", item.get("fee_amount", 0.0))),
                 "raw": item,
             })
