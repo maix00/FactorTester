@@ -175,7 +175,10 @@
     }
 
     function isResearchReportTab(tabID) {
-      return String(tabID || "").startsWith("research-report:");
+      if (String(tabID || "").startsWith("research-report:")) return true;
+      const tab = state.tabs.find(item => item.id === tabID);
+      const pathname = String(tab?.path || "").split(/[?#]/, 1)[0];
+      return /^\/research\/.+$/.test(pathname);
     }
 
     function hasReportHeading(session) {
