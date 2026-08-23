@@ -2068,6 +2068,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function researchReportTabID(path)" in tabs
     assert "research-report:${encodeURIComponent(target)}" in tabs
     assert "tabID: state.activeTabID" in research
+    assert "session.durable.heading = {" in report_entry
+    assert "function invalidateLegacyReportView(tabID, session)" in tab_view_cache
     assert "context.tabID || `report:${publicationID}`" in report_entry
     assert r"const reportMatch = /^\/research\/(.+)$/" in tab_view_cache
     assert "decodeURIComponent(publicationID)" in tab_view_cache
