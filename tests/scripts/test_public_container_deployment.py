@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import stat
@@ -119,6 +120,32 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert args["CODEX_NPM_REGISTRY"] == (
         "${FACTORTESTER_CODEX_NPM_REGISTRY:-https://registry.npmjs.org}"
     )
+
+
+def test_public_agent_image_installs_cc_switch_from_verified_local_archives() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    dockerignore = (DEPLOYMENT / "FactorTester.Dockerfile.dockerignore").read_text(
+        encoding="utf-8",
+    )
+    archives = {
+        "cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz": (
+            "8065c5bae9eda270747c1766cefbb2091d9625655dbf409ad7764eb47c0a8635"
+        ),
+        "cc-switch-cli-linux-arm64-musl-v5.10.2.tar.gz": (
+            "b25c77f7eebbe3968c53022e1b5e703e324203e94e5c6379320bcd1bbe268e63"
+        ),
+    }
+
+    assert "github.com/SaladDay/cc-switch-cli/releases" not in dockerfile
+    for name, expected_digest in archives.items():
+        archive = DEPLOYMENT / name
+        assert archive.is_file()
+        assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected_digest
+        assert f"!deploy/docker/factortester-public/{name}" in dockerignore
+        assert f"COPY deploy/docker/factortester-public/{name}" in dockerfile
+        assert expected_digest in dockerfile
 
 
 def test_public_agent_uses_codex_secure_container_profile() -> None:
@@ -446,6 +473,12 @@ def test_legacy_push_entrypoint_delegates_to_synchronous_container_publish(
         encoding="utf-8",
     )
     publisher.chmod(0o755)
+    synchronizer = server / "sync_public_field_history.sh"
+    synchronizer.write_text(
+        "#!/usr/bin/env bash\nprintf 'field-history-synchronization\\n'\n",
+        encoding="utf-8",
+    )
+    synchronizer.chmod(0o755)
 
     result = subprocess.run(
         [str(legacy), "--start"],
@@ -455,7 +488,10 @@ def test_legacy_push_entrypoint_delegates_to_synchronous_container_publish(
     )
 
     assert result.returncode == 0
-    assert result.stdout == "synchronous-publication\n"
+    assert result.stdout == (
+        "synchronous-publication\n"
+        "field-history-synchronization\n"
+    )
     assert result.stderr == ""
 
 

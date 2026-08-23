@@ -8,6 +8,8 @@ deploy/docker/*
 !deploy/docker/factortester-public/factortester-entrypoint.sh
 !deploy/docker/factortester-public/start-fixed-service.py
 !deploy/docker/factortester-public/mihomo-linux-amd64-v1.19.30.gz
+!deploy/docker/factortester-public/cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz
+!deploy/docker/factortester-public/cc-switch-cli-linux-arm64-musl-v5.10.2.tar.gz
 !server/
 !server/**
 !tools/
