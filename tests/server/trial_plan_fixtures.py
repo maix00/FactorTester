@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 
 import orjson
 
@@ -21,10 +22,35 @@ def run_spec() -> dict:
         "run_spec_version": RUN_SPEC_VERSION,
         "workspace_id": "workspace-1",
         "analyses": ["ic"],
-        "start_date": "2020-01-01",
-        "end_date": "2023-12-31",
-        "selected_paths": ["CNFutures/黑色"],
+        "configuration": {
+            "analyses": {
+                "ic": {
+                    "settings": {
+                        "start_date": "2020-01-01",
+                        "end_date": "2023-12-31",
+                    },
+                    "paths": ["CNFutures/黑色"],
+                },
+            },
+        },
     }
+
+
+def run_spec_with_dates(
+    start_date: str,
+    end_date: str,
+    *,
+    sample: str | None = None,
+    **updates,
+) -> dict:
+    value = deepcopy(run_spec())
+    settings = value["configuration"]["analyses"]["ic"]["settings"]
+    settings["start_date"] = start_date
+    settings["end_date"] = end_date
+    if sample is not None:
+        value["sample"] = sample
+    value.update(updates)
+    return value
 
 
 def semantic_hash(value: dict) -> str:

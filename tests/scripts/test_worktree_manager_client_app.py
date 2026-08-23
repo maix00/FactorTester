@@ -1925,7 +1925,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "/api/workspaces" in scripts["tests.js"]
     assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["run-batch-actions.js"]
-    assert "ensureRunSubmitCode" in scripts["run-batch-actions.js"]
+    assert "ensureFactorsForExecution" in scripts["run-batch-actions.js"]
+    assert "ensureProductsForExecution" in scripts["run-batch-actions.js"]
     assert "workbench-run-submit" in scripts["tests.js"]
     assert 'analyses: [state.kind]' in scripts["run-batch-actions.js"]
     assert "/api/runs" in scripts["run-batch-actions.js"]
@@ -1957,14 +1958,20 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "window.FTBacktestGroupModel" in scripts["backtest-group-model.js"]
     assert "window.FTBacktestGroupForm" in scripts["backtest-group-form.js"]
     assert "window.FTBacktestGroups" in scripts["backtest-groups.js"]
-    assert "state.manifest.flows" in scripts["backtest-groups.js"]
+    assert "FTConfigurationGroupSurface.flows(state, surfaceKey)" in scripts[
+        "backtest-groups.js"
+    ]
+    assert "FTConfigurationGroupSurface.render" in scripts["backtest-groups.js"]
     assert 'className: "backtest-groups"' in scripts["backtest-groups.js"]
-    assert "FTTabListChip.create" in scripts["backtest-groups.js"]
-    assert "state.manifest.surfaces" in scripts["backtest-groups.js"]
+    assert "FTConfigurationGroupSurface.surfaces(state)" in scripts[
+        "backtest-groups.js"
+    ]
     assert "surface?.content_adapter" in scripts["backtest-groups.js"]
-    assert "flow.surface === surfaceKey" in scripts["backtest-groups.js"]
     assert "implementedFlows" not in scripts["backtest-groups.js"]
-    assert "FTBacktestGroups.render" in scripts["tests.js"]
+    assert "FTConfigurationGroupSurface?.renderer?.(state.kind)" in scripts[
+        "tests.js"
+    ]
+    assert "groupRenderer?.render" in scripts["tests.js"]
     assert "FTTestContentAdapters.chipSources(state)" in scripts["tests.js"]
     assert "externalTabs" not in scripts["tests.js"]
     assert "selectionPanel" not in scripts["tests.js"]
@@ -2058,6 +2065,12 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "context.nativeReference" in rich_text
     assert "context?.openReference?.(target, label)" in rich_text
     assert 'path.startsWith("/jobs/")' in tabs
+    assert "function researchReportTabID(path)" in tabs
+    assert "research-report:${encodeURIComponent(target)}" in tabs
+    assert "tabID: state.activeTabID" in research
+    assert "context.tabID || `report:${publicationID}`" in report_entry
+    assert r"const reportMatch = /^\/research\/(.+)$/" in tab_view_cache
+    assert "decodeURIComponent(publicationID)" in tab_view_cache
     assert "context.tabSession" in tests
 
 
@@ -2768,7 +2781,7 @@ eval(require("fs").readFileSync({json.dumps(str(group_model))}, "utf8"));
 const state = {{analysis: {{groups: [], ls_configs: []}}}};
 const roots = FTBacktestGroupModel.addBaseBatch(state, {{
   product_path_selection: {{id: "day", name: "日盘", paths: ["day-path"]}},
-  factorAlias: "FactorA", splitCount: 3, groupIndex: 1, allGroups: true,
+  factor_candidate_refs: ["FactorA"], splitCount: 3, groupIndex: 1, allGroups: true,
 }});
 const child = FTBacktestGroupModel.addDerived(state, roots[0].id, {{
   name: "硅派生组", productMask: ["SI.GFE"],

@@ -6,7 +6,12 @@
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     const source = FTReportSource.create(publicationID, api);
-    const session = context.tabSession(`report:${publicationID}`);
+    // The research feature tab owns the report list. A concrete report owns
+    // its actual closable left-sidebar tab, so reading state must stay on
+    // that tab instead of a publication-only alias shared by reports.
+    const session = context.tabSession(
+      context.tabID || `report:${publicationID}`,
+    );
     session.durable ||= {};
     const reading = session.durable.reportReading ||= {disclosures: {}};
     reading.disclosures ||= {};

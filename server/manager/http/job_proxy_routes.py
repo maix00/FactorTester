@@ -285,9 +285,12 @@ class JobProxyRoutesMixin:
                             self.state._local_route(port=value, online=True)
                             for value in running_ports
                         ]
-                    raise TargetUnavailable(
-                        "storage server has no available FactorTester service"
-                    )
+                    # Metadata belongs to this Manager's storage repository;
+                    # the zero-port route is only a control-plane identity.
+                    # It deliberately does not imply that a business service
+                    # is running or that artifact bytes should use a worker
+                    # port.
+                    return [self.state._local_route(port=0, online=True)]
                 descriptor = self.state.federation_registry.describe(server_id)
                 if descriptor is not None:
                     transfer_node = descriptor.get("transfer_node")
@@ -387,6 +390,12 @@ class JobProxyRoutesMixin:
         if match is None:
             return False
         suffix = match.group(2) or ""
+        # Retained artifact bytes are served only through the short-lived
+        # Manager-issued ``/access`` capability.  The old direct byte routes
+        # must remain an unconditional 404 (including for anonymous callers)
+        # instead of falling through to a worker-port proxy or an auth 401.
+        if method == "GET" and suffix.startswith("/artifacts/"):
+            return False
         supplemental_collection = suffix == "/supplementals"
         custom_analysis_collection = suffix == "/custom-analyses"
         custom_analysis_item = suffix.startswith("/custom-analyses/")

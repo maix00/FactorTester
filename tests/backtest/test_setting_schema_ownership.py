@@ -9,7 +9,6 @@ def test_single_factor_page_uses_factor_and_product_module_field_schemas() -> No
 
     for module, field_name, expected_module, expected_tab in (
         (FactorModule, "factor_candidates", "factor_execution", "factors"),
-        (FactorModule, "factor", "factor_execution", "factors"),
         (FactorModule, "factor_role_bindings", "factor_execution", "factors"),
         (ProductSelectionModule, "product_path_candidates", "product_selection", "product_path_selection"),
         (ProductSelectionModule, "product_path_selection", "product_selection", "product_path_selection"),

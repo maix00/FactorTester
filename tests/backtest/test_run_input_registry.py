@@ -16,12 +16,11 @@ def test_backtest_run_inputs_are_fully_declared_by_the_backend() -> None:
         item["kind"]: item
         for item in run_inputs["content_options"]["inputs"]
     }
-    assert set(descriptors) == {
-        "strategy_source", "strategy_spec", "run_dependency",
-    }
-    assert descriptors["strategy_source"]["inspect_endpoint"] == (
-        "/api/run-inputs/strategy/inspect"
-    )
+    # Strategy source/spec are now registered through the factor/strategy
+    # authoring fields. The run-input tab only owns arbitrary dependency
+    # files; keeping the assertion here prevents the old duplicate upload
+    # descriptors from returning to the manifest.
+    assert set(descriptors) == {"run_dependency"}
     dependency = descriptors["run_dependency"]
     assert dependency["extensions"] == (
         ".cfg", ".csv", ".ini", ".json", ".md", ".py", ".toml",
@@ -46,7 +45,13 @@ def test_factor_upload_control_is_declared_for_every_factor_test() -> None:
             for item in manifest["tab_lists"]["local-settings"]
             if item["content_adapter"] == "factor_selection"
         )
-        descriptor = factor_tab["content_options"]["inputs"][0]
-        assert descriptor["kind"] == "factor_source"
-        assert descriptor["inspect_endpoint"] == "/custom-factors/api/validate"
-        assert descriptor["path_prefix"] == "custom_factors"
+        assert factor_tab["content_options"] == {}
+        contracts = manifest["field_contracts"]["settings"]
+        assert {
+            "factor_candidates",
+            "factor_source_selections",
+            "factor_set_selections",
+        }.issubset(contracts)
+        assert contracts["factor_source_selections"]["value"]["ref_kind"] == (
+            "factor_source_selection_list"
+        )

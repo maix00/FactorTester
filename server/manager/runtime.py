@@ -313,13 +313,16 @@ class ManagerState(
         self._init_transfer_state()
         self._init_transfer_access()
         self._init_data_plane_process()
-        # Reuse the existing Manager-local SQLite database configured by
-        # .settings. It already contains local account/data projections;
-        # ManagerSessionStore adds only its own table there.
+        # The production entry point injects the existing Manager-local
+        # SQLite database configured by .settings.  An embeddable Manager
+        # must not silently attach to that process-global file: tests,
+        # previews, and multiple local Manager instances each need an
+        # isolated session store.  ``app.main`` supplies the production
+        # database explicitly below.
         self.sessions_db_path = (
             session_db_path.expanduser().resolve()
             if session_db_path is not None
-            else configured_manager_sqlite_path()
+            else (self.state_root / "manager-sessions.sqlite").resolve()
         )
         self.sessions_path = self.state_root / "sessions.json"
         self.session_store = ManagerSessionStore(self.sessions_db_path)
