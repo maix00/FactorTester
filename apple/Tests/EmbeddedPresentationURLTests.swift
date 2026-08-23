@@ -12,6 +12,17 @@ final class EmbeddedPresentationURLTests: XCTestCase {
         )
     }
 
+    func testDocumentationDeepLinkUsesTheSharedEmbeddedWebRoute() {
+        let source = URL(
+            string: "https://example.test/docs/system-overview#main-flow"
+        )!
+
+        XCTAssertEqual(
+            EmbeddedPresentationURL.add(to: source)?.absoluteString,
+            "https://example.test/docs/system-overview?presentation=embedded#main-flow"
+        )
+    }
+
     func testAddingPresentationReplacesExistingValue() {
         let source = URL(
             string: "https://example.test/docs?presentation=standalone"

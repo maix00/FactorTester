@@ -291,6 +291,9 @@
       if (pathname === "/settings" || pathname.startsWith("/settings/")) {
         return openTab(path, {id: "settings", title: t("设置"), closable: false});
       }
+      if (pathname === "/docs" || pathname.startsWith("/docs/")) {
+        return openTab(path, {id: "docs", title: t("技术文档"), closable: true});
+      }
       if (["/products", "/products/sources", "/products/categories", "/products/groups"]
         .includes(pathname)) {
         return openTab(path, {id: "products", title: t("产品"), closable: false});

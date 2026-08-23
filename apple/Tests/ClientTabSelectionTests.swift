@@ -18,6 +18,18 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
+    func testEmbeddedDocumentationLinksOpenTestPagesInSwiftTabs() {
+        for path in ["/ic-test", "/backtest"] {
+            XCTAssertEqual(
+                ResearchDocumentWebNavigationMessage.path(from: ["path": path]),
+                path
+            )
+            let destination = ClientTab.embeddedNavigationDestination(for: path)
+            XCTAssertNotNil(destination, path)
+            XCTAssertTrue(destination?.isClosable == true, path)
+        }
+    }
+
     func testHomeIsAvailableInTheFallbackFeatureEntry() {
         let home = Module.fallbackModules.first { $0.id == "home" }
         XCTAssertEqual(home?.title, "主页")
