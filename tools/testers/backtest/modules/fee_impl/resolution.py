@@ -14,6 +14,7 @@ from tools.testers.backtest.modules.trading_rule import _resolve_method
 
 from .market import market_fee_cost
 from .mode import resolve_fee_mode
+from .observability import record_fee_runtime_assumption
 
 
 def resolve_fee_cost(state, ctx) -> None:
@@ -33,6 +34,14 @@ def resolve_fee_cost(state, ctx) -> None:
             mode = resolve_fee_mode(config, ledger_config)
             fields = historical_fields_for_product(
                 historical_fields, order.instrument,
+            )
+            record_fee_runtime_assumption(
+                state,
+                strategy=strategy,
+                product=order.instrument,
+                timestamp=ctx.timestamp,
+                mode=mode,
+                fields=fields,
             )
             fixed_rate = float(
                 getattr(ledger_config, "fixed_fee_rate", None) or 0.0

@@ -13,9 +13,7 @@ def market_fee_cost(
     order, *, price: float, fields: dict[str, object], position,
     fee_mode: str, cost_basis_method: str = "FIFO",
 ) -> float:
-    missing = [field for field in FEE_FIELDS if field not in fields]
-    if "VolumeMultiple" not in fields:
-        missing.append("VolumeMultiple")
+    missing = missing_market_fee_fields(fields)
     if missing and requires_complete_fee_fields(fee_mode):
         raise KeyError(
             f"market fee requires MarketDataModule historical fields for "
@@ -72,6 +70,13 @@ def explicit_offset_quantities(order):
 
 def requires_complete_fee_fields(mode: str) -> bool:
     return mode in {"exact", "custom", "close_today", "close_yesterday"}
+
+
+def missing_market_fee_fields(fields: dict[str, object]) -> list[str]:
+    missing = [field for field in FEE_FIELDS if field not in fields]
+    if "VolumeMultiple" not in fields:
+        missing.append("VolumeMultiple")
+    return missing
 
 
 def has_any_fee_field(fields: dict[str, object]) -> bool:
