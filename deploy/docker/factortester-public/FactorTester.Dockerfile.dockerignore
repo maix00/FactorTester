@@ -32,6 +32,10 @@ deploy/docker/*
 apple/*
 !apple/Resources/
 !apple/Resources/**
+!apple/Sources/
+apple/Sources/*
+!apple/Sources/Navigation/
+!apple/Sources/Navigation/**
 !settings.py
 !start_server.py
 **/__pycache__/
