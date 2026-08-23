@@ -22,31 +22,22 @@ ssh_command=(
   -o ConnectionAttempts=1
   -o StrictHostKeyChecking=yes
 )
-scp_command=(
-  scp
-  -o BatchMode=yes
-  -o ConnectTimeout="${FACTORTESTER_SSH_CONNECT_TIMEOUT:-20}"
-  -o ConnectionAttempts=1
-  -o StrictHostKeyChecking=yes
-)
 if [[ -n "${FACTORTESTER_SSH_PORT:-}" ]]; then
   ssh_command+=(-p "$FACTORTESTER_SSH_PORT")
-  scp_command+=(-P "$FACTORTESTER_SSH_PORT")
 fi
 if [[ -n "${FACTORTESTER_SSH_KEY:-}" ]]; then
   ssh_command+=(-i "$FACTORTESTER_SSH_KEY" -o IdentitiesOnly=yes)
-  scp_command+=(-i "$FACTORTESTER_SSH_KEY" -o IdentitiesOnly=yes)
 fi
 if [[ -n "${FACTORTESTER_SSH_HOST_KEY_ALIAS:-}" ]]; then
   ssh_command+=(-o "HostKeyAlias=$FACTORTESTER_SSH_HOST_KEY_ALIAS")
-  scp_command+=(-o "HostKeyAlias=$FACTORTESTER_SSH_HOST_KEY_ALIAS")
 fi
 
 source_db="$(cd "$repo_root" && python -c 'from settings import CACHE_DB_PATH; print(CACHE_DB_PATH)')"
 python "$repo_root/tools/migrations/sync_field_history_snapshot.py" \
   export "$source_db" "$snapshot"
 
-"${scp_command[@]}" "$snapshot" "$remote:$remote_snapshot"
+"${ssh_command[@]}" "$remote" \
+  "umask 077; tee '$remote_snapshot' >/dev/null" < "$snapshot"
 "${ssh_command[@]}" "$remote" bash -s -- \
   "$remote_snapshot" "$remote_container_root" "$remote_env" <<'REMOTE'
 set -Eeuo pipefail
