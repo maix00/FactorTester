@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from html import escape
 import math
+from html import escape
 from typing import Any
 
 import orjson
-
 
 SCHEMA_VERSION = 1
 RENDERER_VERSION = "equity-svg@1"
@@ -26,14 +25,7 @@ def build_equity_curve_artifact(
     prepared = []
     for index, item in enumerate(series[:MAX_SERIES]):
         equity_points = _minmax_points(item["values"], MAX_POINTS_PER_SERIES)
-        peak = -math.inf
-        drawdowns = []
-        historical_max_drawdown = 0.0
-        for value in item["values"]:
-            peak = max(peak, value)
-            current_drawdown = (value / peak - 1.0) if peak > 0 else 0.0
-            historical_max_drawdown = min(historical_max_drawdown, current_drawdown)
-            drawdowns.append(historical_max_drawdown)
+        drawdowns = _current_drawdowns(item["values"])
         prepared.append({
             "label": item["label"],
             "start": item["start"],
@@ -54,7 +46,7 @@ def build_equity_curve_artifact(
         "value_basis": "reported_total_equity",
         "x_axis": "timestamp_or_observation_order",
         "panels": ["equity", "drawdown"],
-        "drawdown_definition": "historical_maximum_drawdown_through_each_point",
+        "drawdown_definition": "current_value_relative_to_running_peak",
         "initial_equity": [item["initial_equity"] for item in prepared],
         "downsampling": "bucket_minmax_preserve_endpoints",
         "max_points_per_series": MAX_POINTS_PER_SERIES,
@@ -71,6 +63,16 @@ def build_equity_curve_artifact(
         "omitted_series_count": max(len(series) - len(prepared), 0),
     }
     return _render_svg(prepared, receipt), receipt
+
+
+def _current_drawdowns(values: list[float]) -> list[float]:
+    """Return the underwater curve, which recovers to zero at a new peak."""
+    peak = -math.inf
+    drawdowns = []
+    for value in values:
+        peak = max(peak, value)
+        drawdowns.append((value / peak - 1.0) if peak > 0 else 0.0)
+    return drawdowns
 
 
 def receipt_bytes(receipt: dict[str, Any]) -> bytes:
@@ -177,7 +179,7 @@ def _minmax_points(values: list[float], maximum: int) -> list[tuple[int, float]]
 def _render_svg(
     series: list[dict[str, Any]], receipt: dict[str, Any]
 ) -> bytes:
-    width, height = 960, 540
+    width = 960
     left, right = 72.0, 24.0
     equity_top, equity_bottom = 62.0, 330.0
     drawdown_top, drawdown_bottom = 386.0, 490.0
@@ -271,7 +273,7 @@ def _render_svg(
 def _axis_indices(count: int) -> list[int]:
     if count <= 1:
         return [0] if count else []
-    return sorted(set([0, count // 4, count // 2, (count * 3) // 4, count - 1]))
+    return sorted({0, count // 4, count // 2, (count * 3) // 4, count - 1})
 
 
 def _timestamp_label(value: Any) -> str:
