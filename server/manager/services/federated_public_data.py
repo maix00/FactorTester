@@ -69,6 +69,77 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         self._publication_sources: dict[str, str] = {}
         self._lock = threading.RLock()
 
+    def _peer_routes(self) -> list[ServiceRoute]:
+        """Return data-read routes, including control-only peer registrations.
+
+        Research metadata and report projections are served by the peer
+        Manager's control endpoint. They must remain readable when that
+        Manager has no business service port advertised (for example, while
+        its execution services are stopped). The shared route registry still
+        prefers a live business-port route when one exists; this fallback only
+        adds one control-only route for peers that have no such route.
+        """
+        routes = super()._peer_routes()
+        known = {route.server_id for route in routes}
+        try:
+            servers = self.registry.servers(include_offline=False)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return routes
+        for server in servers:
+            if not isinstance(server, dict):
+                continue
+            server_id = str(server.get("server_id") or "").strip()
+            if not server_id or server_id == self.server_id or server_id in known:
+                continue
+            transfer_node = server.get("transfer_node")
+            if not isinstance(transfer_node, dict):
+                continue
+            peer_control_endpoint = str(
+                transfer_node.get("peer_control_endpoint") or ""
+            ).strip().rstrip("/")
+            proxy_token = str(server.get("proxy_token") or "").strip()
+            if not peer_control_endpoint or not proxy_token:
+                continue
+            load = server.get("load")
+            if not isinstance(load, dict):
+                load = {}
+            try:
+                active_jobs = max(0, int(load.get("active_jobs") or 0))
+                queue_depth = max(0, int(load.get("queue_depth") or 0))
+                load_value = max(0.0, float(load.get("load") or 0.0))
+            except (TypeError, ValueError):
+                active_jobs = queue_depth = 0
+                load_value = 0.0
+            routes.append(ServiceRoute(
+                server_id=server_id,
+                role=str(server.get("role") or ""),
+                branch=str(server.get("branch") or ""),
+                revision=str(server.get("revision") or ""),
+                port=0,
+                features=tuple(str(item) for item in server.get("features") or ()),
+                endpoint=str(server.get("endpoint") or "").strip().rstrip("/"),
+                peer_control_endpoint=peer_control_endpoint,
+                peer_data_endpoint=str(
+                    transfer_node.get("peer_data_endpoint") or ""
+                ).strip().rstrip("/"),
+                proxy_token=proxy_token,
+                remote=True,
+                online=True,
+                public_server=bool(
+                    server.get("public_server", server.get("role") == "main")
+                ),
+                load=load_value,
+                active_jobs=active_jobs,
+                queue_depth=queue_depth,
+                latency_ms=(
+                    float(server["latency_ms"])
+                    if server.get("latency_ms") not in {None, ""}
+                    else None
+                ),
+            ))
+            known.add(server_id)
+        return routes
+
     def invalidate_research_cache(self) -> None:
         """Drop cached research listings after a local publication mutation."""
         with self._lock:
