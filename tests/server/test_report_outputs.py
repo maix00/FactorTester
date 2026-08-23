@@ -75,7 +75,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
-    assert source_artifacts_for(["cash_detail"]) == {"order_audit"}
+    assert source_artifacts_for(["cash_detail"]) == {"group_execution", "order_audit"}
     group_detail = capabilities["group_research_detail"]
     assert group_detail["presentation"] == "detail"
     assert group_detail["viewer"] == "group_research_detail"
@@ -96,6 +96,9 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert declarations[0]["canonical_artifact"] == "equity_curve_data"
     assert declarations[0]["rendition_artifacts"] == ["equity_curve_report"]
     assert declarations[0]["receipt_artifact"] == "equity_curve_receipt"
+    assert declarations[0]["result_surface"] == "time_series"
+    assert declarations[0]["result_view"] == "equity"
+    assert declarations[0]["supplemental_bundle"] == "time_series"
     assert "equity_curve_data_receipt" not in declarations[0]["artifacts"]
     assert "fee_detail_data" in declarations[1]["artifacts"]
 
@@ -107,7 +110,7 @@ def test_registered_backtest_result_tabs_have_one_canonical_builder_path() -> No
         "server/manager/web/test-modules/backtest/results/model.js"
     ).read_text()
     tab_artifacts = set(re.findall(
-        r'^\s*[a-z_]+:\s*"([a-z_]+_data)",?$', model, re.MULTILINE,
+        r'^\s*([a-z_]+_data):\s*\{surface:', model, re.MULTILINE,
     ))
     definitions = {
         name: value for name, value in OUTPUT_DEFINITIONS.items()
@@ -301,6 +304,7 @@ def test_optional_execution_and_portfolio_outputs_share_retained_sources() -> No
         "fill_turnover": {
             "average": 0.25, "total": 0.5, "observations": 2,
             "source": "fill_audit",
+            "series": [{"timestamp": "1", "turnover": 0.25}],
         },
     })
     source["order_audit"]["strategies"]["A1"]["orders"] = [{
@@ -315,6 +319,7 @@ def test_optional_execution_and_portfolio_outputs_share_retained_sources() -> No
         "fill_id": "fill-1", "cash_before": 900.0, "cash_after": 880.0,
         "margin_before": 100.0, "margin_after": 120.0,
         "realized_pnl": 1.0, "fee": 3.5,
+        "account_id": "ledger-main", "cash_pool_id": "pool-main",
     }]
 
     artifacts = build_report_artifacts(
@@ -332,10 +337,13 @@ def test_optional_execution_and_portfolio_outputs_share_retained_sources() -> No
     fill = payloads["fill_detail_data"]["rows"][0]
     assert fill["cash_change"] == -20.0
     assert fill["margin_change"] == 20.0
+    assert fill["account_id"] == "ledger-main"
+    assert fill["cash_pool_id"] == "pool-main"
     assert payloads["cash_detail_data"]["rows"][0]["cash"] == 880.0
     assert payloads["position_detail_data"]["rows"][0]["quantity"] == 2.0
     assert payloads["exposure_detail_data"]["rows"][0]["gross_exposure"] == 1000.0
     assert payloads["turnover_detail_data"]["rows"][0]["average"] == 0.25
+    assert payloads["turnover_detail_data"]["rows"][1]["turnover"] == 0.25
     assert payloads["drawdown_detail_data"]["rows"]
     assert payloads["period_returns_data"]["rows"]
 

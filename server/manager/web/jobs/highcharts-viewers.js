@@ -49,6 +49,7 @@
     const format = valueFormat(kind, currency);
     return {
       chart: {backgroundColor: "transparent", panning: {enabled: true, type: "x"}, zooming: {type: "x"}},
+      time: {useUTC: false},
       title: {text: title || null, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
       rangeSelector: {selected: 5, inputEnabled: true},
@@ -61,6 +62,33 @@
       plotOptions: {series: {animation: false, boostThreshold: 1000, turboThreshold: 0}},
       series,
     };
+  }
+
+  function attachInteractions(options, displayOptions = {}) {
+    const range = displayOptions.chartRange;
+    if (range && Number.isFinite(range.min) && Number.isFinite(range.max)) {
+      options.xAxis = {...(options.xAxis || {}), min: range.min, max: range.max};
+    }
+    if (typeof displayOptions.onRangeChange === "function") {
+      options.xAxis = options.xAxis || {};
+      const previous = options.xAxis.events?.setExtremes;
+      options.xAxis.events = {...(options.xAxis.events || {}), setExtremes(event) {
+        previous?.call(this, event);
+        if (event?.trigger !== "ft-sync") {
+          displayOptions.onRangeChange(event.min, event.max, this.chart);
+        }
+      }};
+    }
+    if (typeof displayOptions.onPointClick !== "function") return options;
+    options.plotOptions = options.plotOptions || {};
+    options.plotOptions.series = {
+      ...(options.plotOptions.series || {}),
+      cursor: "pointer",
+      point: {events: {click() {
+        displayOptions.onPointClick(this.x, this.series?.userOptions?.custom || {});
+      }}},
+    };
+    return options;
   }
 
   function timeSeriesOptions(viewer, payload, context) {
@@ -173,13 +201,56 @@
   function optionsFor(viewer, payload, context, selectedMetric = "", displayOptions = {}) {
     const artifact = String(payload?.artifact_kind || "");
     if (viewer === "metrics_chart" || artifact === "metrics_over_time") {
-      return applyEvaluationWindow(
+      return attachInteractions(applyEvaluationWindow(
         metricOptions(payload, context, selectedMetric), context, displayOptions,
-      );
+      ), displayOptions);
     }
-    return applyEvaluationWindow(
+    return attachInteractions(applyEvaluationWindow(
       timeSeriesOptions(viewer, payload, context), context, displayOptions,
+    ), displayOptions);
+  }
+
+  function rowSeriesOptions(payload, context, definition = {}, displayOptions = {}) {
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const fields = Array.isArray(definition.fields) ? definition.fields : [];
+    const labels = definition.labels || {};
+    const grouped = new Map();
+    rows.forEach((row, index) => {
+      const time = timestamp(row?.timestamp, index);
+      if (!Number.isFinite(time)) return;
+      const strategy = String(row?.strategy_id || row?.strategy || row?.series || context.t("序列"));
+      fields.forEach(field => {
+        const value = number(row?.[field]);
+        if (value == null) return;
+        const key = `${strategy}\u0000${field}`;
+        if (!grouped.has(key)) grouped.set(key, {strategy, field, data: []});
+        grouped.get(key).data.push([time, value * (definition.percentFields?.includes(field) ? 100 : 1)]);
+      });
+    });
+    const series = [...grouped.values()].map(item => ({
+      name: `${item.strategy} · ${context.t(labels[item.field] || item.field)}`,
+      type: "line", data: item.data,
+      custom: {field: item.field, seriesRef: item.strategy},
+      tooltip: {valueSuffix: definition.percentFields?.includes(item.field) ? "%" : ""},
+    }));
+    const options = baseOptions(
+      context.t(definition.label || "时变指标"), context.t(definition.yTitle || "数值"), series,
     );
+    return attachInteractions(applyEvaluationWindow(options, context, displayOptions), displayOptions);
+  }
+
+  function mountRows(context, target, payload, definition, displayOptions = {}) {
+    if (!window.Highcharts?.stockChart) throw new Error(context.t("Highcharts 组件未加载"));
+    target._ftChart?.destroy?.();
+    target.replaceChildren();
+    target.classList.add("interactive-artifact-chart");
+    const chart = document.createElement("div");
+    chart.className = "interactive-artifact-chart-canvas";
+    target.append(chart);
+    target._ftChart = window.Highcharts.stockChart(
+      chart, rowSeriesOptions(payload, context, definition, displayOptions),
+    );
+    return target._ftChart;
   }
 
   function supports(declaration) {
@@ -219,5 +290,7 @@
     return target._ftChart;
   }
 
-  window.FTJobHighcharts = Object.freeze({metricChoices, mount, optionsFor, supports});
+  window.FTJobHighcharts = Object.freeze({
+    metricChoices, mount, mountRows, optionsFor, rowSeriesOptions, supports,
+  });
 })();

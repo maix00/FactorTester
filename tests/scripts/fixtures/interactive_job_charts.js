@@ -37,6 +37,7 @@ const equity = window.FTJobHighcharts.optionsFor("equity_curve", {
 assert.equal(equity.series[0].name, "A1");
 assert.equal(equity.series[2].name, "A1 · 当前回撤");
 assert.equal(equity.series[2].yAxis, 2);
+assert.equal(equity.time.useUTC, false, "timestamps must render in the browser's local timezone");
 assert.equal(equity.navigator.enabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");

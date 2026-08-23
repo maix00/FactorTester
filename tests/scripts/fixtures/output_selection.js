@@ -31,4 +31,9 @@ assert.deepEqual(
 );
 assert.equal(window.FTJobGeneration.analysisOf({job: {kind: "ic_test"}}, {}), "ic");
 assert.equal(window.FTJobGeneration.analysisOf({job: {kind: "group_backtest"}}, {}), "backtest");
+assert.equal(window.FTJobGeneration.batchCount([
+  {name: "equity", supplemental_bundle: "time_series"},
+  {name: "returns", supplemental_bundle: "time_series"},
+  {name: "orders", supplemental_bundle: "execution_account"},
+], ["equity", "returns", "orders"]), 2);
 console.log("ok");

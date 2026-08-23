@@ -134,6 +134,7 @@
   function baseChart(series, yTitle = "") {
     return {
       chart: {backgroundColor: "transparent", zooming: {type: "x"}},
+      time: {useUTC: false},
       title: {text: null}, credits: {enabled: false},
       legend: {enabled: true}, xAxis: {type: "datetime", ordinal: false},
       yAxis: {title: {text: yTitle}}, tooltip: {shared: true},

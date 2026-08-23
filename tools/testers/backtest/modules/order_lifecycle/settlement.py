@@ -19,6 +19,10 @@ def record_fill_settlement(
     cash_after: float,
     margin_before: float,
     margin_after: float,
+    account_id: str = "",
+    cash_pool_id: str = "",
+    account_currency: str = "",
+    cash_pool_base_currency: str = "",
 ) -> Fill:
     order_store = state.order_store
     audit_store = state.order_flow_store
@@ -47,5 +51,9 @@ def record_fill_settlement(
         cash_after=cash_after,
         margin_before=margin_before,
         margin_after=margin_after,
+        account_id=account_id,
+        cash_pool_id=cash_pool_id,
+        account_currency=account_currency,
+        cash_pool_base_currency=cash_pool_base_currency,
     ))
     return fill

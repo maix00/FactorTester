@@ -16,6 +16,7 @@ const factor = {
   ],
 };
 const series = window.FTICResultCharts.seriesOptions(factor, context);
+assert.equal(series.time.useUTC, false);
 assert.equal(series.navigator.enabled, true);
 assert.equal(series.series[0].data.length, 3);
 assert.ok(Number.isFinite(series.series[0].data[0][0]));

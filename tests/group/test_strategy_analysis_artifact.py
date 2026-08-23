@@ -101,11 +101,11 @@ def test_strategy_analysis_tab_computes_only_requested_payload():
     )
 
     result = build_strategy_analysis_tab(source, {
-        "analysis_tab": "returns", "strategy_id": "strategy-0",
+        "analysis_tab": "distribution", "strategy_id": "strategy-0",
     })
 
-    assert set(result) == {"return_series"}
-    assert result["return_series"][-1]["return"] == pytest.approx(0.02)
+    assert set(result) == {"distribution"}
+    assert result["distribution"]["period_count"] == 2
 
 
 def test_strategy_analysis_bundle_fills_every_registered_strategy_tab():
@@ -145,7 +145,6 @@ def test_strategy_analysis_bundle_fills_every_registered_strategy_tab():
     assert set(bundle) == STRATEGY_ANALYSIS_TABS
     assert all(isinstance(bundle[tab], dict) and bundle[tab] for tab in STRATEGY_ANALYSIS_TABS)
     assert bundle["overview"]["summary"]["Total Return"] == 0.01
-    assert bundle["returns"]["return_series"][-1]["cumulative_return"] == pytest.approx(1.01)
     assert bundle["membership"]["entry_frequency"]
     assert bundle["products"]["product_analysis"]["rows"]
     assert bundle["tradability"]["tradability_analysis"]["avg_trade_notional_ratio"] == 0.25

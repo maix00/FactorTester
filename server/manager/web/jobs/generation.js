@@ -15,6 +15,16 @@
 
   const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+  function batchCount(definitions, selected) {
+    const selectedSet = new Set(selected || []);
+    const identities = new Set();
+    definitions.forEach(item => {
+      if (!selectedSet.has(item.name)) return;
+      identities.add(String(item.supplemental_bundle || `output:${item.name}`));
+    });
+    return identities.size;
+  }
+
   async function waitForGeneration(context, options, child) {
     const childID = encodeURIComponent(String(child?.job_id || ""));
     if (!childID) throw new Error(context.t("补充任务缺少 Job ID"));
@@ -92,14 +102,23 @@
       }
     }, context.t("从任务保留的原始结果生成表格或图像"));
     generate.className = "primary";
+    const batchNote = document.createElement("p");
+    batchNote.className = "output-generation-batch-note";
+    const updateBatchNote = () => {
+      const count = batchCount(definitions, selected);
+      batchNote.textContent = selected.length
+        ? `${context.t("将共享基础数据并按计算批次生成")} · ${count} ${context.t("个批次")}`
+        : context.t("尚未选择结果");
+    };
     section.append(FTOutputChoices.fieldValueSelector(
-      context, definitions, selected, value => { selected = value; },
-    ));
+      context, definitions, selected, value => { selected = value; updateBatchNote(); },
+    ), batchNote);
+    updateBatchNote();
     const actions = document.createElement("div");
     actions.className = "output-generation-actions";
     actions.append(generate, status); section.append(actions);
     return section;
   }
 
-  window.FTJobGeneration = Object.freeze({analysisOf, capabilities, panel});
+  window.FTJobGeneration = Object.freeze({analysisOf, batchCount, capabilities, panel});
 })();

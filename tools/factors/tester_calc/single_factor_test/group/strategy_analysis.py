@@ -25,7 +25,6 @@ ARTIFACT_VERSION = 1
 
 _DETAIL_KEYS = {
     "overview": "summary",
-    "returns": "return_series",
     "membership": "entry_frequency",
     "distribution": "distribution",
     "rolling": "rolling_analysis",
@@ -341,7 +340,6 @@ def build_strategy_analysis_bundle(
     )
     return {
         "overview": {"summary": summary},
-        "returns": {"return_series": returns},
         "membership": {"entry_frequency": entry_frequency},
         "distribution": {"distribution": distribution},
         "rolling": {"rolling_analysis": rolling},
