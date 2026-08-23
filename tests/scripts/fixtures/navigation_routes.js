@@ -21,6 +21,10 @@ assert.deepStrictEqual(match("/jobs", "?scope=mine"), {kind: "jobs", section: "t
 assert.deepStrictEqual(match("/jobs", "?section=tasks"), {kind: "jobs", section: "tasks"});
 assert.deepStrictEqual(match("/jobs", "?section=unknown"), {kind: "jobs", section: "types"});
 assert.deepStrictEqual(match("/mihomo", ""), {kind: "mihomo"});
+assert.deepStrictEqual(match("/docs", ""), {kind: "docs", slug: ""});
+assert.deepStrictEqual(match("/docs/system-overview", ""), {
+  kind: "docs", slug: "system-overview",
+});
 assert.deepStrictEqual(match("/research/local%3Aid", ""), {
   kind: "report", id: "local%3Aid",
 });
