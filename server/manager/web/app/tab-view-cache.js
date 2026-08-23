@@ -174,6 +174,29 @@
       return state.tabSessions.get(tabID);
     }
 
+    function isResearchReportTab(tabID) {
+      return String(tabID || "").startsWith("research-report:");
+    }
+
+    function hasReportHeading(session) {
+      const heading = session?.durable?.heading;
+      return Boolean(heading && String(heading.title || "").trim()
+        && String(heading.eyebrow || "").trim());
+    }
+
+    function invalidateLegacyReportView(tabID, session) {
+      if (!isResearchReportTab(tabID) || hasReportHeading(session)) return false;
+      if (!session.view && !session.view?.coldKey) return false;
+      // Older report tabs persisted the DOM under a publication alias before
+      // concrete reports owned their own tab. Re-render once so the report
+      // entry can restore its durable reading state and write the localized
+      // title/scope metadata to the concrete tab.
+      session.view = null;
+      session.viewReady = false;
+      deleteColdView(tabID);
+      return true;
+    }
+
     function enforceLiveViewLimit(excludeTabID) {
       const live = state.tabs.map(tab => ({
         tabID: tab.id, session: tabSession(tab.id),
@@ -259,6 +282,7 @@
 
     function restoreView(tabID) {
       const session = tabSession(tabID);
+      if (invalidateLegacyReportView(tabID, session)) return false;
       const view = session.view;
       if (view?.rerenderOnRestore) {
         // This flag is a one-shot invalidation, not a permanent session mode.
@@ -301,6 +325,7 @@
 
     function restoreColdView() {
       const session = tabSession(state.activeTabID);
+      if (invalidateLegacyReportView(state.activeTabID, session)) return false;
       const view = session.view;
       if (!view?.coldKey || !view.pendingRestore) return false;
       const snapshot = readColdView(view.coldKey);
