@@ -188,8 +188,17 @@
     }
 
     function invalidateLegacyReportView(tabID, session) {
-      if (!isResearchReportTab(tabID) || hasReportHeading(session)) return false;
-      if (!session.view && !session.view?.coldKey) return false;
+      if (!isResearchReportTab(tabID) || !session.view) return false;
+      const tab = state.tabs.find(item => item.id === tabID);
+      const heading = session.durable?.heading;
+      const expectedTitle = String(heading?.title || tab?.title || "").trim();
+      const expectedEyebrow = String(heading?.eyebrow || "").trim();
+      const currentTitle = String(session.view.title || "").trim();
+      const currentEyebrow = String(session.view.eyebrow || "").trim();
+      const stale = !hasReportHeading(session)
+        || (expectedTitle && currentTitle !== expectedTitle)
+        || (expectedEyebrow && currentEyebrow !== expectedEyebrow);
+      if (!stale) return false;
       // Older report tabs persisted the DOM under a publication alias before
       // concrete reports owned their own tab. Re-render once so the report
       // entry can restore its durable reading state and write the localized
