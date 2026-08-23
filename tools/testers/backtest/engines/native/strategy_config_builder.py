@@ -77,6 +77,7 @@ _LEDGER_LOOKUP_FLOWS = {
     "lookup_historical_fields_on_ledger",
 }
 _LEDGER_OWNED_SETTING_NAMES = {
+    "account_currency",
     "fee_mode",
     "transaction_fee_source",
     "fixed_fee_rate",

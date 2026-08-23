@@ -63,6 +63,7 @@ class LedgerModule(ExecutableModule):
     label: ClassVar[str] = "账本"
 
     cash: ClassVar[FieldRef[Any]] = CashPoolModule.cash
+    account_currency: ClassVar[FieldRef[str]] = FieldRef("account_currency")
     positions: ClassVar[FieldRef[Any]] = FieldRef("positions")
     equity: ClassVar[FieldRef[float]] = FieldRef("equity")
     initial_capital_major = CashPoolModule.initial_capital_major
@@ -89,6 +90,11 @@ class LedgerModule(ExecutableModule):
     order_status_events = FieldRef("order_status_events")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "account_currency": FieldDefinition(
+            public=True, label="账户币种", editor="select", default="CNY", tab="capital",
+            options=CashPoolModule.fields["base_currency"].options,
+            chip_template="账户币种: {value}", tab_label="资金", tab_order=50,
+        ),
         "positions": FieldDefinition(public=False, display_value_kind="positions"),
     }
 

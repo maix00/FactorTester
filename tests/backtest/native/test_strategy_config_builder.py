@@ -335,6 +335,29 @@ def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
     assert config.margin_utilization_tolerance == 0.005
 
 
+def test_apply_strategy_configs_keeps_account_currency_separate_from_pool_base_currency():
+    account = BacktestRunState()
+    book = StrategyBook.from_dict({
+        "strategies": {"A1": "usd-account"},
+        "cash_pools": {"usd-account": "pool-main"},
+        "cash_pool_configs": {
+            "pool-main": {"initial_capital_major": 1_000_000.0, "base_currency": "CNY"},
+        },
+    })
+
+    apply_strategy_configs(
+        account,
+        {"A1": {
+            "engine_mode": "custom", "margin_mode": "none",
+            "account_currency": "USD", **_GROUP_FIELDS,
+        }},
+        strategy_book=book,
+    )
+
+    assert account.ledger_config_for("usd-account").account_currency == "USD"
+    assert cash_pool_store_for(account).config_by_pool["pool-main"].base_currency == "CNY"
+
+
 def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():
     account = BacktestRunState()
     apply_strategy_configs(account, {"A1": {"engine_mode": "auto", **_GROUP_FIELDS}})

@@ -6,7 +6,11 @@ from collections import defaultdict
 from copy import copy
 from typing import Any
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
+from tools.testers.backtest.modules.cash_pool import (
+    account_cash_or_zero,
+    cash_amount_to_pool_base,
+    cash_pool_money,
+)
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.market_data import historical_fields_for_product
@@ -20,8 +24,6 @@ from .batch import add_cash, apply_scale, components
 def constrain_signal_orders(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.cash_rescale import (
         _clone_positions_for_cash_check,
-        _estimated_execution_cash_delta,
-        _round_execution_scaled_quantity,
     )
 
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
@@ -46,9 +48,10 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
 
     for pool_id, entries in groups.items():
         first_ledger = entries[0][2]
-        cash = cash_for_ledger(state, first_ledger)
-        if cash is None:
-            raise RuntimeError(f"cash_pool {pool_id!r} has no cash")
+        cash = cash_pool_money(
+            state, first_ledger, timestamp=ctx.timestamp,
+            include_conversion_cost=True,
+        )
         available = available_cash_for_ledger(
             state, first_ledger, float(cash.to_major()), reason="signal_order",
         )
@@ -125,8 +128,13 @@ def _cash_delta(
         ledger_config=ledger_config,
         product_fields=product_fields,
     ))
-    return _estimated_execution_cash_delta(
-        cash, positions[id(ledger)], strategy_config, candidate,
+    ledger_cash = account_cash_or_zero(state, ledger)
+    delta = _estimated_execution_cash_delta(
+        ledger_cash, positions[id(ledger)], strategy_config, candidate,
         historical, ledger_config, prices,
         product_fields=product_fields,
+    )
+    return cash_amount_to_pool_base(
+        state, ledger, delta, timestamp=ctx.timestamp,
+        include_conversion_cost=True,
     )

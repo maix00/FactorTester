@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from tools.data.types.data_money import DataMoney
-from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
 from .valuation import gross_notional
@@ -80,7 +79,7 @@ def project_components(
             )
             total_delta += delta
             current_cash = _add_cash(current_cash, delta)
-    margin = margin_reserved(working)
+    margin = margin_reserved(state, ctx, components, working)
     equity = starting_equity + total_delta + (margin - starting_margin)
     gross = gross_notional(state, ctx, components, working)
     utilization = float("inf") if equity <= 0 else margin / equity
@@ -111,8 +110,13 @@ def _apply_quantity(
         ledger_config=ledger_config,
         product_fields=component.product_fields,
     ))
-    return _estimated_execution_cash_delta(
-        cash,
+    from tools.testers.backtest.modules.cash_pool import (
+        account_cash_or_zero,
+        cash_amount_to_pool_base,
+    )
+
+    delta = _estimated_execution_cash_delta(
+        account_cash_or_zero(state, component.ledger),
         positions[id(component.ledger)],
         strategy_config,
         candidate,
@@ -121,12 +125,22 @@ def _apply_quantity(
         prices,
         product_fields=component.product_fields,
     )
+    return cash_amount_to_pool_base(
+        state, component.ledger, delta, timestamp=ctx.timestamp,
+        include_conversion_cost=True,
+    )
 
 
-def margin_reserved(positions: dict[int, dict]) -> float:
+def margin_reserved(state, ctx, components, positions: dict[int, dict]) -> float:
+    from tools.testers.backtest.modules.cash_pool import cash_amount_to_pool_base
+
+    ledgers = {id(component.ledger): component.ledger for component in components}
     return sum(
-        float(entry.margin_reserved.to_major())
-        for ledger_positions in positions.values()
+        cash_amount_to_pool_base(
+            state, ledgers[ledger_key], float(entry.margin_reserved.to_major()),
+            timestamp=ctx.timestamp,
+        )
+        for ledger_key, ledger_positions in positions.items()
         for entry in ledger_positions.values()
         if getattr(entry, "margin_reserved", None) is not None
     )

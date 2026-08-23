@@ -26,6 +26,7 @@ class CashPoolConfig:
 class LedgerConfig:
     """Ledger-owned accounting and execution-rule configuration."""
 
+    account_currency: str | None = None
     fee_mode: str | None = None
     transaction_fee_source: str | None = None
     fixed_fee_rate: float | None = None
@@ -50,6 +51,7 @@ def ledger_config_from_mapping(raw: Mapping[str, Any] | LedgerConfig | None) -> 
     if isinstance(raw, LedgerConfig):
         return raw
     known = {
+        "account_currency",
         "fee_mode",
         "transaction_fee_source",
         "fixed_fee_rate",
@@ -67,6 +69,7 @@ def ledger_config_from_mapping(raw: Mapping[str, Any] | LedgerConfig | None) -> 
         "cash_reserve_major",
     }
     return LedgerConfig(
+        account_currency=_optional_str(raw.get("account_currency")),
         fee_mode=_optional_str(raw.get("fee_mode")),
         transaction_fee_source=_optional_str(raw.get("transaction_fee_source")),
         fixed_fee_rate=_optional_float(raw.get("fixed_fee_rate")),
@@ -91,6 +94,7 @@ def merge_ledger_configs(*configs: LedgerConfig) -> LedgerConfig:
     metadata: dict[str, Any] = {}
     for config in configs:
         for field_name in (
+            "account_currency",
             "fee_mode",
             "transaction_fee_source",
             "fixed_fee_rate",
@@ -118,6 +122,7 @@ def ledger_config_field_values(config: LedgerConfig) -> dict[str, Any]:
     return {
         key: value
         for key in (
+            "account_currency",
             "fee_mode",
             "transaction_fee_source",
             "fixed_fee_rate",
