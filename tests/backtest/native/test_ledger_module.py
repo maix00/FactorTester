@@ -11,7 +11,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
-from tools.testers.backtest.engines.native.position import Lot, ProductPosition
+from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
@@ -403,6 +403,60 @@ def test_equity_uses_margin_and_floating_pnl_when_margin_is_tracked():
     _basic_equity(account, signal_ctx)
 
     assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(991_200.0)
+
+
+def test_equity_values_cash_and_margin_positions_in_the_same_ledger():
+    s = Strategy(alias="mixed-accounting")
+    margin_product, cash_product = _product(), _product()
+    config = _strategy_config(s, engine_mode="auto")
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(
+        ProductSelectionModule.products, s,
+        frozenset({margin_product, cash_product}),
+    )
+    _initialize_ledgers(account, ctx)
+
+    ledger = account.ledger_for_strategy(s)
+    set_cash_for_ledger_pool(account, ledger, DataMoney.from_major(
+        990_000.0, currency="CNY", use_minor_units=False))
+    ledger.set(LedgerModule.positions, {
+        margin_product: ProductPosition(
+            quantity=10.0,
+            average_cost=100.0,
+            margin_reserved=DataMoney.from_major(
+                1_000.0, currency="CNY", use_minor_units=False,
+            ),
+        ),
+        cash_product: ProductPosition(
+            quantity=10.0,
+            average_cost=100.0,
+            margin_reserved=None,
+        ),
+    })
+
+    signal_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    signal_ctx.set(MarketDataModule.current_prices, {
+        margin_product: 110.0,
+        cash_product: 110.0,
+    })
+    signal_ctx.set(MarketDataModule.current_historical_fields, {
+        margin_product: {"VolumeMultiple": 2.0},
+        cash_product: {"VolumeMultiple": 1.0},
+    })
+
+    _basic_equity(account, signal_ctx)
+
+    # Margin positions contribute reserved collateral plus floating P&L;
+    # fully funded positions contribute their current market value.  The
+    # former global branch omitted the latter whenever any margin existed.
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(
+        990_000.0 + 1_000.0 + 10.0 * (110.0 - 100.0) * 2.0 + 10.0 * 110.0,
+    )
 
 
 def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():

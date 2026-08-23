@@ -57,30 +57,36 @@ def ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
         strategy,
         ctx.get(MarketDataModule.current_historical_fields, {}),
     )
-    margin_occupied = 0.0
-    for entry in positions.values():
-        margin_reserved = entry.margin_reserved
-        if margin_reserved is None:
-            continue
-        margin_reserved_major = margin_reserved.to_major()
-        if margin_reserved_major > 0:
-            margin_occupied += margin_reserved_major
-    if margin_occupied > 0:
+    margin_products = {
+        product
+        for product, entry in positions.items()
+        if abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
+        and getattr(entry, "margin_reserved", None) is not None
+    }
+    if margin_products:
+        margin_occupied = sum(
+            float(entry.margin_reserved.to_major())
+            for product, entry in positions.items()
+            if product in margin_products
+        )
         floating_pnl = mark_to_market(
             ledger, state.config_for(strategy), prices, historical_fields,
             ledger_config=state.ledger_config_for(ledger),
-            state=state, timestamp=ctx.timestamp,
+            state=state, timestamp=ctx.timestamp, products=margin_products,
         ).to_major()
-        return cash.to_major() + margin_occupied + floating_pnl
+    else:
+        margin_occupied = 0.0
+        floating_pnl = 0.0
     market_value = sum(
         contract_notional(
             required_current_price(prices, product, ctx.timestamp),
             entry.quantity, historical_fields, product,
         )
         for product, entry in positions.items()
-        if abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
+        if product not in margin_products
+        and abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
     )
-    return cash.to_major() + market_value
+    return cash.to_major() + margin_occupied + floating_pnl + market_value
 
 
 def required_cash_for_ledger(state, ledger):

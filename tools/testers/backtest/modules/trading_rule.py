@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pandas as pd
@@ -559,6 +559,7 @@ def mark_to_market(
     ledger_config=None,
     state: Any | None = None,
     timestamp: Any | None = None,
+    products: Collection[object] | None = None,
 ) -> "DataMoney":
     from .ledger_module import LedgerModule
     from .market_data import contract_multiplier_from_fields, historical_fields_for_product
@@ -567,6 +568,8 @@ def mark_to_market(
     total = 0.0
     require_exact = engine_mode_for(strategy_config) == "exact"
     for product, entry in positions.items():
+        if products is not None and product not in products:
+            continue
         if entry.quantity == 0:
             continue
         fields = historical_fields_for_product(historical_fields, product)
