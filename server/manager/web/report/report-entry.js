@@ -60,15 +60,15 @@
       // tab router first.  Standalone Web keeps its ordinary in-page routing.
       nativeReference: Boolean(window.webkit?.messageHandlers?.researchReference),
       publicationID,
-      reportAssetPath: source.isLocal ? source.reportAssetPath : null,
-      loadReportAsset: source.isLocal ? null : assetRef =>
+      reportAssetPath: source.isOwnerLocal ? source.reportAssetPath : null,
+      loadReportAsset: source.isOwnerLocal ? null : assetRef =>
         FTResearchObjectTransfer.blob(
           transferContext,
           publicationID,
           "research_asset",
           source.assetID(assetRef),
         ),
-      loadLocalResource: source.isLocal ? null : resourceID =>
+      loadLocalResource: source.isOwnerLocal ? null : resourceID =>
         FTResearchObjectTransfer.blob(
           transferContext,
           publicationID,
@@ -275,9 +275,12 @@
     }
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
     let blob;
-    if (publicationID.startsWith("local:")) {
-      const localRef = publicationID.slice("local:".length);
-      const endpoint = `/api/client/research/${encodeURIComponent(localRef)}`
+    if (publicationID.startsWith("local:") || publicationID.startsWith("server:")) {
+      const isServer = publicationID.startsWith("server:");
+      const prefix = isServer ? "server:" : "local:";
+      const localRef = publicationID.slice(prefix.length);
+      const base = isServer ? "/api/server-research/" : "/api/client/research/";
+      const endpoint = `${base}${encodeURIComponent(localRef)}`
         + `/local-resources/${encodeURIComponent(resourceID)}`;
       try {
         const response = await fetch(endpoint, {credentials: "same-origin"});

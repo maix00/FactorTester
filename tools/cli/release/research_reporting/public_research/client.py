@@ -10,24 +10,24 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+from tools.cli.commands.research_report_scope_identity import (
+    resolve_branch_report_scope,
+)
 from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.profile import load_profile_root
+from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
 from tools.cli.release.research_reporting.authoring.tree_projection import (
     project_snapshot,
 )
 from tools.cli.release.research_reporting.authoring.tree_store import load_head
-from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
-from tools.cli.release.research_reporting.public_research.projection import (
-    build_upload_projection,
-)
 from tools.cli.release.research_reporting.public_research.object_uploads import (
     ResearchObjectUpload,
     detach_object_bytes,
     projection_hash,
 )
-from tools.cli.commands.research_report_scope_identity import (
-    resolve_branch_report_scope,
+from tools.cli.release.research_reporting.public_research.projection import (
+    build_upload_projection,
 )
+
 from .outbox import PublicResearchOutbox
 
 
@@ -113,7 +113,11 @@ class PublicResearchClient:
                     report_id = str(head["report_id"])
                     publication = public_by_report.get(report_id)
                     pending = pending_by_report.get(report_id)
-                    shared = publication is not None or pending is not None
+                    visibility = (
+                        publication.get("visibility", "private")
+                        if publication else "private"
+                    )
+                    shared = visibility in {"authorized", "public"}
                     values.append({
                         "profile_id": profile_id,
                         "work_package_id": work_package_id,
@@ -121,15 +125,15 @@ class PublicResearchClient:
                         "report_id": report_id,
                         "title": str(head["title"]),
                         "generation": int(head["generation"]),
-                        "visibility": (
-                            publication.get("visibility", "private")
-                            if publication else "pending" if pending else "private"
-                        ),
+                        "visibility": visibility,
                         "publication_id": (
                             publication.get("publication_id")
                             if publication else None
                         ),
                         "is_shared": shared,
+                        "sharing_state": "shared" if shared else "not_shared",
+                        "build_source": "client",
+                        "build_source_ref": profile_id,
                         "sync_status": (
                             "pending" if pending else
                             "synced" if publication else "local"
@@ -253,6 +257,8 @@ class PublicResearchClient:
                         "projection": projection,
                         "public_title": manifest.get("public_title") or "",
                         "show_profile": bool(manifest.get("show_profile")),
+                        "build_source": "client",
+                        "build_source_ref": manifest.get("profile_ref") or "",
                     },
                 )
                 publication_id = str(value.get("publication_id") or "").strip()

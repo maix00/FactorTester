@@ -536,6 +536,11 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
                         head_value = {}
                     result.append({
                         "local_ref": f"{record_id}:{branch_id}",
+                        "source": "client",
+                        "build_source": "client",
+                        "build_source_ref": str(profile.get("profile_id") or ""),
+                        "sharing_state": "not_shared",
+                        "is_shared": False,
                         "record_id": record_id,
                         "branch_id": branch_id,
                         "report_id": str(head_value.get("report_id") or ""),

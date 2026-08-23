@@ -90,8 +90,11 @@
     const resourceID = detailValue(input.detailFields, "resource_id");
     const publicationID = detailValue(input.detailFields, "publication_id");
     if (!/^[a-f0-9]{24}$/i.test(resourceID) || !publicationID) return null;
-    if (publicationID.startsWith("local:")) {
-      return `/api/client/research/${encodeURIComponent(publicationID.slice(6))}`
+    if (publicationID.startsWith("local:") || publicationID.startsWith("server:")) {
+      const server = publicationID.startsWith("server:");
+      const prefix = server ? "server:" : "local:";
+      const base = server ? "/api/server-research/" : "/api/client/research/";
+      return `${base}${encodeURIComponent(publicationID.slice(prefix.length))}`
         + `/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
     }
     return `/api/public-research/${encodeURIComponent(publicationID)}`

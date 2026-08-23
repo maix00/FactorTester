@@ -24,13 +24,15 @@ from server.manager.services.federated_factor_projection import (
     merge_factor_library_projections,
 )
 from server.manager.services.federated_peer_reads import FederatedPeerReadMixin
-from server.manager.services.public_catalog import public_factor_library
 from server.manager.services.profile_directory import PROFILE_DIRECTORY_PRINCIPAL
+from server.manager.services.public_catalog import public_factor_library
+from server.manager.services.research_object_transfer import ResearchObjectTransfer
+from tools.cli.release.research_reporting.public_research.metadata import (
+    provenance_fields,
+)
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
-from server.manager.services.research_object_transfer import ResearchObjectTransfer
-
 
 DEFAULT_CACHE_SECONDS = 10.0
 
@@ -190,6 +192,8 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                         "publication_id", "report_id", "owner_ref", "profile_ref",
                         "title", "generation", "updated_at", "visibility",
                         "is_owned", "href", "projection_hash",
+                        "build_source", "build_source_ref",
+                        "sharing_state", "is_shared",
                     )
                     if key in payload
                 }
@@ -197,6 +201,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 value.setdefault("visibility", "private")
                 value.setdefault("is_owned", value.get("owner_ref") == viewer)
                 value.setdefault("href", f"/research/{publication_id}")
+                value.update(provenance_fields(value))
                 source_id = str(
                     payload.get("storage_server_id")
                     or row.get("origin_manager_id")
@@ -226,6 +231,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 if not isinstance(raw, dict):
                     continue
                 value = dict(raw)
+                value.update(provenance_fields(value))
                 value["source_server_id"] = route.server_id
                 publication_id = str(value.get("publication_id") or "")
                 if not publication_id:
@@ -247,7 +253,6 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
     def _publication_route(
         self, publication_id: str, viewer_ref: str | None,
     ) -> ServiceRoute | None:
-        viewer = str(viewer_ref or VISITOR_PRINCIPAL)
         with self._lock:
             source_id = self._publication_sources.get(publication_id)
         if not source_id:
@@ -416,7 +421,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         )
         value = response.get("value")
         if not isinstance(value, dict):
-            raise ValueError("research object metadata is invalid")
+            raise TypeError("research object metadata is invalid")
         return dict(value)
 
     def list_owner(self, owner_ref: str) -> list[dict[str, Any]]:
@@ -444,7 +449,9 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                     if isinstance(payload, dict) else row.get("entity_id") or ""
                 ).strip()
                 if publication_id and isinstance(payload, dict):
-                    merged.setdefault(publication_id, dict(payload))
+                    value = dict(payload)
+                    value.update(provenance_fields(value))
+                    merged.setdefault(publication_id, value)
         return sorted(
             merged.values(),
             key=lambda item: str(item.get("synced_at") or item.get("updated_at") or ""),

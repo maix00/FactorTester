@@ -46,10 +46,16 @@
     heading.textContent = context.t("共享研究报告");
     section.append(heading);
     const table = FTUI.table(
-      [context.t("报告"), context.t("用户（Profile）"), "Generation", context.t("访问范围"), context.t("同步时间")],
+      [
+        context.t("报告"), context.t("用户（Profile）"), context.t("构建来源"),
+        context.t("共享状态"), "Generation", context.t("访问范围"),
+        context.t("同步时间"),
+      ],
       reports.map(item => [
         item.title,
         ownerDisplay(item, context),
+        buildSource(context, item),
+        sharing(context, item),
         item.generation,
         visibilityTitle(context, item.visibility),
         FTUI.formatDate(item.updated_at),
@@ -73,6 +79,20 @@
   function visibilityTitle(context, value) {
     const title = {private: "仅自己", authorized: "授权用户", public: "公开"}[value];
     return title ? context.t(title) : value || "";
+  }
+
+  function buildSource(context, item) {
+    return context.t(
+      item.build_source === "server_agent"
+        ? "服务器 Agent 构建" : "客户端构建",
+    );
+  }
+
+  function sharing(context, item) {
+    return context.t(
+      item.sharing_state === "shared" || item.is_shared === true
+        ? "共享" : "非共享",
+    );
   }
 
   window.FTResearchShared = Object.freeze({render, resolvePublicationSource});

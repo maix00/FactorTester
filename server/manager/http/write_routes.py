@@ -60,6 +60,8 @@ class WriteRoutesMixin:
             return
         if self._post_agent_routes(parsed):
             return
+        if self._post_server_research_routes(parsed):
+            return
         if self._post_client_research_routes(parsed):
             return
         if parsed.path == "/api/device/challenge":

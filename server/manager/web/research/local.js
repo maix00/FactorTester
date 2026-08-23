@@ -11,9 +11,17 @@
     // A standalone browser cannot read the user's local filesystem.  The
     // embedded Swift client owns that projection and requests it explicitly.
     if (!embedded || !context.session) return;
-    const researchResult = await context.api("/api/client/research");
+    const [researchResult, publicationResult] = await Promise.all([
+      context.api("/api/client/research"),
+      context.api("/api/research-publications/settings").catch(() => ({reports: []})),
+    ]);
     if (context.isRouteCurrent?.() === false) return;
     const rows = researchResult.research || [];
+    const publications = new Map(
+      (publicationResult.reports || [])
+        .filter(item => item?.report_id)
+        .map(item => [String(item.report_id), item]),
+    );
     const section = document.createElement("section");
     section.className = "job-section";
     const heading = document.createElement("h2");
@@ -30,11 +38,19 @@
       ));
     } else {
       const table = FTUI.table(
-        [context.t("研究"), context.t("Profile"), context.t("分支"), context.t("更新时间")],
+        [
+          context.t("研究"), context.t("Profile"), context.t("分支"),
+          context.t("构建来源"), context.t("共享状态"), context.t("更新时间"),
+        ],
         rows.map(item => [
           item.title,
           item.profile_name || item.profile_id,
           item.branch_id,
+          context.t("客户端构建"),
+          context.t(
+            sharingState(item, publications.get(String(item.report_id || "")))
+              === "shared" ? "共享" : "非共享",
+          ),
           FTUI.formatDate(item.updated_at),
         ]),
       );
@@ -47,6 +63,15 @@
       section.append(table.shell);
     }
     mount.append(section);
+  }
+
+  function sharingState(item, publication) {
+    const value = item?.sharing_state || publication?.sharing_state;
+    if (value === "shared" || value === "not_shared") return value;
+    if (item?.is_shared === true || publication?.is_shared === true) return "shared";
+    const visibility = item?.visibility || publication?.visibility;
+    return ["authorized", "public"].includes(visibility)
+      ? "shared" : "not_shared";
   }
 
   function clientDownload(context, value) {
