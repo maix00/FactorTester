@@ -34,7 +34,7 @@ if [[ -n "${FACTORTESTER_SSH_HOST_KEY_ALIAS:-}" ]]; then
 fi
 
 source_db="$(cd "$repo_root" && python -c 'from settings import CACHE_DB_PATH; print(CACHE_DB_PATH)')"
-python "$repo_root/tools/migrations/sync_field_history_snapshot.py" \
+python -m tools.migrations.sync_field_history_snapshot \
   export "$source_db" "$snapshot"
 gzip -c "$snapshot" > "$compressed_snapshot"
 
@@ -71,9 +71,9 @@ sudo docker cp "$expanded_snapshot" "$container:$container_snapshot"
 sudo docker exec "$container" mkdir -p /data/backups/field-history
 sudo docker exec "$container" sh -c '
 destination="$(python -c '\''from settings import CACHE_DB_PATH; print(CACHE_DB_PATH)'\'')"
-python tools/migrations/sync_field_history_snapshot.py \
+python -m tools.migrations.sync_field_history_snapshot \
   install "$1" "$destination" "$2"
-python tools/migrations/sync_field_history_snapshot.py \
+python -m tools.migrations.sync_field_history_snapshot \
   install "$1" "$destination" "$2" --apply
 ' sh "$container_snapshot" "$container_backup"
 REMOTE
