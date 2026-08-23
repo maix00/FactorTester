@@ -47,9 +47,17 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.FTBacktestStrategyAnalysis = {open() {}};
           window.FTBacktestSnapshotView = {open() {}};
           window.FTJobHighcharts = {
+            metricChoices(payload) {
+              const rows = payload?.rows || [];
+              return [
+                ["annual_return", "年化收益率"], ["sharpe_ratio", "Sharpe ratio"],
+              ].filter(([key]) => rows.some(row => row[key] != null))
+                .map(([key, label]) => ({key, label}));
+            },
             mount(_context, target, payload, viewer, display) {
               target.dataset.mountedViewer = viewer;
               target.dataset.seriesCount = String(payload.series?.length || 0);
+              target.dataset.selectedMetric = display?.selectedMetric || "";
               window.__pointClick = display?.onPointClick;
             }, mountRows(_context, target) { target.dataset.mountedViewer = "rows"; },
           };
@@ -68,6 +76,13 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
               series: [
                 {strategy_id: "strategy-a1", label: "A1", timestamps: [1, 2], values: [100, 101], drawdown: [0, -0.01]},
                 {strategy_id: "strategy-a2", label: "A2", timestamps: [1, 2], values: [100, 99], drawdown: [0, -0.01]},
+              ],
+            },
+            metrics_over_time_data: {
+              artifact_kind: "metrics_over_time",
+              rows: [
+                {series: "A1", timestamp: "2025-01-02", annual_return: 0.1, sharpe_ratio: 1.2},
+                {series: "A2", timestamp: "2025-01-02", annual_return: 0.2, sharpe_ratio: 1.3},
               ],
             },
             order_detail_data: {columns: ["strategy", "order_id"], rows: orderRows},
@@ -89,6 +104,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             jobID: "job-browser",
             artifacts: [
               {name: "equity_curve_data", state: "active"},
+              {name: "metrics_over_time_data", state: "active"},
               {name: "order_detail_data", state: "active"},
             ],
             resultSummary: {
@@ -111,16 +127,52 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"equity_curve\"]') !== null"
         )
-        assert page.evaluate("window.__artifactFetches") == ["equity_curve_data"]
+        assert page.locator(
+            ".backtest-time-series-surface .backtest-surface-filter-row"
+        ).count() == 2
+        assert page.locator(
+            ".backtest-time-series-surface .backtest-surface-filter-label"
+        ).all_text_contents() == ["策略", "曲线"]
+        page.wait_for_function(
+            "window.__artifactFetches.includes('metrics_over_time_data')"
+        )
+        page.wait_for_function(
+            "document.querySelector('input[data-filter-value=\"metric:sharpe_ratio\"]') !== null"
+        )
+        assert set(page.evaluate("window.__artifactFetches")) == {
+            "equity_curve_data", "metrics_over_time_data",
+        }
         assert page.locator('[data-mounted-viewer="equity_curve"]').get_attribute(
             "data-series-count"
         ) == "2"
+
+        page.locator(".backtest-result-chart-filter summary").click()
+        chart_options = page.locator(
+            ".backtest-result-chart-filter .ft-multi-select-options"
+        )
+        chart_options.get_by_text("净值", exact=True).wait_for()
+        chart_options.get_by_text("回撤", exact=True).wait_for()
+        chart_options.get_by_text("年化收益率", exact=True).wait_for()
+        chart_options.get_by_text("Sharpe ratio", exact=True).wait_for()
+        page.locator('input[data-filter-value="equity"]').uncheck()
+        page.locator('input[data-filter-value="drawdown"]').check()
+        page.locator('input[data-filter-value="metric:sharpe_ratio"]').check()
+        page.get_by_role("button", name="保存").click()
+        page.wait_for_function(
+            "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]') !== null"
+        )
+        page.wait_for_function(
+            "document.querySelector('[data-selected-metric=\"sharpe_ratio\"]') !== null"
+        )
+        assert page.locator(".backtest-chart-card h3").all_text_contents() == [
+            "回撤", "Sharpe ratio",
+        ]
 
         page.locator(".backtest-result-strategy-filter summary").click()
         page.locator('input[data-filter-value="strategy-a1"]').check()
         page.get_by_role("button", name="保存").click()
         page.wait_for_function(
-            "document.querySelector('[data-mounted-viewer=\"equity_curve\"]')?.dataset.seriesCount === '1'"
+            "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]')?.dataset.seriesCount === '1'"
         )
         page.evaluate("window.__pointClick(1700000000000)")
         page.get_by_role("dialog").locator("strong", has_text="order-1").wait_for()
@@ -133,6 +185,12 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         assert page.get_by_role("button", name="上一时刻").is_enabled()
         page.get_by_role("button", name="订单", exact=True).click()
         page.get_by_text("策略、账户与资金池关系").wait_for()
+        assert page.locator(
+            ".backtest-dimension-filters .backtest-surface-filter-row"
+        ).count() == 4
+        assert page.locator(
+            ".backtest-dimension-filters .backtest-surface-filter-label"
+        ).all_text_contents() == ["账户", "资金池", "账户币种", "资金池基准币种"]
         assert page.get_by_text("account-1", exact=True).count() >= 1
         page.get_by_role("button", name="按账户").click()
         page.locator(".backtest-relation-table").get_by_text(
@@ -145,9 +203,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function(
             "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 20"
         )
-        assert page.evaluate("window.__artifactFetches") == [
-            "equity_curve_data", "order_detail_data",
-        ]
+        assert set(page.evaluate("window.__artifactFetches")) == {
+            "equity_curve_data", "metrics_over_time_data", "order_detail_data",
+        }
         page.locator(
             ".backtest-result-lazy-target > .backtest-domain-table"
         ).get_by_role("button", name="下一页").click()
@@ -162,11 +220,11 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
 
         page.get_by_role("button", name="时变指标").click()
         page.wait_for_function(
-            "document.querySelector('[data-mounted-viewer=\"equity_curve\"]') !== null"
+            "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]') !== null"
         )
-        assert page.evaluate("window.__artifactFetches") == [
-            "equity_curve_data", "order_detail_data",
-        ], "returning to a result tab must reuse its loaded payload"
+        assert set(page.evaluate("window.__artifactFetches")) == {
+            "equity_curve_data", "metrics_over_time_data", "order_detail_data",
+        }, "returning to a result tab must reuse its loaded payload"
         assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "A1"
         assert errors == []
         browser.close()
