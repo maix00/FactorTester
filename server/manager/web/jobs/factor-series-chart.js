@@ -76,7 +76,7 @@
         panning: {enabled: true, type: "x"}, panKey: "shift",
         zooming: {type: "x", mouseWheel: {enabled: true, type: "x"}},
       },
-      time: {useUTC: false},
+      time: window.FTChartTimeline.timeOptions(),
       title: {text: `${options.product || ""} · ${options.factorLabel || t("因子")}`},
       subtitle: {text: `${bars.length} ${t("条价格")} · ${factorPoints.length} ${t("个因子值")}`},
       rangeSelector: {selected: 5},

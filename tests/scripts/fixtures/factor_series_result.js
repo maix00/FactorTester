@@ -16,6 +16,7 @@ context.window = context;
 vm.createContext(context);
 [
   "server/manager/web/core/price-chart.js",
+  "server/manager/web/jobs/highcharts-timeline.js",
   "server/manager/web/jobs/factor-series-model.js",
   "server/manager/web/jobs/factor-series-chart.js",
   "server/manager/web/jobs/factor-series-view.js",

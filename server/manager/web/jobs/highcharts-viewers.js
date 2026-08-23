@@ -49,7 +49,7 @@
     const format = valueFormat(kind, currency);
     return {
       chart: {backgroundColor: "transparent", panning: {enabled: true, type: "x"}, zooming: {type: "x"}},
-      time: {useUTC: false},
+      time: window.FTChartTimeline.timeOptions(),
       title: {text: title || null, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
       rangeSelector: {selected: 5, inputEnabled: true},
