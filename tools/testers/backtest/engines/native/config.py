@@ -170,8 +170,10 @@ def _optional_bool(value: object) -> bool | None:
         return value
     if isinstance(value, str):
         lowered = value.strip().lower()
+        if lowered in {"", "auto", "automatic"}:
+            return None
         if lowered in {"1", "true", "yes", "on"}:
             return True
         if lowered in {"0", "false", "no", "off"}:
             return False
-    return bool(value)
+    raise ValueError(f"invalid tri-state boolean value: {value!r}")

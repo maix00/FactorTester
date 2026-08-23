@@ -70,9 +70,10 @@ class FeeModule(ExecutableModule):
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "transaction_fee_source": FieldDefinition(
-            public=True, label="交易费来源", default="exchange",
+            public=True, label="交易费来源", default="auto",
             editor="select", tab="cost",
             options=(
+                ("auto", "按经纪商/市场规则自动"),
                 ("exchange", "交易所"), ("openctp", "OpenCTP经纪商"),
             ),
             editable_if={"engine_mode": ("custom",)},

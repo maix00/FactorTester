@@ -25,7 +25,10 @@ from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.testers.backtest.modules.margin import MarginModule
-from tools.testers.backtest.modules.minor_unit import MinorUnitModule
+from tools.testers.backtest.modules.minor_unit import (
+    MinorUnitModule,
+    resolve_use_minor_units,
+)
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.slippage import SlippageModule
@@ -105,21 +108,21 @@ def translate_strategy_config(
 def _note_minor_unit_precision(
     alias: str, config: "StrategyConfig", *, framework: str, fallbacks: list[dict[str, Any]]
 ) -> None:
-    """MinorUnitModule.use_minor_units defaults to True for every engine_mode
-    except "basic" (see minor_unit.py's default_if). Worker runners always
+    """Worker runners always
     compute in plain major-unit floats -- there is no integer-minor-unit
     ledger to route into on the framework side -- so a True value can't be
     silently honored (ADR-024). This isn't a different algorithm the way
     fee_mode/margin_mode are, just coarser (cent-level, not float-epsilon)
     precision, so it's recorded as a fallback rather than rejected outright.
     """
-    if not bool(config.get(MinorUnitModule.use_minor_units, True)):
+    if not resolve_use_minor_units(config):
         return
+    requested = config.get(MinorUnitModule.use_minor_units, "auto")
     fallbacks.append({
         "setting_key": "use_minor_units",
         "module": "minor_unit",
         "engine": framework,
-        "requested_value": True,
+        "requested_value": requested,
         "applied_value": "engine_native",
         "reason": "engine_disabled_value",
     })

@@ -23,6 +23,9 @@ def emit_group_run_outputs(
         project_net_returns,
     )
     from server.services.external_factor_artifacts import result_metadata
+    from tools.testers.backtest.engines.native.effective_settings import (
+        build_effective_runtime_settings,
+    )
 
     payload = prepared["payload"]
     run_id = prepared["run_id"]
@@ -51,6 +54,11 @@ def emit_group_run_outputs(
     )
     if net_returns is not None:
         sink.emit_artifact("net_returns", net_returns)
+    effective_runtime_settings = build_effective_runtime_settings(
+        account,
+        settings_by_strategy=execution["settings_by_strategy"],
+        products=prepared["all_products"],
+    )
     group_execution = {
         "run_id": execution["payload"]["run_id"],
         "engine_result": execution["engine_result"],
@@ -62,6 +70,7 @@ def emit_group_run_outputs(
                 "market_rules": execution["payload"].get("market_rules") or {},
             },
             "settings_by_strategy": execution["settings_by_strategy"],
+            "effective_runtime_settings": effective_runtime_settings,
         },
     }
     sink.emit_core_artifact(
@@ -95,6 +104,7 @@ def emit_group_run_outputs(
             "market_rule_fallback": prepared["market_rule_fallback"],
             "groups": prepared["resolved_backtest_settings"],
         },
+        "effective_runtime_settings": effective_runtime_settings,
         "silent_default_settings": silent_default_settings_for_run(
             payload,
             prepared["flat_groups"],

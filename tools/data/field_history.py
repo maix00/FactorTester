@@ -880,6 +880,8 @@ def _filter_transaction_fee_source_frame(
 def _normalise_transaction_fee_source(value: object) -> str:
     source = str(value or TRANSACTION_FEE_SOURCE_EXCHANGE).strip().lower()
     aliases = {
+        "auto": TRANSACTION_FEE_SOURCE_EXCHANGE,
+        "automatic": TRANSACTION_FEE_SOURCE_EXCHANGE,
         "exchange_base": TRANSACTION_FEE_SOURCE_EXCHANGE,
         "broker_openctp": TRANSACTION_FEE_SOURCE_OPENCTP,
         "openctp_broker": TRANSACTION_FEE_SOURCE_OPENCTP,

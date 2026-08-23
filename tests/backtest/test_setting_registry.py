@@ -281,7 +281,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "counterparty_profile": {"exchange_base": "exchange", "openctp_broker": "openctp"},
     }
     assert {option["value"] for option in index["defaults"]["transaction_fee_source"]["value_descriptor"]["options"]} == {
-        "exchange", "openctp",
+        "auto", "exchange", "openctp",
     }
     assert index["defaults"]["fixed_fee_rate"]["rules"]["visible_if"] == {
         "fee_mode": ["fixed"],
@@ -328,7 +328,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "OpenRatioByMoney",
         "CostBasisMethod",
     }
-    assert index["defaults"]["historical_field_policy"]["value_descriptor"]["options"][1] == {
+    assert index["defaults"]["historical_field_policy"]["value_descriptor"]["options"][0] == {
+        "value": "auto",
+        "label": "按执行模式自动选择",
+    }
+    assert index["defaults"]["historical_field_policy"]["value_descriptor"]["options"][2] == {
         "value": "latest_available",
         "label": "缺失历史数据由时间差最近的数据向后填充",
     }
@@ -368,10 +372,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     # money_unit_policy (with per-engine override: rqalpha forces
     # "engine_native", disabling "minor_units") was an execution-engine
     # dispatch concern spanning native/backtrader/qlib/rqalpha -- replaced
-    # by MinorUnitModule.use_minor_units, a plain boolean scoped to the
+    # by MinorUnitModule.use_minor_units, a tri-state intent scoped to the
     # native engine only (other engines' money-precision handling is their
     # own concern, not modeled here).
-    assert index["defaults"]["use_minor_units"]["value"] is True
+    assert index["defaults"]["use_minor_units"]["value"] == "auto"
     assert all(item.get("module") for item in index["defaults"].values())
     assert all(chip.get("module") for chip in index["chip_fields"])
     assert all(chip.get("target_tab") for chip in index["chip_fields"])

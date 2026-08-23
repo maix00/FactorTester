@@ -423,25 +423,25 @@ def test_end_session_skip_defaults_to_false():
     assert config.get(FactorSignalModule.end_session_skip) is False
 
 
-def test_use_minor_units_defaults_to_true_outside_basic_engine_mode():
+def test_use_minor_units_preserves_auto_intent_outside_basic_engine_mode():
     from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 
     for engine_mode in ("auto", "custom", "exact"):
         configs = build_strategy_configs({"A1": {"engine_mode": engine_mode, **_GROUP_FIELDS}})
         config = next(iter(configs.values()))
-        assert config.get(MinorUnitModule.use_minor_units) is True, engine_mode
+        assert config.get(MinorUnitModule.use_minor_units) == "auto", engine_mode
     # unset engine_mode resolves to "auto" (EngineModule.engine_mode's own default)
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
-    assert config.get(MinorUnitModule.use_minor_units) is True
+    assert config.get(MinorUnitModule.use_minor_units) == "auto"
 
 
-def test_use_minor_units_defaults_to_false_only_for_basic_engine_mode():
+def test_use_minor_units_preserves_basic_engine_conditional_intent():
     from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 
     configs = build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
-    assert config.get(MinorUnitModule.use_minor_units) is False
+    assert config.get(MinorUnitModule.use_minor_units) == "false"
 
 
 def test_use_minor_units_explicit_value_overrides_the_engine_mode_default():

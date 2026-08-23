@@ -253,7 +253,7 @@ def test_resolve_use_int_position_basic_false_auto_true_custom_reads_field():
     assert _resolve_use_int_position(_config(engine_mode="basic")) is False
     assert _resolve_use_int_position(_config(engine_mode="auto")) is True
     assert _resolve_use_int_position(_config(engine_mode="custom"), _ledger_config(accounting_mode="Custom", use_int_position=True)) is True
-    assert _resolve_use_int_position(_config(engine_mode="custom"), _ledger_config(accounting_mode="Custom")) is False
+    assert _resolve_use_int_position(_config(engine_mode="custom"), _ledger_config(accounting_mode="Custom")) is True
 
 
 def test_resolve_margin_mode_defaults_auto_and_reads_field():

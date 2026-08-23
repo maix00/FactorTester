@@ -416,21 +416,22 @@ class MarketDataModule(ExecutableModule):
         "historical_field_policy": FieldDefinition(
             public=True,
             label="历史字段",
-            default=str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
+            default="auto",
             editor="select",
             tab="engine",
             editable_if={"engine_mode": ("custom",)},
             default_if={
                 "engine_mode": {
-                    "exact": str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
-                    "auto": str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
-                    "custom": str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
+                    "exact": "auto",
+                    "auto": "auto",
+                    "custom": "auto",
                 },
             },
             chip_template="历史字段: {value}",
             tab_label="执行引擎",
             tab_order=10,
             options=(
+                ("auto", "按执行模式自动选择"),
                 (str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value), "真实历史数据"),
                 (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "缺失历史数据由时间差最近的数据向后填充"),
             ),
@@ -1573,7 +1574,7 @@ def _load_raw_market_data(state, ctx) -> None:
             transaction_fee_source=_transaction_fee_source_for_state(state),
         ),
         "trading_day_resolver": TimestampTradingDayResolver(trading_day_mapping) if trading_day_mapping else None,
-        "historical_field_policy": request.get("policy", "latest_available"),
+        "historical_field_policy": request.get("policy", "auto"),
         "historical_field_names": _required_market_rule_field_names(state),
         "included_products": tuple(series_by_product.keys()),
         "excluded_out_of_range_products": tuple(store.excluded_out_of_range),
@@ -1895,7 +1896,7 @@ def _initialize_field_state(state, ctx) -> None:
     provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
     if raw_prices is None or raw_prices.empty or resolver is None or provider is None:
         return
-    raw_policy = getattr(store, "historical_field_policy", None) or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value
+    raw_policy = getattr(store, "historical_field_policy", None) or "auto"
     policy = _historical_field_policy_for_engine(state, raw_policy)
     ctx.set(MarketDataModule.historical_field_policy, policy)
     store.publish_historical_field_policy(policy)
@@ -2403,9 +2404,15 @@ def _historical_field_policy_for_engine(state, raw_policy: object | None) -> str
         mode = engine_mode_for(next(iter(configs.values())))
     if mode == "exact":
         return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
-    if mode in {"auto", "custom"}:
-        return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
-    return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
+    policy = str(raw_policy or "auto").strip().lower()
+    if policy in {"", "auto", "automatic"}:
+        return str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
+    if policy not in {
+        str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+        str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
+    }:
+        raise ValueError(f"unsupported historical_field_policy: {raw_policy!r}")
+    return policy
 
 
 def _required_market_rule_field_names(state) -> tuple[str, ...]:
@@ -2414,7 +2421,10 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
     for strategy, config in getattr(state, "strategy_configs", {}).items():
         from tools.testers.backtest.modules.fee import _resolve_fee_mode
         from tools.testers.backtest.modules.margin import _resolve_margin_mode
-        from tools.testers.backtest.modules.trading_rule import _effective_accounting_mode
+        from tools.testers.backtest.modules.trading_rule import (
+            _configured_tristate_bool,
+            _effective_accounting_mode,
+        )
 
         ledger = state.ledger_for_strategy(strategy)
         ledger_config = state.ledger_config_for(ledger)
@@ -2430,7 +2440,9 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
-        if accounting_mode == "Custom" and bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)):
+        if accounting_mode == "Custom" and _configured_tristate_bool(
+            getattr(ledger_config, "daily_mark_to_market_enabled", None),
+        ) is not False:
             fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         margin_mode = _resolve_margin_mode(config, ledger_config)
         allocation = str(config.get(allocation_ref, "") or "")

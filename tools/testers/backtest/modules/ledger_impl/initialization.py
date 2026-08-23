@@ -11,7 +11,9 @@ from tools.testers.backtest.modules.cash_pool import (
     ensure_cash_pool_config_for_strategy_ledger,
     set_cash_for_ledger_pool,
 )
-from tools.testers.backtest.modules.minor_unit import MinorUnitModule
+from tools.testers.backtest.modules.minor_unit import (
+    resolve_use_minor_units,
+)
 from tools.testers.backtest.modules.strategy_book import (
     assign_ledger_for_strategy,
     cash_pool_id_for_ledger,
@@ -40,7 +42,7 @@ def initialize_ledgers(state, ctx) -> None:
         )
         initial_capital = float(pool_config.initial_capital_major or 0.0)
         base_currency = pool_config.base_currency or "CNY"
-        use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
+        use_minor_units = resolve_use_minor_units(strategy_config)
         ledger = state.ledgers.get(ledger_key) or LedgerState(
             strategy=strategy, base_currency=base_currency, ledger_id=ledger_id,
         )

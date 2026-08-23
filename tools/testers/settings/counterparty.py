@@ -219,7 +219,7 @@ def _register_default_counterparty_profiles() -> None:
             FeeModule.transaction_fee_source: "exchange",
             MarginModule.margin_mode: "auto",
             TradingRuleModule.accounting_mode: "Auto",
-            TradingRuleModule.use_int_position: True,
+            TradingRuleModule.use_int_position: "true",
         },
     ))
     register_counterparty_profile(CounterPartyProfile(
@@ -230,7 +230,7 @@ def _register_default_counterparty_profiles() -> None:
             FeeModule.transaction_fee_source: "openctp",
             MarginModule.margin_mode: "auto",
             TradingRuleModule.accounting_mode: "Auto",
-            TradingRuleModule.use_int_position: True,
+            TradingRuleModule.use_int_position: "true",
         },
     ))
 

@@ -73,8 +73,8 @@ class TradingRuleModule(ExecutableModule):
 
     accounting_mode: ClassVar[FieldRef[AccountingMode]] = FieldRef("accounting_mode")
     cost_basis_method: ClassVar[FieldRef[CostBasisMethod]] = FieldRef("cost_basis_method")
-    daily_mark_to_market_enabled: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled")
-    use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
+    daily_mark_to_market_enabled: ClassVar[FieldRef[str]] = FieldRef("daily_mark_to_market_enabled")
+    use_int_position: ClassVar[FieldRef[str]] = FieldRef("use_int_position")
     daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
     resolved_daily_mark_to_market: ClassVar[FieldRef[Any]] = FieldRef("resolved_daily_mark_to_market")
 
@@ -107,20 +107,25 @@ class TradingRuleModule(ExecutableModule):
             chip_template="记账: {value}", tab_label="记账规则", tab_order=180,
         ),
         "cost_basis_method": FieldDefinition(
-            public=True, label="成本法", default="WeightAverage", editor="select", tab="accounting",
-            options=(("WeightAverage", "加权平均成本法"), ("FIFO", "先进先出"),
+            public=True, label="成本法", default="auto", editor="select", tab="accounting",
+            options=(("auto", "按市场规则自动"), ("WeightAverage", "加权平均成本法"), ("FIFO", "先进先出"),
                       ("LIFO", "后进先出"), ("HIFO", "高进先出")),
             editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            default_if={"engine_mode": {"basic": "WeightAverage"}},
             chip_template="成本法: {value}", tab_label="记账规则", tab_order=180,
         ),
         "daily_mark_to_market_enabled": FieldDefinition(
-            public=True, label="逐日盯市", default=False, editor="boolean", tab="accounting",
+            public=True, label="逐日盯市", default="auto", editor="select", tab="accounting",
+            options=(("auto", "按市场规则自动"), ("true", "开启"), ("false", "关闭")),
             editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            default_if={"engine_mode": {"basic": "false"}},
             chip_template="逐日盯市: {value}", tab_label="记账规则", tab_order=180,
         ),
         "use_int_position": FieldDefinition(
-            public=True, label="整数持仓", default=False, editor="boolean", tab="accounting",
+            public=True, label="整数持仓", default="auto", editor="select", tab="accounting",
+            options=(("auto", "按执行规则自动"), ("true", "开启"), ("false", "关闭")),
             editable_if={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            default_if={"engine_mode": {"basic": "false"}},
             chip_template="整数持仓: {value}", tab_label="记账规则", tab_order=180,
         ),
         "trading_rule_custom_product_fields": custom_product_editor_definition(
@@ -203,8 +208,16 @@ def _resolve_method(
     if mode == "Basic":
         return "WeightAverage"
     if mode == "Custom":
-        method = getattr(ledger_config, "cost_basis_method", None) or "WeightAverage"
-        _validate_daily_mark_to_market_cost_basis(strategy_config, method, product, ledger_config=ledger_config)
+        method = _configured_cost_basis_method(ledger_config)
+        if method is None:
+            method = infer_auto_cost_basis_method(
+                historical_fields,
+                require_exact=require_exact,
+                product=product,
+            )
+        _validate_daily_mark_to_market_cost_basis(
+            strategy_config, method, product, ledger_config=ledger_config,
+        )
         return method
     return infer_auto_cost_basis_method(historical_fields, require_exact=require_exact, product=product)
 
@@ -222,11 +235,21 @@ def _resolve_daily_mark_to_market_enabled(
         return False
     fields = historical_fields or {}
     if mode == "Custom":
-        enabled = bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
+        configured = _configured_tristate_bool(
+            getattr(ledger_config, "daily_mark_to_market_enabled", None),
+        )
+        enabled = configured
+        if enabled is None:
+            enabled = _infer_daily_mark_to_market_enabled(
+                fields, require_exact=require_exact, product=product,
+            )
         if enabled:
             _validate_daily_mark_to_market_cost_basis(
                 strategy_config,
-                getattr(ledger_config, "cost_basis_method", None) or "WeightAverage",
+                _resolve_method(
+                    strategy_config, product, fields,
+                    require_exact=require_exact, ledger_config=ledger_config,
+                ),
                 product,
                 ledger_config=ledger_config,
             )
@@ -258,9 +281,27 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
     if _ledger_config_disables_daily_mark_to_market(ledger_config):
         return False
     if mode == "Custom":
-        enabled = bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
+        configured = _configured_tristate_bool(
+            getattr(ledger_config, "daily_mark_to_market_enabled", None),
+        )
+        if configured is None:
+            configured = _infer_daily_mark_to_market_enabled(
+                fields,
+                require_exact=_ledger_requires_exact(ledger_config),
+                product=product,
+            )
+        enabled = configured
         if enabled:
-            _validate_daily_mark_to_market_ledger_config(product, ledger_config=ledger_config)
+            method = _configured_cost_basis_method(ledger_config)
+            if method is None:
+                method = infer_auto_cost_basis_method(
+                    fields,
+                    require_exact=_ledger_requires_exact(ledger_config),
+                    product=product,
+                )
+            _validate_daily_mark_to_market_ledger_config(
+                product, method=method, ledger_config=ledger_config,
+            )
         return enabled
     explicit_field = fields.get("DailyMarkToMarketEnabled")
     if explicit_field not in (None, ""):
@@ -275,7 +316,10 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
 
 
 def _ledger_config_disables_daily_mark_to_market(ledger_config=None) -> bool:
-    if bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)):
+    configured = _configured_tristate_bool(
+        getattr(ledger_config, "daily_mark_to_market_enabled", None),
+    )
+    if configured is True:
         return False
     margin_mode = str(getattr(ledger_config, "margin_mode", "") or "").lower()
     return margin_mode in {"off", "none", "zero"}
@@ -292,15 +336,18 @@ def _validate_daily_mark_to_market_cost_basis(
     *,
     ledger_config=None,
 ) -> None:
-    if bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)) and method == "WeightAverage":
+    if _configured_tristate_bool(
+        getattr(ledger_config, "daily_mark_to_market_enabled", None),
+    ) is True and method == "WeightAverage":
         raise ValueError(
             f"Daily mark-to-market requires a lot-based cost basis for {product}; "
             "use FIFO, LIFO, or HIFO instead of WeightAverage"
         )
 
 
-def _validate_daily_mark_to_market_ledger_config(product: object, *, ledger_config=None) -> None:
-    method = str(getattr(ledger_config, "cost_basis_method", None) or "WeightAverage")
+def _validate_daily_mark_to_market_ledger_config(
+    product: object, *, method: str, ledger_config=None,
+) -> None:
     if method == "WeightAverage":
         raise ValueError(
             f"Daily mark-to-market requires a lot-based cost basis for {product}; "
@@ -332,6 +379,46 @@ def infer_auto_cost_basis_method(
     return "WeightAverage"
 
 
+def _configured_cost_basis_method(ledger_config=None) -> CostBasisMethod | None:
+    raw = getattr(ledger_config, "cost_basis_method", None)
+    if raw in (None, "", "auto", "Auto"):
+        return None
+    method = str(raw)
+    if method not in _VALID_COST_BASIS_METHODS:
+        raise ValueError(f"unsupported configured cost basis method: {method!r}")
+    return cast(CostBasisMethod, method)
+
+
+def _configured_tristate_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"", "auto", "automatic"}:
+        return None
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    raise ValueError(f"invalid tri-state boolean value: {value!r}")
+
+
+def _infer_daily_mark_to_market_enabled(
+    fields: Mapping[str, object], *, require_exact: bool, product: object,
+) -> bool:
+    explicit = fields.get("DailyMarkToMarketEnabled")
+    if explicit not in (None, ""):
+        return _bool_field(explicit)
+    if str(fields.get("CostBasisMethod") or "") == "DailyMarkToMarket":
+        return True
+    if _has_daily_mark_to_market_indicator(fields):
+        return True
+    if require_exact:
+        raise KeyError(f"exact accounting requires DailyMarkToMarketEnabled for {product}")
+    return False
+
+
 def _bool_field(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -356,7 +443,13 @@ def _resolve_use_int_position(strategy_config: "StrategyConfig", ledger_config=N
         return False
     if mode == "Auto":
         return True
-    return bool(getattr(ledger_config, "use_int_position", False))
+    configured = _configured_tristate_bool(
+        getattr(ledger_config, "use_int_position", None),
+    )
+    # `auto` retains the native whole-contract policy.  It is deliberately
+    # resolved here, rather than represented by the field default, so the
+    # RunSpec never lies about an inferred value.
+    return True if configured is None else configured
 
 
 def open_position(
@@ -407,7 +500,6 @@ def close_position(
 
     positions = ledger.get(LedgerModule.positions, {})
     entry = positions[product]
-    prior_quantity = entry.quantity
     apply_quantity_delta(entry, -quantity)
 
     margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio, ledger_config)
@@ -599,15 +691,25 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             enabled = _resolve_daily_mark_to_market_enabled_for_ledger(
                 product, fields, ledger_config=ledger_config,
             )
-            accounting_mode = str(getattr(ledger_config, "accounting_mode", None) or "Auto")
-            if accounting_mode == "Custom":
-                cost_basis_method = str(
-                    getattr(ledger_config, "cost_basis_method", None) or "WeightAverage"
+            strategy_config = _strategy_config_for_ledger(state, ledger)
+            if strategy_config is not None:
+                cost_basis_method = _resolve_method(
+                    strategy_config,
+                    product,
+                    fields,
+                    require_exact=engine_mode_for(strategy_config) == "exact",
+                    ledger_config=ledger_config,
                 )
-                source = "ledger_config.daily_mark_to_market_enabled"
             else:
                 cost_basis_method = infer_auto_cost_basis_method(fields, product=product)
-                source = _daily_mark_to_market_resolution_source(fields)
+            configured_dmtm = _configured_tristate_bool(
+                getattr(ledger_config, "daily_mark_to_market_enabled", None),
+            )
+            source = (
+                "ledger_config.daily_mark_to_market_enabled"
+                if configured_dmtm is not None
+                else _daily_mark_to_market_resolution_source(fields)
+            )
             resolved_dmtm.setdefault(str(ledger.ledger_id), {})[str(product)] = {
                 "enabled": enabled,
                 "source": source,
@@ -760,6 +862,16 @@ def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
                 seen.add(key)
                 targets.append(target_ledger)
     return targets
+
+
+def _strategy_config_for_ledger(state: Any, ledger: Any):
+    """Return the strategy config whose ledger policy is being replayed."""
+    ledger_key = getattr(ledger, "ledger", ledger)
+    for strategy in getattr(state, "strategy_configs", {}):
+        candidate = state.ledger_for_strategy(strategy)
+        if getattr(candidate, "ledger", candidate) == ledger_key:
+            return state.config_for(strategy)
+    return None
 
 
 def _daily_mark_to_market_trading_day(ctx: Any, ledger: Any) -> str | None:

@@ -89,13 +89,13 @@ def test_conditional_defaults_materialize_into_the_complete_resolved_settings_ma
     } == {
         "warmup_mode": "none",
         "fee_mode": "zero",
-        "transaction_fee_source": "exchange",
+        "transaction_fee_source": "auto",
         "margin_mode": "none",
         "margin_call_mode": "off",
         "accounting_mode": "Basic",
-        "historical_field_policy": "latest_available",
-        "use_minor_units": False,
-        "use_int_position": False,
+        "historical_field_policy": "auto",
+        "use_minor_units": "false",
+        "use_int_position": "false",
     }
 
     custom_exchange = _resolve({
@@ -114,7 +114,7 @@ def test_conditional_defaults_materialize_into_the_complete_resolved_settings_ma
         "transaction_fee_source": "exchange",
         "margin_mode": "auto",
         "accounting_mode": "Auto",
-        "use_int_position": True,
+        "use_int_position": "true",
     }
 
 
@@ -128,7 +128,7 @@ def test_editable_values_win_only_when_the_registered_condition_allows_them() ->
         "accounting_mode": "Custom",
         "cost_basis_method": "FIFO",
         "historical_field_policy": "strict_historical",
-        "use_minor_units": False,
+        "use_minor_units": "false",
         "warmup_mode": "fixed",
     })
     assert {
@@ -145,7 +145,7 @@ def test_editable_values_win_only_when_the_registered_condition_allows_them() ->
         "accounting_mode": "Custom",
         "cost_basis_method": "FIFO",
         "historical_field_policy": "strict_historical",
-        "use_minor_units": False,
+        "use_minor_units": "false",
         "warmup_mode": "fixed",
     }
 
@@ -158,7 +158,7 @@ def test_editable_values_win_only_when_the_registered_condition_allows_them() ->
         "margin_call_mode": "liquidate",
         "accounting_mode": "Custom",
         "historical_field_policy": "strict_historical",
-        "use_minor_units": True,
+        "use_minor_units": "true",
         "warmup_mode": "fixed",
     })
     assert {
@@ -170,12 +170,12 @@ def test_editable_values_win_only_when_the_registered_condition_allows_them() ->
         )
     } == {
         "fee_mode": "zero",
-        "transaction_fee_source": "exchange",
+        "transaction_fee_source": "auto",
         "margin_mode": "none",
         "margin_call_mode": "off",
         "accounting_mode": "Basic",
-        "historical_field_policy": "latest_available",
-        "use_minor_units": False,
+        "historical_field_policy": "auto",
+        "use_minor_units": "false",
         "warmup_mode": "fixed",
     }
     fallbacks = {

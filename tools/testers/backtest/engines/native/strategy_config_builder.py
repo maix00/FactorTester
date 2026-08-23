@@ -103,6 +103,10 @@ _LEDGER_INFERRED_SETTING_NAMES = {
     # able to infer FIFO when fee/DMTM fields require lot-level accounting,
     # including the case where margin_mode is explicitly closed.
     "cost_basis_method",
+    # Auto accounting uses the native whole-contract policy unless a custom
+    # ledger explicitly selects a boolean value.  Do not turn the UI default
+    # into a persisted false before the runtime resolver sees it.
+    "use_int_position",
 }
 
 
@@ -192,9 +196,13 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
     if accounting_mode == "Basic":
         return False
     if accounting_mode == "Custom":
-        return bool(resolved_settings.get("daily_mark_to_market_enabled", False))
+        raw_value = resolved_settings.get("daily_mark_to_market_enabled", "auto")
+        value = "auto" if raw_value in (None, "") else str(raw_value).lower()
+        return value != "false"
     margin_mode = str(resolved_settings.get("margin_mode", "auto") or "auto").lower()
-    if margin_mode in {"off", "none", "zero"} and resolved_settings.get("daily_mark_to_market_enabled") is not True:
+    raw_dmtm = resolved_settings.get("daily_mark_to_market_enabled", "auto")
+    configured_dmtm = "auto" if raw_dmtm in (None, "") else str(raw_dmtm).lower()
+    if margin_mode in {"off", "none", "zero"} and configured_dmtm != "true":
         return False
     if engine_mode in {"auto", "exact"}:
         return True
