@@ -1,12 +1,6 @@
 (() => {
   function timestamp(value, index) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      if (Math.abs(value) > 20_000_000_000) return value;
-      if (Math.abs(value) > 1_000_000_000) return value * 1000;
-      return index;
-    }
-    const parsed = Date.parse(String(value || ""));
-    return Number.isFinite(parsed) ? parsed : index;
+    return window.FTChartTimeline.timestamp(value, index);
   }
 
   function lineOptions(title, yTitle, series) {
@@ -15,7 +9,7 @@
         backgroundColor: "transparent", panning: {enabled: true, type: "x"},
         zooming: {type: "x"},
       },
-      time: {useUTC: false},
+      time: window.FTChartTimeline.timeOptions(),
       title: {text: title, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
       rangeSelector: {selected: 5, inputEnabled: true},

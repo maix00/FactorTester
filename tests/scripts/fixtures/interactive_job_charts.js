@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+process.env.TZ = "Asia/Taipei";
+
 (async () => {
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
@@ -37,7 +39,7 @@ const equity = window.FTJobHighcharts.optionsFor("equity_curve", {
 assert.equal(equity.series[0].name, "A1");
 assert.equal(equity.series[2].name, "A1 · 当前回撤");
 assert.equal(equity.series[2].yAxis, 2);
-assert.equal(equity.time.useUTC, false, "timestamps must render in the browser's local timezone");
+assert.equal(equity.time.timezone, "Asia/Taipei", "timestamps must render in the user's browser timezone");
 assert.equal(equity.navigator.enabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
@@ -50,6 +52,16 @@ assert.equal(equity.yAxis[2].top, "72%");
 assert.equal(equity.yAxis[2].height, "28%");
 assert.equal(equity.yAxis[2].max, 0);
 assert.ok(Number.isFinite(equity.series[0].data[0][0]));
+assert.equal(
+  window.FTChartTimeline.timestamp("2025-01-02"),
+  new Date(2025, 0, 2, 0, 0, 0, 0).getTime(),
+  "date-only observations must mean midnight in the user's timezone",
+);
+assert.equal(
+  window.FTChartTimeline.timestamp("2025-03-09T01:30:00-05:00"),
+  Date.parse("2025-03-09T01:30:00-05:00"),
+  "timestamps with an explicit offset must preserve their absolute instant",
+);
 const observedTimes = new Set(equity.series.flatMap(item => item.data.map(point => point[0])));
 assert.equal(observedTimes.size, 3, "the adapter must not synthesize non-trading timestamps");
 

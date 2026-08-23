@@ -669,6 +669,7 @@ def test_ic_domain_charts_preserve_the_old_result_interactions() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_result_charts.js"
     files = [
+        WEB_ROOT / "jobs" / "highcharts-timeline.js",
         WEB_ROOT / "jobs" / "ic-result-model.js",
         WEB_ROOT / "jobs" / "ic-result-charts.js",
     ]
@@ -1352,6 +1353,7 @@ def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None
     detail = (base / "group-detail.js").read_text(encoding="utf-8")
     assert "FTBacktestGroupDetailProducts" in detail
     modules = [
+        WEB_ROOT / "jobs" / "highcharts-timeline.js",
         base / "group-products.js",
         base / "group-detail-parts.js",
     ]

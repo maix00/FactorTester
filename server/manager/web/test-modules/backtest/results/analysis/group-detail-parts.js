@@ -29,7 +29,7 @@
     const values = Array.isArray(rows) ? rows : [];
     const points = (key, scale = 1) => values.flatMap((row, index) => {
       const value = ui().finite(row?.[key]);
-      const timestamp = Date.parse(String(row?.timestamp || ""));
+      const timestamp = window.FTChartTimeline.timestamp(row?.timestamp, Number.NaN);
       return value == null ? [] : [[Number.isFinite(timestamp) ? timestamp : index, value * scale]];
     });
     const target = ui().chartNode();
@@ -70,7 +70,7 @@
     const target = ui().chartNode("compact");
     const series = rows.flatMap((row, index) => {
       const result = ui().finite(row.return);
-      const time = Date.parse(String(row.timestamp || ""));
+      const time = window.FTChartTimeline.timestamp(row.timestamp, Number.NaN);
       return result == null ? [] : [[Number.isFinite(time) ? time : index, result * 100]];
     });
     return stack(
