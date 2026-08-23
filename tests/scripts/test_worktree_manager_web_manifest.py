@@ -27,12 +27,19 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
+    assert manifest["route_groups"]["docs"] == ["docs"]
+    assert "docs" not in manifest["initial_groups"]
+    assert all(
+        not script.startswith("docs/")
+        for group in manifest["initial_groups"]
+        for script in groups[group]
+    )
     assert manifest["styles"] == [
         "styles/app.css", "styles/jobs/result-tabs.css", "styles/report.css",
         "styles/outputs/artifacts.css",
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
-        "styles/task-inputs.css",
+        "styles/task-inputs.css", "styles/docs.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -669,6 +676,7 @@ def test_ic_domain_charts_preserve_the_old_result_interactions() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_result_charts.js"
     files = [
+        WEB_ROOT / "jobs" / "highcharts-timeline.js",
         WEB_ROOT / "jobs" / "ic-result-model.js",
         WEB_ROOT / "jobs" / "ic-result-charts.js",
     ]
@@ -1352,6 +1360,7 @@ def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None
     detail = (base / "group-detail.js").read_text(encoding="utf-8")
     assert "FTBacktestGroupDetailProducts" in detail
     modules = [
+        WEB_ROOT / "jobs" / "highcharts-timeline.js",
         base / "group-products.js",
         base / "group-detail-parts.js",
     ]

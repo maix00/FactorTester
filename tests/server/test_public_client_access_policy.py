@@ -66,6 +66,35 @@ def test_visitor_access_uses_distinct_uuid_owner_namespaces() -> None:
     assert visitor_principal(second_id).endswith(second_id)
 
 
+def test_published_technical_docs_are_public_without_a_session(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.public_server = True
+
+    with _running_manager(state) as base_url:
+        with urlopen(Request(f"{base_url}/docs", headers=_headers())) as response:
+            shell = response.read().decode("utf-8")
+        with urlopen(Request(
+            f"{base_url}/api/docs/index", headers=_headers(),
+        )) as response:
+            index = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/docs/system-overview", headers=_headers(),
+        )) as response:
+            deep_link_shell = response.read().decode("utf-8")
+        with urlopen(Request(
+            f"{base_url}/api/docs/pages/system-overview", headers=_headers(),
+        )) as response:
+            page = json.loads(response.read())
+
+    assert "FT_STATIC_SCRIPTS" not in shell
+    assert index["success"] is True
+    assert index["default_page"] == "getting-started"
+    assert deep_link_shell == shell
+    assert page["success"] is True
+    assert page["title"] == "系统总览"
+
+
 def test_redeeming_a_grant_twice_reuses_the_same_session() -> None:
     store = VisitorAccessStore()
     target = "https://101.133.144.27:7998"

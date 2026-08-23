@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "title": "FactorTester 技术文档",
+  "default_page": "getting-started",
+  "sections": [
+    {"id": "use", "title": "使用平台", "pages": [
+      {"slug": "getting-started", "title": "开始使用", "summary": "认识平台入口，并完成第一次测试。", "kind": "guide", "source": "guides/getting-started.md", "related": ["run-tests", "read-results"]},
+      {"slug": "prepare-products-and-factors", "title": "准备产品与因子", "summary": "理解数据源范围，选择产品路径并准备可执行因子。", "kind": "guide", "source": "guides/prepare-products-and-factors.md", "related": ["run-tests", "core-objects"]},
+      {"slug": "run-tests", "title": "运行 IC 测试与回测", "summary": "从研究对象到运行配置、任务与结果。", "kind": "guide", "source": "guides/run-tests.md", "related": ["runspec-job-artifact"]},
+      {"slug": "read-results", "title": "阅读任务结果", "summary": "查看状态、统计、图表、生成物与输入源码。", "kind": "guide", "source": "guides/read-results.md", "related": ["runspec-job-artifact"]},
+      {"slug": "research-workflow", "title": "开展研究", "summary": "使用本地研究、共享研究、研究图与结构化报告。", "kind": "guide", "source": "guides/research-workflow.md", "related": ["research-reports"]},
+      {"slug": "automation-and-cli", "title": "自动化与 CLI", "summary": "用正式 CLI 和 Agent Skill 自动执行可追溯的平台操作。", "kind": "guide", "source": "guides/automation-and-cli.md", "related": ["research-workflow", "runspec-job-artifact"]}
+    ]},
+    {"id": "concepts", "title": "理解平台", "pages": [
+      {"slug": "core-objects", "title": "核心对象", "summary": "Workspace、WorkPackage、Branch、RunSpec、Job 与 Artifact 的关系。", "kind": "concept", "source": "concepts/core-objects.md", "related": ["runspec-job-artifact"]},
+      {"slug": "runspec-job-artifact", "title": "运行配置、任务与生成物", "summary": "区分可复用配置、冻结提交、执行记录和输出。", "kind": "concept", "source": "concepts/runspec-job-artifact.md", "related": ["run-tests", "test-execution"]}
+    ]},
+    {"id": "implementation", "title": "实现架构", "pages": [
+      {"slug": "system-overview", "title": "系统总览", "summary": "Web、Swift、Manager、工作端口与本地资源的职责边界。", "kind": "implementation", "source": "implementation/system-overview.md", "canonical_paths": ["server/manager/runtime.py", "server/manager/http", "server/manager/web/app", "server/services", "server/modules", "apple/Sources/Navigation"], "related": ["web-swift-navigation", "test-execution"]},
+      {"slug": "web-swift-navigation", "title": "Web 与 Swift 导航", "summary": "统一 Web 渲染与 Swift 原生标签页所有权。", "kind": "implementation", "source": "implementation/web-swift-navigation.md", "canonical_paths": ["server/manager/web/app/navigation.js", "server/manager/web/app/route-dispatch.js", "server/manager/web/app/tabs.js", "apple/Sources/Navigation"], "related": ["system-overview"]},
+      {"slug": "test-execution", "title": "测试执行链路", "summary": "从运行配置到工作端口执行与生成物登记。", "kind": "implementation", "source": "implementation/test-execution.md", "canonical_paths": ["server/manager/services/test_authoring.py", "server/modules", "server/manager/http", "server/manager/storage/job_index.py", "server/manager/web/test-modules"], "related": ["runspec-job-artifact"]},
+      {"slug": "research-reports", "title": "研究报告实现", "summary": "结构化报告、绑定、发布与 Web 阅读器的边界。", "kind": "implementation", "source": "implementation/research-reports.md", "canonical_paths": ["tools/cli/release/research_reporting/authoring", "server/services/research_report_presentations.py", "server/manager/http/server_research_routes.py", "server/manager/http/client_research_routes.py", "server/manager/http/public_research_routes.py", "server/manager/web/report"], "related": ["research-workflow"]}
+    ]},
+    {"id": "help", "title": "排查问题", "pages": [
+      {"slug": "job-failures", "title": "任务失败排查", "summary": "区分配置、数据、执行与展示问题。", "kind": "troubleshooting", "source": "troubleshooting/job-failures.md", "related": ["read-results", "test-execution"]}
+    ]}
+  ]
+}

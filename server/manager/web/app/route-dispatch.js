@@ -19,6 +19,10 @@
         case "reference": return pages.reference?.(context(routeToken), route);
         case "report": return pages.report?.(route.id, routeToken);
         case "research": return pages.research?.(routeToken);
+        case "docs": return guarded(
+          context(routeToken), {nav: "", title: "技术文档", allowVisitor: true},
+          pages.docs, route.slug,
+        );
         case "research-graph": return guarded(
           context(routeToken), {nav: "research", title: "研究图"},
           pages.researchGraph, route.id,

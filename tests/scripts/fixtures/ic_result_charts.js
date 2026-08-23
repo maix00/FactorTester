@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+process.env.TZ = "Asia/Taipei";
 global.window = {};
 for (const file of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(file, "utf8"), {filename: file});
@@ -16,7 +17,7 @@ const factor = {
   ],
 };
 const series = window.FTICResultCharts.seriesOptions(factor, context);
-assert.equal(series.time.useUTC, false);
+assert.equal(series.time.timezone, "Asia/Taipei");
 assert.equal(series.navigator.enabled, true);
 assert.equal(series.series[0].data.length, 3);
 assert.ok(Number.isFinite(series.series[0].data[0][0]));

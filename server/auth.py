@@ -84,12 +84,6 @@ def _check_login():
         'shared.client_release_channel',
         'shared.client_release_beta_appcast',
         'shared.client_release_asset',
-        'core.docs', 'core.docs_single_factor',
-        'core.docs_price_viewer', 'core.docs_factor_editor',
-        'core.docs_data_dictionary',
-        'core.docs_dev', 'core.docs_dev_backend', 'core.docs_dev_frontend',
-        'core.docs_dev_data_pipeline', 'core.docs_dev_deployment',
-        'core.docs_tools', 'core.docs_tool_detail',
         'static',
     }
     ep = request.endpoint

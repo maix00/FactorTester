@@ -233,7 +233,7 @@ class CoreGetRoutesMixin:
             "/", "/research", "/jobs", "/factors", "/products",
             "/profiles", "/settings", "/manager", "/research-graphs",
             "/ic-test", "/backtest", "/test-templates", "/sqlite-web",
-            "/sqlite-web/", "/mihomo",
+            "/sqlite-web/", "/mihomo", "/docs",
         }
         if (
             parsed.path in shell_paths
@@ -247,6 +247,7 @@ class CoreGetRoutesMixin:
             or parsed.path.startswith("/ic-test/")
             or parsed.path.startswith("/backtest/")
             or parsed.path.startswith("/test-templates/")
+            or parsed.path.startswith("/docs/")
         ):
             body = shell_bytes()
             self.send_response(200)
@@ -280,6 +281,7 @@ class CoreGetRoutesMixin:
         parsed = urlparse(self.path)
         handlers = (
             self._get_entry_routes,
+            self._get_technical_docs_routes,
             self._get_transfer_access_status,
             self._get_job_list_routes,
             self._get_agent_app_routes,

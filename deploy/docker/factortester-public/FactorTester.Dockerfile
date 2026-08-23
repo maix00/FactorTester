@@ -135,6 +135,7 @@ COPY scripts scripts
 COPY templates templates
 COPY static static
 COPY docs docs
+COPY product_docs product_docs
 COPY skills skills
 COPY apple/Resources apple/Resources
 COPY settings.py start_server.py ./

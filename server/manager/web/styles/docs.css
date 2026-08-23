@@ -1,0 +1,30 @@
+.technical-docs-layout { display:grid; grid-template-columns:220px minmax(0,760px) 180px; gap:32px; max-width:1240px; margin:0 auto; padding:28px 36px 64px; align-items:start; }
+.technical-docs-navigation,.technical-docs-toc { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow:auto; }
+.technical-docs-search { width:100%; border:1px solid var(--line); border-radius:9px; padding:8px 10px; background:var(--surface); color:inherit; }
+.technical-docs-nav-group { margin-top:22px; }
+.technical-docs-nav-title,.technical-docs-toc h2 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.technical-docs-nav-link,.technical-docs-toc a { display:block; padding:6px 9px; border-radius:7px; color:inherit; text-decoration:none; font-size:13px; }
+.technical-docs-nav-link[hidden],.technical-docs-nav-group[hidden] { display:none; }
+.technical-docs-nav-link.active { background:var(--surface-raised,#eef3f8); font-weight:650; }
+.technical-docs-main { min-width:0; }
+.technical-docs-page-header { padding-bottom:24px; border-bottom:1px solid var(--line); }
+.technical-docs-page-header h1 { margin:5px 0 8px; font-size:32px; letter-spacing:-.025em; }
+.technical-docs-page-header p { margin:0; color:var(--muted); line-height:1.7; }
+.technical-docs-kind { color:var(--accent); font-size:12px; font-weight:650; }
+.technical-docs-article { font-size:15px; line-height:1.85; }
+.technical-docs-article h2 { margin:34px 0 10px; font-size:21px; scroll-margin-top:24px; }
+.technical-docs-article h3 { margin:26px 0 8px; font-size:17px; scroll-margin-top:24px; }
+.technical-docs-article code { padding:2px 5px; border-radius:5px; background:var(--surface-raised,#f3f5f7); font-size:.9em; }
+.technical-docs-article table { width:100%; border-collapse:collapse; }
+.technical-docs-article th,.technical-docs-article td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
+.technical-docs-toc a { padding-left:0; color:var(--muted); }
+.technical-docs-toc a.h3 { padding-left:12px; }
+.technical-docs-pager { display:flex; justify-content:space-between; gap:16px; margin-top:44px; padding-top:20px; border-top:1px solid var(--line); }
+.technical-docs-related { margin-top:36px; padding:18px 20px; border:1px solid var(--line); border-radius:12px; }
+.technical-docs-related h2 { margin:0 0 10px; font-size:14px; }
+.technical-docs-related-links { display:flex; flex-wrap:wrap; gap:8px 16px; }
+.technical-docs-related a { color:var(--accent); text-decoration:none; font-size:13px; }
+.technical-docs-pager a { color:var(--accent); text-decoration:none; }
+.technical-docs-next { margin-left:auto; }
+@media(max-width:980px){.technical-docs-layout{grid-template-columns:190px minmax(0,1fr)}.technical-docs-toc{display:none}}
+@media(max-width:700px){.technical-docs-layout{display:block;padding:18px}.technical-docs-navigation{position:static;max-height:none;margin-bottom:28px}.technical-docs-page-header h1{font-size:27px}}
