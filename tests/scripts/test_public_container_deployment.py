@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -92,6 +94,35 @@ def test_public_image_includes_runtime_localizations_and_git() -> None:
     assert "!skills/" in dockerignore
     assert "!skills/**" in dockerignore
     assert re.search(r"(?m)^\s+git \\?$", dockerfile)
+
+
+def test_public_image_contains_every_technical_doc_canonical_path() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    ).replace("\\\n", " ")
+    copied_roots: set[str] = set()
+    for line in dockerfile.splitlines():
+        if not line.startswith("COPY "):
+            continue
+        tokens = shlex.split(line)
+        copied_roots.update(token.rstrip("/") for token in tokens[1:-1])
+
+    manifest = json.loads(
+        (ROOT / "product_docs" / "manifest.json").read_text(encoding="utf-8")
+    )
+    canonical_paths = {
+        path.rstrip("/")
+        for section in manifest["sections"]
+        for page in section["pages"]
+        for path in page.get("canonical_paths", [])
+    }
+
+    for relative in canonical_paths:
+        assert (ROOT / relative).exists(), relative
+        assert any(
+            relative == root or relative.startswith(f"{root}/")
+            for root in copied_roots
+        ), f"public image omits technical-documentation path: {relative}"
 
 
 def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
