@@ -60,19 +60,32 @@
           : Promise.reject(new Error("client research is available in the local client")),
       ]);
       const rows = [];
+      const publishedByReport = new Map(
+        (serverResult.status === "fulfilled" ? serverResult.value.reports || [] : [])
+          .filter(item => item?.report_id)
+          .map(item => [String(item.report_id), item]),
+      );
       if (serverResult.status === "fulfilled") {
         (serverResult.value.reports || []).forEach(item => rows.push({
           ...item,
-          source: "server",
-          sourceLabel: "服务器",
+          source: "server_catalog",
+          build_source: item.build_source || "client",
           href: item.href || `/research/${encodeURIComponent(item.publication_id || "")}`,
         }));
       }
       if (localResult.status === "fulfilled") {
         (localResult.value.research || []).forEach(item => rows.push({
           ...item,
-          source: "client",
-          sourceLabel: "客户端",
+          source: "client_local",
+          build_source: item.build_source || "client",
+          sharing_state: sharingState(
+            item,
+            publishedByReport.get(String(item.report_id || "")),
+          ),
+          is_shared: sharingState(
+            item,
+            publishedByReport.get(String(item.report_id || "")),
+          ) === "shared",
           title: item.title || item.local_ref,
           owner_ref: item.profile_name || item.profile_id,
           href: `/research/${encodeURIComponent(`local:${item.local_ref}`)}`,
@@ -83,8 +96,8 @@
     const result = await context.api(`/api/public-research?scope=${encodeURIComponent(scope)}`);
     return (result.reports || []).map(item => ({
       ...item,
-      source: scope,
-      sourceLabel: scope === "subordinates" ? "下级用户" : "共享",
+      source: "server_catalog",
+      build_source: item.build_source || "client",
       href: item.href || `/research/${encodeURIComponent(item.publication_id || "")}`,
     }));
   }
@@ -106,11 +119,15 @@
 
   function table(context, rows, state, scope, root) {
     const view = FTUI.pagedTable(
-      [context.t("报告"), context.t("用户（Profile）"), context.t("来源"), context.t("访问范围"), context.t("更新时间")],
+      [
+        context.t("报告"), context.t("用户（Profile）"), context.t("构建来源"),
+        context.t("共享状态"), context.t("访问范围"), context.t("更新时间"),
+      ],
       rows.map(item => [
         item.title || item.name || item.filename || context.t("未命名研究报告"),
         ownerDisplay(context, item),
-        context.t(item.sourceLabel),
+        buildSource(context, item),
+        sharing(context, item),
         visibility(context, item.visibility),
         FTUI.formatDate(item.updated_at || item.created_at),
       ]),
@@ -137,6 +154,27 @@
   function visibility(context, value) {
     const labels = {private: "仅自己", authorized: "授权用户", public: "公开"};
     return context.t(labels[value] || value || "未知");
+  }
+
+  function buildSource(context, item) {
+    const labels = {
+      client: "客户端构建",
+      server_agent: "服务器 Agent 构建",
+    };
+    return context.t(labels[item.build_source] || "未知");
+  }
+
+  function sharing(context, item) {
+    return context.t(sharingState(item) === "shared" ? "共享" : "非共享");
+  }
+
+  function sharingState(item, publication = null) {
+    const value = item?.sharing_state || publication?.sharing_state;
+    if (value === "shared" || value === "not_shared") return value;
+    if (item?.is_shared === true || publication?.is_shared === true) return "shared";
+    const visibility = item?.visibility || publication?.visibility;
+    return ["authorized", "public"].includes(visibility)
+      ? "shared" : "not_shared";
   }
 
   async function renderScope(context, root, embedded) {
@@ -186,5 +224,5 @@
     await renderScope(context, root, embedded);
   }
 
-  window.FTResearchReports = Object.freeze({render});
+  window.FTResearchReports = Object.freeze({render, buildSource, sharing});
 })();

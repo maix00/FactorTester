@@ -17,13 +17,20 @@
     let decoded = String(publicationID || "");
     try { decoded = decodeURIComponent(decoded); } catch (_) {}
     const isLocal = decoded.startsWith("local:");
+    const isServer = decoded.startsWith("server:");
     const localRef = isLocal ? decoded.slice("local:".length) : "";
+    const serverRef = isServer ? decoded.slice("server:".length) : "";
     return {
       publicationID: decoded,
       isLocal,
+      isServer,
+      isOwnerLocal: isLocal || isServer,
       localRef,
+      serverRef,
       path: isLocal
         ? `/api/client/research/${encodeURIComponent(localRef)}`
+        : isServer
+        ? `/api/server-research/${encodeURIComponent(serverRef)}`
         : `/api/public-research/${encodeURIComponent(decoded)}`,
     };
   }

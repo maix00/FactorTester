@@ -100,6 +100,9 @@ def test_public_library_exposes_index_and_chapter_reads(tmp_path):
     result = library.sync({
         "report_id": "r", "owner_ref": "owner", "projection": projection,
     })
+    local = library.list_visible("owner")
+    assert local[0]["build_source"] == "client"
+    assert local[0]["sharing_state"] == "not_shared"
     library.configure(
         owner_ref="owner", report_id="r", projection=None,
         visibility="public", auto_sync=True, relay_local_files=False,
@@ -125,6 +128,9 @@ def test_public_library_exposes_index_and_chapter_reads(tmp_path):
         result["publication_id"], "chapter-a", "section-a", None,
     )
     assert component["components"][0]["body"] == "正文"
+    shared = library.list_visible(None)
+    assert shared[0]["sharing_state"] == "shared"
+    assert shared[0]["is_shared"] is True
 
 
 def test_public_library_index_uses_persisted_sidecar(tmp_path, monkeypatch):

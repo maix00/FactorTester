@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import secrets
-import time
 import base64
 import hashlib
 import mimetypes
 import re
+import secrets
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
-from .storage import atomic_json, locked_registry, read_json, read_registry
+from .metadata import normalize_build_source, provenance_fields
 from .projection import chapter_projection, component_projection, projection_index
-
+from .storage import atomic_json, locked_registry, read_json, read_registry
 
 VISIBILITIES = {"private", "authorized", "public"}
 
@@ -32,6 +32,8 @@ class PublicResearchLibrary:
         report_id = _required(payload, "report_id")
         owner_ref = _required(payload, "owner_ref")
         profile_ref = _optional_text(payload.get("profile_ref"))
+        build_source = normalize_build_source(payload.get("build_source"))
+        build_source_ref = _optional_text(payload.get("build_source_ref"))
         projection = _projection(payload.get("projection"), report_id)
         now = time.time()
         with locked_registry(self.root) as registry:
@@ -48,10 +50,17 @@ class PublicResearchLibrary:
                     "authorized_users": [],
                     "published_at": now,
                     "storage_server_id": self.storage_server_id,
+                    "build_source": build_source,
+                    "build_source_ref": build_source_ref,
                 }
                 registry["publications"].append(record)
             if record["owner_ref"] != owner_ref:
                 raise PermissionError("report owner does not match")
+            _merge_build_metadata(
+                record,
+                build_source=build_source,
+                build_source_ref=build_source_ref,
+            )
             if profile_ref:
                 record["profile_ref"] = profile_ref
             if self.storage_server_id:
@@ -91,17 +100,25 @@ class PublicResearchLibrary:
         auto_sync: bool,
         relay_local_files: bool,
         authorized_users: list[str],
+        build_source: str = "",
+        build_source_ref: str = "",
     ) -> dict[str, Any]:
         owner_ref = _required_text(owner_ref, "owner_ref")
         report_id = _required_text(report_id, "report_id")
         if visibility not in VISIBILITIES:
             raise ValueError("visibility is invalid")
+        existing = _record_by_report(self._registry(), report_id)
+        requested_source = normalize_build_source(
+            build_source,
+            default=str(existing.get("build_source") or "client")
+            if existing is not None else "client",
+        )
+        requested_source_ref = _optional_text(build_source_ref)
         users = sorted({
             _required_text(item, "authorized user")
             for item in authorized_users
             if str(item).strip() and str(item).strip() != owner_ref
         })
-        existing = _record_by_report(self._registry(), report_id)
         value = (
             _projection(projection, report_id)
             if projection is not None
@@ -123,8 +140,15 @@ class PublicResearchLibrary:
                     "owner_ref": owner_ref,
                     "published_at": now,
                     "storage_server_id": self.storage_server_id,
+                    "build_source": requested_source,
+                    "build_source_ref": requested_source_ref,
                 }
                 registry["publications"].append(record)
+            _merge_build_metadata(
+                record,
+                build_source=requested_source,
+                build_source_ref=requested_source_ref,
+            )
             record.update(
                 visibility=visibility,
                 auto_sync=bool(auto_sync),
@@ -196,6 +220,7 @@ class PublicResearchLibrary:
                 "projection_hash": record.get("projection_hash") or "",
                 "storage_server_id": record.get("storage_server_id") or self.storage_server_id,
                 "href": f"/research/{record['publication_id']}",
+                **provenance_fields(record),
             })
         return sorted(values, key=lambda item: item["updated_at"], reverse=True)
 
@@ -208,6 +233,7 @@ class PublicResearchLibrary:
         value = self._projection(publication_id)
         value["access"] = {
             "visibility": record["visibility"],
+            **provenance_fields(record),
             "can_manage": viewer_ref == record["owner_ref"],
             "local_file_relay": bool(record.get("relay_local_files")),
             "owner_client_online": _client_online(record),
@@ -227,6 +253,7 @@ class PublicResearchLibrary:
         )
         value["access"] = {
             "visibility": record["visibility"],
+            **provenance_fields(record),
             "can_manage": viewer_ref == record["owner_ref"],
             "local_file_relay": bool(record.get("relay_local_files")),
             "owner_client_online": _client_online(record),
@@ -262,6 +289,7 @@ class PublicResearchLibrary:
             value = chapter_projection(value, chapter_id, include_content=False)
         value["access"] = {
             "visibility": record["visibility"],
+            **provenance_fields(record),
             "can_manage": viewer_ref == record["owner_ref"],
             "local_file_relay": bool(record.get("relay_local_files")),
             "owner_client_online": _client_online(record),
@@ -282,6 +310,7 @@ class PublicResearchLibrary:
         value = component_projection(chapter, chapter_id, component_id)
         value["access"] = {
             "visibility": record["visibility"],
+            **provenance_fields(record),
             "can_manage": viewer_ref == record["owner_ref"],
             "local_file_relay": bool(record.get("relay_local_files")),
             "owner_client_online": _client_online(record),
@@ -626,8 +655,23 @@ def _client_online(record: dict[str, Any]) -> bool:
     return time.time() - float(record.get("client_online_at") or 0) <= 45
 
 
+def _merge_build_metadata(
+    record: dict[str, Any], *, build_source: str, build_source_ref: str,
+) -> None:
+    """Preserve one report's construction identity across later syncs."""
+    current = normalize_build_source(record.get("build_source"))
+    if current != build_source and record.get("build_source") is not None:
+        raise PermissionError("report construction source does not match")
+    record["build_source"] = build_source
+    if build_source_ref:
+        current_ref = str(record.get("build_source_ref") or "").strip()
+        if current_ref and current_ref != build_source_ref:
+            raise PermissionError("report construction source reference does not match")
+        record["build_source_ref"] = build_source_ref
+
+
 def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
-    return {
+    value = {
         key: record.get(key)
         for key in (
             "publication_id", "report_id", "owner_ref", "profile_ref", "visibility",
@@ -639,3 +683,5 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
         "owner_client_online": _client_online(record),
         "updated_at": record.get("synced_at") or 0,
     }
+    value.update(provenance_fields(record))
+    return value
