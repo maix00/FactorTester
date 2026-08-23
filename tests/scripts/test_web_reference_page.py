@@ -39,5 +39,5 @@ def test_jobs_module_keeps_detail_table_seam() -> None:
     )
     # Formatting now lives in the shared list/detail seam; the controller
     # consumes its table helper through the destructured interface.
-    assert "    scalar, serverLabel, statusPill, table, taskCell, taskHash, taskTitle, text," in source
+    assert "    scalar, serverLabel, statusCell, statusPill, table, taskCell, taskHash, taskTitle, text," in source
     assert "window.FTJobs =" in source

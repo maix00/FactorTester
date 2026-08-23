@@ -23,15 +23,19 @@ from tests.server.test_trial_plan_contract_v5 import trial_plan_v5
 from tests.server.trial_plan_fixtures import (
     initialize_branch,
     job_record,
-    run_spec,
+    run_spec_with_dates,
     semantic_hash,
 )
 from tools.data.sqlite.db import connect_sqlite
 
 
 def _released_trial(path) -> tuple[dict, dict, dict]:
-    baseline = {**run_spec(), "variant": "baseline"}
-    target = {**run_spec(), "variant": "target"}
+    baseline = run_spec_with_dates(
+        "2020-01-01", "2023-12-31", variant="baseline",
+    )
+    target = run_spec_with_dates(
+        "2020-01-01", "2023-12-31", variant="target",
+    )
     baseline_hash = semantic_hash(baseline)
     target_hash = semantic_hash(target)
     sample_hash = derive_sample_identity(baseline)["sample_hash"]

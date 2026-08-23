@@ -18,7 +18,7 @@ from server.services.research_graph.trial_plan.sample_identity import (
 )
 from tests.server.trial_plan_fixtures import (
     initialize_branch,
-    run_spec,
+    run_spec_with_dates,
     semantic_hash,
     trial_plan_v4,
 )
@@ -27,12 +27,7 @@ from tools.data.sqlite.db import connect_sqlite
 
 def _staged_specs_and_plan() -> tuple[list[dict], dict]:
     specs = [
-        {
-            **run_spec(),
-            "sample": stage,
-            "start_date": start,
-            "end_date": end,
-        }
+        run_spec_with_dates(start, end, sample=stage)
         for stage, start, end in (
             ("selection", "2020-01-01", "2021-12-31"),
             ("validation", "2022-01-01", "2023-12-31"),

@@ -137,6 +137,7 @@ def main(
         features=tuple(args.feature),
         state_root=Path(args.state_root) if args.state_root else None,
         fixed_daemon_socket=args.daemon_socket or None,
+        session_db_path=runtime_module.configured_manager_sqlite_path(),
     )
     removed = runtime_module.Handler.state.cleanup_detached_worktrees()
     if removed:

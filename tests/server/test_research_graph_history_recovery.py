@@ -13,6 +13,7 @@ from server.services.research_graph.history_recovery import (
     inspect_history_recovery,
     recover_history,
 )
+from tests.server.trial_plan_fixtures import run_spec
 from tools.migrations.recover_research_graph_history import main
 
 
@@ -137,7 +138,7 @@ def recovery_db(tmp_path, monkeypatch):
         workspace_id="workspace-1",
         configuration_id="configuration-1",
         configuration_revision=1,
-        run_spec={"workspace_id": "workspace-1", "factor": "test"},
+        run_spec=run_spec(),
     )
     with research_graphs.connect_sqlite(path) as conn:
         conn.execute(

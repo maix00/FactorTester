@@ -224,7 +224,7 @@
   function reportContext(routeToken = activeRouteToken) {
     return {
       state, api, t, content, toolbar, button,
-      tabSession, activeNav, setHeading, updateActiveTab,
+      tabID: state.activeTabID, tabSession, activeNav, setHeading, updateActiveTab,
       openReportSettings, saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
       isRouteCurrent: () => routeToken === activeRouteToken,

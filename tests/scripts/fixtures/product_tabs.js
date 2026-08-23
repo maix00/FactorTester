@@ -128,6 +128,19 @@ assert.strictEqual(state.tabs.filter(tab => tab.id === runSpecTabID).length, 1);
 assert.match(state.tabs.find(tab => tab.id === runSpecTabID).path, /label=second$/);
 assert.strictEqual(state.tabs.filter(tab => !tab.closable).length, 4);
 
+// The research feature tab owns the report list. A concrete report gets a
+// stable closable tab so its reading state cannot be shared by other reports.
+tabs.navigate("/research/public-report%3A1");
+const reportTabID = "research-report:public-report%3A1";
+assert.strictEqual(state.activeTabID, reportTabID);
+assert.strictEqual(state.tabs.find(tab => tab.id === reportTabID).closable, true);
+tabs.navigate("/research/public-report%3A1?chapter=methods");
+assert.strictEqual(state.tabs.filter(tab => tab.id === reportTabID).length, 1);
+assert.strictEqual(
+  state.tabs.find(tab => tab.id === reportTabID).path,
+  "/research/public-report%3A1?chapter=methods",
+);
+
 // Closing the final user-opened tab must land on home, not on the nearest
 // pinned feature tab that happens to precede it in state.tabs.
 const closeState = {
