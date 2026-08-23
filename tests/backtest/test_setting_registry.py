@@ -991,6 +991,52 @@ def test_new_run_payload_rejects_top_level_registered_settings() -> None:
         )
 
 
+def test_runtime_execution_projection_reads_nested_local_settings() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    local_settings = {
+        "allocation_policy": "equal_notional",
+        "initial_capital_major": 12_345_678,
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-31",
+    }
+    resolved = _resolve_flat_backtest_settings(
+        {
+            "run_spec": {
+                "configuration": {
+                    "analyses": {"backtest": {"local_settings": local_settings}},
+                },
+            },
+            "local_settings": local_settings,
+            **local_settings,
+        },
+        [{"id": "group-1"}],
+        [],
+    )
+
+    assert resolved["group-1"]["allocation_policy"] == "equal_notional"
+    assert resolved["group-1"]["initial_capital_major"] == 12_345_678
+
+
+def test_conflicting_runtime_execution_projection_is_rejected() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    with pytest.raises(ValueError, match="registered settings must be nested"):
+        _resolve_flat_backtest_settings(
+            {
+                "run_spec": {"configuration": {}},
+                "local_settings": {
+                    "allocation_policy": "equal_notional",
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-01-31",
+                },
+                "allocation_policy": "inverse_volatility",
+            },
+            [{"id": "group-1"}],
+            [],
+        )
+
+
 def test_runtime_datetime_reads_time_values_from_local_settings() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
