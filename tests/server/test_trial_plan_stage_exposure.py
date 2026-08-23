@@ -17,7 +17,7 @@ from server.services.research_graph.trial_plan.sample_identity import (
 )
 from tests.server.trial_plan_fixtures import (
     initialize_branch,
-    run_spec,
+    run_spec_with_dates,
     semantic_hash,
     trial_plan_v4,
 )
@@ -95,11 +95,7 @@ def test_protected_stage_cannot_hide_reuse_behind_same_comparison_role(
 ) -> None:
     path = tmp_path / "candidate-reuse.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    selection_spec = {
-        **run_spec(),
-        "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-    }
+    selection_spec = run_spec_with_dates("2024-01-01", "2024-12-31")
     selection = _single_stage_plan(
         selection_spec,
         stage="selection",

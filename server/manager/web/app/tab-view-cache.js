@@ -354,14 +354,18 @@
     }
 
     function activeSessionSnapshot() {
-      const reportMatch = /^\/research\/([^/]+)$/.exec(location.pathname);
+      const reportMatch = /^\/research\/(.+)$/.exec(location.pathname);
+      let publicationID = reportMatch?.[1] || null;
+      if (publicationID) {
+        try { publicationID = decodeURIComponent(publicationID); } catch (_) {}
+      }
       const pending = state.pendingScrollCapture?.tabID === state.activeTabID
         ? state.pendingScrollCapture : null;
       const session = tabSession(state.activeTabID);
       return {
         scrollY: pending ? pending.scrollY : window.scrollY,
         path: location.pathname,
-        publicationID: reportMatch?.[1] || null,
+        publicationID,
         durable: session.durable || {},
         title: title?.textContent || "",
         eyebrow: eyebrow?.textContent || "",
@@ -389,9 +393,6 @@
       const session = tabSession(state.activeTabID);
       saveView(session);
       parkOverlays(state.activeTabID, session);
-      if (snapshot.publicationID) Object.assign(
-        tabSession(`report:${snapshot.publicationID}`), snapshot,
-      );
     }
 
     function captureScrollPosition() {

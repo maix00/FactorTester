@@ -27,7 +27,11 @@ def test_task_density_overrides_load_last_and_cover_every_task_surface() -> None
     run_rows = _rule(css, ".test-workbench .test-run-field-rows")
     assert ".content:has(> .test-workbench)" in css
     assert "padding: 22px 36px 30px" in css
-    assert "gap: 6px" in workbench and "font-size: 13px" in workbench
+    assert "gap: var(--test-workbench-section-gap)" in workbench
+    assert "--test-workbench-section-gap: 12px" in (
+        (WEB_ROOT / "styles" / "app.css").read_text()
+    )
+    assert "font-size: 13px" in workbench
     assert "min-height: 39px" in settings and "padding: 2px 0" in settings
     assert "grid-template-columns: minmax(0, 1fr)" in run_rows
     for selector in (

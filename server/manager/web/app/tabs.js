@@ -254,8 +254,18 @@
       return `reference-detail:run-spec:${match ? `sha256:${match[1].toLowerCase()}` : target}`;
     }
 
+    function researchReportTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/research\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[1];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `research-report:${encodeURIComponent(target)}`;
+    }
+
     function detailTabIDForPath(path) {
-      return jobDetailTabID(path)
+      return researchReportTabID(path)
+        || jobDetailTabID(path)
         || productSourceFamilyDetailTabID(path)
         || productCategoryDetailTabID(path)
         || productDetailTabID(path) || factorDetailTabID(path)
