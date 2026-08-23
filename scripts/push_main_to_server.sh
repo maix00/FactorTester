@@ -29,4 +29,5 @@ for argument in "$@"; do
   esac
 done
 
-exec "$repo_root/scripts/server/publish_public_main.sh"
+"$repo_root/scripts/server/publish_public_main.sh"
+exec "$repo_root/scripts/server/sync_public_field_history.sh"

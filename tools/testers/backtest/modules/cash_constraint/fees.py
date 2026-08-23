@@ -10,6 +10,9 @@ from tools.testers.backtest.modules.fee import (
     _resolve_fee_mode,
     _resolve_fixed_fee_cost,
 )
+from tools.testers.backtest.modules.fee_impl.observability import (
+    record_fee_runtime_assumption,
+)
 from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_product_fields,
     historical_fields_for_product,
@@ -42,6 +45,14 @@ def estimate_signal_fee(
         product_fields
         if product_fields is not None
         else historical_fields_for_product(historical_fields, order.instrument)
+    )
+    record_fee_runtime_assumption(
+        state,
+        strategy=strategy,
+        product=order.instrument,
+        timestamp=ctx.timestamp,
+        mode=mode,
+        fields=fields,
     )
     multiplier = contract_multiplier_from_product_fields(
         fields, state=state, product=order.instrument, timestamp=ctx.timestamp,
