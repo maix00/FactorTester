@@ -69,7 +69,8 @@
     "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core"],
     "settings": ["core"],
-    "manager": ["core"]
+    "manager": ["core"],
+    "docs": ["core"]
   },
   "control_groups": {
     "ic_horizon_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
@@ -112,7 +113,8 @@
     "profiles": ["profile"],
     "settings": ["settings"],
     "manager": ["manager"],
-    "mihomo": ["manager"]
+    "mihomo": ["manager"],
+    "docs": ["docs"]
   },
   "external_styles": [
     "katex/katex.min.css"
@@ -125,7 +127,8 @@
     "styles/outputs/backtest-results.css",
     "styles/workbench.css",
     "styles/workbench-settings.css",
-    "styles/task-inputs.css"
+    "styles/task-inputs.css",
+    "styles/docs.css"
   ],
   "groups": {
     "core": [
@@ -137,6 +140,10 @@
     ],
     "charts": [
       "core/price-chart.js"
+    ],
+    "docs": [
+      "docs/source.js",
+      "docs/reader.js"
     ],
     "catalog-core": [
       "catalog/factor-model.js",
@@ -404,6 +411,8 @@
     "core/i18n.js",
     "core/icons.js",
     "core/help-popover.js",
+    "docs/source.js",
+    "docs/reader.js",
     "core/price-chart.js",
     "core/market-data.js",
     "catalog/shared/multi-select-filter.js",

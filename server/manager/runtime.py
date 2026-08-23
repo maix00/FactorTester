@@ -42,6 +42,7 @@ from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
 from server.manager.http.object_transfer_routes import ObjectTransferRoutesMixin
 from server.manager.http.transfer_metrics_routes import TransferMetricsRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
+from server.manager.http.technical_docs_routes import TechnicalDocsRoutesMixin
 from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -86,6 +87,7 @@ from server.manager.domain.federation import (
 from server.manager.services.test_authoring import TestAuthoringService
 from server.manager.services.research_graph_catalog import ResearchGraphCatalog
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
+from server.manager.services.technical_docs import TechnicalDocsLibrary
 from server.manager.services.server_access import configured_management_access
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
@@ -200,6 +202,10 @@ class ManagerState(
     ) -> None:
         self.repo = repo.resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
+        self.technical_docs = TechnicalDocsLibrary(
+            self.runtime_source_root / "product_docs",
+            code_root=self.runtime_source_root,
+        )
         self.vibe_trading_root = VIBE_TRADING_ROOT
         self.python = python
         self.server_role = str(
@@ -532,6 +538,7 @@ class Handler(
     ClientReleaseRoutesMixin,
     ManagerIdentityRoutesMixin,
     MihomoDashboardRoutesMixin,
+    TechnicalDocsRoutesMixin,
     CoreGetRoutesMixin,
     BaseHTTPRequestHandler,
 ):
