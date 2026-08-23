@@ -227,7 +227,9 @@
           ? "tasks" : "types",
       };
     }
-    if (parts[0] === "docs") return {kind: "remote-module", module: "docs"};
+    if (parts[0] === "docs") {
+      return {kind: "docs", slug: decodeURIComponent(parts.slice(1).join("/"))};
+    }
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
     if (parts[0] === "mihomo") return {kind: "mihomo"};
     if (parts[0] === "ic-test") return {kind: "ic-test"};

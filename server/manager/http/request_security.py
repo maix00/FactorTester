@@ -712,6 +712,16 @@ class RequestSecurityMixin:
         if path == "/login":
             return True
 
+        # Published technical documentation is intentionally public.  The
+        # catalog exposes curated Markdown only, never the repository tree.
+        if method == "GET" and (
+            path == "/docs"
+            or path.startswith("/docs/")
+            or path == "/api/docs/index"
+            or path.startswith("/api/docs/pages/")
+        ):
+            return True
+
         if method == "GET" and not path.startswith("/api/"):
             requested = path + (f"?{parsed.query}" if parsed.query else "")
             if self._redirect_configured_ingress(

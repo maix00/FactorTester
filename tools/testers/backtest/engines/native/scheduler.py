@@ -1204,7 +1204,10 @@ def _audit_ledgers(state: "BacktestRunState", strategies: frozenset["Strategy"],
             "ledger": ledger.name,
             "strategies": sorted(strategies_by_ledger.get(ledger, set())),
             "cash_pool": pool_id,
-            "cash": _audit_value(getattr(cash_store, "cash_by_pool", {}).get(pool_id)),
+            "cash": _audit_value(getattr(cash_store, "cash_by_ledger", {}).get(ledger.name)),
+            "cash_pool_reserve": _audit_value(
+                getattr(cash_store, "reserve_by_pool", {}).get(pool_id)
+            ),
             "cash_pool_config": _audit_value(getattr(cash_store, "config_by_pool", {}).get(pool_id)),
             "ledger_config": _audit_value(state.ledger_configs.get(ledger)),
             "fields": field_values,

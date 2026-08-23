@@ -1,6 +1,6 @@
 (() => {
   const chartViews = Object.freeze({
-    equity_curve_data: {view: "equity", label: "净值与回撤", viewer: "equity_curve"},
+    equity_curve_data: {view: "equity", label: "净值", viewer: "equity_curve"},
     returns_over_time_data: {view: "returns", label: "收益率", viewer: "line_chart"},
     metrics_over_time_data: {view: "metrics", label: "滚动指标", viewer: "metrics_chart"},
     cash_detail_data: {
@@ -8,9 +8,10 @@
       labels: {cash: "现金", cash_after: "变动后现金"},
     },
     margin_detail_data: {
-      view: "margin", label: "保证金占用率", fields: ["margin_utilization"],
-      labels: {margin_utilization: "保证金占用率"},
+      view: "margin", label: "策略保证金占权益比例", fields: ["margin_utilization"],
+      labels: {margin_utilization: "策略保证金占权益比例"},
       percentFields: ["margin_utilization"],
+      aggregate: "strategy_margin_equity_ratio",
     },
     exposure_detail_data: {
       view: "exposure", label: "风险敞口", fields: ["gross_exposure", "net_exposure"],
@@ -54,19 +55,43 @@
     }).element;
   }
 
+  function filterRow(context, label, control) {
+    const row = document.createElement("div");
+    row.className = "backtest-surface-filter-row";
+    const title = document.createElement("div");
+    title.className = "backtest-surface-filter-label";
+    title.textContent = context.t(label);
+    const value = document.createElement("div");
+    value.className = "backtest-surface-filter-value";
+    value.append(control);
+    row.append(title, value);
+    return row;
+  }
+
   function toolbar(context, state, additions = []) {
     const root = document.createElement("div");
     root.className = "backtest-surface-toolbar";
     const strategy = strategyControl(context, state);
-    if (strategy) root.append(strategy);
-    additions.filter(Boolean).forEach(item => root.append(item));
+    if (strategy) root.append(filterRow(context, "策略", strategy));
+    additions.filter(Boolean).forEach(item => {
+      if (item.element && item.label) {
+        root.append(filterRow(context, item.label, item.element));
+      } else root.append(item);
+    });
     return root;
   }
 
   const dimensions = Object.freeze([
     {key: "account", label: "账户", fields: ["account_id", "account_ref", "account", "ledger_id", "ledger"]},
     {key: "cash_pool", label: "资金池", fields: ["cash_pool_id", "cash_pool", "pool_id"]},
-    {key: "currency", label: "币种", fields: ["currency"]},
+    {
+      key: "account_currency", label: "账户币种",
+      fields: ["account_currency", "ledger_currency", "currency"],
+    },
+    {
+      key: "cash_pool_base_currency", label: "资金池基准币种",
+      fields: ["cash_pool_base_currency", "pool_base_currency", "base_currency"],
+    },
   ]);
 
   function dimensionValue(row, definition) {
@@ -91,7 +116,7 @@
       state.dimensionSelections[key][definition.key] = selected;
       const selectedSet = selected.includes(all) ? null : new Set(selected);
       predicates.push(row => !selectedSet || selectedSet.has(dimensionValue(row, definition)));
-      root.append(window.FTMultiSelectFilter.create(context, {
+      const control = window.FTMultiSelectFilter.create(context, {
         title: context.t(definition.label), compact: true, multi: true,
         className: "backtest-dimension-filter",
         items: [{
@@ -105,7 +130,8 @@
           delete state.tablePages[key];
           state.rerender();
         },
-      }).element);
+      }).element;
+      root.append(filterRow(context, definition.label, control));
     });
     return {
       element: root,
@@ -239,6 +265,8 @@
         try {
           const display = {
             ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
+            hideMetricControl: true, hideTitle: true,
+            selectedMetric: definition.metricKey || "",
             onPointClick: timestamp => state.openEventFlow(timestamp),
             chartRange: state.chartRange,
             onRangeChange: (min, max, source) => {
@@ -275,7 +303,28 @@
     const root = document.createElement("div");
     root.className = "backtest-time-series-surface";
     state.visibleCharts = new Set();
-    const choices = available(state, chartViews);
+    const registered = available(state, chartViews);
+    const metricsArtifact = registered.find(([, definition]) => (
+      definition.viewer === "metrics_chart"
+    ))?.[0];
+    const metricsLoading = Boolean(
+      metricsArtifact && !state.payloads[metricsArtifact] && !state.errors[metricsArtifact],
+    );
+    if (metricsLoading) {
+      queueMicrotask(() => state.ensurePayloads([metricsArtifact]));
+    }
+    const choices = registered.flatMap(([artifact, definition]) => {
+      if (definition.viewer === "equity_curve") return [
+        [artifact, {...definition, view: "equity", label: "净值"}],
+        [artifact, {...definition, view: "drawdown", label: "回撤", viewer: "drawdown_curve"}],
+      ];
+      if (definition.viewer !== "metrics_chart") return [[artifact, definition]];
+      return window.FTJobHighcharts.metricChoices(state.payloads[artifact] || {})
+        .map(metric => [artifact, {
+          ...definition, view: `metric:${metric.key}`, label: metric.label,
+          metricKey: metric.key,
+        }]);
+    });
     const allowed = new Set(choices.map(([, definition]) => definition.view));
     let selected = (state.chartSelection || []).filter(value => allowed.has(value));
     if (!selected.length && choices.length) selected = [choices[0][1].view];
@@ -288,10 +337,12 @@
         description: context.t(`显示${definition.label}曲线`),
       })),
       selected,
+      loading: metricsLoading,
+      loadingText: context.t("正在读取曲线候选…"),
       searchPlaceholder: context.t("搜索曲线…"),
       onApply: values => { state.chartSelection = values; state.rerender(); },
     }).element;
-    const controls = [chartFilter];
+    const controls = [{label: "曲线", element: chartFilter}];
     if (state.evaluationWindow) controls.push(window.FTUI.actionButton(
       context.t(state.showOutOfSample ? "仅显示样本内" : "显示样本外"),
       () => { state.showOutOfSample = !state.showOutOfSample; state.rerender(); },

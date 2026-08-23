@@ -381,7 +381,12 @@ def _has_contract_multiplier(fields: dict[str, object]) -> bool:
 
 def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
-    from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
+    from tools.testers.backtest.modules.cash_pool import (
+        cash_amount_to_pool_base,
+        cash_for_ledger,
+        cash_pool_cash_major,
+        set_cash_for_ledger_pool,
+    )
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
     evaluated: list[tuple[Any, dict[str, Any], Any, float, float, float]] = []
@@ -431,9 +436,20 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 )
             deficit = 0.0
         elif reserve_delta > 1e-12:
-            usable = available_cash_for_ledger(state, ledger, cash.to_major(), reason="margin_requirement")
-            paid = min(usable, reserve_delta)
-            ratio = 1.0 if reserve_delta <= 0 else paid / reserve_delta
+            pool_cash = cash_pool_cash_major(
+                state, ledger, timestamp=ctx.timestamp,
+                include_conversion_cost=True,
+            )
+            usable = available_cash_for_ledger(
+                state, ledger, pool_cash, reason="margin_requirement",
+            )
+            required_in_pool = -cash_amount_to_pool_base(
+                state, ledger, -reserve_delta, timestamp=ctx.timestamp,
+                include_conversion_cost=True,
+            )
+            paid_in_pool = min(usable, required_in_pool)
+            ratio = 1.0 if required_in_pool <= 0 else paid_in_pool / required_in_pool
+            paid = reserve_delta * ratio
             for product, required in requirements.items():
                 entry = positions[product]
                 reserved = _entry_margin_major(entry)

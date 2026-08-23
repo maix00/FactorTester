@@ -6,7 +6,11 @@ from collections import defaultdict
 from copy import copy
 from typing import Any
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
+from tools.testers.backtest.modules.cash_pool import (
+    account_cash_or_zero,
+    cash_amount_to_pool_base,
+    cash_pool_money,
+)
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.market_data import historical_fields_for_product
@@ -47,17 +51,22 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
             if ledger_key not in ledger_configs:
                 ledger_configs[ledger_key] = (ledger, state.ledger_config_for(ledger))
         first_ledger = entries[0][2]
-        cash = cash_for_ledger(state, first_ledger)
-        if cash is None:
-            raise KeyError(f"cash_pool {pool_id!r} has no cash")
+        cash = cash_pool_money(
+            state, first_ledger, timestamp=ctx.timestamp,
+            include_conversion_cost=True,
+        )
         available = available_cash_for_ledger(
             state, first_ledger, float(cash.to_major()), reason="execution_order",
         )
         upper_bound = sum(
-            _execution_cash_required_upper_bound(
+            cash_amount_to_pool_base(
+                state, ledger,
+                _execution_cash_required_upper_bound(
                 state, ctx, ledger, [(strategy, [order], historical)],
                 strategy_config=strategy_configs[strategy],
                 ledger_config=ledger_configs[id(ledger)][1],
+                ),
+                timestamp=ctx.timestamp, include_conversion_cost=True,
             )
             for strategy, order, ledger, historical in entries
         )
@@ -128,8 +137,13 @@ def _cash_delta(
     candidate = copy(order)
     candidate.quantity = quantity
     product_fields = historical_fields_for_product(historical, order.instrument)
-    return _estimated_execution_cash_delta(
-        cash, positions[id(ledger)], strategy_config, candidate,
+    ledger_cash = account_cash_or_zero(state, ledger)
+    delta = _estimated_execution_cash_delta(
+        ledger_cash, positions[id(ledger)], strategy_config, candidate,
         historical, ledger_config, prices,
         product_fields=product_fields,
+    )
+    return cash_amount_to_pool_base(
+        state, ledger, delta, timestamp=ctx.timestamp,
+        include_conversion_cost=True,
     )

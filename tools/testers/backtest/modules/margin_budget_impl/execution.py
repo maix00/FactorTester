@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
+from tools.testers.backtest.modules.cash_pool import cash_pool_money
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.margin import _resolve_margin_mode
 from tools.testers.backtest.modules.market_data import MarketDataModule
@@ -63,14 +63,14 @@ def enforce_execution_margin_limit(state: Any, ctx: Any) -> None:
         )
         first_ledger = entries[0][2]
         cash = _observed_stage(
-            observer, observation, "cash_lookup", cash_for_ledger,
-            state, first_ledger,
+            observer, observation, "cash_lookup", cash_pool_money,
+            state, first_ledger, timestamp=ctx.timestamp,
         )
         if cash is None:
             raise KeyError(f"cash_pool {pool!r} has no cash")
         initial_margin = _observed_stage(
             observer, observation, "initial_margin", margin_reserved,
-            positions,
+            state, ctx, components, positions,
         )
         initial_equity = _observed_stage(
             observer, observation, "pool_equity", pool_equity,

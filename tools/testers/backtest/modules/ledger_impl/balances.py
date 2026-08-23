@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.market_data import historical_fields_for_product
 from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
 
@@ -42,10 +41,9 @@ def normalise_fill_quantity(
 
 
 def required_cash_for_ledger(state, ledger):
-    cash = cash_for_ledger(state, ledger)
-    if cash is None:
-        raise RuntimeError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash pool")
-    return cash
+    from tools.testers.backtest.modules.cash_pool import account_cash_or_zero
+
+    return account_cash_or_zero(state, ledger)
 
 
 def uses_margin_accounting(

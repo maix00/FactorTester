@@ -82,6 +82,8 @@ def _update(client, workspace) -> None:
                 "local_settings": {
                     "start_date": "2024-01-02",
                     "end_date": "2024-02-02",
+                    "account_currency": "USD",
+                    "base_currency": "CNY",
                 },
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
@@ -153,3 +155,6 @@ def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -
     group = run_spec["configuration"]["analyses"]["backtest"]["groups"][0]
     assert group["factor_candidate_refs"] == ["factor:mmret-10d"]
     assert {"factorAlias", "factorAliases", "factor_alias", "factor_aliases"}.isdisjoint(group)
+    local_settings = run_spec["configuration"]["analyses"]["backtest"]["local_settings"]
+    assert local_settings["account_currency"] == "USD"
+    assert local_settings["base_currency"] == "CNY"
