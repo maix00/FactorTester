@@ -134,7 +134,7 @@
   function baseChart(series, yTitle = "") {
     return {
       chart: {backgroundColor: "transparent", zooming: {type: "x"}},
-      time: {useUTC: false},
+      time: window.FTChartTimeline.timeOptions(),
       title: {text: null}, credits: {enabled: false},
       legend: {enabled: true}, xAxis: {type: "datetime", ordinal: false},
       yAxis: {title: {text: yTitle}}, tooltip: {shared: true},

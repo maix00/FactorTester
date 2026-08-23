@@ -32,6 +32,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/core/shared-ui.js",
             "server/manager/web/catalog/shared/multi-select-filter.js",
             "server/manager/web/jobs/result-tabs.js",
+            "server/manager/web/jobs/highcharts-timeline.js",
             "server/manager/web/report/table-view.js",
             "server/manager/web/test-modules/backtest/results/runtime-model.js",
             "server/manager/web/test-modules/backtest/results/model.js",

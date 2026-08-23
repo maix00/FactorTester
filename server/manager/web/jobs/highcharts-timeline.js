@@ -11,8 +11,23 @@
       if (Math.abs(value) > 1_000_000_000) return value * 1000;
       return index;
     }
-    const parsed = Date.parse(String(value || ""));
+    const text = String(value || "").trim();
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? new Date(`${text}T00:00:00`).getTime()
+      : Date.parse(text);
     return Number.isFinite(parsed) ? parsed : index;
+  }
+
+  function userTimezone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+    } catch (_error) {
+      return undefined;
+    }
+  }
+
+  function timeOptions() {
+    return {timezone: userTimezone()};
   }
 
   function observed(items) {
@@ -53,5 +68,7 @@
     return best;
   }
 
-  window.FTChartTimeline = Object.freeze({aligned, nearest, number, observed, timestamp});
+  window.FTChartTimeline = Object.freeze({
+    aligned, nearest, number, observed, timeOptions, timestamp, userTimezone,
+  });
 })();
