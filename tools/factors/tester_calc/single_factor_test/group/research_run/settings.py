@@ -71,7 +71,41 @@ def resolve_flat_backtest_settings(
     setting_keys = set(app.settings)
     raw_local_settings = payload.get("local_settings")
     top_level_setting_keys = setting_keys.intersection(payload)
-    if top_level_setting_keys:
+    # The immutable RunSpec stores registered settings only under
+    # ``local_settings``.  The job runner, however, receives an explicit
+    # execution projection that mirrors those values at the top level for the
+    # legacy runtime call contract.  That projection carries the complete
+    # nested RunSpec as proof of its source; accept it only when every mirror
+    # exactly matches the nested authority.  A client-authored payload with
+    # top-level settings, or a conflicting mirror, remains invalid.
+    run_spec = payload.get("run_spec")
+    run_spec_configuration = (
+        run_spec.get("configuration") if isinstance(run_spec, dict) else None
+    )
+    run_spec_analysis = (
+        run_spec_configuration.get("analyses", {}).get("backtest")
+        if isinstance(run_spec_configuration, dict)
+        and isinstance(run_spec_configuration.get("analyses"), dict)
+        else None
+    )
+    run_spec_local_settings = (
+        run_spec_analysis.get("local_settings")
+        if isinstance(run_spec_analysis, dict)
+        else None
+    )
+    nested_run_spec = (
+        isinstance(raw_local_settings, dict)
+        and isinstance(run_spec_local_settings, dict)
+    )
+    mirrored_runtime_settings = (
+        nested_run_spec
+        and raw_local_settings == run_spec_local_settings
+        and all(
+            raw_local_settings.get(key) == payload.get(key)
+            for key in top_level_setting_keys
+        )
+    )
+    if top_level_setting_keys and not mirrored_runtime_settings:
         raise ValueError(
             "registered settings must be nested under local_settings, "
             f"not top-level: {sorted(top_level_setting_keys)}"
