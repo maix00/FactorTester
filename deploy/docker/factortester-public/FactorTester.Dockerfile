@@ -136,6 +136,7 @@ COPY docs docs
 COPY product_docs product_docs
 COPY skills skills
 COPY apple/Resources apple/Resources
+COPY apple/Sources/Navigation apple/Sources/Navigation
 COPY settings.py start_server.py ./
 COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
     /usr/local/bin/factortester-public-entrypoint
