@@ -157,7 +157,8 @@ def series_reports(name, series, title):
                 "drawdown": current_drawdowns,
                 "max_drawdown": historical_drawdowns,
             })
-        receipt["drawdown_definition"] = "historical_maximum_drawdown_through_each_point"
+        receipt["drawdown_definition"] = "current_value_relative_to_running_peak"
+        receipt["max_drawdown_definition"] = "historical_maximum_drawdown_through_each_point"
     payload = {"schema_version": 1, "artifact_kind": name, "series": payload_series}
     initial_value = (
         series[0]["values"][0] if series and series[0].get("values") else None

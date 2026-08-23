@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import queue
 
-from server.jobs.equity_curve_artifact import build_equity_curve_artifact
+from server.jobs.equity_curve_artifact import (
+    _current_drawdowns,
+    build_equity_curve_artifact,
+)
 from server.jobs.scheduling.worker_pool import _WorkerSink
 
 
@@ -27,10 +30,16 @@ def test_equity_curve_artifact_is_small_deterministic_and_self_describing() -> N
     assert b"SgCCS" in image
     assert len(image) < 100_000
     assert receipt["panels"] == ["equity", "drawdown"]
-    assert receipt["drawdown_definition"] == "historical_maximum_drawdown_through_each_point"
+    assert receipt["drawdown_definition"] == "current_value_relative_to_running_peak"
     assert receipt["initial_equity"] == [100]
     assert receipt["series"][0]["original_points"] == 20
     assert receipt["downsampling"] == "bucket_minmax_preserve_endpoints"
+
+
+def test_equity_curve_drawdown_recovers_at_a_new_running_peak() -> None:
+    assert _current_drawdowns([100.0, 120.0, 90.0, 120.0, 130.0]) == [
+        0.0, 0.0, -0.25, 0.0, 0.0,
+    ]
 
 
 def test_equity_curve_artifact_downsamples_and_rejects_invalid_series() -> None:
