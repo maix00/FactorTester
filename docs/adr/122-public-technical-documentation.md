@@ -30,11 +30,12 @@ Shell. The macOS client embeds that same route; navigation ownership remains
 with the surrounding client tab system. Documentation is readable without an
 account.
 
-`markdown-it-py` is used only as the restricted Markdown parser. Raw HTML is
-disabled, every heading requires an explicit stable anchor, and source paths
-must remain inside the manifested public root. Search and navigation are
-product-owned so a third-party documentation shell cannot create a second
-routing or authentication system.
+`markdown-it-py` is used only as the restricted Markdown parser and `nh3`
+applies the rendered-HTML tag, attribute and URL allowlist. Raw HTML is
+disabled before sanitization, every heading requires an explicit stable
+anchor, and source paths must remain inside the manifested public root. Search
+and navigation are product-owned so a third-party documentation shell cannot
+create a second routing or authentication system.
 
 ## Consequences
 

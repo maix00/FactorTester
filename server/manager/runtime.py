@@ -202,7 +202,10 @@ class ManagerState(
     ) -> None:
         self.repo = repo.resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
-        self.technical_docs = TechnicalDocsLibrary(self.runtime_source_root / "product_docs")
+        self.technical_docs = TechnicalDocsLibrary(
+            self.runtime_source_root / "product_docs",
+            code_root=self.runtime_source_root,
+        )
         self.vibe_trading_root = VIBE_TRADING_ROOT
         self.python = python
         self.server_role = str(

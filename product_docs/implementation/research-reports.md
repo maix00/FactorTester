@@ -8,9 +8,9 @@ authoring 后端维护当前可写树与提交事务；发布生成只读投影�
 
 ## 规范代码入口 {#canonical-paths}
 
-- 报告 authoring：`tools/cli/research_report_authoring/`
-- 报告服务：`server/services/research_report*`
-- Manager 报告读取：`server/manager/http/*research*`
+- 报告 authoring：`tools/cli/release/research_reporting/authoring/`
+- 报告展示服务：`server/services/research_report_presentations.py`
+- Manager 报告读取：`server/manager/http/server_research_routes.py`、`server/manager/http/client_research_routes.py`、`server/manager/http/public_research_routes.py`
 - Web 报告渲染：`server/manager/web/report/`
 
 ## 边界 {#boundaries}

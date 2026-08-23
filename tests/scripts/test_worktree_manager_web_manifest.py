@@ -27,6 +27,13 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
+    assert manifest["route_groups"]["docs"] == ["docs"]
+    assert "docs" not in manifest["initial_groups"]
+    assert all(
+        not script.startswith("docs/")
+        for group in manifest["initial_groups"]
+        for script in groups[group]
+    )
     assert manifest["styles"] == [
         "styles/app.css", "styles/jobs/result-tabs.css", "styles/report.css",
         "styles/outputs/artifacts.css",

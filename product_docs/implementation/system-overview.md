@@ -11,7 +11,7 @@ Manager 提供统一 Web Shell、登录会话、公开目录与任务聚合；�
 - Manager 组合与状态：`server/manager/runtime.py`
 - HTTP 路由：`server/manager/http/`
 - Web Shell：`server/manager/web/app/`
-- 测试定义与执行：`server/services/`、`server/test_modules/`
+- 测试定义与执行：`server/services/`、`server/modules/`
 - Swift 导航与嵌入：`apple/Sources/Navigation/`
 
 这些路径用于定位职责，不代表整个目录都属于公开接口。

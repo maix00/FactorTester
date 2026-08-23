@@ -22,6 +22,8 @@ deploy/docker/*
 !static/**
 !docs/
 !docs/**
+!product_docs/
+!product_docs/**
 !skills/
 !skills/**
 !apple/

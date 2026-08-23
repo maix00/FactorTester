@@ -4,6 +4,7 @@
 .technical-docs-nav-group { margin-top:22px; }
 .technical-docs-nav-title,.technical-docs-toc h2 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 .technical-docs-nav-link,.technical-docs-toc a { display:block; padding:6px 9px; border-radius:7px; color:inherit; text-decoration:none; font-size:13px; }
+.technical-docs-nav-link[hidden],.technical-docs-nav-group[hidden] { display:none; }
 .technical-docs-nav-link.active { background:var(--surface-raised,#eef3f8); font-weight:650; }
 .technical-docs-main { min-width:0; }
 .technical-docs-page-header { padding-bottom:24px; border-bottom:1px solid var(--line); }

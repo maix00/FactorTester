@@ -9,8 +9,8 @@
 ## 规范代码入口 {#canonical-paths}
 
 - 测试 authoring 协议：`server/manager/services/test_authoring.py`
-- 测试模块：`server/test_modules/`
-- Job 路由与投影：`server/manager/http/job_*`、`server/manager/storage/job_index.py`
+- 测试模块：`server/modules/`
+- Job 路由与投影：`server/manager/http/`、`server/manager/storage/job_index.py`
 - Web 测试工作台：`server/manager/web/test-modules/`
 
 ## 生命周期与权限 {#lifecycle}
