@@ -82,25 +82,23 @@ RUN set -eu; \
 # invokes this pinned headless CLI on loopback with one private state directory
 # per Profile Agent session; it does not copy or fork the conversion code.
 ARG CC_SWITCH_VERSION=5.10.2
+COPY deploy/docker/factortester-public/cc-switch-cli-linux-x64-musl-v5.10.2.tar.gz /tmp/cc-switch-linux-x64-musl.tgz
+COPY deploy/docker/factortester-public/cc-switch-cli-linux-arm64-musl-v5.10.2.tar.gz /tmp/cc-switch-linux-arm64-musl.tgz
 RUN set -eu; \
     case "${TARGETARCH}" in \
         amd64) \
-            cc_switch_platform=linux-x64-musl; \
+            cc_switch_archive=/tmp/cc-switch-linux-x64-musl.tgz; \
             cc_switch_sha256=8065c5bae9eda270747c1766cefbb2091d9625655dbf409ad7764eb47c0a8635 ;; \
         arm64) \
-            cc_switch_platform=linux-arm64-musl; \
+            cc_switch_archive=/tmp/cc-switch-linux-arm64-musl.tgz; \
             cc_switch_sha256=b25c77f7eebbe3968c53022e1b5e703e324203e94e5c6379320bcd1bbe268e63 ;; \
         *) echo "unsupported CC Switch architecture: ${TARGETARCH}" >&2; exit 2 ;; \
     esac; \
-    cc_switch_url="https://github.com/SaladDay/cc-switch-cli/releases/download/v${CC_SWITCH_VERSION}/cc-switch-cli-${cc_switch_platform}.tar.gz"; \
-    curl --fail --location --retry 5 --retry-delay 2 \
-        --connect-timeout 20 --max-time 900 \
-        --output /tmp/cc-switch.tgz "${cc_switch_url}"; \
-    echo "${cc_switch_sha256}  /tmp/cc-switch.tgz" | sha256sum --check --status; \
-    tar -xzf /tmp/cc-switch.tgz -C /tmp; \
+    echo "${cc_switch_sha256}  ${cc_switch_archive}" | sha256sum --check --status; \
+    tar -xzf "${cc_switch_archive}" -C /tmp; \
     install -m 0555 /tmp/cc-switch /usr/local/bin/cc-switch; \
     cc-switch --version; \
-    rm -f /tmp/cc-switch /tmp/cc-switch.tgz
+    rm -f /tmp/cc-switch /tmp/cc-switch-linux-*.tgz
 
 # Pin the upstream Mihomo binary in the image. The Manager never publishes
 # its controller or mixed proxy ports; both remain loopback-only.
