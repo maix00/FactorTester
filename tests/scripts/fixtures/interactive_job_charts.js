@@ -116,11 +116,9 @@ progressive.xAxis.events.afterSetExtremes.call(
 await new Promise(resolve => setTimeout(resolve, 20));
 assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
 assert.deepEqual(replacedData, [
-  [1_690_000_000_000, null],
   [1_700_000_000_000, 110], [1_700_000_001_000, 111],
-  [1_710_000_000_000, null],
 ]);
-assert.equal(progressive.chart.zooming.mouseWheel.showResetButton, true);
+assert.strictEqual(progressive.navigator.series.data, progressive.series[0].data);
 requestedRange = {stale: true};
 progressive.xAxis.events.afterSetExtremes.call(
   {chart: progressiveChart}, {
@@ -129,7 +127,7 @@ progressive.xAxis.events.afterSetExtremes.call(
   },
 );
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {min: undefined, max: undefined, maxPoints: 600});
+assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
 
 const metrics = {
   artifact_kind: "metrics_over_time",

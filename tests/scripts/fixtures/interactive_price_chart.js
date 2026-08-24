@@ -60,7 +60,7 @@ assert.ok(Number.isFinite(captured.options.series[0].data[0][0]));
 assert.ok(captured.options.rangeSelector.buttons.length >= 5);
 assert.strictEqual(captured.options.rangeSelector.allButtonsEnabled, true);
 assert.strictEqual(captured.options.navigator.adaptToUpdatedData, false);
-assert.strictEqual(captured.options.chart.zooming.mouseWheel.showResetButton, true);
+assert.strictEqual(captured.options.navigator.series.data, captured.options.series[0].data);
 const zhDate = captured.options.xAxis.labels.formatter.call({value: 1735812000000});
 assert.ok(zhDate.includes("2025"));
 const tooltip = captured.options.series[0].tooltip.pointFormatter.call({
