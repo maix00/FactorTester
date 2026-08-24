@@ -14,7 +14,8 @@
       credits: {enabled: false},
       rangeSelector: {selected: 5, inputEnabled: true},
       navigator: {enabled: true}, scrollbar: {enabled: true},
-      legend: {enabled: true}, xAxis: {type: "datetime", ordinal: false},
+      legend: {enabled: true},
+      xAxis: window.FTChartTimeline.observedTimeAxis(),
       yAxis: [{title: {text: yTitle}, opposite: false, plotLines: [{
         value: 0, width: 1, color: "#94a3b8", dashStyle: "ShortDash",
       }]}],
