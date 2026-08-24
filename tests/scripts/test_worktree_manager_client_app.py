@@ -2771,7 +2771,10 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         scripts = {}
-        for name in ["factor-model", "factor-list", "factor-details", "factors"]:
+        for name in [
+            "factor-model", "factor-list", "factor-details", "factors",
+            "factor-catalog-runtime",
+        ]:
             with urlopen(
                 f"{base_url}/research-static/catalog/{name}.js"
             ) as response:
@@ -2781,28 +2784,29 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     listing = scripts["factor-list"]
     details = scripts["factor-details"]
     coordinator = scripts["factors"]
+    runtime = scripts["factor-catalog-runtime"]
     assert "group.factor_refs" in model
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
     assert "item.value.target_ref, item.value.set_ref" in model
-    assert 'context.api("/api/catalog/factors")' in coordinator
-    assert 'context.api("/api/catalog/factor-sets")' in coordinator
+    assert 'context.api("/api/catalog/factors")' in runtime
+    assert 'context.api("/api/catalog/factor-sets")' in runtime
     assert "/api/catalog/factor-sets/detail" in details
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
-    assert "/api/catalog/product-groups" in coordinator
-    assert "factorTesterLocalFactorSets" in coordinator
-    assert "mergeFactorSets" in coordinator
+    assert "/api/catalog/product-groups" in runtime
+    assert "factorTesterLocalFactorSets" in runtime
+    assert "mergeFactorSets" in runtime
     assert 'visibility: "local"' in model
     assert 'context.t("因子家族")' in listing
     assert 'context.t("因子")' in listing
     assert 'context.t("因子集合")' in listing
     assert '"/factors/sets"' in listing
     assert "FTUI.pagedTable" in listing
-    assert 'className = "factor-catalog-controls"' in coordinator
-    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in coordinator
-    assert "context.toolbar.append(\n      search" not in coordinator
-    assert 'context.t("按下级用户筛选")' in coordinator
+    assert 'className = "factor-catalog-controls"' in listing
+    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in listing
+    assert "context.toolbar.append(\n      search" not in listing
+    assert 'context.t("按下级用户筛选")' in listing
     assert "decodeFrozenFactorRef" in details
 
 
@@ -3083,6 +3087,7 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
             "catalog": "/research-static/catalog/products.js",
             "catalog_details": "/research-static/catalog/details.js",
             "factors": "/research-static/catalog/factors.js",
+            "factor_runtime": "/research-static/catalog/factor-catalog-runtime.js",
             "profiles": "/research-static/profile/profiles.js",
             "settings": "/research-static/settings/settings.js",
         }
@@ -3091,8 +3096,11 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
             with urlopen(f"{base_url}{path}") as response:
                 scripts[name] = response.read().decode("utf-8")
 
-    for script in scripts.values():
+    for name, script in scripts.items():
+        if name == "factors":
+            continue
         assert "context.isRouteCurrent?.() !== false" in script
+    assert "context.isRouteCurrent?.() !== false" in scripts["factor_runtime"]
     assert "const payload = await context.api(\"/api/client/profiles\")" in scripts["profiles"]
     assert "runtime_kind" in scripts["profiles"]
     assert "/api/client/profile-claims" in scripts["profiles"]
