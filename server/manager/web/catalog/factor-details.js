@@ -40,6 +40,9 @@
     root.className = "detail-stack";
     root.append(window.FTFactorDetailShared.summary(context, factor));
     root.append(window.FTFactorDetailShared.source(context, factor));
+    const provenance = window.FTFactorDetailShared.provenance(context, factor);
+    if (provenance) root.append(provenance);
+    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, factor));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
     ).shell);
@@ -176,6 +179,9 @@
     root.className = "detail-stack";
     root.append(window.FTFactorDetailShared.summary(context, family));
     root.append(window.FTFactorDetailShared.source(context, family));
+    const provenance = window.FTFactorDetailShared.provenance(context, family);
+    if (provenance) root.append(provenance);
+    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, family));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(family),
     ).shell);

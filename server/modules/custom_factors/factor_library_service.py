@@ -5,28 +5,33 @@ from __future__ import annotations
 import time
 from typing import cast
 
-from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
+from server.modules.custom_factors.catalog import (
+    list_custom_factors,
+    list_public_factors,
+)
 from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config,
     list_factor_param_config_aliases,
     list_factor_param_config_scopes,
-    list_all_factor_param_aliases_across_scopes,
     load_factor_param_config,
     normalize_product_group,
     save_factor_param_config,
 )
 from server.modules.products.product_group_store import load_product_groups
-from server.modules.shared.factor_param_utils import build_factor_param_item, serialize_factor_param_rows
-from tools.data.account_manage import (
-    account_display_name,
-    get_account,
-    visible_accounts_for,
+from server.modules.shared.factor_param_utils import (
+    build_factor_param_item,
+    serialize_factor_param_rows,
 )
 from server.services.factor_registry import (
     factor_group_key,
     get_custom_factor_instance,
     get_factor_family_instance,
+)
+from tools.data.account_manage import (
+    account_display_name,
+    get_account,
+    visible_accounts_for,
 )
 
 
@@ -111,6 +116,12 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
             factors[-1]['product_group'] = config.get('product_group') or config.get('scope_key') or DEFAULT_SCOPE_KEY
             if isinstance(config.get('metadata'), dict):
                 factors[-1]['metadata'] = config.get('metadata')
+                for key in (
+                    'factor_owner_ref', 'factor_family_ref', 'factor_git_commit',
+                ):
+                    value = config['metadata'].get(key)
+                    if value:
+                        factors[-1][key] = value
         except Exception:
             continue
     return factors
@@ -299,6 +310,9 @@ def _clean_library_metadata(metadata: dict | None) -> dict:
     for key in (
         'note',
         'research_report',
+        'factor_owner_ref',
+        'factor_family_ref',
+        'factor_git_commit',
         'product_group_id',
         'product_group_name',
         'product_group_paths',
@@ -347,6 +361,8 @@ def _merged_library_metadata(
     group_metadata = _product_group_metadata(current_username, product_group)
     for key, value in group_metadata.items():
         merged[key] = value
+    if isinstance(metadata, dict) and not metadata.get('factor_git_commit'):
+        merged.pop('factor_git_commit', None)
     provided = _clean_library_metadata(metadata)
     for key, value in provided.items():
         merged[key] = value
