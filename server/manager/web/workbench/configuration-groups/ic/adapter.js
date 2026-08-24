@@ -1,4 +1,5 @@
 (() => {
+  const productHydrations = new WeakMap();
   const adapter = Object.freeze({
     render: configurationList,
     selected: state => FTICConfigurationGroupModel.selected(state),
@@ -18,6 +19,9 @@
 
   function render(context, state, refresh) {
     initialize(state);
+    if (state.icConfigurationGroupShowConfigOpen === true) {
+      hydrateSummaryProducts(context, state, refresh);
+    }
     const editor = state.icConfigurationGroupEditor;
     if (editor?.groupID && !FTICConfigurationGroupModel.find(state, editor.groupID)) {
       state.icConfigurationGroupEditor = null;
@@ -68,6 +72,7 @@
       showConfigOpen: state.icConfigurationGroupShowConfigOpen === true,
       onToggleConfig: open => {
         state.icConfigurationGroupShowConfigOpen = open;
+        if (open) hydrateSummaryProducts(context, state, refresh);
         refresh();
       },
       items: groups.map(group => ({
@@ -121,6 +126,37 @@
       state.icConfigurationGroupCatalogError = error.message || String(error);
       refresh();
     });
+  }
+
+  function hydrateSummaryProducts(context, state, refresh) {
+    if (!needsProductLabels(state) || productHydrations.has(state)) return;
+    const loader = window.FTTests?.ensureProductsForExecution;
+    if (typeof loader !== "function") return;
+    const promise = Promise.resolve(loader(context, state, refresh));
+    productHydrations.set(state, promise);
+    void promise.then(refresh).catch(error => {
+      state.icConfigurationGroupCatalogError = error.message || String(error);
+      refresh();
+    }).finally(() => {
+      if (productHydrations.get(state) === promise) productHydrations.delete(state);
+    });
+  }
+
+  function needsProductLabels(state) {
+    const catalog = Array.isArray(state.groups) ? state.groups : [];
+    const index = state.productGroupIndex instanceof Map
+      ? state.productGroupIndex
+      : new Map(catalog.map(value => [productIdentity(value), value]));
+    return (state.analysis?.configuration_groups || []).some(group => {
+      const ref = String(group?.product_scope_ref || "");
+      const value = index.get(ref);
+      return Boolean(ref && (!value || value._savedPlaceholder === true));
+    });
+  }
+
+  function productIdentity(value) {
+    return String(window.FTTestProducts?.groupID?.(value)
+      || value?.group_ref || value?.product_group_ref || value?.id || "");
   }
 
   const renderer = Object.freeze({initialize, render});
