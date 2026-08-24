@@ -30,7 +30,7 @@ def fake_server() -> Iterator[str]:
     app = Flask(__name__)
     app.secret_key = "test-secret"
 
-    @app.post("/login")
+    @app.post("/auth/login")
     def login():
         data = request.get_json()
         if data == {"username": "alice", "password": "pw"}:
@@ -57,7 +57,7 @@ def fake_server() -> Iterator[str]:
             profile={"profile_id": "maxa"},
         )
 
-    @app.post("/logout")
+    @app.post("/auth/logout")
     def logout():
         session.clear()
         return jsonify(success=True)
