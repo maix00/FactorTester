@@ -50,13 +50,6 @@ class FactorTesterClient(
             {"profile": profile},
         ))
 
-    def set_keep_login(self, enabled: bool) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/api/keep_login", {
-                "keep_login": bool(enabled),
-            })
-        )
-
     def logout(self) -> dict[str, Any]:
         try:
             return self._expect_success(self.session.post("/auth/logout", {}))
