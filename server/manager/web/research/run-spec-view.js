@@ -2,10 +2,48 @@
   const object = value => value && typeof value === "object" && !Array.isArray(value)
     ? value : {};
 
+  function dataSourceSummary(value, fallback) {
+    const source = object(value);
+    const id = String(source.id || fallback || "");
+    return {
+      id,
+      label: String(
+        source.family_name || source.source_name || source.bundle_name || id,
+      ),
+      source_kind: String(source.source_kind || source.provider_kind || ""),
+      members: (Array.isArray(source.members) ? source.members : []).map(member => {
+        const item = object(member);
+        return {
+          id: String(item.id || item.source_ref || ""),
+          label: String(item.label || item.id || item.source_ref || ""),
+          frequency: String(item.frequency || ""),
+        };
+      }),
+    };
+  }
+
+  function configurationPresentation(value) {
+    const declarations = {};
+    function visit(current) {
+      if (Array.isArray(current)) return current.map(visit);
+      if (!current || typeof current !== "object") return current;
+      return Object.fromEntries(Object.entries(current).map(([key, item]) => {
+        if (key !== "data_source_declarations") return [key, visit(item)];
+        const sources = object(item);
+        Object.assign(declarations, sources);
+        return [key, Object.fromEntries(Object.entries(sources).map(
+          ([sourceID, source]) => [sourceID, dataSourceSummary(source, sourceID)],
+        ))];
+      }));
+    }
+    return {summary: visit(value), declarations};
+  }
+
   function model(value) {
     const record = object(value);
     const contract = object(record.run_spec);
     const configuration = object(contract.configuration);
+    const presented = configurationPresentation(configuration);
     const identity = {
       run_spec_hash: record.run_spec_hash || "",
       run_spec_version: record.run_spec_version ?? contract.run_spec_version ?? "",
@@ -24,6 +62,8 @@
       title: String(record.alias_zh || ""),
       summary: String(record.summary_zh || ""),
       configuration,
+      configurationSummary: presented.summary,
+      dataSourceDeclarations: presented.declarations,
       execution,
     };
   }
@@ -87,10 +127,16 @@
     heading.textContent = context.t("配置身份");
     identity.append(heading, identityTable(context, view.identity));
     root.append(identity);
-    root.append(
-      objectSection(context, "冻结配置内容", view.configuration),
-      objectSection(context, "执行合同", view.execution),
-    );
+    root.append(objectSection(
+      context, "冻结配置内容", view.configurationSummary,
+    ));
+    if (nonEmptyEntries(view.dataSourceDeclarations).length) {
+      root.append(objectSection(
+        context, "完整数据源声明（技术明细）",
+        view.dataSourceDeclarations, false,
+      ));
+    }
+    root.append(objectSection(context, "执行合同", view.execution));
     return root;
   }
 
