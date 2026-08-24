@@ -19,6 +19,12 @@ const factor = {
 const series = window.FTICResultCharts.seriesOptions(factor, context);
 assert.equal(series.time.timezone, "Asia/Taipei");
 assert.equal(series.navigator.enabled, true);
+assert.equal(series.xAxis.ordinal, true, "non-trading gaps must be compressed");
+assert.deepEqual(
+  series.xAxis,
+  window.FTChartTimeline.observedTimeAxis(),
+  "IC and backtest charts must share the observed-time axis infrastructure",
+);
 assert.equal(series.series[0].data.length, 3);
 assert.ok(Number.isFinite(series.series[0].data[0][0]));
 const decay = window.FTICResultCharts.decayOptions(factor, context);

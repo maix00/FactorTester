@@ -30,6 +30,10 @@
     return {timezone: userTimezone()};
   }
 
+  function observedTimeAxis(options = {}) {
+    return {type: "datetime", ordinal: true, ...options};
+  }
+
   function observed(items) {
     const values = new Set();
     (Array.isArray(items) ? items : []).forEach(item => {
@@ -69,6 +73,7 @@
   }
 
   window.FTChartTimeline = Object.freeze({
-    aligned, nearest, number, observed, timeOptions, timestamp, userTimezone,
+    aligned, nearest, number, observed, observedTimeAxis,
+    timeOptions, timestamp, userTimezone,
   });
 })();

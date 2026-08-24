@@ -43,6 +43,7 @@ assert.equal(equity.navigator.enabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
 assert.equal(equity.xAxis.ordinal, true, "non-trading gaps must be compressed");
+assert.deepEqual(equity.xAxis, window.FTChartTimeline.observedTimeAxis());
 assert.equal(equity.yAxis.length, 2, "equity keeps only amount and cumulative-return axes");
 assert.equal(equity.yAxis[1].linkedTo, 0);
 const drawdown = window.FTJobHighcharts.optionsFor("drawdown_curve", {
