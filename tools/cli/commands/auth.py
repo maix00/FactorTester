@@ -39,12 +39,11 @@ def login(username: str, password: str, keep_login: bool) -> None:
     """Login through the configured remote server."""
     if not password:
         password = getpass.getpass("Password: ")
-    client = client_from_config()
+    client = client_from_config(persist_cookies=keep_login)
     data = client.login(username, password)
-    persistence = client.set_keep_login(keep_login)
     click.echo(
         f"已登录: {data.get('username') or username} "
-        f"keep_login={str(bool(persistence.get('keep_login'))).lower()}"
+        f"keep_login={str(keep_login).lower()}"
     )
     state = load_state()
     state.reset()
