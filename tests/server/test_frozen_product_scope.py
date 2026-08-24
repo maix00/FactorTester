@@ -1,9 +1,9 @@
-from server.services.frozen_product_scope import freeze_product_scope
 from server.modules.shared.factor_tester_runtime import (
-    selection_from_request,
     selection_for_product_path_selection,
+    selection_from_request,
 )
 from server.modules.single_factor_test.research_jobs import _execution_payload
+from server.services.frozen_product_scope import freeze_product_scope
 
 
 def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
@@ -68,13 +68,7 @@ def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
     assert payload["shared"]["product_categories"]["inline:session"]["items"] == [
         {"label": "日盘", "paths": ["Product/A"]}
     ]
-    assert payload["shared"]["data_source_declarations"] == {
-        "LocalMIN1": {
-            "id": "LocalMIN1",
-            "frequency": "MIN1",
-            "mapping_revision": "sha256:mapping",
-        }
-    }
+    assert "data_source_declarations" not in payload["shared"]
     assert "product_selections" not in payload["analyses"]["backtest"]
     assert payload["analyses"]["backtest"]["groups"][0][
         "product_path_selection_id"
