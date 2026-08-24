@@ -27,6 +27,16 @@ vm.runInThisContext(
   {filename: "factor-detail-shared.js"},
 );
 global.FTUI = window.FTUI = {
+  code(value, options = {}) {
+    const pre = new Element("pre");
+    pre.className = ["json-code", "code-viewer", options.className || ""]
+      .filter(Boolean).join(" ");
+    const body = new Element("code");
+    body.textContent = String(value || "");
+    body.className = options.language ? `language-${options.language}` : "";
+    pre.append(body);
+    return pre;
+  },
   fieldRows(value) { return Object.entries(value || {}); },
   loading(label) { const item = new Element(); item.textContent = label; return item; },
   table(headers, values) {
