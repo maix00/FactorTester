@@ -27,6 +27,7 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/runs(?:/preview)?",
         r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
+        r"/custom-factors/api/workspace/push",
     ),
     "PUT": (),
     "DELETE": (),
@@ -68,6 +69,16 @@ class JobProxyRoutesMixin:
             if visitor_submission and visitor is not None
             else str(session["username"])
         )
+        workspace_push = (
+            method == "POST"
+            and parsed.path == "/custom-factors/api/workspace/push"
+        )
+        if workspace_push and str(session.get("role") or "") != "super_admin":
+            json_response(self, {
+                "success": False,
+                "error": "super administrator permission required",
+            }, 403)
+            return True
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 1024 * 1024:
             json_response(
@@ -103,6 +114,12 @@ class JobProxyRoutesMixin:
             route = self._service_route(parsed)
         if route is None:
             return True
+        if workspace_push and route.server_id != self.state.server_id:
+            json_response(self, {
+                "success": False,
+                "error": "factor workspace push must use its local Manager",
+            }, 409)
+            return True
         try:
             if run_request:
                 self._stage_factor_sources_for_route(
@@ -134,6 +151,30 @@ class JobProxyRoutesMixin:
                 route=route,
                 origin_server_id=self.state.server_id,
             )
+        if workspace_push and 200 <= response.status < 300:
+            try:
+                value = response.json_object()
+                changes = value.get("public_factor_changes") or []
+                if changes:
+                    value["public_factor_replication"] = (
+                        self.state.public_factor_replication.publish(
+                            changes, principal=principal,
+                        )
+                    )
+                    response = GatewayResponse(
+                        status=response.status,
+                        body=json.dumps(value, ensure_ascii=False).encode("utf-8"),
+                        content_type="application/json",
+                        content_disposition=response.content_disposition,
+                        etag=response.etag,
+                    )
+            except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                json_response(self, {
+                    "success": False,
+                    "error": str(exc),
+                    "code": "public_factor_replication_failed",
+                }, 503)
+                return True
         self._send_gateway_response(
             response,
             route=route,

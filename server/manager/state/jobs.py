@@ -87,6 +87,11 @@ class JobProjectionStateMixin:
             for owner, owner_jobs in by_owner.items():
                 self.job_index.upsert(owner, owner_jobs)
 
+    def sync_local_maintenance(self) -> None:
+        replication = getattr(self, "public_factor_replication", None)
+        if replication is not None:
+            replication.sync_pending()
+
     def aggregate_jobs(self, principal: str) -> list[dict[str, object]]:
         jobs: list[dict[str, object]] = []
         ports = self.service_ports()

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any
-
 
 _UI_CATALOG_KEYS = {
     "product_path_candidates",
@@ -104,22 +103,9 @@ def freeze_product_scope(
         category_ids=category_ids,
         temporary=temporary_categories,
     )
-    source_ids = {
-        source_id
-        for category in categories.values()
-        for source_id in category.get("source_ids") or []
-    }
-    temporary_sources = _object_index(
-        temporary.get("data_source_declarations")
-    )
-
     shared["product_selections"] = canonical_selections
     if categories:
         shared["product_categories"] = categories
-    if source_ids:
-        shared["data_source_declarations"] = _freeze_source_declarations(
-            source_ids, temporary_sources
-        )
     _compact_execution_projections(shared, analysis_map, payload.get("ui"))
     _strip_ui_catalogs(payload.get("ui"))
     return frozen
@@ -389,56 +375,6 @@ def _stable_category(
     ).encode()).hexdigest()
     if include_items:
         result["items"] = items
-    return result
-
-
-def _freeze_source_declarations(
-    source_ids: set[str], temporary: dict[str, dict[str, Any]]
-) -> dict[str, dict[str, Any]]:
-    from server.services.product_catalog_projection import product_source_descriptors
-
-    available = {
-        str(item.get("id") or ""): item
-        for item in product_source_descriptors()
-        if isinstance(item, dict)
-    }
-    available.update(temporary)
-    missing = sorted(source_ids - set(available))
-    if missing:
-        raise ValueError("data-source declarations unavailable: " + ", ".join(missing))
-    return {
-        source_id: _stable_source_declaration(available[source_id])
-        for source_id in sorted(source_ids)
-    }
-
-
-def _stable_source_declaration(value: dict[str, Any]) -> dict[str, Any]:
-    direct = (
-        "id", "family_id", "family_name", "source_ref", "source_name",
-        "source_kind", "provider_kind", "bundle_id", "bundle_name",
-        "server_provided", "naming_schemes", "data_modes", "frequency",
-        "timezone", "mapping_revision",
-    )
-    result = {
-        key: deepcopy(value[key])
-        for key in direct
-        if key in value
-    }
-    members = []
-    for item in value.get("members") or []:
-        if not isinstance(item, dict):
-            continue
-        members.append({
-            key: deepcopy(item[key])
-            for key in (
-                "id", "source_ref", "label", "frequency", "timezone",
-                "time_columns", "data_columns", "dimensions", "data_modes",
-                "naming_scheme",
-            )
-            if key in item
-        })
-    if members:
-        result["members"] = members
     return result
 
 
