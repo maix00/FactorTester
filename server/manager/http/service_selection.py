@@ -23,7 +23,6 @@ from tools.data.account_manage import can_view_user_scope
 
 
 _SERVICE_GET_PREFIXES = (
-    "/docs",
     "/static/css/",
     "/static/js/",
     "/static/vendor/",
@@ -258,9 +257,7 @@ class ServiceSelectionRoutesMixin:
             and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
         )
         public_docs = (
-            parsed.path == "/docs"
-            or parsed.path.startswith("/docs/")
-            or parsed.path.startswith("/static/css/")
+            parsed.path.startswith("/static/css/")
             or parsed.path.startswith("/static/js/")
             or parsed.path.startswith("/static/vendor/")
             or parsed.path.startswith("/static/images/")

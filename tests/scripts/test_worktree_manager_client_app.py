@@ -2577,12 +2577,10 @@ def test_manager_home_only_modules_use_distinct_symbols(tmp_path) -> None:
     assert '"cylinder.split.1x2":' in icons
 
 
-def test_manager_proxies_docs_and_public_assets_without_a_service_login(
+def test_manager_serves_docs_shell_without_a_service_login(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
 
     def request(**values):
@@ -2596,13 +2594,12 @@ def test_manager_proxies_docs_and_public_assets_without_a_service_login(
     monkeypatch.setattr(state.gateway, "request", request)
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/docs?presentation=embedded") as response:
-            assert response.read() == b"<html>docs</html>"
+            body = response.read()
 
-    assert calls == [{
-        "port": 8141,
-        "path": "/docs?presentation=embedded",
-        "principal": "__public_docs__",
-    }]
+    assert body.startswith(b"<!doctype html>")
+    assert b"FT_STATIC_SCRIPTS" not in body
+    assert calls == []
+    assert "/docs" not in _SERVICE_GET_PREFIXES
 
 
 def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
