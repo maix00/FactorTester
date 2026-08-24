@@ -199,7 +199,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
 
         page.locator(".backtest-result-chart-filter summary").click()
         chart_options = page.locator(
-            ".backtest-result-chart-filter .ft-multi-select-options"
+            "body > .ft-multi-select-menu.is-portaled .ft-multi-select-options"
         )
         chart_options.get_by_text("净值", exact=True).wait_for()
         chart_options.get_by_text("回撤", exact=True).wait_for()
