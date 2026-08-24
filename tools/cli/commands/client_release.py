@@ -97,7 +97,14 @@ def _run_release_with_host_python(
         command.append(flag)
         if value is not True:
             command.append(str(value))
-    subprocess.run(command, cwd=source_root, check=True)
+    environment = os.environ.copy()
+    environment.pop("FACTORTESTER_ENTRYPOINT", None)
+    subprocess.run(
+        command,
+        cwd=source_root,
+        env=environment,
+        check=True,
+    )
 
 
 client.add_command(client_adapter)
