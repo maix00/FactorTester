@@ -162,6 +162,11 @@ const unresolvedSources = FTTestContentAdapters.chipSources(state, {
 });
 assert.deepEqual(unresolvedSources.product_group, [],
   "saved placeholders must not expose backend refs as product-group labels");
+const rawRefSources = FTTestContentAdapters.chipSources({
+  kind: "ic", manifest: state.manifest, values: state.values, groups: [],
+}, {product_path_selection_id: group.product_scope_ref});
+assert.deepEqual(rawRefSources.product_group, [],
+  "unresolved product refs must not render as chip labels");
 
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
