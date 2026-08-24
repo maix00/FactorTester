@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import shutil
 import subprocess
@@ -288,6 +289,58 @@ def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, 
 
     with pytest.raises(PermissionError):
         factor_workspace.push_factor_workspace("default$alice@1", allow_public_write=False, branch_mode="force")
+
+
+def test_factor_workspace_push_reports_source_free_public_change(
+    monkeypatch, tmp_path,
+):
+    workspace_root = tmp_path / "factor-root"
+    public_dir = workspace_root / "public_factors"
+    public_dir.mkdir(parents=True)
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "root"}), encoding="utf-8",
+    )
+    source = "class PublicFactor(FactorFamily):\n    pass\n"
+    (public_dir / "PublicFactor.py").write_text(source, encoding="utf-8")
+    stored = {"value": "old\n"}
+
+    monkeypatch.setattr(
+        factor_workspace_storage, "factor_source_root",
+        lambda _username: str(workspace_root),
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage, "load_public_factor_source",
+        lambda _factor_id: stored["value"],
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage, "save_public_factor_source",
+        lambda _factor_id, value: stored.update(value=value),
+    )
+    monkeypatch.setattr(FactorWorkspaceRepository, "ensure", lambda _self: {})
+    monkeypatch.setattr(
+        FactorWorkspaceRepository, "current_branch", lambda _self: "upload",
+    )
+    monkeypatch.setattr(
+        FactorWorkspaceRepository, "checkout", lambda _self, _mode: "upload",
+    )
+    monkeypatch.setattr(
+        factor_workspace_sync, "get_factor_workspace_autosync_branch",
+        lambda _username: "upload",
+    )
+
+    result = factor_workspace.push_factor_workspace(
+        "root", allow_public_write=True, branch_mode="auto",
+    )
+
+    change = result["public_factor_changes"][0]
+    assert change == {
+        "factor_id": "PublicFactor",
+        "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "source_bytes": len(source.encode()),
+    }
+    assert "source_code" not in change
 
 
 def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):

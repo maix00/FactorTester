@@ -19,6 +19,7 @@ class FederationSyncWorker:
         gateway: FederatedGateway,
         peer_provider: Callable[[], list[dict[str, object]]],
         local_refresh: Callable[[], None] | None = None,
+        local_maintenance: Callable[[], None] | None = None,
         interval: float = 5.0,
     ) -> None:
         self.server_id = str(server_id or "").strip()
@@ -26,6 +27,7 @@ class FederationSyncWorker:
         self.gateway = gateway
         self.peer_provider = peer_provider
         self.local_refresh = local_refresh
+        self.local_maintenance = local_maintenance
         self.interval = max(2.0, float(interval))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -96,6 +98,15 @@ class FederationSyncWorker:
                 reports.append({
                     "server_id": self.server_id,
                     "status": "local_refresh_error",
+                    "error": str(exc),
+                })
+        if self.local_maintenance is not None:
+            try:
+                self.local_maintenance()
+            except Exception as exc:
+                reports.append({
+                    "server_id": self.server_id,
+                    "status": "local_maintenance_error",
                     "error": str(exc),
                 })
         try:
