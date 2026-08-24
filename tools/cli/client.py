@@ -36,7 +36,7 @@ class FactorTesterClient(
 
     def login(self, username: str, password: str) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/login",
+            "/auth/login",
             {"username": username, "password": password},
         ))
 
@@ -59,7 +59,7 @@ class FactorTesterClient(
 
     def logout(self) -> dict[str, Any]:
         try:
-            return self._expect_success(self.session.post("/logout", {}))
+            return self._expect_success(self.session.post("/auth/logout", {}))
         finally:
             self.session.clear_cookies()
 
