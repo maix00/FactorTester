@@ -212,6 +212,7 @@ def get_public_factor_detail(factor_name: str) -> dict | None:
             'name': factor_name,
             'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
             'description': getattr(ff, 'description', '') or '',
+            'math_expr': getattr(ff, 'math_expr', '') or '',
             'source_code': strip_factor_meta(source_code),
             'tree_repr': tree_repr,
             'params': [serialize_param_meta(param) for param in ff.params],

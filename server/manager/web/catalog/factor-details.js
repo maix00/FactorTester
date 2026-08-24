@@ -158,7 +158,16 @@
         : `/custom-factors/api/get/${encodeURIComponent(family)}`
           + (owner ? `?owner_username=${encodeURIComponent(owner)}` : "");
       const payload = await context.api(endpoint);
-      return {...value, ...(payload.factor || {})};
+      const detail = payload.factor || {};
+      return {
+        ...value,
+        ...detail,
+        // A source-detail transport may legitimately omit derived metadata.
+        // Never let an empty response erase the formula already present in
+        // the catalog projection.
+        math_expr: detail.math_expr || value.math_expr || "",
+        source_code: detail.source_code || value.source_code || "",
+      };
     } catch (_) {
       return value;
     }
