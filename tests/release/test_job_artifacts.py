@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
+from tools.cli.commands.research_report_job_binding import freeze_report_binding
 from tools.cli.commands.research_report_scope import (
     ensure_authoring,
     resolve_branch_report_scope,
     resolve_history_migration_scope,
 )
-from tools.cli.commands.research_report_job_binding import freeze_report_binding
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.authoring import add_branch_component
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.job_artifact_mounts import (
+    mount_kind,
+    mount_operations,
+    provenance_bindings,
+)
 from tools.cli.release.research_reporting.job_artifact_tables import table_content
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
-from tools.cli.release.research_reporting.job_artifact_mounts import mount_kind
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
@@ -30,16 +34,23 @@ class _Client:
     def __init__(
         self, artifacts: list[dict], content: dict[str, bytes], *,
         execution_node: str = "trial_execution",
+        server_id: str = "public-main", port: int = 8141,
     ) -> None:
         self.artifacts = artifacts
         self.content = content
         self.execution_node = execution_node
+        self.server_id = server_id
+        self.port = port
         self.downloads: list[str] = []
 
     def get_job(self, job_id: str) -> dict:
         return {
             "job_id": job_id,
             "status": "succeeded",
+            "server_id": self.server_id,
+            "execution_server_id": self.server_id,
+            "execution_port": self.port,
+            "port": self.port,
             "run_spec_hash": "c" * 64,
             "research_binding": {"trial_plan_hash": "b" * 64},
             "report_binding": {
@@ -97,6 +108,77 @@ def test_only_curated_ic_summary_json_is_a_mountable_report_table() -> None:
         "metrics_over_time_data",
     ):
         assert mount_kind(name, {"content_type": "application/json"}) is None
+
+
+def test_evidence_binding_keeps_the_job_route_metadata() -> None:
+    bindings = provenance_bindings(
+        "job-evidence",
+        {
+            "server_id": "remote-main",
+            "execution_port": 8000,
+            "evidence": {
+                "canonical": {
+                    "evidence_ref": "evidence:sha256:abc",
+                    "title_zh": "终态证据",
+                },
+            },
+        },
+        "a" * 64,
+    )
+
+    assert [item["kind"] for item in bindings] == ["evidence"]
+    assert bindings[0]["data"]["server_id"] == "remote-main"
+    assert bindings[0]["data"]["port"] == "8000"
+
+
+def test_automatic_artifact_mount_is_an_evidence_fragment_section() -> None:
+    raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
+    digest = hashlib.sha256(raw).hexdigest()
+    mounted, operations = mount_operations(
+        component_exists=lambda _: False,
+        parent_id="job-result",
+        job_id="job-1",
+        detail={
+            "server_id": "remote-main",
+            "execution_port": 8000,
+            "evidence": {
+                "canonical": {
+                    "evidence_ref": "evidence:sha256:abc",
+                    "title_zh": "终态证据",
+                },
+            },
+        },
+        metadata={
+            "name": "equity_curve_report",
+            "file_name": "equity.svg",
+            "content_type": "image/svg+xml",
+            "description": "净值曲线",
+        },
+        raw=raw,
+        kind="image",
+    )
+
+    wrapper = next(
+        operation for operation in operations
+        if operation["op"] == "add"
+        and operation["display_kind"] == "evidence_fragment"
+    )
+    child = next(
+        operation for operation in operations
+        if operation["op"] == "add" and operation["kind"] == "image"
+    )
+    assert wrapper["parent_id"] == "job-result"
+    assert child["parent_id"] == wrapper["component_id"]
+    assert [item["kind"] for item in wrapper["bindings"]] == ["evidence"]
+    assert wrapper["bindings"][0]["target_ref"] == "evidence:sha256:abc"
+    assert wrapper["bindings"][0]["data"] == {
+        "content_hash": digest,
+        "server_id": "remote-main",
+        "port": "8000",
+    }
+    assert child["bindings"] == []
+    assert mounted["component_id"] == child["component_id"]
+    assert mounted["evidence_fragment_id"] == wrapper["component_id"]
 
 
 def _scope(tmp_path: Path):
@@ -222,23 +304,47 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
         package_root=scope.package_root, branch_id="branch-1",
     )
     special = [item for item in snapshot["components"] if item["kind"] == "special"]
-    assert len(special) == 1
-    assert special[0]["display_kind"] == "test_result"
+    result = next(item for item in special if item["display_kind"] == "test_result")
+    fragments = [
+        item for item in special if item["display_kind"] == "evidence_fragment"
+    ]
+    assert len(fragments) == 2
     chapter = next(item for item in snapshot["components"] if item["kind"] == "chapter")
-    assert special[0]["parent_id"] == chapter["component_id"]
+    assert result["parent_id"] == chapter["component_id"]
     result_children = [
         item for item in snapshot["components"]
-        if item["parent_id"] == special[0]["component_id"]
+        if item["parent_id"] == result["component_id"]
     ]
-    assert {item["kind"] for item in result_children} == {"table", "image"}
-    assert value["result_component_id"] == special[0]["component_id"]
+    assert {item["kind"] for item in result_children} == {"special"}
+    assert {item["display_kind"] for item in result_children} == {
+        "evidence_fragment",
+    }
+    fragment_children = [
+        item for item in snapshot["components"]
+        if item["parent_id"] in {
+            child["component_id"] for child in result_children
+        }
+    ]
+    assert {item["kind"] for item in fragment_children} == {"table", "image"}
+    assert all(not item.get("bindings") for item in fragment_children)
+    assert {
+        item["evidence_fragment_id"] for item in value["mounted"]
+    } == {item["component_id"] for item in result_children}
+    assert value["result_component_id"] == result["component_id"]
     assert value["report_head"].endswith("/authoring/HEAD.json")
     assert not (scope.package_root / "branches" / "branch-1" / "REPORT.md").exists()
     image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
     assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
     assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()
-    assert "factortester://job/" in special[0]["body"]
-    assert "factortester://evidence/" not in special[0]["body"]
+    assert "factortester://job/" in result["body"]
+    job_binding = next(
+        item for item in snapshot["bindings"]
+        if item["component_id"] == result["component_id"]
+        and item["kind"] == "job"
+    )
+    assert job_binding["data"]["server_id"] == "public-main"
+    assert job_binding["data"]["port"] == "8141"
+    assert "factortester://evidence/" not in result["body"]
     assert (tmp_path / "jobs" / "job-1" / "fee_detail_csv.csv").is_file()
     assert (tmp_path / "jobs" / "job-1" / "equity_curve_report.svg").is_file()
 
@@ -428,7 +534,7 @@ def test_collect_job_report_is_idempotent(
     snapshot = load_snapshot(
         package_root=scope.package_root, branch_id="branch-1",
     )
-    assert len(snapshot["components"]) == 3
+    assert len(snapshot["components"]) == 4
     assert client.downloads == ["metrics_over_time_report"]
     assert second["downloaded"][0]["cache_hit"] is True
 

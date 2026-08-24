@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 from tools.cli.commands.research_report_scope import (
@@ -17,14 +17,13 @@ from tools.cli.commands.research_report_scope import (
 from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
 
 from .authoring import apply_branch_batch, commit_branch_authoring
+from .authoring.tree_presence import ReportTreePresence
 from .job_artifact_mounts import (
     artifact_ref,
     mount_kind,
     mount_operations,
     result_container_operation,
 )
-from .authoring.tree_presence import ReportTreePresence
-
 
 _SAFE_NODE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -163,7 +162,7 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
         or {}
     )
     if not isinstance(binding, dict):
-        raise ValueError("Job 未登记研究工作包绑定，不能挂载到报告")
+        raise TypeError("Job 未登记研究工作包绑定，不能挂载到报告")
     expected_package = f"work-package:{scope.work_package_id}"
     if str(binding.get("work_package_ref") or "") != expected_package:
         raise ValueError("Job 不属于指定的研究工作包")

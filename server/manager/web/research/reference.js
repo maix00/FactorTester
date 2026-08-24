@@ -81,6 +81,19 @@
     return `/reference?${query.toString()}`;
   }
 
+  function jobRouteFor(identity) {
+    const jobID = String(identity?.job_id || "")
+      .replace(/^(?:job|research-job|task):/, "").trim();
+    if (!jobID) return "";
+    const port = Number(identity?.service_port);
+    const prefix = Number.isInteger(port) && port > 0 && port <= 65_535
+      ? `/jobs/${port}/` : "/jobs/";
+    const serverID = String(identity?.server_id || "").trim();
+    const query = serverID
+      ? `?server_id=${encodeURIComponent(serverID)}` : "";
+    return `${prefix}${encodeURIComponent(jobID)}${query}`;
+  }
+
   function detailValue(fields, name) {
     return (Array.isArray(fields) ? fields : [])
       .find(item => item?.name === name)?.value || "";
@@ -236,6 +249,31 @@
       section.append(fileHeading, download);
       root.append(section);
     }
+    if (kind === "evidence" && Array.isArray(value?.fragments)) {
+      const section = document.createElement("section");
+      section.className = "reference-evidence-sources";
+      const headingNode = document.createElement("h3");
+      headingNode.textContent = t("来源测试任务");
+      section.append(headingNode);
+      const seen = new Set();
+      for (const fragment of value.fragments) {
+        const source = fragment?.source;
+        if (source?.source_kind !== "job") continue;
+        const identity = source.identity || {};
+        const route = jobRouteFor(identity);
+        if (!route || seen.has(route)) continue;
+        seen.add(route);
+        const link = document.createElement("a");
+        link.href = route;
+        link.textContent = fragment.title_zh || identity.job_id || route;
+        link.addEventListener("click", event => {
+          event.preventDefault();
+          context.navigate(route);
+        });
+        section.append(link);
+      }
+      if (seen.size) root.append(section);
+    }
     if (!specializedRunSpec && value && Object.keys(value).some(key => (
       value[key] && typeof value[key] === "object"
     ))) {
@@ -254,6 +292,7 @@
   }
 
   window.FTReferencePage = Object.freeze({
-    pathFor, routeFor, presentationFor, headerFor, resourceEndpoint, render,
+    pathFor, routeFor, jobRouteFor, presentationFor, headerFor,
+    resourceEndpoint, render,
   });
 })();
