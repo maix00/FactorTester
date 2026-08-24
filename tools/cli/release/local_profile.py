@@ -2,26 +2,25 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from hashlib import sha256
 import json
 import subprocess
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
-from .locations import validate_client_root
 from .local_profile_contracts import (
     new_local_profile,
     session_binding_reference,
     validate_local_identifier,
     validate_local_profile,
 )
-from .storage import read_json, write_json
-from .research_identity_migration import migrate_research_identity
+from .locations import validate_client_root
 from .research_branch_bindings import (
     branch_bindings,
     with_branch_binding,
 )
-
+from .research_identity_migration import migrate_research_identity
+from .storage import read_json, write_json
 
 __all__ = [
     "LocalProfileStore",
@@ -48,7 +47,7 @@ class LocalProfileStore:
             raise ValueError(f"local profile not found: {profile_id}")
         profile = validate_local_profile(value)
         migrated, receipt = migrate_research_identity(profile)
-        if receipt["records_migrated"]:
+        if receipt["records_migrated"] or profile != value:
             return self.save(migrated)
         return profile
 
@@ -97,9 +96,11 @@ class LocalProfileStore:
         profile_id: str,
         server_url: str,
     ) -> dict[str, Any]:
-        profile = self.load(profile_id)
-        profile["server"] = {"base_url": server_url}
-        return self.save(profile)
+        del profile_id, server_url
+        raise ValueError(
+            "client Profile has no server endpoint; configure the client "
+            "connection with `factortester configure`"
+        )
 
     def upsert_workspace(
         self,

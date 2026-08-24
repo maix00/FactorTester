@@ -76,8 +76,7 @@ def test_fork_inherits_source_report_tree(
     )
 
     class FakeClient:
-        def __init__(self, session) -> None:
-            assert session.base_url == "http://127.0.0.1:8141"
+        pass
 
         def fork_research_graph_branch(self, instance_id, branch_id, **kwargs):
             assert (instance_id, branch_id) == ("instance-a", "branch-source")
@@ -103,7 +102,9 @@ def test_fork_inherits_source_report_tree(
     monkeypatch.setattr(
         client_research_fork, "load_profile_root", lambda path: client_root,
     )
-    monkeypatch.setattr(client_research_fork, "FactorTesterClient", FakeClient)
+    monkeypatch.setattr(
+        client_research_fork, "client_from_config", lambda: FakeClient(),
+    )
     result = CliRunner().invoke(cli, [
         "client", "research", "fork",
         "graph-branch:instance-a:branch-source",

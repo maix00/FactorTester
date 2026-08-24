@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 from tools.cli.release.local_profile import LocalProfileStore
 
 from ..authoring.declared_links import DeclaredReportReference
@@ -15,7 +15,6 @@ from .entry_requirements import validate_entry_requirement_reference
 from .factor_git import validate_factor_reference
 from .factor_set_git import validate_factor_set_reference
 from .profile_revisions import ProfileRevisionStore
-
 
 _PRODUCT_KINDS = {"product", "contract", "continuous_contract"}
 
@@ -124,11 +123,7 @@ def _factor_roots(scope: Any) -> dict[str, Path]:
 def _client(scope: Any, supplied: FactorTesterClient | None) -> FactorTesterClient:
     if supplied is not None:
         return supplied
-    server = scope.profile.get("server") or {}
-    base_url = str(server.get("base_url") or "")
-    if not base_url:
-        raise ValueError("Profile server base_url is required")
-    return FactorTesterClient(HttpSession(base_url))
+    return client_from_config()
 
 
 def _assert_unchanged(

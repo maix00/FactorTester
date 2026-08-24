@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
+from tools.cli.agent_auth import load_capability
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpClientError, HttpSession
+from tools.cli.http import (
+    ClientConfig,
+    HttpClientError,
+    HttpSession,
+    load_config,
+)
 from tools.cli.manager.client import ManagerClient
 from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
-
 
 _RETRYABLE_HTTP_STATUSES = {401, 403, 408, 429, *range(500, 600)}
 
@@ -19,34 +23,34 @@ def manager_url_for_profile(
     *,
     manager_url: str = "",
 ) -> str:
-    """Resolve the 7998 Manager endpoint without changing execution metadata.
-
-    ``profile["server"]["base_url"]`` remains the service/worktree address
-    (which may be 8000, 7999, or a worktree port).  When the caller does not
-    provide an explicit Manager URL, use the same scheme and host with port
-    7998.  Swift passes its separately configured Manager URL explicitly.
-    """
+    """Resolve Manager from the client connection, never from Profile data."""
     explicit = str(manager_url or "").strip()
     if explicit:
         return ManagerConfig.from_url(explicit).base_url
+    del profile
+    capability = load_capability()
+    if capability is not None:
+        return ManagerConfig.from_url(
+            ClientConfig(capability.base_url).for_port(7998).base_url,
+        ).base_url
+    try:
+        configured = load_config()
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "client has no configured server; run `factortester configure` "
+            "or pass --manager-url"
+        ) from exc
+    return ManagerConfig.from_url(configured.for_port(7998).base_url).base_url
 
-    server = profile.get("server")
-    source = (
-        str(server.get("base_url") or "").strip()
-        if isinstance(server, dict) else ""
-    )
-    if not source:
-        raise ValueError("profile has no server base URL")
-    parsed = urlsplit(source)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("profile server base URL is invalid")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("profile server base URL must not contain credentials or query data")
-    host = parsed.hostname
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    endpoint = urlunsplit((parsed.scheme, f"{host}:7998", "", "", ""))
-    return ManagerConfig.from_url(endpoint).base_url
+
+def manager_url_for_client_url(server_url: str) -> str:
+    """Convert an explicit client connection override to Manager 7998."""
+    value = str(server_url or "").strip()
+    if not value:
+        raise ValueError("client server URL is empty")
+    return ManagerConfig.from_url(
+        ClientConfig(value).for_port(7998).base_url,
+    ).base_url
 
 
 def sync_profile(

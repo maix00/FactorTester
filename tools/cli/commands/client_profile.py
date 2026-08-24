@@ -3,24 +3,16 @@
 from __future__ import annotations
 
 import json
-from hashlib import sha256
 import sys
+from hashlib import sha256
 from pathlib import Path
+
 import click
 
+from tools.cli.client import FactorTesterClient
+from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.release.local_profile import (
-    LocalProfileStore,
-    new_local_profile,
-)
-from tools.cli.release.profile import load_profile_root
-from tools.cli.release.profile_lifecycle import ProfileLifecycle
-from tools.cli.release.user_layout import (
-    default_user_factor_library,
-    default_user_profile_root,
-    user_layout_status,
-)
-from tools.cli.release.storage import read_json, write_json
+from tools.cli.http import ClientConfig, HttpSession, save_config
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
     apply_factor_worktree_binding,
@@ -29,12 +21,25 @@ from tools.cli.release.factor_worktree import (
     rollback_factor_worktree_binding,
     verify_factor_worktree_binding,
 )
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.release.local_profile import (
+    LocalProfileStore,
+    new_local_profile,
+)
+from tools.cli.release.local_profile_contracts import session_binding_reference
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_lifecycle import ProfileLifecycle
+from tools.cli.release.profile_sync import (
+    manager_url_for_client_url,
+)
 from tools.cli.release.profile_sync import (
     sync_profile as _sync_profile,
 )
-from tools.cli.release.local_profile_contracts import session_binding_reference
+from tools.cli.release.storage import read_json, write_json
+from tools.cli.release.user_layout import (
+    default_user_factor_library,
+    default_user_profile_root,
+    user_layout_status,
+)
 
 
 def _json(value) -> str:
@@ -91,7 +96,9 @@ def clear_ui_session(server_url: str) -> None:
 @client_profile.command("create")
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
-@click.option("--server-url", required=True)
+@click.option(
+    "--server-url", default="", help="临时客户端连接覆盖；不会写入 Profile。",
+)
 @click.option(
     "--manager-url",
     default="",
@@ -131,7 +138,11 @@ def create_profile(
         load_profile_root(release_profile)
     ).load(profile_id)
     control_profile_sync = _sync_profile(
-        profile, manager_url=manager_url,
+        profile,
+        manager_url=(
+            manager_url
+            or (manager_url_for_client_url(server_url) if server_url else "")
+        ),
     )
     click.echo(_json({
         **receipt,
@@ -223,7 +234,7 @@ def sync_profiles(
 
 @client_profile.group("server")
 def profile_server() -> None:
-    """Configure the server used by one local Profile."""
+    """Configure the client connection (not a local Profile field)."""
 
 
 @profile_server.command("set")
@@ -236,8 +247,17 @@ def set_profile_server(
     server_url: str,
     release_profile: Path | None,
 ) -> None:
-    store = LocalProfileStore(load_profile_root(release_profile))
-    click.echo(_json(store.set_server_url(profile_id, server_url)))
+    # Keep the old invocation shape for installed scripts, but move the
+    # connection to the client-wide CLI config.  A Profile is portable local
+    # state and must not acquire a server endpoint as a side effect.
+    LocalProfileStore(load_profile_root(release_profile)).load(profile_id)
+    config = ClientConfig(server_url.rstrip("/"))
+    save_config(config)
+    click.echo(_json({
+        "profile_id": profile_id,
+        "connection_scope": "client",
+        "base_url": config.base_url,
+    }))
 
 
 @client_profile.group("workspace")
@@ -328,7 +348,9 @@ def show_user_layout(
 @client_profile.command("bootstrap")
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
-@click.option("--server-url", required=True)
+@click.option(
+    "--server-url", default="", help="临时客户端连接覆盖；不会写入 Profile。",
+)
 @click.option("--manager-url", default="")
 @click.option("--agent-id", required=True)
 @click.option(
@@ -354,7 +376,10 @@ def bootstrap_profile(
     store = LocalProfileStore(root)
     if not principal_ref:
         raise ValueError("principal_ref is required")
-    client = FactorTesterClient(HttpSession(server_url))
+    client = (
+        FactorTesterClient(HttpSession(server_url))
+        if server_url else client_from_config()
+    )
     authenticated = client.current_principal()
     authenticated_ref = str(authenticated.get("username") or "")
     if authenticated_ref != principal_ref:
@@ -362,7 +387,6 @@ def bootstrap_profile(
     candidate = new_local_profile(
         profile_id=profile_id,
         display_name=display_name,
-        server_url=server_url,
         workspace_root=default_user_profile_root(
             principal_ref, profile_id
         ),
@@ -381,7 +405,7 @@ def bootstrap_profile(
             raise ValueError(
                 "profile is bound to another principal; rebind or create a new profile"
             )
-        stable = ("display_name", "server", "workspace_root")
+        stable = ("display_name", "workspace_root")
         if any(existing[key] != candidate[key] for key in stable):
             raise ValueError(
                 "existing profile configuration differs; use an explicit "
@@ -469,7 +493,7 @@ def list_profile_initialization_sources(
     profile = store.load(profile_id)
     binding = profile.get("session_binding") or {}
     principal_ref = str(binding.get("principal_ref") or "")
-    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    client = client_from_config()
     authenticated = client.current_principal()
     if str(authenticated.get("username") or "") != principal_ref:
         raise ValueError("authenticated principal does not match profile")
@@ -499,7 +523,7 @@ def bind_profile_initialization_source(
     profile = store.load(profile_id)
     binding = profile.get("session_binding") or {}
     principal_ref = str(binding.get("principal_ref") or "")
-    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    client = client_from_config()
     authenticated = client.current_principal()
     if str(authenticated.get("username") or "") != principal_ref:
         raise ValueError("authenticated principal does not match profile")
