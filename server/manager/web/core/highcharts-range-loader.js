@@ -1,6 +1,29 @@
 (() => {
+  function boundaryPoint(definition, timestamp) {
+    const sample = (definition.data || []).find(item => item != null);
+    if (Array.isArray(sample)) {
+      return [timestamp, ...Array(Math.max(1, sample.length - 1)).fill(null)];
+    }
+    return {x: timestamp, y: null};
+  }
+
+  function preserveFullDomain(chart, definition) {
+    const minimum = Number(chart._ftFullDataMin);
+    const maximum = Number(chart._ftFullDataMax);
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return definition;
+    const data = Array.isArray(definition.data) ? [...definition.data] : [];
+    const timestamps = new Set(data.map(item => Number(
+      Array.isArray(item) ? item[0] : item?.x,
+    )).filter(Number.isFinite));
+    if (!timestamps.has(minimum)) data.unshift(boundaryPoint(definition, minimum));
+    if (!timestamps.has(maximum)) data.push(boundaryPoint(definition, maximum));
+    return {...definition, data};
+  }
+
   function replaceVisibleSeries(chart, nextOptions, minimum, maximum) {
-    const definitions = Array.isArray(nextOptions?.series) ? nextOptions.series : [];
+    const narrowed = Number.isFinite(minimum) && Number.isFinite(maximum);
+    const definitions = (Array.isArray(nextOptions?.series) ? nextOptions.series : [])
+      .map(definition => narrowed ? preserveFullDomain(chart, definition) : definition);
     const visible = chart.series.filter(series => !series.options?.isInternal);
     const remaining = new Set(visible);
     definitions.forEach((definition, index) => {
@@ -33,6 +56,12 @@
     options.navigator = {
       ...(options.navigator || {}), adaptToUpdatedData: false,
     };
+    options.chart = {...(options.chart || {}), zooming: {
+      ...(options.chart?.zooming || {}), mouseWheel: {
+        enabled: true, showResetButton: true,
+        ...(options.chart?.zooming?.mouseWheel || {}),
+      },
+    }};
     options.xAxis = options.xAxis || {};
     const previous = options.xAxis.events?.afterSetExtremes;
     options.xAxis.events = {...(options.xAxis.events || {}), afterSetExtremes(event) {
@@ -42,6 +71,14 @@
           || (!resetToAll && (!Number.isFinite(Number(event?.min))
             || !Number.isFinite(Number(event?.max))))) return;
       const chart = this.chart;
+      const dataMinimum = Number(event?.dataMin ?? chart.xAxis?.[0]?.dataMin);
+      const dataMaximum = Number(event?.dataMax ?? chart.xAxis?.[0]?.dataMax);
+      if (!Number.isFinite(chart._ftFullDataMin) && Number.isFinite(dataMinimum)) {
+        chart._ftFullDataMin = dataMinimum;
+      }
+      if (!Number.isFinite(chart._ftFullDataMax) && Number.isFinite(dataMaximum)) {
+        chart._ftFullDataMax = dataMaximum;
+      }
       clearTimeout(chart._ftRangeLoadTimer);
       const generation = (chart._ftRangeLoadGeneration || 0) + 1;
       chart._ftRangeLoadGeneration = generation;
