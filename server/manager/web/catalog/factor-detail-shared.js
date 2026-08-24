@@ -29,6 +29,22 @@
     return root;
   }
 
+  function helpIcon(help, options = {}) {
+    if (window.FTUI?.helpIcon) return window.FTUI.helpIcon(help, options);
+    if (window.FTHelp?.create) return window.FTHelp.create(help, options);
+    const icon = document.createElement("button");
+    icon.type = "button";
+    icon.className = "ft-help-icon";
+    icon.textContent = "?";
+    icon.setAttribute?.("aria-label", options.ariaLabel || contextHelpText(help));
+    return icon;
+  }
+
+  function contextHelpText(help) {
+    if (typeof help === "string") return help;
+    return String(help?.title || help?.text || help?.description || "查看说明");
+  }
+
   function parameterEditor(context, parameters = [], initial = {}) {
     const values = {...initial};
     const root = document.createElement("section");
@@ -83,7 +99,289 @@
     return root;
   }
 
+  function versionQuery(options = {}) {
+    const query = new URLSearchParams();
+    if (options.ownerUsername) query.set("owner_username", options.ownerUsername);
+    if (options.workspaceUsername) {
+      query.set("workspace_username", options.workspaceUsername);
+    }
+    return query.toString() ? `?${query.toString()}` : "";
+  }
+
+  function sourceVersionsEndpoint(options = {}) {
+    const kind = encodeURIComponent(options.sourceKind || "public");
+    const family = encodeURIComponent(options.familyID || "");
+    return `/custom-factors/api/source-versions/${kind}/${family}${versionQuery(options)}`;
+  }
+
+  function versionEndpoint(options = {}, version = "current") {
+    const kind = encodeURIComponent(options.sourceKind || "public");
+    const family = encodeURIComponent(options.familyID || "");
+    const selected = encodeURIComponent(version || "current");
+    return `/custom-factors/api/source-versions/${kind}/${family}/${selected}${versionQuery(options)}`;
+  }
+
+  function sourceOptions(value, overrides = {}) {
+    const item = value || {};
+    const sourceKind = overrides.sourceKind || (
+      item.factor_kind === "public" || item.source === "public"
+        ? "public" : item.factor_kind === "local" ? "local" : "custom"
+    );
+    const familyID = overrides.familyID || item.factor_family_alias
+      || item.factor_family_name || item.family_alias || item.family || "";
+    return {
+      sourceKind,
+      familyID: String(familyID || "").trim(),
+      ownerUsername: overrides.ownerUsername || item.owner_username || "",
+      workspaceUsername: overrides.workspaceUsername || item.workspace_username || "",
+    };
+  }
+
+  async function loadSourceVersions(context, value, options = {}) {
+    const resolved = sourceOptions(value, options);
+    if (!resolved.familyID || !["custom", "public"].includes(resolved.sourceKind)) {
+      return {available: false, versions: [], current: null};
+    }
+    const payload = await context.api(sourceVersionsEndpoint(resolved));
+    return {...payload, sourceOptions: resolved};
+  }
+
+  function sourceVersionHelp(context, options = {}) {
+    const version = options.version || {};
+    const commit = version.commit || "current";
+    const title = options.title || context.t("源码版本详情");
+    return helpIcon({
+      mode: "overlay",
+      title,
+      load: async () => {
+        const payload = await context.api(
+          versionEndpoint(options, commit),
+        );
+        const root = document.createElement("div");
+        root.className = "factor-source-version-overlay";
+        const identity = document.createElement("dl");
+        identity.className = "factor-source-version-overlay-meta";
+        [
+          [context.t("源码版本"), payload.commit || context.t("当前最新版本")],
+          [context.t("源码哈希"), payload.source_hash || "—"],
+          [context.t("源码路径"), payload.relative_path || "—"],
+          [context.t("分支"), (payload.branches || []).join(", ") || "—"],
+          [context.t("因子所有者引用"), payload.factor_owner_ref || "—"],
+          [context.t("因子家族引用"), payload.factor_family_ref || "—"],
+        ].forEach(([label, value]) => {
+          const term = document.createElement("dt"); term.textContent = label;
+          const detail = document.createElement("dd"); detail.textContent = value;
+          identity.append(term, detail);
+        });
+        root.append(identity, summary(context, payload));
+        return root;
+      },
+    }, {ariaLabel: context.t("查看该源码版本的公式和身份")});
+  }
+
+  function appendIdentityRow(rows, context, label, value) {
+    const text = String(value ?? "").trim();
+    if (!text || rows.some(row => row[0] === label)) return;
+    rows.push([label, text]);
+  }
+
+  function referenceOverlay(context, value, kind) {
+    const item = value || {};
+    const raw = kind === "factor_ref"
+      ? item.factor_ref || item.target_ref || ""
+      : kind === "factor_owner_ref"
+        ? item.factor_owner_ref || item.owner_ref || ""
+        : kind === "factor_family_ref"
+          ? item.factor_family_ref || item.family_ref || ""
+          : "";
+    const decoded = kind === "factor_ref"
+      ? window.FTFactorModel?.decodeFrozenFactorRef?.(raw)
+      : null;
+    const root = document.createElement("div");
+    root.className = "factor-reference-overlay";
+    const rows = [];
+    appendIdentityRow(rows, context, context.t("引用值"), raw);
+    appendIdentityRow(rows, context, context.t("具体因子 alias"),
+      decoded?.alias || item.factor_alias || item.alias);
+    appendIdentityRow(rows, context, context.t("因子所有者"),
+      decoded?.ownerRef || item.factor_owner_ref || item.owner_ref
+        || item.owner_username);
+    appendIdentityRow(rows, context, context.t("所有者名称"),
+      item.owner_alias || item.owner_username);
+    appendIdentityRow(rows, context, context.t("组织"),
+      item.owner_organization_name || item.organization_name);
+    appendIdentityRow(rows, context, context.t("因子家族引用"),
+      decoded?.family || item.factor_family_ref || item.family_ref);
+    appendIdentityRow(rows, context, context.t("因子家族 alias"),
+      item.factor_family_alias || item.factor_family_name || item.family_alias
+        || decoded?.family);
+    appendIdentityRow(rows, context, context.t("源码版本"),
+      decoded?.gitCommit || item.factor_git_commit || item.git_commit
+        || context.t("当前最新版本"));
+    appendIdentityRow(rows, context, context.t("源码路径"),
+      item.relative_path);
+    appendIdentityRow(rows, context, context.t("源码对象哈希"), item.git_blob);
+    const table = FTUI.table(
+      [context.t("字段"), context.t("值")], rows,
+    );
+    root.append(table.shell);
+    const params = item.factor_params ?? item.params;
+    if (params != null) {
+      const serialized = typeof params === "string"
+        ? params : JSON.stringify(params, null, 2);
+      root.append(FTUI.code(serialized || "{}", {language: "json"}));
+    }
+    return root;
+  }
+
+  function referenceValue(context, value, key, title) {
+    const root = document.createElement("span");
+    root.className = "factor-reference-value";
+    const raw = value?.[key] || "";
+    const textNode = document.createElement("span");
+    textNode.textContent = raw || context.t("未设置");
+    root.append(textNode, helpIcon({
+      mode: "overlay",
+      title: title || context.t("引用详情"),
+      content: referenceOverlay(context, value, key),
+    }, {ariaLabel: context.t("查看引用的真实身份")}));
+    return root;
+  }
+
+  function provenance(context, value) {
+    const item = value || {};
+    const owner = item.factor_owner_ref || item.owner_ref || "";
+    const family = item.factor_family_ref || item.family_ref || "";
+    const commit = item.factor_git_commit || item.git_commit || "";
+    const factorRef = item.factor_ref || item.target_ref || "";
+    const params = item.factor_params ?? item.params;
+    if (!owner && !family && !commit && !factorRef && params == null) return null;
+    const rows = [];
+    if (factorRef) rows.push([
+      context.t("因子引用"), referenceValue(
+        context, {...item, factor_ref: factorRef}, "factor_ref", context.t("因子引用详情"),
+      ),
+    ]);
+    if (owner) rows.push([
+      context.t("factor_owner_ref"), referenceValue(
+        context, {...item, factor_owner_ref: owner}, "factor_owner_ref",
+        context.t("因子所有者详情"),
+      ),
+    ]);
+    if (family) rows.push([
+      context.t("factor_family_ref"), referenceValue(
+        context, {...item, factor_family_ref: family}, "factor_family_ref",
+        context.t("因子家族详情"),
+      ),
+    ]);
+    const versionValue = document.createElement("span");
+    versionValue.className = "factor-reference-value";
+    const versionText = document.createElement("span");
+    versionText.textContent = commit || context.t("当前最新版本");
+    versionValue.append(versionText);
+    const versionOptions = sourceOptions(item);
+    if (["custom", "public"].includes(versionOptions.sourceKind)
+      && versionOptions.familyID) {
+      versionValue.append(sourceVersionHelp(context, {
+        ...versionOptions,
+        version: {commit},
+        title: commit
+          ? context.t("历史源码版本详情") : context.t("当前源码版本详情"),
+      }));
+    } else {
+      versionValue.append(helpIcon({
+        mode: "overlay",
+        title: context.t("源码版本详情"),
+        content: referenceOverlay(context, item, "factor_git_commit"),
+      }, {ariaLabel: context.t("查看源码版本身份")}));
+    }
+    rows.push([context.t("factor_git_commit"), versionValue]);
+    if (params != null) {
+      const valueNode = document.createElement("span");
+      valueNode.className = "factor-reference-value";
+      const count = Array.isArray(params) ? params.length : Object.keys(params || {}).length;
+      const countNode = document.createElement("span");
+      countNode.textContent = `${count}${context.t("个参数")}`;
+      valueNode.append(
+        countNode,
+        helpIcon({
+          mode: "overlay",
+          title: context.t("因子参数详情"),
+          content: referenceOverlay(context, item, context.t("因子参数详情")),
+        }, {ariaLabel: context.t("查看因子参数")} ),
+      );
+      rows.push([context.t("factor_params"), valueNode]);
+    }
+    return FTUI.table(
+      [context.t("RunSpec 字段"), context.t("值")], rows,
+    ).shell;
+  }
+
+  function sourceVersionHistory(context, value, options = {}) {
+    const root = document.createElement("section");
+    root.className = "factor-source-version-history";
+    const heading = document.createElement("div");
+    heading.className = "factor-detail-source-heading";
+    const title = document.createElement("h3");
+    title.textContent = context.t("源码版本");
+    const mount = document.createElement("div");
+    mount.className = "factor-source-version-history-mount";
+    let loaded = false;
+    const load = context.button(context.t("读取版本历史"), async () => {
+      if (loaded) return;
+      loaded = true;
+      load.disabled = true;
+      mount.replaceChildren(FTUI.loading(context.t("正在读取源码版本…")));
+      try {
+        const payload = await loadSourceVersions(context, value, options);
+        const current = payload.current ? [payload.current] : [];
+        const versions = [...current, ...(payload.versions || [])]
+          .filter((item, index, all) => item?.commit
+            && all.findIndex(candidate => candidate.commit === item.commit) === index);
+        if (!versions.length) {
+          mount.replaceChildren(FTUI.empty(context.t("没有可用的源码版本")));
+          return;
+        }
+        const table = FTUI.table(
+          [context.t("版本"), context.t("提交说明"), context.t("时间"), context.t("分支")],
+          versions.map(item => [
+            (() => {
+              const cell = document.createElement("span");
+              cell.className = "factor-reference-value";
+              const commitNode = document.createElement("span");
+              commitNode.textContent = item.is_current
+                ? context.t("当前最新版本") : item.short_commit || item.commit;
+              cell.append(
+                commitNode,
+                sourceVersionHelp(context, {
+                  ...sourceOptions(value, options),
+                  version: item,
+                  title: context.t("源码版本详情"),
+                }),
+              );
+              return cell;
+            })(),
+            item.subject || "—",
+            item.committed_at ? FTUI.formatDate(item.committed_at) : "—",
+            (item.branches || []).join(", ") || "—",
+          ]),
+        );
+        mount.replaceChildren(table.shell);
+      } catch (error) {
+        mount.replaceChildren(FTUI.empty(
+          error.message || context.t("读取源码版本失败"),
+        ));
+      }
+    });
+    load.type = "button";
+    heading.append(title, load);
+    root.append(heading, mount);
+    return root;
+  }
+
   window.FTFactorDetailShared = Object.freeze({
-    expression, parameterEditor, source, summary,
+    expression, loadSourceVersions, parameterEditor, provenance, source,
+    sourceOptions, sourceVersionHelp, sourceVersionHistory, summary,
+    sourceVersionsEndpoint, versionEndpoint,
   });
 })();

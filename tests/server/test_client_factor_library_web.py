@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+
 from flask import Flask
 
-from server.modules.custom_factors import cf_bp
-from server.modules.custom_factors import catalog_routes
-from server.modules.custom_factors import factor_library_routes
-from server.modules.custom_factors import editor_routes
+from server.modules.custom_factors import (
+    catalog_routes,
+    cf_bp,
+    editor_routes,
+    factor_library_routes,
+    factor_library_service,
+)
 from server.modules.custom_factors.client_library import build_client_library_projection
-from server.modules.custom_factors import factor_library_service
 
 
 def test_projection_overview_can_skip_expensive_product_scope_catalog(monkeypatch) -> None:
@@ -243,6 +246,35 @@ def test_factor_projection_preserves_historical_source_marker_per_factor() -> No
     assert factor["factor_family_ref"] == "family:momentum"
     assert factor["factor_params"] == factor["params"]
     assert factor["factor_git_commit"] == "a" * 40
+
+
+def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch) -> None:
+    source = "class Momentum(FactorFamily):\n    pass\n"
+    monkeypatch.setattr(catalog_routes, "can_view_user_scope", lambda *_: True)
+    monkeypatch.setattr(
+        catalog_routes, "load_factor_source", lambda _owner, _family: source,
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "list_factor_source_versions",
+        lambda **_kwargs: {
+            "available": True,
+            "versions": [],
+            "current": {"commit": "a" * 40, "is_current": True},
+        },
+    )
+    client = _app().test_client()
+    _login(client, "alice")
+
+    response = client.get(
+        "/custom-factors/api/source-versions/custom/Momentum",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["factor_owner_ref"] == "alice"
+    assert payload["factor_family_ref"].startswith("factor-family:sha256:")
+    assert payload["current"]["commit"] == "a" * 40
 
 
 def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> None:

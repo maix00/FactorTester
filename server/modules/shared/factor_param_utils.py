@@ -174,4 +174,13 @@ def build_factor_param_item(
         'metadata': metadata,
         'note': metadata.get('note') or '',
         'research_report': metadata.get('research_report') or '',
+        **({
+            'factor_owner_ref': metadata['factor_owner_ref'],
+        } if metadata.get('factor_owner_ref') else {}),
+        **({
+            'factor_family_ref': metadata['factor_family_ref'],
+        } if metadata.get('factor_family_ref') else {}),
+        **({
+            'factor_git_commit': metadata['factor_git_commit'],
+        } if metadata.get('factor_git_commit') else {}),
     }

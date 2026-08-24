@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from typing import cast
 
 from flask import jsonify, request
@@ -67,6 +68,11 @@ def _commit_saved_source(username: str, operation: str, factor_id: str) -> str:
     if not commit_sha:
         raise RuntimeError("源码已保存，但没有生成 Git 提交记录")
     return commit_sha
+
+
+def _factor_family_ref(owner: str, family: str) -> str:
+    identity = f"{owner}\x1f{family}"
+    return f"factor-family:sha256:{sha256(identity.encode()).hexdigest()}"
 
 
 @cf_bp.route('/api/create', methods=['POST'])
@@ -352,7 +358,15 @@ def api_get_factor(factor_id):
             'category': meta.get('category', '自编'),
             'source_code': strip_factor_meta(source),
             'is_public': False,
+            'source': 'custom',
+            'factor_kind': 'custom',
             'owner_username': owner_username,
+            'owner_alias': owner_username,
+            'factor_owner_ref': owner_username,
+            'factor_family_alias': meta.get('name', '') or factor_id,
+            'factor_family_ref': _factor_family_ref(
+                owner_username, meta.get('name', '') or factor_id,
+            ),
             'can_edit': owner_username == username,
             'math_expr': getattr(factor_family, 'math_expr', '') if factor_family is not None else '',
             'params': [serialize_param_meta(param) for param in factor_family.params] if factor_family is not None else [],
