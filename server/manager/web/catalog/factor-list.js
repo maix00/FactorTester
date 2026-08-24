@@ -84,12 +84,12 @@
   function render(context, data, mount, {
     page, query, groupRefs = ["*"], ownerUsernames = ["*"], scope = "public",
     tablePage = 1, onPageChange = () => {}, canModify = false,
-    onDelete = null, onEdit = null,
+    onDelete = null, onEdit = null, onAddFactor = null,
   }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, {
         query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-        canModify, onDelete, onEdit,
+        canModify, onDelete, onEdit, onAddFactor,
       });
     }
     return renderSubjects(context, data, mount, {
@@ -100,7 +100,7 @@
 
   function renderFamilies(context, data, mount, {
     query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-    canModify, onDelete, onEdit,
+    canModify, onDelete, onEdit, onAddFactor,
   }) {
     const scoped = dataForScope(data, scope);
     const ownerMatches = ownerPredicate(ownerUsernames);
@@ -137,7 +137,9 @@
         origin(item, context),
         model().owner(item),
         item.factor_count || 0,
-        ...(canModify ? [actionCell(context, onDelete, onEdit, item)] : []),
+        ...(canModify ? [actionCell(
+          context, onDelete, onEdit, onAddFactor, item,
+        )] : []),
       ]),
       pagingOptions(context, tablePage, onPageChange),
     );
@@ -249,7 +251,7 @@
       model().owner(item.value),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify && kind === "factor"
-        ? [actionCell(context, onDelete, onEdit, item.value)] : []),
+        ? [actionCell(context, onDelete, onEdit, null, item.value)] : []),
     ]);
     const view = FTUI.pagedTable(
       headers, rows, pagingOptions(context, tablePage, onPageChange),
@@ -313,9 +315,15 @@
     });
   }
 
-  function actionCell(context, onDelete, onEdit, item) {
+  function actionCell(context, onDelete, onEdit, onAddFactor, item) {
     const root = document.createElement("span");
     root.className = "factor-catalog-row-actions";
+    if (onAddFactor) root.append(iconButton(
+      context, "新增因子", "plus", event => {
+        event?.stopPropagation?.();
+        return onAddFactor(item);
+      }, "factor-catalog-add-factor-action",
+    ));
     const handleEdit = event => {
       event?.stopPropagation?.();
       return onEdit?.(item);

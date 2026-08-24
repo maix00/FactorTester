@@ -52,6 +52,7 @@ window.FTMultiSelectFilter = {
   create(_context, options = {}) {
     const element = new Element("section");
     element.className = "ft-multi-select-filter";
+    element.pickerOptions = options;
     return {
       element,
       setItems(items) { element.items = items; },
@@ -168,8 +169,60 @@ assert.deepStrictEqual(
   assert.ok(provenance.values.some(row => row[0] === "冻结因子家族"));
   assert.ok(provenance.values.some(row => row[1].children?.[0]?.textContent === "MmRateOfChg"));
 
+  const historicalFactorRef = "factor:sha256:historical-factor";
+  const historicalCommit = "c".repeat(40);
+  const historicalContext = {
+    ...context,
+    content: new Element(),
+    toolbar: new Element(),
+    api: async path => {
+      assert.match(path, /source-versions\/custom\/MmRateOfChg/);
+      return {
+        success: true,
+        commit: historicalCommit,
+        source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+        math_expr: "P_t-P_{t-1}",
+        // These are family defaults/definitions, not the registered factor's
+        // concrete parameter values.
+        params: [{alias: "N", default_value: "5d"}],
+      };
+    },
+  };
+  await window.FTFactorDetails.factorDetail(
+    historicalContext,
+    {
+      ...data,
+      factors: [{
+        ...data.factors[0],
+        factor_ref: historicalFactorRef,
+        factor_git_commit: historicalCommit,
+        factor_params: [{alias: "N", value: "20d"}],
+        params: [{alias: "N", value: "20d"}],
+      }],
+    },
+    historicalFactorRef,
+  );
+  const historicalParameterTable = historicalContext.content.children[0].children.find(
+    item => item.headers?.[0] === "参数",
+  );
+  assert.ok(historicalParameterTable);
+  assert.deepStrictEqual(
+    historicalParameterTable.values.find(row => row[0] === "N"),
+    ["N", "20d"],
+  );
+
   const familyContext = {...context, api: async path => {
     assert.match(path, /source-versions\/custom\/MmRateOfChg/);
+    if (path.includes(`/${"b".repeat(40)}`)) {
+      return {
+        success: true,
+        commit: "b".repeat(40),
+        source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+        source_hash: "historical-hash",
+        math_expr: "P_t-P_{t-1}",
+        params: [{alias: "N", value: "10d"}],
+      };
+    }
     return {
       success: true,
       available: true,
@@ -185,6 +238,18 @@ assert.deepStrictEqual(
     "factor-source-version-history",
   );
   assert.ok(familyContext.content.children[0].children[0].children[0]);
+  const historyPicker = familyContext.content.children[0].children[0]
+    .children[0].children[1].children[0];
+  await historyPicker.pickerOptions.onChange(["b".repeat(40)]);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const historicalSource = familyContext.content.children[0].children.find(item => (
+    item.className === "factor-detail-source"
+  ));
+  assert.match(
+    historicalSource.children[1].children[0].textContent,
+    /MmRateOfChg/,
+  );
+  assert.strictEqual(rendered.at(-1).expression, "P_t-P_{t-1}");
 
   await window.FTFactorDetails.setDetail(context, data, setRef, async () => ({}));
   const memberMount = content.children[0].children.at(-1);

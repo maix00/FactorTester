@@ -182,8 +182,19 @@
     return row;
   }
 
+  function sourceUnavailableText(context) {
+    return context.t(
+      "固定源码版本尚未同步到此服务器，无法恢复该版本；当前源码不会替代它。",
+    );
+  }
+
   function source(context, value) {
     const sourceCode = String(value?.source_code || "").trim();
+    const unavailableReason = String(
+      value?.source_unavailable_reason || context.t(
+        "当前身份无权读取源码，或源码尚未同步到此服务器",
+      ),
+    ).trim();
     const root = document.createElement("section");
     root.className = "factor-detail-source";
     const heading = document.createElement("div");
@@ -199,7 +210,9 @@
       heading.append(copy);
     }
     const body = FTUI.code(
-      sourceCode || context.t("当前身份无权读取源码，或源码尚未同步到此服务器"),
+      sourceCode || unavailableReason || context.t(
+        "当前身份无权读取源码，或源码尚未同步到此服务器",
+      ),
       {
         language: sourceCode ? "python" : "",
         className: "factor-detail-source-code",
@@ -280,6 +293,20 @@
     return {...payload, sourceOptions: resolved};
   }
 
+  async function loadSourceVersion(context, value, version = "current", options = {}) {
+    const resolved = sourceOptions(value, options);
+    if (!resolved.familyID || !["custom", "public"].includes(resolved.sourceKind)) {
+      throw new Error(context.t("当前服务器没有可用的因子家族源码"));
+    }
+    const payload = await context.api(versionEndpoint(
+      resolved, version || "current",
+    ));
+    if (payload?.success === false) {
+      throw new Error(payload.error || context.t("读取源码版本失败"));
+    }
+    return {...payload, sourceOptions: resolved};
+  }
+
   function versionPicker(context, value, options = {}) {
     const resolved = sourceOptions(value, options);
     let payload = options.payload || null;
@@ -320,11 +347,14 @@
       mode: "overlay",
       title,
       load: async () => {
-        const payload = await context.api(
-          versionEndpoint(options, commit),
-        );
-        if (payload?.success === false) {
-          throw new Error(payload.error || context.t("读取源码版本失败"));
+        let payload;
+        try {
+          payload = await loadSourceVersion(context, options, commit);
+        } catch (_) {
+          const unavailable = document.createElement("p");
+          unavailable.className = "factor-source-version-unavailable";
+          unavailable.textContent = sourceUnavailableText(context);
+          return unavailable;
         }
         const root = document.createElement("div");
         root.className = "factor-source-version-overlay";
@@ -520,7 +550,7 @@
         options.onLoaded?.(payload);
       },
       onError: error => {
-        status.textContent = error.message || context.t("读取源码版本失败");
+        status.textContent = sourceUnavailableText(context);
         options.onError?.(error);
       },
     });
@@ -532,10 +562,12 @@
   }
 
   window.FTFactorDetailShared = Object.freeze({
-    expression, loadSourceVersions, parameterEditor, parameterRows,
+    expression, loadSourceVersions, loadSourceVersion, parameterEditor,
+    parameterRows,
     familyIdentity, fieldRow, parameterTable, pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,
-    sourceVersionHistory, versionItems, versionPicker, summary,
+    sourceUnavailableText, sourceVersionHistory, versionItems, versionPicker,
+    summary,
     sourceVersionsEndpoint, versionEndpoint,
   });
 })();

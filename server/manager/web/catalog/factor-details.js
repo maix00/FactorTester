@@ -1,9 +1,11 @@
 (() => {
   const model = () => window.FTFactorModel;
 
-  async function factorDetail(context, data, targetRef, mode = "view", nativeRequest) {
+  async function factorDetail(
+    context, data, targetRef, mode = "view", nativeRequest, options = {},
+  ) {
     if (mode === "create" || mode === "edit") {
-      return FTFactorEditor.render(context, data, targetRef, mode);
+      return FTFactorEditor.render(context, data, targetRef, mode, options);
     }
     let factor = context.testObjectTemporary && context.testObjectInitialValue
       ? context.testObjectInitialValue
@@ -132,14 +134,18 @@
     }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
     family = await withSource(context, family);
-    context.setHeading(model().familyName(family), context.t("因子家族"));
-    context.updateActiveTab?.({title: model().familyName(family)});
-    const publicFamily = family.factor_kind === "public" || family.source === "public";
+    const baseFamily = family;
+    context.setHeading(model().familyName(baseFamily), context.t("因子家族"));
+    context.updateActiveTab?.({title: model().familyName(baseFamily)});
+    const publicFamily = baseFamily.factor_kind === "public"
+      || baseFamily.source === "public";
     const canEdit = Boolean(context.session) && (
       publicFamily
         ? context.session.role === "super_admin"
-        : family.can_edit === true
-          || String(family.owner_username || "") === String(context.session.username || "")
+        : baseFamily.can_edit === true
+          || String(baseFamily.owner_username || "") === String(
+            context.session.username || "",
+          )
     );
     if (canEdit && !context.testObjectViewOnly) {
       const editQuery = publicFamily
@@ -152,7 +158,7 @@
       }, context.t("在独立标签页编辑因子家族")));
       context.toolbar?.append(context.button(context.t("删除"), async () => {
         if (!window.confirm(context.t("确认删除该因子家族？"))) return;
-        const alias = family.factor_family_alias || family.factor_family_name;
+        const alias = baseFamily.factor_family_alias || baseFamily.factor_family_name;
         const endpoint = publicFamily
           ? `/custom-factors/api/delete-public/${encodeURIComponent(alias)}`
           : `/custom-factors/api/delete/${encodeURIComponent(alias)}`;
@@ -169,40 +175,125 @@
         }
       }, context.t("删除此因子家族")));
     }
-    const root = document.createElement("div");
-    root.className = window.FTFactorDetailShared.pageClass("view", "factor-family-page");
-    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, family));
-    root.append(window.FTFactorDetailShared.summary(context, family));
-    root.append(window.FTFactorDetailShared.source(context, family));
-    const provenance = window.FTFactorDetailShared.provenance(context, family);
-    if (provenance) root.append(provenance);
-    root.append(FTUI.table(
-      [context.t("字段"), context.t("值")], FTUI.fieldRows(family),
-    ).shell);
-    const members = data.factors.filter(item =>
-      family.factor_refs?.includes(item.factor_ref)
-    );
-    const view = FTUI.table(
-      [context.t("因子"), context.t("来源"), context.t("所有者")],
-      members.map(item => [
-        item.factor_alias,
-        context.t(item.factor_kind === "public" ? "公共" : "用户"),
-        model().owner(item),
-      ]),
-    );
-    linkRows(view, members, item =>
-      `/factors/factor/${encodeURIComponent(item.factor_ref)}`, context,
-    );
-    root.append(view.shell);
-    context.content.replaceChildren(root);
+    let selectedVersion = baseFamily.factor_git_commit
+      || baseFamily.git_commit || "";
+    let sourceVersions = null;
+    let renderSequence = 0;
+
+    const renderFamily = displayFamily => {
+      const root = document.createElement("div");
+      root.className = window.FTFactorDetailShared.pageClass(
+        "view", "factor-family-page",
+      );
+      root.append(window.FTFactorDetailShared.sourceVersionHistory(
+        context, baseFamily, {
+          payload: sourceVersions,
+          selected: selectedVersion || "__current__",
+          onLoaded: payload => { sourceVersions = payload; },
+          onChange: selected => { void selectVersion(selected); },
+        },
+      ));
+      root.append(window.FTFactorDetailShared.summary(context, displayFamily));
+      root.append(window.FTFactorDetailShared.source(context, displayFamily));
+      const provenance = window.FTFactorDetailShared.provenance(
+        context, displayFamily,
+      );
+      if (provenance) root.append(provenance);
+      root.append(FTUI.table(
+        [context.t("字段"), context.t("值")], FTUI.fieldRows(displayFamily),
+      ).shell);
+      const members = data.factors.filter(item =>
+        baseFamily.factor_refs?.includes(item.factor_ref)
+      );
+      const view = FTUI.table(
+        [context.t("因子"), context.t("来源"), context.t("所有者")],
+        members.map(item => [
+          item.factor_alias,
+          context.t(item.factor_kind === "public" ? "公共" : "用户"),
+          model().owner(item),
+        ]),
+      );
+      linkRows(view, members, item =>
+        `/factors/factor/${encodeURIComponent(item.factor_ref)}`, context,
+      );
+      root.append(view.shell);
+      context.content.replaceChildren(root);
+    };
+
+    const selectVersion = async selected => {
+      const commit = selected === "__current__" ? "" : String(selected || "");
+      selectedVersion = commit;
+      const sequence = ++renderSequence;
+      if (!commit) {
+        renderFamily(baseFamily);
+        return;
+      }
+      context.content.replaceChildren(FTUI.loading(
+        context.t("正在读取源码版本…"),
+      ));
+      try {
+        const payload = await window.FTFactorDetailShared.loadSourceVersion(
+          context, baseFamily, commit,
+        );
+        if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
+        renderFamily({
+          ...baseFamily,
+          ...payload,
+          factor_git_commit: payload.commit || commit,
+          git_commit: payload.commit || commit,
+          source_unavailable_reason: "",
+        });
+      } catch (_) {
+        if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
+        renderFamily({
+          ...baseFamily,
+          factor_git_commit: commit,
+          git_commit: commit,
+          source_code: "",
+          source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
+            context,
+          ),
+        });
+      }
+    };
+
+    renderFamily(baseFamily);
   }
 
   async function withSource(context, value) {
+    const commit = String(value?.factor_git_commit || value?.git_commit || "").trim();
+    const options = window.FTFactorDetailShared.sourceOptions(value);
+    // A frozen source carried by a local/temporary object is authoritative. A
+    // catalog projection without source must instead resolve the exact server
+    // snapshot; it must never silently fall back to today's family source.
+    if (commit && value?.source_code) return value;
+    if (commit && ["custom", "public"].includes(options.sourceKind)) {
+      try {
+        const payload = await window.FTFactorDetailShared.loadSourceVersion(
+          context, value, commit,
+        );
+        const valueParams = window.FTFactorDetailShared.parameterRows(value);
+        const sourceParams = window.FTFactorDetailShared.parameterRows(payload);
+        const params = valueParams.length ? valueParams : sourceParams;
+        return {
+          ...value,
+          ...payload,
+          factor_git_commit: payload.commit || commit,
+          git_commit: payload.commit || commit,
+          source_unavailable_reason: "",
+          ...(params.length ? {params, factor_params: params} : {}),
+        };
+      } catch (_) {
+        return {
+          ...value,
+          source_code: "",
+          source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
+            context,
+          ),
+        };
+      }
+    }
     if (value?.source_code || !context.session) return value;
-    // A frozen historical factor must never be silently shown against today's
-    // family source.  Frozen/temporary objects carry their own source when it
-    // is available; otherwise the UI states that it is unavailable.
-    if (value.factor_git_commit || value.git_commit) return value;
     const family = value.factor_family_alias || value.family_alias
       || model().familyName(value);
     if (!family) return value;
@@ -214,9 +305,13 @@
           + (owner ? `?owner_username=${encodeURIComponent(owner)}` : "");
       const payload = await context.api(endpoint);
       const detail = payload.factor || {};
-      const detailParams = window.FTFactorDetailShared.parameterRows(detail);
       const valueParams = window.FTFactorDetailShared.parameterRows(value);
-      const params = detailParams.length ? detailParams : valueParams;
+      const detailParams = window.FTFactorDetailShared.parameterRows(detail);
+      // A registered factor carries its concrete parameter values; the
+      // source-detail response carries the family's parameter definitions.
+      // Keep the former when present so opening a factor detail page never
+      // replaces the saved factor values with family defaults.
+      const params = valueParams.length ? valueParams : detailParams;
       return {
         ...value,
         ...detail,

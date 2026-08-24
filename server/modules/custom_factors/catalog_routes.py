@@ -111,12 +111,8 @@ def _source_context(source_kind: str, factor_id: str, username: str) -> tuple[st
         if not can_view_user_scope(username, owner):
             raise PermissionError('无权查看该用户因子源码')
         source_code = load_factor_source(owner, factor_id) or ''
-        if not source_code:
-            raise FileNotFoundError('因子源码不存在')
         return owner, source_code, owner
     source_code = load_public_factor_source(factor_id) or ''
-    if not source_code:
-        raise FileNotFoundError('公共因子源码不存在')
     return '__public_jobs__', source_code, str(
         request.args.get('workspace_username') or '',
     ).strip()
@@ -175,6 +171,8 @@ def api_source_version(source_kind, factor_id, version):
             commit=version,
             workspace_username=workspace_username,
         )
+        if not value.get('source_code'):
+            raise FileNotFoundError('因子源码版本不存在')
         detail = _source_detail(source_code=value['source_code'], module_name=factor_id)
         return jsonify({
             'success': True,
