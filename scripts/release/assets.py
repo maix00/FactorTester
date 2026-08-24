@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from hashlib import sha256
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import venv
 import zipfile
-import platform
+from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 from scripts.release.package_layout import validate_client_package_layout
-
 
 DEPENDENCIES = (
     "click==8.4.1",
@@ -38,6 +36,28 @@ _MACHO_PREFIXES = {
     b"\xca\xfe\xba\xbe",
     b"\xbe\xba\xfe\xca",
 }
+
+
+def _create_runtime_environment(environment: Path) -> None:
+    """Create the build venv from source Python or a real host interpreter."""
+    if not getattr(sys, "frozen", False):
+        import venv
+
+        venv.EnvBuilder(with_pip=True).create(environment)
+        return
+
+    interpreter = os.environ.get("FTCLIENT_RELEASE_PYTHON") or shutil.which(
+        "python3"
+    )
+    if not interpreter:
+        raise RuntimeError(
+            "A host python3 interpreter is required to publish a client "
+            "release from the bundled Manager CLI"
+        )
+    subprocess.run(
+        [interpreter, "-m", "venv", str(environment)],
+        check=True,
+    )
 
 
 def runtime_input_digest(
@@ -245,7 +265,7 @@ def embed_client_runtime(
     ) as raw:
         root = Path(raw)
         environment = root / "venv"
-        venv.EnvBuilder(with_pip=True).create(environment)
+        _create_runtime_environment(environment)
         python = environment / "bin" / "python"
         # Install the two build tools first, then install the source packages
         # without dependency resolution.  The explicit runtime dependency
