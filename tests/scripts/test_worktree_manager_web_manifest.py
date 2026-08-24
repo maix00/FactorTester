@@ -1540,11 +1540,13 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
         "async function configuration", 1
     )
 
-    assert 'context.t("查看运行配置")' in detail_page
-    assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" in detail_page
+    assert 'context.t("在配置页面打开")' in detail_page
+    assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" not in detail_page
+    assert "FTRunSpecView.load(" in detail_page
+    assert "FTRunSpecView.render(context, value)" in detail_page
     assert 'context.t("结果预览")' in result_viewers
     assert "FTJobDetailTabs.create" in detail_page
-    assert 'context.t("冻结运行配置")' in detail_page
+    assert 'context.t("查看运行配置")' not in detail_page
     assert "loadSelectedSection(detailTabs.current())" in detail_page
     assert 'id === "configuration"' in detail_page
     assert "FTReferencePage.render(context" in configuration_page

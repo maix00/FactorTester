@@ -44,6 +44,14 @@ assert.deepStrictEqual(match("/jobs/job-one/inputs/factor_source__Demo", ""), {
   kind: "job-input", port: 0, id: "job-one", inputName: "factor_source__Demo",
 });
 assert.deepStrictEqual(match("/ic-test", ""), {kind: "ic-test"});
+assert.deepStrictEqual(match(
+  "/ic-test", "?workspace_id=ws-1&job_id=job-1&run_id=run-1&port=8141&server_id=public-1",
+), {
+  kind: "ic-test", workspaceID: "ws-1", restoredJob: {
+    jobID: "job-1", runID: "run-1", runSpecHash: "", phase: "succeeded",
+    port: 8141, serverID: "public-1", groupID: "",
+  },
+});
 assert.deepStrictEqual(match("/backtest", ""), {kind: "backtest"});
 assert.deepStrictEqual(match(
   "/factor-series",
