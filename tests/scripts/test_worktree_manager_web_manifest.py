@@ -26,7 +26,9 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     groups = manifest["groups"]
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
-    assert manifest["external_styles"] == ["katex/katex.min.css"]
+    assert manifest["external_styles"] == [
+        "katex/katex.min.css", "vendor/highlight/github.min.css",
+    ]
     assert manifest["route_groups"]["docs"] == ["docs"]
     assert "docs" not in manifest["initial_groups"]
     assert all(
@@ -63,7 +65,9 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         *research_static._initial_scripts(manifest),
     ]
     assert script_paths == initial_scripts
-    assert set(initial_scripts).issubset(set(manifest["scripts"]))
+    assert set(initial_scripts).issubset({
+        *manifest["scripts"], *manifest["external_scripts"],
+    })
     assert style_paths == [*manifest["external_styles"], *manifest["styles"]]
 
     discovered_scripts = {
@@ -1531,18 +1535,46 @@ def test_backtest_group_form_uses_registered_override_editor() -> None:
 
 def test_json_details_use_a_bounded_code_container() -> None:
     shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
+    factor_detail = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
+        encoding="utf-8"
+    )
     report_view = (WEB_ROOT / "report" / "component-view.js").read_text(
         encoding="utf-8"
     )
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
-    assert 'pre.className = "json-code"' in shared_ui
+    assert '["json-code", "code-viewer", options.className || ""]' in shared_ui
+    assert 'body.className = `language-${language}`' in shared_ui
+    assert "window.hljs.highlightElement(body)" in shared_ui
+    assert "FTUI.code(" in factor_detail
+    assert 'language: sourceCode ? "python" : ""' in factor_detail
+    assert 'document.createElement("pre")' not in factor_detail
     assert "function isJSONCode(component, content)" in report_view
     assert "JSON.parse(source)" in report_view
     assert 'isJSONCode(component, content) ? "json-code"' in report_view
     assert ".json-code" in styles
     assert "max-height:" in styles.split(".json-code", 1)[1].split("}", 1)[0]
     assert "overflow: auto" in styles.split(".json-code", 1)[1].split("}", 1)[0]
+    assert ".code-viewer code.hljs" in styles
+
+
+def test_highlight_js_is_pinned_and_loaded_with_the_shared_code_viewer() -> None:
+    import hashlib
+
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+    vendor = ROOT / "static" / "vendor" / "highlight"
+    checksums = json.loads((vendor / "checksums.json").read_text())
+
+    script = "vendor/highlight/highlight.min.js"
+    style = "vendor/highlight/github.min.css"
+    assert script not in manifest["initial_external_scripts"]
+    assert script in manifest["external_scripts"]
+    assert manifest["group_external_scripts"]["code-viewer"] == [script]
+    assert "code-viewer" in manifest["group_dependencies"]["catalog-core"]
+    assert style in manifest["external_styles"]
+    assert checksums["version"] == "11.11.1"
+    for filename, expected in checksums["sha256"].items():
+        assert hashlib.sha256((vendor / filename).read_bytes()).hexdigest() == expected
 
 
 def test_shared_paged_table_keeps_pager_outside_scroll_container() -> None:

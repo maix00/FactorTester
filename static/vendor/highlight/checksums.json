@@ -1,0 +1,9 @@
+{
+  "version": "11.11.1",
+  "source": "https://highlightjs.org/",
+  "sha256": {
+    "LICENSE": "6c081431591d9df696c82dc598fe1423765b8a299b200ed00b281afd0f64c490",
+    "github.min.css": "5f5db2458549f8b86de973acd7d5d7b26ff5413c07f26aa3f42b054b943c3448",
+    "highlight.min.js": "3c0521aaca7010923d45e583c634c7d0a47e1535e598ece8fd0090deda4fcef1"
+  }
+}

@@ -72,11 +72,13 @@
       copy.className = `${copy.className || ""} secondary`.trim();
       heading.append(copy);
     }
-    const body = document.createElement("pre");
-    body.className = "factor-detail-source-code";
-    const code = document.createElement("code");
-    code.textContent = sourceCode || context.t("当前身份无权读取源码，或源码尚未同步到此服务器");
-    body.append(code);
+    const body = FTUI.code(
+      sourceCode || context.t("当前身份无权读取源码，或源码尚未同步到此服务器"),
+      {
+        language: sourceCode ? "python" : "",
+        className: "factor-detail-source-code",
+      },
+    );
     root.append(heading, body);
     return root;
   }

@@ -7,6 +7,7 @@
   "initial_groups": ["core", "app"],
   "initial_external_scripts": [],
   "group_external_scripts": {
+    "code-viewer": ["vendor/highlight/highlight.min.js"],
     "report": ["katex/katex.min.js"],
     "job-detail-previews": ["vendor/highcharts/highstock.min.js"],
     "job-detail-factor-series": ["vendor/highcharts/highstock.min.js"],
@@ -18,14 +19,16 @@
     "profile": []
   },
   "group_dependencies": {
+    "code-viewer": ["core"],
     "charts": ["core"],
-    "catalog-core": ["core"],
+    "catalog-core": ["core", "code-viewer"],
     "output-choice": ["core"],
     "workbench-compiler": ["core"],
     "workbench-input-state": ["workbench-core"],
     "workbench-settings-controls": ["workbench-core"],
     "workbench-settings-chips": ["workbench-settings"],
-    "research-reference": ["core"],
+    "research-reference": ["core", "code-viewer"],
+    "report": ["code-viewer"],
     "research": ["catalog-core"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
     "job-detail-input": ["job-detail-core"],
@@ -67,7 +70,7 @@
       "workbench-configuration-groups", "workbench-ic-controls"
     ],
     "workbench-backtest": ["workbench-configuration-groups"],
-    "workbench-templates": ["workbench-core"],
+    "workbench-templates": ["workbench-core", "code-viewer"],
     "settings": ["core"],
     "manager": ["core"],
     "docs": ["core"]
@@ -117,7 +120,8 @@
     "docs": ["docs"]
   },
   "external_styles": [
-    "katex/katex.min.css"
+    "katex/katex.min.css",
+    "vendor/highlight/github.min.css"
   ],
   "styles": [
     "styles/app.css",
@@ -131,6 +135,7 @@
     "styles/docs.css"
   ],
   "groups": {
+    "code-viewer": [],
     "core": [
       "core/module-loader.js",
       "core/i18n.js",
@@ -405,6 +410,7 @@
   },
   "external_scripts": [
     "katex/katex.min.js",
+    "vendor/highlight/highlight.min.js",
     "vendor/highcharts/highstock.min.js",
     "vendor/cytoscape/cytoscape.min.js"
   ],
