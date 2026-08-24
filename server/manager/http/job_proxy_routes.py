@@ -28,9 +28,16 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
         r"/custom-factors/api/workspace/push",
+        r"/custom-factors/api/(?:create|create-public|validate)",
+        r"/custom-factors/api/(?:update|update-public|delete|delete-public)/[A-Za-z0-9._-]{1,256}",
+        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}/add-factor",
     ),
-    "PUT": (),
-    "DELETE": (),
+    "PUT": (
+        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}",
+    ),
+    "DELETE": (
+        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}",
+    ),
     "PATCH": (r"/api/profile-research/[^/]{1,512}/lifecycle",),
 }
 _JOB_ANALYSIS_PATHS = {

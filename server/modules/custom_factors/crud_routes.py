@@ -6,7 +6,7 @@ from typing import cast
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
-from server.modules.custom_factors.catalog import list_custom_factors
+from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
 from server.modules.custom_factors.source_helpers import (
     assemble_factor_source,
     parse_class_meta,
@@ -32,6 +32,9 @@ from tools.data.factor_workspace.storage import (
     rename_factor_source,
     save_factor_source,
     save_public_factor_source,
+)
+from tools.data.sqlite.factor_source_store import (
+    delete_factor_source as delete_factor_source_row,
 )
 
 
@@ -87,6 +90,46 @@ def api_create_factor():
             'source_code': strip_factor_meta(full_source),
             'is_public': False,
         }
+    })
+
+
+@cf_bp.route('/api/create-public', methods=['POST'])
+@login_required
+def api_create_public_factor():
+    """Create one public FactorFamily source for a super administrator."""
+    if not _current_user_is_super_admin():
+        return jsonify({'success': False, 'error': '只有超级管理员可以新增公共因子家族'}), 403
+    data = request.get_json(silent=True) or {}
+    source_code = (data.get('source_code') or '').strip()
+    if not source_code:
+        return jsonify({'success': False, 'error': '源码不能为空'}), 400
+    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
+    if not class_match:
+        return jsonify({'success': False, 'error': '源码中未找到 class 定义'}), 400
+    factor_id = class_match.group(1)
+    if any(str(item.get('id') or '') == factor_id for item in list_public_factors()):
+        return jsonify({'success': False, 'error': f'公共因子家族 "{factor_id}" 已存在'}), 400
+    full_source = assemble_factor_source(
+        source_code,
+        (data.get('chinese_name') or '').strip(),
+        (data.get('description') or '').strip(),
+        (data.get('category') or '公共').strip(),
+    )
+    save_public_factor_source(factor_id, full_source)
+    invalidate_factor_family_cache(factor_id)
+    meta = parse_class_meta(full_source)
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': factor_id,
+            'chinese_name': meta.get('chinese_name', ''),
+            'description': meta.get('description', ''),
+            'category': meta.get('category', '公共'),
+            'source_code': strip_factor_meta(full_source),
+            'is_public': True,
+            'type': 'public',
+        },
     })
 
 
@@ -225,6 +268,22 @@ def api_delete_factor(factor_id):
         invalidate_factor_family_cache(old_name)
 
     return jsonify({'success': True, 'message': f'因子 "{old_name}" 已删除'})
+
+
+@cf_bp.route('/api/delete-public/<factor_id>', methods=['POST'])
+@login_required
+def api_delete_public_factor(factor_id):
+    if not _current_user_is_super_admin():
+        return jsonify({'success': False, 'error': '只有超级管理员可以删除公共因子家族'}), 403
+    existing_source = load_public_factor_source(factor_id)
+    if existing_source is None:
+        return jsonify({'success': False, 'error': '公共因子家族不存在'}), 404
+    delete_factor_source_row('public', '', factor_id)
+    invalidate_factor_family_cache(factor_id)
+    return jsonify({
+        'success': True,
+        'message': f'公共因子家族 "{factor_id}" 已删除',
+    })
 
 
 @cf_bp.route('/api/get/<factor_id>', methods=['GET'])

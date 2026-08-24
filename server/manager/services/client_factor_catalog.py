@@ -8,6 +8,38 @@ from typing import Any
 class ClientFactorCatalogMixin:
     """Project factor metadata from the Manager-local account mirror."""
 
+    @staticmethod
+    def _custom_source_families(
+        username: str,
+        owner_alias: str = "",
+    ) -> list[dict[str, Any]]:
+        """Keep source families visible before a parameter row is registered."""
+        from server.modules.custom_factors.catalog import list_custom_factors
+
+        families = []
+        for item in list_custom_factors(username):
+            alias = str(item.get("id") or item.get("name") or "").strip()
+            if not alias:
+                continue
+            families.append({
+                "factor_family_alias": alias,
+                "factor_family_name": item.get("name") or alias,
+                "chinese_name": item.get("chinese_name") or "",
+                "description": item.get("description") or "",
+                "math_expr": item.get("math_expr") or "",
+                "category": item.get("category") or "",
+                "categories": [item.get("category")]
+                if item.get("category") else [],
+                "owner_username": username,
+                "owner_alias": owner_alias or username,
+                "factor_kind": "custom",
+                "source": "custom",
+                "factor_count": 0,
+                "factor_refs": [],
+                "updated_at": item.get("updated_at") or "",
+            })
+        return families
+
     def factor_library(self, principal: str) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""
         self._refresh_account_domain_async(principal)
@@ -22,6 +54,10 @@ class ClientFactorCatalogMixin:
         )
 
         owner_account = self._local_account(principal)
+        source_families = self._custom_source_families(
+            principal,
+            str(owner_account.get("alias") or owner_account.get("username") or principal),
+        )
         if self.account_domain_sync is not None:
             mirrored = factor_rows_from_sync(
                 self.account_domain_sync, principal,
@@ -42,13 +78,18 @@ class ClientFactorCatalogMixin:
                 )
             if mirrored:
                 return build_client_library_projection(
-                    {"factors": mirrored, "errors": []}, principal=principal,
+                    {
+                        "factors": mirrored,
+                        "families": source_families,
+                        "errors": [],
+                    }, principal=principal,
                 )
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
             account=owner_account,
             include_scope_catalog=False,
         )
+        payload["families"] = source_families
         return build_client_library_projection(payload, principal=principal)
 
     def factor_library_scopes(self, principal: str) -> dict[str, dict[str, Any]]:
@@ -84,6 +125,15 @@ class ClientFactorCatalogMixin:
         subordinate_rows = subordinate_factor_rows(
             self.account_domain_sync, accounts,
         )
+        subordinate_families: list[dict[str, Any]] = []
+        for account in accounts:
+            owner = str(account.get("username") or "").strip()
+            if not owner:
+                continue
+            subordinate_families.extend(self._custom_source_families(
+                owner,
+                str(account.get("alias") or account.get("display_name") or owner),
+            ))
         if not subordinate_rows:
             for account in accounts:
                 owner = str(account.get("username") or "")
@@ -95,6 +145,7 @@ class ClientFactorCatalogMixin:
                 subordinate_rows.extend(subordinate_payload.get("factors") or [])
         subordinate = build_client_library_projection({
             "factors": subordinate_rows,
+            "families": subordinate_families,
             "errors": [],
         }, principal=principal)
         return {
@@ -258,4 +309,3 @@ class ClientFactorCatalogMixin:
                 "member_hash": payload.get("member_hash"),
             },
         }
-

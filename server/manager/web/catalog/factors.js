@@ -162,6 +162,24 @@
         list(context, page, familyScope);
       }, context.t("刷新")),
     );
+    const canCreate = Boolean(context.session) && (
+      page === "factors" && familyScope === "mine"
+      || page === "families" && (
+        familyScope === "mine"
+        || familyScope === "public" && context.session.role === "super_admin"
+      )
+    );
+    if (canCreate) {
+      const label = page === "factors"
+        ? context.t("新增因子") : context.t("新增因子家族");
+      const publicMode = page === "families" && familyScope === "public"
+        ? "&visibility=public" : "";
+      const path = page === "factors"
+        ? "/factors/factor/new?mode=create"
+        : `/factors/family/new?mode=create${publicMode}`;
+      context.toolbar.append(context.button(label, () => context.navigate(path),
+        context.t("在独立标签页新建")));
+    }
     let tablePage = 1;
     const render = () => FTFactorList.render(context, data, results, {
       page,
@@ -171,10 +189,53 @@
       ownerUsernames: owner?.values ?? ["*"],
       tablePage,
       onPageChange: value => { tablePage = value; render(); },
+      canModify: Boolean(context.session) && (
+        page === "factors" && familyScope === "mine"
+        || page === "families" && (
+          familyScope === "mine"
+          || familyScope === "public" && context.session.role === "super_admin"
+        )
+      ),
+      onDelete: item => removeItem(context, page, familyScope, item),
     });
     function resetAndRender() { tablePage = 1; render(); }
     search.addEventListener("input", resetAndRender);
     render();
+  }
+
+  async function removeItem(context, page, scope, item) {
+    const familyAlias = String(
+      item?.factor_family_alias || item?.factor_family_name || "",
+    ).trim();
+    const label = String(
+      page === "families" ? modelFamilyLabel(item) : item?.factor_alias || "",
+    ).trim();
+    if (!familyAlias || !window.confirm(
+      context.t("确认删除“%@”？").replace("%@", label || familyAlias),
+    )) return;
+    const endpoint = page === "families"
+      ? scope === "public"
+        ? `/custom-factors/api/delete-public/${encodeURIComponent(familyAlias)}`
+        : `/custom-factors/api/delete/${encodeURIComponent(familyAlias)}`
+      : `/custom-factors/api/factor-library-configs/${encodeURIComponent(familyAlias)}`
+        + `?factor_alias=${encodeURIComponent(item.factor_alias || "")}`
+        + `&scope_key=${encodeURIComponent(item.scope_key || item.product_group || "default")}`;
+    try {
+      await context.api(endpoint, {
+        method: page === "families" ? "POST" : "DELETE",
+        ...(page === "families" ? {} : {body: JSON.stringify({})}),
+      });
+      context.showNotice?.(context.t("已删除"));
+      await load(context, {refresh: true, sets: page === "sets", groups: true});
+      if (current(context)) list(context, page, scope);
+    } catch (error) {
+      context.showNotice?.(error.message || context.t("删除失败"), true);
+    }
+  }
+
+  function modelFamilyLabel(item) {
+    return item?.factor_family_name || item?.factor_family_alias
+      || item?.family_ref || "";
   }
 
   function searchControl(context, search) {
@@ -223,18 +284,28 @@
     const inline = mode === "view"
       && context.testObjectTemporary
       && context.testObjectInitialValue;
-    const data = inline
+    let data = inline
       ? {factors: [context.testObjectInitialValue], families: []}
       : await load(context);
+    if (!inline && mode === "view" && targetRef && !data.factors.some(item =>
+      item.factor_ref === targetRef || item.factor_alias === targetRef
+    )) {
+      data = await load(context, {refresh: true});
+    }
     if (!current(context)) return;
     return FTFactorDetails.factorDetail(context, data, targetRef, mode, nativeRequest);
   }
 
-  async function familyDetail(context, targetRef) {
+  async function familyDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
-    const data = await load(context);
+    let data = await load(context);
+    if (mode === "view" && targetRef && !data.families.some(item =>
+      item.family_ref === targetRef || item.factor_family_alias === targetRef
+    )) {
+      data = await load(context, {refresh: true});
+    }
     if (!current(context)) return;
-    return FTFactorDetails.familyDetail(context, data, targetRef);
+    return FTFactorDetails.familyDetail(context, data, targetRef, mode, options);
   }
 
   async function setDetail(context, targetRef) {

@@ -202,6 +202,21 @@ window.FTFactorList.render(context, {...data, visitor: true}, mount, {
 assert.equal(mount.value.children[0].textContent, "公共因子家族");
 assert.equal(mount.value.children[1].rows.length, 2);
 
+const deleted = [];
+window.FTUI.actionButton = (label, handler) => ({
+  textContent: label,
+  listeners: {click: handler},
+  classList: {add() {}},
+});
+window.FTFactorList.render(context, data, mount, {
+  page: "families", scope: "mine", query: "", groupRefs: ["*"],
+  canModify: true, onDelete: item => deleted.push(item.family_ref),
+});
+assert.equal(mount.value.children[1].headers.at(-1), "操作");
+const familyAction = mount.value.children[1].rows[0].at(-1);
+familyAction.listeners.click({stopPropagation() {}});
+assert.deepStrictEqual(deleted, ["family:two"]);
+
 window.FTFactorList.render(context, data, mount, {
   page: "factors", scope: "mine", query: "", groupRef: "*",
 });
