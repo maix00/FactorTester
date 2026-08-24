@@ -92,6 +92,14 @@ def test_ic_projection_manifest_is_backend_owned_and_ordered() -> None:
     assert [item["order"] for item in projections] == sorted(
         item["order"] for item in projections
     )
+    by_key = {item["key"]: item for item in projections}
+    assert "holding_half_life" not in by_key
+    assert by_key["decay"]["source_artifacts"] == [
+        "ic_statistics_data", "ic_holding_half_life_data",
+    ]
+    assert by_key["decay"]["output_requests"] == [
+        "ic_statistics", "ic_holding_half_life",
+    ]
 
 
 def test_ic_output_declarations_carry_the_same_projection() -> None:
