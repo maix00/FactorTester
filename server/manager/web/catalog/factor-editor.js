@@ -94,61 +94,27 @@
   function sourceVersionPicker(context, state, redraw) {
     if (!state.family) return null;
     const options = window.FTFactorDetailShared.sourceOptions(state.family);
-    const payload = state.sourceVersions;
-    const items = [{
-      value: "__current__",
-      label: context.t("当前最新版本"),
-      description: context.t("未固定历史提交，使用因子家族当前源码"),
-    }];
-    for (const version of payload?.versions || []) {
-      if (!version.commit) continue;
-      items.push({
-        value: version.commit,
-        label: version.short_commit || version.commit,
-        description: [
-          version.subject || "",
-          version.committed_at ? FTUI.formatDate(version.committed_at) : "",
-        ].filter(Boolean).join(" · "),
-      });
-    }
-    const picker = sharedPicker(context, {
-      compact: true,
-      name: "factor-source-version",
-      title: context.t("源码版本"),
-      multi: false,
-      items,
-      selected: [state.sourceVersionCommit || "__current__"],
-      onChange: values => {
-        const selected = values[0] || "__current__";
-        state.sourceVersionCommit = selected === "__current__" ? "" : selected;
-        redraw();
-      },
-    });
-    const actions = document.createElement("span");
-    actions.className = "factor-editor-version-actions";
-    const load = context.button(
-      payload ? context.t("已读取") : context.t("读取版本历史"),
-      async () => {
-        if (state.sourceVersions) return;
-        load.disabled = true;
-        try {
-          state.sourceVersions = await window.FTFactorDetailShared.loadSourceVersions(
-            context, state.family, options,
-          );
+    const picker = window.FTFactorDetailShared.versionPicker(
+      context, state.family, {
+        ...options,
+        payload: state.sourceVersions,
+        selected: state.sourceVersionCommit || "__current__",
+        onLoaded: payload => {
+          state.sourceVersions = payload;
           redraw();
-        } catch (error) {
-          load.disabled = false;
-          context.showNotice?.(error.message || context.t("读取源码版本失败"), true);
-        }
+        },
+        onError: error => {
+          context.showNotice?.(
+            error.message || context.t("读取源码版本失败"), true,
+          );
+        },
+        onChange: selected => {
+          state.sourceVersionCommit = selected === "__current__" ? "" : selected;
+          redraw();
+        },
       },
-      context.t("选择因子家族源码的具体 Git 版本"),
     );
-    load.type = "button";
-    actions.append(load);
-    const value = document.createElement("div");
-    value.className = "factor-editor-version-picker";
-    value.append(picker.element, actions);
-    return field(context.t("源码版本"), value);
+    return field(context.t("源码版本"), picker.element);
   }
 
   function defaults(parameters) {
@@ -259,14 +225,14 @@
   function sourceMetadata(context, state) {
     const family = state.family || state.inspection || {};
     const loaded = state.loaded || {};
+    const identity = window.FTFactorDetailShared.familyIdentity(loaded, family);
     const owner = loaded.factor_owner_ref || loaded.owner_ref
       || family.factor_owner_ref || family.owner_ref
       || family.owner_alias || "";
-    const familyValue = loaded.factor_family_ref || loaded.family_ref
-      || family.factor_family_ref || family.family_ref || familyAlias(family);
-    const commit = loaded.factor_git_commit || loaded.git_commit
-      || family.factor_git_commit || family.git_commit
-      || state.sourceVersionCommit || "";
+    const familyValue = identity.ref || identity.alias;
+    const commit = state.sourceVersionCommit || identity.commit;
+    const familyLabel = commit
+      ? context.t("冻结因子家族") : context.t("选定因子家族");
     if (!owner && !familyValue && !commit && !state.family && !state.inspection) {
       return null;
     }
@@ -276,8 +242,12 @@
       ? `${context.t("历史源码版本")} · ${commit}`
       : context.t("当前因子家族最新源码");
     root.append(
+      field(
+        familyLabel,
+        readOnlyValue(identity.alias || identity.ref || context.t("未选择")),
+      ),
       field(context.t("因子所有者"), readOnlyValue(owner || context.t("未设置"))),
-      field(context.t("因子家族引用"), readOnlyValue(familyValue || context.t("未设置"))),
+      field(context.t("因子家族引用"), readOnlyValue(identity.ref || context.t("未设置"))),
       field(context.t("源码版本"), readOnlyValue(version)),
     );
     return root;
@@ -449,20 +419,21 @@
       mode, factorID, familyMode, publicMode,
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
-      family: loadedFamily,
+      family: familyMode && mode === "edit" ? loaded : loadedFamily,
       sourceCode: loaded.source_code || "",
       inspection: mode === "edit" && !temporaryFamilyEdit ? {
         params: Array.isArray(loaded.parameter_definitions)
-          ? loaded.parameter_definitions : (Array.isArray(loaded.params) ? loaded.params : []),
+          ? loaded.parameter_definitions
+          : window.FTFactorDetailShared.parameterRows(loaded),
         math_expr: loaded.math_expr || loaded.formula || "",
         description: loaded.description || loaded.chinese_name || "",
       } : null,
-      parameterValues: Array.isArray(loaded.params)
-        ? Object.fromEntries(loaded.params.map(parameter => [
-          parameter.alias || parameter.name,
+      parameterValues: Object.fromEntries(
+        window.FTFactorDetailShared.parameterRows(loaded).map(parameter => [
+          parameter.alias,
           parameter.value ?? parameter.default_value ?? "",
-        ]))
-        : {...(loaded.factor_params || loaded.params || {})},
+        ]),
+      ),
       loaded,
       sourceVersionCommit: loaded.factor_git_commit || loaded.git_commit || "",
       sourceVersions: null,
@@ -474,7 +445,9 @@
     context.setHeading(titleText, noun + context.t("详情"));
     context.updateActiveTab?.({title: titleText});
     const form = document.createElement("form");
-    form.className = "detail-stack factor-editor-form";
+    form.className = window.FTFactorDetailShared.pageClass(
+      mode, `factor-editor-form ${familyMode ? "factor-family-page" : "factor-page"}`,
+    );
     const name = textField(context, familyMode ? "因子家族类名" : "因子类名", loaded.name || loaded.factor_alias || "", {
       readOnly: mode === "edit", required: true,
     });
@@ -492,6 +465,10 @@
           fileInput: familyFileInput,
           showUpload: false,
         }));
+        if (state.mode === "edit") {
+          const version = sourceVersionPicker(context, state, redraw);
+          if (version) sourceMount.append(version);
+        }
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
         if (state.sourceMode === "family") {

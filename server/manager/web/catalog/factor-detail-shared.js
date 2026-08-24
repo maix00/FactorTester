@@ -29,6 +29,47 @@
     return root;
   }
 
+  function pageClass(mode = "view", extra = "") {
+    return [
+      "detail-stack",
+      "factor-detail-page",
+      `factor-detail-page-${mode}`,
+      extra,
+    ].filter(Boolean).join(" ");
+  }
+
+  function familyIdentity(value, fallback = {}) {
+    const item = value || {};
+    const backup = fallback || {};
+    const first = (...values) => values.find(value => (
+      value !== undefined && value !== null && String(value).trim()
+    ));
+    const alias = String(first(
+      item.factor_family_alias,
+      item.factor_family_name,
+      item.family_alias,
+      item.family,
+      backup.factor_family_alias,
+      backup.factor_family_name,
+      backup.family_alias,
+      backup.family,
+    ) || "").trim();
+    const ref = String(first(
+      item.factor_family_ref,
+      item.family_ref,
+      backup.factor_family_ref,
+      backup.family_ref,
+      alias,
+    ) || "").trim();
+    const commit = String(first(
+      item.factor_git_commit,
+      item.git_commit,
+      backup.factor_git_commit,
+      backup.git_commit,
+    ) || "").trim();
+    return {alias, ref, commit};
+  }
+
   function helpIcon(help, options = {}) {
     if (window.FTUI?.helpIcon) return window.FTUI.helpIcon(help, options);
     if (window.FTHelp?.create) return window.FTHelp.create(help, options);
@@ -70,6 +111,75 @@
       root.append(row);
     }
     return {root, values};
+  }
+
+  function parameterRows(value) {
+    const item = value || {};
+    const candidates = [
+      item.params,
+      item.factor_params,
+      item.parameter_definitions,
+    ];
+    const raw = candidates.find(candidate => (
+      Array.isArray(candidate) && candidate.length
+    )) ?? candidates.find(candidate => (
+      candidate && typeof candidate === "object"
+        && !Array.isArray(candidate) && Object.keys(candidate).length
+    ));
+    if (Array.isArray(raw)) {
+      return raw.flatMap(parameter => {
+        const alias = String(
+          parameter?.alias || parameter?.name || "",
+        ).trim();
+        if (!alias) return [];
+        return [{
+          alias,
+          value: parameter.value ?? parameter.default_value ?? "",
+          redacted: parameter.redacted === true,
+          description: parameter.desc || parameter.value_space_desc || "",
+        }];
+      });
+    }
+    if (raw && typeof raw === "object") {
+      return Object.entries(raw).map(([alias, parameter]) => ({
+        alias,
+        value: parameter && typeof parameter === "object"
+          ? parameter.value ?? parameter.default_value ?? "" : parameter,
+        redacted: parameter?.redacted === true,
+        description: parameter?.desc || parameter?.value_space_desc || "",
+      }));
+    }
+    return [];
+  }
+
+  function parameterTable(context, value) {
+    const rows = parameterRows(value);
+    if (!rows.length) return null;
+    return FTUI.table(
+      [context.t("参数"), context.t("值")],
+      rows.map(parameter => [
+        parameter.alias,
+        parameter.redacted ? context.t("已隐藏") : parameter.value,
+      ]),
+    ).shell;
+  }
+
+  function fieldRow(context, labelText, control) {
+    if (window.FTTestFieldRow?.create) {
+      return window.FTTestFieldRow.create(labelText, control);
+    }
+    const row = document.createElement("div");
+    row.className = "test-setting-row test-field-row";
+    const label = document.createElement("span");
+    label.className = "test-field-row-heading";
+    const title = document.createElement("b");
+    title.textContent = labelText;
+    label.append(title);
+    const value = document.createElement("div");
+    value.className = "test-field-row-control";
+    value.append(control);
+    row.append(label, value);
+    return row;
   }
 
   function source(context, value) {
@@ -121,6 +231,27 @@
     return `/custom-factors/api/source-versions/${kind}/${family}/${selected}${versionQuery(options)}`;
   }
 
+  function versionItems(context, payload) {
+    const items = [{
+      value: "__current__",
+      label: context.t("当前最新版本"),
+      description: context.t("未固定历史提交，使用因子家族当前源码"),
+      exclusive: true,
+    }];
+    for (const version of payload?.versions || []) {
+      if (!version?.commit) continue;
+      items.push({
+        value: version.commit,
+        label: version.short_commit || version.commit,
+        description: [
+          version.subject || "",
+          version.committed_at ? FTUI.formatDate(version.committed_at) : "",
+        ].filter(Boolean).join(" · "),
+      });
+    }
+    return items;
+  }
+
   function sourceOptions(value, overrides = {}) {
     const item = value || {};
     const sourceKind = overrides.sourceKind || (
@@ -143,7 +274,42 @@
       return {available: false, versions: [], current: null};
     }
     const payload = await context.api(sourceVersionsEndpoint(resolved));
+    if (payload?.success === false) {
+      throw new Error(payload.error || context.t("读取源码版本失败"));
+    }
     return {...payload, sourceOptions: resolved};
+  }
+
+  function versionPicker(context, value, options = {}) {
+    const resolved = sourceOptions(value, options);
+    let payload = options.payload || null;
+    let loading = false;
+    const pickerFactory = window.FTTestObjectPicker?.create
+      || window.FTMultiSelectFilter?.create;
+    if (!pickerFactory) throw new Error(context.t("下拉选择部件尚未加载"));
+    const picker = pickerFactory(context, {
+      compact: true,
+      name: options.name || "factor-source-version",
+      title: options.title || context.t("源码版本"),
+      multi: false,
+      items: versionItems(context, payload),
+      selected: [options.selected || "__current__"],
+      onChange: values => options.onChange?.(values[0] || "__current__"),
+      onOpen: async () => {
+        if (payload || loading) return;
+        loading = true;
+        try {
+          payload = await loadSourceVersions(context, value, resolved);
+          picker.setItems(versionItems(context, payload));
+          options.onLoaded?.(payload);
+        } catch (error) {
+          options.onError?.(error);
+        } finally {
+          loading = false;
+        }
+      },
+    });
+    return {element: picker.element, picker, get payload() { return payload; }};
   }
 
   function sourceVersionHelp(context, options = {}) {
@@ -157,6 +323,9 @@
         const payload = await context.api(
           versionEndpoint(options, commit),
         );
+        if (payload?.success === false) {
+          throw new Error(payload.error || context.t("读取源码版本失败"));
+        }
         const root = document.createElement("div");
         root.className = "factor-source-version-overlay";
         const identity = document.createElement("dl");
@@ -274,6 +443,24 @@
         context.t("因子家族详情"),
       ),
     ]);
+    const familyIdentityValue = familyIdentity(item);
+    if (familyIdentityValue.alias || familyIdentityValue.ref) {
+      const familyValue = document.createElement("span");
+      familyValue.className = "factor-reference-value";
+      const familyText = document.createElement("span");
+      familyText.textContent = familyIdentityValue.alias || familyIdentityValue.ref;
+      familyValue.append(familyText);
+      if (familyIdentityValue.ref) familyValue.append(helpIcon({
+        mode: "overlay",
+        title: context.t("冻结因子家族详情"),
+        content: referenceOverlay(context, {
+          ...item,
+          factor_family_ref: familyIdentityValue.ref,
+          factor_family_alias: familyIdentityValue.alias,
+        }, "factor_family_ref"),
+      }, {ariaLabel: context.t("查看冻结的因子家族")}));
+      rows.push([context.t("冻结因子家族"), familyValue]);
+    }
     const versionValue = document.createElement("span");
     versionValue.className = "factor-reference-value";
     const versionText = document.createElement("span");
@@ -320,68 +507,35 @@
   function sourceVersionHistory(context, value, options = {}) {
     const root = document.createElement("section");
     root.className = "factor-source-version-history";
-    const heading = document.createElement("div");
-    heading.className = "factor-detail-source-heading";
-    const title = document.createElement("h3");
-    title.textContent = context.t("源码版本");
-    const mount = document.createElement("div");
-    mount.className = "factor-source-version-history-mount";
-    let loaded = false;
-    const load = context.button(context.t("读取版本历史"), async () => {
-      if (loaded) return;
-      loaded = true;
-      load.disabled = true;
-      mount.replaceChildren(FTUI.loading(context.t("正在读取源码版本…")));
-      try {
-        const payload = await loadSourceVersions(context, value, options);
-        const current = payload.current ? [payload.current] : [];
-        const versions = [...current, ...(payload.versions || [])]
-          .filter((item, index, all) => item?.commit
-            && all.findIndex(candidate => candidate.commit === item.commit) === index);
-        if (!versions.length) {
-          mount.replaceChildren(FTUI.empty(context.t("没有可用的源码版本")));
-          return;
-        }
-        const table = FTUI.table(
-          [context.t("版本"), context.t("提交说明"), context.t("时间"), context.t("分支")],
-          versions.map(item => [
-            (() => {
-              const cell = document.createElement("span");
-              cell.className = "factor-reference-value";
-              const commitNode = document.createElement("span");
-              commitNode.textContent = item.is_current
-                ? context.t("当前最新版本") : item.short_commit || item.commit;
-              cell.append(
-                commitNode,
-                sourceVersionHelp(context, {
-                  ...sourceOptions(value, options),
-                  version: item,
-                  title: context.t("源码版本详情"),
-                }),
-              );
-              return cell;
-            })(),
-            item.subject || "—",
-            item.committed_at ? FTUI.formatDate(item.committed_at) : "—",
-            (item.branches || []).join(", ") || "—",
-          ]),
-        );
-        mount.replaceChildren(table.shell);
-      } catch (error) {
-        mount.replaceChildren(FTUI.empty(
-          error.message || context.t("读取源码版本失败"),
-        ));
-      }
+    const status = document.createElement("small");
+    status.className = "factor-source-version-status";
+    const selected = options.selected || "__current__";
+    const picker = versionPicker(context, value, {
+      ...options,
+      selected,
+      onChange: options.onChange,
+      onLoaded: payload => {
+        status.textContent = payload?.available === false
+          ? context.t("当前服务器没有可用的源码版本历史") : "";
+        options.onLoaded?.(payload);
+      },
+      onError: error => {
+        status.textContent = error.message || context.t("读取源码版本失败");
+        options.onError?.(error);
+      },
     });
-    load.type = "button";
-    heading.append(title, load);
-    root.append(heading, mount);
+    root.append(
+      fieldRow(context, context.t("源码版本"), picker.element),
+      status,
+    );
     return root;
   }
 
   window.FTFactorDetailShared = Object.freeze({
-    expression, loadSourceVersions, parameterEditor, provenance, source,
-    sourceOptions, sourceVersionHelp, sourceVersionHistory, summary,
+    expression, loadSourceVersions, parameterEditor, parameterRows,
+    familyIdentity, fieldRow, parameterTable, pageClass, provenance, source,
+    sourceOptions, sourceVersionHelp,
+    sourceVersionHistory, versionItems, versionPicker, summary,
     sourceVersionsEndpoint, versionEndpoint,
   });
 })();

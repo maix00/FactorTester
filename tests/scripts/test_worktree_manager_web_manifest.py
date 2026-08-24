@@ -814,6 +814,30 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "test-factor-family-row" not in source
 
 
+def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker() -> None:
+    shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
+        encoding="utf-8",
+    )
+    details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
+        encoding="utf-8",
+    )
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8",
+    )
+    factor_view = details.split("function projectedFactor", 1)[0]
+    family_view = details.split("async function familyDetail", 1)[1].split(
+        "async function withSource", 1,
+    )[0]
+
+    assert "function pageClass" in shared
+    assert "FTFactorDetailShared.pageClass" in factor_view
+    assert "FTFactorDetailShared.pageClass" in family_view
+    assert "sourceVersionHistory" not in factor_view
+    assert "sourceVersionHistory" in family_view
+    assert "FTFactorDetailShared.versionPicker" in editor
+    assert 'context.t("读取版本历史")' not in editor
+
+
 def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
     source = (WEB_ROOT / "catalog" / "factor-list.js").read_text(encoding="utf-8")
     catalog = (WEB_ROOT / "catalog" / "factor-catalog-list.js").read_text(
