@@ -49,6 +49,18 @@ assert.deepEqual(holdingDecay.series[0].data, [[60, 0.1], [300, 0.05]]);
 assert.equal(holdingDecay.series[1].type, "spline");
 assert.deepEqual(holdingDecay.series[1].data, [[60, 0.08], [180, 0.04], [300, 0.02]]);
 assert.match(holdingDecay.subtitle.text, /2m/);
+const reconstructedFit = window.FTICResultCharts.holdingDecayOptions([{
+  factor_alias: "ROC", entry_delay_bars: 0,
+  selected_model: "exponential",
+  exponential_log_decay_slope_per_second: -0.01,
+  exponential_log_decay_intercept: 0,
+  points: [
+    {horizon_seconds: 60, oriented_mean_ic: 0.5},
+    {horizon_seconds: 300, oriented_mean_ic: 0.05},
+  ],
+}], context);
+assert.equal(reconstructedFit.series.length, 2, "retained fit parameters rebuild the curve");
+assert.equal(reconstructedFit.series[1].data.length, 201);
 const acf = window.FTICResultCharts.autocorrelationOptions(factor, context);
 assert.equal(acf.yAxis.plotLines[0].value, 0.5);
 const histogram = window.FTICResultCharts.histogramOptions(factor, context);

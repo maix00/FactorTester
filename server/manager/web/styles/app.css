@@ -200,6 +200,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .catalog-source-lines > div { overflow-wrap: anywhere; }
 .catalog-source-modes, .catalog-source-availability { font-size: 12px; line-height: 1.45; }
 .catalog-source-paths { max-height: 84px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.factor-detail-source { min-width: 0; }
+.factor-detail-source-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.factor-detail-source-heading h3 { margin: 0; }
+.factor-detail-source-code { max-height: 480px; margin: 8px 0 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); white-space: pre; tab-size: 4; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .catalog-source-providers-button { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 9px; color: var(--accent); background: var(--panel); cursor: pointer; font-size: 12px; }
 .catalog-source-providers-button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .catalog-source-providers-card { max-height: calc(100vh - 48px); overflow: auto; }

@@ -303,4 +303,27 @@ const secondLiveRenderCount = renderCount;
 tabs.activateTab(liveTabID);
 assert.strictEqual(renderCount, secondLiveRenderCount + 1);
 assert.strictEqual(beforeSaveCalls, 2);
+
+// Test configuration routes remain web-owned in the embedded client. Each
+// click creates a separate closable tab instead of being collapsed into the
+// native feature entry, so each tab receives its own durable draft session.
+let nativeNavigations = 0;
+window.webkit = {messageHandlers: {researchNavigation: {
+  postMessage() { nativeNavigations += 1; },
+}}};
+const embeddedState = {
+  tabs: [{id: "jobs", path: "/jobs?section=types", title: "测试", closable: false}],
+  activeTabID: "jobs", tabSessions: new Map(), modules: [], pendingScrollCapture: null,
+};
+const embeddedTabs = window.FTTabs.create({
+  state: embeddedState, embeddedPresentation: true, t: value => value,
+  renderRoute() {}, content, title, eyebrow, toolbar, notice,
+  modulePath: value => value.path, isPinnedPath: () => false,
+  titleForPath: () => "回测", tabIcon: () => "chart",
+});
+embeddedTabs.navigate("/backtest");
+embeddedTabs.navigate("/backtest");
+assert.strictEqual(nativeNavigations, 0);
+assert.strictEqual(embeddedState.tabs.filter(tab => tab.path === "/backtest").length, 2);
+assert.ok(embeddedState.tabs.filter(tab => tab.path === "/backtest").every(tab => tab.closable));
 console.log("ok");
