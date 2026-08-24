@@ -6,7 +6,7 @@
     await window.FTStaticLoader.loadGroups(["factor-catalog-editor"]);
   }
 
-  async function factorDetail(context, targetRef, mode = "view") {
+  async function factorDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
     // A factor created inline in the test editor already carries its complete
     // view model.  Do not make a catalog round-trip just to render that
@@ -25,7 +25,7 @@
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") await ensureEditor();
     return FTFactorDetails.factorDetail(
-      context, data, targetRef, mode, catalog().nativeRequest,
+      context, data, targetRef, mode, catalog().nativeRequest, options,
     );
   }
 

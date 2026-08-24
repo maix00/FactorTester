@@ -451,6 +451,11 @@
     }
     const temporaryFamilyEdit = mode === "edit" && context.testObjectTemporary
       && loaded.source_kind !== "transient" && !loaded.source_code;
+    const selectedFamily = !familyMode && mode === "create" && options.familyRef
+      ? data.families.find(item => familyRef(item) === options.familyRef
+        || item.factor_family_alias === options.familyRef
+        || item.factor_family_name === options.familyRef) || null
+      : null;
     const loadedFamily = temporaryFamilyEdit
       ? data.families.find(item => familyRef(item) === (
         loaded.factor_family_ref || loaded.family_ref
@@ -462,8 +467,10 @@
       mode, factorID, familyMode, publicMode,
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
-      family: familyMode && mode === "edit" ? loaded : loadedFamily,
-      latestFamily: familyMode && mode === "edit" ? loaded : loadedFamily,
+      family: familyMode && mode === "edit"
+        ? loaded : selectedFamily || loadedFamily,
+      latestFamily: familyMode && mode === "edit"
+        ? loaded : selectedFamily || loadedFamily,
       sourceCode: loaded.source_code || "",
       inspection: mode === "edit" && !temporaryFamilyEdit ? {
         params: Array.isArray(loaded.parameter_definitions)

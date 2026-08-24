@@ -103,6 +103,11 @@ assert.deepStrictEqual(match("/factors/families", "?scope=unknown"), {
 assert.deepStrictEqual(match("/factors/family/new", "?mode=create&visibility=public"), {
   kind: "factor-family", id: "", mode: "create", publicMode: true,
 });
+assert.deepStrictEqual(match(
+  "/factors/factor/new", "?mode=create&family_ref=family%3Aone",
+), {
+  kind: "factor", id: "", mode: "create", familyRef: "family:one",
+});
 assert.deepStrictEqual(match("/factors/family/family%3Aone", "?mode=edit"), {
   kind: "factor-family", id: "family:one", mode: "edit", publicMode: false,
 });
