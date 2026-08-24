@@ -107,6 +107,9 @@
       canModify,
       onDelete: item => removeItem(context, page, familyScope, item),
       onEdit: item => editItem(context, page, familyScope, item),
+      onAddFactor: page === "families"
+        ? item => addFactor(context, item)
+        : null,
     });
     function resetAndRender() { tablePage = 1; render(); }
     search.addEventListener("input", resetAndRender);
@@ -126,6 +129,20 @@
         + (scope === "public" ? "&visibility=public" : "")
       : `/factors/factor/${encodeURIComponent(ref)}?mode=edit`;
     context.navigate(path);
+  }
+
+  function addFactor(context, item) {
+    const familyRef = item?.family_ref || item?.factor_family_alias
+      || item?.factor_family_name;
+    if (!familyRef) {
+      context.showNotice?.(context.t("找不到因子家族引用"), true);
+      return;
+    }
+    const query = new URLSearchParams({
+      mode: "create",
+      family_ref: familyRef,
+    });
+    context.navigate(`/factors/factor/new?${query.toString()}`);
   }
 
   async function removeItem(context, page, scope, item) {

@@ -1,9 +1,11 @@
 (() => {
   const model = () => window.FTFactorModel;
 
-  async function factorDetail(context, data, targetRef, mode = "view", nativeRequest) {
+  async function factorDetail(
+    context, data, targetRef, mode = "view", nativeRequest, options = {},
+  ) {
     if (mode === "create" || mode === "edit") {
-      return FTFactorEditor.render(context, data, targetRef, mode);
+      return FTFactorEditor.render(context, data, targetRef, mode, options);
     }
     let factor = context.testObjectTemporary && context.testObjectInitialValue
       ? context.testObjectInitialValue

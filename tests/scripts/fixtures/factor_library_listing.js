@@ -207,6 +207,7 @@ assert.equal(mount.value.children[1].rows.length, 2);
 
 const deleted = [];
 const edited = [];
+const added = [];
 window.FTUI.actionButton = (label, handler) => ({
   textContent: label,
   children: [],
@@ -220,16 +221,20 @@ window.FTFactorList.render(context, data, mount, {
   canModify: true,
   onEdit: item => edited.push(item.family_ref),
   onDelete: item => deleted.push(item.family_ref),
+  onAddFactor: item => added.push(item.family_ref),
 });
 assert.equal(mount.value.children[1].headers.at(-1), "操作");
 const familyAction = mount.value.children[1].rows[0].at(-1);
-assert.equal(familyAction.children[0].children[0].symbol, "square.and.pencil");
-assert.equal(familyAction.children[1].children[0].symbol, "trash");
-assert(familyAction.children[1].className.includes("factor-catalog-delete-action"));
+assert.equal(familyAction.children[0].children[0].symbol, "plus");
+assert.equal(familyAction.children[1].children[0].symbol, "square.and.pencil");
+assert.equal(familyAction.children[2].children[0].symbol, "trash");
+assert(familyAction.children[2].className.includes("factor-catalog-delete-action"));
 familyAction.children[0].listeners.click({stopPropagation() {}});
 familyAction.children[1].listeners.click({stopPropagation() {}});
+familyAction.children[2].listeners.click({stopPropagation() {}});
 assert.deepStrictEqual(edited, ["family:two"]);
 assert.deepStrictEqual(deleted, ["family:two"]);
+assert.deepStrictEqual(added, ["family:two"]);
 
 window.FTFactorList.render(context, data, mount, {
   page: "factors", scope: "mine", query: "", groupRef: "*",
