@@ -38,12 +38,6 @@ def fake_server() -> Iterator[str]:
             return jsonify(success=True, username="alice")
         return jsonify(success=False, error="bad login"), 401
 
-    @app.post("/api/keep_login")
-    def keep_login():
-        assert session.get("username") == "alice"
-        session["keep_login"] = bool(request.get_json().get("keep_login"))
-        return jsonify(success=True, keep_login=session["keep_login"])
-
     @app.post("/api/client/profiles/sync")
     def sync_profile():
         assert session.get("username") == "alice"
@@ -351,7 +345,6 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
 
     assert client.login("alice", "pw")["username"] == "alice"
-    assert client.set_keep_login(True)["keep_login"] is True
     assert client.sync_profile({
         "profile_id": "maxa",
         "display_name": "Max A",
@@ -445,7 +438,6 @@ def test_client_login_persists_across_processes_and_logout_clears_cookie(
     cookie_file = tmp_path / "cookies.lwp"
     first = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
     first.login("alice", "pw")
-    first.set_keep_login(True)
 
     second = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
     assert second.list_workspaces()[0]["workspace_id"] == "workspace-1"

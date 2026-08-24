@@ -23,10 +23,6 @@ def order_audit_server():
         session["username"] = "alice"
         return jsonify(success=True, username="alice")
 
-    @app.post("/api/keep_login")
-    def keep_login():
-        return jsonify(success=True, keep_login=True)
-
     @app.get("/static/config/modules.json")
     def modules():
         return jsonify(success=True, modules=[])
