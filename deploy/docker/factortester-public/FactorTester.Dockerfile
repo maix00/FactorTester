@@ -130,7 +130,6 @@ COPY server server
 COPY tools tools
 COPY sources sources
 COPY scripts scripts
-COPY templates templates
 COPY static static
 COPY docs docs
 COPY product_docs product_docs
