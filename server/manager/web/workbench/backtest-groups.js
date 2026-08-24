@@ -254,29 +254,10 @@
       includeRun: false,
       includeStrategyChips: true,
       groupBy: "none",
-      onOverlay: descriptor => openChipDetail(context, state, descriptor),
+      onOverlay: descriptor => FTTestSettingChips.openDetail(
+        context, state, descriptor,
+      ),
     });
-  }
-
-  function openChipDetail(context, state, descriptor) {
-    const action = descriptor?.detailOverlay;
-    const target = action?.target;
-    if (!action || !target || !window.FTTestObjectEditorOverlay?.open) return false;
-    const value = target.value && typeof target.value === "object" ? target.value : null;
-    const temporary = Boolean(value?.temporary
-      || value?.source_kind === "transient"
-      || value?.source_origin === "test_inline");
-    void FTTestObjectEditorOverlay.open(context, {
-      kind: action.kind,
-      mode: action.mode || "view",
-      ref: target.ref,
-      initialValue: value,
-      temporary,
-      testState: state,
-    }).catch(error => {
-      context.showNotice?.(error.message || context.t("详情读取失败"), true);
-    });
-    return true;
   }
 
   function rowActions(context, state, surface, item, refresh) {

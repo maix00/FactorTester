@@ -62,6 +62,11 @@ global.FTTests = {
   },
 };
 window.FTTests = global.FTTests;
+let openedObject = null;
+global.FTTestObjectEditorOverlay = {
+  open: async (_context, options) => { openedObject = options; },
+};
+window.FTTestObjectEditorOverlay = global.FTTestObjectEditorOverlay;
 global.FTICConfigurationGroupForm = {
   render: (_context, _state, editor) => {
     const form = new Element("form");
@@ -124,6 +129,11 @@ const state = {
         chip_template: "因子候选: {factorCandidateLabel}",
         source_keys: ["factorCandidateLabel"], target_tab: "factor",
         source_adapter: "selected_factor_candidates",
+        clickable: true,
+        detail_overlay: {
+          kind: "factor_set", mode: "view", source_key: "factor_candidates",
+          ref_key: "target_ref",
+        },
       },
       {
         key: "product_path_selection", label: "产品组",
@@ -131,6 +141,8 @@ const state = {
         source_keys: ["product_group"], target_tab: "product_path_selection",
         source_adapter: "selected_product_paths",
         value_resolvers: {productPathSelectionLabel: "product_path_selection_label"},
+        clickable: true,
+        detail_overlay: {kind: "product_group", mode: "view", source_key: "product_group"},
       },
     ],
     surfaces: [{
@@ -167,6 +179,12 @@ const rawRefSources = FTTestContentAdapters.chipSources({
 }, {product_path_selection_id: group.product_scope_ref});
 assert.deepEqual(rawRefSources.product_group, [],
   "unresolved product refs must not render as chip labels");
+const chipSources = FTTestContentAdapters.chipSources(state, {
+  factor_candidate_refs: [group.factor_ref],
+  product_path_selection_id: group.product_scope_ref,
+});
+assert.equal(chipSources.factorCandidateLabel, "ROC 1m");
+assert.equal(chipSources.factor_candidates.length, 1);
 
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
@@ -183,6 +201,11 @@ assert.equal(state.icConfigurationGroupShowConfigOpen, true);
 assert.equal(productLoads, 1,
   "opening summary chips must hydrate product labels without previewing a RunSpec");
 root = window.FTICConfigurationGroups.render(context, state, refresh);
+const hydratedChipSources = FTTestContentAdapters.chipSources(state, {
+  factor_candidate_refs: [group.factor_ref],
+  product_path_selection_id: group.product_scope_ref,
+});
+assert.equal(hydratedChipSources.product_group[0].group_ref, group.product_scope_ref);
 const chipRow = find(root, node => node.className === "strategy-list-chips");
 assert.ok(chipRow);
 const renderedChips = [];
@@ -195,6 +218,20 @@ const renderedChips = [];
 assert.deepEqual(renderedChips.map(chip => (
   chip.children.map(child => child.textContent).join(": ")
 )), ["因子候选: ROC 1m", "产品组: 日盘产品组"]);
+const factorChip = renderedChips.find(chip => chip.children[0]?.textContent === "因子候选");
+factorChip.listeners.click();
+assert.deepEqual(
+  {kind: openedObject.kind, mode: openedObject.mode},
+  {kind: "factor_set", mode: "view"},
+  "IC factor-candidate chip must open the factor-set view overlay",
+);
+const productChip = renderedChips.find(chip => chip.children[0]?.textContent === "产品组");
+productChip.listeners.click();
+assert.deepEqual(
+  {kind: openedObject.kind, mode: openedObject.mode, ref: openedObject.ref},
+  {kind: "product_group", mode: "view", ref: "product-group:day"},
+  "IC product-group chip must open the product-group view overlay",
+);
 const selection = find(root, node => node.tagName === "input");
 assert.equal(selection.type, "radio");
 selection.checked = true;

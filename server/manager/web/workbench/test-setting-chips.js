@@ -403,5 +403,26 @@
     });
   }
 
-  window.FTTestSettingChips = Object.freeze({descriptors, render});
+  function openDetail(context, state, descriptor) {
+    const action = descriptor?.detailOverlay;
+    const target = action?.target;
+    if (!action || !target || !window.FTTestObjectEditorOverlay?.open) return false;
+    const value = target.value && typeof target.value === "object" ? target.value : null;
+    const temporary = Boolean(value?.temporary
+      || value?.source_kind === "transient"
+      || value?.source_origin === "test_inline");
+    void FTTestObjectEditorOverlay.open(context, {
+      kind: action.kind,
+      mode: action.mode || "view",
+      ref: target.ref,
+      initialValue: value,
+      temporary,
+      testState: state,
+    }).catch(error => {
+      context.showNotice?.(error.message || context.t("详情读取失败"), true);
+    });
+    return true;
+  }
+
+  window.FTTestSettingChips = Object.freeze({descriptors, openDetail, render});
 })();
