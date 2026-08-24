@@ -6,6 +6,7 @@ import importlib.util
 import os
 import tempfile
 import time
+from hashlib import sha256
 
 from server.modules.custom_factors.source_helpers import strip_factor_meta
 from server.modules.shared.param_meta import serialize_param_meta
@@ -13,7 +14,6 @@ from tools.data.account_manage import (
     account_display_name,
     visible_accounts_for,
 )
-from server.services.factor_registry import get_factor_family_instance
 from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.factors import FactorFamily
@@ -217,6 +217,17 @@ def get_public_factor_detail(factor_name: str) -> dict | None:
             'tree_repr': tree_repr,
             'params': [serialize_param_meta(param) for param in ff.params],
             'is_public': True,
+            'source': 'public',
+            'factor_kind': 'public',
+            'owner_username': '__public_jobs__',
+            'owner_alias': '公共因子库',
+            'factor_owner_ref': '__public_jobs__',
+            'factor_family_alias': factor_name,
+            'factor_family_ref': (
+                'factor-family:sha256:' + sha256(
+                    f'__public_jobs__\x1f{factor_name}'.encode()
+                ).hexdigest()
+            ),
         }
     except Exception:
         return None

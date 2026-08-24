@@ -82,11 +82,73 @@
       onChange: values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
         state.parameterValues = defaults(state.family?.params || []);
+        state.sourceVersionCommit = "";
+        state.sourceVersions = null;
         state.inspection = null;
         redraw();
       },
     });
     return field(context.t("因子家族"), picker.element);
+  }
+
+  function sourceVersionPicker(context, state, redraw) {
+    if (!state.family) return null;
+    const options = window.FTFactorDetailShared.sourceOptions(state.family);
+    const payload = state.sourceVersions;
+    const items = [{
+      value: "__current__",
+      label: context.t("当前最新版本"),
+      description: context.t("未固定历史提交，使用因子家族当前源码"),
+    }];
+    for (const version of payload?.versions || []) {
+      if (!version.commit) continue;
+      items.push({
+        value: version.commit,
+        label: version.short_commit || version.commit,
+        description: [
+          version.subject || "",
+          version.committed_at ? FTUI.formatDate(version.committed_at) : "",
+        ].filter(Boolean).join(" · "),
+      });
+    }
+    const picker = sharedPicker(context, {
+      compact: true,
+      name: "factor-source-version",
+      title: context.t("源码版本"),
+      multi: false,
+      items,
+      selected: [state.sourceVersionCommit || "__current__"],
+      onChange: values => {
+        const selected = values[0] || "__current__";
+        state.sourceVersionCommit = selected === "__current__" ? "" : selected;
+        redraw();
+      },
+    });
+    const actions = document.createElement("span");
+    actions.className = "factor-editor-version-actions";
+    const load = context.button(
+      payload ? context.t("已读取") : context.t("读取版本历史"),
+      async () => {
+        if (state.sourceVersions) return;
+        load.disabled = true;
+        try {
+          state.sourceVersions = await window.FTFactorDetailShared.loadSourceVersions(
+            context, state.family, options,
+          );
+          redraw();
+        } catch (error) {
+          load.disabled = false;
+          context.showNotice?.(error.message || context.t("读取源码版本失败"), true);
+        }
+      },
+      context.t("选择因子家族源码的具体 Git 版本"),
+    );
+    load.type = "button";
+    actions.append(load);
+    const value = document.createElement("div");
+    value.className = "factor-editor-version-picker";
+    value.append(picker.element, actions);
+    return field(context.t("源码版本"), value);
   }
 
   function defaults(parameters) {
@@ -203,7 +265,8 @@
     const familyValue = loaded.factor_family_ref || loaded.family_ref
       || family.factor_family_ref || family.family_ref || familyAlias(family);
     const commit = loaded.factor_git_commit || loaded.git_commit
-      || family.factor_git_commit || family.git_commit || "";
+      || family.factor_git_commit || family.git_commit
+      || state.sourceVersionCommit || "";
     if (!owner && !familyValue && !commit && !state.family && !state.inspection) {
       return null;
     }
@@ -281,7 +344,10 @@
       `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
       {
         method: "PUT",
-        body: JSON.stringify({params_list: [state.parameterValues || {}]}),
+        body: JSON.stringify({
+          params_list: [state.parameterValues || {}],
+          metadata: {factor_git_commit: state.sourceVersionCommit || null},
+        }),
       },
     );
     return value.factors?.[0] || {
@@ -398,6 +464,8 @@
         ]))
         : {...(loaded.factor_params || loaded.params || {})},
       loaded,
+      sourceVersionCommit: loaded.factor_git_commit || loaded.git_commit || "",
+      sourceVersions: null,
     };
     const noun = familyMode ? context.t("因子家族") : context.t("因子");
     const titleText = mode === "create"
@@ -428,6 +496,8 @@
         sourceMount.append(sourceModePicker(context, state, redraw));
         if (state.sourceMode === "family") {
           sourceMount.append(familyPicker(context, data, state, redraw));
+          const version = sourceVersionPicker(context, state, redraw);
+          if (version) sourceMount.append(version);
           if (state.family) {
             sourceMount.append(window.FTFactorDetailShared.summary(context, state.family));
           }
