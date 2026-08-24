@@ -205,7 +205,7 @@
     actions.className = "ft-multi-select-actions";
     menu.append(searchRow, optionList);
     if (multi) menu.append(note);
-    if (multi || typeof options.onApply === "function") menu.append(actions);
+    if (multi) menu.append(actions);
     dropdown.append(summary, menu);
     if (trailingActions) {
       const controlRow = document.createElement("div");
@@ -379,7 +379,7 @@
           actionHost.append(button);
         }
         if (actionHost.childElementCount) row.append(actionHost);
-        input.addEventListener("change", () => {
+        input.addEventListener("change", async () => {
           if (item.disabled) return;
           if (input.checked) {
             selected = !multi
@@ -392,9 +392,20 @@
           }
           render();
           if (!multi) {
-            committedSelected = [...selected];
-            options.onChange?.([...selected]);
-            dropdown.open = false;
+            const previous = [...committedSelected];
+            try {
+              const commit = options.onChange || options.onApply;
+              const result = commit?.([...selected]);
+              if (result && typeof result.then === "function") await result;
+              committedSelected = [...selected];
+              dropdown.open = false;
+            } catch (error) {
+              selected = previous;
+              render();
+              context.showNotice?.(
+                error.message || translate(context, "应用失败"), true,
+              );
+            }
           }
         });
         return row;
@@ -434,7 +445,7 @@
       });
     }
 
-    if (multi || typeof options.onApply === "function") {
+    if (multi) {
       const apply = document.createElement("button");
       apply.type = "button";
       apply.className = "primary ft-multi-select-apply";
