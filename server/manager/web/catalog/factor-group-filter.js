@@ -53,6 +53,9 @@
       search: filter.search,
       clear: filter.clear,
       render: filter.render,
+      setItems(nextGroups) {
+        filter.setItems(choices(context, nextGroups));
+      },
       setValues: filter.setValues,
       get values() { return filter.values; },
       get value() { return filter.values[0] || ""; },
