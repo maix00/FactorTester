@@ -49,7 +49,8 @@ def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
     assert total == 200
     assert len(sampled) == 100
     assert sampled[0] == {
-        **rows[1], "open": 1, "high": 4, "low": 0,
+        **rows[1], "timestamp": 0, "time": None,
+        "open": 1, "high": 4, "low": 0,
         "close": 3, "volume": 20, "open_interest": 101,
     }
 

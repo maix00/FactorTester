@@ -24,6 +24,8 @@ def bounded_ohlcv_rows(
         first, last = bucket[0], bucket[-1]
         entry = {
             **last,
+            "timestamp": first.get("timestamp"),
+            "time": first.get("time", last.get("time")),
             "open": first.get("open"),
             "high": max(float(item["high"]) for item in bucket),
             "low": min(float(item["low"]) for item in bucket),
