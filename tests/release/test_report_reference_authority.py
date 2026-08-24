@@ -1,12 +1,11 @@
+import subprocess
 from base64 import urlsafe_b64encode
 from pathlib import Path
-import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.local_profile import new_local_profile
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.declared_links import (
     DeclaredReportReference,
 )
@@ -307,7 +306,7 @@ def test_profile_revision_changes_when_configuration_changes(
     )
     store = ProfileRevisionStore(tmp_path / "client")
     first = store.freeze(profile)
-    profile["server"] = {"base_url": "http://127.0.0.1:8142"}
+    profile["display_name"] = "MaxA revised"
 
     second = store.freeze(profile)
 
@@ -370,6 +369,39 @@ def test_authority_passes_an_exact_product_path_without_rewriting(
     )
 
     assert result["target_ref"] == target_ref
+    assert result["data"]["entity_path"] == target_ref
+
+
+def test_authority_uses_client_connection_not_profile_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.cli.release.research_reporting.references import authority
+
+    class Client:
+        def validate_report_reference(self, *, kind, target_ref):
+            return {
+                "kind": kind,
+                "target_ref": target_ref,
+                "object": {"entity_path": target_ref},
+            }
+
+    monkeypatch.setattr(authority, "client_from_config", lambda: Client())
+    scope = SimpleNamespace(
+        client_root=tmp_path / "client",
+        profile_id="maxa",
+        # A stale endpoint must be ignored if an old caller still carries it.
+        profile={"server": {"base_url": "http://127.0.0.1:1"}},
+        package_root=tmp_path / "research" / "wp",
+    )
+    target_ref = "Product/Futures/CNFutures/_products/SI.GFE"
+
+    result = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind="product", target_ref=target_ref, label="工业硅",
+        ),
+        scope=scope,
+    )
+
     assert result["data"]["entity_path"] == target_ref
 
 

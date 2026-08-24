@@ -8,27 +8,17 @@ from typing import Any
 
 import click
 
-from tools.cli.core.context import client_from_config
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
-from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.research_branch_bindings import owns_branch
-from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.publisher import (
-    publish_research_checkpoint,
-)
-from tools.cli.release.research_reporting.authoring.submission import (
-    build_report_submission,
-    empty_report_submission,
-    select_report_submission,
-)
-from tools.cli.release.research_reporting.authoring.structure_gate import (
-    current_chapter_structure,
+from tools.cli.commands.research_graph_bypass_remediation import (
+    bypass_remediation,
 )
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     ChapterReconciliationRequired,
     reconcile_current_container,
     synchronize_transition_container,
+)
+from tools.cli.commands.research_graph_factor_subjects import (
+    attach_transition_factor_subjects,
 )
 from tools.cli.commands.research_graph_local_report import (
     LocalGraphReport,
@@ -43,23 +33,6 @@ from tools.cli.commands.research_graph_node_advance import (
     prepare_evidence,
     read_object,
 )
-from tools.cli.commands.research_graph_report_policy import report_container
-from tools.cli.commands.research_report_scope import (
-    load_authoring,
-    resolve_branch_report_scope,
-)
-from tools.cli.research_graph_target_capabilities import (
-    prepare_target_capabilities,
-)
-from tools.cli.research_graph_submission_contract import (
-    validate_public_transition,
-)
-from tools.cli.research_graph_entry_assessment import (
-    prepare_entry_assessment,
-)
-from tools.cli.commands.research_graph_obligations import (
-    record_edge_selection,
-)
 from tools.cli.commands.research_graph_obligation_advance import (
     finalize_accepted_advance,
     load_accepted_reconciliation,
@@ -69,13 +42,39 @@ from tools.cli.commands.research_graph_obligation_advance import (
     require_scope_consistency,
     write_accepted_reconciliation,
 )
-from tools.cli.commands.research_report_common import rich_body
-from tools.cli.release.research_obligations import ledger_path
-from tools.cli.commands.research_graph_bypass_remediation import (
-    bypass_remediation,
+from tools.cli.commands.research_graph_obligations import (
+    record_edge_selection,
 )
-from tools.cli.commands.research_graph_factor_subjects import (
-    attach_transition_factor_subjects,
+from tools.cli.commands.research_graph_report_policy import report_container
+from tools.cli.commands.research_report_common import rich_body
+from tools.cli.commands.research_report_scope import (
+    load_authoring,
+    resolve_branch_report_scope,
+)
+from tools.cli.core.context import client_from_config
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.research_branch_bindings import owns_branch
+from tools.cli.release.research_obligations import ledger_path
+from tools.cli.release.research_reporting.authoring.structure_gate import (
+    current_chapter_structure,
+)
+from tools.cli.release.research_reporting.authoring.submission import (
+    build_report_submission,
+    empty_report_submission,
+    select_report_submission,
+)
+from tools.cli.release.research_reporting.publisher import (
+    publish_research_checkpoint,
+)
+from tools.cli.research_graph_entry_assessment import (
+    prepare_entry_assessment,
+)
+from tools.cli.research_graph_submission_contract import (
+    validate_public_transition,
+)
+from tools.cli.research_graph_target_capabilities import (
+    prepare_target_capabilities,
 )
 
 
@@ -96,8 +95,8 @@ def _client_for_profile(
     client_root: Path,
     profile_id: str,
 ) -> FactorTesterClient:
-    profile = LocalProfileStore(client_root).load(profile_id)
-    return FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    LocalProfileStore(client_root).load(profile_id)
+    return client_from_config()
 
 
 def _publish_transition_report(

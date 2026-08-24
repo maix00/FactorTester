@@ -13,24 +13,16 @@ from pathlib import Path
 
 import click
 
-from tools.cli.core.context import client_from_config
-from tools.cli.local_graph_navigation import evaluate_next, load_graph_document
 from tools.cli.capability_projection import server_capability_resolution
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
-from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.publisher import (
-    publish_current_node_report_checkpoint,
+from tools.cli.commands.research_graph_chapter_reconciliation import (
+    reconcile_current_container,
 )
 from tools.cli.commands.research_graph_continuation_plan import (
     with_agent_plan,
 )
 from tools.cli.commands.research_graph_continuation_report import (
     publish_continuation_report,
-)
-from tools.cli.commands.research_graph_chapter_reconciliation import (
-    reconcile_current_container,
 )
 from tools.cli.commands.research_graph_local_report import (
     resolve_local_graph_report,
@@ -41,10 +33,17 @@ from tools.cli.commands.research_graph_navigation import (
 from tools.cli.commands.research_graph_obligations import (
     register_obligation_commands,
 )
+from tools.cli.commands.research_graph_report_policy import report_container
 from tools.cli.commands.research_graph_transition_report import (
     register_transition_report_commands,
 )
-from tools.cli.commands.research_graph_report_policy import report_container
+from tools.cli.core.context import client_from_config
+from tools.cli.local_graph_navigation import evaluate_next, load_graph_document
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.research_reporting.publisher import (
+    publish_current_node_report_checkpoint,
+)
 
 
 def _json(value) -> str:
@@ -52,8 +51,8 @@ def _json(value) -> str:
 
 
 def _client_for_profile(client_root: Path, profile_id: str) -> FactorTesterClient:
-    profile = LocalProfileStore(client_root).load(profile_id)
-    return FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    LocalProfileStore(client_root).load(profile_id)
+    return client_from_config()
 
 
 @click.group("research-graph")
@@ -563,6 +562,7 @@ def checkpoint_current_report(
 from tools.cli.commands.research_result_report import (
     register_research_result_report_commands,
 )
+
 register_research_result_report_commands(research_graph)
 register_navigation_commands(research_graph)
 register_obligation_commands(research_graph)

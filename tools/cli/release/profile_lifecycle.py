@@ -9,8 +9,8 @@ from .local_profile import LocalProfileStore, new_local_profile
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
-from .user_layout import default_user_profile_root, default_user_strategy_library
 from .strategy_workspace import initialize_strategy_repo
+from .user_layout import default_user_profile_root, default_user_strategy_library
 
 
 class ProfileLifecycle:
@@ -23,11 +23,12 @@ class ProfileLifecycle:
         *,
         profile_id: str,
         display_name: str,
-        server_url: str,
+        server_url: str | None = None,
         agent_id: str = "",
         role: str = "research",
         principal_ref: str = "",
     ) -> dict[str, Any]:
+        del server_url
         validate_local_identifier(profile_id, "profile_id")
         if not principal_ref:
             raise ValueError(
@@ -42,7 +43,6 @@ class ProfileLifecycle:
         candidate = new_local_profile(
             profile_id=profile_id,
             display_name=display_name,
-            server_url=server_url,
             workspace_root=workspace_root,
             principal_ref=principal_ref,
         )
@@ -67,7 +67,7 @@ class ProfileLifecycle:
             profile = self.store.save(candidate)
         else:
             stable = (
-                "display_name", "server", "workspace_root",
+                "display_name", "workspace_root",
                 "session_binding", "agents",
             )
             if any(existing[key] != candidate[key] for key in stable):

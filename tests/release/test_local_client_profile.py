@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -10,9 +10,12 @@ from click.testing import CliRunner
 from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
-from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.local_profile import validate_local_profile
 from tools.cli.release.adapters.profile_binding import adapter_binding
+from tools.cli.release.local_profile import (
+    LocalProfileStore,
+    new_local_profile,
+    validate_local_profile,
+)
 
 
 def test_local_profile_is_strict_private_and_version_independent(
@@ -28,13 +31,13 @@ def test_local_profile_is_strict_private_and_version_independent(
     )
     stored = store.save(profile)
 
-    assert stored["server"]["base_url"] == "http://127.0.0.1:8123"
+    assert "server" not in stored
     assert store.load("research-a") == stored
     path = root / "profiles" / "research-a.json"
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 9
+    assert stored["schema_version"] == 10
     assert stored["status"] == "active"
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
@@ -44,6 +47,10 @@ def test_local_profile_is_strict_private_and_version_independent(
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
+    with pytest.raises(ValueError, match="must not contain server"):
+        validate_local_profile({
+            **stored, "server": {"base_url": "http://127.0.0.1:8000"},
+        })
 
 
 def test_loading_profile_migrates_legacy_research_identity_once(
@@ -267,6 +274,7 @@ def test_profile_server_update_uses_public_cli_and_preserves_identity(
 ) -> None:
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     store = LocalProfileStore(root)
     original = new_local_profile(
         profile_id="maxa",
@@ -284,10 +292,13 @@ def test_profile_server_update_uses_public_cli_and_preserves_identity(
 
     assert result.exit_code == 0, result.output
     updated = json.loads(result.output)
-    assert updated["server"]["base_url"] == "http://127.0.0.1:8141"
+    assert updated["connection_scope"] == "client"
+    assert updated["base_url"] == "http://127.0.0.1:8141"
     assert updated["profile_id"] == original["profile_id"]
-    assert updated["session_binding"] == original["session_binding"]
-    assert updated["workspace_root"] == original["workspace_root"]
+    unchanged = LocalProfileStore(root).load("maxa")
+    assert unchanged["session_binding"] == original["session_binding"]
+    assert unchanged["workspace_root"] == original["workspace_root"]
+    assert "server" not in unchanged
 
 
 def test_profile_workspace_bind_and_list_use_compact_local_refs(
@@ -465,11 +476,14 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 9
+    assert upgraded["schema_version"] == 10
     assert upgraded["status"] == "active"
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []
+    assert "server" not in upgraded
+    persisted = json.loads(path.read_text())
+    assert "server" not in persisted
 
 
 def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(

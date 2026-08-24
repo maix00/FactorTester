@@ -7,9 +7,8 @@ from pathlib import Path
 
 import click
 
-from tools.cli.client import FactorTesterClient
+from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 
@@ -28,13 +27,11 @@ def resume_local_agent(
     release_profile: Path | None,
 ) -> None:
     """Resume a provider-neutral Agent from its local profile."""
-    profile, agent = LocalProfileStore(
+    _profile, agent = LocalProfileStore(
         load_profile_root(release_profile)
     ).load_agent(profile_id, agent_id)
     scope = agent["scope"]
-    client = FactorTesterClient(HttpSession(
-        str(profile["server"]["base_url"])
-    ))
+    client = client_from_config()
     packet = client.resume_agent(
         agent_id,
         role=str(agent["role"]),

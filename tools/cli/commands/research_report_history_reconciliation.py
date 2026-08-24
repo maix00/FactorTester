@@ -7,9 +7,9 @@ from typing import Any
 
 import click
 
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 from tools.cli.release.profile import load_profile_root
+
 from .research_graph_local_report import (
     resolve_local_graph_report,
 )
@@ -71,9 +71,7 @@ def _reconcile(
         agent_id=str(branch.record["agent_id"]),
         instance_id=instance_id, branch_id=branch_id,
     )
-    remote = client or FactorTesterClient(HttpSession(
-        local.profile["server"]["base_url"],
-    ))
+    remote = client or client_from_config()
     items = load_history(
         remote,
         work_package_ref=str(local.record["graph_instance_ref"]),

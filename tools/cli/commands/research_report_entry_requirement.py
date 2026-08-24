@@ -7,8 +7,8 @@ from typing import Any
 
 import click
 
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
+from tools.cli.release.research_obligations import ledger_path, load_ledger
 from tools.cli.release.research_reporting.authoring.declared_links import (
     DeclaredReportReference,
 )
@@ -18,8 +18,6 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
 from tools.cli.release.research_reporting.references.entry_requirements import (
     validate_entry_requirement_reference,
 )
-from tools.cli.release.research_obligations import ledger_path, load_ledger
-
 
 _LIST_ITEM = re.compile(r"^(?:[-+*]|\d+[.)])\s+")
 
@@ -88,8 +86,7 @@ def resolve_obligation_requirement_title(
     local_title = _frozen_requirement_title(scope, selected)
     if local_title:
         return local_title
-    server = scope.profile.get("server") or {}
-    client = FactorTesterClient(HttpSession(str(server.get("base_url") or "")))
+    client = client_from_config()
     try:
         metadata = validate_entry_requirement_reference(
             reference=DeclaredReportReference(

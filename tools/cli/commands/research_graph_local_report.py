@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_branch_bindings import owns_branch
 from tools.cli.release.research_reporting.authoring import (
@@ -60,9 +59,7 @@ def resolve_local_graph_report(
         and (not agent_id or item["agent_id"] == agent_id)
     ]
     if not records:
-        loader = research_loader or FactorTesterClient(
-            HttpSession(str((profile.get("server") or {})["base_url"]))
-        ).get_profile_research
+        loader = research_loader or client_from_config().get_profile_research
         records = _server_owned_records(
             profile=profile,
             branch_ref=branch_ref,
