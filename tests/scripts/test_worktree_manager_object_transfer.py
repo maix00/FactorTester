@@ -468,6 +468,32 @@ def test_factor_source_object_round_trip_and_source_free_context(tmp_path) -> No
     ] == digest
 
 
+def test_public_factor_source_object_round_trip(tmp_path) -> None:
+    database = tmp_path / "sources.sqlite"
+    source = "class PublicDemo:\n    pass\n"
+    raw = source.encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    source_path = tmp_path / "public-demo.py"
+    source_path.write_bytes(raw)
+
+    FactorSourceDestinationAdapter(database=database)(
+        type("Context", (), {
+            "transfer": type("Transfer", (), {
+                "object_kind": "factor_source",
+                "object_id": "public:PublicDemo",
+                "principal": "root",
+                "expected_size": len(raw),
+                "expected_sha256": digest,
+            })(),
+        })(),
+        source_path,
+    )
+
+    metadata = FactorSourceStore(database=database).metadata("public:PublicDemo")
+    assert metadata["source_kind"] == "public"
+    assert metadata["source_sha256"] == digest
+
+
 def test_source_free_hydration_allows_an_exact_delegated_runspec_object(
     tmp_path,
 ) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -157,6 +158,7 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
     custom_dir = _workspace_custom_dir(root)
     updated_custom = 0
     updated_public = 0
+    public_factor_changes: list[dict[str, object]] = []
 
     if os.path.isdir(custom_dir):
         for filename in sorted(os.listdir(custom_dir)):
@@ -183,12 +185,22 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
             if factor_workspace_storage.load_public_factor_source(factor_id) != source_code:
                 factor_workspace_storage.save_public_factor_source(factor_id, source_code)
                 updated_public += 1
+                normalized = factor_workspace_storage.load_public_factor_source(
+                    factor_id,
+                ) or ""
+                raw = normalized.encode("utf-8")
+                public_factor_changes.append({
+                    "factor_id": factor_id,
+                    "source_sha256": hashlib.sha256(raw).hexdigest(),
+                    "source_bytes": len(raw),
+                })
 
     return {
         "workspace_root": root,
         "git_selected_branch": selected_branch,
         "updated_custom_count": updated_custom,
         "updated_public_count": updated_public,
+        "public_factor_changes": public_factor_changes,
     }
 
 

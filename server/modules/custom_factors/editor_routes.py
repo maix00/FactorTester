@@ -18,7 +18,10 @@ from tools.data.account_manage import can_view_user_scope
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user
 from tools.data.account_manage import get_account, is_super_admin_account
-from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_registry import (
+    get_factor_family_instance,
+    invalidate_factor_family_cache,
+)
 from server.services.run_input_inspection import instantiate_factor_metadata
 from server.services.factor_workspace import (
     build_factor_workspace,
@@ -31,8 +34,40 @@ from tools.data.factor_workspace.storage import (
     assert_canonical_factor_workspace_root,
     factor_source_root,
     load_factor_source,
+    load_public_factor_source,
 )
 from tools.data.sqlite.factor_source_store import list_factor_sources
+
+
+@cf_bp.route('/api/internal/public-source-applied', methods=['POST'])
+@login_required
+def api_public_source_applied():
+    username = current_user()
+    if not is_super_admin_account(get_account(username)):
+        return jsonify({'success': False, 'error': '只有超级管理员可以同步公共因子家族'}), 403
+    values = (request.get_json(silent=True) or {}).get('factors') or []
+    if not isinstance(values, list) or len(values) > 256:
+        return jsonify({'success': False, 'error': '公共因子同步清单无效'}), 400
+    applied = []
+    for value in values:
+        if not isinstance(value, dict):
+            return jsonify({'success': False, 'error': '公共因子同步项无效'}), 400
+        factor_id = str(value.get('factor_id') or '').strip()
+        source = load_public_factor_source(factor_id) or ''
+        raw = source.encode('utf-8')
+        if (
+            not factor_id
+            or len(raw) != int(value.get('source_bytes') or -1)
+            or hashlib.sha256(raw).hexdigest()
+            != str(value.get('source_sha256') or '').lower()
+        ):
+            return jsonify({
+                'success': False,
+                'error': f'公共因子源码校验失败: {factor_id}',
+            }), 409
+        invalidate_factor_family_cache(factor_id)
+        applied.append(factor_id)
+    return jsonify({'success': True, 'applied': applied})
 
 
 @cf_bp.route('/api/validate', methods=['POST'])
