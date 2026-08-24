@@ -10,8 +10,9 @@ A frozen configuration repeated executable settings in analysis, local-setting,
 and UI projections. Product selections also repeated `paths` as
 `selected_paths`, remained under one analysis, and could depend on mutable
 product-group/category rows. Freezing whole catalog and data-source projections
-would solve that dependency but would copy volatile availability and the full
-product catalog into every RunSpec.
+would copy runtime-owned provider metadata and the full product catalog into
+every RunSpec without changing execution, because workers resolve selected
+source IDs through the deployed source registry.
 
 ## Decision
 
@@ -24,10 +25,10 @@ product catalog into every RunSpec.
   Their resolved selection paths already carry the execution semantics.
 - Configuration-local categories freeze their complete item definitions because
   no external catalog row can recover them.
-- Every referenced category freezes the stable declarations of its data-source
-  families and members: identity, frequency, timezone, column mapping,
-  capability dimensions, and naming scheme. Availability, product counts, and
-  full catalog paths remain runtime state and are excluded.
+- A RunSpec keeps only selected data-source or bundle IDs. Provider members,
+  frequency catalogs, timezone, column mapping, capability dimensions, naming
+  schemes, availability, and product counts remain owned by the deployed source
+  registry and are not copied into the configuration.
 - UI candidate catalogs and duplicated executable UI settings are not frozen.
   Equivalent factor aliases and repeated factor owner/family/parameter
   projections are canonicalized without deleting revision manifests or hashes.
@@ -42,7 +43,8 @@ product catalog into every RunSpec.
 
 Historical execution does not depend on mutable product-group rows. Inline
 objects remain template-safe without being inserted into account catalog tables.
-Data-source availability is still checked on the selected execution node, while
-the meaning of the requested source is frozen. Configuration size is bounded by
-objects actually referenced by the run rather than by the size of the visible
-catalog.
+Data-source identity and availability are checked on the selected execution
+node. Reproducibility therefore depends on the selected ID and deployed
+execution version, not on an unused provider snapshot embedded in RunSpec.
+Configuration size is bounded by objects actually executed by the run rather
+than by the size of the visible source or product catalog.
