@@ -71,6 +71,46 @@ assert.equal(
 const observedTimes = new Set(equity.series.flatMap(item => item.data.map(point => point[0])));
 assert.equal(observedTimes.size, 3, "the adapter must not synthesize non-trading timestamps");
 
+let requestedRange = null;
+let replacedData = null;
+const progressive = window.FTJobHighcharts.optionsFor("equity_curve", {
+  artifact_kind: "equity_curve",
+  series: [{label: "A1", timestamps: [1, 2], values: [100, 101]}],
+}, context, "", {
+  rangeDebounceMs: 1,
+  async loadRange(min, max, options) {
+    requestedRange = {min, max, maxPoints: options.maxPoints};
+    return {
+      artifact_kind: "equity_curve",
+      series: [{
+        label: "A1",
+        timestamps: [1_700_000_000_000, 1_700_000_001_000],
+        values: [110, 111],
+      }],
+    };
+  },
+  rangeOptions(payload) {
+    return window.FTJobHighcharts.optionsFor("equity_curve", payload, context);
+  },
+});
+const progressiveSeries = {
+  name: "A1", options: {},
+  update() {}, setData(data) { replacedData = data; }, remove() {},
+};
+const progressiveChart = {
+  series: [progressiveSeries], plotWidth: 400,
+  xAxis: [{setExtremes() {}}],
+  showLoading() {}, hideLoading() {}, redraw() {}, addSeries() {},
+};
+progressive.xAxis.events.afterSetExtremes.call(
+  {chart: progressiveChart}, {min: 10, max: 11, trigger: "navigator"},
+);
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
+assert.deepEqual(replacedData, [
+  [1_700_000_000_000, 110], [1_700_000_001_000, 111],
+]);
+
 const metrics = {
   artifact_kind: "metrics_over_time",
   rows: [

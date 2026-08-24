@@ -532,6 +532,113 @@ def test_local_manager_reads_artifact_metadata_without_business_service(
     assert lookup_principal == "alice"
 
 
+def test_manager_queries_only_one_page_from_local_json_artifact(
+    tmp_path, monkeypatch,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(artifact_root))
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    raw = json.dumps({
+        "columns": ["order_id"],
+        "rows": [{"order_id": f"order-{index}"} for index in range(80)],
+    }).encode()
+    path = artifact_root / "job-query" / "orders.json"
+    path.parent.mkdir()
+    path.write_bytes(raw)
+    repository = JobRepository()
+    repository.create(JobRecord(
+        job_id="job-query", run_id="run-query", owner="alice",
+        workspace_id="workspace", kind="backtest",
+        status=JobStatus.SUBMITTED, retention_mode="full", job_spec={},
+    ))
+    repository.record_artifact(
+        job_id="job-query", name="order_detail_data",
+        relative_path="job-query/orders.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw),
+    )
+    state = manager.ManagerState(
+        tmp_path / "repo", "python", server_id="local-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    state._sessions[state._token_hash("user-token")] = (
+        "alice", "user", float("inf"),
+    )
+    state.job_index.upsert("alice", [{
+        "job_id": "job-query", "owner": "alice",
+        "storage_server_id": "local-feat",
+    }])
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+
+    with _running(server) as endpoint:
+        request = Request(
+            endpoint
+            + "/api/jobs/job-query/artifacts/order_detail_data/query"
+            + "?server_id=local-feat",
+            data=json.dumps({
+                "mode": "table", "page": 2, "page_size": 20,
+            }).encode(),
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+
+    assert value["storage_server_id"] == "local-feat"
+    assert value["data"]["total"] == 80
+    assert len(value["data"]["rows"]) == 20
+    assert value["data"]["rows"][0]["order_id"] == "order-20"
+
+
+def test_remote_artifact_query_uses_storage_manager_public_data(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "repo", "python", server_id="requesting-manager",
+        state_root=tmp_path / "manager-state",
+    )
+    route = ServiceRoute(
+        server_id="source-manager", role="main", branch="main",
+        revision="revision", port=0, remote=True, online=True,
+        peer_control_endpoint="http://10.0.0.2:7998",
+        proxy_token="peer-token",
+    )
+    calls: list[dict[str, object]] = []
+
+    def public_data(selected, **values):
+        calls.append({"route": selected, **values})
+        return {"success": True, "data": {
+            "query_mode": "table", "rows": [{"order_id": "order-1"}],
+            "total": 1, "page": 1, "page_size": 20,
+        }}
+
+    monkeypatch.setattr(state.federation_gateway, "public_data", public_data)
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+
+    value = handler._job_artifact_query_payload(
+        route, job_id="job-remote", name="order_detail_data",
+        principal="alice", request={"mode": "table", "page": 1},
+    )
+
+    assert value["data"]["total"] == 1
+    assert calls == [{
+        "route": route,
+        "kind": "job-artifacts",
+        "operation": "query",
+        "principal": "alice",
+        "payload": {
+            "job_id": "job-remote", "name": "order_detail_data",
+            "query": {"mode": "table", "page": 1},
+        },
+    }]
+
+
 def test_public_artifact_transfer_access_requires_manager_session(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "repo",
