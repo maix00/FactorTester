@@ -77,6 +77,19 @@ def test_publish_release_does_not_require_a_manager_service_port() -> None:
     assert "--service-port" not in result.output
 
 
+def test_bundled_publisher_uses_current_source_checkout(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts" / "release").mkdir(parents=True)
+    (checkout / "scripts" / "release" / "publish.py").write_text(
+        "# release entrypoint\n", encoding="utf-8",
+    )
+    monkeypatch.chdir(checkout)
+
+    assert commands._release_source_root() == checkout
+
+
 def test_profile_cannot_replace_packaged_release_trust_anchor(
     tmp_path: Path,
 ) -> None:

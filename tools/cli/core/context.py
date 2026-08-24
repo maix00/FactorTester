@@ -20,7 +20,9 @@ def requested_ports() -> tuple[int, ...]:
     return tuple(dict.fromkeys(values))
 
 
-def client_from_config(*, port: int | None = None) -> FactorTesterClient:
+def client_from_config(
+    *, port: int | None = None, persist_cookies: bool | None = None,
+) -> FactorTesterClient:
     capability = load_capability()
     try:
         config = load_config()
@@ -40,7 +42,11 @@ def client_from_config(*, port: int | None = None) -> FactorTesterClient:
             target,
             agent_capability=capability,
             bearer_token=capability.token if capability else "",
-            persist_cookies=capability is None,
+            persist_cookies=(
+                capability is None
+                if persist_cookies is None
+                else persist_cookies and capability is None
+            ),
         ),
     )
 
