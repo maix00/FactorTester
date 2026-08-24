@@ -32,8 +32,11 @@ _IC_RESULT_PROJECTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "decay", "label": "IC 衰减", "module": "ic_delay",
         "order": 30, "group": "decay_forward", "viewer": "line_chart",
-        "source_artifacts": ("ic_statistics_data",),
-        "output_requests": ("ic_statistics",), "presentation": "chart",
+        "source_artifacts": (
+            "ic_statistics_data", "ic_holding_half_life_data",
+        ),
+        "output_requests": ("ic_statistics", "ic_holding_half_life"),
+        "presentation": "chart",
         "content_key": "decay", "empty_state": "暂无多周期 IC 衰减数据",
     },
     {
@@ -68,15 +71,6 @@ _IC_RESULT_PROJECTIONS: tuple[dict[str, Any], ...] = (
         "output_requests": ("ic_resample_stability", "ic_statistics"),
         "presentation": "table", "content_key": "resample",
         "empty_state": "暂无重采样稳定性数据",
-    },
-    {
-        "key": "holding_half_life", "label": "持有期半衰期",
-        "module": "ic_summary", "order": 80, "group": "holding_half_life",
-        "viewer": "data_table",
-        "source_artifacts": ("ic_holding_half_life_data",),
-        "output_requests": ("ic_holding_half_life",), "presentation": "table",
-        "content_key": "holding_half_life",
-        "empty_state": "暂无持有期半衰期数据",
     },
     {
         "key": "quantile_portfolio", "label": "分组组合统计",

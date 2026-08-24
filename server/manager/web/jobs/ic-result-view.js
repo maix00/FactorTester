@@ -348,11 +348,21 @@
         : tabEmpty(context, state, "series", "暂无 IC 序列");
     }
     if (state.activeTab === "decay") {
-      return window.FTICResultModel.decay(factor, state.activeMethod).length
-        ? chartView(context, window.FTICResultCharts.decayOptions(
-          factor, context, state.activeMethod,
-        ))
-        : tabEmpty(context, state, "decay", "暂无多周期 IC 衰减数据");
+      const decay = window.FTICResultModel.decay(factor, state.activeMethod);
+      const halfLife = state.model.halfLifeRows.filter(row => (
+        rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+      ));
+      if (!decay.length && !halfLife.length) {
+        return tabEmpty(context, state, "decay", "暂无多周期 IC 衰减数据");
+      }
+      const root = document.createElement("div"); root.className = "ic-domain-stack";
+      if (decay.length) root.append(chartView(
+        context, window.FTICResultCharts.decayOptions(factor, context, state.activeMethod),
+      ));
+      if (halfLife.length) root.append(chartView(
+        context, window.FTICResultCharts.holdingDecayOptions(halfLife, context),
+      ));
+      return root;
     }
     if (state.activeTab === "autocorrelation") {
       return window.FTICResultModel.autocorrelation(
@@ -371,14 +381,6 @@
           factor, context, state.model.summaryRows, descriptor, state.activeMethod,
         ))
         : tabEmpty(context, state, "distribution", "暂无 IC 分布数据");
-    }
-    if (state.activeTab === "holding_half_life") {
-      const selected = state.model.halfLifeRows.filter(row => (
-        rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
-      ));
-      return selected.length
-        ? dataTable(context, selected)
-        : tabEmpty(context, state, "holding_half_life", "暂无持有期半衰期数据");
     }
     if (state.activeTab === "quantile_portfolio") {
       const selected = window.FTICResultModel.portfolioRowsFor(
