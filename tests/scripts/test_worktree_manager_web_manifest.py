@@ -808,7 +808,22 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTTestFieldRow.create" in source
     assert "FTFactorDetailShared.parameterEditor" in source
     assert "factor-editor-source-metadata" in source
+    assert "FTUI.iconButton" in source
+    assert "factor-editor-upload-action" in source
+    assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source
+
+
+def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
+    source = (WEB_ROOT / "catalog" / "factor-list.js").read_text(encoding="utf-8")
+    catalog = (WEB_ROOT / "catalog" / "factor-catalog-list.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert "onEdit = null" in source
+    assert "square.and.pencil" in source
+    assert "onEdit: item => editItem" in catalog
+    assert "?mode=edit" in catalog
 
 
 def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column() -> None:

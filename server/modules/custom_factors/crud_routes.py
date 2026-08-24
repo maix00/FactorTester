@@ -1,30 +1,35 @@
 """Routes for creating, updating, reading, and deleting factor sources."""
 from __future__ import annotations
+
 import re
 from typing import cast
 
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
-from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
+from server.modules.custom_factors.catalog import (
+    list_custom_factors,
+    list_public_factors,
+)
 from server.modules.custom_factors.source_helpers import (
     assemble_factor_source,
     parse_class_meta,
     strip_factor_meta,
 )
-from tools.data.account_manage import (
-    can_view_user_scope,
-    get_account,
-    is_super_admin_account,
-)
-from server.services.research_configurations import rename_factor_family_alias
 from server.services.factor_registry import (
     get_custom_factor_instance,
     invalidate_custom_factor_cache,
     invalidate_factor_family_cache,
 )
+from server.services.factor_workspace import commit_factor_source_change
 from server.services.http_auth import login_required
+from server.services.research_configurations import rename_factor_family_alias
 from server.services.session_runtime import current_user
+from tools.data.account_manage import (
+    can_view_user_scope,
+    get_account,
+    is_super_admin_account,
+)
 from tools.data.factor_workspace.storage import (
     delete_factor_source,
     load_factor_source,
@@ -48,6 +53,20 @@ def _username():
     if u is None:
         return None
     return u
+
+
+def _commit_saved_source(username: str, operation: str, factor_id: str) -> str:
+    try:
+        result = commit_factor_source_change(
+            username,
+            f"factor: {operation} {factor_id}",
+        )
+    except Exception as error:
+        raise RuntimeError(f"源码已保存，但 Git 提交失败：{error}") from error
+    commit_sha = str(result.get("git_commit_sha") or "").strip()
+    if not commit_sha:
+        raise RuntimeError("源码已保存，但没有生成 Git 提交记录")
+    return commit_sha
 
 
 @cf_bp.route('/api/create', methods=['POST'])
@@ -78,6 +97,10 @@ def api_create_factor():
     full_source = assemble_factor_source(source_code, chinese_name, description, category)
 
     save_factor_source(username, factor_id, full_source)
+    try:
+        git_commit_sha = _commit_saved_source(username, "create", factor_id)
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 500
 
     return jsonify({
         'success': True,
@@ -89,6 +112,7 @@ def api_create_factor():
             'category': category,
             'source_code': strip_factor_meta(full_source),
             'is_public': False,
+            'git_commit_sha': git_commit_sha,
         }
     })
 
@@ -117,6 +141,10 @@ def api_create_public_factor():
     )
     save_public_factor_source(factor_id, full_source)
     invalidate_factor_family_cache(factor_id)
+    try:
+        git_commit_sha = _commit_saved_source(_username(), "create public", factor_id)
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 500
     meta = parse_class_meta(full_source)
     return jsonify({
         'success': True,
@@ -129,6 +157,7 @@ def api_create_public_factor():
             'source_code': strip_factor_meta(full_source),
             'is_public': True,
             'type': 'public',
+            'git_commit_sha': git_commit_sha,
         },
     })
 
@@ -189,6 +218,11 @@ def api_update_factor(factor_id):
         if rename_factor_source(username, factor_id, new_name):
             factor_id = new_name
 
+    try:
+        git_commit_sha = _commit_saved_source(username, "update", factor_id)
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 500
+
     new_meta = parse_class_meta(full_source)
     return jsonify({
         'success': True,
@@ -200,6 +234,7 @@ def api_update_factor(factor_id):
             'category': new_meta.get('category', '自编'),
             'source_code': strip_factor_meta(full_source),
             'is_public': False,
+            'git_commit_sha': git_commit_sha,
         }
     })
 
@@ -232,6 +267,10 @@ def api_update_public_factor(factor_id):
 
     save_public_factor_source(factor_id, full_source)
     invalidate_factor_family_cache(factor_id)
+    try:
+        git_commit_sha = _commit_saved_source(_username(), "update public", factor_id)
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 500
 
     new_meta = parse_class_meta(full_source)
     return jsonify({
@@ -245,6 +284,7 @@ def api_update_public_factor(factor_id):
             'source_code': strip_factor_meta(full_source),
             'is_public': True,
             'type': 'public',
+            'git_commit_sha': git_commit_sha,
         }
     })
 

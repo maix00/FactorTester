@@ -151,19 +151,22 @@
     }
   }
 
-  function sourceControls(context, state, redraw) {
+  function sourceControls(context, state, redraw, options = {}) {
     const root = document.createElement("section");
     root.className = "factor-editor-source-controls";
     const actions = document.createElement("div");
     actions.className = "detail-actions factor-editor-source-actions";
-    const upload = context.button(context.t("上传因子家族源码"), () => file.click());
-    upload.type = "button";
+    const file = options.fileInput || filePicker(context, state, redraw);
+    if (options.showUpload !== false) {
+      const upload = context.button(context.t("上传因子家族源码"), () => file.click());
+      upload.type = "button";
+      actions.append(upload);
+    }
     const validate = context.button(context.t("校验源码"), () => {
       void inspect(context, state, redraw, status);
     });
     validate.type = "button";
-    actions.append(upload, validate);
-    const file = filePicker(context, state, redraw);
+    actions.append(validate);
     const source = document.createElement("textarea");
     source.rows = 16;
     source.required = true;
@@ -179,7 +182,8 @@
       status.className = "factor-editor-source-status";
       status.textContent = context.t("源码已通过校验");
     }
-    root.append(actions, file, field(context.t("Python 源码"), source), status);
+    if (!options.fileInput) root.append(file);
+    root.append(actions, field(context.t("Python 源码"), source), status);
     if (state.inspection) {
       root.append(window.FTFactorDetailShared.summary(context, {
         ...state.inspection,
@@ -403,9 +407,6 @@
     context.updateActiveTab?.({title: titleText});
     const form = document.createElement("form");
     form.className = "detail-stack factor-editor-form";
-    const title = document.createElement("h2"); title.textContent = mode === "create"
-      ? context.t(`新增${familyMode ? "因子家族" : "因子"}`)
-      : context.t(`编辑${familyMode ? "因子家族" : "因子"}`);
     const name = textField(context, familyMode ? "因子家族类名" : "因子类名", loaded.name || loaded.factor_alias || "", {
       readOnly: mode === "edit", required: true,
     });
@@ -419,7 +420,10 @@
     const redraw = () => {
       sourceMount.replaceChildren();
       if (state.familyMode) {
-        sourceMount.append(sourceControls(context, state, redraw));
+        sourceMount.append(sourceControls(context, state, redraw, {
+          fileInput: familyFileInput,
+          showUpload: false,
+        }));
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
         if (state.sourceMode === "family") {
@@ -448,6 +452,16 @@
         );
       }
     };
+    const familyFileInput = familyMode ? filePicker(context, state, redraw) : null;
+    if (familyFileInput) {
+      context.toolbar?.append(FTUI.iconButton(
+        context,
+        "paperclip",
+        "上传因子家族源码",
+        () => familyFileInput.click(),
+        {className: "factor-editor-upload-action"},
+      ));
+    }
     const actions = document.createElement("div"); actions.className = "detail-actions";
     const cancel = context.button(context.t("取消"), () => {
       if (!FTTabReturn.returnToSource(context)) {
@@ -458,7 +472,8 @@
     const save = context.button(context.t("保存"), () => form.requestSubmit());
     save.type = "button"; save.className = "primary";
     actions.append(cancel, save);
-    form.append(title, name, chineseName, description, category, sourceMount,
+    if (familyFileInput) form.append(familyFileInput);
+    form.append(name, chineseName, description, category, sourceMount,
       parameterMount, status, actions);
     context.content.replaceChildren(form);
     redraw();
