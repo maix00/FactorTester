@@ -81,9 +81,11 @@
       selected: state.family ? [familyRef(state.family)] : [],
       onChange: values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
+        state.latestFamily = state.family;
         state.parameterValues = defaults(state.family?.params || []);
         state.sourceVersionCommit = "";
         state.sourceVersions = null;
+        state.sourceVersionError = "";
         state.inspection = null;
         redraw();
       },
@@ -103,18 +105,58 @@
           state.sourceVersions = payload;
           redraw();
         },
-        onError: error => {
-          context.showNotice?.(
-            error.message || context.t("读取源码版本失败"), true,
+        onError: () => {
+          state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText(
+            context,
           );
-        },
-        onChange: selected => {
-          state.sourceVersionCommit = selected === "__current__" ? "" : selected;
           redraw();
         },
+        onChange: selected => { void selectSourceVersion(
+          context, state, selected, redraw,
+        ); },
       },
     );
     return field(context.t("源码版本"), picker.element);
+  }
+
+  async function selectSourceVersion(context, state, selected, redraw) {
+    const commit = selected === "__current__" ? "" : String(selected || "");
+    state.sourceVersionCommit = commit;
+    state.sourceVersionError = "";
+    state.sourceVersionLoading = Boolean(commit);
+    redraw();
+    if (!commit) {
+      state.family = state.latestFamily || state.family;
+      state.sourceCode = state.family?.source_code || state.sourceCode;
+      state.sourceVersionLoading = false;
+      redraw();
+      return;
+    }
+    try {
+      const payload = await window.FTFactorDetailShared.loadSourceVersion(
+        context, state.latestFamily || state.family, commit,
+      );
+      state.family = {
+        ...(state.latestFamily || state.family || {}),
+        ...payload,
+        factor_git_commit: payload.commit || commit,
+        git_commit: payload.commit || commit,
+      };
+      state.sourceCode = payload.source_code || "";
+      const nextParameters = payload.params || state.family.params || [];
+      const previous = state.parameterValues || {};
+      state.parameterValues = Object.fromEntries(nextParameters.map(parameter => {
+        const alias = parameter.alias || parameter.name;
+        return [alias, previous[alias] ?? parameter.value ?? parameter.default_value ?? ""];
+      }).filter(([alias]) => alias));
+    } catch (_) {
+      state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText(
+        context,
+      );
+    } finally {
+      state.sourceVersionLoading = false;
+      redraw();
+    }
   }
 
   function defaults(parameters) {
@@ -299,6 +341,7 @@
   async function saveLibraryFactor(context, state) {
     const alias = familyAlias(state.family);
     if (!alias) throw new Error(context.t("请先选择因子家族"));
+    if (state.sourceVersionError) throw new Error(state.sourceVersionError);
     if (context.testObjectTemporary) {
       return {
         factor_family_alias: alias,
@@ -420,6 +463,7 @@
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
       family: familyMode && mode === "edit" ? loaded : loadedFamily,
+      latestFamily: familyMode && mode === "edit" ? loaded : loadedFamily,
       sourceCode: loaded.source_code || "",
       inspection: mode === "edit" && !temporaryFamilyEdit ? {
         params: Array.isArray(loaded.parameter_definitions)
@@ -437,6 +481,8 @@
       loaded,
       sourceVersionCommit: loaded.factor_git_commit || loaded.git_commit || "",
       sourceVersions: null,
+      sourceVersionError: "",
+      sourceVersionLoading: false,
     };
     const noun = familyMode ? context.t("因子家族") : context.t("因子");
     const titleText = mode === "create"
@@ -486,6 +532,18 @@
       }
       const metadata = sourceMetadata(context, state);
       if (metadata) sourceMount.append(metadata);
+      if (state.sourceVersionLoading) {
+        const loading = document.createElement("small");
+        loading.className = "factor-editor-source-status";
+        loading.textContent = context.t("正在读取源码版本…");
+        sourceMount.append(loading);
+      }
+      if (state.sourceVersionError) {
+        const error = document.createElement("small");
+        error.className = "form-error factor-editor-source-status";
+        error.textContent = state.sourceVersionError;
+        sourceMount.append(error);
+      }
       parameterMount.replaceChildren();
       const editor = parameterEditor(context, state);
       if (editor) {
