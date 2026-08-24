@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import click
 
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_obligations import (
@@ -21,18 +21,22 @@ from tools.cli.release.research_obligations import (
     branch_identity,
     canonicalize_ledger,
     initialize_ledger,
-    ledger_hash,
     ledger_from_history,
+    ledger_hash,
     ledger_path,
     load_ledger,
-    obligations as packet_obligations,
     prepare_obligation_split,
     project_requirement_coverage,
     requirement_title_overrides,
     requirement_union,
-    requirements as packet_requirements,
-    write_ledger,
     validate_evidence_use_object,
+    write_ledger,
+)
+from tools.cli.release.research_obligations import (
+    obligations as packet_obligations,
+)
+from tools.cli.release.research_obligations import (
+    requirements as packet_requirements,
 )
 from tools.cli.release.research_obligations.reporting import (
     edge_coverage_operation,
@@ -45,17 +49,35 @@ from tools.cli.release.research_reporting.authoring.submission_begin import (
 from tools.cli.release.research_reporting.authoring.tree_model import (
     apply_batch,
 )
-from tools.cli.release.research_reporting.authoring.tree_store import (
-    load_head,
-)
 from tools.cli.release.research_reporting.authoring.tree_paths import (
     report_tree_paths,
 )
+from tools.cli.release.research_reporting.authoring.tree_store import (
+    load_head,
+)
+from tools.cli.release.research_reporting.git import commit_work_package
 
-from .research_graph_local_report import resolve_local_graph_report
-from .research_graph_report_policy import report_container
 from .research_graph_chapter_reconciliation import (
     reconcile_current_container,
+)
+from .research_graph_cycle_contract import (
+    validate_research_cycle_envelope,
+)
+from .research_graph_local_report import resolve_local_graph_report
+from .research_graph_obligation_context import refresh_context_metadata
+from .research_graph_obligation_definition_migration import (
+    register_definition_migration_command,
+)
+from .research_graph_obligation_evidence_migration import (
+    register_evidence_migration_command,
+)
+from .research_graph_obligation_titles import (
+    register_title_migration_command,
+)
+from .research_graph_report_policy import report_container
+from .research_report_history_timeline import (
+    load_history,
+    obligation_history_contexts,
 )
 from .research_report_scope import (
     load_current_authoring,
@@ -63,24 +85,6 @@ from .research_report_scope import (
 )
 from .research_report_submission_finalize import finalize_report_command
 from .research_report_submission_preflight import checked_component_preflight
-from .research_graph_obligation_titles import (
-    register_title_migration_command,
-)
-from .research_graph_obligation_context import refresh_context_metadata
-from .research_graph_cycle_contract import (
-    validate_research_cycle_envelope,
-)
-from .research_graph_obligation_evidence_migration import (
-    register_evidence_migration_command,
-)
-from .research_graph_obligation_definition_migration import (
-    register_definition_migration_command,
-)
-from .research_report_history_timeline import (
-    load_history,
-    obligation_history_contexts,
-)
-from tools.cli.release.research_reporting.git import commit_work_package
 
 
 def register_obligation_commands(parent: click.Group) -> None:
@@ -153,8 +157,8 @@ def record_edge_selection(
         instance_id, branch_id, profile_id, agent_id, release_profile,
     )
     client_root = load_profile_root(release_profile)
-    profile = LocalProfileStore(client_root).load(profile_id)
-    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    LocalProfileStore(client_root).load(profile_id)
+    client = client_from_config()
     edge_packet = client.get_research_graph_edge_info(
         instance_id, branch_id, edge_id,
     )
@@ -822,10 +826,8 @@ def _register_history_migration_command(obligation: click.Group) -> None:
                 "one-time and never overwrites it"
             )
         client_root = load_profile_root(release_profile)
-        profile = LocalProfileStore(client_root).load(profile_id)
-        client = FactorTesterClient(HttpSession(
-            profile["server"]["base_url"],
-        ))
+        LocalProfileStore(client_root).load(profile_id)
+        client = client_from_config()
         items = _load_logical_obligation_history(
             client, scope=scope, branch_id=branch_id,
         )
@@ -901,8 +903,8 @@ def _scope(
             instance_id=instance_id,
             branch_id=branch_id,
         )
-        profile = LocalProfileStore(client_root).load(profile_id)
-        client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+        LocalProfileStore(client_root).load(profile_id)
+        client = client_from_config()
         packet = client.get_research_graph_node_info(instance_id, branch_id)
         _hydrate_requirement_titles(
             client=client,
@@ -1051,10 +1053,8 @@ def _complete_requirement_titles(
     missing = sorted(required_ids - set(titles))
     if missing:
         client_root = load_profile_root(release_profile)
-        profile = LocalProfileStore(client_root).load(profile_id)
-        client = FactorTesterClient(HttpSession(
-            profile["server"]["base_url"],
-        ))
+        LocalProfileStore(client_root).load(profile_id)
+        client = client_from_config()
         for requirement_id in missing:
             detail = client.get_current_graph_requirement(
                 instance_id, branch_id, requirement_id,
@@ -1202,8 +1202,8 @@ def _prepare_evidence_use_deltas(
 ) -> list[dict[str, Any]]:
     """Resolve each Evidence object and freeze its Graph admission."""
     client_root = load_profile_root(release_profile)
-    profile = LocalProfileStore(client_root).load(profile_id)
-    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    LocalProfileStore(client_root).load(profile_id)
+    client = client_from_config()
     prepared = deepcopy(deltas)
     validated: list[dict[str, Any]] = []
     for delta in prepared:

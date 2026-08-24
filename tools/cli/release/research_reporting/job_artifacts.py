@@ -133,7 +133,7 @@ def _artifact_bytes(
         job_id=job_id, name=name,
         filename=str(metadata.get("file_name") or name),
         content_type=str(metadata.get("content_type") or ""), raw=raw,
-        server_url=str(scope.profile["server"]["base_url"]),
+        server_url=str(getattr(getattr(client, "session", None), "base_url", "")),
     )
     return raw, _cache_summary(stored, hit=False)
 

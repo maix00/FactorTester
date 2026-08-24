@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
-
-from .report_link_kinds import REPORT_LINK_KINDS
 from urllib.parse import quote, urlparse
 
+from .report_link_kinds import REPORT_LINK_KINDS
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _AGENT_ROLES = {"planning", "research"}
@@ -23,16 +22,23 @@ def new_local_profile(
     *,
     profile_id: str,
     display_name: str,
-    server_url: str,
+    server_url: str | None = None,
     workspace_root: Path,
     principal_ref: str = "",
 ) -> dict[str, Any]:
+    """Create a client-owned Profile without a server endpoint.
+
+    ``server_url`` is retained as an ignored call-site argument for one
+    release so older installed callers can create a Profile while their
+    connection is migrated to the client configuration.  It must never be
+    serialized into the Profile.
+    """
+    del server_url
     return validate_local_profile({
-        "schema_version": 9,
+        "schema_version": 10,
         "profile_id": profile_id,
         "status": "active",
         "display_name": display_name,
-        "server": {"base_url": server_url},
         "workspace_root": str(workspace_root.expanduser().resolve()),
         "workspaces": [],
         "initialization_sources": [],
@@ -81,7 +87,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("local profile must be an object")
     allowed = {
-        "schema_version", "profile_id", "status", "display_name", "server",
+        "schema_version", "profile_id", "status", "display_name",
         "workspace_root", "workspaces", "agents", "adapters",
         "initialization_sources",
         "session_binding",
@@ -89,25 +95,36 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "factor_workspace_binding",
         "strategy_workspace_binding",
     }
+    legacy_allowed = {*allowed, "server"}
     observed = set(value)
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
         "research_records",
         "factor_workspace_binding", "strategy_workspace_binding", "status",
     }
-    if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
+    if not (allowed - legacy_optional).issubset(observed):
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+    if observed - (legacy_allowed):
+        raise ValueError("local profile fields are invalid")
+    schema_version = value.get("schema_version")
+    if schema_version not in {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    }:
         raise ValueError("local profile schema_version is unsupported")
+    if schema_version >= 10 and "server" in value:
+        raise ValueError("client Profile must not contain server metadata")
+    if schema_version < 10:
+        server = value.get("server")
+        if not isinstance(server, dict) or set(server) != {"base_url"}:
+            raise ValueError("legacy local profile server fields are invalid")
+        base_url = _text(
+            server.get("base_url"), "server.base_url",
+        ).rstrip("/")
+        if urlparse(base_url).scheme not in {"http", "https"}:
+            raise ValueError("server.base_url must use http or https")
     status = value.get("status", "active")
     if status not in {"active", "inactive"}:
         raise ValueError("local profile status is invalid")
-    server = value.get("server")
-    if not isinstance(server, dict) or set(server) != {"base_url"}:
-        raise ValueError("local profile server fields are invalid")
-    base_url = _text(server.get("base_url"), "server.base_url").rstrip("/")
-    if urlparse(base_url).scheme not in {"http", "https"}:
-        raise ValueError("server.base_url must use http or https")
     agents = _array(value.get("agents"), "agents")
     adapters = _array(value.get("adapters"), "adapters")
     workspaces = _array(value.get("workspaces", []), "workspaces")
@@ -126,13 +143,12 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         value.get("strategy_workspace_binding", {})
     )
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
         "status": status,
         "display_name": _text(value.get("display_name"), "display_name"),
-        "server": {"base_url": base_url},
         "workspace_root": _text(
             value.get("workspace_root"), "workspace_root"
         ),

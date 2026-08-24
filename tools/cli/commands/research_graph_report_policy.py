@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 
 
 def fetch_graph_node_packet(scope: Any) -> dict[str, Any]:
     instance_id, branch_id = graph_identity(scope)
-    client = FactorTesterClient(HttpSession(
-        scope.profile["server"]["base_url"],
-    ))
+    client = client_from_config()
     return client.get_research_graph_node_info(instance_id, branch_id)
 
 

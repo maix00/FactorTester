@@ -29,7 +29,7 @@ def self_profile_projection(principal: str) -> dict[str, Any]:
     if not owner:
         raise ValueError("profile principal is required")
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "profile_id": SELF_PROFILE_ID,
         "profile_kind": SELF_PROFILE_KIND,
         "status": "active",

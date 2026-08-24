@@ -12,16 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from tools.cli.capability_projection import server_capability_resolution
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 
 from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
-from .research_reporting.workspace import initialize_work_package
 from .research_reporting.authoring import (
     commit_branch_authoring,
     ensure_branch_authoring,
 )
+from .research_reporting.workspace import initialize_work_package
 
 
 def create_profile_research(
@@ -42,9 +41,7 @@ def create_profile_research(
         raise ValueError(
             "product_group is required; exact product universe belongs to the TrialPlan"
         )
-    client = FactorTesterClient(
-        HttpSession(context.profile["server"]["base_url"])
-    )
+    client = client_from_config()
     graph = client.get_active_research_graph(graph_id)
     resolution = capability_resolution or _default_resolution(graph)
     resolution = server_capability_resolution(resolution)

@@ -6,7 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from tools.cli.app import cli
-from tools.cli.http import HttpClientError
+from tools.cli.http import ClientConfig, HttpClientError, save_config
 from tools.cli.release import profile_sync
 from tools.cli.release.local_profile import new_local_profile
 
@@ -21,7 +21,16 @@ def _profile(tmp_path: Path, *, server_url: str = "http://127.0.0.1:8141"):
     )
 
 
-def test_manager_url_is_separate_from_profile_execution_url(tmp_path: Path) -> None:
+def _configure_client(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("FACTORTESTER_CONFIG", str(path))
+    save_config(ClientConfig("http://127.0.0.1:8141"), path=path)
+
+
+def test_manager_url_is_separate_from_profile_execution_url(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
 
     assert profile_sync.manager_url_for_profile(profile) == (
@@ -30,10 +39,11 @@ def test_manager_url_is_separate_from_profile_execution_url(tmp_path: Path) -> N
     assert profile_sync.manager_url_for_profile(
         profile, manager_url="http://127.0.0.1:7998/"
     ) == "http://127.0.0.1:7998"
-    assert profile["server"]["base_url"] == "http://127.0.0.1:8141"
+    assert "server" not in profile
 
 
 def test_sync_prefers_manager_keychain_token(tmp_path: Path, monkeypatch) -> None:
+    _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
     captured: dict[str, object] = {}
 
@@ -68,6 +78,7 @@ def test_sync_prefers_manager_keychain_token(tmp_path: Path, monkeypatch) -> Non
 def test_sync_uses_legacy_cookie_fallback_and_derived_manager_port(
     tmp_path: Path, monkeypatch
 ) -> None:
+    _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
     captured: dict[str, object] = {}
 
@@ -97,6 +108,7 @@ def test_sync_uses_legacy_cookie_fallback_and_derived_manager_port(
 def test_sync_reports_pending_when_manager_session_is_unavailable(
     tmp_path: Path, monkeypatch
 ) -> None:
+    _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
     monkeypatch.setattr(
         profile_sync.ManagerCredentialStore, "read", lambda _self: ""
@@ -148,6 +160,4 @@ def test_create_profile_auto_syncs_after_local_write(tmp_path: Path, monkeypatch
     assert receipt["server_visibility_pending"] is False
     assert receipt["control_profile_sync"]["status"] == "synced"
     assert captured["manager_url"] == "http://127.0.0.1:7998"
-    assert captured["profile"]["server"]["base_url"] == (
-        "http://127.0.0.1:8141"
-    )
+    assert "server" not in captured["profile"]

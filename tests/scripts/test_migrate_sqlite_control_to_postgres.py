@@ -77,6 +77,7 @@ def test_profile_metadata_removes_local_paths_and_secrets() -> None:
     assert value is not None
     assert value["principal"] == "alice"
     payload = value["payload"]
+    assert "server" not in payload
     assert "workspace_root" not in payload
     assert "worktree_path" not in json.dumps(payload)
     assert "session_ref" not in payload["session_binding"]

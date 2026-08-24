@@ -7,11 +7,11 @@ from pathlib import Path
 
 import click
 
-from tools.cli.client import FactorTesterClient
+from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
+
 from .client_research_fork_local import (
     bind_local_fork,
     inherit_local_report,
@@ -46,12 +46,7 @@ def fork_profile_scoped_research(
     client_root = load_profile_root(release_profile)
     profile = LocalProfileStore(client_root).load(profile_id)
     package_root = source_package_root(profile, research_ref)
-    server_url = str((profile.get("server") or {}).get("base_url") or "")
-    if not server_url:
-        raise click.ClickException(
-            f"profile has no server URL: {profile_id}"
-        )
-    client = FactorTesterClient(HttpSession(server_url))
+    client = client_from_config()
     branch = client.fork_research_graph_branch(
         instance_id,
         source_branch_id,

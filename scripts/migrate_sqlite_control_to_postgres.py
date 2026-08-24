@@ -168,7 +168,7 @@ def profile_metadata(value: Mapping[str, Any]) -> dict[str, Any] | None:
     if not profile_id or not principal:
         return None
     allowed = {
-        "schema_version", "profile_id", "status", "display_name", "server",
+        "schema_version", "profile_id", "status", "display_name",
         "initialization_sources", "session_binding", "research_records",
         "factor_workspace_binding", "strategy_workspace_binding", "agents",
     }

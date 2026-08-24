@@ -5,14 +5,6 @@ from pathlib import Path
 
 import click
 
-from tools.cli.client import FactorTesterClient
-from tools.cli.core.context import client_from_config
-from tools.cli.http import HttpSession
-from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.publisher import (
-    publish_current_node_report_checkpoint,
-)
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     reconcile_current_container,
 )
@@ -20,6 +12,12 @@ from tools.cli.commands.research_graph_local_report import (
     resolve_local_graph_report,
 )
 from tools.cli.commands.research_graph_report_policy import report_container
+from tools.cli.core.context import client_from_config
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.research_reporting.publisher import (
+    publish_current_node_report_checkpoint,
+)
 
 
 def register_research_result_report_commands(group) -> None:
@@ -42,8 +40,8 @@ def _result_report(
     profile_id, agent_id, release_profile,
 ) -> None:
     root = load_profile_root(release_profile)
-    profile = LocalProfileStore(root).load(profile_id)
-    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    LocalProfileStore(root).load(profile_id)
+    client = client_from_config()
     projection = client.get_result_report_projection(
         instance_id, branch_id, action_id=action_id,
     )

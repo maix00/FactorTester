@@ -9,7 +9,7 @@ from typing import Any
 import click
 
 from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
+from tools.cli.core.context import client_from_config
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 
@@ -105,10 +105,8 @@ def register_transition_report_commands(parent: click.Group) -> None:
             instance_id=instance_id,
             branch_id=branch_id,
         )
-        profile = LocalProfileStore(client_root).load(profile_id)
-        client = FactorTesterClient(
-            HttpSession(profile["server"]["base_url"])
-        )
+        LocalProfileStore(client_root).load(profile_id)
+        client = client_from_config()
         try:
             result = retry_latest_transition_report(
                 client=client,
