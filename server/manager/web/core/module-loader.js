@@ -28,15 +28,35 @@
 
   function loadScript(relative) {
     if (loaded.has(relative)) return loaded.get(relative);
-    const promise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = assetURL(relative);
-      script.async = false;
-      script.dataset.ftLazyModule = relative;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error(`无法加载模块 ${relative}`));
-      document.head.append(script);
-    }).catch(error => {
+    const promise = (async () => {
+      let lastError;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            const base = assetURL(relative);
+            script.src = attempt
+              ? `${base}${base.includes("?") ? "&" : "?"}retry=${attempt}`
+              : base;
+            script.async = false;
+            script.dataset.ftLazyModule = relative;
+            script.onload = () => resolve();
+            script.onerror = () => {
+              script.remove();
+              reject(new Error(`无法加载模块 ${relative}`));
+            };
+            document.head.append(script);
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        }
+      }
+      throw lastError;
+    })().catch(error => {
       loaded.delete(relative);
       throw error;
     });
