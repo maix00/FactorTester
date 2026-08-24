@@ -186,15 +186,14 @@ LocalCNFutures 已完成迁移；运行时只读 provider-scoped canonical path�
 start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │
 ├─ server/               ← HTTP 层（Flask Blueprints）
-│  ├─ core.py            ← 页面路由（/ , /price_viewer, /docs/*）
 │  ├─ auth.py            ← 登录/登出/会话
 │  ├─ admin.py           ← 用户与机构管理
 │  ├─ modules/
 │  │  ├─ single_factor_test/  ← IC、分组回测与研究任务执行 API
-│  │  ├─ custom_factors/      ← 编辑器、CRUD、目录、参数配置
+│  │  ├─ custom_factors/      ← CRUD、目录、参数配置 API（编辑器由 Manager 提供）
 │  │  ├─ products/cn_futures/ ← 品种树 + 价格数据 API
 │  │  ├─ shared/              ← 共享工具
-│  │  └─ templates/           ← 模板渲染辅助
+│  │  └─ templates/           ← 运行配置模板 API
 │  └─ services/          ← 业务逻辑（无 Flask 依赖）
 │     ├─ factor_registry.py   ← FactorFamily 加载 + 三级缓存
 │     ├─ product_tree.py      ← CategoryTree → Fancytree JSON
@@ -204,7 +203,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │     ├─ runtime_state.py     ← 当前用户上下文
 │     ├─ api_response.py      ← 统一响应格式
 │     ├─ http_auth.py         ← HTTP 认证中间件
-│     └─ tools/tool_docs.py   ← 源码文档生成器
+│     └─ manager/services/technical_docs.py ← Manager 7998 的公开技术文档编译器
 │
 ├─ tools/                ← 核心引擎（无 Flask，无 HTTP）
 │  ├─ factors/
@@ -234,8 +233,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 ├─ factor_family_sources ← 公共 FactorFamily 源码的 SQLite 注册表
 ├─ sources/              ← 数据源实现
 │  └─ LocalCNFutures/    ← 本地中国期货数据管线
-├─ templates/            ← Jinja2 HTML 模板
-├─ static/               ← CSS/JS 前端资源
+├─ static/               ← Manager 共享图标、配置与第三方资源
 ├─ Settings.py           ← 全局配置（日期、路径、比例等）
 └─ docs/
    ├─ adr/               ← 架构决策记录

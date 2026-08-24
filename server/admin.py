@@ -7,7 +7,7 @@ import re
 import secrets
 from typing import Any, cast
 
-from flask import Blueprint, current_app, request, jsonify, render_template
+from flask import Blueprint, current_app, request, jsonify
 import orjson
 
 from server.jobs.repository import JobRepository
@@ -148,15 +148,6 @@ def _build_hierarchy_tree(users: list[dict], organizations: list[dict], levels: 
             'children': org_children,
         })
     return tree
-
-
-@admin_bp.route('/users', methods=['GET'])
-@login_required
-def users_page():
-    _, _, error = _require_admin_account()
-    if error:
-        return error
-    return render_template('admin_users.html')
 
 
 @admin_bp.route('/api/context', methods=['GET'])

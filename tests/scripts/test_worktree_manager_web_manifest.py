@@ -2036,11 +2036,25 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
         (ROOT / "server" / "manager" / "web" / "module-manifest.json")
         .read_text(encoding="utf-8")
     )
-    assert manifest["route_groups"]["factor-family"] == ["factor-catalog-detail"]
-    assert manifest["route_groups"]["factor"] == ["factor-catalog-detail"]
-    assert "catalog" not in manifest["route_groups"]["factor-family"]
-    assert "katex/katex.min.js" in manifest["group_external_scripts"]["factor-catalog-detail"]
-    assert "vendor/highlight/highlight.min.js" in manifest["group_external_scripts"]["factor-catalog-detail"]
+    assert manifest["route_groups"]["factor-family"] == [
+        "factor-catalog-detail-rendering",
+    ]
+    assert manifest["route_groups"]["factor"] == [
+        "factor-catalog-detail-rendering",
+    ]
+    assert manifest["route_groups"]["factor-set"] == ["factor-catalog-detail"]
+    assert manifest["group_dependencies"]["factor-catalog-detail"] == [
+        "factor-catalog-core",
+    ]
+    assert "factor-catalog-list" not in manifest["group_dependencies"][
+        "factor-catalog-detail"
+    ]
+    assert "katex/katex.min.js" in manifest["group_external_scripts"][
+        "factor-catalog-detail-rendering"
+    ]
+    assert "vendor/highlight/highlight.min.js" in manifest[
+        "group_external_scripts"
+    ]["factor-catalog-detail-rendering"]
 
 
 def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> None:
@@ -2050,11 +2064,16 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
         (ROOT / "server" / "manager" / "web" / "module-manifest.json")
         .read_text(encoding="utf-8")
     )
-    factors = (
-        ROOT / "server" / "manager" / "web" / "catalog" / "factors.js"
-    ).read_text(encoding="utf-8")
     factor_list = (
         ROOT / "server" / "manager" / "web" / "catalog" / "factor-list.js"
+    ).read_text(encoding="utf-8")
+    catalog_list = (
+        ROOT / "server" / "manager" / "web" / "catalog"
+        / "factor-catalog-list.js"
+    ).read_text(encoding="utf-8")
+    runtime = (
+        ROOT / "server" / "manager" / "web" / "catalog"
+        / "factor-catalog-runtime.js"
     ).read_text(encoding="utf-8")
 
     assert manifest["route_groups"]["factor-families"] == ["factor-catalog-list"]
@@ -2062,8 +2081,23 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert manifest["group_external_scripts"].get("factor-catalog-list", []) == []
     assert "core/highcharts-range-loader.js" not in manifest["groups"]["factor-catalog-list"]
     assert "catalog/products.js" not in manifest["groups"]["factor-catalog-list"]
-    assert 'load(context, {sets: page === "sets"})' in factors
-    assert 'load(context, {groups: true})' in factors
-    assert "onOpen: () =>" in factors
-    assert "/api/catalog/product-groups" in factors
+    assert 'library: page !== "sets"' in catalog_list
+    assert 'sets: page === "sets"' in catalog_list
+    assert 'groups: true, library: page !== "sets"' in catalog_list
+    assert "onOpen: () =>" in catalog_list
+    assert "/api/catalog/product-groups" in runtime
+    assert 'context.api("/api/catalog/factor-sets")' in runtime
+    sets_start = runtime.index("async function loadSets(context)")
+    groups_start = runtime.index("async function loadGroups(context)")
+    assert "loadLibrary(context)" not in runtime[sets_start:groups_start]
     assert "model().subjectGroups(data.groups)" in factor_list
+
+
+def test_factor_catalog_runtime_loads_only_requested_sources() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_catalog_runtime.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"

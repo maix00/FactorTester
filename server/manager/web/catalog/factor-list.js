@@ -1,6 +1,5 @@
 (() => {
   const model = () => window.FTFactorModel;
-
   function headerTabs(context, active) {
     const tabs = document.createElement("nav");
     tabs.className = "research-section-tabs factor-catalog-tabs";

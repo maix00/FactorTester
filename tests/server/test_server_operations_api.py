@@ -23,8 +23,8 @@ def _client(monkeypatch, *, role: str):
     )
     app = Flask(
         __name__,
-        template_folder=str(ROOT / "templates"),
-        static_folder=str(ROOT / "static"),
+        template_folder=None,
+        static_folder=None,
     )
     app.secret_key = "test"
     app.register_blueprint(server_operations_bp)
@@ -32,31 +32,6 @@ def _client(monkeypatch, *, role: str):
     with client.session_transaction() as session:
         session["username"] = "root"
     return client
-
-
-def test_super_admin_can_open_server_operations_page(monkeypatch) -> None:
-    client = _client(monkeypatch, role="super_admin")
-
-    response = client.get("/admin/server-operations")
-
-    assert response.status_code == 200
-    assert "服务器运行状态" in response.get_data(as_text=True)
-
-
-def test_embedded_server_operations_page_drops_standalone_home_link(
-    monkeypatch,
-) -> None:
-    client = _client(monkeypatch, role="super_admin")
-
-    standalone = client.get("/admin/server-operations").get_data(as_text=True)
-    embedded = client.get(
-        "/admin/server-operations?presentation=embedded"
-    ).get_data(as_text=True)
-
-    assert "返回首页" in standalone
-    assert "返回首页" not in embedded
-    assert "服务实例" in embedded
-    assert "全服测试任务" in embedded
 
 
 def test_shared_module_manifest_limits_server_operations_to_super_admin() -> None:
@@ -68,7 +43,7 @@ def test_shared_module_manifest_limits_server_operations_to_super_admin() -> Non
         item for item in manifest["modules"]
         if item["id"] == "server_operations"
     )
-    assert module["path"] == "/admin/server-operations"
+    assert module["path"] == "/manager?section=server"
     assert module["roles"] == ["super_admin"]
 
 
@@ -81,22 +56,6 @@ def test_shared_module_manifest_restores_home_and_excludes_test_launchers() -> N
     assert module_ids[0] == "home"
     assert "ic-test" not in module_ids
     assert "backtest" not in module_ids
-
-
-@pytest.mark.parametrize(
-    "role", ["user", "developer", "level_admin", "org_admin"]
-)
-def test_non_super_admin_cannot_open_server_operations_page(
-    monkeypatch,
-    role: str,
-) -> None:
-    response = _client(monkeypatch, role=role).get(
-        "/admin/server-operations",
-        headers={"Accept": "application/json"},
-    )
-
-    assert response.status_code == 403
-    assert response.get_json()["success"] is False
 
 
 @pytest.mark.parametrize(

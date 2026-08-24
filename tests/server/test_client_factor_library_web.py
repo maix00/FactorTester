@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
-import re
-
 from flask import Flask
 
 from server.modules.custom_factors import cf_bp
@@ -13,9 +10,6 @@ from server.modules.custom_factors import factor_library_routes
 from server.modules.custom_factors import editor_routes
 from server.modules.custom_factors.client_library import build_client_library_projection
 from server.modules.custom_factors import factor_library_service
-
-
-ROOT = Path(__file__).parents[2]
 
 
 def test_projection_overview_can_skip_expensive_product_scope_catalog(monkeypatch) -> None:
@@ -52,8 +46,8 @@ def test_projection_overview_can_skip_expensive_product_scope_catalog(monkeypatc
 def _app() -> Flask:
     app = Flask(
         __name__,
-        template_folder=str(ROOT / "templates"),
-        static_folder=str(ROOT / "static"),
+        static_folder=None,
+        template_folder=None,
     )
     app.secret_key = "client-library-test"
     app.register_blueprint(cf_bp)
@@ -101,42 +95,6 @@ def test_public_source_applied_requires_superadmin_and_verifies_source(
     assert response.status_code == 200
     assert response.get_json()["applied"] == ["PublicAlpha"]
     assert invalidated == ["PublicAlpha"]
-
-
-def test_client_library_is_a_distinct_page_not_editor_css_hiding() -> None:
-    client = _app().test_client()
-    _login(client)
-
-    redirected = client.get(
-        "/custom-factors/editor?client_mode=library",
-        follow_redirects=False,
-    )
-    assert redirected.status_code == 302
-    assert redirected.headers["Location"].endswith(
-        "/custom-factors/library"
-    )
-
-    library = client.get("/custom-factors/library")
-    assert library.status_code == 200
-    html = library.get_data(as_text=True)
-    assert 'data-client-mode="library"' in html
-    assert "REGISTERED METADATA" in html
-    assert "factor_library_client.js" in html
-    for forbidden in (
-        "workspace-card",
-        "factor-source-root-input",
-        "data-workspace-action",
-        "source-view",
-        "source-code",
-        "highlight.js",
-    ):
-        assert forbidden not in html
-
-    editor = client.get("/custom-factors/editor")
-    editor_html = editor.get_data(as_text=True)
-    assert editor.status_code == 200
-    assert "workspace-card" in editor_html
-    assert "factor_library_readonly.js" in editor_html
 
 
 def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
@@ -322,33 +280,6 @@ def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> No
     assert public["factor_count"] == 0
     assert public["params"][0]["alias"] == "window"
     assert mine["factor_count"] == 1
-
-
-def test_client_library_javascript_has_exactly_one_metadata_network_boundary(
-) -> None:
-    script = (
-        ROOT
-        / "static/js/modules/custom_factor_editor/factor_library_client.js"
-    ).read_text(encoding="utf-8")
-    paths = set(re.findall(
-        r"['\"](/custom-factors/[^'\"]+)['\"]",
-        script,
-    ))
-
-    assert paths == {"/custom-factors/api/client/factor-library"}
-    assert script.count("fetch(") == 1
-    for forbidden in (
-        "/api/get/",
-        "/api/public-factor/",
-        "/api/source-root",
-        "/api/workspace/build",
-        "/api/workspace/sync",
-        "/api/workspace/push",
-        "source_code",
-        "math_expr",
-        "source-code",
-    ):
-        assert forbidden not in script
 
 
 def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(

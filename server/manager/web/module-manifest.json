@@ -14,7 +14,10 @@
     "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
     "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
     "job-detail-input": ["katex/katex.min.js"],
-    "factor-catalog-detail": [
+    "factor-catalog-detail-rendering": [
+      "vendor/highlight/highlight.min.js", "katex/katex.min.js"
+    ],
+    "factor-catalog-editor": [
       "vendor/highlight/highlight.min.js", "katex/katex.min.js"
     ],
     "catalog": ["vendor/highcharts/highstock.min.js", "katex/katex.min.js"],
@@ -42,7 +45,9 @@
     "catalog": ["catalog-core", "charts"],
     "factor-catalog-core": ["core"],
     "factor-catalog-list": ["factor-catalog-core"],
-    "factor-catalog-detail": ["factor-catalog-list"],
+    "factor-catalog-detail": ["factor-catalog-core"],
+    "factor-catalog-detail-rendering": ["factor-catalog-detail"],
+    "factor-catalog-editor": ["factor-catalog-core"],
     "workbench-core": [],
     "workbench-settings": ["workbench-core", "catalog-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
@@ -105,8 +110,8 @@
     "test-template": ["workbench-templates"],
     "factor-families": ["factor-catalog-list"],
     "factor-sets": ["factor-catalog-list"],
-    "factor-family": ["factor-catalog-detail"],
-    "factor": ["factor-catalog-detail"],
+    "factor-family": ["factor-catalog-detail-rendering"],
+    "factor": ["factor-catalog-detail-rendering"],
     "factor-set": ["factor-catalog-detail"],
     "factors": ["factor-catalog-list"],
     "product-group": ["catalog"],
@@ -165,16 +170,20 @@
     "factor-catalog-core": [
       "catalog/factor-model.js",
       "catalog/factor-detail-shared.js",
-      "catalog/shared/multi-select-filter.js"
+      "catalog/shared/multi-select-filter.js",
+      "catalog/factor-catalog-runtime.js",
+      "catalog/factors.js"
     ],
     "factor-catalog-list": [
       "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
-      "catalog/factors.js"
+      "catalog/factor-catalog-list.js"
     ],
     "factor-catalog-detail": [
-      "catalog/factor-editor.js",
       "catalog/factor-details.js"
+    ],
+    "factor-catalog-editor": [
+      "catalog/factor-editor.js"
     ],
     "output-choice": [
       "core/output-choices.js"
@@ -501,8 +510,10 @@
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",
+    "catalog/factor-catalog-runtime.js",
     "catalog/factor-group-filter.js",
     "catalog/factor-list.js",
+    "catalog/factor-catalog-list.js",
     "catalog/factor-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",

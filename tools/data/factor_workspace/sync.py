@@ -16,7 +16,6 @@ from .construct import (
     _clear_workspace_generated,
     _ensure_workspace_layout,
     _remove_missing_files,
-    _sync_tools_index,
     _sync_tools_sdk,
     _sync_vscode_settings,
     _workspace_custom_dir,
@@ -99,7 +98,6 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
     removed_files.extend(_remove_missing_files(_workspace_custom_dir(root), expected_custom_files))
     removed_files.extend(_remove_missing_files(_workspace_public_dir(root), expected_public_files))
 
-    tools_index_changed = _sync_tools_index(root)
     tools_sdk_changed = _sync_tools_sdk(root)
     vscode_settings_changed = _sync_vscode_settings(root)
 
@@ -127,7 +125,6 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
         "cleared_files": cleared_files,
         "touched_files": touched_files,
         "removed_files": removed_files,
-        "tools_index_changed": tools_index_changed,
         "tools_sdk_changed": tools_sdk_changed,
         "vscode_settings_changed": vscode_settings_changed,
         "manifest_changed": manifest_changed,
