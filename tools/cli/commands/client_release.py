@@ -65,6 +65,13 @@ def operator_client() -> None:
     """Manage authorized FactorTester client publication."""
 
 
+def _release_source_root() -> Path | None:
+    for source_root in (Path.cwd(), Path(__file__).resolve().parents[3]):
+        if (source_root / "scripts" / "release" / "publish.py").is_file():
+            return source_root
+    return None
+
+
 client.add_command(client_adapter)
 client.add_command(client_catalog)
 client.add_command(client_profile)
@@ -202,8 +209,8 @@ def publish_release(**options) -> None:
     # the public client package.  The editable CLI entrypoint still needs to
     # resolve that namespace when launched from Conda (console scripts do not
     # add the current working directory to ``sys.path``).
-    source_root = Path(__file__).resolve().parents[3]
-    if (source_root / "script" / "release" / "publish.py").is_file():
+    source_root = _release_source_root()
+    if source_root is not None:
         source_root_text = str(source_root)
         if source_root_text not in sys.path:
             sys.path.insert(0, source_root_text)
