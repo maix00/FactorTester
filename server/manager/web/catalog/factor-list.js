@@ -316,12 +316,27 @@
       event?.stopPropagation?.();
       return onDelete?.(item);
     };
-    const button = FTUI.actionButton
-      ? FTUI.actionButton(context.t("删除"), handleDelete, {
-        help: context.t("删除此条登记"),
-      })
-      : context.button(context.t("删除"), handleDelete, context.t("删除此条登记"));
-    button.classList?.add("catalog-row-action");
+    return iconButton(context, "删除", "trash", handleDelete, "danger-action");
+  }
+
+  function iconButton(context, label, symbol, action, className = "") {
+    const translated = context.t(label);
+    const button = typeof context.button === "function"
+      ? context.button("", action, translated)
+      : FTUI.actionButton
+        ? FTUI.actionButton("", action, {help: translated})
+        : document.createElement("button");
+    if (typeof context.button !== "function"
+      && typeof FTUI.actionButton !== "function") {
+      button.addEventListener("click", action);
+    }
+    button.className = ["factor-catalog-icon-action", className]
+      .filter(Boolean).join(" ");
+    button.setAttribute?.("aria-label", translated);
+    const icon = window.FTIcons?.node?.(symbol);
+    if (icon && typeof button.replaceChildren === "function") {
+      button.replaceChildren(icon);
+    }
     return button;
   }
 
@@ -332,5 +347,6 @@
     render,
     searchPlaceholder,
     subjectScopeTabs,
+    iconButton,
   });
 })();
