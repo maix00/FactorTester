@@ -34,6 +34,7 @@ vm.runInContext(
 );
 
 const target = {classList: {add() {}}};
+const lazyRange = {loadRange() {}, rangeOptions() { return {series: []}; }};
 const result = context.FTPriceChart.render({t: value => value}, target, {
   product: "SI.GFE",
   desc: "工业硅",
@@ -42,7 +43,7 @@ const result = context.FTPriceChart.render({t: value => value}, target, {
     {timestamp: "2025-01-02T15:00:00+08:00", open: 10, high: 12, low: 9, close: 11, volume: 100, open_interest: 80},
     {timestamp: 1735897200000, open: 11, high: 13, low: 10, close: 12, volume: 120, open_interest: 90},
   ],
-});
+}, lazyRange);
 
 assert.strictEqual(result, chart);
 assert.strictEqual(captured.target, target);
@@ -59,6 +60,7 @@ assert.ok(Number.isFinite(captured.options.series[0].data[0][0]));
 assert.ok(captured.options.rangeSelector.buttons.length >= 5);
 assert.strictEqual(captured.options.rangeSelector.allButtonsEnabled, true);
 assert.strictEqual(captured.options.navigator.adaptToUpdatedData, false);
+assert.strictEqual(captured.options.chart.zooming.mouseWheel.showResetButton, true);
 const zhDate = captured.options.xAxis.labels.formatter.call({value: 1735812000000});
 assert.ok(zhDate.includes("2025"));
 const tooltip = captured.options.series[0].tooltip.pointFormatter.call({
