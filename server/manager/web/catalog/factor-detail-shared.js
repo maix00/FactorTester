@@ -56,5 +56,32 @@
     return {root, values};
   }
 
-  window.FTFactorDetailShared = Object.freeze({expression, parameterEditor, summary});
+  function source(context, value) {
+    const sourceCode = String(value?.source_code || "").trim();
+    const root = document.createElement("section");
+    root.className = "factor-detail-source";
+    const heading = document.createElement("div");
+    heading.className = "factor-detail-source-heading";
+    const title = document.createElement("h3");
+    title.textContent = context.t("Python 源码");
+    heading.append(title);
+    if (sourceCode) {
+      const copy = context.button(context.t("复制"), async () => {
+        await navigator.clipboard.writeText(sourceCode);
+      }, context.t("复制源码"));
+      copy.className = `${copy.className || ""} secondary`.trim();
+      heading.append(copy);
+    }
+    const body = document.createElement("pre");
+    body.className = "factor-detail-source-code";
+    const code = document.createElement("code");
+    code.textContent = sourceCode || context.t("当前身份无权读取源码，或源码尚未同步到此服务器");
+    body.append(code);
+    root.append(heading, body);
+    return root;
+  }
+
+  window.FTFactorDetailShared = Object.freeze({
+    expression, parameterEditor, source, summary,
+  });
 })();

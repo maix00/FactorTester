@@ -17,6 +17,7 @@
     if (!factor) factor = projectedFactor(data.factors, frozen);
     if (factor && frozen) factor = frozenProjection(factor, frozen);
     if (!factor) factor = await localFactor(frozen, nativeRequest);
+    factor = await withSource(context, factor);
     factor = model().withSourceMetadata(factor);
     factor.factor_source_version = factor.factor_git_commit
       ? `历史源码版本 · ${factor.factor_git_commit}`
@@ -38,6 +39,7 @@
     const root = document.createElement("div");
     root.className = "detail-stack";
     root.append(window.FTFactorDetailShared.summary(context, factor));
+    root.append(window.FTFactorDetailShared.source(context, factor));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
     ).shell);
@@ -110,13 +112,15 @@
   }
 
   async function familyDetail(context, data, targetRef) {
-    const family = data.families.find(item => item.family_ref === targetRef);
+    let family = data.families.find(item => item.family_ref === targetRef);
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
+    family = await withSource(context, family);
     context.setHeading(model().familyName(family), context.t("因子家族"));
     context.updateActiveTab?.({title: model().familyName(family)});
     const root = document.createElement("div");
     root.className = "detail-stack";
     root.append(window.FTFactorDetailShared.summary(context, family));
+    root.append(window.FTFactorDetailShared.source(context, family));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(family),
     ).shell);
@@ -136,6 +140,28 @@
     );
     root.append(view.shell);
     context.content.replaceChildren(root);
+  }
+
+  async function withSource(context, value) {
+    if (value?.source_code || !context.session) return value;
+    // A frozen historical factor must never be silently shown against today's
+    // family source.  Frozen/temporary objects carry their own source when it
+    // is available; otherwise the UI states that it is unavailable.
+    if (value.factor_git_commit || value.git_commit) return value;
+    const family = value.factor_family_alias || value.family_alias
+      || model().familyName(value);
+    if (!family) return value;
+    try {
+      const owner = value.owner_username || "";
+      const endpoint = value.factor_kind === "public" || value.source === "public"
+        ? `/custom-factors/api/public-factor/${encodeURIComponent(family)}`
+        : `/custom-factors/api/get/${encodeURIComponent(family)}`
+          + (owner ? `?owner_username=${encodeURIComponent(owner)}` : "");
+      const payload = await context.api(endpoint);
+      return {...value, ...(payload.factor || {})};
+    } catch (_) {
+      return value;
+    }
   }
 
   async function setDetail(context, data, targetRef, nativeRequest) {

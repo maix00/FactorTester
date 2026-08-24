@@ -113,7 +113,7 @@
         name: `${label} · ${context.t("观测值")}`,
         type: "scatter", data: points, marker: {enabled: true, radius: 4},
       });
-      const fitted = (row.fit_points || []).map(item => [
+      const fitted = fitPoints(row, points).map(item => [
         Number(item.horizon_seconds), Number(item.oriented_mean_ic),
       ]).filter(item => Number.isFinite(item[0]) && Number.isFinite(item[1]));
       if (fitted.length) series.push({
@@ -145,6 +145,38 @@
       }},
       plotOptions: {series: {animation: false, turboThreshold: 0}}, series,
     };
+  }
+
+  function fitPoints(row, observed) {
+    if (Array.isArray(row.fit_points) && row.fit_points.length) return row.fit_points;
+    if (observed.length < 2) return [];
+    const start = observed[0][0];
+    const stop = observed.at(-1)[0];
+    const count = 201;
+    const selected = String(row.selected_model || "");
+    const slope = Number(row.exponential_log_decay_slope_per_second);
+    const intercept = Number(row.exponential_log_decay_intercept);
+    const smooth = row.smooth_fit;
+    return Array.from({length: count}, (_, index) => {
+      const seconds = start + ((stop - start) * index) / (count - 1);
+      let value = NaN;
+      if ((selected === "exponential" || !selected)
+        && Number.isFinite(slope) && slope < 0 && Number.isFinite(intercept)) {
+        value = Math.exp(intercept + slope * seconds);
+      } else if (selected === "damped_oscillatory_exponential" && smooth) {
+        const amplitude = Number(smooth.amplitude);
+        const decay = Number(smooth.decay_per_day);
+        const frequency = Number(smooth.frequency_per_day);
+        const phase = Number(smooth.phase);
+        const offset = Number(smooth.offset);
+        if ([amplitude, decay, frequency, phase, offset].every(Number.isFinite)) {
+          const days = (seconds - start) / 86400;
+          value = amplitude * Math.exp(-decay * days)
+            * Math.cos(frequency * days + phase) + offset;
+        }
+      }
+      return {horizon_seconds: seconds, oriented_mean_ic: value};
+    }).filter(item => Number.isFinite(item.oriented_mean_ic));
   }
 
   function autocorrelationOptions(
