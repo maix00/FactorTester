@@ -52,7 +52,7 @@
       time: window.FTChartTimeline.timeOptions(),
       title: {text: title || null, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
-      rangeSelector: {selected: 5, inputEnabled: true},
+      rangeSelector: {selected: 5, inputEnabled: true, allButtonsEnabled: true},
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       legend: {enabled: true},
@@ -82,42 +82,7 @@
         }
       }};
     }
-    if (typeof displayOptions.loadRange === "function"
-        && typeof displayOptions.rangeOptions === "function") {
-      options.xAxis = options.xAxis || {};
-      const previous = options.xAxis.events?.afterSetExtremes;
-      options.xAxis.events = {...(options.xAxis.events || {}), afterSetExtremes(event) {
-        previous?.call(this, event);
-        if (event?.trigger === "ft-data-refresh"
-            || !Number.isFinite(Number(event?.min))
-            || !Number.isFinite(Number(event?.max))) return;
-        const chart = this.chart;
-        clearTimeout(chart._ftRangeLoadTimer);
-        const generation = (chart._ftRangeLoadGeneration || 0) + 1;
-        chart._ftRangeLoadGeneration = generation;
-        chart._ftRangeLoadTimer = setTimeout(async () => {
-          chart.showLoading?.(displayOptions.loadingText || "Loading…");
-          try {
-            const payload = await displayOptions.loadRange(
-              Number(event.min), Number(event.max), {
-                maxPoints: Math.max(200, Math.ceil(Number(chart.plotWidth || 600) * 1.5)),
-              },
-            );
-            if (!payload || chart._ftRangeLoadGeneration !== generation) return;
-            replaceVisibleSeries(
-              chart, displayOptions.rangeOptions(payload),
-              Number(event.min), Number(event.max),
-            );
-          } catch (error) {
-            if (error?.name !== "AbortError") {
-              displayOptions.onRangeError?.(error);
-            }
-          } finally {
-            if (chart._ftRangeLoadGeneration === generation) chart.hideLoading?.();
-          }
-        }, Math.max(0, Number(displayOptions.rangeDebounceMs) || 120));
-      }};
-    }
+    window.FTHighchartsRangeLoader?.attach(options, displayOptions);
     if (typeof displayOptions.onPointClick !== "function") return options;
     options.plotOptions = options.plotOptions || {};
     options.plotOptions.series = {
@@ -128,32 +93,6 @@
       }}},
     };
     return options;
-  }
-
-  function replaceVisibleSeries(chart, nextOptions, minimum, maximum) {
-    const definitions = Array.isArray(nextOptions?.series) ? nextOptions.series : [];
-    const visible = chart.series.filter(series => !series.options?.isInternal);
-    const remaining = new Set(visible);
-    definitions.forEach(definition => {
-      const identity = String(definition.id || definition.name || "");
-      const current = visible.find(series => (
-        remaining.has(series)
-        && String(series.options?.id || series.name || "") === identity
-      ));
-      if (!current) {
-        chart.addSeries(definition, false);
-        return;
-      }
-      remaining.delete(current);
-      const {data, ...presentation} = definition;
-      current.update(presentation, false);
-      current.setData(definition.data || [], false, false, false);
-    });
-    remaining.forEach(series => series.remove(false));
-    chart.xAxis[0]?.setExtremes(
-      minimum, maximum, false, false, {trigger: "ft-data-refresh"},
-    );
-    chart.redraw(false);
   }
 
   function timeSeriesOptions(viewer, payload, context) {
@@ -194,7 +133,6 @@
     if (equity) {
       const initial = items.flatMap(item => item?.values || [])
         .map(number).find(value => value != null) || 1;
-      options.rangeSelector = {enabled: false};
       options.yAxis = [{title: {text: yTitle}, opposite: false}, {
         title: {text: context.t("累计收益率（%）")}, opposite: true,
         linkedTo: 0,

@@ -26,6 +26,7 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import range_bound
+from .sampling import bounded_ohlcv_rows
 
 
 def contract_listing(
@@ -186,6 +187,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
         for _, row in price_frame.iterrows()
     ]
+    rows, total_count = bounded_ohlcv_rows(rows, payload)
     name_parts = contract_uid.split("|")
     return {
         "success": True,
@@ -205,7 +207,8 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "available_sources": available_sources,
         "available_freqs": available_freqs,
-        "count": len(rows),
+        "count": total_count,
+        "returned_count": len(rows),
         "has_oi": has_open_interest,
         "fields": (
             product_public_fields(contract_product)

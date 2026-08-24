@@ -625,6 +625,11 @@ def test_product_price_chart_is_interactive_ohlcv() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    panel = (WEB_ROOT / "catalog" / "product-price-panel.js").read_text(encoding="utf-8")
+    chart = (WEB_ROOT / "core" / "price-chart.js").read_text(encoding="utf-8")
+    assert "FTHighchartsRangeLoader?.attach" in chart
+    assert "loadRange:" in panel
+    assert "max_points:" in panel
 
 
 def test_factor_series_result_restores_the_old_multi_panel_viewer() -> None:
@@ -699,6 +704,13 @@ def test_ic_charts_reuse_job_lazy_query_and_mount_infrastructure() -> None:
     assert "FTJobHighcharts.mountOptions" in view
     assert "function mount(" not in charts
     assert "function mountOptions" in shared
+    assert "FTMultiSelectFilter.create" in view
+    assert 'context.t("IC 类型")' in view
+    assert 'context.t("前瞻收益期")' in view
+    assert 'context.t("入场延迟")' in view
+    assert 'if (tab === "decay") return {method: true, horizon: false' in view
+    assert "state.loadToken += 1" in view
+    assert "if (!target.isConnected) return" in view
 
 
 def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:

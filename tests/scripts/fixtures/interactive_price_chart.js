@@ -20,6 +20,13 @@ context.window = context;
 vm.createContext(context);
 vm.runInContext(
   fs.readFileSync(
+    path.join(root, "server/manager/web/core/highcharts-range-loader.js"),
+    "utf8",
+  ),
+  context,
+);
+vm.runInContext(
+  fs.readFileSync(
     path.join(root, "server/manager/web/core/price-chart.js"),
     "utf8",
   ),
@@ -50,6 +57,8 @@ assert.strictEqual(captured.options.series[2].name, "持仓量");
 assert.strictEqual(captured.options.series[0].data.length, 2);
 assert.ok(Number.isFinite(captured.options.series[0].data[0][0]));
 assert.ok(captured.options.rangeSelector.buttons.length >= 5);
+assert.strictEqual(captured.options.rangeSelector.allButtonsEnabled, true);
+assert.strictEqual(captured.options.navigator.adaptToUpdatedData, false);
 const zhDate = captured.options.xAxis.labels.formatter.call({value: 1735812000000});
 assert.ok(zhDate.includes("2025"));
 const tooltip = captured.options.series[0].tooltip.pointFormatter.call({

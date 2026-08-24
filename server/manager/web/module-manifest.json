@@ -139,6 +139,7 @@
       "core/shared-ui.js"
     ],
     "charts": [
+      "core/highcharts-range-loader.js",
       "core/price-chart.js"
     ],
     "docs": [
@@ -414,6 +415,7 @@
     "core/help-popover.js",
     "docs/source.js",
     "docs/reader.js",
+    "core/highcharts-range-loader.js",
     "core/price-chart.js",
     "core/market-data.js",
     "catalog/shared/multi-select-filter.js",

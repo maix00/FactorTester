@@ -223,6 +223,7 @@
   function chartView(context, options, stock = false, displayOptions = {}) {
     const target = document.createElement("div"); target.className = "ic-domain-chart";
     queueMicrotask(() => {
+      if (!target.isConnected) return;
       try {
         window.FTJobHighcharts.mountOptions(
           context, target, options, stock, displayOptions,
@@ -245,6 +246,16 @@
     } : null;
   }
 
+  function selectedDescriptors(state) {
+    const horizons = state.selectedHorizons?.length
+      ? state.selectedHorizons : [state.activeHorizon];
+    const delays = state.selectedDelays?.length
+      ? state.selectedDelays.map(Number) : [Number(state.activeDelay || 0)];
+    return state.descriptors.filter(item => (
+      horizons.includes(item.horizon) && delays.includes(Number(item.delay || 0))
+    ));
+  }
+
   function rowMatchesSlice(row, state) {
     const method = String(row.ic_method || row.correlation || row.method || "");
     if (method && !window.FTICResultModel.methodMatches(row, state.activeMethod)) return false;
@@ -258,60 +269,90 @@
       || Number(row.entry_delay_bars || row.delay || 0) === Number(state.activeDelay || 0);
   }
 
+  function rowMatchesSelections(row, state) {
+    const method = window.FTICResultModel.methodOf(row);
+    const horizon = String(
+      row.forward_return_horizon || row.horizon || row.baseline_horizon
+        || row.primary_forward_return_horizon || "",
+    );
+    const delay = Number(row.entry_delay_bars || row.delay || 0);
+    return (!method || state.selectedMethods.includes(method))
+      && (!horizon || state.selectedHorizons.includes(horizon))
+      && state.selectedDelays.includes(delay);
+  }
+
   function methodLabel(context, method) {
     if (method === "rank") return context.t("Rank IC");
     if (method === "pearson") return context.t("Pearson IC");
     return method || context.t("IC");
   }
 
+  function filterCapabilities(tab) {
+    if (tab === "decay") return {method: true, horizon: false, delay: true, multi: true};
+    if (["series", "autocorrelation", "rolling"].includes(tab)) {
+      return {method: true, horizon: true, delay: true, multi: true};
+    }
+    return {method: true, horizon: true, delay: true, multi: false};
+  }
+
+  function filterControl(context, title, items, selected, multi, onChange) {
+    return window.FTMultiSelectFilter.create(context, {
+      title, items: items.map(item => ({
+        value: String(item.value), label: String(item.label), description: String(item.label),
+      })),
+      selected: selected.map(String), multi, compact: false,
+      onChange, onApply: onChange,
+    }).element;
+  }
+
   function sliceControl(context, state, rerender) {
     const root = document.createElement("div"); root.className = "ic-domain-slice";
-    const methods = document.createElement("div"); methods.className = "ic-domain-methods";
-    state.rawModel.methods.forEach(method => {
-      const button = document.createElement("button"); button.type = "button";
-      button.classList.toggle("active", state.activeMethod === method);
-      button.textContent = methodLabel(context, method);
-      button.addEventListener("click", () => {
-        state.activeMethod = method; state.activeHorizon = ""; rerender();
-      });
-      methods.append(button);
-    });
     const fields = document.createElement("div"); fields.className = "ic-domain-slice-fields";
-    const choices = [
-      ["horizon", context.t("前瞻收益期"), [...new Set(state.descriptors.map(item => item.horizon))]],
-      ["delay", context.t("入场延迟"), state.descriptors.filter(item => (
-        item.horizon === state.activeHorizon
-      )).map(item => item.delay)],
-    ];
-    choices.forEach(([key, label, values]) => {
-      const field = document.createElement("label");
-      const title = document.createElement("span"); title.textContent = label;
-      const select = document.createElement("select");
-      [...new Set(values)].forEach(value => {
-        const option = document.createElement("option"); option.value = String(value);
-        option.textContent = key === "delay" ? `d${value}` : String(value); select.append(option);
-      });
-      select.value = String(key === "delay" ? state.activeDelay : state.activeHorizon);
-      select.addEventListener("change", () => {
-        if (key === "horizon") {
-          state.activeHorizon = select.value;
-          state.activeDelay = state.descriptors.find(item => (
-            item.horizon === state.activeHorizon
-          ))?.delay || 0;
-        } else state.activeDelay = Number(select.value);
-        rerender();
-      });
-      field.append(title, select); fields.append(field);
-    });
+    const capability = filterCapabilities(state.activeTab);
+    const methods = state.rawModel.methods;
+    const horizons = [...new Set(state.descriptors.map(item => item.horizon))];
+    const delays = [...new Set(state.descriptors.map(item => Number(item.delay || 0)))];
+    const commit = (key, values) => {
+      const normalized = values.length ? values : [key === "delay" ? "0" : ""];
+      if (key === "method") {
+        state.selectedMethods = normalized;
+        state.activeMethod = normalized[0] || methods[0] || "rank";
+      } else if (key === "horizon") {
+        state.selectedHorizons = normalized;
+        state.activeHorizon = normalized[0] || horizons[0] || "";
+      } else {
+        state.selectedDelays = normalized.map(Number);
+        state.activeDelay = state.selectedDelays[0] || 0;
+      }
+      rerender();
+    };
+    fields.append(filterControl(
+      context, context.t("IC 类型"),
+      methods.map(value => ({value, label: methodLabel(context, value)})),
+      capability.multi ? state.selectedMethods : [state.activeMethod],
+      capability.multi, values => commit("method", values),
+    ));
+    if (capability.horizon) fields.append(filterControl(
+      context, context.t("前瞻收益期"),
+      horizons.map(value => ({value, label: value})),
+      capability.multi ? state.selectedHorizons : [state.activeHorizon],
+      capability.multi, values => commit("horizon", values),
+    ));
+    if (capability.delay) fields.append(filterControl(
+      context, context.t("入场延迟"),
+      delays.map(value => ({value, label: `d${value}`})),
+      capability.multi ? state.selectedDelays : [state.activeDelay],
+      capability.multi, values => commit("delay", values),
+    ));
     const factor = activeFactor(state);
     if (factor?.factorRef) {
       const inspect = context.button(context.t("查看因子序列"), () => {
         context.navigate(factorSeriesPath(factor.factorRef, state.productGroupRef));
       }, context.t("将当前冻结因子与产品价格、成交量和持仓量对照"));
       inspect.classList.add("ic-factor-series-link");
-      fields.append(inspect);
+      root.append(inspect);
     }
-    root.append(methods, fields); return root;
+    root.prepend(fields); return root;
   }
 
   function dataTable(context, rows) {
@@ -357,14 +398,14 @@
     if (!factor) return tabEmpty(context, state, state.activeTab, "暂无 IC 因子结果");
     if (state.activeTab === "summary") return summaryView(context, state, rerender);
     if (state.activeTab === "series") {
-      const selected = window.FTICResultModel.seriesFor(
-        factor, descriptor, state.activeMethod,
+      const descriptors = selectedDescriptors(state);
+      const options = window.FTICResultCharts.seriesOptions(
+        factor, context, descriptors, state.selectedMethods,
       );
+      const selected = options.series?.length;
       const source = state.sources.get("ic_series_data");
       return selected
-        ? chartView(context, window.FTICResultCharts.seriesOptions(
-          factor, context, descriptor, state.activeMethod,
-        ), true, source ? {
+        ? chartView(context, options, true, source ? {
           loadRange: (min, max, options = {}) => source.load({
             min, max, maxPoints: options.maxPoints,
           }),
@@ -374,7 +415,7 @@
               item.factorRef && item.factorRef === factor.factorRef
             )) || ranged.factors.find(item => item.factorAlias === factor.factorAlias);
             return window.FTICResultCharts.seriesOptions(
-              rangedFactor || factor, context, descriptor, state.activeMethod,
+              rangedFactor || factor, context, descriptors, state.selectedMethods,
             );
           },
           loadingText: context.t("正在读取当前时间范围…"),
@@ -382,28 +423,34 @@
         : tabEmpty(context, state, "series", "暂无 IC 序列");
     }
     if (state.activeTab === "decay") {
-      const decay = window.FTICResultModel.decay(factor, state.activeMethod);
+      const decay = window.FTICResultCharts.decayOptions(
+        factor, context, state.selectedMethods, state.selectedDelays,
+      );
       const halfLife = state.model.halfLifeRows.filter(row => (
-        rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+        rowMatchesFactor(row, factor)
+          && (!window.FTICResultModel.methodOf(row)
+            || state.selectedMethods.includes(window.FTICResultModel.methodOf(row)))
+          && state.selectedDelays.includes(Number(row.entry_delay_bars || row.delay || 0))
       ));
-      if (!decay.length && !halfLife.length) {
+      if (!decay.series?.some(item => item.data?.some(value => value != null)) && !halfLife.length) {
         return tabEmpty(context, state, "decay", "暂无多周期 IC 衰减数据");
       }
       const root = document.createElement("div"); root.className = "ic-domain-stack";
-      if (decay.length) root.append(chartView(
-        context, window.FTICResultCharts.decayOptions(factor, context, state.activeMethod),
-      ));
+      if (decay.series?.length) root.append(chartView(context, decay));
       if (halfLife.length) root.append(chartView(
         context, window.FTICResultCharts.holdingDecayOptions(halfLife, context),
       ));
       return root;
     }
     if (state.activeTab === "autocorrelation") {
-      return window.FTICResultModel.autocorrelation(
-        factor, 20, state.model.summaryRows, descriptor, state.activeMethod,
-      ).length
+      const descriptors = selectedDescriptors(state);
+      return descriptors.some(item => state.selectedMethods.some(method => (
+        window.FTICResultModel.autocorrelation(
+          factor, 20, state.model.summaryRows, item, method,
+        ).length
+      )))
         ? chartView(context, window.FTICResultCharts.autocorrelationOptions(
-          factor, context, state.model.summaryRows, descriptor, state.activeMethod,
+          factor, context, state.model.summaryRows, descriptors, state.selectedMethods,
         ))
         : tabEmpty(context, state, "autocorrelation", "IC 序列不足，无法估计自相关");
     }
@@ -435,7 +482,9 @@
     const sourceRows = state.activeTab === "rolling"
       ? state.model.rollingRows : state.model.periodRows;
     const selected = sourceRows.filter(row => (
-      rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+      rowMatchesFactor(row, factor) && (
+        state.activeTab === "rolling" ? rowMatchesSelections(row, state) : rowMatchesSlice(row, state)
+      )
     ));
     if (state.activeTab === "rolling" && selected.length) {
       const root = document.createElement("div"); root.className = "ic-domain-stack";
@@ -459,9 +508,11 @@
     const ordered = state.factorOrder.map(key => (
       state.rawModel.factors.find(item => item.key === key)
     )).filter(Boolean);
-    state.descriptors = window.FTICResultModel.descriptorsFor(
-      ordered, state.activeMethod,
-    );
+    state.descriptors = [...new Map(
+      state.selectedMethods.flatMap(method => (
+        window.FTICResultModel.descriptorsFor(ordered, method)
+      )).map(item => [`${item.horizon}\u0000${item.delay}`, item]),
+    ).values()];
     if (!state.descriptors.some(item => (
       item.horizon === state.activeHorizon && item.delay === Number(state.activeDelay || 0)
     ))) {
@@ -473,6 +524,20 @@
       )) || state.descriptors[0] || {horizon: "", delay: 0};
       state.activeHorizon = selected.horizon; state.activeDelay = selected.delay;
     }
+    const availableMethods = new Set(state.rawModel.methods);
+    state.selectedMethods = state.selectedMethods.filter(item => availableMethods.has(item));
+    if (!state.selectedMethods.length && state.activeMethod) {
+      state.selectedMethods = [state.activeMethod];
+    }
+    const availableHorizons = new Set(state.descriptors.map(item => item.horizon));
+    state.selectedHorizons = state.selectedHorizons.filter(item => availableHorizons.has(item));
+    if (!state.selectedHorizons.length && state.activeHorizon) {
+      state.selectedHorizons = [state.activeHorizon];
+    }
+    const availableDelays = new Set(state.descriptors.map(item => Number(item.delay || 0)));
+    state.selectedDelays = state.selectedDelays.map(Number)
+      .filter(item => availableDelays.has(item));
+    if (!state.selectedDelays.length) state.selectedDelays = [Number(state.activeDelay || 0)];
     state.model = {...state.rawModel, factors: ordered};
     state.model.matrix = window.FTICResultModel.statisticMatrix(
       ordered, state.rawModel.summaryRows, activeDescriptor(state), state.activeMethod,
@@ -491,6 +556,9 @@
       active: state.activeTab,
       controls: [sliceControl(context, state, rerender)],
       onChange: async key => {
+        state.loadToken += 1;
+        state.loadingTab = "";
+        state.loadError = "";
         if (key === "custom-analysis:new") {
           try {
             const analysis = await state.customAnalyses.add();
@@ -537,6 +605,7 @@
           rawModel, model: rawModel, factorOrder: [], tabs: resultTabs,
           activeFactorKey: "", activeTab,
           activeMethod: "rank", activeHorizon: "", activeDelay: 0,
+          selectedMethods: ["rank"], selectedHorizons: [], selectedDelays: [0],
           customAnalyses: options.customAnalyses || null,
           productGroupRef: productGroupRef(
             options.configuration, options.productGroupRef,
