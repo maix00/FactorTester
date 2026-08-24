@@ -84,23 +84,23 @@
   function render(context, data, mount, {
     page, query, groupRefs = ["*"], ownerUsernames = ["*"], scope = "public",
     tablePage = 1, onPageChange = () => {}, canModify = false,
-    onDelete = null,
+    onDelete = null, onEdit = null,
   }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, {
         query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-        canModify, onDelete,
+        canModify, onDelete, onEdit,
       });
     }
     return renderSubjects(context, data, mount, {
       page, query, groupRefs, ownerUsernames, scope, tablePage, onPageChange,
-      canModify, onDelete,
+      canModify, onDelete, onEdit,
     });
   }
 
   function renderFamilies(context, data, mount, {
     query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-    canModify, onDelete,
+    canModify, onDelete, onEdit,
   }) {
     const scoped = dataForScope(data, scope);
     const ownerMatches = ownerPredicate(ownerUsernames);
@@ -137,7 +137,7 @@
         origin(item, context),
         model().owner(item),
         item.factor_count || 0,
-        ...(canModify ? [actionCell(context, onDelete, item)] : []),
+        ...(canModify ? [actionCell(context, onDelete, onEdit, item)] : []),
       ]),
       pagingOptions(context, tablePage, onPageChange),
     );
@@ -197,7 +197,7 @@
 
   function renderSubjects(context, data, mount, {
     page, query, groupRefs, ownerUsernames, scope, tablePage, onPageChange,
-    canModify, onDelete,
+    canModify, onDelete, onEdit,
   }) {
     const names = model().productGroupNames(data.groups);
     const bySubject = model().subjectGroups(data.groups);
@@ -232,7 +232,9 @@
     const headers = kind === "factor-set"
       ? [context.t("因子集合"), context.t("成员数"), context.t("所有者"), context.t("可见范围"), context.t("产品组")]
       : [context.t("因子"), context.t("原类名"), context.t("说明"), context.t("来源"), context.t("所有者"), context.t("产品组")];
-    if (canModify && kind === "factor") headers.push(context.t("操作"));
+    if (canModify && kind === "factor") {
+      headers.push(context.t("操作"));
+    }
     const rows = items.map(item => kind === "factor-set" ? [
       item.value.title_zh || item.value.set_id,
       item.value.member_count || 0,
@@ -247,7 +249,7 @@
       model().owner(item.value),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify && kind === "factor"
-        ? [actionCell(context, onDelete, item.value)] : []),
+        ? [actionCell(context, onDelete, onEdit, item.value)] : []),
     ]);
     const view = FTUI.pagedTable(
       headers, rows, pagingOptions(context, tablePage, onPageChange),
@@ -311,19 +313,36 @@
     });
   }
 
-  function actionCell(context, onDelete, item) {
+  function actionCell(context, onDelete, onEdit, item) {
+    const root = document.createElement("span");
+    root.className = "factor-catalog-row-actions";
+    const handleEdit = event => {
+      event?.stopPropagation?.();
+      return onEdit?.(item);
+    };
     const handleDelete = event => {
       event?.stopPropagation?.();
       return onDelete?.(item);
     };
-    return iconButton(
+    if (onEdit) root.append(iconButton(
+      context, "编辑", "square.and.pencil", handleEdit,
+      "factor-catalog-edit-action",
+    ));
+    if (onDelete) root.append(iconButton(
       context, "删除", "trash", handleDelete,
       "danger-action factor-catalog-delete-action",
-    );
+    ));
+    return root;
   }
 
   function iconButton(context, label, symbol, action, className = "") {
     const translated = context.t(label);
+    if (FTUI.iconButton) {
+      return FTUI.iconButton(context, symbol, label, action, {
+        className: ["factor-catalog-icon-action", className]
+          .filter(Boolean).join(" "),
+      });
+    }
     const button = typeof context.button === "function"
       ? context.button("", action, translated)
       : FTUI.actionButton

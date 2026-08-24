@@ -45,6 +45,7 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
 
     stored: list[tuple[str, str]] = []
     invalidated: list[str] = []
+    commits: list[tuple[str, str]] = []
     def allow() -> bool:
         return True
 
@@ -61,6 +62,13 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
     monkeypatch.setattr(
         crud_routes, "invalidate_factor_family_cache", invalidated.append,
     )
+    monkeypatch.setattr(
+        crud_routes,
+        "commit_factor_source_change",
+        lambda username, message: (
+            commits.append((username, message)) or {"git_commit_sha": "abc1234"}
+        ),
+    )
     created = client.post(
         "/custom-factors/api/create-public",
         json={
@@ -70,7 +78,9 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
     )
     assert created.status_code == 200
     assert created.get_json()["factor"]["id"] == "PublicAlpha"
+    assert created.get_json()["factor"]["git_commit_sha"] == "abc1234"
     assert stored and stored[0][0] == "PublicAlpha"
+    assert commits == [("alice", "factor: create public PublicAlpha")]
 
     monkeypatch.setattr(
         crud_routes, "load_public_factor_source", lambda _factor_id: stored[0][1],
