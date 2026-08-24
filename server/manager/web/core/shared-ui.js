@@ -96,10 +96,26 @@
     ));
   }
 
-  function code(value) {
+  function code(value, options = {}) {
+    const source = typeof value === "string"
+      ? value : JSON.stringify(value, null, 2);
+    const language = String(
+      options.language || (typeof value === "string" ? "" : "json"),
+    ).trim().toLowerCase();
     const pre = document.createElement("pre");
-    pre.className = "json-code";
-    pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    pre.className = ["json-code", "code-viewer", options.className || ""]
+      .filter(Boolean).join(" ");
+    if (language) pre.dataset.language = language;
+    const body = document.createElement("code");
+    body.textContent = source;
+    if (language) body.className = `language-${language}`;
+    pre.append(body);
+    if (
+      language && window.hljs?.getLanguage?.(language)
+      && typeof window.hljs.highlightElement === "function"
+    ) {
+      window.hljs.highlightElement(body);
+    }
     return pre;
   }
 
