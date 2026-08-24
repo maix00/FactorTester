@@ -21,8 +21,31 @@
     return url.pathname + url.search;
   }
 
-  async function fetchArtifact(context, path, options = {}) {
-    const issued = await context.api(accessPath(path), {method: "POST"});
+  const artifactRetryDelays = [250, 750];
+
+  function artifactRequestKey(path) {
+    const random = window.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `artifact-read:${String(path)}:${random}`;
+  }
+
+  function retryableArtifactError(error, signal) {
+    if (signal?.aborted) return false;
+    if ([502, 503, 504].includes(Number(error?.status))) return true;
+    return error?.name === "TypeError" || error?.name === "NetworkError";
+  }
+
+  function waitForArtifactRetry(attempt) {
+    return new Promise(resolve => setTimeout(
+      resolve, artifactRetryDelays[attempt] || artifactRetryDelays.at(-1),
+    ));
+  }
+
+  async function fetchArtifactOnce(context, path, options, idempotencyKey) {
+    const issued = await context.api(accessPath(path), {
+      method: "POST",
+      headers: {"Idempotency-Key": idempotencyKey},
+    });
     const access = issued?.access || {};
     if (!access.url || !access.bearer) {
       throw new Error(context.t("生成物传输授权无效"));
@@ -44,6 +67,23 @@
       ), {status: response.status});
     }
     return response;
+  }
+
+  async function fetchArtifact(context, path, options = {}) {
+    const idempotencyKey = artifactRequestKey(path);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await fetchArtifactOnce(
+          context, path, options, idempotencyKey,
+        );
+      } catch (error) {
+        if (attempt >= artifactRetryDelays.length
+            || !retryableArtifactError(error, options.signal)) {
+          throw error;
+        }
+        await waitForArtifactRetry(attempt);
+      }
+    }
   }
 
   async function saveBlob(context, path, fileName) {
