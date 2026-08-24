@@ -316,7 +316,10 @@
       event?.stopPropagation?.();
       return onDelete?.(item);
     };
-    return iconButton(context, "删除", "trash", handleDelete, "danger-action");
+    return iconButton(
+      context, "删除", "trash", handleDelete,
+      "danger-action factor-catalog-delete-action",
+    );
   }
 
   function iconButton(context, label, symbol, action, className = "") {

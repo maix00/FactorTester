@@ -92,6 +92,7 @@
         : `/factors/family/new?mode=create${publicMode}`;
       context.toolbar.append(window.FTFactorList.iconButton(
         context, label, "plus", () => context.navigate(path),
+        "factor-catalog-add-action",
       ));
     }
     let tablePage = 1;
