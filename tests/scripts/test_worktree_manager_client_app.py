@@ -2689,6 +2689,11 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
             f"{base_url}/research-static/jobs/job-artifact-viewers.js"
         ) as response:
             viewers = response.read().decode("utf-8")
+    coordinator = (
+        ROOT / "server" / "manager" / "web" / "app" / "coordinator.js"
+    ).read_text(
+        encoding="utf-8",
+    )
 
     assert "/stream" in progress
     assert "updateActiveTab" in job_detail
@@ -2716,6 +2721,7 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "job.execution_port" in jobs
     assert "function executionTarget" in job_detail
     assert "context.showNotice?.(" in artifacts
+    assert "api, raw, navigate, openTab, activeNav" in coordinator
     assert "priceChart" in viewers
     assert "dataTable" in viewers
     assert "tableModel" in viewers
