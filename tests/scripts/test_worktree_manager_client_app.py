@@ -327,6 +327,51 @@ def test_client_business_api_keeps_service_path_and_manager_selects_port(
     }]
 
 
+@pytest.mark.parametrize(
+    ("path", "forwarded_path"),
+    (
+        (
+            "/custom-factors/api/public-factor/MmClose2High",
+            "/custom-factors/api/public-factor/MmClose2High",
+        ),
+        (
+            "/custom-factors/api/get/SubordinateFactor?owner_username=GTHT%40child%401",
+            "/custom-factors/api/get/SubordinateFactor?owner_username=GTHT%40child%401",
+        ),
+    ),
+)
+def test_factor_family_source_detail_uses_authenticated_manager_gateway(
+    tmp_path, monkeypatch, path: str, forwarded_path: str,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"factor":{"source_code":"available"}}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}{path}",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["factor"]["source_code"] == "available"
+    assert calls == [{
+        "port": 8141,
+        "path": forwarded_path,
+        "principal": "user@1",
+    }]
+
+
 def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatch) -> None:
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
