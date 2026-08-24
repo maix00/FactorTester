@@ -1,5 +1,5 @@
 (() => {
-  function render(context, target, payload) {
+  function render(context, target, payload, displayOptions = {}) {
     const highcharts = window.Highcharts;
     if (!highcharts?.stockChart) {
       target.replaceChildren?.(empty(context, "交互式行情图组件未加载"));
@@ -13,7 +13,12 @@
     target.__ftPriceChart?.destroy?.();
     target.__ftPriceChartObserver?.disconnect?.();
     target.classList?.add("interactive-price-chart");
-    const chart = highcharts.stockChart(target, optionsOf(context, payload, bars));
+    const chartOptions = optionsOf(context, payload, bars);
+    window.FTHighchartsRangeLoader?.attach(chartOptions, {
+      ...displayOptions,
+      rangeOptions: incoming => optionsOf(context, incoming, barsOf(incoming)),
+    });
+    const chart = highcharts.stockChart(target, chartOptions);
     target.__ftPriceChart = chart;
     if (window.ResizeObserver) {
       const observer = new ResizeObserver(() => chart.reflow?.());
@@ -184,7 +189,7 @@
       title: {text: title || null},
       subtitle: {text: [payload?.freq, `${bars.length} ${t("条数据")}`].filter(Boolean).join(" · ")},
       rangeSelector: {
-        selected: 4,
+        selected: 4, allButtonsEnabled: true,
         buttons: [
           {type: "day", count: 3, text: t("3天")},
           {type: "week", count: 1, text: t("1周")},
@@ -200,7 +205,7 @@
       },
       yAxis,
       tooltip: {shared: true, split: false, valueDecimals: 2},
-      navigator: {enabled: true},
+      navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       plotOptions: {series: {animation: false, turboThreshold: 0}},
       credits: {enabled: false},

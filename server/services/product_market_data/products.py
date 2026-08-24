@@ -28,6 +28,7 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import range_bound
+from .sampling import bounded_ohlcv_rows
 
 
 _PRODUCT_SELECTION_LOCK = RLock()
@@ -211,6 +212,7 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     if frame is None or frame.empty:
         raise ProductMarketDataError("指定范围内无价格数据", 404)
     rows, has_open_interest = _price_rows(product, frame, adjusted, frequency)
+    rows, total_count = bounded_ohlcv_rows(rows, payload)
     adjustment = _adjustment_metadata(product, adjusted)
     term_structure = supports_term_structure(product)
     return {
@@ -232,7 +234,8 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "available_sources": available_sources_for_product(product),
         "available_freqs": available_freq_names_for_product(product),
-        "count": len(rows),
+        "count": total_count,
+        "returned_count": len(rows),
         "has_oi": has_open_interest,
         "contracts": _contract_ranges(product, payload),
         "fields": product_public_fields(product),
