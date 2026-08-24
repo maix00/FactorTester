@@ -83,14 +83,14 @@
 
   const dimensions = Object.freeze([
     {key: "account", label: "账户", fields: ["account_id", "account_ref", "account", "ledger_id", "ledger"]},
-    {key: "cash_pool", label: "资金池", fields: ["cash_pool_id", "cash_pool", "pool_id"]},
+    {key: "cash_pool", label: "资金池", fields: ["cash_pool_id", "cash_pool", "pool_id", "pool"]},
     {
       key: "account_currency", label: "账户币种",
-      fields: ["account_currency", "ledger_currency", "currency"],
+      fields: ["account_currency", "ledger_currency", "currency", "accountCurrency"],
     },
     {
       key: "cash_pool_base_currency", label: "资金池基准币种",
-      fields: ["cash_pool_base_currency", "pool_base_currency", "base_currency"],
+      fields: ["cash_pool_base_currency", "pool_base_currency", "base_currency", "poolBaseCurrency"],
     },
   ]);
 
@@ -100,13 +100,15 @@
     return String(value ?? "").trim();
   }
 
-  function dimensionFilters(context, state, rows, key) {
+  function dimensionFilters(context, state, source, key) {
     const root = document.createElement("div");
     root.className = "backtest-dimension-filters";
     state.dimensionSelections[key] = state.dimensionSelections[key] || {};
     const predicates = [];
     dimensions.forEach(definition => {
-      const values = [...new Set(rows.map(row => dimensionValue(row, definition)).filter(Boolean))]
+      const values = (Array.isArray(source)
+        ? [...new Set(source.map(row => dimensionValue(row, definition)).filter(Boolean))]
+        : [...new Set(source?.[definition.key] || [])])
         .sort((left, right) => left.localeCompare(right, "zh-CN"));
       if (!values.length) return;
       const all = `__all_${definition.key}__`;
@@ -128,6 +130,7 @@
         onApply: next => {
           state.dimensionSelections[key][definition.key] = next;
           delete state.tablePages[key];
+          state.remoteTableData?.delete(key);
           state.rerender();
         },
       }).element;
@@ -151,12 +154,17 @@
     const relations = [];
     const seen = new Set();
     rows.forEach(row => {
-      const strategy = String(row?.strategy_id || row?.strategy_ref || row?.strategy || "").trim();
-      const account = dimensionValue(row, accountDefinition);
-      const pool = dimensionValue(row, poolDefinition);
-      const accountCurrency = firstValue(row, ["account_currency", "ledger_currency", "currency"]);
+      const strategy = String(
+        row?.strategy_id || row?.strategy_ref || row?.strategy || "",
+      ).trim();
+      const account = firstValue(row, ["account", ...accountDefinition.fields]);
+      const pool = firstValue(row, ["pool", ...poolDefinition.fields]);
+      const accountCurrency = firstValue(row, [
+        "accountCurrency", "account_currency", "ledger_currency", "currency",
+      ]);
       const poolBaseCurrency = firstValue(row, [
-        "cash_pool_base_currency", "pool_base_currency", "base_currency",
+        "poolBaseCurrency", "cash_pool_base_currency", "pool_base_currency",
+        "base_currency",
       ]);
       if (!account && !pool) return;
       const key = `${strategy}\u0000${account}\u0000${pool}\u0000${accountCurrency}\u0000${poolBaseCurrency}`;
@@ -241,17 +249,51 @@
     return root;
   }
 
-  function lazyTarget(context, state, artifact, render) {
-    const target = document.createElement("div");
-    target.className = "backtest-result-lazy-target";
-    const error = state.errors[artifact];
-    if (error) target.append(state.helpers.message(context, error.message));
-    else if (state.payloads[artifact]) render(target, state.payloads[artifact]);
-    else {
-      target.append(window.FTUI.loading(context.t("正在读取此结果…")));
-      queueMicrotask(() => state.ensurePayloads([artifact]));
-    }
-    return target;
+  function selectedStrategyValues(state) {
+    if (state.strategyScope.all) return [];
+    const selected = new Set(state.strategySelection || []);
+    return [...new Set(state.model.strategies.flatMap(strategy => {
+      const identifier = String(
+        strategy?.id || strategy?.strategyID || strategy?.strategy_id
+          || strategy?.label || strategy?.name || "",
+      ).trim();
+      if (!selected.has(identifier)) return [];
+      return [
+        identifier, strategy?.label, strategy?.display_name,
+        strategy?.name, strategy?.strategy_id,
+      ].map(value => String(value || "").trim()).filter(Boolean);
+    }))];
+  }
+
+  function tableQueryRequest(state, key) {
+    const filters = {};
+    const strategies = selectedStrategyValues(state);
+    if (strategies.length) filters.strategy = {
+      fields: ["strategy_id", "strategy_ref", "strategy", "series"],
+      values: strategies,
+    };
+    const selections = state.dimensionSelections[key] || {};
+    dimensions.forEach(definition => {
+      const all = `__all_${definition.key}__`;
+      const selected = (selections[definition.key] || [])
+        .filter(value => value !== all);
+      if (selected.length) filters[definition.key] = {
+        fields: definition.fields, values: selected,
+      };
+    });
+    return {
+      filters,
+      facets: Object.fromEntries(dimensions.map(definition => (
+        [definition.key, definition.fields]
+      ))),
+      distinct: {relations: {
+        strategy: ["strategy_id", "strategy_ref", "strategy", "series"],
+        account: dimensions.find(item => item.key === "account").fields,
+        accountCurrency: dimensions.find(item => item.key === "account_currency").fields,
+        pool: dimensions.find(item => item.key === "cash_pool").fields,
+        poolBaseCurrency: dimensions.find(item => item.key === "cash_pool_base_currency").fields,
+      }},
+    };
   }
 
   function chartCard(context, state, artifact, definition) {
@@ -259,7 +301,16 @@
     section.className = "backtest-chart-card";
     const heading = document.createElement("h3");
     heading.textContent = context.t(definition.label);
-    const content = lazyTarget(context, state, artifact, (target, payload) => {
+    const content = document.createElement("div");
+    content.className = "backtest-result-lazy-target";
+    const payload = state.chartPayloads[artifact];
+    const loadError = state.chartErrors[artifact];
+    if (loadError) content.append(state.helpers.message(context, loadError.message));
+    else if (!payload) {
+      content.append(window.FTUI.loading(context.t("正在读取此结果…")));
+      queueMicrotask(() => state.ensureChartPayloads([artifact]));
+    } else {
+      const target = content;
       const filtered = state.strategyScope.filterPayload(payload);
       queueMicrotask(() => {
         try {
@@ -268,6 +319,27 @@
             hideMetricControl: true, hideTitle: true,
             selectedMetric: definition.metricKey || "",
             onPointClick: timestamp => state.openEventFlow(timestamp),
+            loadingText: context.t("正在读取当前时间范围…"),
+            loadRange: async (min, max, options = {}) => {
+              const request = definition.metricKey ? {
+                fields: [
+                  "strategy_id", "strategy", "series", "timestamp",
+                  definition.metricKey,
+                ],
+              } : definition.fields ? {
+                fields: [
+                  "strategy_id", "strategy", "series", "timestamp",
+                  "product", "equity", "margin", ...definition.fields,
+                ],
+              } : {};
+              const incoming = await state.chartSource(artifact, definition).load(
+                {min, max, maxPoints: options.maxPoints}, request,
+              );
+              return incoming ? state.strategyScope.filterPayload(incoming) : null;
+            },
+            onRangeError: error => context.showNotice?.(
+              error?.message || String(error), true,
+            ),
             chartRange: state.chartRange,
             onRangeChange: (min, max, source) => {
               if (!Number.isFinite(min) || !Number.isFinite(max)) return;
@@ -294,7 +366,7 @@
           target.replaceChildren(state.helpers.message(context, error.message));
         }
       });
-    });
+    }
     section.append(heading, content);
     return section;
   }
@@ -308,10 +380,11 @@
       definition.viewer === "metrics_chart"
     ))?.[0];
     const metricsLoading = Boolean(
-      metricsArtifact && !state.payloads[metricsArtifact] && !state.errors[metricsArtifact],
+      metricsArtifact && !state.chartPayloads[metricsArtifact]
+        && !state.chartErrors[metricsArtifact],
     );
     if (metricsLoading) {
-      queueMicrotask(() => state.ensurePayloads([metricsArtifact]));
+      queueMicrotask(() => state.ensureChartPayloads([metricsArtifact]));
     }
     const choices = registered.flatMap(([artifact, definition]) => {
       if (definition.viewer === "equity_curve") return [
@@ -319,7 +392,7 @@
         [artifact, {...definition, view: "drawdown", label: "回撤", viewer: "drawdown_curve"}],
       ];
       if (definition.viewer !== "metrics_chart") return [[artifact, definition]];
-      return window.FTJobHighcharts.metricChoices(state.payloads[artifact] || {})
+      return window.FTJobHighcharts.metricChoices(state.chartPayloads[artifact] || {})
         .map(metric => [artifact, {
           ...definition, view: `metric:${metric.key}`, label: metric.label,
           metricKey: metric.key,
@@ -396,13 +469,19 @@
     if (selected?.[0] === "event_flow") {
       const artifacts = window.FTBacktestEventFlow.coreSources
         .map(([artifact]) => artifact).filter(artifact => state.artifactsByName.has(artifact));
-      const missing = artifacts.filter(artifact => !state.payloads[artifact]);
+      const missing = artifacts.filter(artifact => !state.eventPayloads[artifact]);
       if (missing.length) {
-        content.append(window.FTUI.loading(context.t("正在读取交易事件…")));
-        queueMicrotask(() => state.ensurePayloads(missing));
+        const error = missing.map(artifact => state.eventErrors[artifact]).find(Boolean);
+        if (error) content.append(state.helpers.message(
+          context, error?.message || String(error),
+        ));
+        else {
+          content.append(window.FTUI.loading(context.t("正在读取交易事件…")));
+          queueMicrotask(() => state.ensureEventPayloads(missing));
+        }
       } else {
         const rows = artifacts.flatMap(artifact => state.strategyScope.filterRows(
-          state.payloads[artifact]?.rows || [],
+          state.eventPayloads[artifact]?.rows || [],
         ));
         const filters = dimensionFilters(context, state, rows, `${stateKey}:event_flow`);
         content.append(relationshipView(
@@ -412,21 +491,25 @@
         const flow = document.createElement("div");
         content.append(flow);
         window.FTBacktestEventFlow.render(
-          context, flow, state.payloads, state.strategyScope,
+          context, flow, state.eventPayloads, state.strategyScope,
           {rowFilter: filters.rowFilter},
         );
       }
     } else if (selected?.[2]) {
-      content.append(lazyTarget(context, state, selected[2], (target, payload) => {
-        const key = `${stateKey}:${selected[0]}`;
-        const rows = state.strategyScope.filterRows(window.FTBacktestResultModel.rows(payload));
-        if (stateKey === "executionView") {
-          const filters = dimensionFilters(context, state, rows, key);
-          target.append(relationshipView(context, state, rows, key));
-          if (filters.element.childElementCount) target.append(filters.element);
-          target.append(state.helpers.dataTable(context, filters.filterRows(rows), state, key));
-        } else target.append(state.helpers.dataTable(context, rows, state, key));
-      }));
+      const key = `${stateKey}:${selected[0]}`;
+      const table = state.helpers.remoteDataTable(
+        context, state, selected[2], key, tableQueryRequest(state, key),
+      );
+      if (stateKey === "executionView" && table.data) {
+        const filters = dimensionFilters(
+          context, state, table.data.facets || {}, key,
+        );
+        content.append(relationshipView(
+          context, state, table.data.distinct?.relations || [], key,
+        ));
+        if (filters.element.childElementCount) content.append(filters.element);
+      }
+      content.append(table.element);
     }
     root.append(content);
     return root;

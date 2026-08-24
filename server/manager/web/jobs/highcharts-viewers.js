@@ -53,13 +53,16 @@
       title: {text: title || null, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
       rangeSelector: {selected: 5, inputEnabled: true},
-      navigator: {enabled: true},
+      navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       legend: {enabled: true},
       xAxis: {type: "datetime", ordinal: true},
       yAxis: [{title: {text: yTitle}, opposite: false}],
       tooltip: {shared: true, valueDecimals: kind === "currency" ? 2 : 4, valueSuffix: format.suffix},
-      plotOptions: {series: {animation: false, boostThreshold: 1000, turboThreshold: 0}},
+      plotOptions: {series: {
+        animation: false, boostThreshold: 1000, turboThreshold: 0,
+        marker: {enabled: false}, dataGrouping: {enabled: false},
+      }},
       series,
     };
   }
@@ -79,6 +82,42 @@
         }
       }};
     }
+    if (typeof displayOptions.loadRange === "function"
+        && typeof displayOptions.rangeOptions === "function") {
+      options.xAxis = options.xAxis || {};
+      const previous = options.xAxis.events?.afterSetExtremes;
+      options.xAxis.events = {...(options.xAxis.events || {}), afterSetExtremes(event) {
+        previous?.call(this, event);
+        if (event?.trigger === "ft-data-refresh"
+            || !Number.isFinite(Number(event?.min))
+            || !Number.isFinite(Number(event?.max))) return;
+        const chart = this.chart;
+        clearTimeout(chart._ftRangeLoadTimer);
+        const generation = (chart._ftRangeLoadGeneration || 0) + 1;
+        chart._ftRangeLoadGeneration = generation;
+        chart._ftRangeLoadTimer = setTimeout(async () => {
+          chart.showLoading?.(displayOptions.loadingText || "Loading…");
+          try {
+            const payload = await displayOptions.loadRange(
+              Number(event.min), Number(event.max), {
+                maxPoints: Math.max(200, Math.ceil(Number(chart.plotWidth || 600) * 1.5)),
+              },
+            );
+            if (!payload || chart._ftRangeLoadGeneration !== generation) return;
+            replaceVisibleSeries(
+              chart, displayOptions.rangeOptions(payload),
+              Number(event.min), Number(event.max),
+            );
+          } catch (error) {
+            if (error?.name !== "AbortError") {
+              displayOptions.onRangeError?.(error);
+            }
+          } finally {
+            if (chart._ftRangeLoadGeneration === generation) chart.hideLoading?.();
+          }
+        }, Math.max(0, Number(displayOptions.rangeDebounceMs) || 120));
+      }};
+    }
     if (typeof displayOptions.onPointClick !== "function") return options;
     options.plotOptions = options.plotOptions || {};
     options.plotOptions.series = {
@@ -89,6 +128,32 @@
       }}},
     };
     return options;
+  }
+
+  function replaceVisibleSeries(chart, nextOptions, minimum, maximum) {
+    const definitions = Array.isArray(nextOptions?.series) ? nextOptions.series : [];
+    const visible = chart.series.filter(series => !series.options?.isInternal);
+    const remaining = new Set(visible);
+    definitions.forEach(definition => {
+      const identity = String(definition.id || definition.name || "");
+      const current = visible.find(series => (
+        remaining.has(series)
+        && String(series.options?.id || series.name || "") === identity
+      ));
+      if (!current) {
+        chart.addSeries(definition, false);
+        return;
+      }
+      remaining.delete(current);
+      const {data, ...presentation} = definition;
+      current.update(presentation, false);
+      current.setData(definition.data || [], false, false, false);
+    });
+    remaining.forEach(series => series.remove(false));
+    chart.xAxis[0]?.setExtremes(
+      minimum, maximum, false, false, {trigger: "ft-data-refresh"},
+    );
+    chart.redraw(false);
   }
 
   function timeSeriesOptions(viewer, payload, context) {
@@ -268,8 +333,14 @@
     const chart = document.createElement("div");
     chart.className = "interactive-artifact-chart-canvas";
     target.append(chart);
+    const options = {
+      ...displayOptions,
+      rangeOptions: incoming => rowSeriesOptions(
+        incoming, context, definition, {...displayOptions, loadRange: null},
+      ),
+    };
     target._ftChart = window.Highcharts.stockChart(
-      chart, rowSeriesOptions(payload, context, definition, displayOptions),
+      chart, rowSeriesOptions(payload, context, definition, options),
     );
     return target._ftChart;
   }
@@ -289,6 +360,14 @@
     chart.className = "interactive-artifact-chart-canvas";
     let selected = choices.some(item => item.key === displayOptions.selectedMetric)
       ? displayOptions.selectedMetric : choices[0]?.key || "";
+    const chartOptions = incoming => optionsFor(
+      viewer, incoming, context, selected, {
+        ...displayOptions,
+        rangeOptions: next => optionsFor(
+          viewer, next, context, selected, {...displayOptions, loadRange: null},
+        ),
+      },
+    );
     if (choices.length > 1 && !displayOptions.hideMetricControl) {
       const controls = document.createElement("div");
       controls.className = "interactive-artifact-chart-controls";
@@ -300,14 +379,14 @@
         selected = select.value;
         target._ftChart?.destroy?.();
         target._ftChart = window.Highcharts.stockChart(
-          chart, optionsFor(viewer, payload, context, selected, displayOptions),
+          chart, chartOptions(payload),
         );
       });
       label.append(select); controls.append(label); target.append(controls);
     }
     target.append(chart);
     target._ftChart = window.Highcharts.stockChart(
-      chart, optionsFor(viewer, payload, context, selected, displayOptions),
+      chart, chartOptions(payload),
     );
     return target._ftChart;
   }

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 import time
+from urllib.parse import urlparse
+
 import pytest
+
 from server.manager import runtime as manager
 from server.manager.domain.federation import (
-    FederationConfigStore,
     FederatedServerRegistry,
+    FederationConfigStore,
     ServiceRoute,
     TargetUnavailable,
 )
 from server.manager.network_endpoints import server_endpoints
 from tests.federation_fixtures import federation_registration as _registration
+
 
 def test_federation_config_public_view_redacts_registration_token(tmp_path) -> None:
     store = FederationConfigStore(tmp_path / "federation.json")
@@ -146,6 +150,58 @@ def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monke
 
     assert state.route_for().server_id == "local-main"
     assert state.route_for().port == 8000
+
+
+def test_job_analysis_skips_unrelated_offline_peer(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="main",
+        server_id="remote-main",
+        fixed_port=8000,
+        fixed_branch="main",
+        state_root=tmp_path / "manager-state",
+    )
+    online = ServiceRoute(
+        server_id="remote-main",
+        role="main",
+        branch="main",
+        revision="a" * 40,
+        port=8000,
+        remote=False,
+        online=True,
+    )
+    offline = ServiceRoute(
+        server_id="local-feat",
+        role="feat",
+        branch="feat",
+        revision="b" * 40,
+        port=8141,
+        remote=True,
+        online=False,
+    )
+    monkeypatch.setattr(
+        state.federation_registry,
+        "servers",
+        lambda include_offline=False: (
+            [{"server_id": offline.server_id}] if include_offline else []
+        ),
+    )
+    monkeypatch.setattr(
+        state,
+        "service_routes",
+        lambda include_offline=False: [online, offline]
+        if include_offline else [online],
+    )
+    manager.Handler.state = state
+    handler = object.__new__(manager.Handler)
+
+    routes = handler._job_routes(
+        urlparse("/api/jobs/job-1/group-snapshot"),
+        "alice",
+    )
+
+    assert routes == [online]
 
 
 def test_explicit_self_route_survives_missing_worktree_metadata(

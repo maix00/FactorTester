@@ -6,19 +6,24 @@ import re
 import secrets
 from urllib.parse import unquote
 
+from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.job_public_projection import (
     PUBLIC_JOB_PRINCIPAL,
     read_principals,
 )
 from server.manager.http.responses import json_response
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
+from server.manager.services.job_artifact_query import JobArtifactQueryService
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
-from server.manager.services.job_artifact_catalog import JobArtifactCatalog
-
 
 _ACCESS_PATH = re.compile(
     r"^/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/"
     r"([^/]{1,512})/access$"
+)
+_QUERY_PATH = re.compile(
+    r"^/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/"
+    r"([^/]{1,512})/query$"
 )
 _STATUS_PATH = re.compile(
     r"^/api/transfers/([A-Za-z0-9._-]{1,128})$"
@@ -27,6 +32,83 @@ _SUBMISSION_ACCESS_PATH = "/api/transfers/submissions/access"
 
 
 class JobTransferRoutesMixin:
+    def _query_artifact_projection(self, parsed) -> bool:
+        match = _QUERY_PATH.fullmatch(parsed.path)
+        if match is None:
+            return False
+        session = self._session()
+        visitor = self._visitor_mode()
+        if session is None and not self._anonymous_ui_allowed():
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else visitor.principal if visitor is not None
+            else PUBLIC_JOB_PRINCIPAL
+        )
+        job_id = unquote(match.group(1))
+        name = unquote(match.group(2))
+        if not name or name in {".", ".."} or "\\" in name:
+            json_response(
+                self, {"success": False, "error": "artifact name is invalid"}, 400,
+            )
+            return True
+        try:
+            request = self._json_body(64 * 1024)
+            routes = self._job_routes(
+                parsed, principal, for_artifact_storage=True,
+            )
+            principals = read_principals(
+                self.state, principal, job_id, routes=routes,
+            )
+            selected = None
+            for route in routes:
+                for lookup_principal in principals:
+                    try:
+                        payload = self._job_artifact_query_payload(
+                            route,
+                            job_id=job_id,
+                            name=name,
+                            principal=lookup_principal,
+                            request=request,
+                        )
+                    except KeyError:
+                        continue
+                    selected = (route, payload)
+                    break
+                if selected is not None:
+                    break
+            if selected is None:
+                raise KeyError("artifact was not found")
+            route, payload = selected
+        except KeyError as exc:
+            json_response(
+                self, {"success": False, "error": str(exc).strip("'")}, 404,
+            )
+            return True
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        except (NodeUnavailable, TargetUnavailable, TargetNotFound) as exc:
+            json_response(self, {
+                "success": False,
+                "code": getattr(exc, "code", "storage_server_unavailable"),
+                "error": str(exc),
+            }, 503)
+            return True
+        except (PeerControlError, ConnectionError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, {
+            "success": True,
+            "storage_server_id": route.server_id,
+            "data": payload.get("data") or {},
+        })
+        return True
+
     def _issue_submission_transfer_access(self, parsed) -> bool:
         if parsed.path != _SUBMISSION_ACCESS_PATH:
             return False
@@ -358,6 +440,37 @@ class JobTransferRoutesMixin:
             operation="list",
             principal=principal,
             payload={"job_id": job_id},
+        )
+
+    def _job_artifact_query_payload(
+        self,
+        route,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        request: dict[str, object],
+    ) -> dict[str, object]:
+        """Query the storage Manager directly, never an execution service."""
+        if route.server_id in {self.state.server_id, "local"}:
+            return {
+                "data": JobArtifactQueryService(self.state).query(
+                    job_id=job_id,
+                    name=name,
+                    principal=principal,
+                    request=request,
+                ),
+            }
+        return self.state.federation_gateway.public_data(
+            route,
+            kind="job-artifacts",
+            operation="query",
+            principal=principal,
+            payload={
+                "job_id": job_id,
+                "name": name,
+                "query": dict(request),
+            },
         )
 
     def _job_artifact_manifest(self, routes, *, job_id: str, principal: str):

@@ -330,14 +330,13 @@ class JobProxyRoutesMixin:
             )]
         if has_peers:
             routes = self.state.service_routes(include_offline=True)
-            offline_remote = [
-                route for route in routes if route.remote and not route.online
-            ]
-            if offline_remote:
-                names = ", ".join(
-                    f"{route.server_id}:{route.port}" for route in offline_remote
-                )
-                raise TargetUnavailable(f"registered target is offline: {names}")
+            # An unqualified request is allowed to select any currently
+            # online candidate.  An unrelated stopped peer is not a reason
+            # to reject a local/public target: retained result data and
+            # storage-backed supplemental analysis may be entirely owned by
+            # the online Manager.  An explicit ``server_id``/port still goes
+            # through ``route_for`` above and therefore keeps its precise
+            # offline-target error.
             online = [route for route in routes if route.online]
             if not online:
                 raise TargetUnavailable("no online service target")

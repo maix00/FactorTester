@@ -32,6 +32,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/core/shared-ui.js",
             "server/manager/web/catalog/shared/multi-select-filter.js",
             "server/manager/web/jobs/result-tabs.js",
+            "server/manager/web/jobs/artifact-query.js",
             "server/manager/web/jobs/highcharts-timeline.js",
             "server/manager/web/report/table-view.js",
             "server/manager/web/test-modules/backtest/results/runtime-model.js",
@@ -62,6 +63,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             }, mountRows(_context, target) { target.dataset.mountedViewer = "rows"; },
           };
           window.__artifactFetches = [];
+          window.__artifactQueries = [];
           const orderRows = Array.from({length: 25}, (_, index) => ({
             strategy: "A1", order_id: `order-${index + 1}`,
             timestamp: 1700000000000 + index * 60000,
@@ -94,12 +96,61 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
               return {async text() { return JSON.stringify(payloads[name]); }};
             },
           };
-        """)
+          window.__queryArtifact = async (path, options) => {
+            const name = decodeURIComponent(
+              path.split("/artifacts/")[1].split("/query")[0],
+            );
+            const request = JSON.parse(options.body || "{}");
+            window.__artifactQueries.push({name, request});
+            const payload = payloads[name];
+            if (request.mode === "series" || request.mode === "time_rows") {
+              return {data: payload};
+            }
+            let rows = [...(payload.rows || [])];
+            const filters = request.filters || {};
+            const candidate = (row, fields) => String(
+              fields.map(field => row[field]).find(value => value != null && String(value)) || "",
+            );
+            Object.values(filters).forEach(filter => {
+              rows = rows.filter(row => {
+                const value = candidate(row, filter.fields || []);
+                return !value || (filter.values || []).includes(value);
+              });
+            });
+            const facets = Object.fromEntries(Object.entries(request.facets || {}).map(
+              ([key, fields]) => [key, [...new Set(
+                payload.rows.map(row => candidate(row, fields)).filter(Boolean),
+              )].sort()],
+            ));
+            const distinct = Object.fromEntries(Object.entries(request.distinct || {}).map(
+              ([key, definition]) => {
+                const seen = new Set();
+                const values = rows.flatMap(row => {
+                  const item = Object.fromEntries(Object.entries(definition).map(
+                    ([label, fields]) => [label, candidate(row, fields)],
+                  ));
+                  const identity = JSON.stringify(item);
+                  if (seen.has(identity)) return [];
+                  seen.add(identity); return [item];
+                });
+                return [key, values];
+              },
+            ));
+            const page = Number(request.page || 1);
+            const pageSize = Number(request.page_size || 20);
+              return {data: {
+              query_mode: "table", columns: payload.columns,
+              rows: rows.slice((page - 1) * pageSize, page * pageSize),
+                page, page_size: pageSize, total: rows.length, facets, distinct,
+              }};
+            };
+            void 0;
+          """)
         page.add_script_tag(
             path=str(ROOT / "server/manager/web/test-modules/backtest/results/view.js")
         )
         page.evaluate("""
-          const context = {t: value => value};
+          const context = {t: value => value, api: window.__queryArtifact};
           const section = window.FTBacktestResults.section(context, {
             jobID: "job-browser",
             artifacts: [
@@ -134,12 +185,12 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             ".backtest-time-series-surface .backtest-surface-filter-label"
         ).all_text_contents() == ["策略", "曲线"]
         page.wait_for_function(
-            "window.__artifactFetches.includes('metrics_over_time_data')"
+            "window.__artifactQueries.some(item => item.name === 'metrics_over_time_data')"
         )
         page.wait_for_function(
             "document.querySelector('input[data-filter-value=\"metric:sharpe_ratio\"]') !== null"
         )
-        assert set(page.evaluate("window.__artifactFetches")) == {
+        assert set(page.evaluate("window.__artifactQueries.map(item => item.name)")) == {
             "equity_curve_data", "metrics_over_time_data",
         }
         assert page.locator('[data-mounted-viewer="equity_curve"]').get_attribute(
@@ -148,7 +199,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
 
         page.locator(".backtest-result-chart-filter summary").click()
         chart_options = page.locator(
-            ".backtest-result-chart-filter .ft-multi-select-options"
+            "body > .ft-multi-select-menu.is-portaled .ft-multi-select-options"
         )
         chart_options.get_by_text("净值", exact=True).wait_for()
         chart_options.get_by_text("回撤", exact=True).wait_for()
@@ -203,7 +254,8 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function(
             "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 20"
         )
-        assert set(page.evaluate("window.__artifactFetches")) == {
+        assert page.evaluate("window.__artifactFetches") == []
+        assert set(page.evaluate("window.__artifactQueries.map(item => item.name)")) == {
             "equity_curve_data", "metrics_over_time_data", "order_detail_data",
         }
         page.locator(
@@ -222,9 +274,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]') !== null"
         )
-        assert set(page.evaluate("window.__artifactFetches")) == {
-            "equity_curve_data", "metrics_over_time_data", "order_detail_data",
-        }, "returning to a result tab must reuse its loaded payload"
+        assert page.evaluate("window.__artifactFetches") == []
         assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "A1"
         assert errors == []
         browser.close()
