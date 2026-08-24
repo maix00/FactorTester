@@ -108,13 +108,19 @@ const progressiveChart = {
   showLoading() {}, hideLoading() {}, redraw() {}, addSeries() {},
 };
 progressive.xAxis.events.afterSetExtremes.call(
-  {chart: progressiveChart}, {min: 10, max: 11, trigger: "navigator"},
+  {chart: progressiveChart}, {
+    min: 10, max: 11, dataMin: 1_690_000_000_000,
+    dataMax: 1_710_000_000_000, trigger: "navigator",
+  },
 );
 await new Promise(resolve => setTimeout(resolve, 20));
 assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
 assert.deepEqual(replacedData, [
+  [1_690_000_000_000, null],
   [1_700_000_000_000, 110], [1_700_000_001_000, 111],
+  [1_710_000_000_000, null],
 ]);
+assert.equal(progressive.chart.zooming.mouseWheel.showResetButton, true);
 requestedRange = {stale: true};
 progressive.xAxis.events.afterSetExtremes.call(
   {chart: progressiveChart}, {
