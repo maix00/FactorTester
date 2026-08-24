@@ -27,7 +27,13 @@
     return [...values, ...names];
   }
 
-  function create(context, groups, initialValues = ["*"], onChange = () => {}) {
+  function create(
+    context,
+    groups,
+    initialValues = ["*"],
+    onChange = () => {},
+    options = {},
+  ) {
     const filter = window.FTMultiSelectFilter.create(context, {
       title: context.t("按产品组筛选"),
       className: "factor-product-group-filter",
@@ -36,6 +42,7 @@
       items: choices(context, groups),
       selected: initialValues,
       onChange,
+      onOpen: options.onOpen,
     });
     return Object.freeze({
       element: filter.element,

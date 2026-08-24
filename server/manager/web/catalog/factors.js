@@ -1,36 +1,106 @@
 (() => {
   let cache = null;
+  let libraryPromise = null;
+  let setsPromise = null;
+  let groupsPromise = null;
 
   function current(context) {
     return context.isRouteCurrent?.() !== false;
   }
 
-  async function load(context, refresh = false) {
-    if (cache && !refresh) return cache;
-    const [libraryResult, setsResult, groupsResult, localSetsResult] =
-      await Promise.allSettled([
-        context.api("/api/catalog/factors"),
-        context.api("/api/catalog/factor-sets"),
-        context.api("/api/catalog/product-groups"),
-        nativeRequest("catalog").catch(() => ({items: []})),
-      ]);
-    if (libraryResult.status !== "fulfilled") throw libraryResult.reason;
-    const library = libraryResult.value || {};
-    const sets = setsResult.status === "fulfilled" ? setsResult.value : {};
-    const groups = groupsResult.status === "fulfilled" ? groupsResult.value : {};
-    const localSets = localSetsResult.status === "fulfilled"
-      ? localSetsResult.value : {items: []};
+  function emptyCache() {
+    return {
+      factors: [], families: [], familyScopes: {}, principal: "", visitor: false,
+      sets: [], setScopes: {}, groups: [],
+      setsLoaded: false, groupsLoaded: false,
+    };
+  }
+
+  function applyLibrary(library) {
+    const value = library || {};
     cache = {
-      factors: Array.isArray(library.factors) ? library.factors : [],
-      families: Array.isArray(library.families) ? library.families : [],
-      familyScopes: library.family_scopes || library.family_tabs || {},
-      principal: String(library.principal || ""),
-      visitor: Boolean(library.visitor),
-      sets: FTFactorModel.mergeFactorSets(sets.items, localSets.items),
-      setScopes: sets.item_scopes || {},
-      groups: Array.isArray(groups.groups) ? groups.groups : [],
+      ...(cache || emptyCache()),
+      factors: Array.isArray(value.factors) ? value.factors : [],
+      families: Array.isArray(value.families) ? value.families : [],
+      familyScopes: value.family_scopes || value.family_tabs || {},
+      principal: String(value.principal || ""),
+      visitor: Boolean(value.visitor),
     };
     return cache;
+  }
+
+  async function loadLibrary(context, refresh = false) {
+    if (refresh) {
+      cache = null;
+      libraryPromise = null;
+      setsPromise = null;
+      groupsPromise = null;
+    }
+    if (cache && cache.libraryLoaded) return cache;
+    if (!libraryPromise) {
+      libraryPromise = context.api("/api/catalog/factors")
+        .then(value => {
+          const result = applyLibrary(value);
+          result.libraryLoaded = true;
+          return result;
+        })
+        .catch(error => {
+          libraryPromise = null;
+          throw error;
+        });
+    }
+    return libraryPromise;
+  }
+
+  async function loadSets(context) {
+    const data = await loadLibrary(context);
+    if (data.setsLoaded) return data;
+    if (!setsPromise) {
+      setsPromise = Promise.allSettled([
+        context.api("/api/catalog/factor-sets"),
+        nativeRequest("catalog").catch(() => ({items: []})),
+      ]).then(([setsResult, localSetsResult]) => {
+        const sets = setsResult.status === "fulfilled" ? setsResult.value : {};
+        const localSets = localSetsResult.status === "fulfilled"
+          ? localSetsResult.value : {items: []};
+        data.sets = FTFactorModel.mergeFactorSets(sets.items, localSets.items);
+        data.setScopes = sets.item_scopes || {};
+        data.setsLoaded = true;
+        return data;
+      }).catch(error => {
+        setsPromise = null;
+        throw error;
+      });
+    }
+    return setsPromise;
+  }
+
+  async function loadGroups(context) {
+    const data = await loadLibrary(context);
+    if (data.groupsLoaded) return data;
+    if (!groupsPromise) {
+      groupsPromise = context.api("/api/catalog/product-groups")
+        .then(value => {
+          data.groups = Array.isArray(value?.groups) ? value.groups : [];
+          data.groupsLoaded = true;
+          return data;
+        })
+        .catch(error => {
+          groupsPromise = null;
+          throw error;
+        });
+    }
+    return groupsPromise;
+  }
+
+  async function load(context, options = {}) {
+    const refresh = options === true || options.refresh === true;
+    const includeSets = options === true || options.sets === true;
+    const includeGroups = options === true || options.groups === true;
+    let data = await loadLibrary(context, refresh);
+    if (includeSets) data = await loadSets(context);
+    if (includeGroups) data = await loadGroups(context);
+    return data;
   }
 
   async function list(context, page = "families", requestedScope = "public") {
@@ -38,7 +108,7 @@
     context.setHeading(context.t("因子库"), "FactorTester");
     context.toolbar.append(FTFactorList.headerTabs(context, page));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取因子库…")));
-    const data = await load(context);
+    let data = await load(context, {sets: page === "sets"});
     if (!current(context)) return;
     const root = document.createElement("div");
     root.className = "library-page";
@@ -58,8 +128,22 @@
     search.placeholder = FTFactorList.searchPlaceholder(context, page, familyScope);
     search.setAttribute("aria-label", search.placeholder);
     controls.append(searchControl(context, search));
+    let groupLoad = null;
     const group = FTFactorGroupFilter.create(
-      context, data.groups, ["*"], () => resetAndRender(),
+      context, data.groups, ["*"], () => resetAndRender(), {
+        onOpen: () => {
+          if (data.groupsLoaded || groupLoad) return groupLoad;
+          groupLoad = load(context, {groups: true}).then(next => {
+            data = next;
+            group.setItems(data.groups);
+            if (current(context)) render();
+          }).catch(error => {
+            groupLoad = null;
+            context.showNotice?.(error.message || context.t("产品组读取失败"), true);
+          });
+          return groupLoad;
+        },
+      },
     );
     controls.append(group.element);
     const owner = familyScope === "subordinates"
@@ -73,7 +157,7 @@
 
     context.toolbar.append(
       context.button("↻", async () => {
-        await load(context, true);
+        await load(context, {refresh: true, sets: true, groups: true});
         if (!current(context)) return;
         list(context, page, familyScope);
       }, context.t("刷新")),
@@ -158,7 +242,7 @@
     const inline = context.testObjectTemporary && context.testObjectInitialValue;
     const data = inline
       ? {sets: [context.testObjectInitialValue], factors: []}
-      : await load(context);
+      : await load(context, {sets: true});
     if (!current(context)) return;
     return FTFactorDetails.setDetail(context, data, targetRef, nativeRequest);
   }
