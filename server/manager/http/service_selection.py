@@ -29,6 +29,8 @@ _SERVICE_GET_PREFIXES = (
     "/static/images/",
     "/custom-factors/api/client/factor-library",
     "/custom-factors/api/client/factor-sets",
+    "/custom-factors/api/public-factor/",
+    "/custom-factors/api/get/",
     "/api/product-groups",
     "/api/report-references/validate",
     "/api/profile-research",
