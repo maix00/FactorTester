@@ -55,13 +55,12 @@ def test_unauthenticated_api_get_returns_json_instead_of_login_html() -> None:
     }
 
 
-def test_unauthenticated_browser_get_still_redirects_to_login() -> None:
+def test_unauthenticated_browser_get_is_json_without_service_page_redirect() -> None:
     response = _unauthenticated_client().get("/api/private-probe")
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith(
-        "/?next=/api/private-probe"
-    )
+    assert response.status_code == 401
+    assert response.content_type == "application/json"
+    assert response.get_json()["login_required"] is True
 
 
 def test_login_applies_explicit_persistent_session_atomically(

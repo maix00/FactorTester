@@ -19,14 +19,35 @@ def test_public_catalog_contains_guides_and_implementation_maps() -> None:
 
 
 def test_legacy_source_browser_and_templates_are_removed() -> None:
-    core = (ROOT / "server/core.py").read_text(encoding="utf-8")
+    app_factory = (ROOT / "server/__init__.py").read_text(encoding="utf-8")
 
-    assert "/docs/tools" not in core
-    assert "/docs/tool/" not in core
-    assert "scan_tool_files" not in core
+    assert not (ROOT / "server/core.py").exists()
     assert not (ROOT / "server/scan_tools.py").exists()
-    assert not any((ROOT / "templates/docs").glob("**/*"))
-    assert not (ROOT / "templates/tools_doc.html").exists()
+    assert "core_bp" not in app_factory
+    assert "template_folder=None" in app_factory
+    assert "static_folder=None" in app_factory
+    assert not (ROOT / "tools/data/tech_docs/tool_docs.py").exists()
+    assert not (ROOT / "tools/decorators/tech_docs").exists()
+    assert not (ROOT / "templates").exists()
+    assert not (ROOT / "static/css").exists()
+    assert not (ROOT / "static/js").exists()
+
+
+def test_business_service_does_not_register_browser_pages() -> None:
+    app_factory = (ROOT / "server/__init__.py").read_text(encoding="utf-8")
+    auth = (ROOT / "server/auth.py").read_text(encoding="utf-8")
+    http_auth = (ROOT / "server/services/http_auth.py").read_text(encoding="utf-8")
+    custom_factors = (ROOT / "server/modules/custom_factors/catalog_routes.py").read_text(encoding="utf-8")
+    admin = (ROOT / "server/admin.py").read_text(encoding="utf-8")
+    operations = (ROOT / "server/server_operations.py").read_text(encoding="utf-8")
+
+    assert "render_template" not in app_factory
+    assert "methods=['GET', 'POST']" not in auth
+    assert "render_template" not in auth
+    assert "redirect('/login')" not in http_auth
+    assert "render_template" not in custom_factors
+    assert "render_template" not in admin
+    assert "render_template" not in operations
 
 
 def test_markdown_disables_embedded_html_and_keeps_stable_anchors(tmp_path: Path) -> None:

@@ -2,13 +2,12 @@
 Flask 应用工厂模块。
 
 create_app() 负责：
-  1. 设置模板/静态文件路径（开发模式和 PyInstaller 打包模式自适应）
+  1. 创建只提供 API 的业务服务 Flask 应用（网页由 Manager 7998 承载）
   2. 设置 session secret key 和过期时间（30天）
-  3. 注册所有 Blueprint（auth / core / templates / shared / sft / mfa / cn_futures / cf / admin）
+  3. 注册 API Blueprint（auth / templates / shared / sft / cn_futures / cf / admin）
 """
 from __future__ import annotations
 
-import sys, os
 from datetime import timedelta
 
 
@@ -16,9 +15,7 @@ def create_app():
     """
     创建并配置 Flask 应用。
 
-    自动解析项目根目录（server/ 的父级），支持：
-      - 开发模式：__file__ 指向源码文件
-      - 打包模式：sys.frozen 为 True 时使用 PyInstaller 的 _MEIPASS
+    业务端口不配置模板目录或静态目录；网页入口统一由 Manager 7998 提供。
     """
     # Keep application-only imports inside the factory. Deployment modules
     # under ``server.deployment`` must be usable before runtime .settings,
@@ -26,15 +23,11 @@ def create_app():
     from flask import Flask
     from server.services.session_secret import load_session_secret
 
-    # Project root is one level above this package (server/)
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if getattr(sys, 'frozen', False):
-        root = getattr(sys, '_MEIPASS', os.path.abspath('.'))
-    app = Flask(
-        __name__,
-        template_folder=os.path.join(root, 'templates'),
-        static_folder=os.path.join(root, 'static'),
-    )
+    # Business ports are data/execution APIs only.  The Manager owns the
+    # browser shell, static assets, technical docs, database browser, and all
+    # module entry pages.  Disabling Flask's template/static adapters here
+    # makes accidental reintroduction of a service-port web page fail closed.
+    app = Flask(__name__, static_folder=None, template_folder=None)
 
     # 持久化 secret，避免服务器重启或客户端更新导致所有会话失效。
     app.secret_key = load_session_secret()
@@ -60,7 +53,6 @@ def create_app():
 
     # ── 注册 Blueprint ──
     from server.auth import auth_bp
-    from server.core import core_bp
     from server.modules.templates import templates_bp
     from server.modules.shared import register_routes as register_shared_routes
     from server.modules.factors import factors_bp
@@ -78,7 +70,6 @@ def create_app():
     register_custom_factor_routes()
 
     app.register_blueprint(auth_bp)
-    app.register_blueprint(core_bp)
     app.register_blueprint(templates_bp)
     app.register_blueprint(shared_bp)
     app.register_blueprint(factors_bp)

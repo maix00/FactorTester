@@ -321,8 +321,7 @@
         closable: nativeDetail ? true : undefined,
         forceNew: testConfiguration || path.startsWith("/factor-series")
           || path.startsWith("/docs")
-          || path.startsWith("/sqlite-web") || path.startsWith("/manager")
-          || path.startsWith("/admin/server-operations"),
+          || path.startsWith("/sqlite-web") || path.startsWith("/manager"),
       });
     }
 
