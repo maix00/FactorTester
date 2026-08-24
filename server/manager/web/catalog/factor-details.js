@@ -37,24 +37,16 @@
     }
     context.updateActiveTab?.({title: factor.factor_alias || context.t("因子详情")});
     const root = document.createElement("div");
-    root.className = "detail-stack";
+    root.className = window.FTFactorDetailShared.pageClass("view", "factor-page");
     root.append(window.FTFactorDetailShared.summary(context, factor));
     root.append(window.FTFactorDetailShared.source(context, factor));
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
     if (provenance) root.append(provenance);
-    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, factor));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
     ).shell);
-    if (Array.isArray(factor.params) && factor.params.length) {
-      root.append(FTUI.table(
-        [context.t("参数"), context.t("值")],
-        factor.params.map(item => [
-          item.alias,
-          item.redacted ? context.t("已隐藏") : item.value,
-        ]),
-      ).shell);
-    }
+    const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
+    if (parameters) root.append(parameters);
     context.content.replaceChildren(root);
   }
 
@@ -75,6 +67,8 @@
       ...factor,
       factor_ref: frozen.factorRef,
       factor_owner_ref: frozen.ownerRef,
+      factor_family_alias: frozen.family,
+      factor_family_name: frozen.family,
       factor_family_ref: frozen.family,
       factor_git_commit: frozen.gitCommit,
       factor_params: frozen.params,
@@ -176,12 +170,12 @@
       }, context.t("删除此因子家族")));
     }
     const root = document.createElement("div");
-    root.className = "detail-stack";
+    root.className = window.FTFactorDetailShared.pageClass("view", "factor-family-page");
+    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, family));
     root.append(window.FTFactorDetailShared.summary(context, family));
     root.append(window.FTFactorDetailShared.source(context, family));
     const provenance = window.FTFactorDetailShared.provenance(context, family);
     if (provenance) root.append(provenance);
-    root.append(window.FTFactorDetailShared.sourceVersionHistory(context, family));
     root.append(FTUI.table(
       [context.t("字段"), context.t("值")], FTUI.fieldRows(family),
     ).shell);
@@ -220,6 +214,9 @@
           + (owner ? `?owner_username=${encodeURIComponent(owner)}` : "");
       const payload = await context.api(endpoint);
       const detail = payload.factor || {};
+      const detailParams = window.FTFactorDetailShared.parameterRows(detail);
+      const valueParams = window.FTFactorDetailShared.parameterRows(value);
+      const params = detailParams.length ? detailParams : valueParams;
       return {
         ...value,
         ...detail,
@@ -228,6 +225,7 @@
         // the catalog projection.
         math_expr: detail.math_expr || value.math_expr || "",
         source_code: detail.source_code || value.source_code || "",
+        ...(params.length ? {params, factor_params: params} : {}),
       };
     } catch (_) {
       return value;

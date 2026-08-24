@@ -48,6 +48,16 @@ global.FTUI = window.FTUI = {
     return {shell, body};
   },
 };
+window.FTMultiSelectFilter = {
+  create(_context, options = {}) {
+    const element = new Element("section");
+    element.className = "ft-multi-select-filter";
+    return {
+      element,
+      setItems(items) { element.items = items; },
+    };
+  },
+};
 const rendered = [];
 global.katex = window.katex = {
   render(expression, mount, options) {
@@ -105,9 +115,26 @@ const data = {
     math_expr: "\\frac{P_t-P_{t-N}}{P_{t-N}}",
     description: "端点变化率",
     owner_alias: "MaxA",
+    params: [{alias: "N", value: "20d"}],
+  }],
+  families: [{
+    family_ref: "factor-family:sha256:momentum",
+    factor_family_alias: "MmRateOfChg",
+    factor_family_name: "MmRateOfChg",
+    factor_kind: "custom",
+    owner_username: "alice",
+    owner_alias: "Alice",
+    description: "动量变化率",
+    source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+    factor_refs: [],
   }],
   sets: [{target_ref: setRef, visibility: "server"}],
 };
+
+assert.deepStrictEqual(
+  window.FTFactorDetailShared.familyIdentity({factor_family_ref: "family:momentum"}),
+  {alias: "", ref: "family:momentum", commit: ""},
+);
 
 (async () => {
   const sourceView = window.FTFactorDetailShared.source(context, {
@@ -130,6 +157,34 @@ const data = {
   assert.strictEqual(
     navigated.at(-1), `/factor-series?factor_ref=${encodeURIComponent(factorRef)}`,
   );
+  const parameterTable = content.children[0].children.find(item => (
+    item.headers?.[0] === "参数"
+  ));
+  assert.ok(parameterTable);
+  assert.ok(parameterTable.values.some(row => row[0] === "N"));
+  const provenance = content.children[0].children.find(item => (
+    item.headers?.[0] === "RunSpec 字段"
+  ));
+  assert.ok(provenance.values.some(row => row[0] === "冻结因子家族"));
+  assert.ok(provenance.values.some(row => row[1].children?.[0]?.textContent === "MmRateOfChg"));
+
+  const familyContext = {...context, api: async path => {
+    assert.match(path, /source-versions\/custom\/MmRateOfChg/);
+    return {
+      success: true,
+      available: true,
+      current: {commit: "a".repeat(40), is_current: true},
+      versions: [{commit: "b".repeat(40), short_commit: "bbbb", subject: "旧版本"}],
+    };
+  }};
+  await window.FTFactorDetails.familyDetail(
+    familyContext, data, "factor-family:sha256:momentum",
+  );
+  assert.strictEqual(
+    familyContext.content.children[0].children[0].className,
+    "factor-source-version-history",
+  );
+  assert.ok(familyContext.content.children[0].children[0].children[0]);
 
   await window.FTFactorDetails.setDetail(context, data, setRef, async () => ({}));
   const memberMount = content.children[0].children.at(-1);
