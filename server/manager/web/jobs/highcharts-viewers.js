@@ -391,7 +391,22 @@
     return target._ftChart;
   }
 
+  function mountOptions(context, target, options, stock = false, displayOptions = {}) {
+    const factory = stock ? window.Highcharts?.stockChart : window.Highcharts?.chart;
+    if (!factory) throw new Error(context.t("Highcharts 组件未加载"));
+    target._ftChart?.destroy?.();
+    target.replaceChildren();
+    target.classList.add("interactive-artifact-chart");
+    const chart = document.createElement("div");
+    chart.className = "interactive-artifact-chart-canvas";
+    target.append(chart);
+    target._ftChart = factory.call(
+      window.Highcharts, chart, attachInteractions(options, displayOptions),
+    );
+    return target._ftChart;
+  }
+
   window.FTJobHighcharts = Object.freeze({
-    metricChoices, mount, mountRows, optionsFor, rowSeriesOptions, supports,
+    metricChoices, mount, mountOptions, mountRows, optionsFor, rowSeriesOptions, supports,
   });
 })();

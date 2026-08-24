@@ -688,6 +688,19 @@ def test_ic_domain_charts_preserve_the_old_result_interactions() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_ic_charts_reuse_job_lazy_query_and_mount_infrastructure() -> None:
+    view = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
+    charts = (WEB_ROOT / "jobs" / "ic-result-charts.js").read_text(encoding="utf-8")
+    shared = (WEB_ROOT / "jobs" / "highcharts-viewers.js").read_text(encoding="utf-8")
+
+    assert "FTJobArtifactQuery.timeSource" in view
+    assert '{mode: "series", maxPoints: 800}' in view
+    assert "source.load({" in view
+    assert "FTJobHighcharts.mountOptions" in view
+    assert "function mount(" not in charts
+    assert "function mountOptions" in shared
+
+
 def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
 

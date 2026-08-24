@@ -19,6 +19,7 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     normalize_ic_metric_selection,
 )
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    evaluate_forward_ic_decay_curve,
     fit_forward_ic_half_life,
 )
 
@@ -154,7 +155,7 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
             crossing = aliases.get(str(delay)) if isinstance(aliases, dict) else None
             if not isinstance(crossing, dict):
                 crossing = {}
-            rows.append({
+            row = {
                 "factor_alias": str(factor.get("factor_alias") or factor.get("alias") or ""),
                 "factor_ref": str(factor.get("factor_ref") or ""),
                 "ic_method": str(factor.get("ic_method") or "rank"),
@@ -196,7 +197,13 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 "crossing_first_nonpositive_horizon": crossing.get("first_nonpositive_horizon"),
                 "crossing_curve_monotonic_nonincreasing": crossing.get("curve_monotonic_nonincreasing"),
                 "points": point_rows,
-            })
+            }
+            row["fit_points"] = evaluate_forward_ic_decay_curve(
+                fitted,
+                minimum_seconds=points[0][0],
+                maximum_seconds=points[-1][0],
+            )
+            rows.append(row)
     return rows
 
 
