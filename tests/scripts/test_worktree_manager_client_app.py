@@ -2773,7 +2773,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
         scripts = {}
         for name in [
             "factor-model", "factor-list", "factor-details", "factors",
-            "factor-catalog-runtime",
+            "factor-catalog-runtime", "factor-catalog-list",
         ]:
             with urlopen(
                 f"{base_url}/research-static/catalog/{name}.js"
@@ -2785,6 +2785,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     details = scripts["factor-details"]
     coordinator = scripts["factors"]
     runtime = scripts["factor-catalog-runtime"]
+    catalog_list = scripts["factor-catalog-list"]
     assert "group.factor_refs" in model
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
@@ -2803,10 +2804,10 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'context.t("因子集合")' in listing
     assert '"/factors/sets"' in listing
     assert "FTUI.pagedTable" in listing
-    assert 'className = "factor-catalog-controls"' in listing
-    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in listing
-    assert "context.toolbar.append(\n      search" not in listing
-    assert 'context.t("按下级用户筛选")' in listing
+    assert 'className = "factor-catalog-controls"' in catalog_list
+    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in catalog_list
+    assert "context.toolbar.append(\n      search" not in catalog_list
+    assert 'context.t("按下级用户筛选")' in catalog_list
     assert "decodeFrozenFactorRef" in details
 
 

@@ -2067,6 +2067,10 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     factor_list = (
         ROOT / "server" / "manager" / "web" / "catalog" / "factor-list.js"
     ).read_text(encoding="utf-8")
+    catalog_list = (
+        ROOT / "server" / "manager" / "web" / "catalog"
+        / "factor-catalog-list.js"
+    ).read_text(encoding="utf-8")
     runtime = (
         ROOT / "server" / "manager" / "web" / "catalog"
         / "factor-catalog-runtime.js"
@@ -2077,10 +2081,10 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert manifest["group_external_scripts"].get("factor-catalog-list", []) == []
     assert "core/highcharts-range-loader.js" not in manifest["groups"]["factor-catalog-list"]
     assert "catalog/products.js" not in manifest["groups"]["factor-catalog-list"]
-    assert 'library: page !== "sets"' in factor_list
-    assert 'sets: page === "sets"' in factor_list
-    assert 'groups: true, library: page !== "sets"' in factor_list
-    assert "onOpen: () =>" in factor_list
+    assert 'library: page !== "sets"' in catalog_list
+    assert 'sets: page === "sets"' in catalog_list
+    assert 'groups: true, library: page !== "sets"' in catalog_list
+    assert "onOpen: () =>" in catalog_list
     assert "/api/catalog/product-groups" in runtime
     assert 'context.api("/api/catalog/factor-sets")' in runtime
     sets_start = runtime.index("async function loadSets(context)")
