@@ -7,7 +7,7 @@ struct ResearchDocumentReferenceOverlay: View {
     let reportRef: String
     let serverURL: URL
     let objectHref: String?
-    let openJobSource: (String, Int) -> Void
+    let openJobSource: (String, Int?, String) -> Void
     var showsDismiss = true
 
     @Environment(\.dismiss) private var dismiss
@@ -40,7 +40,6 @@ struct ResearchDocumentReferenceOverlay: View {
                         ResearchDocumentEvidenceFragmentList(
                             detail: evidenceDetail,
                             reportRef: reportRef,
-                            defaultPort: serverURL.port ?? 8141,
                             openJob: openJobSource
                         )
                     }

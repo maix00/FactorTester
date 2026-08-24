@@ -126,17 +126,36 @@ struct ResearchDocumentReportView: View {
                     for: reference,
                     steps: steps
                 ),
-                openJobSource: { jobID, port in
-                    openJob(TestJob(
-                        id: jobID,
-                        kind: "test",
-                        status: "unknown",
-                        workspaceID: "",
-                        port: port,
-                        profile: profileName,
-                        updatedAt: nil,
-                        artifactCount: 0
-                    ))
+                openJobSource: { jobID, port, serverID in
+                    if serverID.isEmpty {
+                        openJob(TestJob(
+                            id: jobID,
+                            kind: "test",
+                            status: "unknown",
+                            workspaceID: "",
+                            port: port ?? serverURL.port ?? 8141,
+                            profile: profileName,
+                            updatedAt: nil,
+                            artifactCount: 0
+                        ))
+                    } else {
+                        var detailFields = [
+                            ResearchDocumentReferenceField(
+                                name: "server_id", value: serverID
+                            ),
+                        ]
+                        if let port {
+                            detailFields.append(.init(
+                                name: "port", value: String(port)
+                            ))
+                        }
+                        openReferencePage(.init(
+                            kind: "job",
+                            targetRef: "job:\(jobID)",
+                            label: L10n.text("测试任务"),
+                            detailFields: detailFields
+                        ))
+                    }
                 }
             )
         }
@@ -192,13 +211,13 @@ struct ResearchDocumentReportView: View {
         }
         if let route = ResearchDocumentReferenceBindingResolver.jobRoute(
             for: reference, binding: binding
-        ) {
+        ), route.serverID.isEmpty, let port = route.port {
             openJob(TestJob(
                 id: route.jobID,
                 kind: "test",
                 status: "unknown",
                 workspaceID: "",
-                port: route.port,
+                port: port,
                 profile: profileName,
                 updatedAt: nil,
                 artifactCount: 0

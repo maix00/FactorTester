@@ -264,6 +264,36 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertTrue(ClientTab.reference(reference)?.id.contains(":port:8176") == true)
     }
 
+    func testJobReferenceCarriesBoundServerIntoItsWebTab() {
+        let reference = ResearchDocumentTypedLink(
+            kind: "job",
+            targetRef: "job:abc123",
+            label: "回测任务",
+            detailFields: [
+                .init(name: "server_id", value: "remote-main"),
+                .init(name: "port", value: "8176"),
+            ]
+        )
+        guard case let .web(path)? = ClientTab.reference(reference)?.content else {
+            return XCTFail("job reference must open a Web tab")
+        }
+        XCTAssertEqual(path, "/jobs/8176/abc123?server_id=remote-main")
+        XCTAssertTrue(ClientTab.reference(reference)?.id.contains(":server:remote-main") == true)
+    }
+
+    func testJobReferenceCanRouteByServerIdentityWithoutPort() {
+        let reference = ResearchDocumentTypedLink(
+            kind: "job",
+            targetRef: "job:abc123",
+            label: "回测任务",
+            detailFields: [.init(name: "server_id", value: "remote-main")]
+        )
+        guard case let .web(path)? = ClientTab.reference(reference)?.content else {
+            return XCTFail("server-only Job reference must open a Web tab")
+        }
+        XCTAssertEqual(path, "/jobs/abc123?server_id=remote-main")
+    }
+
     func testJobIdentityIsPortScopedButRunSpecIdentityIsContentAddressed() {
         let jobTarget = "research-job:shared"
         let firstJob = ClientTab.reference(.init(
