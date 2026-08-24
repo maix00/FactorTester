@@ -128,9 +128,6 @@ assert.deepEqual(multi.values, ["a"]);
 assert.equal(multi.summary.children[0].textContent, "A");
 const bInput = multi.optionList.children[1].children[0];
 bInput.checked = true;
-bInput.listeners.change();
-assert.deepEqual(multi.values, ["b"]);
-assert.equal(multi.summary.children[0].textContent, "B");
 assert.equal(descendants(multi.element).some(item => (
   item.className === "ft-multi-select-selection-note"
 )), false, "single choice must not render a redundant selected note");
@@ -177,6 +174,27 @@ locked.summary.listeners.click({preventDefault() {}});
 assert.equal(locked.dropdown.open, false);
 
 (async () => {
+  await bInput.listeners.change();
+  assert.deepEqual(multi.values, ["b"]);
+  assert.equal(multi.summary.children[0].textContent, "B");
+  assert.equal(multi.dropdown.open, false,
+    "single-select commits immediately and closes the dropdown");
+
+  const legacySingleChanges = [];
+  const legacySingle = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "a", label: "A"}, {value: "b", label: "B"}],
+    selected: ["a"], multi: false,
+    onApply: values => legacySingleChanges.push(values),
+  });
+  const legacyB = legacySingle.optionList.children[1].children[0];
+  legacyB.checked = true;
+  await legacyB.listeners.change();
+  assert.deepEqual(legacySingleChanges, [["b"]],
+    "single-select also commits legacy onApply callbacks immediately");
+  assert.equal(descendants(legacySingle.element).some(item => (
+    item.className === "primary ft-multi-select-apply"
+  )), false, "single-select must not render a save action");
+
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [
