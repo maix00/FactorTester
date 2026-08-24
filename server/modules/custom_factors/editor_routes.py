@@ -116,12 +116,6 @@ def api_validate_expr():
     if not source_code and factor_id:
         if not can_view_user_scope(username, owner_username):
             return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
-        if owner_username != username:
-            return jsonify({
-                'success': True,
-                'valid': False,
-                'error': '跨账号登记因子只授权执行，不授权读取源码或数学表达式',
-            })
         loaded_source = load_factor_source(owner_username, factor_id) or ''
         source_code = strip_factor_meta(loaded_source) if loaded_source else ''
 
