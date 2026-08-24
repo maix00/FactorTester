@@ -18,8 +18,6 @@ deploy/docker/*
 !sources/**
 !scripts/
 !scripts/**
-!templates/
-!templates/**
 !static/
 !static/**
 !docs/
