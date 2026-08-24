@@ -344,8 +344,9 @@
     const seen = new Set();
     return values.map(value => {
       const ref = productGroupID(value);
-      return index.get(ref) || value;
+      return index.get(ref) || (typeof value === "string" ? null : value);
     }).filter(value => {
+      if (!value) return false;
       const ref = productGroupID(value);
       if (!ref || seen.has(ref) || value?._savedPlaceholder === true) return false;
       seen.add(ref);
