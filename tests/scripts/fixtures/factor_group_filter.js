@@ -53,6 +53,7 @@ const view = window.FTFactorGroupFilter.create(
 assert.strictEqual(view.element.tagName, "SECTION");
 assert.strictEqual(view.search.type, "search");
 assert.strictEqual(view.search.placeholder, "搜索产品组");
+assert.strictEqual(typeof view.setItems, "function");
 assert.strictEqual(view.value, "*");
 const rowLabel = item => item.children[1]?.textContent || item.textContent;
 assert.ok(view.options.children.some(item => rowLabel(item) === "全部产品组"));
@@ -82,6 +83,11 @@ const all = view.options.children.find(item => rowLabel(item) === "全部产品�
 all.children[0].checked = true;
 all.children[0].listeners.change();
 assert.deepStrictEqual(view.values, ["*"]);
+
+view.setItems([
+  {group_ref: "product-group:updated", name: "更新后的产品组"},
+]);
+assert.ok(view.options.children.some(item => rowLabel(item) === "更新后的产品组"));
 
 function tags(node) {
   return [node.tagName, ...(node.children || []).flatMap(tags)];
