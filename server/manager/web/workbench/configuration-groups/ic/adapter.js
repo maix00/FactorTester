@@ -150,7 +150,10 @@
     return (state.analysis?.configuration_groups || []).some(group => {
       const ref = String(group?.product_scope_ref || "");
       const value = index.get(ref);
-      return Boolean(ref && (!value || value._savedPlaceholder === true));
+      const label = value && typeof value === "object"
+        ? value.title_zh || value.name || value.label || "" : "";
+      return Boolean(ref && (!value || typeof value === "string"
+        || value._savedPlaceholder === true || !label || label === ref));
     });
   }
 
