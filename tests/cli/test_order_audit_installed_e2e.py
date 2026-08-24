@@ -17,7 +17,7 @@ def order_audit_server():
     app = Flask(__name__)
     app.secret_key = "order-audit-e2e"
 
-    @app.post("/login")
+    @app.post("/auth/login")
     def login():
         assert request.get_json() == {"username": "alice", "password": "pw"}
         session["username"] = "alice"
