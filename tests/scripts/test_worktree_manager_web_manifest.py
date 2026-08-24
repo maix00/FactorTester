@@ -723,7 +723,8 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     assert manifest["group_dependencies"]["job-detail-ic"] == [
         "job-detail-previews", "catalog-core",
     ]
-    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["catalog-core"]
+    assert "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
+    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["factor-catalog-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
     ) < len(manifest["groups"]["job-detail-previews"])
@@ -1366,8 +1367,11 @@ def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
     dependencies = manifest["group_dependencies"]["job-detail-backtest"]
     assert "catalog-core" in dependencies
     assert (
+        "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
+    )
+    assert (
         "catalog/shared/multi-select-filter.js"
-        in manifest["groups"]["catalog-core"]
+        in manifest["groups"]["factor-catalog-core"]
     )
 
 
@@ -2032,6 +2036,34 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
         (ROOT / "server" / "manager" / "web" / "module-manifest.json")
         .read_text(encoding="utf-8")
     )
-    assert "catalog" in manifest["route_groups"]["factor-family"]
-    assert "catalog" in manifest["route_groups"]["factor"]
-    assert "katex/katex.min.js" in manifest["group_external_scripts"]["catalog"]
+    assert manifest["route_groups"]["factor-family"] == ["factor-catalog-detail"]
+    assert manifest["route_groups"]["factor"] == ["factor-catalog-detail"]
+    assert "catalog" not in manifest["route_groups"]["factor-family"]
+    assert "katex/katex.min.js" in manifest["group_external_scripts"]["factor-catalog-detail"]
+    assert "vendor/highlight/highlight.min.js" in manifest["group_external_scripts"]["factor-catalog-detail"]
+
+
+def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> None:
+    import json
+
+    manifest = json.loads(
+        (ROOT / "server" / "manager" / "web" / "module-manifest.json")
+        .read_text(encoding="utf-8")
+    )
+    factors = (
+        ROOT / "server" / "manager" / "web" / "catalog" / "factors.js"
+    ).read_text(encoding="utf-8")
+    factor_list = (
+        ROOT / "server" / "manager" / "web" / "catalog" / "factor-list.js"
+    ).read_text(encoding="utf-8")
+
+    assert manifest["route_groups"]["factor-families"] == ["factor-catalog-list"]
+    assert manifest["route_groups"]["factors"] == ["factor-catalog-list"]
+    assert manifest["group_external_scripts"].get("factor-catalog-list", []) == []
+    assert "core/highcharts-range-loader.js" not in manifest["groups"]["factor-catalog-list"]
+    assert "catalog/products.js" not in manifest["groups"]["factor-catalog-list"]
+    assert 'load(context, {sets: page === "sets"})' in factors
+    assert 'load(context, {groups: true})' in factors
+    assert "onOpen: () =>" in factors
+    assert "/api/catalog/product-groups" in factors
+    assert "model().subjectGroups(data.groups)" in factor_list
