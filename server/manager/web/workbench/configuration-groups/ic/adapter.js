@@ -113,6 +113,9 @@
       includeStrategyChips: true,
       groupBy: "none",
       inline: true,
+      onOverlay: descriptor => FTTestSettingChips.openDetail(
+        context, state, descriptor,
+      ),
     });
   }
 
