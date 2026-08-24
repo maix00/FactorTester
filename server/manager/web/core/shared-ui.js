@@ -139,6 +139,23 @@
     return button;
   }
 
+  function iconButton(context, symbol, label, action, options = {}) {
+    const translated = context?.t ? context.t(label) : text(label);
+    const button = typeof context?.button === "function"
+      ? context.button("", action, translated)
+      : actionButton("", action, {help: translated});
+    button.type = "button";
+    button.className = ["icon-action-button", options.className || ""]
+      .filter(Boolean).join(" ");
+    button.title = translated;
+    button.setAttribute?.("aria-label", translated);
+    const icon = window.FTIcons?.node?.(symbol);
+    if (icon && typeof button.replaceChildren === "function") {
+      button.replaceChildren(icon);
+    }
+    return button;
+  }
+
   function helpIcon(help, options = {}) {
     if (window.FTHelp?.create) return window.FTHelp.create(help, options);
     const label = help && typeof help === "object"
@@ -153,7 +170,7 @@
   }
 
   window.FTUI = {
-    actionButton, appendRow, code, empty, fieldRows, formatDate, helpIcon, loading,
-    pagedTable, table, text,
+    actionButton, appendRow, code, empty, fieldRows, formatDate, helpIcon, iconButton,
+    loading, pagedTable, table, text,
   };
 })();

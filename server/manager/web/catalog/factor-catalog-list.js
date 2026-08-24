@@ -106,10 +106,26 @@
       onPageChange: value => { tablePage = value; render(); },
       canModify,
       onDelete: item => removeItem(context, page, familyScope, item),
+      onEdit: item => editItem(context, page, familyScope, item),
     });
     function resetAndRender() { tablePage = 1; render(); }
     search.addEventListener("input", resetAndRender);
     render();
+  }
+
+  function editItem(context, page, scope, item) {
+    const ref = page === "families"
+      ? item?.family_ref || item?.factor_family_alias || item?.factor_family_name
+      : item?.factor_ref || item?.factor_alias;
+    if (!ref) {
+      context.showNotice?.(context.t("找不到可编辑的引用"), true);
+      return;
+    }
+    const path = page === "families"
+      ? `/factors/family/${encodeURIComponent(ref)}?mode=edit`
+        + (scope === "public" ? "&visibility=public" : "")
+      : `/factors/factor/${encodeURIComponent(ref)}?mode=edit`;
+    context.navigate(path);
   }
 
   async function removeItem(context, page, scope, item) {

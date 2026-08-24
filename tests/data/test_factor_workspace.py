@@ -267,6 +267,41 @@ def test_generated_workspace_commit_suppresses_recursive_autosync(monkeypatch):
     assert __import__("os").environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC") is None
 
 
+def test_factor_source_change_commits_current_upload_workspace(monkeypatch):
+    observed: list[tuple[str, str]] = []
+    git_state = {
+        "git_enabled": True,
+        "git_current_branch": "upload",
+    }
+    monkeypatch.setattr(
+        factor_workspace,
+        "sync_database_to_workspace",
+        lambda username, branch_mode, clear_existing: {
+            "username": username,
+            "git": git_state,
+            "git_selected_branch": branch_mode,
+        },
+    )
+    monkeypatch.setattr(
+        FactorWorkspaceRepository,
+        "commit_generated",
+        lambda self, message: observed.append((self.username, message)) or "abc1234",
+    )
+    monkeypatch.setattr(
+        FactorWorkspaceRepository,
+        "state",
+        lambda self: {**git_state, "git_current_branch": "upload"},
+    )
+
+    result = factor_workspace.commit_factor_source_change(
+        "default$alice@1", "factor: create Momentum",
+    )
+
+    assert observed == [("default$alice@1", "factor: create Momentum")]
+    assert result["git_commit_sha"] == "abc1234"
+    assert result["git_selected_branch"] == "upload"
+
+
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
     workspace_root = tmp_path / "factor-root"
     public_dir = workspace_root / "public_factors"
