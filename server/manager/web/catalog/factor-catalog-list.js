@@ -90,8 +90,9 @@
       const path = page === "factors"
         ? "/factors/factor/new?mode=create"
         : `/factors/family/new?mode=create${publicMode}`;
-      context.toolbar.append(context.button(label, () => context.navigate(path),
-        context.t("在独立标签页新建")));
+      context.toolbar.append(window.FTFactorList.iconButton(
+        context, label, "plus", () => context.navigate(path),
+      ));
     }
     let tablePage = 1;
     const render = () => window.FTFactorList.render(context, data, results, {

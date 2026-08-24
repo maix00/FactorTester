@@ -9,11 +9,14 @@ global.document = {
       tagName: String(tagName || "").toUpperCase(),
       children: [],
       append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
       addEventListener() {},
       setAttribute() {},
     };
   },
 };
+window.FTIcons = {node(symbol) { return {symbol}; }};
+global.FTIcons = window.FTIcons;
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
@@ -205,8 +208,11 @@ assert.equal(mount.value.children[1].rows.length, 2);
 const deleted = [];
 window.FTUI.actionButton = (label, handler) => ({
   textContent: label,
+  children: [],
   listeners: {click: handler},
   classList: {add() {}},
+  replaceChildren(...items) { this.children = items; },
+  setAttribute() {},
 });
 window.FTFactorList.render(context, data, mount, {
   page: "families", scope: "mine", query: "", groupRefs: ["*"],
@@ -214,6 +220,7 @@ window.FTFactorList.render(context, data, mount, {
 });
 assert.equal(mount.value.children[1].headers.at(-1), "操作");
 const familyAction = mount.value.children[1].rows[0].at(-1);
+assert.equal(familyAction.children[0].symbol, "trash");
 familyAction.listeners.click({stopPropagation() {}});
 assert.deepStrictEqual(deleted, ["family:two"]);
 
