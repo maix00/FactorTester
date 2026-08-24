@@ -221,6 +221,7 @@ window.FTFactorList.render(context, data, mount, {
 assert.equal(mount.value.children[1].headers.at(-1), "操作");
 const familyAction = mount.value.children[1].rows[0].at(-1);
 assert.equal(familyAction.children[0].symbol, "trash");
+assert(familyAction.className.includes("factor-catalog-delete-action"));
 familyAction.listeners.click({stopPropagation() {}});
 assert.deepStrictEqual(deleted, ["family:two"]);
 
