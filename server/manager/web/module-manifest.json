@@ -191,6 +191,7 @@
     ],
     "job-detail-core": [
       "jobs/artifacts.js",
+      "jobs/artifact-query.js",
       "jobs/generation.js",
       "jobs/actions.js",
       "jobs/detail-tabs.js",
@@ -455,6 +456,7 @@
     "research/shared.js",
     "research/workspaces.js",
     "jobs/artifacts.js",
+    "jobs/artifact-query.js",
     "jobs/factor-series-view.js",
     "jobs/ic-result-view.js",
     "test-modules/backtest/results/analysis/api.js",

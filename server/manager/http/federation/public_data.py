@@ -5,23 +5,23 @@ from __future__ import annotations
 import json
 
 from server.manager.http.responses import json_response
-from tools.cli.release.research_reporting.public_research.object_store import (
-    PublicResearchObjectStore,
-)
 from server.manager.services.factor_library_scopes import (
     compose_factor_library_scopes,
 )
+from server.manager.services.job_artifact_catalog import JobArtifactCatalog
+from server.manager.services.job_artifact_query import JobArtifactQueryService
 from server.manager.services.profile_directory import (
     PROFILE_DIRECTORY_PRINCIPAL,
     ProfileDirectoryService,
 )
-from server.manager.services.job_artifact_catalog import JobArtifactCatalog
+from tools.cli.release.research_reporting.public_research.object_store import (
+    PublicResearchObjectStore,
+)
 from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
     is_super_admin_account,
 )
-
 
 VISITOR_PRINCIPAL = "__public_jobs__"
 
@@ -45,7 +45,7 @@ class FederationPublicDataRoutesMixin:
             if not kind or not operation or not principal:
                 raise ValueError("federated public-data request is incomplete")
             if not isinstance(payload, dict):
-                raise ValueError("federated public-data payload must be an object")
+                raise TypeError("federated public-data payload must be an object")
             value = self._public_data_value(
                 kind=kind,
                 operation=operation,
@@ -74,13 +74,26 @@ class FederationPublicDataRoutesMixin:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
         if kind == "research":
             return self._research_data_value(operation, viewer, payload)
-        if kind == "job-artifacts" and operation == "list":
-            return {
-                "artifacts": JobArtifactCatalog(self.state).list(
-                    job_id=str(payload.get("job_id") or ""),
-                    principal=principal,
-                ),
-            }
+        if kind == "job-artifacts":
+            if operation == "list":
+                return {
+                    "artifacts": JobArtifactCatalog(self.state).list(
+                        job_id=str(payload.get("job_id") or ""),
+                        principal=principal,
+                    ),
+                }
+            if operation == "query":
+                query = payload.get("query")
+                if not isinstance(query, dict):
+                    raise ValueError("artifact query must be an object")
+                return {
+                    "data": JobArtifactQueryService(self.state).query(
+                        job_id=str(payload.get("job_id") or ""),
+                        name=str(payload.get("name") or ""),
+                        principal=principal,
+                        request=query,
+                    ),
+                }
         if kind == "catalog":
             if operation == "profiles":
                 return {

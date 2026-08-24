@@ -21,11 +21,42 @@
     return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
   }
 
-  async function loadPayload(context, artifact, jobID, artifactQuery) {
-    const response = await FTJobArtifacts.fetch(
-      context, artifactPath(jobID, artifact, artifactQuery),
+  function artifactDataPath(state, name) {
+    return artifactPath(
+      state.options.jobID, state.artifactsByName.get(name),
+      state.options.artifactQuery || "",
     );
-    return JSON.parse(await response.text());
+  }
+
+  function chartQueryMode(name) {
+    return ["equity_curve_data", "returns_over_time_data"].includes(name)
+      ? "series" : "time_rows";
+  }
+
+  async function ensureChartPayloads(context, state, names) {
+    const pending = [...new Set(names)].filter(name => (
+      state.artifactsByName.has(name)
+      && !state.chartPayloads[name]
+      && !state.chartLoading.has(name)
+    ));
+    if (!pending.length) return;
+    pending.forEach(name => state.chartLoading.add(name));
+    await Promise.all(pending.map(async name => {
+      try {
+        const source = window.FTJobArtifactQuery.timeSource(
+          context, artifactDataPath(state, name),
+          {mode: chartQueryMode(name), maxPoints: 800},
+        );
+        const payload = await source.load();
+        if (payload) state.chartPayloads[name] = payload;
+        delete state.chartErrors[name];
+      } catch (error) {
+        if (error?.name !== "AbortError") state.chartErrors[name] = error;
+      } finally {
+        state.chartLoading.delete(name);
+      }
+    }));
+    if (state.target?.isConnected !== false) renderLoaded(context, state.target, state);
   }
 
   function message(context, value) {
@@ -206,6 +237,61 @@
     return table.shell;
   }
 
+  function remoteDataTable(
+    context, state, artifact, pageKey, request = {}, options = {},
+  ) {
+    const target = document.createElement("div");
+    target.className = "backtest-result-lazy-target";
+    const page = Number(state.tablePages[pageKey] || 1);
+    const fingerprint = JSON.stringify({artifact, page, request});
+    const cached = state.remoteTableData.get(pageKey);
+    const error = state.remoteTableErrors.get(fingerprint);
+    const ready = cached?.fingerprint === fingerprint ? cached.data : null;
+    if (error) target.append(message(context, error.message || String(error)));
+    else if (!ready) {
+      target.append(window.FTUI.loading(context.t("正在读取当前页…")));
+      if (!state.remoteTableLoading.has(fingerprint)) {
+        state.remoteTableLoading.add(fingerprint);
+        queueMicrotask(async () => {
+          try {
+            let source = state.tableSources.get(artifact);
+            if (!source) {
+              source = window.FTJobArtifactQuery.tableSource(
+                context, artifactDataPath(state, artifact), {pageSize: 20},
+              );
+              state.tableSources.set(artifact, source);
+            }
+            const data = await source.page(page, request);
+            state.remoteTableData.set(pageKey, {fingerprint, data});
+            state.remoteTableErrors.delete(fingerprint);
+          } catch (loadError) {
+            state.remoteTableErrors.set(fingerprint, loadError);
+          } finally {
+            state.remoteTableLoading.delete(fingerprint);
+          }
+          if (state.target?.isConnected !== false) {
+            renderLoaded(context, state.target, state);
+          }
+        });
+      }
+    } else {
+      target.append(window.FTJobArtifactQuery.pagedTable(context, ready, {
+        className: "backtest-domain-table",
+        renderCell(value) {
+          return value && typeof value === "object"
+            ? window.FTUI.code(value)
+            : window.FTRichText.inline(String(value ?? ""), context);
+        },
+        onPageChange(next) {
+          state.tablePages[pageKey] = next;
+          state.remoteTableData.delete(pageKey);
+          renderLoaded(context, state.target, state);
+        },
+      }));
+    }
+    return {element: target, data: ready};
+  }
+
   function tabContent(context, state) {
     if (state.customAnalyses) {
       const customID = state.customAnalyses.tabIDFor(state.activeTab);
@@ -259,29 +345,44 @@
     return message(context, "暂无结果");
   }
 
-  async function ensurePayloads(context, state, names) {
+  async function queryEventPayloads(context, state, names, range = null) {
+    const output = {};
+    await Promise.all(names.map(async name => {
+      let source = state.eventSources.get(name);
+      if (!source) {
+        source = window.FTJobArtifactQuery.timeSource(
+          context, artifactDataPath(state, name), {
+            mode: "time_rows", maxPoints: 200,
+          },
+        );
+        state.eventSources.set(name, source);
+      }
+      const request = range ? {min: range.min, max: range.max, maxPoints: 200} : {
+        maxPoints: 200,
+      };
+      const data = await source.load(request);
+      if (data) output[name] = data;
+    }));
+    return output;
+  }
+
+  async function ensureEventPayloads(context, state, names) {
     const pending = [...new Set(names)].filter(name => (
-      state.artifactsByName.has(name) && !state.payloads[name] && !state.loading.has(name)
+      state.artifactsByName.has(name) && !state.eventLoading.has(name)
     ));
     if (!pending.length) return;
-    pending.forEach(name => state.loading.add(name));
-    await Promise.all(pending.map(async name => {
-      try {
-        state.payloads[name] = await loadPayload(
-          context, state.artifactsByName.get(name), state.options.jobID,
-          state.options.artifactQuery || "",
-        );
-        delete state.errors[name];
-      } catch (error) {
-        state.errors[name] = error;
-      } finally {
-        state.loading.delete(name);
-      }
-    }));
-    state.model = window.FTBacktestResultModel.build(
-      state.payloads, state.model.summary, [...state.artifactsByName.keys()],
-      state.options.resultDeclarations || [],
-    );
+    pending.forEach(name => state.eventLoading.add(name));
+    try {
+      Object.assign(
+        state.eventPayloads,
+        await queryEventPayloads(context, state, pending),
+      );
+      pending.forEach(name => delete state.eventErrors[name]);
+    } catch (error) {
+      pending.forEach(name => { state.eventErrors[name] = error; });
+    } finally {
+      pending.forEach(name => state.eventLoading.delete(name));
+    }
     if (state.target?.isConnected !== false) renderLoaded(context, state.target, state);
   }
 
@@ -297,19 +398,39 @@
       state.model.strategies, state.strategySelection,
     );
     state.rerender = () => renderLoaded(context, target, state);
-    state.ensurePayloads = names => ensurePayloads(context, state, names);
+    state.ensureChartPayloads = names => ensureChartPayloads(context, state, names);
+    state.ensureEventPayloads = names => ensureEventPayloads(context, state, names);
+    state.chartSource = (artifact, definition) => {
+      const key = `${artifact}:${definition.view || definition.viewer || "series"}`;
+      if (!state.chartSources.has(key)) {
+        state.chartSources.set(key, window.FTJobArtifactQuery.timeSource(
+          context, artifactDataPath(state, artifact), {
+            mode: chartQueryMode(artifact), maxPoints: 800,
+          },
+        ));
+      }
+      return state.chartSources.get(key);
+    };
     state.openEventFlow = timestamp => {
       const view = window.FTBacktestAnalysisUI.dialog(context, "交易事件", "");
       view.body.append(window.FTUI.loading(context.t("正在读取交易事件…")));
       const names = window.FTBacktestEventFlow.coreSources
         .map(([name]) => name).filter(name => state.artifactsByName.has(name));
-      void ensurePayloads(context, state, names).then(() => {
-        if (view.root.isConnected) window.FTBacktestEventFlow.render(
-          context, view.body, state.payloads, state.strategyScope, {timestamp},
-        );
-      });
+      const exact = Number(timestamp);
+      const range = Number.isFinite(exact) ? {min: exact, max: exact} : null;
+      void queryEventPayloads(context, state, names, range)
+        .then(payloads => {
+          if (view.root.isConnected) window.FTBacktestEventFlow.render(
+            context, view.body, payloads, state.strategyScope, {timestamp},
+          );
+        })
+        .catch(error => {
+          if (view.root.isConnected) view.body.replaceChildren(
+            message(context, error?.message || String(error)),
+          );
+        });
     };
-    state.helpers = {dataTable, message};
+    state.helpers = {dataTable, message, remoteDataTable};
     const customTabs = state.customAnalyses?.tabs({
       onDeleted: () => {
         state.activeTab = state.model.tabs[0] || "overview";
@@ -375,7 +496,13 @@
           options.resultDeclarations || [],
         );
         renderLoaded(context, target, {
-          model, payloads: {}, artifactsByName, errors: {}, loading: new Set(),
+          model, artifactsByName,
+          chartPayloads: {}, chartErrors: {}, chartLoading: new Set(),
+          chartSources: new Map(),
+          eventPayloads: {}, eventErrors: {}, eventLoading: new Set(),
+          eventSources: new Map(),
+          tableSources: new Map(), remoteTableData: new Map(),
+          remoteTableErrors: new Map(), remoteTableLoading: new Set(),
           tablePages: {},
           activeTab: options.customAnalyses?.state?.requestedKey
             || model.tabs[0] || "summary",
