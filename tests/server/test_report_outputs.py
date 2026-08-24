@@ -779,6 +779,9 @@ def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     data = json.loads(next(item.raw for item in artifacts if item.name == "ic_holding_half_life_data"))
     assert data["artifact_kind"] == "ic_holding_half_life"
     assert data["rows"][0]["exponential_half_life_seconds"] == 120.0
+    assert len(data["rows"][0]["fit_points"]) == 201
+    assert data["rows"][0]["fit_points"][0]["horizon_seconds"] == 60.0
+    assert abs(data["rows"][0]["fit_points"][-1]["oriented_mean_ic"] - 0.02) < 1e-12
     assert data["rows"][0]["baseline_horizon"] == "MIN1"
     assert data["inference"].startswith("descriptive_only")
     assert "may overlap" in data["horizon_overlap_note"]

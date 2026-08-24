@@ -123,32 +123,19 @@ def render_holding_half_life_svg(
                     baseline / 2.0, color="#94a3b8", linestyle="--",
                     linewidth=0.9, label=f"基准 IC 一半 = {baseline / 2.0:.4f}",
                 )
-            slope = row.get("exponential_log_decay_slope_per_second")
-            intercept = row.get("exponential_log_decay_intercept")
-            if x_values and slope is not None and intercept is not None:
-                slope_value = float(slope)
-                intercept_value = float(intercept)
-                if slope_value < 0:
-                    x_min, x_max = min(x_values), max(x_values)
-                    grid = [x_min + (x_max - x_min) * index / 100.0 for index in range(101)]
-                    direction = float(row.get("expected_direction") or 1)
-                    curve = [direction * math.exp(intercept_value + slope_value * value * 3600.0) for value in grid]
-                    axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="指数衰减拟合")
-            smooth_fit = row.get("smooth_fit")
-            if isinstance(smooth_fit, dict) and x_values:
-                grid = [x_values[0] + (x_values[-1] - x_values[0]) * index / 200.0 for index in range(201)]
-                amplitude = float(smooth_fit.get("amplitude") or 0.0)
-                decay = float(smooth_fit.get("decay_per_day") or 0.0)
-                frequency = float(smooth_fit.get("frequency_per_day") or 0.0)
-                phase = float(smooth_fit.get("phase") or 0.0)
-                offset = float(smooth_fit.get("offset") or 0.0)
-                origin = x_values[0]
-                curve = [
-                    amplitude * math.exp(-decay * ((value - origin) / 24.0))
-                    * math.cos(frequency * ((value - origin) / 24.0) + phase) + offset
-                    for value in grid
-                ]
-                axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="阻尼振荡指数拟合")
+            fit_points = [
+                item for item in row.get("fit_points") or ()
+                if isinstance(item, dict)
+            ]
+            if fit_points:
+                grid = [float(item["horizon_seconds"]) / 3600.0 for item in fit_points]
+                curve = [float(item["oriented_mean_ic"]) for item in fit_points]
+                fit_label = (
+                    "阻尼振荡指数拟合"
+                    if row.get("selected_model") == "damped_oscillatory_exponential"
+                    else "指数衰减拟合"
+                )
+                axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label=fit_label)
             delay = row.get("entry_delay_bars")
             status = str(row.get("exponential_status") or "not_estimable")
             half_life = row.get("exponential_half_life_seconds")

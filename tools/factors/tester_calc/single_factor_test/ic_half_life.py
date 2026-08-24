@@ -163,6 +163,61 @@ def fit_forward_ic_half_life(
     return result
 
 
+def evaluate_forward_ic_decay_curve(
+    fitted: dict[str, Any],
+    *,
+    minimum_seconds: float,
+    maximum_seconds: float,
+    point_count: int = 201,
+) -> list[dict[str, float]]:
+    """Evaluate the selected forward-IC model on one canonical time grid.
+
+    The returned values use the same direction-aligned axis as the fitter.
+    Report SVGs and interactive clients consume these points directly so the
+    model formula has exactly one implementation.
+    """
+
+    start = _finite_float(minimum_seconds)
+    stop = _finite_float(maximum_seconds)
+    count = max(2, int(point_count))
+    if start is None or stop is None or stop < start:
+        return []
+    grid = np.linspace(start, stop, count)
+    selected = str(fitted.get("selected_model") or "")
+    if selected == "damped_oscillatory_exponential":
+        smooth = fitted.get("smooth_fit")
+        if not isinstance(smooth, dict):
+            return []
+        values = [
+            _finite_float(smooth.get(key))
+            for key in (
+                "amplitude", "decay_per_day", "frequency_per_day",
+                "phase", "offset",
+            )
+        ]
+        if any(value is None for value in values):
+            return []
+        amplitude, decay, frequency, phase, offset = values
+        elapsed_days = (grid - start) / 86400.0
+        curve = (
+            amplitude * np.exp(-decay * elapsed_days)
+            * np.cos(frequency * elapsed_days + phase) + offset
+        )
+    elif selected == "exponential":
+        slope = _finite_float(fitted.get("log_decay_slope_per_second"))
+        intercept = _finite_float(fitted.get("log_decay_intercept"))
+        if slope is None or intercept is None or slope >= 0:
+            return []
+        curve = np.exp(intercept + slope * grid)
+    else:
+        return []
+    return [
+        {"horizon_seconds": float(seconds), "oriented_mean_ic": float(value)}
+        for seconds, value in zip(grid, curve)
+        if math.isfinite(float(value))
+    ]
+
+
 def fit_ic_series_ar1_half_life(
     values: Iterable[Any],
     *,
