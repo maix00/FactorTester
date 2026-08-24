@@ -16,6 +16,7 @@ class Element {
 
 global.Node = Element;
 global.document = {createElement: tagName => new Element(tagName)};
+global.navigator.clipboard = {async writeText(value) { navigator.copied = value; }};
 global.window = {};
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
@@ -99,6 +100,14 @@ const data = {
 };
 
 (async () => {
+  const sourceView = window.FTFactorDetailShared.source(context, {
+    source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+  });
+  assert.strictEqual(sourceView.children[0].children[0].textContent, "Python 源码");
+  assert.match(sourceView.children[1].children[0].textContent, /MmRateOfChg/);
+  await sourceView.children[0].children[1].listeners.click();
+  assert.match(navigator.copied, /FactorFamily/);
+
   await window.FTFactorDetails.factorDetail(
     context, data, factorRef, async () => {
       throw new Error("native catalog is unavailable");

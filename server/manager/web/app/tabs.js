@@ -304,19 +304,23 @@
       const detailTabID = detailTabIDForPath(path);
       const nativeDetail = Boolean(detailTabID);
       const nativeReference = pathname === "/reference";
+      const testConfiguration = pathname === "/ic-test" || pathname === "/backtest";
       if (embeddedPresentation
         && (path.startsWith("/research/") || path.startsWith("/jobs/")
-            || path.startsWith("/ic-test") || path.startsWith("/backtest")
             || path.startsWith("/factor-series") || nativeDetail || nativeReference)
+        && !testConfiguration
         && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;
       }
       return openTab(path, {
         id: detailTabID || undefined,
-        closable: nativeDetail,
-        forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")
-          || path.startsWith("/factor-series") || path.startsWith("/docs")
+        // Omit the option for ordinary routes. Passing false marks a tab as
+        // pinned and hides it from the opened-tab rail, which broke test
+        // configuration tabs even though forceNew created distinct entries.
+        closable: nativeDetail ? true : undefined,
+        forceNew: testConfiguration || path.startsWith("/factor-series")
+          || path.startsWith("/docs")
           || path.startsWith("/sqlite-web") || path.startsWith("/manager")
           || path.startsWith("/admin/server-operations"),
       });
