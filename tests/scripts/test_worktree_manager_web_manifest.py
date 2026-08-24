@@ -529,6 +529,9 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
+    assert 'for (let attempt = 0; attempt < 2; attempt += 1)' in loader
+    assert 'retry=${attempt}' in loader
+    assert 'script.remove()' in loader
 
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-previews"]
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-ic"]
