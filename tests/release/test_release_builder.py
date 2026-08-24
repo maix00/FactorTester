@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import plistlib
 import subprocess
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from scripts.release import assets as release_assets
+from scripts.release import build as release_build
+from scripts.release import embed_runtime as runtime_refresh
 from scripts.release.assets import (
     build_app_archive,
     build_installer_dmg,
     embed_client_runtime,
 )
-from scripts.release import build as release_build
-from scripts.release import embed_runtime as runtime_refresh
 from scripts.release.build import build_release, validate_embedded_sparkle_key
 from scripts.release.manifest import _kind, create_manifest
 from scripts.release.source_checkout import clean_worktree
@@ -567,14 +567,10 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     app = tmp_path / "FTClient.app"
     (app / "Contents/Resources").mkdir(parents=True)
 
-    class FakeEnvironment:
-        def __init__(self, **kwargs):
-            pass
-
-        def create(self, path):
-            (path / "bin").mkdir(parents=True)
-            (path / "bin/python").write_text("")
-            (path / "bin/pyinstaller").write_text("")
+    def fake_environment(path):
+        (path / "bin").mkdir(parents=True)
+        (path / "bin/python").write_text("")
+        (path / "bin/pyinstaller").write_text("")
 
     def fake_run(command, **kwargs):
         if "pyinstaller" in Path(command[0]).name:
@@ -591,7 +587,9 @@ def test_embedded_runtime_writes_internal_hash_receipt(
             destination.chmod(0o755)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(release_assets.venv, "EnvBuilder", FakeEnvironment)
+    monkeypatch.setattr(
+        release_assets, "_create_runtime_environment", fake_environment
+    )
     monkeypatch.setattr(release_assets.subprocess, "run", fake_run)
     monkeypatch.setattr(
         release_assets, "validate_client_package_layout", lambda _repo: None
@@ -621,6 +619,27 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     resources = app / "Contents/Resources/FactorTester"
     assert not (resources / "sources/Tiger/__pycache__").exists()
     assert not any(path.suffix == ".pyc" for path in resources.rglob("*"))
+
+
+def test_frozen_publisher_creates_venv_with_host_python(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(release_assets.sys, "frozen", True, raising=False)
+    monkeypatch.setenv("FTCLIENT_RELEASE_PYTHON", "/host/python3")
+    monkeypatch.setattr(
+        release_assets.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    environment = tmp_path / "venv"
+    release_assets._create_runtime_environment(environment)
+
+    assert calls == [
+        (["/host/python3", "-m", "venv", str(environment)], {"check": True})
+    ]
 
 
 def test_app_archive_is_deterministic_and_preserves_executable(
