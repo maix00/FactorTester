@@ -45,6 +45,14 @@ assert.equal(
   "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc&label=%E8%BF%90%E8%A1%8C%E9%85%8D%E7%BD%AE&server_id=public-1",
 );
 assert.equal(
+  page.jobRouteFor({job_id: "job:abc", service_port: 8000, server_id: "remote-main"}),
+  "/jobs/8000/abc?server_id=remote-main",
+);
+assert.equal(
+  page.jobRouteFor({job_id: "abc", server_id: "remote-main"}),
+  "/jobs/abc?server_id=remote-main",
+);
+assert.equal(
   page.resourceEndpoint({detailFields: [
     {name: "publication_id", value: "local:record:branch"},
     {name: "resource_id", value: "a".repeat(24)},

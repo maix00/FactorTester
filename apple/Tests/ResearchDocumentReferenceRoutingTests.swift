@@ -69,6 +69,30 @@ final class ResearchDocumentReferenceRoutingTests: XCTestCase {
         )
     }
 
+    func testJobRouteAcceptsServerIdentityWithoutWorkerPort() {
+        let reference = ResearchDocumentTypedLink(
+            kind: "job",
+            targetRef: "job:shared",
+            label: "任务",
+            componentID: "entry-2"
+        )
+        let value = ResearchDocumentBinding(
+            id: "binding-entry-2",
+            componentID: "entry-2",
+            kind: "job",
+            targetRef: "job:shared",
+            label: "任务",
+            detailFields: [.init(name: "server_id", value: "remote-main")]
+        )
+
+        XCTAssertEqual(
+            ResearchDocumentReferenceBindingResolver.jobRoute(
+                for: reference, binding: value
+            ),
+            .init(jobID: "shared", port: nil, serverID: "remote-main")
+        )
+    }
+
     func testProfileRouteUsesOnlyExplicitProfileReference() {
         let reference = ResearchDocumentTypedLink(
             kind: "profile",

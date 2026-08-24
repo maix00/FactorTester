@@ -123,19 +123,29 @@
       const reference = new URL(target);
       const type = reference.hostname.replaceAll("_", "-");
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
-      const binding = (state.report?.bindings || []).find(item => item?.target_ref === target);
+      // Bindings store the typed target (for example ``job:<id>``), while
+      // the URL path is percent-encoded. Resolve against both forms so the
+      // binding metadata remains available for federated Job routing.
+      const binding = (state.report?.bindings || []).find(item => (
+        item?.target_ref === value || item?.target_ref === target
+      ));
       const port = Number(binding?.data?.port);
+      const serverID = String(
+        binding?.data?.server_id || binding?.data?.execution_server_id || "",
+      ).trim();
       const jobPrefix = Number.isInteger(port) && port > 0 && port <= 65_535
         ? `${port}/` : "";
       // When the Web renderer is hosted inside FTClient, typed-object links
       // stay in the native tab stack. Standalone Web uses its own route tabs.
       const nativeHandler = window.webkit?.messageHandlers?.researchReference;
       if (nativeHandler) {
-        const detailFields = binding?.data && typeof binding.data === "object"
-          ? (Object.prototype.hasOwnProperty.call(binding.data, "port")
-            ? {port: binding.data.port}
-            : {})
-          : {};
+        const detailFields = {};
+        if (binding?.data && typeof binding.data === "object") {
+          if (Object.prototype.hasOwnProperty.call(binding.data, "port")) {
+            detailFields.port = binding.data.port;
+          }
+          if (serverID) detailFields.server_id = serverID;
+        }
         if (type === "file") {
           detailFields.publication_id = state.activePublicationID || "";
           detailFields.resource_id = value;
@@ -151,7 +161,17 @@
       if (!state.session && showPublicReference(target, type, value, context)) return;
       if (["job", "task"].includes(type) && value) {
         const jobID = value.replace(/^(?:job|research-job|task):/, "");
-        return navigate(`/jobs/${jobPrefix}${encodeURIComponent(jobID)}`);
+        const query = serverID
+          ? `?server_id=${encodeURIComponent(serverID)}` : "";
+        return navigate(
+          `/jobs/${jobPrefix}${encodeURIComponent(jobID)}${query}`,
+        );
+      }
+      if (type === "evidence" && value) {
+        const route = window.FTReferencePage?.routeFor?.(
+          "evidence", value, binding?.label || labelOverride || value, serverID,
+        ) || `/reference?kind=evidence&target=${encodeURIComponent(value)}`;
+        return navigate(route);
       }
       if (type === "factor-family" && value) return navigate(`/factors/family/${encodeURIComponent(value)}`);
       if (type === "factor-set" && value) return navigate(`/factors/set/${encodeURIComponent(value)}`);

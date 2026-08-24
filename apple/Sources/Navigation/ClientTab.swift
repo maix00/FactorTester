@@ -392,6 +392,7 @@ struct ClientTab: Identifiable {
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
         let kind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind)
         let referencePort = servicePort(in: reference.detailFields)
+        let referenceServerID = serviceServerID(in: reference.detailFields)
         let route: (page: String, symbol: String, target: String)?
         switch kind.replacingOccurrences(of: "_", with: "-") {
         case "factor-family":
@@ -430,8 +431,25 @@ struct ClientTab: Identifiable {
                     target: reference.targetRef,
                     label: reference.label,
                     systemImage: "doc.text.magnifyingglass",
-                    path: "/jobs/\(referencePort)/\(encodedJob)",
-                    servicePort: referencePort
+                    path: jobReferencePath(
+                        port: referencePort, job: encodedJob,
+                        serverID: referenceServerID
+                    ),
+                    servicePort: referencePort,
+                    serviceServerID: referenceServerID
+                )
+            }
+            if !referenceServerID.isEmpty {
+                return referenceWeb(
+                    kind: kind,
+                    target: reference.targetRef,
+                    label: reference.label,
+                    systemImage: "doc.text.magnifyingglass",
+                    path: jobReferencePath(
+                        port: nil, job: encodedJob,
+                        serverID: referenceServerID
+                    ),
+                    serviceServerID: referenceServerID
                 )
             }
             route = ("/jobs/", "doc.text.magnifyingglass", value)
@@ -484,6 +502,11 @@ struct ClientTab: Identifiable {
                 URLQueryItem(name: "details", value: detailPayload)
             )
         }
+        if !referenceServerID.isEmpty {
+            components.queryItems?.append(
+                URLQueryItem(name: "server_id", value: referenceServerID)
+            )
+        }
         let path = components.string ?? "/reference"
         return referenceWeb(
             kind: kind,
@@ -491,7 +514,8 @@ struct ClientTab: Identifiable {
             label: displayLabel,
             systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
             path: path,
-            servicePort: referencePort
+            servicePort: referencePort,
+            serviceServerID: referenceServerID
         )
     }
 
@@ -504,12 +528,14 @@ struct ClientTab: Identifiable {
         systemImage: String,
         path: String,
         servicePort: Int? = nil,
+        serviceServerID: String = "",
     ) -> ClientTab {
         .web(
             id: referenceIdentity(
                 kind: kind,
                 target: target,
-                servicePort: servicePort
+                servicePort: servicePort,
+                serviceServerID: serviceServerID
             ),
             title: label,
             titleKey: nil,
@@ -557,17 +583,22 @@ struct ClientTab: Identifiable {
     private static func referenceIdentity(
         kind: String,
         target: String,
-        servicePort: Int?
+        servicePort: Int?,
+        serviceServerID: String = ""
     ) -> String {
         let canonicalKind = ResearchDocumentReferenceCatalog.canonicalKind(kind)
         let canonicalTarget = canonicalReferenceTarget(
             kind: canonicalKind,
             target: target
         )
-        return scopedIdentity(
+        let identity = scopedIdentity(
             "reference:\(canonicalKind):\(canonicalTarget)",
             servicePort: canonicalKind == "run_spec" ? nil : servicePort
         )
+        guard canonicalKind != "run_spec", !serviceServerID.isEmpty else {
+            return identity
+        }
+        return "\(identity):server:\(serviceServerID)"
     }
 
     private static func canonicalReferenceTarget(
@@ -603,6 +634,24 @@ struct ClientTab: Identifiable {
         guard let raw = fields.first(where: { $0.name == "port" })?.value
         else { return nil }
         return validServicePort(Int(raw))
+    }
+
+    private static func serviceServerID(
+        in fields: [ResearchDocumentReferenceField]
+    ) -> String {
+        fields.first(where: { $0.name == "server_id" })?.value
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func jobReferencePath(
+        port: Int?, job: String, serverID: String
+    ) -> String {
+        let path = port.map { "/jobs/\($0)/\(job)" }
+            ?? "/jobs/\(job)"
+        guard !serverID.isEmpty else { return path }
+        var components = URLComponents(string: path) ?? URLComponents()
+        components.queryItems = [URLQueryItem(name: "server_id", value: serverID)]
+        return components.string ?? path
     }
 
     private static func servicePort(from path: String) -> Int? {

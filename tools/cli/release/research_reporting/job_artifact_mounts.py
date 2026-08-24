@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .authoring.inline_links import typed_link_list
 from .authoring.special_section_operation import add_special_section_operation
 from .job_artifact_tables import table_content
-
 
 _IMAGE_TYPES = {
     "image/svg+xml": ".svg", "image/png": ".png",
@@ -48,6 +47,7 @@ def mount_operations(
     component_id = _component_id(job_id, name, digest)
     if component_exists(component_id):
         return _mounted(name, component_id, kind, digest), []
+    fragment_id = _fragment_component_id(job_id, name, digest)
     if kind == "image":
         asset = _image_asset(job_id, name, raw, metadata, digest)
         operations: list[dict[str, Any]] = [{"op": "asset", "asset": asset}]
@@ -60,21 +60,33 @@ def mount_operations(
             ),
         )
     bindings = provenance_bindings(job_id, detail, digest)
-    operations.append({
+    title = str(metadata.get("description") or name)
+    operations.extend((add_special_section_operation(
+        component_id=fragment_id,
+        title=title,
+        parent_id=parent_id,
+        body=_report_body(job_id, name, bindings),
+        display_kind="evidence_fragment",
+        bindings=bindings,
+    ), {
         "op": "add", "component_id": component_id, "kind": kind,
-        "title": str(metadata.get("description") or name), "parent_id": parent_id,
-        "body": _report_body(job_id, name, bindings), "content": content,
-        "display_kind": "",
-        "bindings": bindings,
-    })
-    return _mounted(name, component_id, kind, digest), operations
+        "title": title, "parent_id": fragment_id, "body": "",
+        "content": content, "display_kind": "", "bindings": [],
+    }))
+    return _mounted(
+        name, component_id, kind, digest, fragment_id=fragment_id,
+    ), operations
 
 
 def result_container_operation(
     *, component_exists: Callable[[str], bool], parent_id: str, job_id: str,
     detail: dict[str, Any], status: str,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Return the one stable, collapsible report container owned by a Job."""
+    """Return a Job's test-result Evidence subsection.
+
+    ``test_result`` is a concrete Evidence-section type. Its children are
+    ``evidence_fragment`` subsections, not a second generic Evidence wrapper.
+    """
     component_id = result_component_id(job_id)
     if component_exists(component_id):
         return component_id, []
@@ -102,8 +114,17 @@ def artifact_url(job_id: str, name: str) -> str:
     return f"factortester-artifact://jobs/{job_id}/{name}"
 
 
-def _mounted(name: str, component_id: str, kind: str, digest: str) -> dict[str, Any]:
-    return {"name": name, "component_id": component_id, "kind": kind, "content_hash": digest}
+def _mounted(
+    name: str, component_id: str, kind: str, digest: str, *,
+    fragment_id: str = "",
+) -> dict[str, Any]:
+    value = {
+        "name": name, "component_id": component_id, "kind": kind,
+        "content_hash": digest,
+    }
+    if fragment_id:
+        value["evidence_fragment_id"] = fragment_id
+    return value
 
 
 def _image_asset(job_id: str, name: str, raw: bytes, metadata: dict[str, Any], digest: str) -> dict[str, str]:
@@ -154,14 +175,14 @@ def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> lis
             "kind": "evidence",
             "target_ref": canonical_ref,
             "label": canonical_title,
-            "data": {"content_hash": digest},
+            "data": _job_reference_data(detail, content_hash=digest),
         }]
     return [{
         "binding_id": f"job-{job_id}-{digest[:12]}",
         "kind": "job",
         "target_ref": f"job:{job_id}",
         "label": "测试任务",
-        "data": {"content_hash": digest},
+        "data": _job_reference_data(detail, content_hash=digest),
     }]
 
 
@@ -178,7 +199,7 @@ def result_bindings(
             "kind": "evidence",
             "target_ref": canonical_ref,
             "label": canonical_title,
-            "data": {},
+            "data": _job_reference_data(detail),
         }]
     else:
         bindings = [{
@@ -186,7 +207,7 @@ def result_bindings(
             "kind": "job",
             "target_ref": f"job:{job_id}",
             "label": "测试任务",
-            "data": {},
+            "data": _job_reference_data(detail),
         }]
     research = (
         detail.get("research_binding")
@@ -250,6 +271,13 @@ def _component_id(job_id: str, name: str, digest: str) -> str:
     return (raw[:104] + "-" + digest[:16])[:128]
 
 
+def _fragment_component_id(job_id: str, name: str, digest: str) -> str:
+    raw = _SAFE_NAME.sub(
+        "-", f"job-{job_id}-evidence-{name}",
+    ).strip("-")
+    return (raw[:104] + "-" + digest[:16])[:128]
+
+
 def _mime(metadata: dict[str, Any]) -> str:
     return str(metadata.get("content_type") or "").split(";", 1)[0].lower()
 
@@ -257,3 +285,64 @@ def _mime(metadata: dict[str, Any]) -> str:
 def _filename(name: str, metadata: dict[str, Any]) -> str:
     value = Path(str(metadata.get("file_name") or name)).name
     return value if value and value not in {".", ".."} else name + _IMAGE_TYPES.get(_mime(metadata), "")
+
+
+def _job_reference_data(
+    detail: dict[str, Any], *, content_hash: str = "",
+) -> dict[str, str]:
+    """Return stable route metadata for a report's Job hyperlink."""
+    candidates = _detail_candidates(detail)
+    data: dict[str, str] = {}
+    if content_hash:
+        data["content_hash"] = content_hash
+    server_id = _first_text(candidates, (
+        "execution_server_id", "server_id", "storage_server_id",
+    ))
+    port = _first_port(candidates, (
+        "execution_port", "port", "service_port",
+    ))
+    if server_id:
+        data["server_id"] = server_id
+    if port:
+        data["port"] = str(port)
+    return data
+
+
+def _detail_candidates(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    queue: list[Any] = [detail]
+    while queue:
+        value = queue.pop(0)
+        if not isinstance(value, dict) or value in candidates:
+            continue
+        candidates.append(value)
+        for key in ("task_detail", "job", "server_context"):
+            child = value.get(key)
+            if isinstance(child, dict):
+                queue.append(child)
+    return candidates
+
+
+def _first_text(
+    candidates: list[dict[str, Any]], keys: tuple[str, ...],
+) -> str:
+    for candidate in candidates:
+        for key in keys:
+            value = str(candidate.get(key) or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _first_port(
+    candidates: list[dict[str, Any]], keys: tuple[str, ...],
+) -> int:
+    for candidate in candidates:
+        for key in keys:
+            try:
+                value = int(candidate.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= value <= 65_535:
+                return value
+    return 0
