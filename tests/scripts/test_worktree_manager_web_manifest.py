@@ -1991,3 +1991,15 @@ def test_factor_details_render_latex_and_factor_set_members_open() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
+    import json
+
+    manifest = json.loads(
+        (ROOT / "server" / "manager" / "web" / "module-manifest.json")
+        .read_text(encoding="utf-8")
+    )
+    assert "catalog" in manifest["route_groups"]["factor-family"]
+    assert "catalog" in manifest["route_groups"]["factor"]
+    assert "katex/katex.min.js" in manifest["group_external_scripts"]["catalog"]

@@ -13,7 +13,7 @@
     "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
     "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
     "job-detail-input": ["katex/katex.min.js"],
-    "catalog": ["vendor/highcharts/highstock.min.js"],
+    "catalog": ["vendor/highcharts/highstock.min.js", "katex/katex.min.js"],
     "research": ["vendor/cytoscape/cytoscape.min.js"],
     "profile": []
   },
