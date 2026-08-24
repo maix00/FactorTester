@@ -56,7 +56,7 @@
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       legend: {enabled: true},
-      xAxis: {type: "datetime", ordinal: true},
+      xAxis: window.FTChartTimeline.observedTimeAxis(),
       yAxis: [{title: {text: yTitle}, opposite: false}],
       tooltip: {shared: true, valueDecimals: kind === "currency" ? 2 : 4, valueSuffix: format.suffix},
       plotOptions: {series: {
