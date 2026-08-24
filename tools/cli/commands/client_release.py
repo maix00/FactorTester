@@ -3,30 +3,17 @@
 from __future__ import annotations
 
 import json
-from importlib.resources import files
-from pathlib import Path
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
+from importlib.resources import files
+from pathlib import Path
 from urllib.error import URLError
 
 import click
 
-from tools.cli.core.errors import friendly_errors
-from tools.cli.release.profile import (
-    load_profile_root,
-    load_release_inputs,
-    load_update_inputs,
-)
-from tools.cli.release.transaction import ClientReleaseStore
-from tools.cli.release.bundle_runtime import activate_bundled_runtime
-from tools.cli.release.locations import default_client_root, validate_client_root
-from tools.cli.release.app_update_control import dispatch_app_update, read_status
-from tools.cli.release.client_release_bundle import inspect_client_release_bundle
-from tools.cli.manager.client import ManagerClient
-from tools.cli.manager.config import (
-    ManagerConfig,
-    ManagerCredentialStore,
-)
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_catalog import client_catalog
 from tools.cli.commands.client_profile import client_profile, profile_factor_worktree
@@ -41,7 +28,23 @@ from tools.cli.commands.client_profile_revision import (
 )
 from tools.cli.commands.client_research import client_research
 from tools.cli.commands.strategy_profile import register_strategy_profile_commands
+from tools.cli.core.errors import friendly_errors
 from tools.cli.local_sources import default_local_sources_root
+from tools.cli.manager.client import ManagerClient
+from tools.cli.manager.config import (
+    ManagerConfig,
+    ManagerCredentialStore,
+)
+from tools.cli.release.app_update_control import dispatch_app_update, read_status
+from tools.cli.release.bundle_runtime import activate_bundled_runtime
+from tools.cli.release.client_release_bundle import inspect_client_release_bundle
+from tools.cli.release.locations import default_client_root, validate_client_root
+from tools.cli.release.profile import (
+    load_profile_root,
+    load_release_inputs,
+    load_update_inputs,
+)
+from tools.cli.release.transaction import ClientReleaseStore
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -70,6 +73,31 @@ def _release_source_root() -> Path | None:
         if (source_root / "scripts" / "release" / "publish.py").is_file():
             return source_root
     return None
+
+
+def _run_release_with_host_python(
+    source_root: Path,
+    options: dict,
+) -> None:
+    interpreter = os.environ.get("FTCLIENT_RELEASE_PYTHON") or shutil.which(
+        "python3"
+    )
+    if not interpreter:
+        raise click.ClickException(
+            "A host python3 interpreter is required to publish a client release"
+        )
+    command = [
+        interpreter,
+        str(source_root / "scripts" / "release" / "publish.py"),
+    ]
+    for name, value in options.items():
+        if value is None or value is False:
+            continue
+        flag = f"--{name.replace('_', '-')}"
+        command.append(flag)
+        if value is not True:
+            command.append(str(value))
+    subprocess.run(command, cwd=source_root, check=True)
 
 
 client.add_command(client_adapter)
@@ -210,17 +238,24 @@ def publish_release(**options) -> None:
     # resolve that namespace when launched from Conda (console scripts do not
     # add the current working directory to ``sys.path``).
     source_root = _release_source_root()
-    if source_root is not None:
-        source_root_text = str(source_root)
-        if source_root_text not in sys.path:
-            sys.path.insert(0, source_root_text)
-    from scripts.release.publish import publish_release as run_release
+    if source_root is None:
+        raise click.ClickException(
+            "Run client release from a FactorTester source checkout"
+        )
     from tools.cli.release.signing_keys import manifest_private_key
 
     options["legacy_private_key"] = manifest_private_key(
         str(options.get("channel") or ""),
         options.get("legacy_private_key"),
     )
+    if getattr(sys, "frozen", False):
+        _run_release_with_host_python(source_root, options)
+        return
+    if source_root is not None:
+        source_root_text = str(source_root)
+        if source_root_text not in sys.path:
+            sys.path.insert(0, source_root_text)
+    from scripts.release.publish import publish_release as run_release
     receipt = run_release(**options)
     click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
 

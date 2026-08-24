@@ -5,16 +5,16 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from tests.release.test_release_manifest import signed_manifest
 from tools.cli.app import cli
-from tools.cli.manager_app import manager_cli
 from tools.cli.commands import client_release as commands
+from tools.cli.manager_app import manager_cli
 from tools.cli.release import profile as release_profile
 from tools.cli.release.profile import (
     MAIN_GITHUB_MANIFEST_URL,
     load_release_inputs,
     load_update_inputs,
 )
-from tests.release.test_release_manifest import signed_manifest
 from tools.cli.release.update_channel import ValidatedUpdateManifest
 
 
@@ -88,6 +88,41 @@ def test_bundled_publisher_uses_current_source_checkout(
     monkeypatch.chdir(checkout)
 
     assert commands._release_source_root() == checkout
+
+
+def test_frozen_publisher_delegates_complete_release_to_host_python(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    source_root = tmp_path / "checkout"
+    entrypoint = source_root / "scripts/release/publish.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("# release entrypoint\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setenv("FTCLIENT_RELEASE_PYTHON", "/host/python3")
+    monkeypatch.setattr(
+        commands.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    commands._run_release_with_host_python(source_root, {
+        "channel": "beta",
+        "source_revision": "a" * 40,
+        "output": tmp_path / "output",
+        "mandatory": True,
+        "notary_profile": None,
+        "delta_only": False,
+    })
+
+    command, kwargs = calls[0]
+    assert command[:2] == ["/host/python3", str(entrypoint)]
+    assert command[2:] == [
+        "--channel", "beta",
+        "--source-revision", "a" * 40,
+        "--output", str(tmp_path / "output"),
+        "--mandatory",
+    ]
+    assert kwargs == {"cwd": source_root, "check": True}
 
 
 def test_profile_cannot_replace_packaged_release_trust_anchor(
