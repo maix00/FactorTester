@@ -688,6 +688,17 @@ def test_ic_domain_charts_preserve_the_old_result_interactions() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+
+    assert manifest["group_dependencies"]["job-detail-ic"] == [
+        "job-detail-previews",
+    ]
+    assert manifest["groups"]["job-detail-previews"].index(
+        "jobs/highcharts-timeline.js",
+    ) < len(manifest["groups"]["job-detail-previews"])
+
+
 def test_ic_domain_result_view_only_claims_recognized_active_artifacts() -> None:
     import subprocess
 
