@@ -14,19 +14,19 @@ from server.manager.domain.federation import (
 )
 from server.manager.http.gateway import GatewayResponse
 from server.manager.http.responses import json_response
-from server.manager.services.test_authoring import TestAuthoringError
-from server.manager.services.factor_source_transfer import FactorSourceTransfer
 from server.manager.services.factor_source_hydration import FactorSourceHydrator
+from server.manager.services.factor_source_transfer import FactorSourceTransfer
+from server.manager.services.test_authoring import TestAuthoringError
 from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 from tools.data.account_manage import can_view_user_scope
-
 
 _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/client/factor-library",
     "/custom-factors/api/client/factor-sets",
     "/custom-factors/api/public-factor/",
     "/custom-factors/api/get/",
+    "/custom-factors/api/source-versions/",
     "/api/product-groups",
     "/api/report-references/validate",
     "/api/profile-research",
@@ -279,15 +279,19 @@ class ServiceSelectionRoutesMixin:
             parsed,
             principal=str(session["username"]) if session is not None else "",
         )
-        if response.status == 404 and source_ref and not route.remote:
-            if FactorSourceHydrator(self.state).hydrate(
+        if (
+            response.status == 404
+            and source_ref
+            and not route.remote
+            and FactorSourceHydrator(self.state).hydrate(
                 source_ref, principal=str(session["username"]),
-            ):
-                response = self.state.route_request(
-                    route,
-                    path=self._forwarded_service_path(parsed),
-                    principal=str(session["username"]),
-                )
+            )
+        ):
+            response = self.state.route_request(
+                route,
+                path=self._forwarded_service_path(parsed),
+                principal=str(session["username"]),
+            )
         self._send_gateway_response(response, route=route)
         return True
 

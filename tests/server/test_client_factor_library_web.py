@@ -277,6 +277,51 @@ def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch)
     assert payload["current"]["commit"] == "a" * 40
 
 
+def test_source_version_route_returns_persisted_snapshot_without_current_source(
+    monkeypatch,
+) -> None:
+    commit = "b" * 40
+    source = "class Momentum(FactorFamily):\n    pass\n"
+    monkeypatch.setattr(
+        catalog_routes, "load_public_factor_source", lambda _factor_id: None,
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "load_factor_source_version",
+        lambda **_kwargs: {
+            "commit": commit,
+            "source_code": source,
+            "source_hash": "hash",
+            "relative_path": "public_factors/Momentum.py",
+            "branches": [],
+            "is_current": False,
+        },
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "_source_detail",
+        lambda **_kwargs: {
+            "source_code": source,
+            "math_expr": "P_t",
+            "chinese_name": "动量",
+            "description": "历史版本",
+            "params": [],
+        },
+    )
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get(
+        f"/custom-factors/api/source-versions/public/Momentum/{commit}",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["commit"] == commit
+    assert payload["source_code"] == source
+    assert payload["source_kind"] == "public"
+
+
 def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> None:
     payload = build_client_library_projection({
         "families": [{

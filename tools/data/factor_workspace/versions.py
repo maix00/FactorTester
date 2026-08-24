@@ -8,6 +8,11 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from tools.data.sqlite.factor_source_versions import (
+    list_factor_source_version_snapshots,
+    load_factor_source_version_snapshot,
+)
+
 from .storage import WORKSPACE_ROOTS_DIR, factor_source_root
 
 _SOURCE_DIRS = {
@@ -163,15 +168,34 @@ def list_factor_source_versions(
         current_source=current_source,
         workspace_username=workspace_username,
     )
+    current_hash = _source_hash(current_source) if current_source else ""
+    bounded = min(200, max(1, int(limit)))
+    snapshots = list_factor_source_version_snapshots(
+        source_kind,
+        owner_username,
+        factor_id,
+        current_hash=current_hash,
+        limit=bounded,
+    )
     if source is None:
         return {
-            "available": False,
-            "versions": [],
+            "available": bool(snapshots),
+            "workspace": "server-db" if snapshots else "",
+            "versions": snapshots,
+            "current": {
+                "commit": "",
+                "short_commit": "",
+                "committed_at": 0,
+                "author": "",
+                "subject": "当前源码",
+                "branches": [],
+                "relative_path": _source_path(source_kind, factor_id),
+                "source_hash": current_hash,
+                "is_current": True,
+            },
             "relative_path": _source_path(source_kind, factor_id),
         }
 
-    current_hash = _source_hash(current_source) if current_source else ""
-    bounded = min(200, max(1, int(limit)))
     rows = _git_text(
         source.root,
         "log", "--all", "--follow", f"--max-count={bounded * 3}",
@@ -225,12 +249,22 @@ def list_factor_source_versions(
             "is_current": True,
             "uncommitted": True,
         }
+    merged: list[dict[str, Any]] = []
+    seen_commits: set[str] = set()
+    for item in [*versions, *snapshots]:
+        commit = str(item.get("commit") or "")
+        if not commit or commit in seen_commits:
+            continue
+        seen_commits.add(commit)
+        merged.append(item)
+        if len(merged) >= bounded:
+            break
     return {
         "available": True,
         "workspace": "server",
         "relative_path": source.relative_path,
         "current": current,
-        "versions": versions,
+        "versions": merged,
     }
 
 
@@ -251,6 +285,20 @@ def load_factor_source_version(
             "source_hash": _source_hash(current_source),
             "is_current": True,
         }
+    snapshot = load_factor_source_version_snapshot(
+        source_kind,
+        owner_username,
+        factor_id,
+        commit,
+    )
+    if snapshot is not None:
+        snapshot["is_current"] = bool(
+            current_source
+            and _source_hash(snapshot.get("source_code") or "")
+            == _source_hash(current_source)
+        )
+        return snapshot
+
     source = _find_workspace_source(
         source_kind=source_kind,
         owner_username=owner_username,

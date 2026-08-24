@@ -338,6 +338,12 @@ def test_client_business_api_keeps_service_path_and_manager_selects_port(
             "/custom-factors/api/get/SubordinateFactor?owner_username=GTHT%40child%401",
             "/custom-factors/api/get/SubordinateFactor?owner_username=GTHT%40child%401",
         ),
+        (
+            "/custom-factors/api/source-versions/custom/Momentum"
+            "?owner_username=GTHT%40child%401",
+            "/custom-factors/api/source-versions/custom/Momentum"
+            "?owner_username=GTHT%40child%401",
+        ),
     ),
 )
 def test_factor_family_source_detail_uses_authenticated_manager_gateway(
