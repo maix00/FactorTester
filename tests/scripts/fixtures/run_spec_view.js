@@ -63,7 +63,20 @@ const value = view.model({
     configuration_fingerprint: "fingerprint-1",
     analyses: ["ic"],
     retention_mode: "full",
-    configuration: {shared: {start_date: "2025-01-01"}, analyses: {ic: {ic_lags: [0, 1]}}},
+    configuration: {
+      payload: {shared: {data_source_declarations: {Local: {
+        id: "Local", family_name: "本地数据源", source_kind: "bundle",
+        naming_schemes: {product: {canonical: "vendor"}},
+        members: [{
+          id: "LocalMIN1", label: "本地分钟线", frequency: "MIN1",
+          timezone: "Asia/Shanghai", data_columns: Array.from(
+            {length: 24}, (_, index) => `column-${index}`,
+          ),
+        }],
+      }}}},
+      shared: {start_date: "2025-01-01"},
+      analyses: {ic: {ic_lags: [0, 1]}},
+    },
   },
 });
 
@@ -71,9 +84,23 @@ assert.equal(value.identity.run_spec_hash, hash);
 assert.equal(value.identity.configuration_revision, 7);
 assert.equal(value.identity.workspace_id, "workspace-1");
 assert.deepEqual(value.configuration.analyses.ic.ic_lags, [0, 1]);
+assert.deepEqual(
+  value.configurationSummary.payload.shared.data_source_declarations,
+  {Local: {
+    id: "Local", label: "本地数据源", source_kind: "bundle",
+    members: [{id: "LocalMIN1", label: "本地分钟线", frequency: "MIN1"}],
+  }},
+);
+assert.equal(value.dataSourceDeclarations.Local.members[0].data_columns.length, 24);
 assert.deepEqual(value.execution, {analyses: ["ic"], retention_mode: "full"});
 assert.equal(value.title, "日盘 IC 运行配置");
 assert.equal(value.summary, "两个因子、三个收益期");
+const rendered = view.render({t: item => item}, {
+  run_spec: {configuration: value.configuration},
+});
+assert.equal(rendered.children.length, 4);
+assert.equal(rendered.children[2].children[0].textContent, "完整数据源声明（技术明细）");
+assert.equal(rendered.children[2].open, false);
 assert.equal(view.digest(`runspec:sha256:${hash}`), hash);
 assert.equal(view.digest(`run-spec:sha256:${hash}`), hash);
 assert.equal(view.digest("invalid"), "");
