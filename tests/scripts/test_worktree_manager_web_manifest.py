@@ -717,8 +717,9 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
 
     assert manifest["group_dependencies"]["job-detail-ic"] == [
-        "job-detail-previews",
+        "job-detail-previews", "catalog-core",
     ]
+    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["catalog-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
     ) < len(manifest["groups"]["job-detail-previews"])

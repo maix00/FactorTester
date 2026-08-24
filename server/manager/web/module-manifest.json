@@ -31,7 +31,7 @@
     "job-detail-input": ["job-detail-core"],
     "job-detail-previews": ["job-detail-core", "report", "charts"],
     "job-detail-factor-series": ["job-detail-core", "charts"],
-    "job-detail-ic": ["job-detail-previews"],
+    "job-detail-ic": ["job-detail-previews", "catalog-core"],
     "job-detail-backtest": ["job-detail-previews", "catalog-core"],
     "catalog": ["catalog-core", "charts"],
     "workbench-core": [],
