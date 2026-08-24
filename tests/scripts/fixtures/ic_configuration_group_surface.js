@@ -55,7 +55,11 @@ let factorLoads = 0;
 let productLoads = 0;
 global.FTTests = {
   ensureFactorsForExecution: async () => { factorLoads += 1; },
-  ensureProductsForExecution: async () => { productLoads += 1; },
+  ensureProductsForExecution: async (_context, state) => {
+    productLoads += 1;
+    state.groups = [{group_ref: "product-group:day", name: "日盘产品组"}];
+    state.productGroupIndex = new Map(state.groups.map(item => [item.group_ref, item]));
+  },
 };
 window.FTTests = global.FTTests;
 global.FTICConfigurationGroupForm = {
@@ -104,7 +108,10 @@ const state = {
   selectedICConfigurationGroupIDs: [],
   values: {factor_candidates: []},
   savedFactors: [{factor_ref: factorRef, factor_alias: "ROC 1m"}],
-  groups: [{group_ref: "product-group:day", name: "日盘产品组"}],
+  groups: [{
+    group_ref: "product-group:day", title_zh: "product-group:day",
+    _savedPlaceholder: true,
+  }],
   manifest: {
     tab_lists: {"local-settings": [
       {key: "factor", label: "因子执行"},
@@ -150,6 +157,12 @@ const context = {
 };
 const refresh = () => { refreshCount += 1; };
 
+const unresolvedSources = FTTestContentAdapters.chipSources(state, {
+  product_path_selection_id: group.product_scope_ref,
+});
+assert.deepEqual(unresolvedSources.product_group, [],
+  "saved placeholders must not expose backend refs as product-group labels");
+
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
 assert.deepEqual(state.analysis.configuration_groups[0].editor_mounted_tabs, [
@@ -162,6 +175,8 @@ const displaySettings = find(
 assert.equal(displaySettings?.textContent, "显示设置");
 displaySettings.listeners.click();
 assert.equal(state.icConfigurationGroupShowConfigOpen, true);
+assert.equal(productLoads, 1,
+  "opening summary chips must hydrate product labels without previewing a RunSpec");
 root = window.FTICConfigurationGroups.render(context, state, refresh);
 const chipRow = find(root, node => node.className === "strategy-list-chips");
 assert.ok(chipRow);

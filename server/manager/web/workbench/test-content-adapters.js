@@ -347,7 +347,7 @@
       return index.get(ref) || value;
     }).filter(value => {
       const ref = productGroupID(value);
-      if (!ref || seen.has(ref)) return false;
+      if (!ref || seen.has(ref) || value?._savedPlaceholder === true) return false;
       seen.add(ref);
       return true;
     });
