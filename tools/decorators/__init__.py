@@ -8,4 +8,3 @@ FACTOR_WORKSPACE = True
 
 if FACTOR_WORKSPACE:
     from .factor_workspace import factor_workspace
-    from .tech_docs import tech_docs

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "首页模块的唯一注册表 —— 跨客户端共享。web (templates/home.html) 与原生 App (apple/) 的 home 都从这里渲染。新增/调整模块只改这一处，所有端同步生效。字段：id 唯一标识；title 标题；desc 描述；icon 网页用 emoji 文本；sfSymbol 苹果原生用 SF Symbol 名；path 服务器路由；requiresAuth 是否需登录才能进入；roles 非空时仅这些角色可见（角色取自 /api/me 的 role）；managerOnly 表示由 Manager 7998 提供、业务服务端口首页不显示。",
+  "_comment": "Manager 7998 的兼容模块目录。权威导航来自 Manager /api/modules；本文件只供旧 CLI/客户端读取，不对应业务端口网页。字段：id 唯一标识；title 标题；desc 描述；icon 网页用文本；sfSymbol 苹果原生用 SF Symbol 名；path 为 Manager 路由；requiresAuth 是否需登录；roles 为角色限制；managerOnly 表示仅由 Manager 提供。",
   "modules": [
     {
       "id": "home",
@@ -49,11 +49,11 @@
     },
     {
       "id": "custom_factors",
-      "title": "因子管理",
-      "desc": "创建、编辑和管理自定义因子表达式",
+      "title": "因子库",
+      "desc": "浏览、创建和管理因子",
       "icon": "🧬",
       "sfSymbol": "atom",
-      "path": "/custom-factors/editor",
+      "path": "/factors",
       "requiresAuth": true,
       "roles": []
     },
@@ -63,7 +63,7 @@
       "desc": "管理机构、用户层级与管理员权限",
       "icon": "🏛",
       "sfSymbol": "building.columns",
-      "path": "/admin/users",
+      "path": "/manager?section=accounts",
       "requiresAuth": true,
       "roles": ["super_admin", "org_admin", "level_admin"]
     },
@@ -73,7 +73,7 @@
       "desc": "管理 FactorTester 服务端口并查看全服测试任务队列",
       "icon": "OPS",
       "sfSymbol": "server.rack",
-      "path": "/admin/server-operations",
+      "path": "/manager?section=server",
       "requiresAuth": true,
       "roles": ["super_admin"],
       "managerOnly": true,

@@ -7,7 +7,7 @@ browser directly.
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, request
 
 from server.services.http_auth import login_required
 from server.services.manager_control import manager_action, manager_snapshot
@@ -30,15 +30,6 @@ def _require_super_admin():
             "error": "只有超级管理员可以管理服务器运行状态",
         }), 403
     return None
-
-
-@server_operations_bp.get("/server-operations")
-@login_required
-def server_operations_page():
-    error = _require_super_admin()
-    if error:
-        return error
-    return render_template("server_operations.html")
 
 
 @server_operations_bp.get("/api/server-instances")

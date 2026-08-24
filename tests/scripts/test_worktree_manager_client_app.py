@@ -2375,33 +2375,14 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'Generation ${value.generation}' not in research
 
 
-def test_web_site_icon_is_shared_by_flask_and_manager(tmp_path) -> None:
-    from flask import Flask
-
-    from server.core import core_bp
-
+def test_manager_serves_the_site_icon(tmp_path) -> None:
     icon = (ROOT / "static" / "favicon.svg").read_bytes()
-    home = (ROOT / "templates" / "home.html").read_text(encoding="utf-8")
     shell = (ROOT / "server" / "manager" / "web" / "research.html").read_text(
         encoding="utf-8",
     )
-    assert '<link rel="icon" type="image/svg+xml" href="{{ url_for(\'core.favicon\') }}">' in home
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in shell
     assert "modules.json" not in icon.decode("utf-8")
     assert "SF Symbols" not in icon.decode("utf-8")
-
-    flask_app = Flask(
-        __name__,
-        template_folder=str(ROOT / "templates"),
-        static_folder=str(ROOT / "static"),
-    )
-    flask_app.register_blueprint(core_bp)
-    flask_client = flask_app.test_client()
-    for path in ("/favicon.svg", "/favicon.ico"):
-        response = flask_client.get(path)
-        assert response.status_code == 200
-        assert response.content_type.startswith("image/svg+xml")
-        assert response.data == icon
 
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
@@ -2577,12 +2558,10 @@ def test_manager_home_only_modules_use_distinct_symbols(tmp_path) -> None:
     assert '"cylinder.split.1x2":' in icons
 
 
-def test_manager_proxies_docs_and_public_assets_without_a_service_login(
+def test_manager_serves_docs_shell_without_a_service_login(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
 
     def request(**values):
@@ -2596,13 +2575,12 @@ def test_manager_proxies_docs_and_public_assets_without_a_service_login(
     monkeypatch.setattr(state.gateway, "request", request)
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/docs?presentation=embedded") as response:
-            assert response.read() == b"<html>docs</html>"
+            body = response.read()
 
-    assert calls == [{
-        "port": 8141,
-        "path": "/docs?presentation=embedded",
-        "principal": "__public_docs__",
-    }]
+    assert body.startswith(b"<!doctype html>")
+    assert b"FT_STATIC_SCRIPTS" not in body
+    assert calls == []
+    assert "/docs" not in _SERVICE_GET_PREFIXES
 
 
 def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
@@ -2771,7 +2749,10 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         scripts = {}
-        for name in ["factor-model", "factor-list", "factor-details", "factors"]:
+        for name in [
+            "factor-model", "factor-list", "factor-details", "factors",
+            "factor-catalog-runtime", "factor-catalog-list",
+        ]:
             with urlopen(
                 f"{base_url}/research-static/catalog/{name}.js"
             ) as response:
@@ -2781,28 +2762,30 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     listing = scripts["factor-list"]
     details = scripts["factor-details"]
     coordinator = scripts["factors"]
+    runtime = scripts["factor-catalog-runtime"]
+    catalog_list = scripts["factor-catalog-list"]
     assert "group.factor_refs" in model
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
     assert "item.value.target_ref, item.value.set_ref" in model
-    assert 'context.api("/api/catalog/factors")' in coordinator
-    assert 'context.api("/api/catalog/factor-sets")' in coordinator
+    assert 'context.api("/api/catalog/factors")' in runtime
+    assert 'context.api("/api/catalog/factor-sets")' in runtime
     assert "/api/catalog/factor-sets/detail" in details
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
-    assert "/api/catalog/product-groups" in coordinator
-    assert "factorTesterLocalFactorSets" in coordinator
-    assert "mergeFactorSets" in coordinator
+    assert "/api/catalog/product-groups" in runtime
+    assert "factorTesterLocalFactorSets" in runtime
+    assert "mergeFactorSets" in runtime
     assert 'visibility: "local"' in model
     assert 'context.t("因子家族")' in listing
     assert 'context.t("因子")' in listing
     assert 'context.t("因子集合")' in listing
     assert '"/factors/sets"' in listing
     assert "FTUI.pagedTable" in listing
-    assert 'className = "factor-catalog-controls"' in coordinator
-    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in coordinator
-    assert "context.toolbar.append(\n      search" not in coordinator
-    assert 'context.t("按下级用户筛选")' in coordinator
+    assert 'className = "factor-catalog-controls"' in catalog_list
+    assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in catalog_list
+    assert "context.toolbar.append(\n      search" not in catalog_list
+    assert 'context.t("按下级用户筛选")' in catalog_list
     assert "decodeFrozenFactorRef" in details
 
 
@@ -3083,6 +3066,7 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
             "catalog": "/research-static/catalog/products.js",
             "catalog_details": "/research-static/catalog/details.js",
             "factors": "/research-static/catalog/factors.js",
+            "factor_runtime": "/research-static/catalog/factor-catalog-runtime.js",
             "profiles": "/research-static/profile/profiles.js",
             "settings": "/research-static/settings/settings.js",
         }
@@ -3091,8 +3075,11 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
             with urlopen(f"{base_url}{path}") as response:
                 scripts[name] = response.read().decode("utf-8")
 
-    for script in scripts.values():
+    for name, script in scripts.items():
+        if name == "factors":
+            continue
         assert "context.isRouteCurrent?.() !== false" in script
+    assert "context.isRouteCurrent?.() !== false" in scripts["factor_runtime"]
     assert "const payload = await context.api(\"/api/client/profiles\")" in scripts["profiles"]
     assert "runtime_kind" in scripts["profiles"]
     assert "/api/client/profile-claims" in scripts["profiles"]

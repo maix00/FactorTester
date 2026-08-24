@@ -44,20 +44,18 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     app = create_app()
 
     assert unified_db.exists()
-    # The business service no longer owns the database browser.  Manager 7998
-    # mounts sqlite-web itself, so workers must not expose the page or the old
-    # local-data JSON endpoints.
+    # The business service no longer owns any browser or database page.
+    # Manager 7998 mounts sqlite-web itself; service-port web paths are absent.
     client = app.test_client()
-    resp = client.get('/sqlite-web/')
-    assert resp.status_code == 404
-    with client.session_transaction() as sess:
-        sess['username'] = 'default$alice@1'
     for path in (
+        '/',
+        '/products',
+        '/jobs',
+        '/sqlite-web/',
         '/local-data',
         '/api/local-data/stores',
         '/api/local-data/openctp/tables',
         '/api/local-data/openctp/table/accounts',
     ):
         response = client.get(path)
-        assert response.status_code == 410
-        assert response.get_json()['manager_only'] is True
+        assert response.status_code == 404

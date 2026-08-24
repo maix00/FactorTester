@@ -8,11 +8,11 @@ Authentication Blueprint — 登录/登出/注册 + 全局请求认证守卫。
   - register: 新建用户（需管理员权限）
   - api_me / api_keep_login / api_public_organizations: 前端状态同步 API
 
-PUBLIC_ENDPOINTS: 不要求登录的端点集合，包含文档系统和静态资源。
+PUBLIC_ENDPOINTS: 不要求登录的 API 端点集合。业务端口不提供网页入口。
 """
 import re
 import secrets
-from flask import Blueprint, request, jsonify, render_template, session, redirect
+from flask import Blueprint, request, jsonify, session
 from tools.data.account_manage import (
     accounts_lock, load_accounts, save_accounts,
     verify_password, hash_password,
@@ -67,24 +67,14 @@ def _is_public_graph_gateway_read() -> bool:
     )
 
 
-def _wants_json_response() -> bool:
-    return (
-        request.is_json
-        or request.method != 'GET'
-        or request.accept_mimetypes.best == 'application/json'
-    )
-
-
 @auth_bp.before_app_request
 def _check_login():
     PUBLIC_ENDPOINTS = {
         'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login',
         'auth.api_public_organizations', 'auth.logout',
-        'core.home',
         'shared.client_release_channel',
         'shared.client_release_beta_appcast',
         'shared.client_release_asset',
-        'static',
     }
     ep = request.endpoint
     # 公开端点不要求登录，但已登录用户需更新活动时间
@@ -110,23 +100,17 @@ def _check_login():
                 cleanup_user_pages(user)
             cleanup_session_resource(session.get('_sid', ''))
             session.clear()
-            if _wants_json_response():
-                return jsonify({'success': False, 'error': '长时间无操作，已自动退出', 'login_required': True, 'auto_logout': True}), 401
-            return redirect(f'/?next={request.path}&auto_logout=1')
+            return jsonify({'success': False, 'error': '长时间无操作，已自动退出', 'login_required': True, 'auto_logout': True}), 401
         touch_session_activity()
         return None
 
     # 未登录
-    if _wants_json_response():
-        return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
-    # 未登录访问受保护页面 → 回首页并带 next 参数，首页会弹出登录框
-    return redirect(f'/?next={request.path}')
+    # Business ports never redirect an unauthenticated browser to a legacy
+    # page.  Manager 7998 owns the login shell and clients receive JSON.
+    return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
 
-@auth_bp.route('/login', methods=['GET', 'POST'])
+@auth_bp.route('/login', methods=['POST'])
 def login():
-    if request.method == 'GET':
-        # GET /login 直接跳首页（登录入口在首页弹框里）
-        return redirect('/')
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''

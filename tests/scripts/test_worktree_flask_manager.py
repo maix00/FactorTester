@@ -2503,6 +2503,31 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
     repository.mkdir()
     active_source = repository / ".workspace" / "manager-sources" / ("a" * 40)
     active_source.mkdir(parents=True)
+    product_docs = active_source / "product_docs"
+    product_docs.mkdir()
+    (product_docs / "getting-started.md").write_text(
+        "## Getting started {#getting-started}\n\nTemporary manager fixture.\n",
+        encoding="utf-8",
+    )
+    (product_docs / "manifest.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "title": "Fixture docs",
+            "default_page": "getting-started",
+            "sections": [{
+                "id": "guide",
+                "title": "Guide",
+                "pages": [{
+                    "slug": "getting-started",
+                    "title": "Getting started",
+                    "summary": "Fixture",
+                    "kind": "guide",
+                    "source": "getting-started.md",
+                }],
+            }],
+        }),
+        encoding="utf-8",
+    )
     porcelain = (
         f"worktree {repository}\n"
         "HEAD e5707434d001991c89871f743a0583086d393c6e\n"

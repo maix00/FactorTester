@@ -404,16 +404,16 @@
         pageContext, "factor_evaluation", {factorRef, groupRef},
       ),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
-      factorFamilies: (pageContext, route) => FTFactors.list(
+      factorFamilies: (pageContext, route) => FTFactorCatalogList.list(
         pageContext, "families", route?.scope || "public",
       ),
-      factorSets: (pageContext, route) => FTFactors.list(
+      factorSets: (pageContext, route) => FTFactorCatalogList.list(
         pageContext, "sets", route?.scope || "mine",
       ),
       factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
       factor: (pageContext, id, mode) => FTFactors.factorDetail(pageContext, id, mode),
       factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),
-      factors: (pageContext, route) => FTFactors.list(
+      factors: (pageContext, route) => FTFactorCatalogList.list(
         pageContext, "factors", route?.scope || "mine",
       ),
       productGroup: (pageContext, id) => FTProducts.groupDetail(pageContext, id),

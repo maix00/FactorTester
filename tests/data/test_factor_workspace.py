@@ -65,9 +65,6 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
             }
         ],
     )
-    monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [
-        {"path": "types/base.py", "name": "types / base.py", "desc": "", "symbols": []}
-    ])
     git_state = {
         "git_enabled": True,
         "git_repo_root": str(workspace_root),
@@ -94,7 +91,6 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (public_dir / "PublicFactor.py").read_text(encoding="utf-8") == "class PublicFactor(FactorFamily):\n    pass\n"
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
     assert ".factor_workspace/" in (workspace_root / ".gitignore").read_text(encoding="utf-8")
-    assert (workspace_root / "tools_index.json").exists()
     parameters_pkg_stub = (workspace_root / "tools" / "parameters" / "__init__.pyi").read_text(encoding="utf-8")
     factors_pkg_stub = (workspace_root / "tools" / "factors" / "__init__.pyi").read_text(encoding="utf-8")
     expr_pkg_stub = (workspace_root / "tools" / "factors" / "expr" / "__init__.pyi").read_text(encoding="utf-8")
@@ -368,7 +364,6 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
         "list_factor_sources",
         lambda source_kind: [],
     )
-    monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [])
 
     from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
     save_factor_source_workspace_settings(
@@ -429,7 +424,6 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
         "ProductDataView",
         "DataProvider",
         "@factor_workspace",
-        "@tech_docs",
         "collect_factor_workspace",
         "FACTOR_WORKSPACE",
     )

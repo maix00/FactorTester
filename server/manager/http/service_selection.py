@@ -23,11 +23,6 @@ from tools.data.account_manage import can_view_user_scope
 
 
 _SERVICE_GET_PREFIXES = (
-    "/docs",
-    "/static/css/",
-    "/static/js/",
-    "/static/vendor/",
-    "/static/images/",
     "/custom-factors/api/client/factor-library",
     "/custom-factors/api/client/factor-sets",
     "/custom-factors/api/public-factor/",
@@ -257,15 +252,7 @@ class ServiceSelectionRoutesMixin:
             and visitor is None
             and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
         )
-        public_docs = (
-            parsed.path == "/docs"
-            or parsed.path.startswith("/docs/")
-            or parsed.path.startswith("/static/css/")
-            or parsed.path.startswith("/static/js/")
-            or parsed.path.startswith("/static/vendor/")
-            or parsed.path.startswith("/static/images/")
-        )
-        if session is None and visitor is None and not (public_graph or public_docs):
+        if session is None and visitor is None and not public_graph:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -280,7 +267,6 @@ class ServiceSelectionRoutesMixin:
                 principal=(
                     visitor.principal if visitor is not None
                     else "__public_graph__" if public_graph
-                    else "__public_docs__" if public_docs
                     else str(session["username"])
                 ),
             )
