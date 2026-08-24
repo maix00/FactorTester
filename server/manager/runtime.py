@@ -88,6 +88,9 @@ from server.manager.services.test_authoring import TestAuthoringService
 from server.manager.services.research_graph_catalog import ResearchGraphCatalog
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.technical_docs import TechnicalDocsLibrary
+from server.manager.services.public_factor_replication import (
+    PublicFactorReplicationService,
+)
 from server.manager.services.server_access import configured_management_access
 from server.manager.http.pages import (
     PUBLIC_DEVICE_COMPLIANCE_NOTICE,
@@ -106,6 +109,9 @@ from server.manager.storage.service_intents import ServiceIntentStore
 from server.manager.storage.session_store import (
     ManagerSessionStore,
     configured_manager_sqlite_path,
+)
+from server.manager.storage.public_factor_replication import (
+    PublicFactorReplicationStore,
 )
 from server.manager.http.security import (
     configured_local_client_networks,
@@ -384,6 +390,7 @@ class ManagerState(
                 include_offline=True,
             ),
             local_refresh=self.refresh_local_job_projection,
+            local_maintenance=self.sync_local_maintenance,
         )
         self._capability_cache: dict[
             tuple[str, int, str], tuple[float, dict[str, object]]
@@ -398,6 +405,10 @@ class ManagerState(
             sqlite_path=self.sessions_db_path,
             control_store=self.control_store,
             manager_id=self.server_id,
+        )
+        self.public_factor_replication = PublicFactorReplicationService(
+            self,
+            PublicFactorReplicationStore(self.sessions_db_path),
         )
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -62,6 +63,44 @@ def _app() -> Flask:
 def _login(client, username: str = "alice") -> None:
     with client.session_transaction() as session:
         session["username"] = username
+
+
+def test_public_source_applied_requires_superadmin_and_verifies_source(
+    monkeypatch,
+) -> None:
+    source = "class PublicAlpha:\n    pass\n"
+    raw = source.encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    invalidated: list[str] = []
+    monkeypatch.setattr(editor_routes, "get_account", lambda name: {"name": name})
+    monkeypatch.setattr(
+        editor_routes, "is_super_admin_account", lambda account: account["name"] == "root",
+    )
+    monkeypatch.setattr(
+        editor_routes, "load_public_factor_source", lambda factor_id: source,
+    )
+    monkeypatch.setattr(
+        editor_routes, "invalidate_factor_family_cache", invalidated.append,
+    )
+    client = _app().test_client()
+    payload = {"factors": [{
+        "factor_id": "PublicAlpha",
+        "source_sha256": digest,
+        "source_bytes": len(raw),
+    }]}
+
+    _login(client, "alice")
+    assert client.post(
+        "/custom-factors/api/internal/public-source-applied", json=payload,
+    ).status_code == 403
+    _login(client, "root")
+    response = client.post(
+        "/custom-factors/api/internal/public-source-applied", json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["applied"] == ["PublicAlpha"]
+    assert invalidated == ["PublicAlpha"]
 
 
 def test_client_library_is_a_distinct_page_not_editor_css_hiding() -> None:

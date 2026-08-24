@@ -77,6 +77,24 @@ def test_federation_sync_worker_advances_cursor_and_is_idempotent(tmp_path) -> N
     assert gateway.calls == 2
 
 
+def test_federation_sync_worker_runs_local_maintenance(tmp_path) -> None:
+    calls: list[str] = []
+
+    class _Index:
+        pass
+
+    worker = FederationSyncWorker(
+        server_id="local",
+        job_index=_Index(),
+        gateway=object(),
+        peer_provider=lambda: [],
+        local_maintenance=lambda: calls.append("maintenance"),
+    )
+
+    assert worker.sync_once() == []
+    assert calls == ["maintenance"]
+
+
 def test_manager_sync_endpoints_use_authenticated_peer_control_plane(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "target-repo",
@@ -191,4 +209,3 @@ def test_manual_manager_sync_requires_admin_and_returns_worker_report(tmp_path) 
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-
