@@ -19,6 +19,7 @@ from server.manager.services.factor_source_transfer import FactorSourceTransfer
 from server.manager.services.factor_source_hydration import FactorSourceHydrator
 from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
+from tools.data.account_manage import can_view_user_scope
 
 
 _SERVICE_GET_PREFIXES = (
@@ -288,8 +289,40 @@ class ServiceSelectionRoutesMixin:
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )
             return True
+        source_ref = self._factor_source_hydration_ref(
+            parsed,
+            principal=str(session["username"]) if session is not None else "",
+        )
+        if response.status == 404 and source_ref and not route.remote:
+            if FactorSourceHydrator(self.state).hydrate(
+                source_ref, principal=str(session["username"]),
+            ):
+                response = self.state.route_request(
+                    route,
+                    path=self._forwarded_service_path(parsed),
+                    principal=str(session["username"]),
+                )
         self._send_gateway_response(response, route=route)
         return True
+
+    @staticmethod
+    def _factor_source_hydration_ref(parsed, *, principal: str) -> str:
+        """Resolve an authorized missing source for one detail-only retry."""
+        public_prefix = "/custom-factors/api/public-factor/"
+        custom_prefix = "/custom-factors/api/get/"
+        if parsed.path.startswith(public_prefix):
+            factor_id = unquote(parsed.path.removeprefix(public_prefix)).strip()
+            return f"public:{factor_id}" if factor_id else ""
+        if not parsed.path.startswith(custom_prefix) or not principal:
+            return ""
+        factor_id = unquote(parsed.path.removeprefix(custom_prefix)).strip()
+        owner = str(
+            parse_qs(parsed.query).get("owner_username", [principal])[0]
+            or principal
+        ).strip()
+        if not factor_id or not can_view_user_scope(principal, owner):
+            return ""
+        return f"{owner}:{factor_id}"
 
     @staticmethod
     def _visitor_service_get_allowed(path: str) -> bool:
