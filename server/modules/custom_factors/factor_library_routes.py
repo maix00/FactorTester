@@ -10,6 +10,7 @@ from server.modules.custom_factors import cf_bp
 from server.services.api_response import api_ok, route_guard
 from server.modules.custom_factors.factor_library_service import (
     build_factor_library_overview,
+    delete_factor_library_factor,
     list_factor_library_product_groups,
     list_factor_library_config_users,
     save_current_user_library_config,
@@ -287,10 +288,18 @@ def api_delete_factor_library_config(ff_alias):
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     scope_key = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
+    factor_alias = str(request.args.get('factor_alias') or '').strip()
     with get_user_file_lock(username):
-        deleted = delete_factor_param_config(username, ff_alias, scope_key=scope_key)
+        deleted = (
+            delete_factor_library_factor(
+                username, ff_alias, factor_alias, product_group=scope_key,
+            )
+            if factor_alias else delete_factor_param_config(
+                username, ff_alias, scope_key=scope_key,
+            )
+        )
     if not deleted:
-        return jsonify({'success': False, 'error': '配置不存在'}), 404
+        return jsonify({'success': False, 'error': '因子或配置不存在'}), 404
     return jsonify({'success': True})
 
 

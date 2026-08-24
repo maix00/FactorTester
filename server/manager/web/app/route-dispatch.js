@@ -83,6 +83,7 @@
         );
         case "factor-family": return guarded(
           context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factorFamily, route.id,
+          route.mode || "view", {publicMode: route.publicMode === true},
         );
         case "factor": return guarded(
           context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true},

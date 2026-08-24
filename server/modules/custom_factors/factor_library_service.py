@@ -8,6 +8,7 @@ from typing import cast
 from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
 from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
+    delete_factor_param_config,
     list_factor_param_config_aliases,
     list_factor_param_config_scopes,
     list_all_factor_param_aliases_across_scopes,
@@ -373,3 +374,59 @@ def save_current_user_library_config(
     account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
     return config, factors
+
+
+def delete_factor_library_factor(
+    current_username: str,
+    ff_alias: str,
+    factor_alias: str,
+    product_group: str = DEFAULT_SCOPE_KEY,
+) -> bool:
+    """Remove one registered factor row without deleting its family config.
+
+    The catalog's ``我的因子`` rows are parameterized registrations, not
+    source families.  Deleting a row must therefore preserve the other
+    parameter rows in the same family/product-group scope.
+    """
+    scope_key = normalize_product_group(product_group)
+    target_alias = str(factor_alias or "").strip()
+    if not target_alias:
+        return False
+    config = load_factor_param_config(current_username, ff_alias, scope_key)
+    if not config:
+        return False
+    rows = config.get("params_list") or []
+    if not isinstance(rows, list):
+        return False
+    try:
+        family = get_factor_family_instance(ff_alias, username=current_username)
+    except (ImportError, KeyError, TypeError, ValueError):
+        return False
+    remaining = []
+    removed = False
+    for row in rows:
+        if not isinstance(row, dict):
+            remaining.append(row)
+            continue
+        try:
+            alias = str(family.get_alias(**row) or "").strip()
+        except (AttributeError, TypeError, ValueError):
+            alias = ""
+        if not removed and alias == target_alias:
+            removed = True
+            continue
+        remaining.append(row)
+    if not removed:
+        return False
+    if remaining:
+        save_factor_param_config(
+            current_username,
+            ff_alias,
+            remaining,
+            scope_key,
+            metadata=config.get("metadata")
+            if isinstance(config.get("metadata"), dict) else None,
+        )
+    else:
+        delete_factor_param_config(current_username, ff_alias, scope_key)
+    return True

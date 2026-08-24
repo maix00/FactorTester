@@ -75,6 +75,24 @@
         list(context, page, familyScope);
       }, context.t("刷新")),
     );
+    const canModify = Boolean(context.session) && (
+      page === "factors" && familyScope === "mine"
+      || page === "families" && (
+        familyScope === "mine"
+        || familyScope === "public" && context.session.role === "super_admin"
+      )
+    );
+    if (canModify) {
+      const label = page === "factors"
+        ? context.t("新增因子") : context.t("新增因子家族");
+      const publicMode = page === "families" && familyScope === "public"
+        ? "&visibility=public" : "";
+      const path = page === "factors"
+        ? "/factors/factor/new?mode=create"
+        : `/factors/family/new?mode=create${publicMode}`;
+      context.toolbar.append(context.button(label, () => context.navigate(path),
+        context.t("在独立标签页新建")));
+    }
     let tablePage = 1;
     const render = () => window.FTFactorList.render(context, data, results, {
       page,
@@ -84,10 +102,49 @@
       ownerUsernames: owner?.values ?? ["*"],
       tablePage,
       onPageChange: value => { tablePage = value; render(); },
+      canModify,
+      onDelete: item => removeItem(context, page, familyScope, item),
     });
     function resetAndRender() { tablePage = 1; render(); }
     search.addEventListener("input", resetAndRender);
     render();
+  }
+
+  async function removeItem(context, page, scope, item) {
+    const familyAlias = String(
+      item?.factor_family_alias || item?.factor_family_name || "",
+    ).trim();
+    const label = String(
+      page === "families" ? modelFamilyLabel(item) : item?.factor_alias || "",
+    ).trim();
+    if (!familyAlias || !window.confirm(
+      context.t("确认删除“%@”？").replace("%@", label || familyAlias),
+    )) return;
+    const endpoint = page === "families"
+      ? scope === "public"
+        ? `/custom-factors/api/delete-public/${encodeURIComponent(familyAlias)}`
+        : `/custom-factors/api/delete/${encodeURIComponent(familyAlias)}`
+      : `/custom-factors/api/factor-library-configs/${encodeURIComponent(familyAlias)}`
+        + `?factor_alias=${encodeURIComponent(item.factor_alias || "")}`
+        + `&scope_key=${encodeURIComponent(item.scope_key || item.product_group || "default")}`;
+    try {
+      await context.api(endpoint, {
+        method: page === "families" ? "POST" : "DELETE",
+        ...(page === "families" ? {} : {body: JSON.stringify({})}),
+      });
+      context.showNotice?.(context.t("已删除"));
+      await catalog().load(context, {
+        refresh: true, library: page !== "sets", sets: page === "sets", groups: true,
+      });
+      if (catalog().isCurrent(context)) list(context, page, scope);
+    } catch (error) {
+      context.showNotice?.(error.message || context.t("删除失败"), true);
+    }
+  }
+
+  function modelFamilyLabel(item) {
+    return item?.factor_family_name || item?.factor_family_alias
+      || item?.family_ref || "";
   }
 
   function searchControl(context, search) {
