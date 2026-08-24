@@ -528,6 +528,20 @@ const strategyScopedBacktest = {
   assert.deepEqual(batch.submittedItems(refreshDuringSubmission).map(item => item.jobID), ["job-5"],
     "a repainted test page must retain the Job consumed by its progress/result observer");
   assert.equal(navigated, false, "submission must keep the test page visible");
+  const restoredBacktest = {
+    ...backtest, testRunBatch: [], activeRunGroupID: "",
+    restoredJob: {
+      jobID: "job-restored", runID: "run-restored",
+      runSpecHash: "a".repeat(64), phase: "succeeded",
+      port: 8141, serverID: "public-1", groupID: "",
+    },
+  };
+  const restoredItem = batch.synchronize(restoredBacktest)[0];
+  assert.equal(restoredItem.jobID, "job-restored");
+  assert.equal(restoredItem.phase, "succeeded");
+  assert.equal(restoredItem.artifactQuery, "?server_id=public-1");
+  assert.equal(restoredBacktest.restoredJob, null,
+    "the source Job must bind exactly once to the new configuration tab");
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 5);
   assert.ok(actionsSource.includes("state.runValues?.service_port"));
   assert.ok(actionsSource.includes(

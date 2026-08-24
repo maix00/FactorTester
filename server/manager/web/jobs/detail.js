@@ -81,7 +81,6 @@
         || taskDetail.execution_server_id || taskDetail.server_id || "",
     ).trim();
     return {
-      title: context.t("查看运行配置"),
       target,
       serverID: targetServerID,
       path: FTReferencePage.routeFor(
@@ -192,9 +191,24 @@
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     const runSpec = runSpecReference(taskDetail, job, context, resolvedServerID);
-    if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
-      FTRunSpecView.open(context, runSpec.target, runSpec.serverID);
-    }, runSpec.title));
+    if (context.session && FTJobActions.workbenchKind(job) && FTJobActions.runID(job)) {
+      const openConfiguration = context.button(context.t("在配置页面打开"), async () => {
+        openConfiguration.disabled = true;
+        try {
+          await FTJobActions.cloneRunWorkspace(context, {
+            job, jobID, portQuery, resolvedPort,
+            serverID: resolvedServerID, openNewTab: true,
+            title: `${context.t("从测试任务恢复")} ${jobID.slice(0, 8)}`,
+          });
+        } catch (error) {
+          context.showNotice(
+            `${context.t("恢复冻结配置失败")}: ${error.message}`, true,
+          );
+          openConfiguration.disabled = false;
+        }
+      }, context.t("在配置页面打开"));
+      context.toolbar.append(openConfiguration);
+    }
     if (!localRun) FTJobActions.install(context, {
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
     });
@@ -251,14 +265,31 @@
       ));
     }
     let configurationLoaded = false;
-    const loadConfiguration = () => {
+    const loadConfiguration = async () => {
       if (configurationLoaded) return;
       configurationLoaded = true;
+      if (runSpec) {
+        configuration.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
+        try {
+          const value = await FTRunSpecView.load(
+            context, runSpec.target, runSpec.serverID,
+          );
+          if (configuration.isConnected !== false) {
+            configuration.replaceChildren(FTRunSpecView.render(context, value));
+          }
+          return;
+        } catch (error) {
+          if (taskDetail.configuration == null) {
+            configuration.replaceChildren(FTUI.empty(
+              context.t("无法读取运行配置"), error.message || String(error),
+            ));
+            return;
+          }
+        }
+      }
       configuration.replaceChildren(taskDetail.configuration != null
-        ? fieldSection(context, context.t("冻结运行配置"), taskDetail.configuration)
-        : FTUI.empty(
-          context.t("暂无运行配置"), context.t("任务没有绑定运行配置"),
-        ));
+        ? FTRunSpecView.render(context, taskDetail.configuration)
+        : FTUI.empty(context.t("暂无运行配置"), context.t("任务没有绑定运行配置")));
     };
     const declarations = FTJobArtifacts.effectiveDeclarations(
       taskDetail.output_declarations || [], outputArtifacts, context,

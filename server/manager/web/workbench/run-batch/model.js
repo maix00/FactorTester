@@ -188,6 +188,27 @@
     if (!state.testRunBatch.some(item => item.groupID === state.activeRunGroupID)) {
       state.activeRunGroupID = state.testRunBatch[0]?.groupID || "";
     }
+    const restored = state.restoredJob;
+    if (restored?.jobID && !state.testRunBatch.some(item => item.jobID === restored.jobID)) {
+      const target = state.testRunBatch.find(item => (
+        restored.groupID && item.groupID === restored.groupID
+      )) || (state.testRunBatch.length === 1 ? state.testRunBatch[0] : null);
+      if (target) {
+        Object.assign(target, {
+          phase: String(restored.phase || "succeeded"),
+          runSpecHash: String(restored.runSpecHash || ""),
+          runID: String(restored.runID || ""),
+          jobID: String(restored.jobID),
+          port: Number(restored.port || 0),
+          serverID: String(restored.serverID || ""),
+          portQuery: routeQuery(restored),
+          artifactQuery: restored.serverID
+            ? `?server_id=${encodeURIComponent(restored.serverID)}` : "",
+        });
+        state.activeRunGroupID = target.groupID;
+        state.restoredJob = null;
+      }
+    }
     return state.testRunBatch;
   }
 

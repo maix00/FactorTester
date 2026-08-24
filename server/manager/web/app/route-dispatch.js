@@ -61,10 +61,12 @@
           jobsContext(routeToken), route.port, route.id, route.inputName, route.serverID,
         );
         case "ic-test": return guarded(
-          context(routeToken), {nav: "", title: "IC 测试", allowVisitor: true}, pages.icTest,
+          context(routeToken), {nav: "", title: "IC 测试", allowVisitor: true},
+          pages.icTest, route,
         );
         case "backtest": return guarded(
-          context(routeToken), {nav: "", title: "回测", allowVisitor: true}, pages.backtest,
+          context(routeToken), {nav: "", title: "回测", allowVisitor: true},
+          pages.backtest, route,
         );
         case "factor-series": return guarded(
           context(routeToken), {nav: "factors", title: "因子序列", allowVisitor: true},

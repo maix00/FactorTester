@@ -30,7 +30,10 @@
   }
 
   async function cloneRunWorkspace(context, options) {
-    const {job, portQuery = "", title = "", derivedPrefill = null} = options || {};
+    const {
+      job, jobID = "", portQuery = "", title = "", derivedPrefill = null,
+      resolvedPort = 0, serverID = "", openNewTab = false,
+    } = options || {};
     const kind = workbenchKind(job);
     const sourceRunID = runID(job);
     if (!kind || !sourceRunID) throw new Error(context.t("任务缺少可恢复的冻结运行配置"));
@@ -40,13 +43,31 @@
     );
     const workspaceID = String(value.workspace?.workspace_id || "");
     if (!workspaceID) throw new Error(context.t("恢复响应缺少工作区"));
-    localStorage.setItem(`ft-${kind}-workspace`, workspaceID);
+    if (!openNewTab) localStorage.setItem(`ft-${kind}-workspace`, workspaceID);
     if (kind === "backtest" && derivedPrefill) {
       sessionStorage.setItem("ft-backtest-derived-prefill", JSON.stringify({
         ...derivedPrefill, workspaceID,
       }));
     }
-    context.navigate(kind === "ic" ? "/ic-test" : "/backtest");
+    const route = kind === "ic" ? "/ic-test" : "/backtest";
+    if (openNewTab) {
+      const params = new URLSearchParams({
+        workspace_id: workspaceID,
+        job_id: String(jobID || job.job_id || ""),
+        run_id: sourceRunID,
+        run_spec_hash: String(job.run_spec_hash || ""),
+        status: String(job.status || "succeeded"),
+        port: String(resolvedPort || job.execution_port || job.port || 0),
+        server_id: String(serverID || job.execution_server_id || job.server_id || ""),
+        group_id: String(
+          job.configuration_group_id || job.group_id || job.task_group_id || "",
+        ),
+      });
+      context.openTab(`${route}?${params}`, {
+        forceNew: true,
+        title: `${context.t(kind === "ic" ? "IC 测试" : "回测")} · ${String(jobID || sourceRunID).slice(0, 8)}`,
+      });
+    } else context.navigate(route);
     return value.workspace;
   }
 
@@ -95,29 +116,6 @@
     }
     if (cancellableStatuses.has(job.status) && !job.cancel_requested) {
       add("取消任务", "cancel", {confirm: true, danger: true});
-    }
-    if (terminalStatuses.has(job.status)) {
-      add("按冻结配置重试", "retry", {
-        confirm: true, openNewAttempt: true,
-      });
-      if (workbenchKind(job) && runID(job)) {
-        const restore = context.button(context.t("恢复为可编辑配置"), async () => {
-          restore.disabled = true;
-          try {
-            await cloneRunWorkspace(context, {
-              job, portQuery,
-              title: `${context.t("从测试任务恢复")} ${jobID.slice(0, 8)}`,
-            });
-          } catch (error) {
-            context.showNotice(
-              `${context.t("恢复冻结配置失败")}: ${error.message}`,
-              true,
-            );
-            restore.disabled = false;
-          }
-        }, context.t("恢复为可编辑配置"));
-        context.toolbar.append(restore);
-      }
     }
   }
 
