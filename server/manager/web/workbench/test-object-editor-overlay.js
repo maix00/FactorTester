@@ -33,16 +33,19 @@
     if (dialog.open) dialog.close(); else dialog.remove();
   }
 
-  function editorContext(context, mount, closeOverlay, onSaved, options = {}) {
+  function editorContext(
+    context, mount, closeOverlay, onSaved, options = {}, callbacks = {},
+  ) {
     const toolbar = document.createElement("div");
     return {
       ...context,
       content: mount,
       toolbar,
-      setHeading: () => {},
+      setHeading: callbacks.setHeading || (() => {}),
       updateActiveTab: () => {},
       activeNav: () => {},
-      navigate: () => closeOverlay(),
+      navigate: callbacks.navigate || (() => closeOverlay()),
+      openFactor: callbacks.openFactor,
       closeTab: () => closeOverlay(),
       onSaved,
       testState: options.testState || null,
@@ -83,7 +86,13 @@
     closeButton.className = "dialog-close";
     closeButton.textContent = "×";
     closeButton.title = context.t("关闭");
-    heading.append(copy, closeButton);
+    const backButton = document.createElement("button");
+    backButton.type = "button";
+    backButton.className = "secondary test-object-editor-back";
+    backButton.textContent = context.t("返回");
+    backButton.title = context.t("返回因子集合");
+    backButton.hidden = true;
+    heading.append(backButton, copy, closeButton);
     const mount = document.createElement("div");
     mount.className = "test-object-editor-overlay-mount";
     card.append(heading, mount);
@@ -104,7 +113,6 @@
       options.onSaved?.(normalized);
       finish(normalized);
     };
-    const proxy = editorContext(context, mount, () => finish(null), saved, options);
     closeButton.addEventListener("click", () => finish(null));
     dialog.addEventListener("close", () => {
       if (!state.closed) {
@@ -117,18 +125,130 @@
     document.body.append(dialog);
     dialog.showModal();
     const promise = new Promise(resolve => { state.resolve = resolve; });
-    try {
-      await window.FTStaticLoader?.loadGroups?.([definition.load]);
-      if (state.closed) return promise;
-      await definition.render(proxy, options.ref || "new", mode, options);
-    } catch (error) {
-      if (!state.closed) {
-        mount.replaceChildren(FTUI.empty(
-          context.t("读取失败"), error.message || context.t("请稍后重试"),
-        ));
+    const frames = [{
+      kind: options.kind,
+      ref: options.ref || "new",
+      mode,
+      initialValue: options.initialValue || null,
+      temporary: options.temporary === true,
+    }];
+    let renderToken = 0;
+    let loadedGroups = false;
+
+    const updateFrameHeading = (frame, name = "") => {
+      const frameDefinition = definitions[frame.kind] || definition;
+      const prefix = frame.mode === "edit"
+        ? context.t("编辑") : frame.mode === "view" ? context.t("查看") : context.t("新建");
+      title.textContent = prefix + context.t(frameDefinition.title);
+      if (name && frame.kind === "factor") title.title = name;
+      backButton.hidden = frames.length < 2;
+    };
+
+    const renderFrame = async frame => {
+      const token = ++renderToken;
+      const frameDefinition = definitions[frame.kind];
+      if (!frameDefinition) return;
+      updateFrameHeading(frame);
+      mount.replaceChildren();
+      const frameOptions = {
+        ...options,
+        ...frame,
+        mode: frame.mode,
+        initialValue: frame.initialValue,
+        temporary: frame.temporary,
+      };
+      const proxy = editorContext(
+        context, mount, () => finish(null), saved, frameOptions, {
+          navigate: path => {
+            if (frame.kind === "factor_set" && isFactorPath(path)) {
+              const targetRef = factorRefFromPath(path);
+              if (targetRef) {
+                openFactor({target_ref: targetRef, label: targetRef});
+                return;
+              }
+            }
+            finish(null);
+          },
+          openFactor,
+          setHeading: (name, scope) => {
+            updateFrameHeading(frame, name);
+          },
+        },
+      );
+      try {
+        if (!loadedGroups) {
+          await window.FTStaticLoader?.loadGroups?.([frameDefinition.load]);
+          loadedGroups = true;
+        }
+        if (state.closed || token !== renderToken) return;
+        await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);
+      } catch (error) {
+        if (!state.closed && token === renderToken) {
+          mount.replaceChildren(FTUI.empty(
+            context.t("读取失败"), error.message || context.t("请稍后重试"),
+          ));
+        }
       }
-    }
+    };
+
+    const openFactor = item => {
+      const targetRef = String(item?.target_ref || item?.factor_ref || "").trim();
+      if (!targetRef) return;
+      const initialValue = factorInitialValue(item, targetRef);
+      frames.push({
+        kind: "factor", ref: targetRef, mode: "view",
+        initialValue, temporary: Boolean(initialValue),
+      });
+      void renderFrame(frames.at(-1));
+    };
+
+    backButton.addEventListener("click", () => {
+      if (frames.length < 2) return;
+      frames.pop();
+      void renderFrame(frames.at(-1));
+    });
+    await renderFrame(frames[0]);
     return promise;
+  }
+
+  function isFactorPath(path) {
+    return /^\/factors\/factor\//.test(String(path || ""));
+  }
+
+  function factorRefFromPath(path) {
+    const match = /^\/factors\/factor\/(.+?)(?:\?|$)/.exec(String(path || ""));
+    if (!match) return "";
+    try { return decodeURIComponent(match[1]); } catch (_) { return match[1]; }
+  }
+
+  function factorInitialValue(item, targetRef) {
+    if (!item || typeof item !== "object") return null;
+    // Frozen references already encode the family commit/blob.  Prefer that
+    // authoritative projection unless the member row carries a complete
+    // inline source view; a row containing only a commit must not suppress
+    // the catalog resolver and leave the nested detail without its formula.
+    const frozen = String(targetRef).startsWith("factor:v1:");
+    const hasInlineSource = ["source_code", "math_expr", "formula", "latex"]
+      .some(key => String(item[key] || "").trim());
+    if (frozen && !hasInlineSource) return null;
+    const hasSource = [
+      "factor_git_commit", "git_commit", "source_code", "math_expr",
+      "formula", "latex", "factor_params", "params",
+    ].some(key => item[key] !== undefined && item[key] !== null);
+    if (!hasSource) return null;
+    const decoded = frozen ? window.FTFactorModel?.decodeFrozenFactorRef?.(targetRef) : null;
+    return {
+      ...item,
+      factor_ref: item.factor_ref || targetRef,
+      ...(decoded ? {
+        factor_alias: item.factor_alias || decoded.alias,
+        factor_family_alias: item.factor_family_alias || decoded.family,
+        factor_git_commit: item.factor_git_commit || decoded.gitCommit,
+        factor_family_ref: item.factor_family_ref || decoded.family,
+        factor_owner_ref: item.factor_owner_ref || decoded.ownerRef,
+        factor_params: item.factor_params || decoded.params,
+      } : {}),
+    };
   }
 
   window.FTTestObjectEditorOverlay = Object.freeze({open});

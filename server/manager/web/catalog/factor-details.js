@@ -245,7 +245,7 @@
       link.textContent = item.label || item.target_ref;
       link.addEventListener("click", event => {
         event.preventDefault();
-        context.navigate(path);
+        navigateReference(context, kind, item, path);
       });
       root.append(link);
     });
@@ -264,6 +264,7 @@
     );
     linkRows(view, members, item =>
       `/factors/factor/${encodeURIComponent(item.target_ref)}`, context,
+      (item, path) => navigateReference(context, "factor", item, path),
     );
     mount.replaceChildren(view.shell);
     if (!page.has_more) return;
@@ -290,11 +291,24 @@
     );
   }
 
-  function linkRows(view, items, path, context) {
+  function linkRows(view, items, path, context, onNavigate = null) {
     [...view.body.rows].forEach((row, index) => {
       row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(path(items[index])));
+      row.addEventListener("click", () => {
+        const item = items[index];
+        const target = path(item);
+        if (onNavigate) onNavigate(item, target);
+        else context.navigate(target);
+      });
     });
+  }
+
+  function navigateReference(context, kind, item, path) {
+    if (kind === "factor" && context.openFactor) {
+      context.openFactor(item);
+      return;
+    }
+    context.navigate(path);
   }
 
   window.FTFactorDetails = Object.freeze({factorDetail, familyDetail, setDetail});

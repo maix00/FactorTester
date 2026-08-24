@@ -146,6 +146,7 @@
 .test-object-editor-dialog > .test-object-editor-overlay { width: 100%; max-width: none; box-sizing: border-box; }
 .test-object-editor-overlay { width: auto; max-height: calc(100vh - 32px); overflow: auto; }
 .test-object-editor-overlay > .section-heading { padding-right: 32px; }
+.test-object-editor-overlay .test-object-editor-back { flex: 0 0 auto; }
 .test-object-editor-overlay-mount, .test-object-editor-overlay-mount > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
 .test-object-editor-overlay .factor-editor-form { width: 100%; max-width: none; margin-inline: 0; }
 .test-object-editor-overlay .factor-editor-form .test-setting-row { grid-template-columns: minmax(180px, .52fr) minmax(0, 1.48fr); }
