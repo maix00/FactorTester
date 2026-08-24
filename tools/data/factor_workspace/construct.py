@@ -6,12 +6,10 @@ import ast
 import json
 import os
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
 from tools.data.factor_workspace import storage as factor_workspace_storage
-from tools.data.tech_docs import scan_tool_files
 from tools.decorators.factor_workspace import extract_factor_workspace_exports, has_factor_workspace_decorator
 
 from .sdk import AUTHOR_SDK_MODULES
@@ -135,7 +133,7 @@ def _decorator_to_source(decorator: ast.expr) -> str | None:
 
 def _is_authoring_marker(decorator: ast.expr) -> bool:
     name = _decorator_to_source(decorator)
-    return name in {"factor_workspace", "tech_docs"}
+    return name == "factor_workspace"
 
 
 def _is_factor_workspace_flag(node: ast.expr) -> bool:
@@ -269,7 +267,7 @@ def _render_stub_module(source: str, filename: str, *, explicit_author_api: bool
     def _render_import_from(node: ast.ImportFrom) -> str | None:
         aliases = []
         for alias in node.names:
-            if alias.name in {"factor_workspace", "tech_docs"}:
+            if alias.name == "factor_workspace":
                 continue
             local_name = _import_alias_name(alias)
             imported_name = alias.name.rsplit(".", 1)[-1]
@@ -385,7 +383,7 @@ def _render_stub_module(source: str, filename: str, *, explicit_author_api: bool
                     if isinstance(child, ast.ImportFrom):
                         aliases = [
                             alias for alias in child.names
-                            if alias.name not in {"factor_workspace", "tech_docs"}
+                            if alias.name != "factor_workspace"
                         ]
                         if aliases:
                             rendered_import = ast.unparse(
@@ -394,7 +392,7 @@ def _render_stub_module(source: str, filename: str, *, explicit_author_api: bool
                     elif isinstance(child, ast.Import):
                         aliases = [
                             alias for alias in child.names
-                            if _import_alias_name(alias) not in {"factor_workspace", "tech_docs"}
+                            if _import_alias_name(alias) != "factor_workspace"
                         ]
                         if aliases:
                             rendered_import = ast.unparse(ast.Import(names=aliases))
@@ -464,21 +462,6 @@ def _remove_missing_files(directory: str, expected_names: set[str]) -> list[str]
             os.remove(path)
             removed.append(path)
     return removed
-
-
-def _sync_tools_index(root: str) -> bool:
-    tools_dir = os.path.join(os.getcwd(), "tools")
-    tool_files = scan_tool_files(tools_dir, include_symbols=True)
-    serializable_files: list[dict[str, Any]] = []
-    for item in tool_files:
-        serializable_files.append({key: value for key, value in item.items() if key != "tree"})
-    payload = {
-        "workspace_root": root,
-        "tools_dir": tools_dir,
-        "generated_at": time.time(),
-        "files": serializable_files,
-    }
-    return _write_json(os.path.join(root, "tools_index.json"), payload)
 
 
 def _sync_tools_sdk(root: str) -> bool:

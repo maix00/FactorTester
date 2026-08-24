@@ -33,7 +33,6 @@ import pandas as pd
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
 
 from tools.decorators import factor_workspace
-from tools.decorators import tech_docs
 from tools.data.types import DataFreq, UniqueNameObject
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
@@ -43,7 +42,6 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.FactorTester import FactorTester
 
-@tech_docs
 @factor_workspace
 class Factor(UniqueNameObject, FactorExpr):
     """
