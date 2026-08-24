@@ -13,6 +13,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
     case obligationCoverage
     case pathSelection
     case testResult
+    case evidenceFragment
     case researchGap
 
     static func resolve(
@@ -69,6 +70,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "test_result" {
             return .testResult
         }
+        if displayKind == "evidence_fragment"
+            || sectionRole == "evidence_fragment" {
+            return .evidenceFragment
+        }
         if displayKind == "research_gap"
             || sectionRole == "research_gap" {
             return .researchGap
@@ -93,6 +98,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return L10n.text("义务覆盖")
         case .pathSelection: return L10n.text("研究路径选择")
         case .testResult: return L10n.text("测试结果")
+        case .evidenceFragment: return L10n.text("证据片段")
         case .researchGap: return L10n.text("研究缺口")
         }
     }
@@ -109,6 +115,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return "checkmark.shield"
         case .pathSelection: return "arrow.triangle.branch"
         case .testResult: return "chart.bar.doc.horizontal"
+        case .evidenceFragment: return "doc.text.magnifyingglass"
         case .researchGap: return "exclamationmark.triangle"
         }
     }
@@ -125,6 +132,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return .green
         case .pathSelection: return .indigo
         case .testResult: return .blue
+        case .evidenceFragment: return .indigo
         case .researchGap: return .orange
         }
     }

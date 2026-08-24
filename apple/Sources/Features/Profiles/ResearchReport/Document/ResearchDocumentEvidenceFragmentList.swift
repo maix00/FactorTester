@@ -6,8 +6,7 @@ import AppKit
 struct ResearchDocumentEvidenceFragmentList: View {
     let detail: ResearchEvidenceDetailPayload
     let reportRef: String
-    let defaultPort: Int
-    let openJob: (String, Int) -> Void
+    let openJob: (String, Int?, String) -> Void
 
     var body: some View {
         if !detail.fragments.isEmpty {
@@ -75,10 +74,11 @@ struct ResearchDocumentEvidenceFragmentList: View {
         case "job":
             if let jobID = identity["job_id"]?.scalarText {
                 Button(L10n.text("打开测试任务")) {
-                    let port = Int(
-                        identity["service_port"]?.scalarText ?? ""
-                    ) ?? defaultPort
-                    openJob(jobID, port)
+                    let port = identity["service_port"]?.scalarText.flatMap {
+                        Int($0)
+                    }
+                    let serverID = identity["server_id"]?.scalarText ?? ""
+                    openJob(jobID, port, serverID)
                 }
                 .buttonStyle(.link)
             }

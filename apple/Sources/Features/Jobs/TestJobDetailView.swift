@@ -63,7 +63,7 @@ struct TestJobDetailView: View {
                 reportRef: "",
                 serverURL: serverURL(for: job),
                 objectHref: nil,
-                openJobSource: { _, _ in }
+                openJobSource: { _, _, _ in }
             )
         }
     }

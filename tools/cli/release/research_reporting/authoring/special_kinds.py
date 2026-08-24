@@ -12,6 +12,7 @@ SPECIAL_SECTION_DISPLAY_KINDS = frozenset({
     "graph_continuation",
     "research_gap",
     "test_result",
+    "evidence_fragment",
 })
 
 AGENT_SPECIAL_SECTION_DISPLAY_KINDS = frozenset({

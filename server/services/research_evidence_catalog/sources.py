@@ -3,31 +3,36 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 
 import settings as Settings
-from tools.data.sqlite.db import connect_sqlite
-
 from server.services.research_evidence_scope import (
     check_identity_scope,
     validate_applicability,
 )
-from .schema import ensure_schema
+from tools.data.sqlite.db import connect_sqlite
+
 from .provenance import validate_file_provenance
+from .schema import ensure_schema
 from .validation import (
     canonical,
     digest,
-    evidence_kind as validate_evidence_kind,
     fragment_reference,
     object_value,
     required_text,
     sha256,
-    source_kind as validate_source_kind,
     source_reference,
     text_list,
     validate_identity,
     validate_selector,
+)
+from .validation import (
+    evidence_kind as validate_evidence_kind,
+)
+from .validation import (
+    source_kind as validate_source_kind,
 )
 
 
@@ -42,6 +47,9 @@ def capture_job_source(*, owner: str, job_id: str) -> dict[str, Any]:
     job = detail["job"]
     if job.status not in TERMINAL_STATUSES:
         raise ValueError("JobAttempt must be terminal before evidence capture")
+    server_id = str(
+        os.environ.get("FACTORTESTER_SERVER_ID") or "local"
+    ).strip()
     artifacts = [
         {
             key: item.get(key)
@@ -53,6 +61,7 @@ def capture_job_source(*, owner: str, job_id: str) -> dict[str, Any]:
     ]
     snapshot = {
         "job_id": job.job_id,
+        "server_id": server_id,
         "run_id": job.run_id,
         "attempt": job.attempt,
         "status": job.status.value,
@@ -73,6 +82,7 @@ def capture_job_source(*, owner: str, job_id: str) -> dict[str, Any]:
         source_kind="job",
         identity={
             "job_id": job.job_id,
+            "server_id": server_id,
             "run_id": job.run_id,
             "attempt": job.attempt,
             "service_port": job.service_port,
