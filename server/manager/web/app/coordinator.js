@@ -410,7 +410,9 @@
       factorSets: (pageContext, route) => FTFactorCatalogList.list(
         pageContext, "sets", route?.scope || "mine",
       ),
-      factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
+      factorFamily: (pageContext, id, mode, options) => FTFactors.familyDetail(
+        pageContext, id, mode, options,
+      ),
       factor: (pageContext, id, mode) => FTFactors.factorDetail(pageContext, id, mode),
       factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),
       factors: (pageContext, route) => FTFactorCatalogList.list(

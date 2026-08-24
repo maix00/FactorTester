@@ -245,6 +245,10 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "owner_organization_name": _safe_text(
             item.get("owner_organization_name")
         ),
+        "scope_key": _safe_text(
+            item.get("scope_key") or item.get("product_group")
+        ),
+        "product_group": _safe_text(item.get("product_group")),
         "updated_at": _safe_text(item.get("updated_at")),
     }
     commit = _safe_text(item.get("factor_git_commit") or item.get("git_commit"))

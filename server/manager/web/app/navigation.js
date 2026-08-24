@@ -277,7 +277,14 @@
       return {kind: "factor-sets", scope: ["mine", "subordinates"].includes(scope) ? scope : "mine"};
     }
     if (parts[0] === "factors" && parts[1] === "family" && parts[2]) {
-      return {kind: "factor-family", id: decodeURIComponent(parts.slice(2).join("/"))};
+      const id = decodeURIComponent(parts.slice(2).join("/"));
+      const params = new URLSearchParams(search);
+      return {
+        kind: "factor-family",
+        id: id === "new" ? "" : id,
+        mode: params.get("mode") || (id === "new" ? "create" : "view"),
+        publicMode: params.get("visibility") === "public",
+      };
     }
     if (parts[0] === "factors" && parts[1] === "factor" && parts[2]) {
       const id = decodeURIComponent(parts.slice(2).join("/"));

@@ -100,6 +100,12 @@ assert.deepStrictEqual(match("/factors/families", "?scope=subordinates"), {
 assert.deepStrictEqual(match("/factors/families", "?scope=unknown"), {
   kind: "factor-families", scope: "public",
 });
+assert.deepStrictEqual(match("/factors/family/new", "?mode=create&visibility=public"), {
+  kind: "factor-family", id: "", mode: "create", publicMode: true,
+});
+assert.deepStrictEqual(match("/factors/family/family%3Aone", "?mode=edit"), {
+  kind: "factor-family", id: "family:one", mode: "edit", publicMode: false,
+});
 assert.strictEqual(pinned("/products?source=local"), true);
 assert.strictEqual(pinned("/products/sources?source=local"), true);
 assert.strictEqual(pinned("/products/groups"), true);

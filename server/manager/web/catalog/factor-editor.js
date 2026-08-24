@@ -97,6 +97,7 @@
   }
 
   function parameters(state) {
+    if (state.familyMode) return [];
     if (state.sourceMode === "source") return state.inspection?.params || [];
     return state.family?.params || [];
   }
@@ -311,15 +312,23 @@
         temporary: true,
       };
     }
-    const endpoint = state.mode === "create"
-      ? "/custom-factors/api/create"
-      : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`;
+    const endpoint = state.familyMode
+      ? state.publicMode
+        ? state.mode === "create"
+          ? "/custom-factors/api/create-public"
+          : `/custom-factors/api/update-public/${encodeURIComponent(state.factorID)}`
+        : state.mode === "create"
+          ? "/custom-factors/api/create"
+          : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`
+      : state.mode === "create"
+        ? "/custom-factors/api/create"
+        : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`;
     const value = await context.api(endpoint, {
       method: "POST", body: JSON.stringify(payload),
     });
     const saved = value.factor || value;
     const alias = saved.name || saved.id || state.factorID;
-    if (Object.keys(state.parameterValues || {}).length) {
+    if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
       await context.api(
         `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
         {
@@ -331,16 +340,29 @@
     return saved;
   }
 
-  async function render(context, data, targetRef, mode) {
+  async function render(context, data, targetRef, mode, options = {}) {
     if (!context.session) throw new Error(context.t("登录后才能编辑因子"));
-    let factor = context.testObjectInitialValue || data.factors.find(item => item.factor_ref === targetRef
-      || item.factor_alias === targetRef || item.id === targetRef);
-    const factorID = factor?.factor_alias || factor?.id || targetRef;
+    const familyMode = options.familyMode === true;
+    const publicMode = options.publicMode === true;
+    let factor = familyMode
+      ? data.families.find(item => item.family_ref === targetRef
+        || item.factor_family_alias === targetRef)
+      : context.testObjectInitialValue || data.factors.find(item => item.factor_ref === targetRef
+        || item.factor_alias === targetRef || item.id === targetRef);
+    const factorID = familyMode
+      ? familyAlias(factor) || targetRef
+      : factor?.factor_alias || factor?.id || targetRef;
     if (mode === "edit" && !factorID) throw new Error(context.t("因子不存在"));
     let loaded = factor ? {...factor} : {};
     if (mode === "edit" && !context.testObjectTemporary) {
+      const endpoint = familyMode && publicMode
+        ? `/custom-factors/api/public-factor/${encodeURIComponent(factorID)}`
+        : familyMode
+          ? `/custom-factors/api/get/${encodeURIComponent(factorID)}`
+            + `?owner_username=${encodeURIComponent(factor?.owner_username || context.session.username || "")}`
+          : `/custom-factors/api/get/${encodeURIComponent(factorID)}`;
       const value = await context.api(
-        `/custom-factors/api/get/${encodeURIComponent(factorID)}`,
+        endpoint,
       );
       loaded = {...loaded, ...(value.factor || {})};
     }
@@ -354,7 +376,8 @@
       )) || null
       : null;
     const state = {
-      mode, factorID, sourceMode: mode === "edit" && !temporaryFamilyEdit
+      mode, factorID, familyMode, publicMode,
+      sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
       family: loadedFamily,
       sourceCode: loaded.source_code || "",
@@ -372,15 +395,18 @@
         : {...(loaded.factor_params || loaded.params || {})},
       loaded,
     };
+    const noun = familyMode ? context.t("因子家族") : context.t("因子");
     const titleText = mode === "create"
-      ? context.t("新增因子") : loaded.factor_alias || loaded.name || factorID;
-    context.setHeading(titleText, context.t("因子详情"));
+      ? context.t(`新增${familyMode ? "因子家族" : "因子"}`)
+      : loaded.factor_alias || loaded.name || factorID;
+    context.setHeading(titleText, noun + context.t("详情"));
     context.updateActiveTab?.({title: titleText});
     const form = document.createElement("form");
     form.className = "detail-stack factor-editor-form";
     const title = document.createElement("h2"); title.textContent = mode === "create"
-      ? context.t("新增因子") : context.t("编辑因子");
-    const name = textField(context, "因子类名", loaded.name || loaded.factor_alias || "", {
+      ? context.t(`新增${familyMode ? "因子家族" : "因子"}`)
+      : context.t(`编辑${familyMode ? "因子家族" : "因子"}`);
+    const name = textField(context, familyMode ? "因子家族类名" : "因子类名", loaded.name || loaded.factor_alias || "", {
       readOnly: mode === "edit", required: true,
     });
     const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
@@ -392,7 +418,9 @@
     status.className = "form-error";
     const redraw = () => {
       sourceMount.replaceChildren();
-      if (state.mode === "create") {
+      if (state.familyMode) {
+        sourceMount.append(sourceControls(context, state, redraw));
+      } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
         if (state.sourceMode === "family") {
           sourceMount.append(familyPicker(context, data, state, redraw));
@@ -457,10 +485,17 @@
           });
         }
         if (context.onSaved) { context.onSaved(result); return; }
-        const ref = result.factor_ref || result.factor_alias || result.name;
-        if (FTTabReturn.returnToSource(context, {kind: "factor", ref})) return;
+        const ref = state.familyMode
+          ? result.family_ref || result.factor_family_ref || result.id
+            || result.name || state.factorID
+          : result.factor_ref || result.factor_alias || result.name;
+        const kind = state.familyMode ? "family" : "factor";
+        if (FTTabReturn.returnToSource(context, {kind, ref})) return;
         context.closeTab?.(context.tabID);
-        context.navigate(`/factors/factor/${encodeURIComponent(ref)}?updated=${Date.now()}`);
+        const path = state.familyMode
+          ? `/factors/family/${encodeURIComponent(ref)}?updated=${Date.now()}`
+          : `/factors/factor/${encodeURIComponent(ref)}?updated=${Date.now()}`;
+        context.navigate(path);
       } catch (error) {
         status.textContent = error.message || context.t("因子保存失败");
         save.disabled = false;

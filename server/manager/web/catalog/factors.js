@@ -14,9 +14,14 @@
     const inline = mode === "view"
       && context.testObjectTemporary
       && context.testObjectInitialValue;
-    const data = inline
+    let data = inline
       ? {factors: [context.testObjectInitialValue], families: []}
       : await catalog().load(context, {library: true});
+    if (!inline && mode === "view" && targetRef && !data.factors.some(item =>
+      item.factor_ref === targetRef || item.factor_alias === targetRef
+    )) {
+      data = await catalog().load(context, {refresh: true, library: true});
+    }
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") await ensureEditor();
     return FTFactorDetails.factorDetail(
@@ -24,11 +29,19 @@
     );
   }
 
-  async function familyDetail(context, targetRef) {
+  async function familyDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
-    const data = await catalog().load(context, {library: true});
+    let data = await catalog().load(context, {library: true});
+    if (mode === "view" && targetRef && !data.families.some(item =>
+      item.family_ref === targetRef || item.factor_family_alias === targetRef
+    )) {
+      data = await catalog().load(context, {refresh: true, library: true});
+    }
     if (!catalog().isCurrent(context)) return;
-    return FTFactorDetails.familyDetail(context, data, targetRef);
+    if (mode === "create" || mode === "edit") await ensureEditor();
+    return FTFactorDetails.familyDetail(
+      context, data, targetRef, mode, options,
+    );
   }
 
   async function setDetail(context, targetRef) {

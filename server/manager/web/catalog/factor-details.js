@@ -111,12 +111,67 @@
     };
   }
 
-  async function familyDetail(context, data, targetRef) {
-    let family = data.families.find(item => item.family_ref === targetRef);
+  async function familyDetail(
+    context, data, targetRef, mode = "view", options = {},
+  ) {
+    let family = data.families.find(item => item.family_ref === targetRef
+      || item.factor_family_alias === targetRef);
+    if (mode === "create" || mode === "edit") {
+      if (mode === "edit" && !family) {
+        throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
+      }
+      return FTFactorEditor.render(
+        context,
+        data,
+        family?.family_ref || targetRef,
+        mode,
+        {
+          familyMode: true,
+          publicMode: options.publicMode === true
+            || family?.factor_kind === "public"
+            || family?.source === "public",
+        },
+      );
+    }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
     family = await withSource(context, family);
     context.setHeading(model().familyName(family), context.t("因子家族"));
     context.updateActiveTab?.({title: model().familyName(family)});
+    const publicFamily = family.factor_kind === "public" || family.source === "public";
+    const canEdit = Boolean(context.session) && (
+      publicFamily
+        ? context.session.role === "super_admin"
+        : family.can_edit === true
+          || String(family.owner_username || "") === String(context.session.username || "")
+    );
+    if (canEdit && !context.testObjectViewOnly) {
+      const editQuery = publicFamily
+        ? "?mode=edit&visibility=public" : "?mode=edit";
+      context.toolbar?.append(context.button(context.t("编辑"), () => {
+        context.navigate(FTTabReturn.withSource(
+          `/factors/family/${encodeURIComponent(family.family_ref)}${editQuery}`,
+          context, {kind: "family", ref: family.family_ref},
+        ));
+      }, context.t("在独立标签页编辑因子家族")));
+      context.toolbar?.append(context.button(context.t("删除"), async () => {
+        if (!window.confirm(context.t("确认删除该因子家族？"))) return;
+        const alias = family.factor_family_alias || family.factor_family_name;
+        const endpoint = publicFamily
+          ? `/custom-factors/api/delete-public/${encodeURIComponent(alias)}`
+          : `/custom-factors/api/delete/${encodeURIComponent(alias)}`;
+        try {
+          await context.api(endpoint, {method: "POST"});
+          context.showNotice?.(context.t("已删除"));
+          if (FTTabReturn.returnToSource(context)) return;
+          context.closeTab?.(context.tabID);
+          context.navigate(publicFamily
+            ? "/factors/families?scope=public"
+            : "/factors/families?scope=mine");
+        } catch (error) {
+          context.showNotice?.(error.message || context.t("删除失败"), true);
+        }
+      }, context.t("删除此因子家族")));
+    }
     const root = document.createElement("div");
     root.className = "detail-stack";
     root.append(window.FTFactorDetailShared.summary(context, family));
