@@ -12,8 +12,8 @@
       time: window.FTChartTimeline.timeOptions(),
       title: {text: title, align: "left", style: {fontSize: "14px"}},
       credits: {enabled: false},
-      rangeSelector: {selected: 5, inputEnabled: true},
-      navigator: {enabled: true}, scrollbar: {enabled: true},
+      rangeSelector: {selected: 5, inputEnabled: true, allButtonsEnabled: true},
+      navigator: {enabled: true, adaptToUpdatedData: false}, scrollbar: {enabled: true},
       legend: {enabled: true},
       xAxis: window.FTChartTimeline.observedTimeAxis(),
       yAxis: [{title: {text: yTitle}, opposite: false, plotLines: [{
@@ -25,12 +25,23 @@
     };
   }
 
-  function seriesOptions(factor, context, descriptor = null, method = "") {
+  function matchesChoice(value, selected) {
+    const values = Array.isArray(selected) ? selected : [selected];
+    return !values.filter(Boolean).length || values.map(String).includes(String(value));
+  }
+
+  function seriesOptions(factor, context, descriptors = null, methods = "") {
+    const selectedDescriptors = Array.isArray(descriptors) ? descriptors : [descriptors];
+    const selectedMethods = (Array.isArray(methods) ? methods : [methods]).filter(Boolean);
     const series = (factor?.series || []).filter(item => (
-      window.FTICResultModel.methodMatches(item, method)
-        && window.FTICResultModel.descriptorMatches(item, descriptor)
+      matchesChoice(window.FTICResultModel.methodOf(item), methods)
+        && selectedDescriptors.some(descriptor => (
+          !descriptor || window.FTICResultModel.descriptorMatches(item, descriptor)
+        ))
     )).map(item => ({
-      name: `${item.horizon || context.t("默认周期")} · d${item.delay || 0}`,
+      name: [selectedMethods.length > 1 ? window.FTICResultModel.methodOf(item) : "",
+        item.horizon || context.t("默认周期"), `d${item.delay || 0}`]
+        .filter(Boolean).join(" · "),
       type: "line",
       data: item.values.flatMap((value, index) => (
         value == null ? [] : [[timestamp(item.dates[index], index), value]]
@@ -40,9 +51,25 @@
     return lineOptions(context.t("IC 序列"), "IC", series);
   }
 
-  function decayOptions(factor, context, method = "") {
-    const values = window.FTICResultModel.decay(factor, method);
-    const categories = values.map(item => `${item.horizon || "—"} · d${item.delay}`);
+  function decayOptions(factor, context, methods = "", delays = []) {
+    const selectedMethods = Array.isArray(methods) ? methods : [methods];
+    const selectedDelays = (Array.isArray(delays) ? delays : [delays]).map(Number);
+    const values = (factor?.statistics || []).filter(item => (
+      matchesChoice(window.FTICResultModel.methodOf(item), selectedMethods)
+        && (!selectedDelays.length || selectedDelays.includes(Number(item.entry_delay_bars || 0)))
+    )).map(item => ({
+      method: window.FTICResultModel.methodOf(item),
+      horizon: String(item.forward_return_horizon || item.horizon || ""),
+      delay: Number(item.entry_delay_bars || 0),
+      mean: window.FTICResultModel.finite(item.mean_ic ?? item.mean),
+      ir: window.FTICResultModel.finite(item.icir_signal ?? item.IR ?? item.ir),
+    })).filter(item => item.mean != null || item.ir != null)
+      .sort((left, right) => window.FTICResultModel.horizonSeconds(left.horizon)
+        - window.FTICResultModel.horizonSeconds(right.horizon) || left.delay - right.delay);
+    const categories = values.map(item => [
+      selectedMethods.filter(Boolean).length > 1 ? item.method : "",
+      item.horizon || "—", `d${item.delay}`,
+    ].filter(Boolean).join(" · "));
     return {
       chart: {backgroundColor: "transparent", zooming: {type: "x"}},
       title: {text: context.t("IC 衰减分析"), align: "left", style: {fontSize: "14px"}},
@@ -121,16 +148,26 @@
   }
 
   function autocorrelationOptions(
-    factor, context, summaryRows = [], descriptor = null, method = "",
+    factor, context, summaryRows = [], descriptors = null, methods = "",
   ) {
-    const values = window.FTICResultModel.autocorrelation(
-      factor, 20, summaryRows, descriptor, method,
-    );
+    const selectedDescriptors = Array.isArray(descriptors) ? descriptors : [descriptors];
+    const selectedMethods = (Array.isArray(methods) ? methods : [methods]).filter(Boolean);
+    const combinations = (selectedMethods.length ? selectedMethods : [""]).flatMap(method => (
+      selectedDescriptors.map(descriptor => ({method, descriptor}))
+    ));
+    const rows = combinations.map(({method, descriptor}) => ({
+      method, descriptor,
+      values: window.FTICResultModel.autocorrelation(
+        factor, 20, summaryRows, descriptor, method,
+      ),
+    })).filter(item => item.values.length);
+    const lags = [...new Set(rows.flatMap(item => item.values.map(value => value.lag)))]
+      .sort((left, right) => left - right);
     return {
       chart: {type: "column", backgroundColor: "transparent", zooming: {type: "x"}},
       title: {text: context.t("IC 自相关衰减"), align: "left", style: {fontSize: "14px"}},
-      credits: {enabled: false}, legend: {enabled: false},
-      xAxis: {categories: values.map(item => `Lag ${item.lag}`), crosshair: true},
+      credits: {enabled: false}, legend: {enabled: rows.length > 1},
+      xAxis: {categories: lags.map(item => `Lag ${item}`), crosshair: true},
       yAxis: {
         title: {text: context.t("自相关系数")}, min: -1, max: 1,
         plotLines: [{value: 0.5, color: "#ef4444", dashStyle: "Dash", width: 1,
@@ -138,7 +175,13 @@
       },
       tooltip: {pointFormat: "<b>{point.category}</b>: {point.y:.4f}"},
       plotOptions: {series: {animation: false}, column: {borderWidth: 0}},
-      series: [{name: context.t("自相关"), data: values.map(item => item.value), negativeColor: "#ef4444"}],
+      series: rows.map(item => ({
+        name: [item.method, item.descriptor?.horizon,
+          item.descriptor ? `d${item.descriptor.delay || 0}` : ""].filter(Boolean).join(" · ")
+          || context.t("自相关"),
+        data: lags.map(lag => item.values.find(value => value.lag === lag)?.value ?? null),
+        negativeColor: "#ef4444",
+      })),
     };
   }
 

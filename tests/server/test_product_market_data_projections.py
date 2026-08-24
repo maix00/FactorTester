@@ -4,6 +4,7 @@ import pandas as pd
 
 from server.modules.shared.price_data_helpers import open_interest_column
 from server.services.product_market_data.products import _price_rows
+from server.services.product_market_data.sampling import bounded_ohlcv_rows
 from tools.data.types import DataFreq
 
 
@@ -34,6 +35,23 @@ def test_product_price_rows_keeps_open_interest_from_provider_alias() -> None:
 
     assert has_open_interest is True
     assert [row["open_interest"] for row in rows] == [80.0, 90.0]
+
+
+def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
+    rows = [{
+        "timestamp": index, "open": index + 1, "high": index + 3,
+        "low": index, "close": index + 2, "volume": 10,
+        "open_interest": 100 + index,
+    } for index in range(200)]
+
+    sampled, total = bounded_ohlcv_rows(rows, {"max_points": 100})
+
+    assert total == 200
+    assert len(sampled) == 100
+    assert sampled[0] == {
+        **rows[1], "open": 1, "high": 4, "low": 0,
+        "close": 3, "volume": 20, "open_interest": 101,
+    }
 
 
 def test_manager_product_fields_resolves_contracts_for_independent_detail_tabs(

@@ -181,23 +181,46 @@
     mount.replaceChildren(root);
 
     let requestID = 0;
+    function applyBound(payload, prefix, value) {
+      if (!Number.isFinite(value)) return;
+      const date = new Date(value);
+      const pad = item => String(item).padStart(2, "0");
+      payload[`${prefix}_date`] = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      payload[`${prefix}_time`] = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function rangePayload(minimum, maximum, maximumPoints) {
+      const payload = {
+        ...(contractUID ? {contract_uid: contractUID} : {product_name: product.name}),
+        adjusted: Boolean(state.adjusted),
+        max_points: maximumPoints || 1200,
+      };
+      if (state.dataSource) payload.data_source = state.dataSource;
+      if (Number.isFinite(minimum)) applyBound(payload, "start", minimum);
+      else if (options.startDate) payload.start_date = options.startDate;
+      if (Number.isFinite(maximum)) applyBound(payload, "end", maximum);
+      else if (options.endDate) payload.end_date = options.endDate;
+      return payload;
+    }
+
+    async function fetchRange(minimum, maximum, maximumPoints) {
+      const value = await context.api(endpoint(source), {
+        method: "POST",
+        body: JSON.stringify(rangePayload(minimum, maximum, maximumPoints)),
+      });
+      if (value?.success === false) {
+        throw new Error(value.error || context.t("请求失败"));
+      }
+      return value || {};
+    }
+
     async function load() {
       const requestIDForLoad = ++requestID;
       controls.setBusy(true);
       metadataMount.replaceChildren(FTUI.loading(context.t("正在读取数据能力…")));
       chartMount.replaceChildren(FTUI.loading(context.t("正在读取价格曲线…")));
-      const payload = {
-        ...(contractUID ? {contract_uid: contractUID} : {product_name: product.name}),
-        adjusted: Boolean(state.adjusted),
-        start_date: options.startDate || null,
-        end_date: options.endDate || null,
-      };
-      if (state.dataSource) payload.data_source = state.dataSource;
       try {
-        const value = await context.api(endpoint(source), {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        const value = await fetchRange(undefined, undefined, 1200);
         if (!current(context) || requestIDForLoad !== requestID) return;
         if (value?.success === false) {
           throw new Error(value.error || context.t("请求失败"));
@@ -209,6 +232,11 @@
             ...value,
             product: value.contract_name || value.product || options.contractName || targetName,
             desc: value.desc || product.desc,
+          }, {
+            loadingText: context.t("正在读取当前时间范围…"),
+            loadRange: (minimum, maximum, range = {}) => fetchRange(
+              minimum, maximum, range.maxPoints,
+            ),
           });
         } else {
           chartMount.replaceChildren(FTUI.empty(

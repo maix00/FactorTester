@@ -14,6 +14,9 @@ vm.runInThisContext(fs.readFileSync(
   "server/manager/web/jobs/highcharts-timeline.js", "utf8",
 ), {filename: "highcharts-timeline.js"});
 vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/core/highcharts-range-loader.js", "utf8",
+), {filename: "highcharts-range-loader.js"});
+vm.runInThisContext(fs.readFileSync(
   "server/manager/web/jobs/highcharts-viewers.js", "utf8",
 ), {filename: "highcharts-viewers.js"});
 vm.runInThisContext(fs.readFileSync(
@@ -40,6 +43,7 @@ assert.equal(equity.series[0].name, "A1");
 assert.equal(equity.series.length, 2, "the equity chart must not embed drawdown series");
 assert.equal(equity.time.timezone, "Asia/Taipei", "timestamps must render in the user's browser timezone");
 assert.equal(equity.navigator.enabled, true);
+assert.equal(equity.rangeSelector.allButtonsEnabled, true);
 assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
 assert.equal(equity.xAxis.ordinal, true, "non-trading gaps must be compressed");
@@ -111,6 +115,15 @@ assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
 assert.deepEqual(replacedData, [
   [1_700_000_000_000, 110], [1_700_000_001_000, 111],
 ]);
+requestedRange = {stale: true};
+progressive.xAxis.events.afterSetExtremes.call(
+  {chart: progressiveChart}, {
+    min: 10, max: 11, trigger: "rangeSelectorButton",
+    rangeSelectorButton: {type: "all"},
+  },
+);
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.deepEqual(requestedRange, {min: undefined, max: undefined, maxPoints: 600});
 
 const metrics = {
   artifact_kind: "metrics_over_time",

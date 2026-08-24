@@ -278,7 +278,7 @@
     factor, maximumLag = 20, summaryRows = [], descriptor = null, method = "",
   ) {
     const persisted = (factor?.autocorrelation || []).filter(item => (
-      methodMatches(item, method) && item.lag != null
+      methodMatches(item, method) && descriptorMatches(item, descriptor) && item.lag != null
     ));
     if (persisted.length) {
       return persisted
