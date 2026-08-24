@@ -69,34 +69,6 @@
     return `${Number((value / 86400).toPrecision(4))}d`;
   }
 
-  function fittedDecayData(row, points) {
-    if (!points.length) return [];
-    const minimum = points[0][0];
-    const maximum = points[points.length - 1][0];
-    const grid = Array.from({length: 201}, (_, index) => (
-      minimum + ((maximum - minimum) * index / 200)
-    ));
-    const smooth = row.smooth_fit;
-    if (smooth && typeof smooth === "object") {
-      const amplitude = Number(smooth.amplitude || 0);
-      const decay = Number(smooth.decay_per_day || 0);
-      const frequency = Number(smooth.frequency_per_day || 0);
-      const phase = Number(smooth.phase || 0);
-      const offset = Number(smooth.offset || 0);
-      return grid.map(seconds => [seconds, (
-        amplitude * Math.exp(-decay * ((seconds - minimum) / 86400))
-        * Math.cos(frequency * ((seconds - minimum) / 86400) + phase) + offset
-      )]);
-    }
-    const slope = Number(row.exponential_log_decay_slope_per_second);
-    const intercept = Number(row.exponential_log_decay_intercept);
-    if (!Number.isFinite(slope) || !Number.isFinite(intercept) || slope >= 0) return [];
-    // The payload's points and both fit parameter sets are direction-aligned.
-    // Keep the fitted line on that same axis even when the raw baseline IC is
-    // negative; applying the original sign again would mirror only the fit.
-    return grid.map(seconds => [seconds, Math.exp(intercept + slope * seconds)]);
-  }
-
   function holdingDecayOptions(rows, context) {
     const series = [];
     rows.forEach(row => {
@@ -114,7 +86,9 @@
         name: `${label} · ${context.t("观测值")}`,
         type: "scatter", data: points, marker: {enabled: true, radius: 4},
       });
-      const fitted = fittedDecayData(row, points);
+      const fitted = (row.fit_points || []).map(item => [
+        Number(item.horizon_seconds), Number(item.oriented_mean_ic),
+      ]).filter(item => Number.isFinite(item[0]) && Number.isFinite(item[1]));
       if (fitted.length) series.push({
         name: `${label} · ${context.t("拟合曲线")}`,
         type: "spline", data: fitted, marker: {enabled: false}, dashStyle: "ShortDash",
@@ -213,21 +187,8 @@
     };
   }
 
-  function mount(target, options, stock = false) {
-    if (!window.Highcharts) throw new Error("Highcharts is unavailable");
-    target._ftChart?.destroy?.();
-    target.replaceChildren();
-    const canvas = document.createElement("div");
-    canvas.className = "ic-domain-chart-canvas";
-    target.append(canvas);
-    target._ftChart = stock && window.Highcharts.stockChart
-      ? window.Highcharts.stockChart(canvas, options)
-      : window.Highcharts.chart(canvas, options);
-    return target._ftChart;
-  }
-
   window.FTICResultCharts = Object.freeze({
-    autocorrelationOptions, decayOptions, holdingDecayOptions, histogramOptions, mount,
+    autocorrelationOptions, decayOptions, holdingDecayOptions, histogramOptions,
     rollingOptions, seriesOptions,
   });
 })();

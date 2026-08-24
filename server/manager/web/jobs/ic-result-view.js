@@ -86,6 +86,7 @@
 
   async function payloadsForTabs(
     context, artifacts, jobID, artifactQuery, resultDeclarations, tabKeys = null,
+    sources = new Map(),
   ) {
     const declared = declaredTabs(resultDeclarations);
     const candidates = declared;
@@ -96,6 +97,17 @@
       .filter(item => names.has(String(item.name || "")));
     const pairs = await Promise.all(selectedArtifacts.map(async artifact => {
       try {
+        if (artifact.name === "ic_series_data") {
+          let source = sources.get(artifact.name);
+          if (!source) {
+            source = window.FTJobArtifactQuery.timeSource(
+              context, artifactPath(jobID, artifact, artifactQuery),
+              {mode: "series", maxPoints: 800},
+            );
+            sources.set(artifact.name, source);
+          }
+          return [artifact.name, await source.load()];
+        }
         const response = await FTJobArtifacts.fetch(
           context, artifactPath(jobID, artifact, artifactQuery),
         );
@@ -125,7 +137,7 @@
       try {
         const incoming = await payloadsForTabs(
           context, state.artifacts, state.jobID, state.artifactQuery,
-          state.resultDeclarations, [key],
+          state.resultDeclarations, [key], state.sources,
         );
         if (token !== state.loadToken) return;
         state.payloads = {...state.payloads, ...incoming};
@@ -208,10 +220,14 @@
     shell.append(hint); return shell;
   }
 
-  function chartView(context, options, stock = false) {
+  function chartView(context, options, stock = false, displayOptions = {}) {
     const target = document.createElement("div"); target.className = "ic-domain-chart";
     queueMicrotask(() => {
-      try { window.FTICResultCharts.mount(target, options, stock); }
+      try {
+        window.FTJobHighcharts.mountOptions(
+          context, target, options, stock, displayOptions,
+        );
+      }
       catch (error) { target.replaceChildren(empty(context, error.message)); }
     });
     return target;
@@ -341,10 +357,28 @@
     if (!factor) return tabEmpty(context, state, state.activeTab, "暂无 IC 因子结果");
     if (state.activeTab === "summary") return summaryView(context, state, rerender);
     if (state.activeTab === "series") {
-      return window.FTICResultModel.seriesFor(factor, descriptor, state.activeMethod)
+      const selected = window.FTICResultModel.seriesFor(
+        factor, descriptor, state.activeMethod,
+      );
+      const source = state.sources.get("ic_series_data");
+      return selected
         ? chartView(context, window.FTICResultCharts.seriesOptions(
           factor, context, descriptor, state.activeMethod,
-        ), true)
+        ), true, source ? {
+          loadRange: (min, max, options = {}) => source.load({
+            min, max, maxPoints: options.maxPoints,
+          }),
+          rangeOptions: payload => {
+            const ranged = window.FTICResultModel.build({ic_series_data: payload});
+            const rangedFactor = ranged.factors.find(item => (
+              item.factorRef && item.factorRef === factor.factorRef
+            )) || ranged.factors.find(item => item.factorAlias === factor.factorAlias);
+            return window.FTICResultCharts.seriesOptions(
+              rangedFactor || factor, context, descriptor, state.activeMethod,
+            );
+          },
+          loadingText: context.t("正在读取当前时间范围…"),
+        } : {})
         : tabEmpty(context, state, "series", "暂无 IC 序列");
     }
     if (state.activeTab === "decay") {
@@ -510,7 +544,7 @@
           artifacts: options.artifacts, jobID: options.jobID,
           artifactQuery: options.artifactQuery || "",
           resultDeclarations: options.resultDeclarations || [],
-          payloads: {}, loadToken: 0,
+          payloads: {}, sources: new Map(), loadToken: 0,
           loadingTab: resultTabs.some(tab => tab.key === activeTab) ? activeTab : "",
           loadError: "",
         };

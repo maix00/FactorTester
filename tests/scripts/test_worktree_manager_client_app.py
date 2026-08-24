@@ -2555,8 +2555,9 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "updateActiveTab" in job_detail
     assert "window.FTJobs.detail = detail" in job_detail
     assert "window.FTJobs.configuration = configuration" in job_detail
-    assert "查看运行配置" in job_detail
-    assert "FTRunSpecView.open" in job_detail
+    assert "在配置页面打开" in job_detail
+    assert "FTRunSpecView.load" in job_detail
+    assert "FTRunSpecView.render" in job_detail
     assert "FTReferencePage.routeFor" in job_detail
     assert "runspec:sha256:" in job_detail
     assert "FTJobActions.install" in job_detail
@@ -2565,7 +2566,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert 'add("下一步", "continue"' in actions
     assert 'add("运行到底", "continue"' in actions
     assert 'add("取消任务", "cancel"' in actions
-    assert 'add("按冻结配置重试", "retry"' in actions
+    assert 'add("按冻结配置重试", "retry"' not in actions
+    assert "恢复为可编辑配置" not in actions
     assert 'method: "DELETE"' in artifacts
     assert "showDirectoryPicker" in artifacts
     assert "/artifacts/archive" not in artifacts

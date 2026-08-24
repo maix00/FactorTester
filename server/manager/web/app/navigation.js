@@ -73,6 +73,25 @@
     return serverID ? {serverID} : {};
   }
 
+  function restoredTestState(search) {
+    const params = new URLSearchParams(search);
+    const workspaceID = params.get("workspace_id") || "";
+    const jobID = params.get("job_id") || "";
+    if (!workspaceID) return {};
+    return {
+      workspaceID,
+      restoredJob: jobID ? {
+        jobID,
+        runID: params.get("run_id") || "",
+        runSpecHash: params.get("run_spec_hash") || "",
+        phase: params.get("status") || "succeeded",
+        port: Number(params.get("port") || 0),
+        serverID: params.get("server_id") || "",
+        groupID: params.get("group_id") || "",
+      } : null,
+    };
+  }
+
   // Display-only fallback for a temporary Manager/API outage.  It mirrors the
   // stable public entries and the research child tabs, but never replaces the
   // server-side filtering performed by /api/modules when that endpoint works.
@@ -232,8 +251,8 @@
     }
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
     if (parts[0] === "mihomo") return {kind: "mihomo"};
-    if (parts[0] === "ic-test") return {kind: "ic-test"};
-    if (parts[0] === "backtest") return {kind: "backtest"};
+    if (parts[0] === "ic-test") return {kind: "ic-test", ...restoredTestState(search)};
+    if (parts[0] === "backtest") return {kind: "backtest", ...restoredTestState(search)};
     if (parts[0] === "factor-series") {
       const params = new URLSearchParams(search);
       return {

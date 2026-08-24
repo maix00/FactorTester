@@ -688,6 +688,19 @@ def test_ic_domain_charts_preserve_the_old_result_interactions() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_ic_charts_reuse_job_lazy_query_and_mount_infrastructure() -> None:
+    view = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
+    charts = (WEB_ROOT / "jobs" / "ic-result-charts.js").read_text(encoding="utf-8")
+    shared = (WEB_ROOT / "jobs" / "highcharts-viewers.js").read_text(encoding="utf-8")
+
+    assert "FTJobArtifactQuery.timeSource" in view
+    assert '{mode: "series", maxPoints: 800}' in view
+    assert "source.load({" in view
+    assert "FTJobHighcharts.mountOptions" in view
+    assert "function mount(" not in charts
+    assert "function mountOptions" in shared
+
+
 def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
 
@@ -1540,11 +1553,13 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
         "async function configuration", 1
     )
 
-    assert 'context.t("查看运行配置")' in detail_page
-    assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" in detail_page
+    assert 'context.t("在配置页面打开")' in detail_page
+    assert "FTRunSpecView.open(context, runSpec.target, runSpec.serverID)" not in detail_page
+    assert "FTRunSpecView.load(" in detail_page
+    assert "FTRunSpecView.render(context, value)" in detail_page
     assert 'context.t("结果预览")' in result_viewers
     assert "FTJobDetailTabs.create" in detail_page
-    assert 'context.t("冻结运行配置")' in detail_page
+    assert 'context.t("查看运行配置")' not in detail_page
     assert "loadSelectedSection(detailTabs.current())" in detail_page
     assert 'id === "configuration"' in detail_page
     assert "FTReferencePage.render(context" in configuration_page

@@ -5,9 +5,10 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+from server.modules.single_factor_test.ic import _ICComputeResult
 from server.modules.single_factor_test.ic_diagnostics import (
-    _period_key,
     _period_groups,
+    _period_key,
     _period_keys,
     period_diagnostics,
 )
@@ -18,17 +19,17 @@ from server.modules.single_factor_test.ic_response import (
     _series_detail_budget,
     build_ic_response,
 )
-from server.modules.single_factor_test.ic import _ICComputeResult
 from tools.data.types import DataFreq
 from tools.factors.temporal_support import TemporalSupport
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     _acf_half_life_diagnostic,
     filter_ic_metric_mapping,
-    normalize_ic_metric_selection,
     metric_semantics_catalog,
+    normalize_ic_metric_selection,
     summarize_ic_series,
 )
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    evaluate_forward_ic_decay_curve,
     fit_forward_ic_half_life,
     fit_ic_series_ar1_half_life,
 )
@@ -104,6 +105,12 @@ def test_half_life_estimators_keep_predictive_decay_and_ic_persistence_distinct(
     assert predictive["n_invalid_oriented_points"] == 0
     assert predictive["last_horizon"] == "MIN5"
     assert predictive["log_fit_rmse"] < 1e-12
+    curve = evaluate_forward_ic_decay_curve(
+        predictive, minimum_seconds=60.0, maximum_seconds=300.0,
+    )
+    assert len(curve) == 201
+    assert abs(curve[0]["oriented_mean_ic"] - 0.08) < 1e-12
+    assert abs(curve[-1]["oriented_mean_ic"] - 0.02) < 1e-12
 
     persistence = fit_ic_series_ar1_half_life(
         [1.0, 0.8, 0.64, 0.512, 0.4096, 0.32768],

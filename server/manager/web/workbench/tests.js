@@ -126,13 +126,15 @@
     const sessions = context.tabSession || (context.tabSession = {});
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
-    const savedDraft = sessions.durable?.testDrafts?.[kind];
+    const requestedWorkspaceID = String(options.workspaceID || "");
+    const savedDraft = requestedWorkspaceID ? null : sessions.durable?.testDrafts?.[kind];
     const application = definitions[kind].application;
     const clientQuery = clientScope === "web"
       ? ""
       : `?client=${encodeURIComponent(clientScope)}`;
-    const savedWorkspaceID = savedDraft?.schemaVersion === 2
-      ? String(savedDraft.workspaceID || "") : "";
+    const savedWorkspaceID = requestedWorkspaceID || (
+      savedDraft?.schemaVersion === 2 ? String(savedDraft.workspaceID || "") : ""
+    );
     const savedWorkspaceConfigurationPromise = savedWorkspaceID
       ? context.api(`/api/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
         .then(value => ({value, error: null}))
@@ -167,7 +169,11 @@
       settingsLoadedTabs: new Set(),
       restoredWorkspaceID: savedWorkspaceID,
     };
-    FTTestState.restoreWorkspace(state);
+    if (requestedWorkspaceID) {
+      state.workspace = state.workspaces.find(item => (
+        String(item.workspace_id || "") === requestedWorkspaceID
+      )) || {workspace_id: requestedWorkspaceID};
+    } else FTTestState.restoreWorkspace(state);
     if (state.workspace && !state.workspace.configuration) {
       let value = null;
       if (state.workspace.workspace_id === savedWorkspaceID) {
@@ -195,6 +201,7 @@
     window.FTTestProducts?.synchronize?.(state);
     window.FTBacktestGroups?.initialize?.(state);
     applyBacktestDerivedPrefill(state);
+    state.restoredJob = options.restoredJob || null;
     sessions.tests[kind] = state;
     return state;
   }

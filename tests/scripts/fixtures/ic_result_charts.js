@@ -33,8 +33,11 @@ assert.deepEqual(decay.series[0].data, [0.08, 0.03]);
 const holdingDecay = window.FTICResultCharts.holdingDecayOptions([{
   factor_alias: "ROC", entry_delay_bars: 0, display_direction: 1,
   expected_direction: 1, exponential_half_life_seconds: 120,
-  exponential_log_decay_slope_per_second: -0.001,
-  exponential_log_decay_intercept: -2,
+  fit_points: [
+    {horizon_seconds: 60, oriented_mean_ic: 0.08},
+    {horizon_seconds: 180, oriented_mean_ic: 0.04},
+    {horizon_seconds: 300, oriented_mean_ic: 0.02},
+  ],
   points: [
     {horizon_seconds: 60, oriented_mean_ic: 0.1},
     {horizon_seconds: 300, oriented_mean_ic: 0.05},
@@ -44,7 +47,7 @@ assert.equal(holdingDecay.xAxis.type, "linear");
 assert.equal(holdingDecay.series[0].type, "scatter");
 assert.deepEqual(holdingDecay.series[0].data, [[60, 0.1], [300, 0.05]]);
 assert.equal(holdingDecay.series[1].type, "spline");
-assert.equal(holdingDecay.series[1].data.length, 201);
+assert.deepEqual(holdingDecay.series[1].data, [[60, 0.08], [180, 0.04], [300, 0.02]]);
 assert.match(holdingDecay.subtitle.text, /2m/);
 const acf = window.FTICResultCharts.autocorrelationOptions(factor, context);
 assert.equal(acf.yAxis.plotLines[0].value, 0.5);

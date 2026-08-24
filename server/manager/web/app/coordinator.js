@@ -398,8 +398,8 @@
       jobInput: (pageContext, port, id, inputName, serverID) => (
         FTJobInputDetail.show(pageContext, port, id, inputName, serverID)
       ),
-      icTest: pageContext => FTTests.show(pageContext, "ic"),
-      backtest: pageContext => FTTests.show(pageContext, "backtest"),
+      icTest: (pageContext, route) => FTTests.show(pageContext, "ic", route),
+      backtest: (pageContext, route) => FTTests.show(pageContext, "backtest", route),
       factorSeries: (pageContext, factorRef, groupRef) => FTTests.show(
         pageContext, "factor_evaluation", {factorRef, groupRef},
       ),
