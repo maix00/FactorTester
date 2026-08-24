@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
-from server.manager.http import catalog_routes
+from server.manager.http import catalog_routes, service_selection
 from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
@@ -370,6 +370,100 @@ def test_factor_family_source_detail_uses_authenticated_manager_gateway(
         "path": forwarded_path,
         "principal": "user@1",
     }]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_ref"),
+    (
+        (
+            "/custom-factors/api/public-factor/MmClose2High",
+            "public:MmClose2High",
+        ),
+        (
+            "/custom-factors/api/get/SubordinateFactor?owner_username=child%401",
+            "child@1:SubordinateFactor",
+        ),
+    ),
+)
+def test_missing_factor_source_is_hydrated_once_before_detail_retry(
+    tmp_path, monkeypatch, path: str, expected_ref: str,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    monkeypatch.setattr(
+        service_selection, "can_view_user_scope",
+        lambda current, owner: current == "user@1" and owner == "child@1",
+    )
+    calls = []
+    hydrated = []
+
+    def request(**values):
+        calls.append(values)
+        body = (
+            b'{"success":false,"error":"not found"}'
+            if len(calls) == 1
+            else b'{"success":true,"factor":{"source_code":"available"}}'
+        )
+        return manager.GatewayResponse(
+            status=404 if len(calls) == 1 else 200,
+            body=body,
+            content_type="application/json",
+        )
+
+    def hydrate(_hydrator, factor_ref, *, principal):
+        hydrated.append((factor_ref, principal))
+        return True
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(service_selection.FactorSourceHydrator, "hydrate", hydrate)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}{path}",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["factor"]["source_code"] == "available"
+    assert hydrated == [(expected_ref, "user@1")]
+    assert len(calls) == 2
+
+
+def test_factor_source_detail_does_not_hydrate_an_unreadable_owner(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    monkeypatch.setattr(
+        service_selection, "can_view_user_scope", lambda *_args: False,
+    )
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=404,
+            body=b'{"success":false,"error":"not found"}',
+            content_type="application/json",
+        )
+
+    def reject_hydration(*_args, **_values):
+        raise AssertionError("an unreadable source must not be hydrated")
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        service_selection.FactorSourceHydrator, "hydrate", reject_hydration,
+    )
+    with running_manager(state) as base_url, pytest.raises(HTTPError) as raised:
+        urlopen(Request(
+            f"{base_url}/custom-factors/api/get/Secret"
+            "?owner_username=unreadable%401",
+            headers={"Authorization": "Bearer user-token"},
+        ))
+
+    assert raised.value.code == 404
+    assert len(calls) == 1
 
 
 def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatch) -> None:
