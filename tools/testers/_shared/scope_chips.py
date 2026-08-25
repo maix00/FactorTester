@@ -14,8 +14,8 @@ def register_factor_product_scope_chips(app: object) -> None:
         inherit_from_root=True, batch_owned=True,
         source_adapter="selected_factor_candidates", clickable=True,
         detail_overlay={
-            "kind": "factor_set", "mode": "view",
-            "source_key": "factor_candidates", "ref_key": "target_ref",
+            "kind_source_key": "factorCandidateDetailKind", "mode": "view",
+            "source_key": "factor_candidate_detail", "ref_key": "target_ref",
         },
     ))
     app.register_chip_field(ChipDefinition(

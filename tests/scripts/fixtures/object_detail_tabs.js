@@ -54,6 +54,16 @@ assert.deepStrictEqual(
   ["overview", "source", "parameters", "identity", "jobs"],
 );
 
+const createFactorDefinitions = window.FTObjectDetailTabs.definitions("factor", {
+  overview: {hidden: true},
+  jobs: {hidden: true},
+});
+assert.deepStrictEqual(
+  createFactorDefinitions.map(item => item.key),
+  ["source", "parameters", "identity"],
+  "factor creation must start with source selection and must not ask for family metadata",
+);
+
 const panels = Object.fromEntries(definitions.map(item => [
   item.key, Object.assign(new Element(), {textContent: item.key}),
 ]));
