@@ -6,10 +6,52 @@ import sqlite3
 
 import orjson
 
-from ..assurance import canonical_hash
 from server.services.maintenance_cases.schema import (
     create_schema as create_maintenance_schema,
 )
+
+from ..assurance import canonical_hash
+from ..subjects import job_subjects
+
+
+def index_job_subjects(
+    conn: sqlite3.Connection, job_id: str, job_spec: object,
+) -> None:
+    """Replace one Job's derived object references transactionally."""
+    identity = str(job_id)
+    conn.execute("DELETE FROM research_job_subjects WHERE job_id=?", (identity,))
+    conn.executemany(
+        """INSERT INTO research_job_subjects(
+               job_id, object_kind, object_ref, owner_ref, alias
+           ) VALUES (?, ?, ?, ?, ?)""",
+        [
+            (
+                identity, item.object_kind, item.object_ref,
+                item.owner_ref, item.alias,
+            )
+            for item in job_subjects(job_spec)
+        ],
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO research_job_subject_index_state(job_id) VALUES (?)",
+        (identity,),
+    )
+
+
+def _backfill_job_subjects(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """SELECT jobs.job_id, jobs.job_spec_json
+           FROM research_jobs AS jobs
+           LEFT JOIN research_job_subject_index_state AS state
+             ON state.job_id=jobs.job_id
+           WHERE state.job_id IS NULL"""
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = orjson.loads(row["job_spec_json"] or "{}")
+        except (TypeError, ValueError, orjson.JSONDecodeError):
+            payload = {}
+        index_job_subjects(conn, str(row["job_id"]), payload)
 
 
 def ensure_job_schema(conn: sqlite3.Connection) -> None:
@@ -98,6 +140,25 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             ON research_jobs(deployment_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_research_jobs_run
             ON research_jobs(owner, run_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS research_job_subjects (
+            job_id TEXT NOT NULL,
+            object_kind TEXT NOT NULL,
+            object_ref TEXT NOT NULL,
+            owner_ref TEXT NOT NULL DEFAULT '',
+            alias TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (job_id, object_kind, object_ref),
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (object_kind IN ('family', 'factor', 'set'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_job_subject_ref
+            ON research_job_subjects(object_kind, object_ref, job_id);
+        CREATE INDEX IF NOT EXISTS idx_research_job_subject_alias
+            ON research_job_subjects(object_kind, owner_ref, alias, job_id);
+        CREATE TABLE IF NOT EXISTS research_job_subject_index_state (
+            job_id TEXT PRIMARY KEY,
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE
+        );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_one_active_step
             ON research_jobs(owner)
             WHERE step_mode=1 AND status IN (
@@ -161,6 +222,7 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         """
     )
     create_maintenance_schema(conn)
+    _backfill_job_subjects(conn)
     columns = {
         str(row["name"])
         for row in conn.execute("PRAGMA table_info(research_jobs)").fetchall()

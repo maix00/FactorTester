@@ -14,6 +14,43 @@ from server.manager.domain.federation import ServiceRoute, TargetUnavailable
 from server.manager.http.gateway import GatewayResponse
 
 
+def _object_job_query(
+    object_kind: str, object_ref: str, owner_ref: str, alias: str,
+) -> dict[str, str]:
+    values = {
+        "object_kind": str(object_kind or "").strip(),
+        "object_ref": str(object_ref or "").strip(),
+        "object_owner_ref": str(owner_ref or "").strip(),
+        "object_alias": str(alias or "").strip(),
+    }
+    return {key: value for key, value in values.items() if value}
+
+
+def _job_matches_object(
+    job: dict[str, object], *, object_kind: str, object_ref: str,
+    object_owner_ref: str, object_alias: str,
+) -> bool:
+    kind = str(object_kind or "").strip()
+    if not kind:
+        return True
+    for item in job.get("object_subjects") or ():
+        if not isinstance(item, dict) or item.get("object_kind") != kind:
+            continue
+        if kind == "family" and object_owner_ref and object_alias:
+            if (str(item.get("owner_ref") or "") == object_owner_ref
+                    and str(item.get("alias") or "") == object_alias):
+                return True
+        elif str(item.get("object_ref") or "") == object_ref:
+            return True
+    return False
+
+
+def _filter_object_jobs(
+    jobs: list[dict[str, object]], **query: str,
+) -> list[dict[str, object]]:
+    return [item for item in jobs if _job_matches_object(item, **query)]
+
+
 class JobProjectionStateMixin:
     """Own job indexing and on-demand peer aggregation semantics."""
 
@@ -425,6 +462,8 @@ class JobProjectionStateMixin:
 
     def aggregate_public_jobs(
         self, *, cursor: str = "", limit: int = 20,
+        object_kind: str = "", object_ref: str = "",
+        object_owner_ref: str = "", object_alias: str = "",
         _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read one public page from the service-wide job repository.
@@ -439,6 +478,9 @@ class JobProjectionStateMixin:
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
+            query.update(_object_job_query(
+                object_kind, object_ref, object_owner_ref, object_alias,
+            ))
             try:
                 value = self.service_json(
                     port,
@@ -474,7 +516,11 @@ class JobProjectionStateMixin:
             except (ConnectionError, OSError, TypeError, ValueError):
                 continue
 
-        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
+        cached = [] if cursor else _filter_object_jobs(
+            self.job_index.list_all(limit=2000),
+            object_kind=object_kind, object_ref=object_ref,
+            object_owner_ref=object_owner_ref, object_alias=object_alias,
+        )[:bounded_limit]
         return {
             "public": True,
             "jobs": cached,
@@ -489,6 +535,8 @@ class JobProjectionStateMixin:
 
     def aggregate_server_jobs(
         self, *, principal: str, cursor: str = "", limit: int = 20,
+        object_kind: str = "", object_ref: str = "",
+        object_owner_ref: str = "", object_alias: str = "",
         _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read the permissioned server projection for a Manager user.
@@ -501,6 +549,9 @@ class JobProjectionStateMixin:
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
+            query.update(_object_job_query(
+                object_kind, object_ref, object_owner_ref, object_alias,
+            ))
             if cursor:
                 query["cursor"] = cursor
             try:
@@ -534,7 +585,11 @@ class JobProjectionStateMixin:
             except (ConnectionError, OSError, TypeError, ValueError):
                 continue
 
-        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
+        cached = [] if cursor else _filter_object_jobs(
+            self.job_index.list_all(limit=2000),
+            object_kind=object_kind, object_ref=object_ref,
+            object_owner_ref=object_owner_ref, object_alias=object_alias,
+        )[:bounded_limit]
         return {
             "public": False,
             "jobs": cached,
@@ -555,6 +610,8 @@ class JobProjectionStateMixin:
         username: str = "",
         page: int = 1,
         limit: int = 20,
+        object_kind: str = "", object_ref: str = "",
+        object_owner_ref: str = "", object_alias: str = "",
         _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read one account projection from the shared job repository.
@@ -574,6 +631,9 @@ class JobProjectionStateMixin:
                 "limit": str(bounded_limit),
                 "page": str(requested_page),
             }
+            query.update(_object_job_query(
+                object_kind, object_ref, object_owner_ref, object_alias,
+            ))
             if scope == "subordinates" and username:
                 query["username"] = username
             try:
@@ -603,9 +663,21 @@ class JobProjectionStateMixin:
             except (ConnectionError, OSError, TypeError, ValueError):
                 continue
 
-        cached = self.job_index.page(
-            cache_principal, page=requested_page, limit=bounded_limit,
+        cached_rows = _filter_object_jobs(
+            self.job_index.list(cache_principal, limit=2000),
+            object_kind=object_kind, object_ref=object_ref,
+            object_owner_ref=object_owner_ref, object_alias=object_alias,
         )
+        start = (requested_page - 1) * bounded_limit
+        cached = {
+            "jobs": cached_rows[start:start + bounded_limit],
+            "page": requested_page,
+            "page_size": min(bounded_limit, max(0, len(cached_rows) - start)),
+            "total": len(cached_rows),
+            "total_pages": max(1, (len(cached_rows) + bounded_limit - 1) // bounded_limit),
+            "has_more": start + bounded_limit < len(cached_rows),
+            "next_cursor": None,
+        }
         return {
             **cached,
             "success": True,
@@ -642,6 +714,8 @@ class JobProjectionStateMixin:
         limit: int = 20,
         source_scope: str = "mine",
         username: str = "",
+        object_kind: str = "", object_ref: str = "",
+        object_owner_ref: str = "", object_alias: str = "",
     ) -> dict[str, object]:
         """Fan out a bounded read when the cross-server tab is opened.
 
@@ -659,14 +733,15 @@ class JobProjectionStateMixin:
         source_limit = min(100, bounded * requested_page)
         source_scope = str(source_scope or "mine").strip().lower()
         username = str(username or "").strip()
-        if source_scope not in {"mine", "subordinates", "server"}:
+        if source_scope not in {"mine", "subordinates", "visible", "server"}:
             raise ValueError(
-                "cross-server source scope must be mine, subordinates, or server"
+                "cross-server source scope must be mine, subordinates, visible, or server"
             )
         if source_scope == "subordinates" and not username:
             raise ValueError("username is required for subordinate jobs")
         cache_key = (
             str(principal), source_scope, username, requested_page, bounded,
+            object_kind, object_ref, object_owner_ref, object_alias,
         )
         cached = self._cross_server_cache_get(cache_key)
         if cached is not None:
@@ -675,12 +750,16 @@ class JobProjectionStateMixin:
 
         combined: list[dict[str, object]] = []
         source_status: list[dict[str, object]] = []
+        object_query = _object_job_query(
+            object_kind, object_ref, object_owner_ref, object_alias,
+        )
 
         def query_local() -> tuple[dict[str, object], list[dict[str, object]]]:
             if source_scope == "server":
                 local_payload = self.aggregate_server_jobs(
                     principal=principal,
                     limit=source_limit,
+                    **object_query,
                     _allow_federation=False,
                 )
             else:
@@ -690,6 +769,7 @@ class JobProjectionStateMixin:
                     "page": 1,
                     "limit": source_limit,
                     "_allow_federation": False,
+                    **object_query,
                 }
                 if username:
                     account_query["username"] = username
@@ -719,6 +799,7 @@ class JobProjectionStateMixin:
                 page=1,
                 limit=source_limit,
                 username=username,
+                **object_query,
             )
 
         peer_routes = self._federation_manager_routes()

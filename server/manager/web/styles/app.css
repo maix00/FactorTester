@@ -206,6 +206,18 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-source-code { margin-top: 8px; tab-size: 4; }
 .factor-source-version-history { min-width: 0; }
 .factor-source-version-history-mount { min-width: 0; margin-top: 8px; }
+.object-detail-tabs-shell { display: grid; gap: 14px; min-width: 0; }
+.object-detail-tabs { width: fit-content; max-width: 100%; box-sizing: border-box; }
+.object-detail-tab-label { display: inline-flex; align-items: center; gap: 6px; }
+.object-detail-tab-state { border-radius: 999px; padding: 1px 5px; color: var(--muted); background: var(--panel); font-size: 9px; line-height: 1.35; }
+.object-detail-tab.is-dirty .object-detail-tab-state { color: #8a5500; background: #fff1c9; }
+.object-detail-tab-panel { display: grid; gap: 12px; min-width: 0; }
+.object-detail-tab-panel[hidden] { display: none; }
+.object-detail-tab-notice { margin: 0; border-left: 3px solid var(--accent); padding: 7px 10px; color: var(--muted); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); font-size: 12px; }
+.object-detail-tab-notice.is-readonly { border-left-color: var(--muted); background: var(--soft); }
+.factor-detail-top { display: grid; gap: 12px; min-width: 0; }
+.factor-detail-source-editor { display: grid; gap: 9px; min-width: 0; }
+.factor-detail-source-editor textarea { width: 100%; min-height: 320px; box-sizing: border-box; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 4; }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
