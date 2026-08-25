@@ -200,9 +200,13 @@ def _contract(*, application: str, app: Any | None = None) -> dict[str, Any]:
                 },
             ],
             "inner": {
-                "source": "factor_candidates",
+                "source_when_outer_mounted": "factor_candidates",
+                "selection_mode_when_outer_mounted": "filter",
+                "sources_when_outer_unmounted": [
+                    "factor_set_selections", "factor_source_selections",
+                ],
+                "selection_mode_when_outer_unmounted": "build_candidate_pool",
                 "editor": "shared_object_multi_select",
-                "selection_mode": "filter",
             },
         },
         # The outer factor tab builds this pool.  A nested strategy never

@@ -1419,6 +1419,15 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert contract["outer_scope_tabs"]["factor"]["scope_fields"] == [
             "factor_candidates",
         ]
+        assert contract["factor_candidate_sources"]["inner"] == {
+            "source_when_outer_mounted": "factor_candidates",
+            "selection_mode_when_outer_mounted": "filter",
+            "sources_when_outer_unmounted": [
+                "factor_set_selections", "factor_source_selections",
+            ],
+            "selection_mode_when_outer_unmounted": "build_candidate_pool",
+            "editor": "shared_object_multi_select",
+        }
         inner_factor = contract["inner_factor_fields"]
         assert inner_factor["candidate_selection"]["cardinality"] == "many"
         assert inner_factor["candidate_selection"]["filter_only_when_outer_mounted"] is True

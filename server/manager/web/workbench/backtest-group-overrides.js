@@ -214,11 +214,15 @@
         controlHost.setAttribute("aria-disabled", "true");
       }
       controlHost.append(control);
+      const rowClass = [
+        "backtest-group-override-row",
+        target === "factor_role_bindings" ? "factor-candidate-child-row" : "",
+      ].filter(Boolean).join(" ");
       return FTTestFieldRow.create(
         field.label || key,
         controlHost,
         window.FTTestFieldHelp?.forField?.(manifest, key, context) || "",
-        {className: "backtest-group-override-row"},
+        {className: rowClass},
       );
     };
 

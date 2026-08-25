@@ -107,11 +107,12 @@
         },
       },
     );
-    const storedFactors = selectedFactorRefs(state, defaults);
     const hasStoredFactors = Boolean(
       Array.isArray(defaults.factor_candidate_refs)
         && defaults.factor_candidate_refs.length,
     );
+    const storedFactors = hasStoredFactors
+      ? defaults.factor_candidate_refs.map(String).filter(Boolean) : [];
     const selectedFactors = factorScopeBlocked ? []
       : factorScope.source === "outer" && editor.mode === "base"
       && !hasStoredFactors
@@ -119,6 +120,14 @@
       : storedFactors;
     factorRefs = selectedFactors;
     innerScopeValues.factor_candidates = selectedCandidateValues();
+    const factorSourceState = !factorScopeBlocked && factorScope.source !== "outer"
+      ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
+          factor_candidate_refs: selectedFactors,
+          factor_source_selections: defaults.factor_source_selections,
+          factor_set_selections: defaults.factor_set_selections,
+          factor_role_bindings: defaults.factor_role_bindings,
+        })
+      : null;
     let overrideEditor;
     let fallbackOverrides;
     let fallbackFactorOverrides;
@@ -127,7 +136,23 @@
     let factorPanel;
     const factorHost = document.createElement("div");
     factorHost.className = "backtest-group-factor-panel";
+    const syncScopedFactorSources = () => {
+      if (!factorSourceState) return null;
+      const snapshot = FTTestFactorCandidateSources.scopedSourceSnapshot(factorSourceState);
+      factorRefs = snapshot.factor_candidate_refs;
+      innerScopeValues.factor_candidates = snapshot.factor_candidates;
+      editor.draft = {...(editor.draft || {}), ...snapshot};
+      return snapshot;
+    };
+    const factorSourceMetadata = () => {
+      const snapshot = syncScopedFactorSources();
+      return snapshot ? {
+        factor_source_selections: snapshot.factor_source_selections,
+        factor_set_selections: snapshot.factor_set_selections,
+      } : {};
+    };
     const renderFactorPanel = () => {
+      syncScopedFactorSources();
       const combinationVisible = window.FTStrategyEditorScope?.fieldVisible?.(
         state, "factor_combination_mode", "inner", innerScopeValues,
       ) ?? factorRefs.length > 1;
@@ -146,6 +171,19 @@
           ? context.t("当前没有可用组合方式，暂不能提交多个因子候选") : "",
         overrideContent,
       };
+      if (factorSourceState) {
+        factorPanel = FTTestFactorCandidateSources.scopedSourcePanel(
+          context, factorSourceState, () => {
+            syncScopedFactorSources();
+            factorPanel = null;
+            renderFactorPanel();
+            overrideEditor?.refresh();
+            editorTabs?.refreshChips();
+          }, panelOptions,
+        );
+        factorHost.replaceChildren(factorPanel);
+        return;
+      }
       if (!factorPanel) {
         factorPanel = window.FTTestFactorCandidateSources?.innerPanel?.(
           context, state, () => {}, panelOptions,
@@ -164,11 +202,8 @@
       multi: candidateDescriptor.cardinality === "many",
       loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
-      canCreate: !factorScopeBlocked && (
-        factorScope.source === "outer"
-          ? candidateDescriptor.allow_inline_create_when_outer_mounted === true
-          : candidateDescriptor.allow_inline_create_when_outer_unmounted !== false
-      ),
+      canCreate: !factorScopeBlocked
+        && candidateDescriptor.allow_inline_create_when_outer_mounted === true,
       name: "backtest-factor-candidates",
       onChange: values => {
         factorRefs = values;
@@ -246,13 +281,15 @@
         ...innerScopeValues,
         ...(overrideEditor?.value?.() || {}),
       }),
-      chipSources: () => window.FTTestContentAdapters?.chipSources?.(state, {
+      chipSources: () => window.FTTestContentAdapters?.chipSources?.(
+        factorSourceState || state, {
         factor_candidate_refs: factorRefs,
         product_path_selection_id: productGroupRef,
         splitCount: Number(splitCount?.value || 0),
         groupIndex: Number(groupIndex?.value || 0),
         productMask,
-      }) || {},
+        },
+      ) || {},
       renderStructure: () => structure,
       renderFactor: () => { renderFactorPanel(); return factorHost; },
       renderProduct: renderProductPanel,
@@ -295,6 +332,7 @@
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
             factor_candidate_refs: factorRefs, splitCount: splitCount.value,
+            ...factorSourceMetadata(),
             factor_combination_mode: factorCombinationMode,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
             productMask,
@@ -314,6 +352,7 @@
             product_path_selection: productProjection(group || productGroupRef),
             product_path_selection_id: productGroupRef,
             factor_candidate_refs: factorRefs,
+            ...factorSourceMetadata(),
             factor_combination_mode: factorCombinationMode,
             splitCount: splitCount.value,
             groupIndex: groupIndex.value,
@@ -333,6 +372,7 @@
             name: name.value.trim(), productMask, overrides: parsedOverrides,
             ...productPatch,
             factor_candidate_refs: factorRefs,
+            ...factorSourceMetadata(),
             factor_combination_mode: factorCombinationMode,
             splitCount: splitCount.value,
             groupIndex: groupIndex.value,
