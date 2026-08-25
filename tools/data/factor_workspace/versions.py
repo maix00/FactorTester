@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import Any
 
 from tools.data.sqlite.factor_source_versions import (
-    list_factor_source_version_snapshots,
-    load_factor_source_version_snapshot,
+    list_factor_formula_versions,
+    load_factor_formula_version,
 )
 
 from .storage import WORKSPACE_ROOTS_DIR, factor_source_root
@@ -66,6 +67,34 @@ def _git_source(root: str, *args: str) -> str:
 
 def _source_hash(source_code: str) -> str:
     return hashlib.sha256(source_code.encode("utf-8")).hexdigest()
+
+
+def _formula_snapshots(
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+    *,
+    current_hash: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = list_factor_formula_versions(
+        source_kind, owner_username, factor_id, limit=limit,
+    )
+    return [{
+        "commit": str(row["family_formula_fingerprint"]),
+        "short_commit": str(row["family_formula_fingerprint"])[:12],
+        "committed_at": int(float(row.get("created_at") or 0)),
+        "author": "",
+        "subject": str(row.get("subject") or "公式源码快照"),
+        "branches": [],
+        "relative_path": _source_path(source_kind, factor_id),
+        "source_hash": str(row.get("source_sha256") or ""),
+        "family_formula_fingerprint": str(row["family_formula_fingerprint"]),
+        "is_current": bool(
+            current_hash and current_hash == str(row.get("source_sha256") or "")
+        ),
+        "version_source": "formula-snapshot",
+    } for row in rows]
 
 
 def _workspace_candidates(
@@ -170,10 +199,8 @@ def list_factor_source_versions(
     )
     current_hash = _source_hash(current_source) if current_source else ""
     bounded = min(200, max(1, int(limit)))
-    snapshots = list_factor_source_version_snapshots(
-        source_kind,
-        owner_username,
-        factor_id,
+    snapshots = _formula_snapshots(
+        source_kind, owner_username, factor_id,
         current_hash=current_hash,
         limit=bounded,
     )
@@ -285,19 +312,31 @@ def load_factor_source_version(
             "source_hash": _source_hash(current_source),
             "is_current": True,
         }
-    snapshot = load_factor_source_version_snapshot(
-        source_kind,
-        owner_username,
-        factor_id,
-        commit,
-    )
-    if snapshot is not None:
-        snapshot["is_current"] = bool(
-            current_source
-            and _source_hash(snapshot.get("source_code") or "")
-            == _source_hash(current_source)
+    snapshot = None
+    if re.fullmatch(r"[0-9a-fA-F]{64}", commit):
+        snapshot = load_factor_formula_version(
+            source_kind, owner_username, factor_id, commit.lower(),
         )
-        return snapshot
+    if snapshot is not None:
+        return {
+            "commit": str(snapshot["family_formula_fingerprint"]),
+            "short_commit": str(snapshot["family_formula_fingerprint"])[:12],
+            "source_code": str(snapshot["source_code"]),
+            "source_hash": str(snapshot["source_sha256"]),
+            "family_formula_fingerprint": str(
+                snapshot["family_formula_fingerprint"]
+            ),
+            "subject": str(snapshot.get("subject") or "公式源码快照"),
+            "committed_at": int(float(snapshot.get("created_at") or 0)),
+            "relative_path": _source_path(source_kind, factor_id),
+            "branches": [],
+            "version_source": "formula-snapshot",
+            "is_current": bool(
+                current_source
+                and str(snapshot["source_sha256"])
+                == _source_hash(current_source)
+            ),
+        }
 
     source = _find_workspace_source(
         source_kind=source_kind,

@@ -36,9 +36,11 @@ if FACTOR_WORKSPACE:
         # rolling
         RollingExpr,
         RollingOp,
+        WindowBarsExpr,
         _rolling_argmaxmin,
         _mask_outside_trunc,
         _resolve_windows,
+        window_bars,
         # shift
         ShiftOp,
         _is_zero_shift_period,
@@ -108,9 +110,11 @@ __all__ = [
     "_to_expr",
     "RollingExpr",
     "RollingOp",
+    "WindowBarsExpr",
     "_rolling_argmaxmin",
     "_mask_outside_trunc",
     "_resolve_windows",
+    "window_bars",
     "ShiftOp",
     "_is_zero_shift_period",
     "_strip_latex_time_subscript",
