@@ -67,6 +67,90 @@ class IncompatibleFactorConfiguration(ValueError):
 
 
 FactorResolver = Callable[[dict[str, Any]], dict[str, Any]]
+SourceFingerprintResolver = Callable[[str, str], str]
+SourceVersionLoader = Callable[[str, str, str, str], dict[str, Any] | None]
+SourceVersionRecorder = Callable[..., dict[str, Any]]
+
+
+def backfill_current_factor_source_versions(
+    *,
+    apply: bool = False,
+    source_rows: list[dict[str, Any]] | None = None,
+    fingerprint_resolver: SourceFingerprintResolver | None = None,
+    version_loader: SourceVersionLoader | None = None,
+    version_recorder: SourceVersionRecorder | None = None,
+) -> dict[str, Any]:
+    """Snapshot current family sources under their semantic fingerprints.
+
+    This makes a currently equivalent frozen factor inspectable without ever
+    substituting today's source for a genuinely historical fingerprint.
+    """
+    if source_rows is None:
+        from tools.data.sqlite.factor_source_store import list_factor_sources
+
+        source_rows = [
+            *list_factor_sources("public"),
+            *list_factor_sources("custom"),
+        ]
+    if fingerprint_resolver is None:
+        from server.modules.custom_factors.catalog import (
+            _load_factor_family_from_source,
+        )
+
+        def fingerprint_resolver(source_code: str, factor_id: str) -> str:
+            factor_cls, _ = _load_factor_family_from_source(
+                source_code, f"_formula_snapshot_{factor_id}",
+            )
+            if factor_cls is None:
+                raise ValueError("factor family source cannot be loaded")
+            return str(factor_cls().expr.semantic_fingerprint())
+    if version_loader is None or version_recorder is None:
+        from tools.data.sqlite.factor_source_versions import (
+            load_factor_formula_version,
+            record_factor_formula_version,
+        )
+
+        version_loader = version_loader or load_factor_formula_version
+        version_recorder = version_recorder or record_factor_formula_version
+
+    planned: list[tuple[str, str, str, str, str]] = []
+    errors: list[dict[str, str]] = []
+    for row in source_rows:
+        kind = str(row.get("source_kind") or "").strip()
+        owner = str(row.get("owner_username") or "").strip()
+        factor_id = str(row.get("factor_id") or "").strip()
+        source_code = str(row.get("source_code") or "")
+        try:
+            if kind not in {"public", "custom"} or not factor_id or not source_code:
+                raise ValueError("factor source identity is incomplete")
+            fingerprint = fingerprint_resolver(source_code, factor_id)
+            if version_loader(kind, owner, factor_id, fingerprint) is None:
+                planned.append((kind, owner, factor_id, source_code, fingerprint))
+        except (ImportError, TypeError, ValueError) as error:
+            errors.append({
+                "source_kind": kind,
+                "owner_username": owner,
+                "factor_id": factor_id,
+                "error": str(error),
+            })
+    migrated = 0
+    if apply and not errors:
+        for kind, owner, factor_id, source_code, fingerprint in planned:
+            version_recorder(
+                kind,
+                owner,
+                factor_id,
+                source_code,
+                family_formula_fingerprint=fingerprint,
+                subject="formula identity migration",
+            )
+            migrated += 1
+    return {
+        "eligible": len(source_rows),
+        "planned": len(planned),
+        "migrated": migrated,
+        "errors": errors,
+    }
 
 
 def migrate_editable_configuration_payload(
@@ -777,7 +861,12 @@ def main(argv: list[str] | None = None) -> int:
         discard_incompatible=arguments.discard_incompatible,
         control_plan_path=arguments.control_plan,
     )
+    report["source_versions"] = backfill_current_factor_source_versions(
+        apply=arguments.apply,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    if report["source_versions"]["errors"]:
+        return 1
     if arguments.apply and arguments.discard_incompatible:
         return 0
     return 0 if not report["errors"] else 1
