@@ -35,9 +35,12 @@
     let productScopeRef = draft.product_scope_ref ?? current?.product_scope_ref ?? "";
     const factorSourceState = !factorScopeBlocked && factorScope.source !== "outer"
       ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
-          factor_candidate_refs: factorRef ? [factorRef] : [],
-          factor_source_selections: current?.factor_source_selections,
-          factor_set_selections: current?.factor_set_selections,
+          factor_candidate_refs: draft.factor_candidate_refs
+            ?? (factorRef ? [factorRef] : []),
+          factor_source_selections: draft.factor_source_selections
+            ?? current?.factor_source_selections,
+          factor_set_selections: draft.factor_set_selections
+            ?? current?.factor_set_selections,
         })
       : null;
 
