@@ -64,6 +64,30 @@ def test_source_version_backfill_only_records_current_semantic_fingerprint() -> 
     assert recorded[0][4]["family_formula_fingerprint"] == fingerprint
 
 
+def test_source_version_backfill_reports_unfingerprintable_source() -> None:
+    report = backfill_current_factor_source_versions(
+        source_rows=[{
+            "source_kind": "public",
+            "owner_username": "",
+            "factor_id": "Broken",
+            "source_code": "broken source",
+        }],
+        fingerprint_resolver=lambda *_args: (_ for _ in ()).throw(
+            NotImplementedError("opaque formula node")
+        ),
+        version_loader=lambda *_args: None,
+        version_recorder=lambda *_args, **_kwargs: {},
+    )
+
+    assert report["planned"] == 0
+    assert report["errors"] == [{
+        "source_kind": "public",
+        "owner_username": "",
+        "factor_id": "Broken",
+        "error": "opaque formula node",
+    }]
+
+
 def _resolved(record: dict) -> dict:
     assert record["params"] == {"N": "20d"}
     return freeze_factor_identity(

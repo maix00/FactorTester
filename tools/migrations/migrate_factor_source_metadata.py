@@ -72,6 +72,38 @@ def _legacy_display_metadata(source_code: str) -> dict[str, str]:
     return result
 
 
+def _upgrade_legacy_formula_source(factor_id: str, source_code: str) -> str:
+    """Replace known pre-fingerprint formula nodes during explicit migration."""
+    if factor_id != "VlYZ" or "class _DynamicWeight(FactorExpr):" not in source_code:
+        return source_code
+    value = source_code.replace(
+        "from tools.factors.FactorExpr import FactorExpr",
+        "from tools.factors.FactorExpr import window_bars",
+    )
+    old = (
+        "        yz_var = (sig_o2 + _DynamicWeight(N) * sig_c2 + "
+        "(1.0 - _DynamicWeight(N)) * sig_rs2).as_intermediate('SIG_YZ2')"
+    )
+    new = (
+        "        n = window_bars(N).max(2.0)\n"
+        "        weight = 0.34 / (1.34 + (n + 1.0) / (n - 1.0))\n"
+        "        yz_var = (sig_o2 + weight * sig_c2 + "
+        "(1.0 - weight) * sig_rs2).as_intermediate('SIG_YZ2')"
+    )
+    if old not in value:
+        raise ValueError("legacy VlYZ source does not match the explicit migration")
+    value = value.replace(old, new)
+    value, replaced = re.subn(
+        r"\nclass _DynamicWeight\(FactorExpr\):.*?(?=\nif __name__ ==)",
+        "\n",
+        value,
+        flags=re.DOTALL,
+    )
+    if replaced != 1:
+        raise ValueError("legacy VlYZ helper could not be removed")
+    return value
+
+
 def migrate_factor_source_metadata(database: str | Path) -> dict[str, int]:
     """Migrate all existing source rows and never run implicitly at import."""
     path = Path(database).expanduser().resolve()
@@ -130,7 +162,9 @@ def migrate_factor_source_metadata(database: str | Path) -> dict[str, int]:
                 ),
             ).rowcount
             metadata_rows += int(inserted or 0)
-            canonical = _strip_legacy_display_metadata(source)
+            canonical = _strip_legacy_display_metadata(
+                _upgrade_legacy_formula_source(str(row["factor_id"]), source)
+            )
             if canonical != source:
                 connection.execute(
                     f"""

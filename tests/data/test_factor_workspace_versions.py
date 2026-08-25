@@ -80,3 +80,53 @@ def test_factor_source_versions_only_include_source_changes(tmp_path, monkeypatc
     )
     assert historical["source_code"] == first_source
     assert historical["is_current"] is False
+
+
+def test_formula_snapshot_is_exposed_without_pretending_to_be_git(monkeypatch):
+    source = "class Momentum:\n    expr = 'close'\n"
+    fingerprint = "a" * 64
+    source_hash = versions._source_hash(source)
+    monkeypatch.setattr(versions, "_find_workspace_source", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        versions,
+        "list_factor_formula_versions",
+        lambda *_args, **_kwargs: [{
+            "family_formula_fingerprint": fingerprint,
+            "source_sha256": source_hash,
+            "subject": "formula identity migration",
+            "created_at": 123.0,
+        }],
+    )
+    monkeypatch.setattr(
+        versions,
+        "load_factor_formula_version",
+        lambda *_args, **_kwargs: {
+            "family_formula_fingerprint": fingerprint,
+            "source_sha256": source_hash,
+            "source_code": source,
+            "subject": "formula identity migration",
+            "created_at": 123.0,
+        },
+    )
+
+    listing = versions.list_factor_source_versions(
+        source_kind="custom",
+        owner_username="alice",
+        factor_id="Momentum",
+        current_source=source,
+    )
+    loaded = versions.load_factor_source_version(
+        source_kind="custom",
+        owner_username="alice",
+        factor_id="Momentum",
+        current_source=source,
+        commit=fingerprint,
+    )
+
+    assert listing["workspace"] == "server-db"
+    assert listing["versions"][0]["commit"] == fingerprint
+    assert listing["versions"][0]["version_source"] == "formula-snapshot"
+    assert listing["versions"][0]["is_current"] is True
+    assert loaded["source_code"] == source
+    assert loaded["version_source"] == "formula-snapshot"
+    assert loaded["is_current"] is True
