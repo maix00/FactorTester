@@ -185,12 +185,45 @@
   function restoreDraft(state, snapshot) {
     if (snapshot?.schemaVersion !== 2 || snapshot.kind !== state.kind
         || !snapshot.values || typeof snapshot.values !== "object") return false;
+    if (!compatibleFrozenFactors(snapshot.values)) return false;
     state.restoredWorkspaceID = String(snapshot.workspaceID || "");
     for (const key of draftKeys) {
       if (key in snapshot.values) state[key] = structuredClone(snapshot.values[key]);
     }
     state.settingsInitialized = false;
     return true;
+  }
+
+  function compatibleFrozenFactors(values) {
+    const factors = [
+      ...(Array.isArray(values.savedFactors) ? values.savedFactors : []),
+      ...(Array.isArray(values.values?.factor_candidates)
+        ? values.values.factor_candidates : []),
+      ...(Array.isArray(values.savedTemporaryObjects?.factors)
+        ? values.savedTemporaryObjects.factors : []),
+    ];
+    const records = new Set();
+    for (const factor of factors) {
+      const ref = frozenFactorRef(factor);
+      if (!ref) return false;
+      records.add(ref);
+    }
+    const analysis = values.analysis || {};
+    const refs = [
+      ...(analysis.groups || []).flatMap(group => (
+        Array.isArray(group?.factor_candidate_refs) ? group.factor_candidate_refs : []
+      )),
+      ...(analysis.configuration_groups || []).map(group => group?.factor_ref),
+    ].map(value => String(value || "").trim()).filter(Boolean);
+    return refs.every(ref => records.has(ref));
+  }
+
+  function frozenFactorRef(value) {
+    if (!value || typeof value !== "object" || value.schema_version !== 2) return "";
+    const ref = String(value.ref || value.factor_ref || "").trim();
+    const alias = String(value.alias || value.factor_alias || "").trim();
+    if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(ref) || !alias) return "";
+    return value.identity && typeof value.identity === "object" ? ref : "";
   }
 
   function savedSettings(state) {
