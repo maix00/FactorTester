@@ -237,6 +237,19 @@ assert.deepStrictEqual(deleted, ["family:two"]);
 assert.deepStrictEqual(added, ["family:two"]);
 
 window.FTFactorList.render(context, data, mount, {
+  page: "families", scope: "subordinates", query: "", groupRefs: ["*"],
+  canModify: false,
+  canAddFactor: true,
+  onAddFactor: item => added.push(item.family_ref),
+});
+assert.equal(mount.value.children[1].headers.at(-1), "操作");
+const subordinateAction = mount.value.children[1].rows[0].at(-1);
+assert.strictEqual(subordinateAction.children.length, 1);
+assert.equal(subordinateAction.children[0].children[0].symbol, "plus");
+subordinateAction.children[0].listeners.click({stopPropagation() {}});
+assert.deepStrictEqual(added, ["family:two", "family:four"]);
+
+window.FTFactorList.render(context, data, mount, {
   page: "factors", scope: "mine", query: "", groupRef: "*",
 });
 assert.deepStrictEqual(mount.value.headers, [

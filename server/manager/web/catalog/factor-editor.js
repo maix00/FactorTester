@@ -228,22 +228,23 @@
     actions.className = "detail-actions factor-editor-source-actions";
     const file = options.fileInput || filePicker(context, state, redraw);
     if (options.showUpload !== false) {
-      const upload = context.button(context.t("上传因子家族源码"), () => file.click());
-      upload.type = "button";
+      const upload = FTUI.actionButton(
+        context.t("上传因子源码"), () => file.click(), {variant: "secondary"},
+      );
       actions.append(upload);
     }
-    const validate = context.button(context.t("校验源码"), () => {
+    const validate = FTUI.actionButton(context.t("校验源码"), () => {
       void inspect(context, state, redraw, status);
-    });
-    validate.type = "button";
+    }, {variant: "secondary"});
     actions.append(validate);
-    const source = document.createElement("textarea");
-    source.rows = 16;
-    source.required = true;
-    source.placeholder = context.t("填写继承 FactorFamily 的 Python 类源码");
-    source.value = state.sourceCode;
-    source.addEventListener("input", () => {
-      state.sourceCode = source.value;
+    const editor = FTUI.codeEditor(state.sourceCode, {
+      language: "python",
+      required: true,
+      placeholder: context.t("填写继承 FactorFamily 的 Python 类源码"),
+      ariaLabel: context.t("Python 源码"),
+    });
+    editor.textarea.addEventListener("input", () => {
+      state.sourceCode = editor.value();
       state.inspection = null;
     });
     const status = document.createElement("small");
@@ -253,7 +254,7 @@
       status.textContent = context.t("源码已通过校验");
     }
     if (!options.fileInput) root.append(file);
-    root.append(actions, field(context.t("Python 源码"), source), status);
+    root.append(actions, field(context.t("Python 源码"), editor.element), status);
     return root;
   }
 
@@ -540,7 +541,6 @@
       if (state.familyMode) {
         sourceMount.append(sourceControls(context, state, redraw, {
           fileInput: familyFileInput,
-          showUpload: false,
         }));
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
@@ -582,24 +582,15 @@
         ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
     const familyFileInput = familyMode ? filePicker(context, state, redraw) : null;
-    if (familyFileInput) {
-      context.toolbar?.append(FTUI.iconButton(
-        context,
-        "paperclip",
-        "上传因子家族源码",
-        () => familyFileInput.click(),
-        {className: "factor-editor-upload-action"},
-      ));
-    }
     const actions = document.createElement("div"); actions.className = "detail-actions";
-    const cancel = context.button(context.t("取消"), () => {
+    const cancel = FTUI.actionButton(context.t("取消"), () => {
       if (!FTTabReturn.returnToSource(context)) {
         context.closeTab?.(context.tabID); context.navigate("/factors");
       }
-    });
-    cancel.type = "button";
-    const save = context.button(context.t("保存"), () => form.requestSubmit());
-    save.type = "button"; save.className = "primary";
+    }, {variant: "secondary"});
+    const save = FTUI.actionButton(
+      context.t("保存"), () => form.requestSubmit(), {variant: "primary"},
+    );
     actions.append(cancel, save);
     if (familyFileInput) form.append(familyFileInput);
     const overrides = state.familyMode ? {
