@@ -32,6 +32,7 @@
   }
 
   function catalogItems(state) {
+    const catalog = state?.catalogSourceState || state;
     const byID = new Map();
     const add = item => {
       const value = window.FTFactorModel?.withSourceMetadata?.(item) || item;
@@ -40,8 +41,8 @@
       const previous = byID.get(id);
       byID.set(id, previous ? {...previous, ...value} : value);
     };
-    (state.factors || []).forEach(add);
-    (state.savedFactors || []).forEach(add);
+    (catalog.factors || []).forEach(add);
+    (catalog.savedFactors || []).forEach(add);
     FTTestFactorSelection.candidates(state).forEach(add);
     selections(state).forEach(add);
     return [...byID.values()];
@@ -140,6 +141,18 @@
         refresh?.();
       },
     });
+    // A nested editor can open before the shared visible-factor catalog has
+    // finished loading.  Its local authoring state must remain independent,
+    // but the picker catalog is live shared data: refresh the already-mounted
+    // control when that request completes instead of freezing the one saved
+    // factor that happened to seed the draft.
+    const catalogPromise = state.lazy?.factors?.promise;
+    if (catalogPromise && typeof catalogPromise.then === "function") {
+      void catalogPromise.then(() => {
+        picker?.setItems(pickerItems(context, state));
+        picker?.setValues(selections(state).map(factorID).filter(Boolean));
+      }).catch(() => {});
+    }
     return FTTestFieldRow.create(
       context.t("因子"), picker.element,
       window.FTTestFieldHelp?.forField?.(
@@ -332,6 +345,7 @@
         : candidates.filter(item => !(item.factor_set_refs || []).length);
       local = {
         ...state,
+        catalogSourceState: state,
         values: {
           ...(state.values || {}),
           factor_candidates: structuredClone(candidates),
@@ -343,8 +357,7 @@
       if (owner && typeof owner === "object") scopedSourceStates.set(owner, local);
     }
     local.manifest = state.manifest;
-    local.factors = state.factors;
-    local.savedFactors = state.savedFactors;
+    local.catalogSourceState = state;
     local.factorSetCatalog = state.factorSetCatalog;
     local.lazy = state.lazy;
     return local;
