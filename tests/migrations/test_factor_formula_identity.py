@@ -206,6 +206,52 @@ def test_explicit_database_migration_updates_editable_rows_not_historical_runs(
     assert json.loads(historical_raw)["configuration"]["schema_version"] == 1
 
 
+def test_explicit_migration_removes_legacy_revision_manifests_from_v2_rows(
+    tmp_path,
+) -> None:
+    database = tmp_path / "manager.sqlite3"
+    factor = _resolved({"params": {"N": "20d"}})
+    payload = {
+        "schema_version": 2,
+        "shared": {
+            "factors": [factor],
+            "factor_revision_manifests": [{"factor_git_commit": "deadbeef"}],
+        },
+        "analyses": {"backtest": {"groups": [{
+            "factor_candidate_refs": [factor["ref"]],
+        }]}},
+        "ui": {},
+    }
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE research_configurations ("
+            "configuration_id TEXT PRIMARY KEY, owner TEXT, "
+            "schema_version INTEGER, revision INTEGER, payload_json TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO research_configurations VALUES (?, ?, ?, ?, ?)",
+            ("config-v2", "alice", 2, 7, json.dumps(payload)),
+        )
+
+    report = migrate_configuration_database(database, resolver=_resolved, apply=True)
+
+    assert report["eligible"] == 1
+    assert report["planned"] == 1
+    assert report["migrated"] == 1
+    assert report["errors"] == []
+    assert report["legacy_revision_manifests"] == {
+        "eligible": 1, "planned": 1, "migrated": 1, "errors": [],
+    }
+    with sqlite3.connect(database) as connection:
+        revision, raw = connection.execute(
+            "SELECT revision, payload_json FROM research_configurations"
+        ).fetchone()
+    assert revision == 8
+    migrated = json.loads(raw)
+    assert "factor_revision_manifests" not in migrated["shared"]
+    assert migrated["shared"]["factors"] == [factor]
+
+
 def test_database_migration_commits_recoverable_rows_and_keeps_bad_drafts(
     tmp_path,
 ) -> None:
