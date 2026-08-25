@@ -15,6 +15,9 @@ from server.modules.custom_factors import (
 from server.modules.custom_factors.client_library import build_client_library_projection
 from server.manager.services.account_domain_projection import factor_rows_from_sync
 from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
+from server.manager.services.federated_factor_projection import (
+    merge_factor_library_projections,
+)
 from server.manager.services import public_catalog
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
@@ -339,6 +342,80 @@ def test_factor_projection_preserves_formula_identity_per_factor() -> None:
     assert "factor_family_ref" not in factor
 
 
+def test_family_projection_merges_registered_historical_factor_into_current_family() -> None:
+    """A registered factor revision is a member, not a second family row."""
+    payload = build_client_library_projection({
+        "families": [{
+            "factor_family_alias": "CA",
+            "factor_family_name": "CA",
+            "description": "复权收盘价",
+            "category": "价格",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "factor_owner_ref": "principal:alice",
+            "source": "custom",
+            "family_formula_fingerprint": "c" * 64,
+        }],
+        "factors": [{
+            "factor_alias": "CA",
+            "factor_family_alias": "CA",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "source": "custom",
+            **_frozen_factor(alias="CA", family="CA"),
+        }],
+    }, principal="alice")
+
+    assert len(payload["families"]) == 1
+    family = payload["families"][0]
+    assert family["description"] == "复权收盘价"
+    assert family["categories"] == ["价格"]
+    assert family["family_formula_fingerprint"] == "c" * 64
+    assert family["factor_count"] == 1
+    assert family["factor_refs"] == [payload["factors"][0]["factor_ref"]]
+
+
+def test_federated_projection_keeps_source_family_and_merges_member_counts() -> None:
+    source = {
+        "family_ref": "family:current",
+        "factor_family_alias": "Momentum",
+        "description": "当前说明",
+        "categories": ["动量"],
+        "owner_username": "__public_jobs__",
+        "factor_owner_ref": "public",
+        "source": "public",
+        "factor_kind": "public",
+        "has_source_definition": True,
+        "family_formula_fingerprint": "c" * 64,
+        "factor_count": 0,
+        "factor_refs": [],
+    }
+    member = {
+        "family_ref": "family:historical",
+        "factor_family_alias": "Momentum",
+        "owner_username": "__public_jobs__",
+        "factor_owner_ref": "public",
+        "source": "public",
+        "factor_kind": "public",
+        "has_source_definition": False,
+        "family_formula_fingerprint": "a" * 64,
+        "factor_count": 1,
+        "factor_refs": ["factor:v2:member"],
+    }
+
+    payload = merge_factor_library_projections([
+        {"schema_version": 2, "families": [source], "factors": []},
+        {"schema_version": 2, "families": [member], "factors": []},
+    ], principal="alice")
+
+    assert len(payload["families"]) == 1
+    family = payload["families"][0]
+    assert family["family_ref"] == "family:current"
+    assert family["family_formula_fingerprint"] == "c" * 64
+    assert family["description"] == "当前说明"
+    assert family["factor_count"] == 1
+
+
 def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch) -> None:
     source = "class Momentum(FactorFamily):\n    pass\n"
     fingerprint = "a" * 64
@@ -425,6 +502,45 @@ def test_source_version_route_returns_persisted_snapshot_without_current_source(
     assert payload["family_formula_fingerprint"] == fingerprint
     assert payload["source_code"] == source
     assert payload["source_kind"] == "public"
+
+
+def test_source_version_current_returns_live_family_source(monkeypatch) -> None:
+    source = "class Momentum(FactorFamily):\n    pass\n"
+    fingerprint = "d" * 64
+    monkeypatch.setattr(
+        catalog_routes, "load_public_factor_source", lambda _factor_id: source,
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "get_factor_source_metadata",
+        lambda *_args: {
+            "chinese_name": "动量",
+            "description": "当前源码",
+            "category": "动量",
+        },
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "_source_detail",
+        lambda *_args, **_kwargs: {
+            "source_code": source,
+            "math_expr": "P_t-P_{t-1}",
+            "family_formula_fingerprint": fingerprint,
+            "params": [],
+        },
+    )
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get(
+        "/custom-factors/api/source-versions/public/Momentum/current",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["source_code"] == source
+    assert payload["family_formula_fingerprint"] == fingerprint
+    assert payload["factor_family_alias"] == "Momentum"
 
 
 def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> None:

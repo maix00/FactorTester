@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from tools.cli.factor_subject_refs import validate_factor_subject_ref
+from tools.factors.formula_identity import require_frozen_factor
 
 _REF = re.compile(r"^evidence:[a-z_]+:sha256:[0-9a-f]{64}$")
 
@@ -16,6 +17,7 @@ def validate_applicability(value: Any) -> dict[str, Any]:
         raise ValueError("applicability must be an object")
     allowed = {
         "product_refs", "source_refs", "factor_refs", "sample_refs",
+        "factor_subjects",
         "contract_hash", "methodology_hash", "trial_plan_hash",
         "run_spec_hash", "time_window", "limitations",
     }
@@ -33,6 +35,26 @@ def validate_applicability(value: Any) -> dict[str, Any]:
             raise ValueError(
                 "applicability.factor_refs contains a non-frozen factor subject"
             ) from error
+    subjects = value.get("factor_subjects", [])
+    if not isinstance(subjects, list):
+        raise ValueError("applicability.factor_subjects must be an array")
+    frozen_subjects = []
+    for item in subjects:
+        try:
+            frozen_subjects.append(require_frozen_factor(item))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "applicability.factor_subjects contains an invalid frozen factor"
+            ) from error
+    subject_refs = [item["ref"] for item in frozen_subjects]
+    if len(subject_refs) != len(set(subject_refs)):
+        raise ValueError("applicability.factor_subjects must be unique")
+    if not set(subject_refs).issubset(set(value.get("factor_refs", []))):
+        raise ValueError(
+            "applicability.factor_subjects must be declared in factor_refs"
+        )
+    if frozen_subjects:
+        value = {**value, "factor_subjects": frozen_subjects}
     for field in ("contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash"):
         if field in value and not sha(value[field]):
             raise ValueError(f"applicability.{field} must be sha256")

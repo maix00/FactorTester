@@ -91,6 +91,7 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
         "name": "Momentum",
         "factor_family": "MomentumFamily",
         "description": "public description",
+        "family_formula_fingerprint": "a" * 64,
         "source_code": "SECRET SOURCE",
         "params": [{"alias": "window", "value": "20"}],
         "is_public": True,
@@ -99,6 +100,7 @@ def test_public_factor_library_contains_public_metadata_only(monkeypatch):
         "name": "Volatility",
         "factor_family": "FactorFamily",
         "description": "public volatility",
+        "family_formula_fingerprint": "b" * 64,
         "params": [],
         "is_public": True,
     }])

@@ -14,7 +14,10 @@ from server.jobs.states import JobStatus
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
-from server.services.research_graph.branch.job_attempt import _job_factor_refs
+from server.services.research_graph.branch.job_attempt import (
+    _job_factor_refs,
+    _job_factor_subjects,
+)
 from server.services.research_graph.branch.transition import advance_graph_branch
 from server.services.research_evidence_catalog import find_job_evidence
 from server.services.research_graph.research_cycle.replay import (
@@ -59,6 +62,9 @@ def test_multi_factor_job_preserves_each_frozen_formula_identity() -> None:
     spec = {"configuration": {"shared": {"factors": factors}}}
 
     assert _job_factor_refs(spec) == sorted(item["ref"] for item in factors)
+    assert _job_factor_subjects(spec) == sorted(
+        factors, key=lambda item: item["ref"],
+    )
 
 
 def test_job_preserves_exact_frozen_factor_set_subject() -> None:

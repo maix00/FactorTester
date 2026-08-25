@@ -19,6 +19,7 @@ from server.services.research_evidence_catalog import (
     prepare_lifecycle_transition,
 )
 from tests.server.data_contract_fixtures import initialize
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 def _source(owner: str = "alice") -> dict:
@@ -203,10 +204,14 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
     source = _source()
     fragment = _fragment(source["source_ref"])
-    factor_ref = (
-        "factor:v1:profile-maxa:SgCCS:SgCCS:"
-        + "a" * 40 + ":" + "b" * 40
+    factor = freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias="SgCCS",
+        factor_alias="SgCCS",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
     )
+    factor_ref = factor["ref"]
     evidence = create_evidence(
         owner="alice",
         evidence_kind="factor_semantics",
@@ -217,6 +222,7 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
         applicability={
             "product_refs": ["product:SI.GFE"],
             "factor_refs": [factor_ref],
+            "factor_subjects": [factor],
             "contract_hash": "c" * 64,
             "methodology_hash": "d" * 64,
             "time_window": {"start": "2025-01-01", "end": "2025-12-31"},

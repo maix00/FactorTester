@@ -63,8 +63,12 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
     }
 
     func testFactorReferenceKeepsPurpleTextAndSpacesAssignment() {
+        let target = "factor-family:v2:" + String(repeating: "a", count: 43)
+        let encoded = target.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        )!
         let rendered = ResearchInlineAttributedString.make(
-            "[TrMomentum](factortester://factor/factor-family%3Av1%3Aone)=`CLOSE`",
+            "[TrMomentum](factortester://factor/\(encoded))=`CLOSE`",
             scope: .init(
                 componentID: "entry",
                 bindings: [
@@ -72,7 +76,7 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
                         id: "binding",
                         componentID: "entry",
                         kind: "factor",
-                        targetRef: "factor-family:v1:one",
+                        targetRef: target,
                         label: "TrMomentum",
                         detailFields: []
                     ),
@@ -190,14 +194,20 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
                     id: "factor",
                     componentID: "entry",
                     kind: "factor",
-                    targetRef: "factor:v1:profile-test:cGF0aA:TW1UcmVuZA:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    targetRef: "factor:v2:" + String(
+                        repeating: "a", count: 43
+                    ),
                     label: "MmTrend",
                     detailFields: []
                 ),
             ]
         )
+        let target = "factor:v2:" + String(repeating: "a", count: 43)
+        let encoded = target.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        )!
         let value = ResearchInlineAttributedString.make(
-            "[MmTrend](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
+            "[MmTrend](factortester://factor/\(encoded))"
                 + "=\\(\(latex)\\)",
             scope: scope,
             mathImages: [key: resolved]

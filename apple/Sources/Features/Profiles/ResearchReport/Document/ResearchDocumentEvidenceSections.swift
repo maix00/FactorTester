@@ -54,7 +54,9 @@ enum ResearchDocumentEvidenceSections {
             return localized(detail?.applicability, prefix: "")
         }
         return localized(
-            .object(values.filter { $0.key != "factor_refs" }),
+            .object(values.filter {
+                $0.key != "factor_refs" && $0.key != "factor_subjects"
+            }),
             prefix: ""
         )
     }
@@ -63,10 +65,15 @@ enum ResearchDocumentEvidenceSections {
         _ detail: ResearchEvidenceDetailPayload?
     ) -> [ResearchDocumentRelatedReference] {
         guard case let .object(values) = detail?.applicability,
-              case let .array(refs) = values["factor_refs"] else { return [] }
-        return refs.compactMap { value in
-            guard let targetRef = value.scalarText,
-                  let label = frozenFactorIdentity(targetRef) else { return nil }
+              case let .array(subjects) = values["factor_subjects"] else {
+            return []
+        }
+        return subjects.compactMap { value in
+            guard case let .object(subject) = value,
+                  let targetRef = subject["ref"]?.scalarText,
+                  targetRef.hasPrefix("factor:v2:"),
+                  let label = subject["alias"]?.scalarText,
+                  !label.isEmpty else { return nil }
             return .init(
                 relation: L10n.text("适用因子"),
                 reference: .init(
@@ -77,21 +84,6 @@ enum ResearchDocumentEvidenceSections {
                 detailFields: []
             )
         }
-    }
-
-    private static func frozenFactorIdentity(_ value: String) -> String? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 7,
-              parts[0] == "factor" || parts[0] == "factor-family",
-              parts[1] == "v1" else { return nil }
-        var encoded = String(parts[4])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
-        guard let data = Data(base64Encoded: encoded),
-              let identity = String(data: data, encoding: .utf8),
-              !identity.isEmpty else { return nil }
-        return identity
     }
 
     private static func localized(

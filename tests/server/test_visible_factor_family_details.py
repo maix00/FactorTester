@@ -2,10 +2,14 @@ from server.modules.custom_factors import catalog
 
 
 def test_visible_subordinate_family_keeps_formula_and_read_only_source(monkeypatch):
-    monkeypatch.setattr(catalog, "visible_accounts_for", lambda *_args, **_kwargs: [
-        {"username": "parent"},
-        {"username": "child"},
-    ])
+    monkeypatch.setattr(
+        catalog, "get_account", lambda username: {"username": username},
+    )
+    monkeypatch.setattr(
+        catalog,
+        "direct_subordinate_accounts_for",
+        lambda username: [{"username": "child"}] if username == "parent" else [],
+    )
     monkeypatch.setattr(catalog, "account_display_name", lambda value: value["username"])
     monkeypatch.setattr(catalog, "list_custom_factors", lambda username: [{
         "id": "Momentum",

@@ -31,7 +31,7 @@ struct ResearchDocumentReferenceOverlay: View {
                     }
                     detailSections
                     if reference.kind == "factor",
-                       reference.targetRef.hasPrefix("factor-set:v1:") {
+                       reference.targetRef.hasPrefix("factor-set:v2:") {
                         ResearchFactorSetMemberList(
                             targetRef: reference.targetRef
                         )

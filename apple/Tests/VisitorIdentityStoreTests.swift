@@ -1,5 +1,5 @@
 import XCTest
-@testable import FactorTesterClient
+@testable import FTClient
 
 final class VisitorIdentityStoreTests: XCTestCase {
     func testIdentityIsStableAndCanonicalPerInstallation() {
