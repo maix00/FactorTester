@@ -11,9 +11,57 @@ from tools.factors.formula_identity import (
 )
 from tools.migrations.migrate_factor_formula_identity import (
     IncompatibleFactorConfiguration,
+    backfill_current_factor_source_versions,
     migrate_configuration_database,
     migrate_editable_configuration_payload,
 )
+
+
+def test_source_version_backfill_only_records_current_semantic_fingerprint() -> None:
+    fingerprint = "c" * 64
+    versions: dict[tuple[str, str, str, str], dict] = {}
+    recorded = []
+
+    def load(kind, owner, factor_id, value):
+        return versions.get((kind, owner, factor_id, value))
+
+    def record(kind, owner, factor_id, source_code, **kwargs):
+        recorded.append((kind, owner, factor_id, source_code, kwargs))
+        value = {"family_formula_fingerprint": kwargs["family_formula_fingerprint"]}
+        versions[(kind, owner, factor_id, kwargs["family_formula_fingerprint"])] = value
+        return value
+
+    rows = [{
+        "source_kind": "custom",
+        "owner_username": "alice",
+        "factor_id": "Momentum",
+        "source_code": "class Momentum(FactorFamily):\n    pass\n",
+    }]
+    dry_run = backfill_current_factor_source_versions(
+        source_rows=rows,
+        fingerprint_resolver=lambda *_args: fingerprint,
+        version_loader=load,
+        version_recorder=record,
+    )
+    applied = backfill_current_factor_source_versions(
+        apply=True,
+        source_rows=rows,
+        fingerprint_resolver=lambda *_args: fingerprint,
+        version_loader=load,
+        version_recorder=record,
+    )
+    repeated = backfill_current_factor_source_versions(
+        apply=True,
+        source_rows=rows,
+        fingerprint_resolver=lambda *_args: fingerprint,
+        version_loader=load,
+        version_recorder=record,
+    )
+
+    assert dry_run == {"eligible": 1, "planned": 1, "migrated": 0, "errors": []}
+    assert applied == {"eligible": 1, "planned": 1, "migrated": 1, "errors": []}
+    assert repeated == {"eligible": 1, "planned": 0, "migrated": 0, "errors": []}
+    assert recorded[0][4]["family_formula_fingerprint"] == fingerprint
 
 
 def _resolved(record: dict) -> dict:
