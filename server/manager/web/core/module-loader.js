@@ -30,7 +30,14 @@
     if (loaded.has(relative)) return loaded.get(relative);
     const promise = (async () => {
       let lastError;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      // A freshly activated container can briefly close an existing browser's
+      // first static request.  Retry within this user action so feature
+      // overlays do not require a second click to finish loading their group.
+      const retryDelays = [0, 100, 250, 500, 1000];
+      for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+        if (retryDelays[attempt]) {
+          await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+        }
         try {
           await new Promise((resolve, reject) => {
             const script = document.createElement("script");
@@ -50,9 +57,6 @@
           return;
         } catch (error) {
           lastError = error;
-          if (attempt === 0) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
         }
       }
       throw lastError;

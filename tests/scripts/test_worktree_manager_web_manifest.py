@@ -529,7 +529,8 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     assert '/research-static/vendor/highcharts/highstock.min.js?v=' not in shell
-    assert 'for (let attempt = 0; attempt < 2; attempt += 1)' in loader
+    assert "const retryDelays = [0, 100, 250, 500, 1000]" in loader
+    assert "attempt < retryDelays.length" in loader
     assert 'retry=${attempt}' in loader
     assert 'script.remove()' in loader
 
@@ -620,6 +621,19 @@ def test_lazy_loader_uses_one_ordered_script_path_for_webkit() -> None:
     assert 'link.rel = "preload"' not in loader
     assert "preloadScripts" not in loader
     assert "for (const relative of scripts) await loadScript(relative);" in loader
+
+
+def test_lazy_loader_recovers_within_the_first_user_action() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "module_loader_retry.js"
+    loader = WEB_ROOT / "core" / "module-loader.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(loader)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
 
 
 def test_product_price_chart_is_interactive_ohlcv() -> None:
