@@ -103,10 +103,13 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testReportObjectsOpenDedicatedWebTabs() {
+        let factorRef = "factor:v2:" + String(repeating: "a", count: 43)
+        let familyRef = "factor-family:v2:" + String(repeating: "b", count: 43)
+        let setRef = "factor-set:v2:" + String(repeating: "c", count: 43)
         let cases: [(String, String, String)] = [
-            ("factor", "factor:v1:abc", "/factors/factor/"),
-            ("factor", "factor-family:v1:abc", "/factors/family/"),
-            ("factor_set", "factor-set:v1:abc", "/factors/set/"),
+            ("factor", factorRef, "/factors/factor/"),
+            ("factor", familyRef, "/factors/family/"),
+            ("factor_set", setRef, "/factors/set/"),
             ("product", "product:CNFutures/A.DCE", "/products/product/"),
             ("product_group", "product-group:day", "/products/group/"),
             ("continuous_contract", "continuous-contract:A.DCE", "/products/continuous-contract/"),
@@ -166,14 +169,15 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testHyphenatedAndUnderscoredKindsUseTheSameReferenceTemplate() {
+        let familyRef = "factor-family:v2:" + String(repeating: "a", count: 43)
         let hyphenated = ClientTab.reference(.init(
             kind: "factor-family",
-            targetRef: "factor-family:v1:abc",
+            targetRef: familyRef,
             label: "动量因子家族"
         ))
         let underscored = ClientTab.reference(.init(
             kind: "factor_family",
-            targetRef: "factor-family:v1:abc",
+            targetRef: familyRef,
             label: "动量因子家族"
         ))
 
@@ -188,11 +192,14 @@ final class ClientTabSelectionTests: XCTestCase {
             "factor_family"
         )
 
+        let encoded = familyRef.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        )!
         let parsed = ResearchDocumentTypedLinkParser.reference(
-            from: URL(string: "factortester://factor-family/factor-family%3Av1%3Aabc")!
+            from: URL(string: "factortester://factor-family/\(encoded)")!
         )
         XCTAssertEqual(parsed?.kind, "factor_family")
-        XCTAssertEqual(parsed?.targetRef, "factor-family:v1:abc")
+        XCTAssertEqual(parsed?.targetRef, familyRef)
 
         let web = ResearchDocumentWebReferenceMessage.decode([
             "href": "https://example.com/research?q=1",
@@ -370,6 +377,7 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testEmbeddedProductAndFactorDestinationsCreateSwiftTabs() {
+        let factorRef = String(repeating: "a", count: 43)
         let cases = [
             "/products/group/product-group%3Atiger?source=local",
             "/products/product/JNI.OSE?source=local",
@@ -378,7 +386,7 @@ final class ClientTabSelectionTests: XCTestCase {
             "/factors/family/factor-family%3Amomentum",
             "/factors/factor/factor%3Amomentum",
             "/factors/set/factor-set%3Amomentum",
-            "/factor-series?factor_ref=factor%3Av1%3Amomentum&group_ref=product-group%3Atiger",
+            "/factor-series?factor_ref=factor%3Av2%3A\(factorRef)&group_ref=product-group%3Atiger",
         ]
 
         for path in cases {
@@ -395,7 +403,8 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testEmbeddedFactorSeriesPreservesFrozenFactorAndProductGroup() {
-        let path = "/factor-series?factor_ref=factor%3Av1%3Amomentum"
+        let factorRef = String(repeating: "a", count: 43)
+        let path = "/factor-series?factor_ref=factor%3Av2%3A\(factorRef)"
             + "&group_ref=product-group%3Atiger&source=local"
         guard let destination = ClientTab.embeddedNavigationDestination(
             for: path
@@ -447,11 +456,12 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testEmbeddedWebFactorNavigationReachesNativeTabBridge() {
+        let digest = String(repeating: "a", count: 43)
         let paths = [
-            "/factors/family/factor-family%3Av1%3Aprofile-maxa%3AMmRateOfChg",
-            "/factors/factor/factor%3Av1%3Aprofile-maxa%3AMmRateOfChg%7CP%3A%5BCA%5D",
-            "/factors/set/factor-set%3Av1%3Aprofile-maxa%3Aroc-daily",
-            "/factor-series?factor_ref=factor%3Av1%3Aprofile-maxa%3AMmRateOfChg&group_ref=product-group%3Atiger",
+            "/factors/family/factor-family%3Av2%3A\(digest)",
+            "/factors/factor/factor%3Av2%3A\(digest)",
+            "/factors/set/factor-set%3Av2%3A\(digest)",
+            "/factor-series?factor_ref=factor%3Av2%3A\(digest)&group_ref=product-group%3Atiger",
         ]
         for path in paths {
             XCTAssertEqual(
@@ -476,11 +486,12 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testFactorDetailBuildsStableNativeTab() {
+        let setRef = "factor-set:v2:" + String(repeating: "a", count: 43)
         let tab = ClientTab.factorDetail(
-            "factor-set:v1:profile-maxa:roc-daily",
+            setRef,
             kind: "set"
         )
-        XCTAssertEqual(tab.id, "web:factor-set:factor-set:v1:profile-maxa:roc-daily")
+        XCTAssertEqual(tab.id, "web:factor-set:\(setRef)")
         XCTAssertEqual(tab.systemImage, "square.stack.3d.up")
         guard case let .web(path) = tab.content else {
             return XCTFail("factor detail must use the shared Web renderer")

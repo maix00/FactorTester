@@ -3,6 +3,7 @@ import XCTest
 
 final class ClientLocalCatalogBridgeTests: XCTestCase {
     func testEmbeddedCatalogPagesIncludeBothTestWorkbenches() {
+        let factorRef = String(repeating: "a", count: 43)
         for path in [
             "/products?source=local",
             "/products/product/JNI.OSE?source=local",
@@ -10,7 +11,7 @@ final class ClientLocalCatalogBridgeTests: XCTestCase {
             "/ic-test",
             "/ic-test/session-one",
             "/backtest?presentation=embedded",
-            "/factor-series?factor_ref=factor%3Av1%3Aone",
+            "/factor-series?factor_ref=factor%3Av2%3A\(factorRef)",
         ] {
             XCTAssertTrue(
                 ClientLocalCatalogBridgeContract.allowsEmbeddedPage(path: path),

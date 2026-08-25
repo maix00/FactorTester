@@ -1,6 +1,7 @@
 """Routes for custom-factor catalog pages and read-only factor metadata."""
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any, cast
 
 from flask import jsonify, request
@@ -167,9 +168,30 @@ def api_source_version(source_kind, factor_id, fingerprint):
     username = cast(str, current_user())
     try:
         kind = _source_kind(source_kind)
-        owner, _source_code = _source_context(
+        owner, source_code = _source_context(
             kind, factor_id, username,
         )
+        metadata = get_factor_source_metadata(
+            kind, owner if kind == 'custom' else '', factor_id,
+        )
+        if fingerprint == 'current':
+            if not source_code:
+                raise FileNotFoundError('因子家族当前源码不存在')
+            detail = _source_detail(
+                source_code=source_code,
+                module_name=factor_id,
+                metadata=metadata,
+            )
+            return jsonify({
+                'success': True,
+                **detail,
+                'source_sha256': sha256(source_code.encode('utf-8')).hexdigest(),
+                'source_kind': kind,
+                'factor_id': factor_id,
+                'factor_owner_ref': owner,
+                'factor_family_alias': factor_id,
+                'is_current': True,
+            })
         value = load_factor_formula_version(
             kind,
             owner if kind == 'custom' else '',
@@ -181,9 +203,7 @@ def api_source_version(source_kind, factor_id, fingerprint):
         detail = _source_detail(
             source_code=value['source_code'],
             module_name=factor_id,
-            metadata=get_factor_source_metadata(
-                kind, owner if kind == 'custom' else '', factor_id,
-            ),
+            metadata=metadata,
         )
         return jsonify({
             'success': True,

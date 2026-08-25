@@ -3,7 +3,7 @@ import XCTest
 
 final class ResearchFactorSetMemberListTests: XCTestCase {
     func testMemberPageAlwaysUsesNativeCLIAndFrozenTarget() {
-        let target = "factor-set:v1:profile-maxa:path:id:rev:blob"
+        let target = "factor-set:v2:" + String(repeating: "a", count: 43)
         XCTAssertEqual(
             ResearchFactorSetMemberList.commandArguments(
                 targetRef: target, offset: 50, limit: 50
@@ -27,11 +27,13 @@ final class ResearchFactorSetMemberListTests: XCTestCase {
         }
 
         async let first = cache.value(
-            targetRef: "factor-set:v1:immutable", offset: 0, limit: 50,
+            targetRef: "factor-set:v2:" + String(repeating: "a", count: 43),
+            offset: 0, limit: 50,
             loader: loader
         )
         async let second = cache.value(
-            targetRef: "factor-set:v1:immutable", offset: 0, limit: 50,
+            targetRef: "factor-set:v2:" + String(repeating: "a", count: 43),
+            offset: 0, limit: 50,
             loader: loader
         )
         let values = try await [first, second]
@@ -50,11 +52,13 @@ final class ResearchFactorSetMemberListTests: XCTestCase {
         }
 
         _ = try await cache.value(
-            targetRef: "factor-set:v1:immutable", offset: 0, limit: 50,
+            targetRef: "factor-set:v2:" + String(repeating: "a", count: 43),
+            offset: 0, limit: 50,
             loader: loader
         )
         _ = try await cache.value(
-            targetRef: "factor-set:v1:immutable", offset: 0, limit: 50,
+            targetRef: "factor-set:v2:" + String(repeating: "a", count: 43),
+            offset: 0, limit: 50,
             loader: loader
         )
 
