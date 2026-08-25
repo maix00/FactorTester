@@ -17,6 +17,10 @@ global.FTICConfigurationGroupModel = window.FTICConfigurationGroupModel;
 load("server/manager/web/workbench/test-state.js");
 
 const factorRef = `factor:v2:${"a".repeat(43)}`;
+const frozenFactor = {
+  schema_version: 2, ref: factorRef, alias: "ROC",
+  owner_ref: "owner:alice", identity: {family_ref: "family:roc"},
+};
 const group = {
   config_group_id: "icg-day",
   batch_id: "icb-day",
@@ -34,7 +38,7 @@ const state = {
   workspace: {
     workspace_id: "workspace-ic",
     configuration: {payload: {
-      shared: {factors: [{factor_ref: factorRef, factor_alias: "ROC"}]},
+      shared: {factors: [frozenFactor]},
       analyses: {ic: {
         schema_version: 2,
         configuration_groups: [group],
@@ -89,7 +93,7 @@ const legacy = {
   workspace: {
     workspace_id: "workspace-legacy",
     configuration: {payload: {
-      shared: {factors: [{factor_ref: factorRef, factor_alias: "ROC"}]},
+      shared: {factors: [frozenFactor]},
       analyses: {ic: {
         factors: [{factor_ref: factorRef}],
         product_path_selection_id: "product-group:legacy",
