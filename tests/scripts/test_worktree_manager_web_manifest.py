@@ -958,6 +958,8 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "function candidatePicker" in source
     assert "function innerPanel" in source
     assert "function scopedSourcePanel" in source
+    assert "const scopedSourceStates = new WeakMap()" in source
+    assert "owner.factorSourceState" not in source
     assert "sources_when_outer_unmounted" in (
         ROOT / "tools" / "testers" / "settings" / "strategy_editor.py"
     ).read_text(encoding="utf-8")

@@ -122,10 +122,13 @@
     innerScopeValues.factor_candidates = selectedCandidateValues();
     const factorSourceState = !factorScopeBlocked && factorScope.source !== "outer"
       ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
-          factor_candidate_refs: selectedFactors,
-          factor_source_selections: defaults.factor_source_selections,
-          factor_set_selections: defaults.factor_set_selections,
-          factor_role_bindings: defaults.factor_role_bindings,
+          factor_candidate_refs: editor.draft?.factor_candidate_refs ?? selectedFactors,
+          factor_source_selections: editor.draft?.factor_source_selections
+            ?? defaults.factor_source_selections,
+          factor_set_selections: editor.draft?.factor_set_selections
+            ?? defaults.factor_set_selections,
+          factor_role_bindings: editor.draft?.factor_role_bindings
+            ?? defaults.factor_role_bindings,
         })
       : null;
     let overrideEditor;

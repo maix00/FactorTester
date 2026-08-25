@@ -1,4 +1,5 @@
 (() => {
+  const scopedSourceStates = new WeakMap();
   function descriptor(state) {
     return Object.entries(state?.manifest?.defaults || {}).find(([, field]) => (
       field?.serialization?.kind === "factor_source_selection_list"
@@ -321,7 +322,8 @@
   }
 
   function scopedSourceState(state, owner, initial = {}) {
-    let local = owner?.factorSourceState;
+    let local = owner && typeof owner === "object"
+      ? scopedSourceStates.get(owner) : null;
     if (!local) {
       const wanted = new Set((initial.factor_candidate_refs || []).map(String));
       const candidates = catalogItems(state).filter(item => wanted.has(factorID(item)));
@@ -338,7 +340,7 @@
           factor_role_bindings: structuredClone(initial.factor_role_bindings || {}),
         },
       };
-      if (owner) owner.factorSourceState = local;
+      if (owner && typeof owner === "object") scopedSourceStates.set(owner, local);
     }
     local.manifest = state.manifest;
     local.factors = state.factors;
