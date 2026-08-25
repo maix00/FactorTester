@@ -819,6 +819,25 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "background: transparent !important" in styles
 
 
+def test_frozen_factor_chip_detail_uses_its_snapshot_without_port_resolution() -> None:
+    chips = (WEB_ROOT / "workbench" / "test-setting-chips.js").read_text(
+        encoding="utf-8",
+    )
+    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    factors = (WEB_ROOT / "catalog" / "factors.js").read_text(encoding="utf-8")
+    details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'const snapshot = action.kind === "factor"' in chips
+    assert "snapshot," in chips
+    assert "testObjectSnapshot: options.snapshot === true" in overlay
+    assert "context.testObjectTemporary || context.testObjectSnapshot" in factors
+    assert "context.testObjectTemporary || context.testObjectSnapshot" in details
+
+
 def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker() -> None:
     shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
         encoding="utf-8",

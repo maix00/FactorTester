@@ -187,6 +187,7 @@ const chipSources = FTTestContentAdapters.chipSources(state, {
 assert.equal(chipSources.factorCandidateLabel, "ROC 1m");
 assert.equal(chipSources.factorCandidateDetailKind, "factor");
 assert.equal(chipSources.factor_candidate_detail.ref, factorRef);
+assert.equal(chipSources.factor_candidate_detail.schema_version, 2);
 
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
@@ -223,8 +224,8 @@ assert.deepEqual(renderedChips.map(chip => (
 const factorChip = renderedChips.find(chip => chip.children[0]?.textContent === "因子候选");
 factorChip.listeners.click();
 assert.deepEqual(
-  {kind: openedObject.kind, mode: openedObject.mode},
-  {kind: "factor", mode: "view"},
+  {kind: openedObject.kind, mode: openedObject.mode, snapshot: openedObject.snapshot},
+  {kind: "factor", mode: "view", snapshot: true},
   "a one-factor IC candidate chip must open the factor view overlay",
 );
 const productChip = renderedChips.find(chip => chip.children[0]?.textContent === "产品组");

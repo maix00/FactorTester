@@ -12,7 +12,7 @@
     // view model.  Do not make a catalog round-trip just to render that
     // temporary factor's read-only overlay.
     const inline = mode === "view"
-      && context.testObjectTemporary
+      && (context.testObjectTemporary || context.testObjectSnapshot)
       && context.testObjectInitialValue;
     let data = inline
       ? {factors: [context.testObjectInitialValue], families: []}

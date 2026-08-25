@@ -17,7 +17,8 @@
     if (mode === "create" || mode === "edit") {
       return FTFactorEditor.render(context, data, targetRef, mode, options);
     }
-    let factor = context.testObjectTemporary && context.testObjectInitialValue
+    let factor = (context.testObjectTemporary || context.testObjectSnapshot)
+      && context.testObjectInitialValue
       ? context.testObjectInitialValue
       : data.factors.find(item => (
         item.factor_ref === targetRef || item.factor_alias === targetRef

@@ -415,12 +415,16 @@
     const temporary = Boolean(value?.temporary
       || value?.source_kind === "transient"
       || value?.source_origin === "test_inline");
+    const snapshot = action.kind === "factor"
+      && value?.schema_version === 2
+      && String(value?.ref || "") === String(target.ref);
     void FTTestObjectEditorOverlay.open(context, {
       kind: action.kind,
       mode: action.mode || "view",
       ref: target.ref,
       initialValue: value,
       temporary,
+      snapshot,
       testState: state,
     }).catch(error => {
       context.showNotice?.(error.message || context.t("详情读取失败"), true);
