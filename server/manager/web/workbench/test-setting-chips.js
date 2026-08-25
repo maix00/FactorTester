@@ -171,9 +171,9 @@
     const object = value && typeof value === "object" ? value : null;
     const ref = object
       ? object[action.ref_key || "ref"]
-        || object.factor_ref || object.group_ref || object.product_group_ref
+        || object.ref || object.group_ref || object.product_group_ref
         || object.product_group_template_id || object.product_path_selection_id
-        || object.id || object.alias || object.factor_alias || object.name
+        || object.id || object.alias || object.name
       : value;
     if (!hasValue(ref)) return null;
     return {

@@ -7,13 +7,12 @@
   function factorRef(value) {
     if (typeof value === "string") return value.trim();
     if (!value || typeof value !== "object") return "";
-    return String(value.factor_ref || value.target_ref || "").trim();
+    return String(value.ref || "").trim();
   }
 
   function factorLabel(value) {
     if (typeof value === "string") return value.trim();
-    return String(value?.factor_alias || value?.alias || value?.name
-      || factorRef(value)).trim();
+    return String(value?.alias || factorRef(value)).trim();
   }
 
   function normalize(value) {

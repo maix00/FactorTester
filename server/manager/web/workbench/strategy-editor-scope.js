@@ -112,13 +112,12 @@
 
   function factorID(value) {
     if (typeof value === "string") return value;
-    return value?.factor_ref || value?.target_ref || value?.factor_alias
-      || value?.alias || value?.id || "";
+    return value?.ref || "";
   }
 
   function factorLabel(value) {
     if (typeof value === "string") return value;
-    return value?.factor_alias || value?.alias || value?.name || factorID(value);
+    return value?.alias || factorID(value);
   }
 
   function groupID(value) {

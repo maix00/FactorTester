@@ -172,7 +172,7 @@
   }
 
   function factorIdentity(value) {
-    return String(value?.factor_ref || value?.target_ref || "");
+    return String(value?.ref || "");
   }
 
   function productIdentity(value) {

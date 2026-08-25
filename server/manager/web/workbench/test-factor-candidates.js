@@ -68,7 +68,7 @@
         : "选择一个因子候选作为本次回测因子"),
       items: rows.map(factor => ({
         value: FTTestFactorSelection.factorID(factor),
-        label: factor.factor_alias || factor.alias || factor.factor_ref,
+        label: factor.alias,
         description: sourceDescription(context, state, factor),
         factor,
       })).filter(item => item.value),
@@ -164,7 +164,7 @@
     rows.forEach(factor => {
       const item = document.createElement("li");
       const label = document.createElement("strong");
-      label.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
+      label.textContent = factor.alias;
       const description = document.createElement("small");
       description.textContent = sourceDescription(context, state, factor);
       item.append(label, description);

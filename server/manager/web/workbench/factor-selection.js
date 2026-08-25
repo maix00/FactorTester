@@ -5,13 +5,11 @@
   }
 
   function factorID(value) {
-    return value?.ref || value?.factor_ref || value?.target_ref || value?.alias || value?.factor_alias
-      || value?.id || value?.name || "";
+    return value?.ref || "";
   }
 
   function factorAlias(value) {
-    return value?.alias || value?.factor_alias || value?.name || value?.ref
-      || value?.factor_ref || "";
+    return value?.alias || "";
   }
 
   function addCandidate(state, value, options = {}) {

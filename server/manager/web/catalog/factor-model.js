@@ -74,7 +74,9 @@
   }
 
   function familyName(value) {
-    return value.factor_family_name
+    return value?.schema_version === 2
+      ? String(value?.identity?.family_alias || "")
+      : value.factor_family_name
       || value.factor_family_alias
       || value.family
       || value.chinese_name
@@ -127,7 +129,9 @@
   }
 
   function owner(value) {
-    return value.owner_alias || value.owner_username || value.profile_id || "";
+    return value?.schema_version === 2
+      ? String(value.owner_ref || "")
+      : value.owner_alias || value.owner_username || value.profile_id || "";
   }
 
   function mergeFactorSets(serverItems, localItems) {

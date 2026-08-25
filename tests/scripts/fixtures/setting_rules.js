@@ -111,7 +111,7 @@ rules.patchValues(manifest, values, {fee_custom_product_fields: [{product: "SI.G
 assert.deepEqual(values.custom_product_fields, [{product: "SI.GFE"}]);
 
 const roles = window.FTTestFactorRoles;
-assert.deepEqual(roles.normalize({ranking: {factor_ref: "factor:roc"}, screen: "factor:sgccs"}), {
+assert.deepEqual(roles.normalize({ranking: {ref: "factor:roc"}, screen: "factor:sgccs"}), {
   ranking: "factor:roc", screen: "factor:sgccs",
 });
 assert.deepEqual(roles.visibleRoles({serialization: {

@@ -14,10 +14,10 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
 
 const state = {
   settingsMountedTabs: ["factor", "product_path_selection"],
-  factors: [{factor_ref: "visible-factor", factor_alias: "Visible"}],
+  factors: [{ref: "visible-factor", alias: "Visible"}],
   groups: [{group_ref: "visible-group", title_zh: "Visible group"}],
   values: {
-    factor_candidates: [{factor_ref: "outer-factor", factor_alias: "Outer"}],
+    factor_candidates: [{ref: "outer-factor", alias: "Outer"}],
     factor: "outer-factor",
     product_path_candidates: [{group_ref: "outer-group", title_zh: "Outer group"}],
     product_path_selection: "outer-group",
@@ -108,7 +108,7 @@ if (process.argv[3]) {
   state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 }
 
-assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].factor_ref, "outer-factor");
+assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].ref, "outer-factor");
 assert.equal(window.FTStrategyEditorScope.scope(state, "product_path_selection").items[0].group_ref, "outer-group");
 assert.deepEqual(window.FTStrategyEditorScope.validate(state), []);
 const innerCandidates = window.FTStrategyEditorScope.scopedField(
@@ -184,7 +184,7 @@ assert.equal(window.FTStrategyEditorScope.validate(state).length, 1);
 state.values.product_path_candidates = [];
 assert.equal(window.FTStrategyEditorScope.validate(state).length, 2);
 state.settingsMountedTabs = [];
-assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].factor_ref, "visible-factor");
+assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].ref, "visible-factor");
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").required, false);
 assert.deepEqual(
   window.FTStrategyEditorScope.innerTabs(state, ["cost", "time"])
