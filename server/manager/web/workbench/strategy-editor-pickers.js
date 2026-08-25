@@ -39,12 +39,12 @@
 
   function factorAlias(value) {
     if (typeof value === "string") return value;
-    return value?.factor_alias || value?.alias || value?.name || "";
+    return value?.alias || "";
   }
 
   function factorRef(value) {
     if (typeof value === "string") return value;
-    return value?.factor_ref || value?.target_ref || "";
+    return value?.ref || "";
   }
 
   function productGroupID(value) {

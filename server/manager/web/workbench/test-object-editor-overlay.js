@@ -165,7 +165,7 @@
             if (frame.kind === "factor_set" && isFactorPath(path)) {
               const targetRef = factorRefFromPath(path);
               if (targetRef) {
-                openFactor({target_ref: targetRef, label: targetRef});
+                openFactor({ref: targetRef, alias: targetRef});
                 return;
               }
             }
@@ -194,7 +194,7 @@
     };
 
     const openFactor = item => {
-      const targetRef = String(item?.target_ref || item?.factor_ref || "").trim();
+      const targetRef = String(item?.ref || "").trim();
       if (!targetRef) return;
       const initialValue = factorInitialValue(item, targetRef);
       frames.push({
@@ -233,13 +233,13 @@
     ].some(key => item[key] !== undefined && item[key] !== null);
     if (!hasSource) return null;
     const identity = frozen
-      ? window.FTFactorModel?.frozenFactorIdentity?.({...item, factor_ref: targetRef})
+      ? window.FTFactorModel?.frozenFactorIdentity?.(item)
       : null;
     return {
       ...item,
-      factor_ref: item.factor_ref || targetRef,
+      ref: targetRef,
       ...(identity ? {
-        factor_alias: item.factor_alias || identity.alias,
+        alias: identity.alias,
         factor_family_alias: item.factor_family_alias || identity.family,
         factor_owner_ref: item.factor_owner_ref || identity.ownerRef,
         factor_params: item.factor_params || identity.params,

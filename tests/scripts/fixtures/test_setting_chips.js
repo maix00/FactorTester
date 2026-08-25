@@ -191,7 +191,7 @@ const overlayRow = FTTestSettingChips.render({
   mountedTabs: ["factor", "product_path_selection"],
   sources: {
     factorAlias: ["ROC 1m"],
-    factor: [{factor_ref: "factor:roc-1m", factor_alias: "ROC 1m"}],
+    factor: [{ref: "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", alias: "ROC 1m"}],
     product_path_selection: [{label: "日盘"}],
     product_group: [{group_ref: "group:day", name: "日盘"}],
   },
@@ -204,7 +204,10 @@ const factorOverlayChip = overlayRow.children
     && item.children[0]?.textContent === "因子");
 assert.equal(factorOverlayChip.tagName, "button");
 factorOverlayChip.listeners.click();
-assert.equal(openedOverlay.detailOverlay.target.ref, "factor:roc-1m");
+assert.equal(
+  openedOverlay.detailOverlay.target.ref,
+  "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+);
 assert.equal(openedOverlay.detailOverlay.kind, "factor");
 const productGroupOverlayChip = overlayRow.children
   .flatMap(group => group.children)

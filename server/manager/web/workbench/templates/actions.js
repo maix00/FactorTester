@@ -45,7 +45,7 @@
       await FTTestLazyCode.loadGroup("workbench-factors");
       await FTTestLazyCode.loadGroup("workbench-products");
       if (!state.workspace) {
-        state.factorRef = template.payload?.shared?.factors?.[0]?.factor_ref || state.factorRef;
+        state.factorRef = template.payload?.shared?.factors?.[0]?.ref || state.factorRef;
         await FTTestConfiguration.ensureWorkspace(context, state);
       }
       const value = await context.api(

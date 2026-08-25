@@ -112,7 +112,7 @@ const state = {
   analysis: {configuration_groups: [group]},
   selectedICConfigurationGroupIDs: [],
   values: {factor_candidates: []},
-  savedFactors: [{factor_ref: factorRef, factor_alias: "ROC 1m"}],
+  savedFactors: [{ref: factorRef, alias: "ROC 1m"}],
   groups: [{
     group_ref: "product-group:day", title_zh: "product-group:day",
     _savedPlaceholder: true,

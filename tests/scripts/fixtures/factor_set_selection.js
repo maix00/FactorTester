@@ -73,14 +73,12 @@ const state = {
 
 (async () => {
   const context = {t: value => value};
-  const values = await window.FTTestFactorSets.descriptors(context, state, [{
-    factor_alias: "Momentum|N:20d",
-  }]);
+  const values = await window.FTTestFactorSets.descriptors(context, state, [member]);
   assert.deepEqual(values, [global.descriptor]);
   assert.equal(state.transientFactorSources.length, 0);
   await assert.rejects(
     window.FTTestFactorSets.descriptors(
-      context, state, [{factor_alias: "Other|N:20d"}],
+      context, state, [{...member, ref: `factor:v2:${"D".repeat(43)}`, alias: "Other|N:20d"}],
     ),
     /成员与当前运行因子不一致/,
   );
