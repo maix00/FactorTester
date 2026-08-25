@@ -19,16 +19,13 @@ from tools.cli.release.profile_factor_set_queries import (
     resolve_factor_set_members,
     resolve_factor_set_run_input,
 )
-from tools.cli.release.research_reporting.references.factor_set_git import (
+from tools.cli.release.research_reporting.references.factor_set_workspace import (
     create_factor_set_manifest,
-    factor_set_manifest_path,
     freeze_factor_set_reference,
     read_factor_set_manifest,
     validate_factor_set_reference,
 )
-from tools.cli.release.research_reporting.references.factor_git import (
-    validate_frozen_factor_identities,
-)
+from tools.factors.formula_identity import require_frozen_factor
 
 
 def register_factor_set_commands(group: click.Group) -> None:
@@ -37,7 +34,7 @@ def register_factor_set_commands(group: click.Group) -> None:
 
 @click.group("factor-set")
 def factor_set() -> None:
-    """Create and freeze named sets of committed factor expressions."""
+    """Create and synchronize named sets of frozen factors."""
 
 
 @factor_set.command("create")
@@ -45,13 +42,13 @@ def factor_set() -> None:
 @click.option("--set-id", required=True)
 @click.option("--title-zh", required=True)
 @click.option("--description-zh", default="")
-@click.option("--member-ref", multiple=True)
+@click.option("--member-record", multiple=True)
 @click.option(
-    "--member-ref-file",
+    "--member-record-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--replace", is_flag=True)
-@click.option("--expected-member-hash", default="")
+@click.option("--expected-member-fingerprint", default="")
 @click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -63,51 +60,40 @@ def create_factor_set(
     set_id: str,
     title_zh: str,
     description_zh: str,
-    member_ref: tuple[str, ...],
-    member_ref_file: Path | None,
+    member_record: tuple[str, ...],
+    member_record_file: Path | None,
     replace: bool,
-    expected_member_hash: str,
+    expected_member_fingerprint: str,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
-    """Write a factor-set manifest; commit it before creating a reference."""
+    """Write a formula-addressed factor-set manifest."""
     root = load_profile_root(release_profile)
-    repository, roots = _factor_context(root, profile_id)
-    members = _member_refs(member_ref, member_ref_file)
-    for target_ref in members:
-        if not target_ref.startswith("factor:v1:"):
-            raise ValueError(
-                "factor-set members must be frozen concrete factor:v1 references"
-            )
-    validate_frozen_factor_identities(target_refs=members, roots=roots)
+    repository, _roots = _factor_context(root, profile_id)
+    members = _member_records(member_record, member_record_file)
     value = create_factor_set_manifest(
         repository=repository,
         scope=f"profile-{profile_id}",
         set_id=set_id,
         title_zh=title_zh,
         description_zh=description_zh,
-        member_refs=members,
+        members=members,
         replace=replace,
-        expected_member_hash=expected_member_hash,
+        expected_member_fingerprint=expected_member_fingerprint,
     )
-    value["next_actions"] = _commit_actions(
-        repository=repository,
-        profile_id=profile_id,
-        set_id=set_id,
-        manifest_path=str(value["manifest_path"]),
-    )
+    value["next_actions"] = _sync_actions(profile_id=profile_id, set_id=set_id)
     _echo(_compact_manifest_result(value), as_json)
 
 
 @factor_set.command("update")
 @click.argument("profile_id")
 @click.option("--set-id", required=True)
-@click.option("--expected-member-hash", required=True)
+@click.option("--expected-member-fingerprint", required=True)
 @click.option("--title-zh", required=True)
 @click.option("--description-zh", default="")
-@click.option("--member-ref", multiple=True)
+@click.option("--member-record", multiple=True)
 @click.option(
-    "--member-ref-file",
+    "--member-record-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
@@ -119,38 +105,29 @@ def create_factor_set(
 def update_factor_set(
     profile_id: str,
     set_id: str,
-    expected_member_hash: str,
+    expected_member_fingerprint: str,
     title_zh: str,
     description_zh: str,
-    member_ref: tuple[str, ...],
-    member_ref_file: Path | None,
+    member_record: tuple[str, ...],
+    member_record_file: Path | None,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
     """Replace a manifest only when its current member hash still matches."""
     root = load_profile_root(release_profile)
-    repository, roots = _factor_context(root, profile_id)
-    members = _member_refs(member_ref, member_ref_file)
-    for target_ref in members:
-        if not target_ref.startswith("factor:v1:"):
-            raise ValueError(
-                "factor-set members must be frozen concrete factor:v1 references"
-            )
-    validate_frozen_factor_identities(target_refs=members, roots=roots)
+    repository, _roots = _factor_context(root, profile_id)
+    members = _member_records(member_record, member_record_file)
     value = create_factor_set_manifest(
         repository=repository,
         scope=f"profile-{profile_id}",
         set_id=set_id,
         title_zh=title_zh,
         description_zh=description_zh,
-        member_refs=members,
+        members=members,
         replace=True,
-        expected_member_hash=expected_member_hash,
+        expected_member_fingerprint=expected_member_fingerprint,
     )
-    value["next_actions"] = _commit_actions(
-        repository=repository, profile_id=profile_id, set_id=set_id,
-        manifest_path=str(value["manifest_path"]),
-    )
+    value["next_actions"] = _sync_actions(profile_id=profile_id, set_id=set_id)
     _echo(_compact_manifest_result(value), as_json)
 
 
@@ -169,7 +146,7 @@ def list_factor_sets(
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
-    """List working manifests and their exact committed target when available."""
+    """List workspace manifests and their formula-addressed identities."""
     root = load_profile_root(release_profile)
     profile = LocalProfileStore(root).load(profile_id)
     _echo(list_profile_factor_sets(profile=profile, query=query), as_json)
@@ -261,18 +238,12 @@ def diff_factor_sets(
 ) -> None:
     """Compare two immutable versions of one factor-set."""
     root = load_profile_root(release_profile)
-    profile_id = _profile_id_from_target(from_target_ref)
-    if _profile_id_from_target(to_target_ref) != profile_id:
-        raise ValueError("factor-set diff requires the same Profile scope")
-    _repository, roots = _factor_context(root, profile_id)
-    before = validate_factor_set_reference(
-        kind="factor", target_ref=from_target_ref, roots=roots,
-    )
-    after = validate_factor_set_reference(
-        kind="factor", target_ref=to_target_ref, roots=roots,
-    )
-    if before["set_ref"] != after["set_ref"]:
-        raise ValueError("factor-set diff requires the same stable set_ref")
+    _before_profile, before = _resolve_target(root, from_target_ref)
+    _after_profile, after = _resolve_target(root, to_target_ref)
+    if (before["owner_ref"], before["set_id"]) != (
+        after["owner_ref"], after["set_id"],
+    ):
+        raise ValueError("factor-set diff requires the same owner and set id")
     before_members = set(before["member_refs"])
     after_members = set(after["member_refs"])
     changes = [
@@ -284,7 +255,7 @@ def diff_factor_sets(
     ]
     page = changes[offset:offset + limit]
     _echo({
-        "set_ref": before["set_ref"],
+        "set_ref": before["target_ref"],
         "from_target_ref": from_target_ref,
         "to_target_ref": to_target_ref,
         "change_count": len(changes),
@@ -300,7 +271,6 @@ def diff_factor_sets(
 @factor_set.command("reference")
 @click.argument("profile_id")
 @click.option("--set-id", required=True)
-@click.option("--revision", default="HEAD", show_default=True)
 @click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -310,11 +280,10 @@ def diff_factor_sets(
 def reference_factor_set(
     profile_id: str,
     set_id: str,
-    revision: str,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
-    """Return one exact, committed factor-set target_ref."""
+    """Return one exact formula-addressed factor-set target_ref."""
     root = load_profile_root(release_profile)
     repository, roots = _factor_context(root, profile_id)
     value = freeze_factor_set_reference(
@@ -322,7 +291,6 @@ def reference_factor_set(
         scope=f"profile-{profile_id}",
         set_id=set_id,
         roots=roots,
-        revision=revision,
     )
     value["next_actions"] = [{
         "action": "search_evidence",
@@ -340,7 +308,6 @@ def reference_factor_set(
 @factor_set.command("sync")
 @click.argument("profile_id")
 @click.option("--set-id", required=True)
-@click.option("--revision", default="HEAD", show_default=True)
 @click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -350,7 +317,6 @@ def reference_factor_set(
 def sync_factor_set(
     profile_id: str,
     set_id: str,
-    revision: str,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
@@ -362,7 +328,6 @@ def sync_factor_set(
         scope=f"profile-{profile_id}",
         set_id=set_id,
         roots=roots,
-        revision=revision,
     )
     value = client_from_config().register_factor_set({
         "target_ref": frozen["target_ref"],
@@ -410,9 +375,8 @@ def factor_set_members(
     as_json: bool,
 ) -> None:
     """Resolve one frozen factor-set manifest into a bounded member page."""
-    profile_id = _profile_id_from_target(target_ref)
     root = load_profile_root(release_profile)
-    profile = LocalProfileStore(root).load(profile_id)
+    profile, _value = _resolve_target(root, target_ref)
     _echo(resolve_factor_set_members(
         profile=profile,
         target_ref=target_ref,
@@ -435,9 +399,8 @@ def factor_set_descriptor(
     as_json: bool,
 ) -> None:
     """Return the exact immutable descriptor required by Run submission."""
-    profile_id = _profile_id_from_target(target_ref)
     root = load_profile_root(release_profile)
-    profile = LocalProfileStore(root).load(profile_id)
+    profile, _value = _resolve_target(root, target_ref)
     _echo(resolve_factor_set_descriptor(
         profile=profile, target_ref=target_ref,
     ), as_json)
@@ -457,9 +420,8 @@ def factor_set_run_input(
     as_json: bool,
 ) -> None:
     """Return exact local sources and descriptor for a single Run."""
-    profile_id = _profile_id_from_target(target_ref)
     root = load_profile_root(release_profile)
-    profile = LocalProfileStore(root).load(profile_id)
+    profile, _value = _resolve_target(root, target_ref)
     _echo(resolve_factor_set_run_input(
         profile=profile, target_ref=target_ref,
     ), as_json)
@@ -486,53 +448,64 @@ def _echo(value: dict, as_json: bool) -> None:
         click.echo(str(value.get("target_ref") or value.get("set_ref") or ""))
 
 
-def _member_refs(
+def _member_records(
     direct: tuple[str, ...], source_file: Path | None,
-) -> list[str]:
-    values = list(direct)
+) -> list[dict]:
+    values: list[object] = []
+    for item in direct:
+        try:
+            values.append(json.loads(item))
+        except json.JSONDecodeError as error:
+            raise ValueError("member-record must contain valid JSON") from error
     if source_file is not None:
         try:
             loaded = json.loads(source_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            raise ValueError("member-ref-file must contain valid JSON") from error
-        if not isinstance(loaded, list) or not all(
-            isinstance(item, str) for item in loaded
-        ):
-            raise ValueError("member-ref-file must contain a JSON string array")
+            raise ValueError("member-record-file must contain valid JSON") from error
+        if not isinstance(loaded, list):
+            raise ValueError("member-record-file must contain a JSON object array")
         values.extend(loaded)
     if not values:
-        raise ValueError("at least one --member-ref or --member-ref-file is required")
-    return values
+        raise ValueError(
+            "at least one --member-record or --member-record-file is required"
+        )
+    return [require_frozen_factor(value) for value in values]
 
 
-def _profile_id_from_target(target_ref: str) -> str:
-    parts = target_ref.split(":")
-    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
-        raise ValueError("factor-set target_ref format is invalid")
-    if not parts[2].startswith("profile-"):
-        raise ValueError("factor-set target_ref must use a Profile scope")
-    return parts[2].removeprefix("profile-")
+def _resolve_target(root: Path, target_ref: str) -> tuple[dict, dict]:
+    matches: list[tuple[dict, dict]] = []
+    for profile in LocalProfileStore(root).list():
+        try:
+            _repository, roots = profile_factor_context(profile)
+            value = validate_factor_set_reference(
+                kind="factor", target_ref=target_ref, roots=roots,
+            )
+        except (OSError, ValueError):
+            continue
+        matches.append((profile, value))
+    if len(matches) != 1:
+        raise ValueError("factor-set ref is unavailable or ambiguous")
+    return matches[0]
 
 
 def _summary(value: dict, *, target_ref: str | None, status: str) -> dict:
     return {
-        "set_id": value["set_id"],
-        "set_ref": value["set_ref"],
+        "set_id": value["identity"]["set_id"],
+        "set_ref": value["ref"],
         "target_ref": target_ref,
-        "title_zh": value["title_zh"],
-        "description_zh": str(value.get("description_zh") or ""),
-        "member_count": value["member_count"],
-        "member_hash": value["member_hash"],
+        "title_zh": value["alias"],
+        "description_zh": str(value.get("description") or ""),
+        "member_count": len(value["identity"]["members"]),
+        "member_fingerprint": value["identity"]["member_fingerprint"],
         "status": status,
     }
 
 
 def _compact_manifest_result(value: dict) -> dict:
-    result = {
-        key: item for key, item in value.items()
-        if key not in {"member_refs"}
-    }
-    result["member_count"] = len(value.get("member_refs") or [])
+    result = _summary(value, target_ref=value["ref"], status="frozen")
+    result["manifest_path"] = value.get("manifest_path")
+    if value.get("next_actions"):
+        result["next_actions"] = value["next_actions"]
     result["member_resolution"] = {
         "command": "members",
         "available_after_freeze": True,
@@ -553,26 +526,13 @@ def _compact_frozen(value: dict) -> dict:
     return result
 
 
-def _commit_actions(
-    *, repository: Path, profile_id: str, set_id: str, manifest_path: str,
-) -> list[dict]:
+def _sync_actions(*, profile_id: str, set_id: str) -> list[dict]:
     return [{
-        "action": "stage_manifest",
-        "description_zh": "暂存因子集合清单",
-        "argv": ["git", "-C", str(repository), "add", "--", manifest_path],
-    }, {
-        "action": "commit_manifest",
-        "description_zh": "提交因子集合清单",
-        "argv": [
-            "git", "-C", str(repository), "commit", "-m",
-            f"research: freeze factor set {set_id}", "--", manifest_path,
-        ],
-    }, {
-        "action": "freeze_reference",
-        "description_zh": "冻结已提交的因子集合版本",
+        "action": "sync_factor_set",
+        "description_zh": "将冻结因子集合登记到当前服务器",
         "argv": [
             "factortester", "client", "profile", "factor-worktree",
-            "factor-set", "reference", profile_id,
+            "factor-set", "sync", profile_id,
             "--set-id", set_id, "--json",
         ],
     }]

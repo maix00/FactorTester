@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import re
 import sqlite3
 import tempfile
 import time
@@ -37,28 +36,6 @@ def _load_public_factors() -> list[dict[str, Any]]:
 
 def _load_custom_factors(username: str) -> list[dict[str, Any]]:
     return _custom_factor_dicts(username)
-
-
-def _strip_factor_meta(source_code: str) -> str:
-    lines = []
-    in_multiline_desc = False
-    for line in source_code.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("# -*- coding:") or stripped.startswith("# Custom Factor:"):
-            continue
-        if re.match(r"^\s*description\s*=\s*(\"\"\"|''')", line):
-            in_multiline_desc = True
-            if line.count('"""') + line.count("'''") >= 2:
-                in_multiline_desc = False
-            continue
-        if in_multiline_desc:
-            if '"""' in line or "'''" in line:
-                in_multiline_desc = False
-            continue
-        if re.match(r"^\s*(desc|description|category)\s*=", line):
-            continue
-        lines.append(line)
-    return "\n".join(lines).strip("\n")
 
 
 def _load_factor_family_from_source(source_code: str, module_name: str) -> tuple[type | None, object | None]:
@@ -218,12 +195,12 @@ def _public_factor_dicts() -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_id,
-                    "category": "",
+                    "category": row.get("category") or "",
                     "factor_family": "FactorFamily",
-                    "chinese_name": "",
-                    "description": "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "params": [],
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "is_public": True,
                     "updated_at": updated_at,
                     "load_error": True,
@@ -236,12 +213,12 @@ def _public_factor_dicts() -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_id,
-                    "category": getattr(ff, "category", "") or _factor_family_name(factor_cls),
+                    "category": row.get("category") or _factor_family_name(factor_cls),
                     "factor_family": _factor_family_name(factor_cls),
-                    "chinese_name": getattr(ff, "desc", "") or getattr(ff, "chinese_name", "") or "",
-                    "description": getattr(ff, "description", "") or "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "math_expr": getattr(ff, "math_expr", "") or "",
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "params": [
                         {
                             "alias": getattr(param, "alias", ""),
@@ -260,12 +237,12 @@ def _public_factor_dicts() -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_id,
-                    "category": "",
+                    "category": row.get("category") or "",
                     "factor_family": "FactorFamily",
-                    "chinese_name": "",
-                    "description": "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "params": [],
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "is_public": True,
                     "updated_at": updated_at,
                     "load_error": True,
@@ -287,12 +264,12 @@ def _custom_factor_dicts(owner_username: str) -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_id,
-                    "category": "自编",
+                    "category": row.get("category") or "自编",
                     "factor_family": "FactorFamily",
-                    "chinese_name": "",
-                    "description": "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "params": [],
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "is_public": False,
                     "updated_at": updated_at,
                     "load_error": True,
@@ -305,12 +282,12 @@ def _custom_factor_dicts(owner_username: str) -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_cls.__name__,
-                    "category": getattr(ff, "category", "") or "自编",
+                    "category": row.get("category") or "自编",
                     "factor_family": _factor_family_name(factor_cls),
-                    "chinese_name": getattr(ff, "desc", "") or "",
-                    "description": getattr(ff, "description", "") or "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "math_expr": getattr(ff, "math_expr", "") or "",
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "params": [
                         {
                             "alias": getattr(param, "alias", ""),
@@ -329,12 +306,12 @@ def _custom_factor_dicts(owner_username: str) -> list[dict[str, Any]]:
                 {
                     "id": factor_id,
                     "name": factor_id,
-                    "category": "自编",
+                    "category": row.get("category") or "自编",
                     "factor_family": "FactorFamily",
-                    "chinese_name": "",
-                    "description": "",
+                    "chinese_name": row.get("chinese_name") or "",
+                    "description": row.get("description") or "",
                     "params": [],
-                    "source_code": _strip_factor_meta(source_code),
+                    "source_code": source_code,
                     "is_public": False,
                     "updated_at": updated_at,
                     "load_error": True,

@@ -5,16 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tools.cli.release.research_reporting.references.factor_set_git import (
+from tools.cli.release.research_reporting.references.factor_set_workspace import (
     factor_set_manifest_path,
     freeze_factor_set_reference,
     read_factor_set_manifest,
     validate_factor_set_reference,
 )
-from tools.cli.release.research_reporting.references.factor_git import (
-    read_frozen_factor_source,
-)
-
 
 MAX_LOCAL_FACTOR_SET_PROFILES = 512
 MAX_LOCAL_FACTOR_SET_ITEMS = 10_000
@@ -48,7 +44,7 @@ def list_profile_factor_sets(
     query: str = "",
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """List manifests and their immutable reference when committed."""
+    """List formula-addressed manifests; Git state is optional provenance."""
     profile_id = str(profile.get("profile_id") or "").strip()
     repository, roots = profile_factor_context(profile)
     scope = f"profile-{profile_id}"
@@ -62,8 +58,8 @@ def list_profile_factor_sets(
             repository=repository, scope=scope, set_id=path.stem,
         )
         haystack = " ".join([
-            value["set_id"], value["title_zh"],
-            str(value.get("description_zh") or ""),
+            value["identity"]["set_id"], value["alias"],
+            str(value.get("description") or ""),
         ]).casefold()
         if needle and needle not in haystack:
             continue
@@ -74,11 +70,11 @@ def list_profile_factor_sets(
             frozen = freeze_factor_set_reference(
                 repository=repository,
                 scope=scope,
-                set_id=value["set_id"],
+                set_id=value["identity"]["set_id"],
                 roots=roots,
             )
             target_ref = frozen["target_ref"]
-            status = "committed"
+            status = "frozen"
             validation_error = None
         except ValueError as error:
             target_ref = None
@@ -137,7 +133,7 @@ def list_local_factor_sets(
             items_truncated = True
             break
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "local",
         "profiles_scanned": profiles_scanned,
         "profiles_total": len(profiles),
@@ -157,13 +153,6 @@ def resolve_factor_set_members(
     limit: int,
 ) -> dict[str, Any]:
     """Resolve a bounded page from one immutable factor-set reference."""
-    profile_id = str(profile.get("profile_id") or "").strip()
-    parts = target_ref.split(":")
-    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
-        raise ValueError("factor-set target_ref format is invalid")
-    expected_scope = f"profile-{profile_id}"
-    if parts[2] != expected_scope:
-        raise ValueError("factor-set does not belong to this Profile")
     _repository, roots = profile_factor_context(profile)
     value = validate_factor_set_reference(
         kind="factor", target_ref=target_ref, roots=roots,
@@ -172,9 +161,8 @@ def resolve_factor_set_members(
     page = related[offset:offset + limit]
     return {
         "target_ref": target_ref,
-        "set_ref": value["set_ref"],
-        "title_zh": value["title_zh"],
-        "member_hash": value["member_hash"],
+        "alias": value["alias"],
+        "member_fingerprint": value["member_fingerprint"],
         "member_count": len(related),
         "offset": offset,
         "limit": limit,
@@ -187,13 +175,7 @@ def resolve_factor_set_members(
 def resolve_factor_set_descriptor(
     *, profile: dict[str, Any], target_ref: str,
 ) -> dict[str, Any]:
-    """Return the exact Git-backed descriptor used by Run submission."""
-    profile_id = str(profile.get("profile_id") or "").strip()
-    parts = target_ref.split(":")
-    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
-        raise ValueError("factor-set target_ref format is invalid")
-    if parts[2] != f"profile-{profile_id}":
-        raise ValueError("factor-set does not belong to this Profile")
+    """Return the exact formula-addressed descriptor used by Run submission."""
     _repository, roots = profile_factor_context(profile)
     value = validate_factor_set_reference(
         kind="factor", target_ref=target_ref, roots=roots,
@@ -207,34 +189,17 @@ def resolve_factor_set_descriptor(
 def resolve_factor_set_run_input(
     *, profile: dict[str, Any], target_ref: str,
 ) -> dict[str, Any]:
-    """Return the immutable descriptor and exact local sources for one Run."""
-    profile_id = str(profile.get("profile_id") or "").strip()
-    parts = target_ref.split(":")
-    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
-        raise ValueError("factor-set target_ref format is invalid")
-    if parts[2] != f"profile-{profile_id}":
-        raise ValueError("factor-set does not belong to this Profile")
+    """Return one immutable descriptor; sources resolve by frozen factor ref."""
     _repository, roots = profile_factor_context(profile)
     value = validate_factor_set_reference(
         kind="factor", target_ref=target_ref, roots=roots,
     )
-    sources: dict[str, dict[str, str]] = {}
-    for member_ref in value["member_refs"]:
-        source = read_frozen_factor_source(
-            target_ref=member_ref, roots=roots,
-        )
-        existing = sources.get(source["factor_id"])
-        if existing and existing["source_blob"] != source["source_blob"]:
-            raise ValueError(
-                "factor-set cannot execute two source revisions of the same factor family"
-            )
-        sources[source["factor_id"]] = source
     return {
         "descriptor": {
             "target_ref": value["target_ref"],
             "manifest": value["descriptor"],
         },
-        "transient_factor_sources": [sources[key] for key in sorted(sources)],
+        "transient_factor_sources": [],
     }
 
 
@@ -242,12 +207,12 @@ def factor_set_summary(
     value: dict[str, Any], *, target_ref: str | None, status: str,
 ) -> dict[str, Any]:
     return {
-        "set_id": value["set_id"],
-        "set_ref": value["set_ref"],
+        "set_id": value["identity"]["set_id"],
+        "set_ref": target_ref,
         "target_ref": target_ref,
-        "title_zh": value["title_zh"],
-        "description_zh": str(value.get("description_zh") or ""),
-        "member_count": value["member_count"],
-        "member_hash": value["member_hash"],
+        "title_zh": value["alias"],
+        "description_zh": str(value.get("description") or ""),
+        "member_count": len(value["identity"]["members"]),
+        "member_fingerprint": value["identity"]["member_fingerprint"],
         "status": status,
     }

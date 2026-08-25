@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import sqlite3
 import time
 import uuid
+from copy import deepcopy
 from typing import Any
 
 import orjson
 
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
+from tools.data.types.object_identity import unique_frozen_identities
 
-
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ROLES = {"workspace", "template"}
 
 
@@ -64,15 +64,11 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     # retires the old duplicate projection on its next save.
     shared.pop("factor_families", None)
     payload = {**payload, "shared": shared}
-    factors = shared.get("factors")
-    if not isinstance(factors, list) or not all(isinstance(item, dict) for item in factors):
-        raise ValueError("shared.factors must be an array of objects")
+    factors = unique_frozen_identities(shared.get("factors"))
+    shared["factors"] = factors
     factor_aliases: set[str] = set()
     for factor in factors:
-        alias = str(factor.get("alias") or "").strip()
-        family_alias = str(factor.get("factor_family_alias") or "").strip()
-        if not alias or not family_alias:
-            raise ValueError("each factor requires alias and factor_family_alias")
+        alias = factor["alias"]
         if alias in factor_aliases:
             raise ValueError(f"factor alias must be unique: {alias}")
         factor_aliases.add(alias)
@@ -171,6 +167,14 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     payload = _loads(row["payload_json"]) or {}
+    if (
+        int(row["schema_version"] or 0) != SCHEMA_VERSION
+        or int(payload.get("schema_version") or 0) != SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "editable configuration requires the explicit factor formula "
+            "identity migration"
+        )
     raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     return {
         "configuration_id": str(row["configuration_id"]),
@@ -382,7 +386,9 @@ def delete_template(*, configuration_id: str, owner: str) -> bool:
         return cursor.rowcount == 1
 
 
-def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> dict[str, Any]:
+def legacy_snapshot_to_payload(
+    snapshot: dict, *, factor_family_alias: str, owner: str,
+) -> dict[str, Any]:
     """One-time migration adapter. Runtime APIs never call this function."""
     source = deepcopy(snapshot)
     backtest = deepcopy(source)
@@ -447,9 +453,36 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
         alias = str(source.get(key) or "").strip()
         if alias:
             factor_aliases.add(alias)
+    from server.services.factor_revisions import _load_revision_definition
+    from tools.factors.formula_identity import freeze_factor_identity
+
+    frozen_by_alias: dict[str, dict[str, Any]] = {}
+    aliases_by_family: dict[str, list[str]] = {}
+    for alias in sorted(factor_aliases):
+        family = alias.split("|", 1)[0] or factor_family_alias
+        aliases_by_family.setdefault(family, []).append(alias)
+    for family, aliases in aliases_by_family.items():
+        definition = _load_revision_definition(
+            family_ref=family,
+            factor_aliases=aliases,
+            owner=owner,
+        )
+        for resolved in definition["resolved_factors"]:
+            alias = str(resolved["factor_alias"])
+            frozen_by_alias[alias] = freeze_factor_identity(
+                owner_ref=str(definition["factor_owner_ref"]),
+                family_alias=str(definition["factor_family_alias"]),
+                factor_alias=alias,
+                family_formula_fingerprint=str(
+                    definition["family_formula_fingerprint"]
+                ),
+                self_formula_fingerprint=str(
+                    resolved["self_formula_fingerprint"]
+                ),
+                params=resolved["params"],
+            )
     refs_by_alias = {
-        alias: "factor:legacy:" + hashlib.sha256(alias.encode()).hexdigest()
-        for alias in factor_aliases
+        alias: record["ref"] for alias, record in frozen_by_alias.items()
     }
     for group in backtest.get("groups") or []:
         if not isinstance(group, dict):
@@ -472,14 +505,7 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
     return {
         "schema_version": SCHEMA_VERSION,
         "shared": {
-            "factors": [
-                {
-                    "factor_ref": refs_by_alias[alias],
-                    "alias": alias,
-                    "factor_family_alias": factor_family_alias,
-                }
-                for alias in sorted(factor_aliases)
-            ],
+            "factors": [frozen_by_alias[alias] for alias in sorted(frozen_by_alias)],
         },
         "analyses": {"backtest": backtest},
         "ui": source,
@@ -595,9 +621,15 @@ def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
         for row in (item for item in rows if item["kind"] == "global"):
             try:
                 legacy = json.loads(row["payload_json"])
-                from server.modules.products.product_group_store import load_product_groups
-                from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
-                from server.modules.templates.snapshot_product_groups import refresh_template_product_group_paths
+                from server.modules.products.product_group_store import (
+                    load_product_groups,
+                )
+                from server.modules.templates.backend_settings_migration import (
+                    migrate_snapshot_backend_settings,
+                )
+                from server.modules.templates.snapshot_product_groups import (
+                    refresh_template_product_group_paths,
+                )
 
                 snapshot = deepcopy(legacy.get("snapshot") or {})
                 snapshot, _ = migrate_snapshot_backend_settings(
@@ -619,6 +651,7 @@ def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
                 payload = legacy_snapshot_to_payload(
                     wrapped.get("snapshot") or {},
                     factor_family_alias=str(row["scope_key"] or legacy.get("ff_alias") or ""),
+                    owner=str(row["username"]),
                 )
                 validate_payload(payload)
                 if apply:
@@ -712,7 +745,11 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
                             payload = validate_payload(draft)
                         except ValueError:
                             family = str(row["factor_family_alias"] or "") if "factor_family_alias" in columns else ""
-                            payload = legacy_snapshot_to_payload(draft, factor_family_alias=family)
+                            payload = legacy_snapshot_to_payload(
+                                draft,
+                                factor_family_alias=family,
+                                owner=str(row["owner"]),
+                            )
                         if apply:
                             now = time.time()
                             conn.execute(

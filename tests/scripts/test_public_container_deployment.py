@@ -426,6 +426,33 @@ def test_public_restore_check_uses_pre_migration_table_count() -> None:
     assert 'restore-check \"$postgres_table_count_before\"' in activate
 
 
+def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+    activate = (
+        ROOT / "scripts" / "server" / "activate_public_revision.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "migrate-factor-identities" in script
+    assert "migrate_factor_source_metadata" in script
+    assert "migrate_factor_formula_identity --apply --discard-incompatible" in script
+    assert "PRAGMA integrity_check" in script
+    assert "schema_version=1" in script
+    release_sequence = """bash "$public_script" stop-app
+app_stopped=1
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \\
+  bash "$public_script" migrate-factor-identities
+
+sudo mv "$next_env" "$production_env"
+switched=1
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
+  bash "$public_script" restart-app"""
+    assert release_sequence in activate
+    assert "restore-factor-identities" in activate
+    assert "finalize-factor-identities" in activate
+
+
 def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
     publish_path = ROOT / "scripts" / "server" / "publish_public_main.sh"
     publish = publish_path.read_text(encoding="utf-8")

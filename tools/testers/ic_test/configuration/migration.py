@@ -139,12 +139,18 @@ def _factor_subjects(
         members = unique_texts(set_members.get(target_ref, ()))
         if not members:
             raise ValueError(f"factor-set descriptor is missing: {target_ref}")
-        if any(not ref.startswith("factor:v1:") for ref in members):
-            raise ValueError("factor-set members must be frozen factor_ref values")
+        if any(not _is_v2_factor_ref(ref) for ref in members):
+            raise ValueError("factor-set members must be factor:v2 values")
         if set(members) - factor_set:
             raise ValueError("factor-set members are missing from factor_selections")
         covered.update(members)
     return tuple(sorted((*selected_sets, *(factor_set - covered))))
+
+
+def _is_v2_factor_ref(value: str) -> bool:
+    from tools.factors.formula_identity import is_factor_reference
+
+    return is_factor_reference(value)
 
 
 __all__ = ["migrate_flat_ic_settings"]

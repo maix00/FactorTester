@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 from typing import Any
 
 import settings as Settings
@@ -26,6 +25,11 @@ from server.services.research_evidence_catalog import (
 from server.services.research_evidence_catalog.validation import digest
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
+from tools.factors.formula_identity import (
+    is_factor_reference,
+    require_frozen_factor,
+)
+from tools.factors.factor_set_identity import is_factor_set_reference
 
 
 SERVER_ACTION = "bind_job_attempt"
@@ -159,72 +163,25 @@ def _job_factor_refs(spec: dict[str, Any]) -> list[str]:
     for value in _walk_objects(spec):
         raw = value.get("factor_refs")
         if isinstance(raw, dict):
-            explicit_refs.update(
-                str(target_ref).strip()
-                for target_ref in raw.values()
-                if str(target_ref or "").strip().startswith("factor:v1:")
-            )
+            explicit_refs.update(_v2_factor_refs(raw.values()))
         factors = value.get("factors")
         if isinstance(factors, list):
-            explicit_refs.update(
-                str(item.get("factor_ref") or "").strip()
-                for item in factors
-                if isinstance(item, dict)
-                and str(item.get("factor_ref") or "").strip().startswith(
-                    "factor:v1:"
-                )
-            )
-    # A submitted exact member identity is authoritative.  Do not add a
-    # second, synthetic factor-expr identity for the same factor just because
-    # an older revision manifest is also present in the RunSpec.
-    if explicit_refs:
-        return sorted(explicit_refs | _job_factor_set_refs(spec))
-    aliases: set[str] = set()
-    for value in _walk_objects(spec):
-        for key in ("alias", "factorAlias", "factor"):
-            alias = str(value.get(key) or "").strip()
-            if alias and ("|" in alias or key != "alias"):
-                aliases.add(alias)
-    manifests = spec.get("factor_revision_manifests")
-    if not isinstance(manifests, list):
-        manifests = (
-            (spec.get("run_spec") or {})
-            .get("configuration", {})
-            .get("shared", {})
-            .get("factor_revision_manifests", [])
-            if isinstance(spec.get("run_spec"), dict) else []
-        )
-    aliases_by_hash = {
-        hashlib.sha256(alias.encode()).hexdigest(): alias
-        for alias in aliases
-    }
+            for item in factors:
+                try:
+                    explicit_refs.add(require_frozen_factor(item)["ref"])
+                except (TypeError, ValueError):
+                    continue
+    return sorted(explicit_refs | _job_factor_set_refs(spec))
+
+
+def _v2_factor_refs(values: Any) -> set[str]:
     refs: set[str] = set()
-    unresolved: list[str] = []
-    for item in manifests:
-        if not isinstance(item, dict):
+    for value in values:
+        text = str(value or "").strip()
+        if not is_factor_reference(text):
             continue
-        alias = aliases_by_hash.get(str(item.get("factor_alias_hash") or ""))
-        revision = str(
-            item.get("resolved_factor_expr_hash")
-            or item.get("manifest_hash") or ""
-        ).strip().removeprefix("sha256:")
-        if alias and len(revision) == 64 and all(
-            char in "0123456789abcdef" for char in revision
-        ):
-            refs.add(f"factor-expr:{alias}@sha256:{revision}")
-        elif len(revision) == 64 and all(
-            char in "0123456789abcdef" for char in revision
-        ):
-            unresolved.append(revision)
-    if not refs and len(aliases) == 1 and len(unresolved) == 1:
-        # Historical single-factor JobSpecs predate factor_alias_hash.  A
-        # one-to-one binding is still unambiguous; multi-factor specs fail
-        # closed instead of inventing an alias x revision Cartesian product.
-        refs.add(
-            f"factor-expr:{next(iter(aliases))}@sha256:{unresolved[0]}"
-        )
-    refs.update(_job_factor_set_refs(spec))
-    return sorted(refs)
+        refs.add(text)
+    return refs
 
 
 def _job_factor_set_refs(spec: dict[str, Any]) -> set[str]:
@@ -244,16 +201,9 @@ def _job_factor_set_refs(spec: dict[str, Any]) -> set[str]:
             )
         for candidate in candidates:
             text = str(candidate or "").strip()
-            parts = text.split(":")
-            if (
-                len(parts) == 7
-                and parts[:2] == ["factor-set", "v1"]
-                and len(parts[-2]) in {40, 64}
-                and len(parts[-1]) in {40, 64}
-                and all(char in "0123456789abcdef" for char in parts[-2])
-                and all(char in "0123456789abcdef" for char in parts[-1])
-            ):
-                refs.add(text)
+            if not is_factor_set_reference(text):
+                continue
+            refs.add(text)
     return refs
 
 
@@ -441,7 +391,6 @@ def _validate_binding(
     checkpoint: dict[str, Any],
     expected: dict[str, Any],
 ) -> None:
-    job = detail["job"]
     binding = detail["trial_binding"]
     graph_binding = detail["graph_binding"]
     identity = detail["identity_refs"]

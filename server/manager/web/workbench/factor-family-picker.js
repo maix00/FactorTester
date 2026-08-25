@@ -2,11 +2,9 @@
   function entries(options = {}) {
     const publicItems = (options.publicFamilies || []).map(item => normalize(
       item, "public", item.owner_ref || item.owner_alias || "",
-      item.git_commit || "",
     ));
     const localItems = (options.localFamilies || []).map(item => normalize(
       item, "local", options.ownerRef || item.owner_ref || "",
-      options.gitCommit || item.git_commit || "",
     ));
     const transientItems = (options.transientFamilies || []).map(item => ({
       ...item,
@@ -20,11 +18,13 @@
       .filter(item => item.family);
   }
 
-  function normalize(value, sourceKind, ownerRef, gitCommit) {
+  function normalize(value, sourceKind, ownerRef) {
     const family = value.factor_family_alias || value.family_alias
       || value.family || value.name || "";
     const familyRef = value.family_ref || value.factor_family_ref || "";
-    const sourceIdentity = familyRef || [ownerRef, gitCommit, family].join(":");
+    const formulaFingerprint = String(value.family_formula_fingerprint || "");
+    const sourceIdentity = familyRef
+      || [ownerRef, family, formulaFingerprint].join(":");
     return {
       ...value,
       key: `${sourceKind}:${sourceIdentity}`,
@@ -32,7 +32,7 @@
       family,
       familyRef,
       ownerRef,
-      gitCommit,
+      familyFormulaFingerprint: formulaFingerprint,
       title: family,
       description: value.chinese_name || value.title_zh || value.desc
         || value.description || "",
@@ -54,7 +54,6 @@
   }
 
   // The workbench uses FTMultiSelectFilter for rendering.  Keep this module
-  // as a data-only catalog seam so factor source normalization is shared by
-  // the picker and the embedded client's local Git bridge.
+  // as a data-only catalog seam so formula identity normalization is shared.
   window.FTFactorFamilyPicker = Object.freeze({entries, familyFactors, filter});
 })();

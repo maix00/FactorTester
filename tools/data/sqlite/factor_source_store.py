@@ -13,6 +13,11 @@ import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
 SOURCE_TABLE = "factor_family_sources"
+METADATA_TABLE = "factor_family_source_metadata"
+
+
+class FactorSourceMetadataUnavailable(RuntimeError):
+    """The source row predates the explicit metadata schema migration."""
 
 _IMPORT_MODULE_BY_SYMBOL: dict[str, str] = {
     "DataColumn": "tools.data.types",
@@ -97,6 +102,16 @@ def normalize_factor_source_code(source_code: str) -> str:
     return normalized
 
 
+def canonical_factor_source_code(source_code: str) -> str:
+    """Normalize executable source without interpreting legacy metadata.
+
+    Display metadata is migrated explicitly into SQLite.  Runtime reads and
+    writes never parse or rewrite it, so legacy rows cannot be silently
+    accepted under the new storage contract.
+    """
+    return normalize_factor_source_code(source_code or "")
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         f"""
@@ -106,6 +121,20 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             factor_id TEXT NOT NULL,
             factor_name TEXT NOT NULL DEFAULT '',
             source_code TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (source_kind, owner_username, factor_id)
+        )
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {METADATA_TABLE} (
+            source_kind TEXT NOT NULL,
+            owner_username TEXT NOT NULL DEFAULT '',
+            factor_id TEXT NOT NULL,
+            chinese_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
             updated_at REAL NOT NULL,
             PRIMARY KEY (source_kind, owner_username, factor_id)
         )
@@ -125,17 +154,27 @@ def _load_source(source_kind: str, owner_username: str, factor_id: str) -> str |
             _ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT source_code
-                FROM factor_family_sources
-                WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+                SELECT s.source_code, m.factor_id AS metadata_factor_id
+                FROM factor_family_sources AS s
+                LEFT JOIN factor_family_source_metadata AS m
+                  ON m.source_kind = s.source_kind
+                 AND m.owner_username = s.owner_username
+                 AND m.factor_id = s.factor_id
+                WHERE s.source_kind = ? AND s.owner_username = ? AND s.factor_id = ?
                 """,
                 (source_kind, owner_username or "", factor_id),
             ).fetchone()
             if row is None:
                 return None
+            if row["metadata_factor_id"] is None:
+                raise FactorSourceMetadataUnavailable(
+                    f"factor source metadata migration required: {source_kind}/{owner_username}/{factor_id}"
+                )
             source_code = str(row["source_code"] or "")
-            normalized = normalize_factor_source_code(source_code)
+            normalized = canonical_factor_source_code(source_code)
             return normalized or None
+    except FactorSourceMetadataUnavailable:
+        raise
     except Exception:
         return None
 
@@ -146,22 +185,41 @@ def get_factor_source_record(source_kind: str, owner_username: str, factor_id: s
             _ensure_schema(conn)
             row = conn.execute(
                 """
-                SELECT source_kind, owner_username, factor_id, factor_name, source_code, updated_at
+                SELECT s.source_kind, s.owner_username, s.factor_id, s.factor_name,
+                       s.source_code, s.updated_at,
+                       m.chinese_name, m.description, m.category
                 FROM factor_family_sources
-                WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+                AS s
+                LEFT JOIN factor_family_source_metadata AS m
+                  ON m.source_kind = s.source_kind
+                 AND m.owner_username = s.owner_username
+                 AND m.factor_id = s.factor_id
+                WHERE s.source_kind = ? AND s.owner_username = ? AND s.factor_id = ?
                 """,
                 (source_kind, owner_username or "", factor_id),
             ).fetchone()
             if row is None:
                 return None
+            metadata = {
+                "chinese_name": str(row["chinese_name"] or ""),
+                "description": str(row["description"] or ""),
+                "category": str(row["category"] or ""),
+            }
+            if row["chinese_name"] is None:
+                raise FactorSourceMetadataUnavailable(
+                    f"factor source metadata migration required: {source_kind}/{owner_username}/{factor_id}"
+                )
             return {
                 "source_kind": row["source_kind"],
                 "owner_username": row["owner_username"],
                 "factor_id": row["factor_id"],
                 "factor_name": row["factor_name"],
-                "source_code": normalize_factor_source_code(str(row["source_code"] or "")),
+                "source_code": canonical_factor_source_code(str(row["source_code"] or "")),
                 "updated_at": float(row["updated_at"] or 0.0),
+                **metadata,
             }
+    except FactorSourceMetadataUnavailable:
+        raise
     except Exception:
         return None
 
@@ -176,8 +234,17 @@ def upsert_factor_source(
     factor_id: str,
     factor_name: str,
     source_code: str,
+    *,
+    chinese_name: str | None = None,
+    description: str | None = None,
+    category: str | None = None,
 ) -> str:
-    normalized_source_code = normalize_factor_source_code(source_code or "")
+    normalized_source_code = canonical_factor_source_code(source_code or "")
+    metadata = {
+        "chinese_name": str(chinese_name or ""),
+        "description": str(description or ""),
+        "category": str(category or ""),
+    }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
@@ -199,9 +266,13 @@ def upsert_factor_source(
                 time.time(),
             ),
         )
+        _upsert_metadata(
+            conn, source_kind, owner_username, factor_id, metadata,
+        )
     _enqueue_source_metadata(
         source_kind, owner_username, factor_id, factor_name,
         normalized_source_code,
+        metadata=metadata,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -212,6 +283,13 @@ def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) 
         conn.execute(
             """
             DELETE FROM factor_family_sources
+            WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+            """,
+            (source_kind, owner_username or "", factor_id),
+        )
+        conn.execute(
+            f"""
+            DELETE FROM {METADATA_TABLE}
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
             (source_kind, owner_username or "", factor_id),
@@ -241,6 +319,14 @@ def rename_factor_source(
         ).fetchone()
         if row is None:
             return str(Settings.CACHE_DB_PATH)
+        metadata_row = conn.execute(
+            f"""
+            SELECT chinese_name, description, category
+            FROM {METADATA_TABLE}
+            WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+            """,
+            (source_kind, owner_username or "", old_factor_id),
+        ).fetchone()
         conn.execute(
             """
             DELETE FROM factor_family_sources
@@ -263,11 +349,29 @@ def rename_factor_source(
                 owner_username or "",
                 new_factor_id,
                 new_factor_name or new_factor_id,
-                normalize_factor_source_code(str(row["source_code"] or "")),
+                canonical_factor_source_code(str(row["source_code"] or "")),
                 time.time(),
             ),
         )
-        source_code = normalize_factor_source_code(str(row["source_code"] or ""))
+        metadata: dict[str, str] = {}
+        if metadata_row is not None:
+            metadata = {
+                "chinese_name": str(metadata_row["chinese_name"] or ""),
+                "description": str(metadata_row["description"] or ""),
+                "category": str(metadata_row["category"] or ""),
+            }
+            _upsert_metadata(
+                conn,
+                source_kind,
+                owner_username,
+                new_factor_id,
+                metadata,
+            )
+        conn.execute(
+            f"DELETE FROM {METADATA_TABLE} WHERE source_kind = ? AND owner_username = ? AND factor_id = ?",
+            (source_kind, owner_username or "", old_factor_id),
+        )
+        source_code = canonical_factor_source_code(str(row["source_code"] or ""))
     # The outbox uses a second connection to the same SQLite database.  It
     # must run after this write transaction is closed; otherwise SQLite keeps
     # the rename transaction open and the nested outbox write raises
@@ -277,7 +381,7 @@ def rename_factor_source(
     )
     _enqueue_source_metadata(
         source_kind, owner_username, new_factor_id, new_factor_name,
-        source_code,
+        source_code, metadata=metadata,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -289,6 +393,7 @@ def _enqueue_source_metadata(
     factor_name: str,
     source_code: str,
     *,
+    metadata: dict[str, str] | None = None,
     deleted: bool = False,
 ) -> None:
     """Sync a source manifest, never the source code itself."""
@@ -312,6 +417,9 @@ def _enqueue_source_metadata(
                     os.environ.get("FACTORTESTER_SERVER_ID") or ""
                 ).strip(),
                 "visibility": "public" if source_kind == "public" else "private",
+                "chinese_name": str((metadata or {}).get("chinese_name") or ""),
+                "description": str((metadata or {}).get("description") or ""),
+                "category": str((metadata or {}).get("category") or ""),
             },
             deleted=deleted,
         )
@@ -324,21 +432,112 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
         _ensure_schema(conn)
         rows = conn.execute(
             """
-            SELECT source_kind, owner_username, factor_id, factor_name, source_code, updated_at
-            FROM factor_family_sources
-            WHERE source_kind = ?
-            ORDER BY owner_username, factor_id
+            SELECT s.source_kind, s.owner_username, s.factor_id, s.factor_name,
+                   s.source_code, s.updated_at,
+                   m.chinese_name, m.description, m.category
+            FROM factor_family_sources AS s
+            LEFT JOIN factor_family_source_metadata AS m
+              ON m.source_kind = s.source_kind
+             AND m.owner_username = s.owner_username
+             AND m.factor_id = s.factor_id
+            WHERE s.source_kind = ?
+            ORDER BY s.owner_username, s.factor_id
             """,
             (source_kind,),
         ).fetchall()
-    return [
-        {
+    result = []
+    for row in rows:
+        metadata = {
+            "chinese_name": str(row["chinese_name"] or ""),
+            "description": str(row["description"] or ""),
+            "category": str(row["category"] or ""),
+        }
+        if row["chinese_name"] is None:
+            raise FactorSourceMetadataUnavailable(
+                f"factor source metadata migration required: {source_kind}/{row['owner_username']}/{row['factor_id']}"
+            )
+        result.append({
             "source_kind": row["source_kind"],
             "owner_username": row["owner_username"],
             "factor_id": row["factor_id"],
             "factor_name": row["factor_name"],
-            "source_code": normalize_factor_source_code(str(row["source_code"] or "")),
+            "source_code": canonical_factor_source_code(str(row["source_code"] or "")),
             "updated_at": row["updated_at"],
-        }
-        for row in rows
-    ]
+            **metadata,
+        })
+    return result
+
+
+def _upsert_metadata(
+    conn: sqlite3.Connection,
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+    metadata: dict[str, str],
+) -> None:
+    conn.execute(
+        f"""
+        INSERT INTO {METADATA_TABLE} (
+            source_kind, owner_username, factor_id,
+            chinese_name, description, category, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source_kind, owner_username, factor_id) DO UPDATE SET
+            chinese_name = excluded.chinese_name,
+            description = excluded.description,
+            category = excluded.category,
+            updated_at = excluded.updated_at
+        """,
+        (
+            source_kind,
+            owner_username or "",
+            factor_id,
+            str(metadata.get("chinese_name") or ""),
+            str(metadata.get("description") or ""),
+            str(metadata.get("category") or ""),
+            time.time(),
+        ),
+    )
+
+
+def get_factor_source_metadata(
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+) -> dict[str, str]:
+    """Return explicitly migrated display metadata."""
+    record = get_factor_source_record(source_kind, owner_username, factor_id)
+    if record is None:
+        raise FactorSourceMetadataUnavailable(
+            f"factor source metadata unavailable: {source_kind}/{owner_username}/{factor_id}"
+        )
+    return {
+        "chinese_name": str(record.get("chinese_name") or ""),
+        "description": str(record.get("description") or ""),
+        "category": str(record.get("category") or ""),
+    }
+
+
+def upsert_factor_source_metadata(
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+    *,
+    chinese_name: str = "",
+    description: str = "",
+    category: str = "",
+) -> str:
+    """Update display metadata without changing the source revision."""
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        _upsert_metadata(
+            conn,
+            source_kind,
+            owner_username,
+            factor_id,
+            {
+                "chinese_name": chinese_name,
+                "description": description,
+                "category": category,
+            },
+        )
+    return str(Settings.CACHE_DB_PATH)

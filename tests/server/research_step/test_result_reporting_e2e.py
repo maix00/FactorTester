@@ -32,7 +32,7 @@ from tests.server.test_current_report_checkpoint import _seed
 from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import research_result_report as result_commands
-from tools.cli.http import HttpSession
+from tools.cli.http import ClientConfig, HttpSession, save_config
 from tools.cli.release.research_reporting.audit_objects import (
     stage_run_spec_preview,
 )
@@ -40,6 +40,7 @@ from tools.cli.release.research_reporting.authoring.tree_model import load_snaps
 from tools.cli.release.research_reporting.authoring.tree_render import (
     render_tree_markdown,
 )
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 @contextmanager
@@ -65,14 +66,20 @@ def test_result_route_cli_local_publish_and_server_append(
             "SET current_node='trial_execution'"
         )
 
+    factor = freeze_factor_identity(
+        owner_ref="alice",
+        family_alias="SgCPS",
+        factor_alias="SgCPS|N:20d",
+        family_formula_fingerprint="c" * 64,
+        self_formula_fingerprint="d" * 64,
+        params={"N": "20d"},
+    )
     run_spec = {
         "run_spec_version": 3,
         "configuration_revision": 7,
         "analyses": ["ic"],
         "configuration": {
-            "shared": {"factor_revision_manifests": [{
-                "factor_family_ref": "alice:SgCPS",
-            }]},
+            "shared": {"factors": [factor]},
             "analyses": {"ic": {
                 "product_path_selection": {"label": "日盘", "paths": []},
                 "local_settings": {"factor": "SgCPS|20"},
@@ -189,7 +196,8 @@ def test_result_route_cli_local_publish_and_server_append(
     }), encoding="utf-8")
 
     with _server(app) as base_url:
-        store.set_server_url("maxa", base_url)
+        cli_config = tmp_path / "client-connection.json"
+        save_config(ClientConfig(base_url), path=cli_config)
         result = CliRunner().invoke(cli, [
             "research-graph",
             "result-report",
@@ -205,7 +213,10 @@ def test_result_route_cli_local_publish_and_server_append(
             "research-maxa",
             "--release-profile",
             str(release_profile),
-        ], env={"FACTORTESTER_HOME": str(tmp_path / "cli-home")})
+        ], env={
+            "FACTORTESTER_HOME": str(tmp_path / "cli-home"),
+            "FACTORTESTER_CONFIG": str(cli_config),
+        })
         frozen = FactorTesterClient(
             HttpSession(base_url, cookies=tmp_path / "cookies.lwp"),
         ).get_research_cycle_object(

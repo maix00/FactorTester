@@ -12,18 +12,14 @@
       : data.factors.find(item => (
         item.factor_ref === targetRef || item.factor_alias === targetRef
       ));
-    const frozen = factor ? null : model().decodeFrozenFactorRef(targetRef);
-    if (!factor && !frozen) {
+    if (!factor) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
     }
-    if (!factor) factor = projectedFactor(data.factors, frozen);
-    if (factor && frozen) factor = frozenProjection(factor, frozen);
-    if (!factor) factor = await localFactor(frozen, nativeRequest);
     factor = await withSource(context, factor);
     factor = model().withSourceMetadata(factor);
-    factor.factor_source_version = factor.factor_git_commit
-      ? `历史源码版本 · ${factor.factor_git_commit}`
-      : "当前因子家族最新源码";
+    factor.factor_source_version = factor.family_formula_fingerprint
+      ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
+      : "未固定公式版本";
     context.setHeading(factor.factor_alias || context.t("因子详情"), model().familyName(factor));
     const factorRef = factor.factor_ref || targetRef;
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
@@ -50,64 +46,6 @@
     const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
     if (parameters) root.append(parameters);
     context.content.replaceChildren(root);
-  }
-
-  function projectedFactor(factors, frozen) {
-    const candidates = (Array.isArray(factors) ? factors : []).filter(item => (
-      item.factor_alias === frozen.alias
-      && model().familyName(item) === frozen.family
-    ));
-    if (candidates.length <= 1) return candidates[0] || null;
-    const ownerID = String(frozen.ownerRef || "").split(":").at(-1);
-    return candidates.find(item => [
-      item.owner_username, item.profile_id, item.owner_ref,
-    ].some(value => value === ownerID || value === frozen.ownerRef)) || null;
-  }
-
-  function frozenProjection(factor, frozen) {
-    return {
-      ...factor,
-      factor_ref: frozen.factorRef,
-      factor_owner_ref: frozen.ownerRef,
-      factor_family_alias: frozen.family,
-      factor_family_name: frozen.family,
-      factor_family_ref: frozen.family,
-      factor_git_commit: frozen.gitCommit,
-      factor_params: frozen.params,
-      git_commit: frozen.gitCommit,
-      git_blob: frozen.gitBlob,
-      relative_path: frozen.relativePath,
-      params: frozen.params,
-    };
-  }
-
-  async function localFactor(frozen, nativeRequest) {
-    let family = {};
-    try {
-      family = await nativeRequest("family", {
-        owner_ref: frozen.ownerRef,
-        git_commit: frozen.gitCommit,
-        family: frozen.family,
-      });
-    } catch (_) {}
-    return {
-      ...family,
-      factor_ref: frozen.factorRef,
-      factor_alias: frozen.alias,
-      factor_family_alias: frozen.family,
-      factor_family_name: frozen.family,
-      factor_owner_ref: frozen.ownerRef,
-      factor_family_ref: frozen.family,
-      factor_git_commit: frozen.gitCommit,
-      factor_params: frozen.params,
-      owner_alias: frozen.ownerRef,
-      owner_ref: frozen.ownerRef,
-      git_commit: frozen.gitCommit,
-      git_blob: frozen.gitBlob,
-      relative_path: frozen.relativePath,
-      params: frozen.params,
-      factor_kind: "local",
-    };
   }
 
   async function familyDetail(
@@ -175,8 +113,7 @@
         }
       }, context.t("删除此因子家族")));
     }
-    let selectedVersion = baseFamily.factor_git_commit
-      || baseFamily.git_commit || "";
+    let selectedVersion = "";
     let sourceVersions = null;
     let renderSequence = 0;
 
@@ -221,10 +158,10 @@
     };
 
     const selectVersion = async selected => {
-      const commit = selected === "__current__" ? "" : String(selected || "");
-      selectedVersion = commit;
+      const fingerprint = selected === "__current__" ? "" : String(selected || "");
+      selectedVersion = fingerprint;
       const sequence = ++renderSequence;
-      if (!commit) {
+      if (!fingerprint) {
         renderFamily(baseFamily);
         return;
       }
@@ -233,22 +170,21 @@
       ));
       try {
         const payload = await window.FTFactorDetailShared.loadSourceVersion(
-          context, baseFamily, commit,
+          context, baseFamily, fingerprint,
         );
         if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
         renderFamily({
           ...baseFamily,
           ...payload,
-          factor_git_commit: payload.commit || commit,
-          git_commit: payload.commit || commit,
+          family_formula_fingerprint:
+            payload.family_formula_fingerprint || fingerprint,
           source_unavailable_reason: "",
         });
       } catch (_) {
         if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
         renderFamily({
           ...baseFamily,
-          factor_git_commit: commit,
-          git_commit: commit,
+          family_formula_fingerprint: fingerprint,
           source_code: "",
           source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
             context,
@@ -261,16 +197,16 @@
   }
 
   async function withSource(context, value) {
-    const commit = String(value?.factor_git_commit || value?.git_commit || "").trim();
+    const fingerprint = String(value?.family_formula_fingerprint || "").trim();
     const options = window.FTFactorDetailShared.sourceOptions(value);
     // A frozen source carried by a local/temporary object is authoritative. A
     // catalog projection without source must instead resolve the exact server
     // snapshot; it must never silently fall back to today's family source.
-    if (commit && value?.source_code) return value;
-    if (commit && ["custom", "public"].includes(options.sourceKind)) {
+    if (fingerprint && value?.source_code) return value;
+    if (fingerprint && ["custom", "public"].includes(options.sourceKind)) {
       try {
         const payload = await window.FTFactorDetailShared.loadSourceVersion(
-          context, value, commit,
+          context, value, fingerprint,
         );
         const valueParams = window.FTFactorDetailShared.parameterRows(value);
         const sourceParams = window.FTFactorDetailShared.parameterRows(payload);
@@ -278,8 +214,8 @@
         return {
           ...value,
           ...payload,
-          factor_git_commit: payload.commit || commit,
-          git_commit: payload.commit || commit,
+          family_formula_fingerprint:
+            payload.family_formula_fingerprint || fingerprint,
           source_unavailable_reason: "",
           ...(params.length ? {params, factor_params: params} : {}),
         };
@@ -331,7 +267,7 @@
     const selected = data.sets.find(item =>
       item.target_ref === targetRef || item.set_ref === targetRef
     );
-    const frozenRef = targetRef.startsWith("factor-set:v1:")
+    const frozenRef = targetRef.startsWith("factor-set:v2:")
       ? targetRef
       : selected?.target_ref;
     if (!frozenRef) {

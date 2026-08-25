@@ -45,11 +45,19 @@ const manifest = {
     split_count: {scope_policy: "group_only", serialization: {}},
   },
 };
-const factor = {
-  factor_ref: "factor:v1:profile-maxa:path:alias:commit:blob",
-  factor_alias: "ROC|N:20d|$F:1d",
-  factor_family_alias: "ROC",
-};
+function frozenFactor(digest, alias, family) {
+  return {
+    schema_version: 2, ref: `factor:v2:${digest.repeat(43)}`, alias,
+    owner_ref: "profile:maxa",
+    identity: {
+      family_ref: `factor-family:v2:${digest.toUpperCase().repeat(43)}`,
+      family_alias: family,
+      family_formula_fingerprint: digest.repeat(64),
+      self_formula_fingerprint: digest.repeat(64), params: {},
+    },
+  };
+}
+const factor = frozenFactor("a", "ROC|N:20d|$F:1d", "ROC");
 const product = {product_path_selection_id: "day", selected_paths: ["CNFutures/day"]};
 const values = {
   factor_owner_ref: "profile:maxa",
@@ -132,7 +140,7 @@ if (configurationSource) {
     analysis: {
       ...values,
       groups: [{
-        id: "group-1", factor_candidate_refs: [factor.factor_ref],
+        id: "group-1", factor_candidate_refs: [factor.ref],
         split_count: 5,
         product_path_selection_id: "day",
         product_path_selection: {
@@ -229,32 +237,35 @@ assert.equal(sanitized.groups[0].locked_execution, "automatic");
 
 const subjects = FTTestConfigurationCompiler.factorSubjects([factor]);
 assert.deepEqual(subjects, [{
-  alias: factor.factor_alias,
-  factor_ref: factor.factor_ref,
+  ...factor,
 }]);
+assert.deepEqual(
+  FTTestConfigurationCompiler.factorSubjects([factor, structuredClone(factor)]),
+  [factor],
+);
 assert.throws(
-  () => FTTestConfigurationCompiler.factorSubjects([{factor_alias: "unfrozen"}]),
+  () => FTTestConfigurationCompiler.factorSubjects([
+    factor, {...factor, alias: "conflicting"},
+  ]),
+  /不同的冻结对象/,
+);
+assert.throws(
+  () => FTTestConfigurationCompiler.factorSubjects([{alias: "unfrozen"}]),
   /缺少稳定引用/,
 );
-assert.deepEqual(
-  FTTestConfigurationCompiler.factorSubjects([{
-    factor_alias: "UploadedMomentum|N:5d",
-    source_kind: "transient",
-    transient_factor_id: "UploadedMomentum",
+assert.throws(
+  () => FTTestConfigurationCompiler.factorSubjects([{
+    alias: "UploadedMomentum|N:5d", source_kind: "transient",
   }]),
-  [{alias: "UploadedMomentum|N:5d"}],
+  /缺少稳定引用/,
 );
 
-const another = {
-  factor_ref: "factor:v1:profile-maxa:path:other:commit:blob",
-  factor_alias: "SgCCS|N:20d|$F:1m",
-  factor_family_alias: "SgCCS",
-};
+const another = frozenFactor("b", "SgCCS|N:20d|$F:1m", "SgCCS");
 const configurationGroup = {
   config_group_id: "icg-day-roc",
   batch_id: "icb-day-roc",
   name: "日盘 ROC",
-  factor_ref: factor.factor_ref,
+  factor_ref: factor.ref,
   product_scope_ref: "product-group:day",
   entry_delay_bars: 1,
   horizon: {sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5]},

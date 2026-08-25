@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-from base64 import urlsafe_b64encode
-import hashlib
 import json
+import hashlib
 
-from flask import Flask
 import pytest
+from flask import Flask
 
-import settings as Settings
-from server.modules.single_factor_test import sft_bp
 import server.modules.shared.submission_helpers  # noqa: F401 - injects product resolver
-from server.modules.single_factor_test import research_jobs
+import settings as Settings
 from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
-from server.services import factor_registry
+from server.modules.single_factor_test import research_jobs, sft_bp
 from server.services import (
+    factor_registry,
     research_configuration_snapshots,
     research_configurations,
     research_runs,
     research_workspaces,
 )
-from tools.data.sqlite.db import connect_sqlite
+from server.services.factor_revisions import _load_revision_definition
 from tests.server.trial_plan_fixtures import trial_plan
+from tools.data.sqlite.db import connect_sqlite
+from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.alias_validator import factor_formula_identity
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
@@ -31,11 +33,8 @@ def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
     workspace = _create_workspace(client)
     payload = _payload(workspace)
     shared = payload["shared"]
-    shared["factors"] = [{
-        "factor_ref": "factor:v1:profile:p:factor:commit:blob",
-        "alias": "MmRet|P:CA|N:10d|$F:5m",
-        "factor_family_alias": "MmRet",
-    }]
+    factor = _frozen_factor("MmRet|$F:5m")
+    shared["factors"] = [factor]
     shared["temporary_objects"] = {
         "product_selections": [{
             "id": "product-scope:core8", "selected_paths": ["/canonical/products/core8"],
@@ -47,7 +46,7 @@ def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
         "configuration_groups": [{
             "config_group_id": "cg-alpha",
             "product_scope_ref": "product-scope:core8",
-            "factor_ref": "factor:v1:profile:p:factor:commit:blob",
+            "factor_ref": factor["ref"],
             "horizon": {"sampling": "scale_aware"},
             "entry_delay_bars": 1,
             "methods": ["rank"],
@@ -144,13 +143,13 @@ class {family}(FactorFamily):
 
 
 def _create_workspace(client):
+    aliases = [
+        "MmRet|$F:1d",
+        "MmMADevRat|$F:1d|$Rev",
+    ]
     response = client.post("/api/workspaces", json={
         "title": "multi factor research",
-        "factor_families": [{"alias": "MmRet"}, {"alias": "MmMADevRat"}],
-        "factors": [
-            {"factor_family_alias": "MmRet", "alias": "MmRet|P:CA|N:10d|$F:1d"},
-            {"factor_family_alias": "MmMADevRat", "alias": "MmMADevRat|P:CA|N:10d|$F:1d|$Rev"},
-        ],
+        "factors": [_frozen_factor(alias) for alias in aliases],
     })
     assert response.status_code == 201
     return response.get_json()["workspace"]
@@ -160,7 +159,7 @@ def _payload(workspace, *, n: str = "10d"):
     shared = dict(workspace["configuration"]["payload"]["shared"])
     shared["user_defined_shared_setting"] = {"enabled": True, "threshold": 1.25}
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "shared": shared,
         "analyses": {
             "ic": {"factor_configs": [{"N": n}], "product_paths": ["core8_path"]},
@@ -168,7 +167,7 @@ def _payload(workspace, *, n: str = "10d"):
                 "local_settings": {"user_defined_local_setting": "kept"},
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
-                    "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+                    "factorAlias": "MmRet|$F:1d",
                     "product_path_selection_id": "core8",
                     "user_defined_group_setting": {"mode": "custom"},
                 }],
@@ -178,8 +177,8 @@ def _payload(workspace, *, n: str = "10d"):
                 }],
                 "product_selections": {"core8": {"id": "core8", "selected_paths": ["core8_path"]}},
             },
-            "factor_evaluation": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
-            "factor_type_analysis": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
+            "factor_evaluation": {"factor_alias": "MmRet|$F:1d"},
+            "factor_type_analysis": {"factor_alias": "MmRet|$F:1d"},
         },
         "ui": {"selected_tab": "ic"},
     }
@@ -198,38 +197,54 @@ def _update(client, workspace, payload):
     return workspace
 
 
-def _factor_set_descriptor(*aliases: str) -> dict:
-    encode = lambda value: urlsafe_b64encode(value.encode()).decode().rstrip("=")
-    members = sorted(
-        "factor:v1:profile-maxa:"
-        f"{encode('custom_factors/Research.py')}:{encode(alias)}:"
-        + "a" * 40 + ":" + "b" * 40
-        for alias in aliases
+def _frozen_factor(alias: str) -> dict:
+    family_alias = alias.split("|", 1)[0]
+    definition = _load_revision_definition(
+        family_ref=f"public:{family_alias}",
+        factor_aliases=[alias],
+        owner="alice",
     )
-    manifest = {
-        "schema_version": 1,
-        "set_id": "run-subjects",
-        "set_ref": "factor-set:profile-maxa:run-subjects",
-        "title_zh": "本次运行因子集合",
-        "member_refs": members,
-        "member_hash": "sha256:" + hashlib.sha256(json.dumps(
-            members, ensure_ascii=False, separators=(",", ":"),
-        ).encode()).hexdigest(),
-    }
-    payload = (
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode()
-    blob = hashlib.sha1(
-        f"blob {len(payload)}\0".encode() + payload
-    ).hexdigest()
+    resolved = definition["resolved_factors"][0]
+    return freeze_factor_identity(
+        owner_ref="public",
+        family_alias=family_alias,
+        factor_alias=alias,
+        family_formula_fingerprint=definition["family_formula_fingerprint"],
+        self_formula_fingerprint=resolved["self_formula_fingerprint"],
+        params=resolved["params"],
+    )
+
+
+def _factor_set_descriptor(*aliases: str) -> dict:
+    manifest = freeze_factor_set_identity(
+        owner_ref="profile:maxa",
+        set_id="run-subjects",
+        alias="本次运行因子集合",
+        members=[_frozen_factor(alias) for alias in aliases],
+    )
     return {
-        "target_ref": (
-            "factor-set:v1:profile-maxa:"
-            f"{encode('.factortester/factor-sets/run-subjects.json')}:"
-            f"{encode('run-subjects')}:" + "c" * 40 + f":{blob}"
-        ),
+        "target_ref": manifest["ref"],
         "manifest": manifest,
     }
+
+
+def _inline_factor(tmp_path, source: str, alias: str) -> dict:
+    source_file = tmp_path / f"{alias.split('|', 1)[0]}.py"
+    source_file.write_text(source, encoding="utf-8")
+    formula = factor_formula_identity(
+        source_file=source_file,
+        identity=alias,
+        object_kind="factor",
+        blob_hash=hashlib.sha256(source.encode()).hexdigest(),
+    )
+    return freeze_factor_identity(
+        owner_ref="alice",
+        family_alias=alias.split("|", 1)[0],
+        factor_alias=formula["canonical_identity"],
+        family_formula_fingerprint=formula["family_formula_fingerprint"],
+        self_formula_fingerprint=formula["self_formula_fingerprint"],
+        params=formula["params"],
+    )
 
 
 def test_workspace_has_one_mutable_configuration_not_revision_history(client) -> None:
@@ -287,12 +302,12 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
         "name": "legacy",
         "ff_alias": "MmRet",
         "snapshot": {
-            "factor": "MmRet|P:CA|N:10d|$F:1d",
-            "factor_candidates": [{"alias": "MmRet|P:CA|N:10d|$F:1d"}],
+                "factor": "MmRet|$F:1d",
+                "factor_candidates": [{"alias": "MmRet|$F:1d"}],
             "submissions": [{"id": "selection-1", "selected_paths": ["core8_path"]}],
             "group_settings": {"groups": [{
                 "id": "A1", "testerId": "selection-1", "groupCount": 5,
-                "groupIndex": 0, "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+                    "groupIndex": 0, "factorAlias": "MmRet|$F:1d",
             }]},
         },
     }), ("params", "", "MmRet", {
@@ -337,25 +352,24 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
         ).fetchone() is None
     templates = research_configurations.list_templates(owner="alice")
     assert templates[0]["legacy_template_id"] == "MmRet:legacy-1"
-    alias = "MmRet|P:CA|N:10d|$F:1d"
-    legacy_ref = "factor:legacy:" + hashlib.sha256(alias.encode()).hexdigest()
+    alias = "MmRet|$F:1d"
     assert "factor_families" not in templates[0]["payload"]["shared"]
-    assert templates[0]["payload"]["shared"]["factors"] == [{
-        "factor_ref": legacy_ref,
-        "alias": alias,
-        "factor_family_alias": "MmRet",
-    }]
+    factor = templates[0]["payload"]["shared"]["factors"][0]
+    assert factor["alias"] == alias
+    assert factor["ref"].startswith("factor:v2:")
     assert templates[0]["payload"]["analyses"]["backtest"]["groups"][0]["splitCount"] == 5
     migrated_backtest = templates[0]["payload"]["analyses"]["backtest"]
     assert "factor" not in migrated_backtest and "factor_candidates" not in migrated_backtest
     assert "factor" not in migrated_backtest["local_settings"]
     assert "factor_candidates" not in migrated_backtest["local_settings"]
-    assert migrated_backtest["groups"][0]["factor_candidate_refs"] == [legacy_ref]
+    assert migrated_backtest["groups"][0]["factor_candidate_refs"] == [
+        factor["ref"],
+    ]
 
 
 def test_legacy_workspace_and_runs_require_then_apply_one_time_migration(client) -> None:
     draft = {
-        "factor_alias": "MmRet|P:CA|N:10d|$F:1d",
+        "factor_alias": "MmRet|$F:1d",
         "group_settings": {"groups": []},
     }
     run_spec = {"workspace_id": "legacy-workspace", "workspace_revision": 3}
@@ -520,12 +534,12 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     assert preview_payload["success"] is True
     assert len(preview_payload["run_spec_hash"]) == 64
     assert preview_payload["run_spec_version"] == 3
-    assert preview_payload["factor_revision_manifests"]
+    assert preview_payload["frozen_factors"]
     assert all(
         "source_code" not in manifest
         and "tree_repr" not in manifest
         and "math_expr" not in manifest
-        for manifest in preview_payload["factor_revision_manifests"]
+        for manifest in preview_payload["frozen_factors"]
     )
     assert JobRepository().list(owner="alice") == []
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -541,10 +555,8 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     assert submitted.status_code == 202, submitted.get_data(as_text=True)
     run = submitted.get_json()["run"]
     assert preview_payload["run_spec_hash"] == run["run_spec_hash"]
-    assert preview_payload["factor_revision_manifests"] == (
-        run["run_spec"]["configuration"]["shared"][
-            "factor_revision_manifests"
-        ]
+    assert preview_payload["frozen_factors"] == (
+        run["run_spec"]["configuration"]["shared"]["factors"]
     )
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
@@ -683,10 +695,9 @@ def test_frozen_manager_context_rejects_tampered_factor_source(client) -> None:
     )
     sources = context["prepared"]["portable_factor_sources"]
     assert sources
-    sources[0]["source_code"] += "\n# tampered after Manager freeze\n"
-    encoded = sources[0]["source_code"].encode("utf-8")
-    sources[0]["source_sha256"] = hashlib.sha256(encoded).hexdigest()
-    sources[0]["source_bytes"] = len(encoded)
+    sources[0]["source_code"] = sources[0]["source_code"].replace(
+        "DataColumn.CLOSE", "DataColumn.OPEN",
+    )
 
     response = client.post("/api/runs/capability-preview", json={
         **request_payload,
@@ -951,8 +962,8 @@ def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     descriptor = _factor_set_descriptor(
-        "MmRet|P:CA|N:10d|$F:1d",
-        "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
+        "MmRet|$F:1d",
+        "MmMADevRat|$F:1d|$Rev",
     )
 
     response = client.post("/api/runs/preview", json={
@@ -966,45 +977,19 @@ def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
     payload = response.get_json()
     assert payload["factor_subject_descriptors"] == [{
         "target_ref": descriptor["target_ref"],
-        "set_ref": "factor-set:profile-maxa:run-subjects",
-        "member_hash": descriptor["manifest"]["member_hash"],
+        "member_fingerprint": descriptor["manifest"]["identity"][
+            "member_fingerprint"
+        ],
         "member_count": 2,
-        "authority": "client_git_blob",
+        "authority": "formula_manifest",
     }]
 
 
 def test_preview_freezes_transient_profile_screen_without_shared_registration(
-    client, monkeypatch,
+    client, monkeypatch, tmp_path,
 ) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
-    payload["analyses"]["backtest"]["local_settings"].update({
-        "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-    })
-    payload["shared"]["factors"].append({
-        "factor_ref": "factor:profile-screen-20d",
-        "factor_family_alias": "ProfileScreen",
-        "alias": "ProfileScreen|N:20d",
-        "source_kind": "transient",
-    })
-    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
-        "factor:profile-screen-20d"
-    ]
-    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
-        "screen": "factor:profile-screen-20d",
-    }
-    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
-    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
-    _update(client, workspace, payload)
-    monkeypatch.setattr(
-        research_jobs,
-        "_capability_plans",
-        lambda prepared, owner: [
-            {"kind": kind, "resolved": {"data_requirements": []}}
-            for kind in prepared["analyses"]
-        ],
-    )
     source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -1018,7 +1003,29 @@ class ProfileScreen(FactorFamily):
             WindowParam("N", default_value="20d")
         ).cs_ordinal_rank(ascending=False)
 '''
-
+    factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
+    payload["analyses"]["backtest"]["local_settings"].update({
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    })
+    payload["shared"]["factors"].append(factor)
+    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
+        factor["ref"]
+    ]
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": factor["ref"],
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda prepared, owner: [
+            {"kind": kind, "resolved": {"data_requirements": []}}
+            for kind in prepared["analyses"]
+        ],
+    )
     response = client.post("/api/runs/preview", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -1043,7 +1050,7 @@ class ProfileScreen(FactorFamily):
         f"/api/workspaces/{workspace['workspace_id']}/configuration"
     ).get_json()["configuration"]["payload"]
     assert any(
-        item.get("factor_ref") == "factor:profile-screen-20d"
+        item.get("ref") == factor["ref"]
         for item in configuration["shared"]["factors"]
     )
 
@@ -1054,27 +1061,6 @@ def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    created = client.post("/api/workspaces", json={
-        "title": "transient factor inputs",
-        "factor_families": [{"alias": "ProfileScreen"}],
-        "factors": [{
-            "factor_ref": "factor:profile-screen-20d",
-            "factor_family_alias": "ProfileScreen",
-            "alias": "ProfileScreen|N:20d",
-        }],
-    })
-    assert created.status_code == 201
-    workspace = created.get_json()["workspace"]
-    payload = _payload(workspace)
-    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
-        "factor:profile-screen-20d"
-    ]
-    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
-        "screen": "factor:profile-screen-20d",
-    }
-    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
-    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
-    _update(client, workspace, payload)
     source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -1089,7 +1075,24 @@ class ProfileScreen(FactorFamily):
             WindowParam("N", default_value="20d")
         ).cs_ordinal_rank(ascending=False)
 '''
-
+    factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
+    created = client.post("/api/workspaces", json={
+        "title": "transient factor inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [factor],
+    })
+    assert created.status_code == 201
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factor_candidate_refs"] = [
+        factor["ref"]
+    ]
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": factor["ref"],
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
     response = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -1157,23 +1160,6 @@ def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    created = client.post("/api/workspaces", json={
-        "title": "retry retained source",
-        "factor_families": [{"alias": "ProfileScreen"}],
-        "factors": [{
-            "factor_ref": "factor:profile-screen-20d",
-            "factor_family_alias": "ProfileScreen",
-            "alias": "ProfileScreen|N:20d",
-        }],
-    })
-    workspace = created.get_json()["workspace"]
-    payload = _payload(workspace)
-    group = payload["analyses"]["backtest"]["groups"][0]
-    group["factor_candidate_refs"] = ["factor:profile-screen-20d"]
-    group["factorRoleBindings"] = {"screen": "factor:profile-screen-20d"}
-    group["screen_rule"] = "lte"
-    group["screen_upper"] = 12
-    _update(client, workspace, payload)
     source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -1188,6 +1174,20 @@ class ProfileScreen(FactorFamily):
             WindowParam("N", default_value="20d")
         ).cs_ordinal_rank(ascending=False)
 '''
+    factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
+    created = client.post("/api/workspaces", json={
+        "title": "retry retained source",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [factor],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    group = payload["analyses"]["backtest"]["groups"][0]
+    group["factor_candidate_refs"] = [factor["ref"]]
+    group["factorRoleBindings"] = {"screen": factor["ref"]}
+    group["screen_rule"] = "lte"
+    group["screen_upper"] = 12
+    _update(client, workspace, payload)
     submitted = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -1239,20 +1239,6 @@ def test_retry_input_copy_failure_terminalizes_new_attempt(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    created = client.post("/api/workspaces", json={
-        "title": "retry input copy failure",
-        "factor_families": [{"alias": "ProfileScreen"}],
-        "factors": [{
-            "factor_family_alias": "ProfileScreen",
-            "alias": "ProfileScreen|N:20d",
-        }],
-    })
-    workspace = created.get_json()["workspace"]
-    payload = _payload(workspace)
-    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
-        "ProfileScreen|N:20d"
-    )
-    _update(client, workspace, payload)
     source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -1266,6 +1252,18 @@ class ProfileScreen(FactorFamily):
             WindowParam("N", default_value="20d")
         )
 '''
+    factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
+    created = client.post("/api/workspaces", json={
+        "title": "retry input copy failure",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [factor],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
     submitted = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -1318,21 +1316,6 @@ def test_submitted_strategy_hook_is_retained_and_exposed_as_job_input(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    created = client.post("/api/workspaces", json={
-        "title": "strategy hook inputs",
-        "factor_families": [{"alias": "ProfileScreen"}],
-        "factors": [{
-            "factor_family_alias": "ProfileScreen",
-            "alias": "ProfileScreen|N:20d",
-        }],
-    })
-    workspace = created.get_json()["workspace"]
-    payload = _payload(workspace)
-    payload["shared"] = dict(workspace["configuration"]["payload"]["shared"])
-    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
-        "ProfileScreen|N:20d"
-    )
-    _update(client, workspace, payload)
     factor_source = '''
 from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
@@ -1346,6 +1329,21 @@ class ProfileScreen(FactorFamily):
             WindowParam("N", default_value="20d")
         )
 '''
+    factor = _inline_factor(
+        tmp_path, factor_source, "ProfileScreen|N:20d",
+    )
+    created = client.post("/api/workspaces", json={
+        "title": "strategy hook inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [factor],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["shared"] = dict(workspace["configuration"]["payload"]["shared"])
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
     source = """\
 class IntradayGate:
     def on_bar(self, context):

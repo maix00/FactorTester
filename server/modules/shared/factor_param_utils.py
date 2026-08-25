@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import re
 
+from tools.cli.release.research_reporting.references.factor_formula import (
+    build_factor_reference,
+)
 from tools.parameters import TypeParam
 
 
@@ -142,14 +145,34 @@ def build_factor_param_item(
         for p in factor_family.params
     ]
     source = meta.get('source') or 'unknown'
+    family_alias = getattr(factor_family, 'alias', None) or meta.get('name') or ''
+    factor = factor_family.get_factor(**normalized_row)
+    expression = getattr(factor, '_source_expr', None) or factor.expr
+    family_formula_fingerprint = factor_family.expr.semantic_fingerprint()
+    self_formula_fingerprint = expression.semantic_fingerprint()
+    metadata = (
+        config.get('metadata')
+        if isinstance(config.get('metadata'), dict) else {}
+    )
+    owner_ref = str(
+        metadata.get('factor_owner_ref')
+        or ('public' if source == 'public' else owner_username)
+    ).strip()
+    factor_ref = build_factor_reference(
+        owner_ref=owner_ref,
+        family_alias=family_alias,
+        factor_alias=str(factor.alias),
+        family_formula_fingerprint=family_formula_fingerprint,
+        self_formula_fingerprint=self_formula_fingerprint,
+    )
     # 条目级 category 优先于因子家族 meta category
     row_category = params.get('category', '') if isinstance(params, dict) else ''
     family_category = meta.get('category') or ''
-    metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
     return {
         'id': f"{owner_username}:{getattr(factor_family, 'alias', '')}:{config.get('id')}:{row_idx}",
-        'factor_alias': factor_family.get_alias(**normalized_row),
-        'factor_family_alias': getattr(factor_family, 'alias', None) or meta.get('name') or '',
+        'factor_ref': factor_ref,
+        'factor_alias': str(factor.alias),
+        'factor_family_alias': family_alias,
         'factor_family_id': meta.get('id') or getattr(factor_family, 'alias', ''),
         'factor_family_name': meta.get('name') or getattr(factor_family, 'alias', ''),
         'chinese_name': meta.get('chinese_name') or '',
@@ -164,6 +187,7 @@ def build_factor_param_item(
         'template_name': config.get('name') or '未命名配置',
         'template_row_index': row_idx,
         'params': params_display,
+        'factor_params': params_display,
         'params_count': len(params_display),
         'owner_username': owner_username,
         'owner_alias': owner_acct.get('alias') or owner_username,
@@ -174,13 +198,7 @@ def build_factor_param_item(
         'metadata': metadata,
         'note': metadata.get('note') or '',
         'research_report': metadata.get('research_report') or '',
-        **({
-            'factor_owner_ref': metadata['factor_owner_ref'],
-        } if metadata.get('factor_owner_ref') else {}),
-        **({
-            'factor_family_ref': metadata['factor_family_ref'],
-        } if metadata.get('factor_family_ref') else {}),
-        **({
-            'factor_git_commit': metadata['factor_git_commit'],
-        } if metadata.get('factor_git_commit') else {}),
+        'factor_owner_ref': owner_ref,
+        'family_formula_fingerprint': family_formula_fingerprint,
+        'self_formula_fingerprint': self_formula_fingerprint,
     }

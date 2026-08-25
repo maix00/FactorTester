@@ -1,8 +1,14 @@
-"""Immutable SQLite snapshots for factor-family source revisions."""
+"""Immutable formula versions for factor families.
+
+Formula identity is semantic and deliberately independent of Git.  The
+source snapshot is retained so a frozen formula can be inspected and
+executed even when no workspace exists on the server.
+"""
 
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import time
 from typing import Any
@@ -10,15 +16,36 @@ from typing import Any
 import settings as Settings
 
 from .db import connect_sqlite
-from .factor_source_store import normalize_factor_source_code
+from .factor_source_store import canonical_factor_source_code
 
-TABLE_NAME = "factor_family_source_versions"
+TABLE_NAME = "factor_family_formula_versions"
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _owner(source_kind: str, owner_username: str) -> str:
     return "" if str(source_kind or "").strip() == "public" else str(
-        owner_username or "",
+        owner_username or ""
     ).strip()
+
+
+def _identity(
+    source_kind: str,
+    owner_username: str,
+    factor_id: str,
+) -> tuple[str, str, str]:
+    kind = str(source_kind or "").strip()
+    owner = _owner(kind, owner_username)
+    factor = str(factor_id or "").strip()
+    if kind not in {"custom", "public"} or not factor:
+        raise ValueError("公式版本身份无效")
+    return kind, owner, factor
+
+
+def _fingerprint(value: str) -> str:
+    fingerprint = str(value or "").strip().lower()
+    if not _FINGERPRINT_RE.fullmatch(fingerprint):
+        raise ValueError("family formula fingerprint must be 64 hexadecimal characters")
+    return fingerprint
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -28,178 +55,169 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             source_kind TEXT NOT NULL,
             owner_username TEXT NOT NULL DEFAULT '',
             factor_id TEXT NOT NULL,
-            commit_sha TEXT NOT NULL,
-            source_hash TEXT NOT NULL,
+            family_formula_fingerprint TEXT NOT NULL,
+            source_sha256 TEXT NOT NULL,
             source_code TEXT NOT NULL,
-            relative_path TEXT NOT NULL DEFAULT '',
             subject TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL,
-            PRIMARY KEY (source_kind, owner_username, factor_id, commit_sha)
+            PRIMARY KEY (
+                source_kind, owner_username, factor_id,
+                family_formula_fingerprint
+            )
         )
-        """,
+        """
     )
     conn.execute(
         f"""
         CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_factor
-        ON {TABLE_NAME}(source_kind, owner_username, factor_id, created_at DESC)
-        """,
+        ON {TABLE_NAME}(
+            source_kind, owner_username, factor_id, created_at DESC
+        )
+        """
     )
 
 
-def ensure_factor_source_versions_sqlite_store() -> str:
+def ensure_factor_formula_versions_sqlite_store() -> str:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
     return str(Settings.CACHE_DB_PATH)
 
 
-def record_factor_source_version(
+def record_factor_formula_version(
     source_kind: str,
     owner_username: str,
     factor_id: str,
-    commit_sha: str,
     source_code: str,
     *,
-    relative_path: str = "",
+    family_formula_fingerprint: str,
     subject: str = "",
 ) -> dict[str, Any]:
-    commit = str(commit_sha or "").strip()
-    if not commit:
-        raise ValueError("源码版本必须包含 Git commit")
-    normalized = normalize_factor_source_code(source_code or "")
+    kind, owner, factor = _identity(source_kind, owner_username, factor_id)
+    fingerprint = _fingerprint(family_formula_fingerprint)
+    normalized = canonical_factor_source_code(source_code or "")
     if not normalized:
         raise ValueError("源码版本不能为空")
-    kind = str(source_kind or "").strip()
-    owner = _owner(kind, owner_username)
-    factor = str(factor_id or "").strip()
-    if kind not in {"custom", "public"} or not factor:
-        raise ValueError("源码版本身份无效")
-    source_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    now = time.time()
+    source_sha256 = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    created_at = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
             f"""
-            INSERT INTO {TABLE_NAME} (
-                source_kind, owner_username, factor_id, commit_sha,
-                source_hash, source_code, relative_path, subject, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source_kind, owner_username, factor_id, commit_sha)
-            DO UPDATE SET
-                source_hash = excluded.source_hash,
-                source_code = excluded.source_code,
-                relative_path = excluded.relative_path,
-                subject = excluded.subject
+            INSERT OR IGNORE INTO {TABLE_NAME} (
+                source_kind, owner_username, factor_id,
+                family_formula_fingerprint, source_sha256, source_code,
+                subject, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                kind, owner, factor, commit, source_hash, normalized,
-                relative_path, subject, now,
+                kind,
+                owner,
+                factor,
+                fingerprint,
+                source_sha256,
+                normalized,
+                str(subject or ""),
+                created_at,
             ),
         )
+        row = conn.execute(
+            f"""
+            SELECT source_sha256, source_code, subject, created_at
+            FROM {TABLE_NAME}
+            WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+              AND family_formula_fingerprint = ?
+            """,
+            (kind, owner, factor, fingerprint),
+        ).fetchone()
+    assert row is not None
     return {
         "source_kind": kind,
         "owner_username": owner,
         "factor_id": factor,
-        "commit": commit,
-        "source_hash": source_hash,
-        "source_code": normalized,
-        "relative_path": relative_path,
-        "subject": subject,
-        "created_at": now,
+        "family_formula_fingerprint": fingerprint,
+        "source_sha256": str(row["source_sha256"]),
+        "source_code": str(row["source_code"]),
+        "subject": str(row["subject"] or ""),
+        "created_at": float(row["created_at"]),
     }
 
 
-def _matches_commit(requested: str, stored: str) -> bool:
-    left = str(requested or "").strip().lower()
-    right = str(stored or "").strip().lower()
-    return bool(left and right and (left == right or left.startswith(right) or right.startswith(left)))
-
-
-def load_factor_source_version_snapshot(
+def load_factor_formula_version(
     source_kind: str,
     owner_username: str,
     factor_id: str,
-    commit_sha: str,
+    family_formula_fingerprint: str,
 ) -> dict[str, Any] | None:
-    kind = str(source_kind or "").strip()
-    owner = _owner(kind, owner_username)
+    kind, owner, factor = _identity(source_kind, owner_username, factor_id)
+    fingerprint = _fingerprint(family_formula_fingerprint)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
-        rows = conn.execute(
+        row = conn.execute(
             f"""
-            SELECT source_kind, owner_username, factor_id, commit_sha,
-                   source_hash, source_code, relative_path, subject, created_at
+            SELECT source_sha256, source_code, subject, created_at
             FROM {TABLE_NAME}
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
-            ORDER BY created_at DESC
+              AND family_formula_fingerprint = ?
             """,
-            (kind, owner, str(factor_id or "").strip()),
-        ).fetchall()
-    row = next((item for item in rows if _matches_commit(commit_sha, item["commit_sha"])), None)
+            (kind, owner, factor, fingerprint),
+        ).fetchone()
     if row is None:
         return None
     return {
-        "source_kind": row["source_kind"],
-        "owner_username": row["owner_username"],
-        "factor_id": row["factor_id"],
-        "commit": row["commit_sha"],
-        "source_hash": row["source_hash"],
-        "source_code": normalize_factor_source_code(str(row["source_code"] or "")),
-        "relative_path": row["relative_path"] or "",
-        "subject": row["subject"] or "",
-        "created_at": float(row["created_at"] or 0.0),
-        "branches": [],
+        "source_kind": kind,
+        "owner_username": owner,
+        "factor_id": factor,
+        "family_formula_fingerprint": fingerprint,
+        "source_sha256": str(row["source_sha256"]),
+        "source_code": str(row["source_code"]),
+        "subject": str(row["subject"] or ""),
+        "created_at": float(row["created_at"]),
     }
 
 
-def list_factor_source_version_snapshots(
+def list_factor_formula_versions(
     source_kind: str,
     owner_username: str,
     factor_id: str,
     *,
-    current_hash: str = "",
+    current_fingerprint: str = "",
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    kind = str(source_kind or "").strip()
-    owner = _owner(kind, owner_username)
+    kind, owner, factor = _identity(source_kind, owner_username, factor_id)
+    current = (
+        _fingerprint(current_fingerprint) if str(current_fingerprint or "").strip() else ""
+    )
     bounded = min(200, max(1, int(limit)))
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         rows = conn.execute(
             f"""
-            SELECT source_kind, owner_username, factor_id, commit_sha,
-                   source_hash, relative_path, subject, created_at
+            SELECT family_formula_fingerprint, source_sha256, subject, created_at
             FROM {TABLE_NAME}
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (kind, owner, str(factor_id or "").strip(), bounded),
+            (kind, owner, factor, bounded),
         ).fetchall()
-    result: list[dict[str, Any]] = []
-    seen_hashes: set[str] = set()
-    for row in rows:
-        source_hash = str(row["source_hash"] or "")
-        if not source_hash or source_hash in seen_hashes:
-            continue
-        seen_hashes.add(source_hash)
-        result.append({
-            "commit": row["commit_sha"],
-            "short_commit": str(row["commit_sha"] or "")[:12],
-            "committed_at": int(float(row["created_at"] or 0.0)),
-            "author": "",
-            "subject": row["subject"] or "源码快照",
-            "branches": [],
-            "relative_path": row["relative_path"] or "",
-            "source_hash": source_hash,
-            "is_current": bool(current_hash and source_hash == current_hash),
-            "workspace": "server-db",
-        })
-    return result
+    return [
+        {
+            "family_formula_fingerprint": str(row["family_formula_fingerprint"]),
+            "source_sha256": str(row["source_sha256"]),
+            "subject": str(row["subject"] or ""),
+            "created_at": float(row["created_at"]),
+            "is_current": bool(
+                current
+                and current == str(row["family_formula_fingerprint"])
+            ),
+        }
+        for row in rows
+    ]
 
 
 __all__ = [
-    "ensure_factor_source_versions_sqlite_store",
-    "list_factor_source_version_snapshots",
-    "load_factor_source_version_snapshot",
-    "record_factor_source_version",
+    "ensure_factor_formula_versions_sqlite_store",
+    "list_factor_formula_versions",
+    "load_factor_formula_version",
+    "record_factor_formula_version",
 ]

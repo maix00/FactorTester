@@ -1,7 +1,6 @@
 """Routes for custom-factor catalog pages and read-only factor metadata."""
 from __future__ import annotations
 
-from hashlib import sha256
 from typing import Any, cast
 
 from flask import jsonify, request
@@ -14,7 +13,6 @@ from server.modules.custom_factors.catalog import (
     list_public_factors,
     list_visible_custom_factors,
 )
-from server.modules.custom_factors.source_helpers import strip_factor_meta
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user
@@ -23,9 +21,10 @@ from tools.data.factor_workspace.storage import (
     load_factor_source,
     load_public_factor_source,
 )
-from tools.data.factor_workspace.versions import (
-    list_factor_source_versions,
-    load_factor_source_version,
+from tools.data.sqlite.factor_source_store import get_factor_source_metadata
+from tools.data.sqlite.factor_source_versions import (
+    list_factor_formula_versions,
+    load_factor_formula_version,
 )
 
 
@@ -78,44 +77,43 @@ def _source_kind(value: str) -> str:
     return kind
 
 
-def _factor_family_ref(owner: str, family: str) -> str:
-    """Build the same stable family ref used by client-library projections."""
-    identity = f"{owner}\x1f{family}"
-    return f"factor-family:sha256:{sha256(identity.encode()).hexdigest()}"
-
-
-def _source_detail(source_code: str, module_name: str) -> dict[str, Any]:
+def _source_detail(
+    source_code: str,
+    module_name: str,
+    metadata: dict[str, str],
+) -> dict[str, Any]:
     factor_cls, _ = _load_factor_family_from_source(source_code, module_name)
     if factor_cls is None:
         return {
-            'source_code': strip_factor_meta(source_code),
+            'source_code': source_code,
             'math_expr': '',
-            'chinese_name': '',
-            'description': '',
+            'chinese_name': metadata.get('chinese_name', ''),
+            'description': metadata.get('description', ''),
+            'category': metadata.get('category', ''),
             'params': [],
         }
     family = factor_cls()
     return {
-        'source_code': strip_factor_meta(source_code),
+        'source_code': source_code,
         'math_expr': getattr(family, 'math_expr', '') or '',
-        'chinese_name': getattr(family, 'desc', '') or '',
-        'description': getattr(family, 'description', '') or '',
+        'chinese_name': metadata.get('chinese_name', ''),
+        'description': metadata.get('description', ''),
+        'category': metadata.get('category', ''),
+        'family_formula_fingerprint': family.expr.semantic_fingerprint(),
         'params': [serialize_param_meta(param) for param in family.params],
     }
 
 
-def _source_context(source_kind: str, factor_id: str, username: str) -> tuple[str, str, str]:
+def _source_context(source_kind: str, factor_id: str, username: str) -> tuple[str, str]:
     owner = str(request.args.get('owner_username') or '').strip()
     if source_kind == 'custom':
         owner = owner or username
         if not can_view_user_scope(username, owner):
             raise PermissionError('无权查看该用户因子源码')
         source_code = load_factor_source(owner, factor_id) or ''
-        return owner, source_code, owner
+        return owner, source_code
     source_code = load_public_factor_source(factor_id) or ''
-    return '__public_jobs__', source_code, str(
-        request.args.get('workspace_username') or '',
-    ).strip()
+    return '__public_jobs__', source_code
 
 
 @cf_bp.route('/api/source-versions/<source_kind>/<factor_id>', methods=['GET'])
@@ -124,26 +122,35 @@ def api_source_versions(source_kind, factor_id):
     username = cast(str, current_user())
     try:
         kind = _source_kind(source_kind)
-        owner, source_code, workspace_username = _source_context(
+        owner, source_code = _source_context(
             kind, factor_id, username,
         )
-        value = list_factor_source_versions(
-            source_kind=kind,
-            owner_username=owner if kind == 'custom' else '',
-            factor_id=factor_id,
-            current_source=source_code,
-            workspace_username=workspace_username,
+        detail = _source_detail(
+            source_code,
+            factor_id,
+            get_factor_source_metadata(
+                kind, owner if kind == 'custom' else '', factor_id,
+            ),
+        )
+        current_fingerprint = str(
+            detail.get('family_formula_fingerprint') or ''
+        )
+        versions = list_factor_formula_versions(
+            kind,
+            owner if kind == 'custom' else '',
+            factor_id,
+            current_fingerprint=current_fingerprint,
             limit=request.args.get('limit', 100),
         )
         return jsonify({
             'success': True,
-            **value,
+            'available': bool(versions),
+            'versions': versions,
+            'current_fingerprint': current_fingerprint,
             'source_kind': kind,
             'factor_id': factor_id,
             'factor_owner_ref': owner,
-            'factor_family_ref': _factor_family_ref(
-                owner, factor_id,
-            ),
+            'factor_family_alias': factor_id,
         })
     except PermissionError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 403
@@ -152,28 +159,32 @@ def api_source_versions(source_kind, factor_id):
 
 
 @cf_bp.route(
-    '/api/source-versions/<source_kind>/<factor_id>/<version>',
+    '/api/source-versions/<source_kind>/<factor_id>/<fingerprint>',
     methods=['GET'],
 )
 @login_required
-def api_source_version(source_kind, factor_id, version):
+def api_source_version(source_kind, factor_id, fingerprint):
     username = cast(str, current_user())
     try:
         kind = _source_kind(source_kind)
-        owner, source_code, workspace_username = _source_context(
+        owner, _source_code = _source_context(
             kind, factor_id, username,
         )
-        value = load_factor_source_version(
-            source_kind=kind,
-            owner_username=owner if kind == 'custom' else '',
-            factor_id=factor_id,
-            current_source=source_code,
-            commit=version,
-            workspace_username=workspace_username,
+        value = load_factor_formula_version(
+            kind,
+            owner if kind == 'custom' else '',
+            factor_id,
+            fingerprint,
         )
-        if not value.get('source_code'):
+        if value is None or not value.get('source_code'):
             raise FileNotFoundError('因子源码版本不存在')
-        detail = _source_detail(source_code=value['source_code'], module_name=factor_id)
+        detail = _source_detail(
+            source_code=value['source_code'],
+            module_name=factor_id,
+            metadata=get_factor_source_metadata(
+                kind, owner if kind == 'custom' else '', factor_id,
+            ),
+        )
         return jsonify({
             'success': True,
             **value,
@@ -181,7 +192,7 @@ def api_source_version(source_kind, factor_id, version):
             'source_kind': kind,
             'factor_id': factor_id,
             'factor_owner_ref': owner,
-            'factor_family_ref': _factor_family_ref(owner, factor_id),
+            'factor_family_alias': factor_id,
         })
     except PermissionError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 403

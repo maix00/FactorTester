@@ -824,7 +824,7 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
         encoding="utf-8",
     )
-    factor_view = details.split("function projectedFactor", 1)[0]
+    factor_view = details.split("async function familyDetail", 1)[0]
     family_view = details.split("async function familyDetail", 1)[1].split(
         "async function withSource", 1,
     )[0]

@@ -297,7 +297,10 @@
       };
     }
     if (parts[0] === "factors" && parts[1] === "set" && parts[2]) {
-      return {kind: "factor-set", id: decodeURIComponent(parts.slice(2).join("/"))};
+      const id = decodeURIComponent(parts.slice(2).join("/"));
+      const mode = new URLSearchParams(search).get("mode")
+        || (id === "new" ? "create" : "view");
+      return {kind: "factor-set", id: id === "new" ? "" : id, mode};
     }
     if (parts[0] === "factors") {
       const scope = new URLSearchParams(search).get("scope") || "mine";

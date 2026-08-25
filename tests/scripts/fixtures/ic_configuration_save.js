@@ -10,18 +10,22 @@ function load(path) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
 }
 
-const selectedFactorRef = `factor:sha256:${"a".repeat(64)}`;
-const staleGlobalFactorRef = "factor:v1:profile-max:path:stale:commit:blob";
-const selectedFactor = {
-  factor_ref: selectedFactorRef,
-  factor_alias: "ROC|N:20d|$F:1d",
-  factor_family_alias: "ROC",
-};
-const staleGlobalFactor = {
-  factor_ref: staleGlobalFactorRef,
-  factor_alias: "StaleGlobal",
-  factor_family_alias: "StaleGlobal",
-};
+function frozenFactor(digest, alias, family) {
+  return {
+    schema_version: 2, ref: `factor:v2:${digest.repeat(43)}`, alias,
+    owner_ref: "profile:maxa",
+    identity: {
+      family_ref: `factor-family:v2:${digest.toUpperCase().repeat(43)}`,
+      family_alias: family,
+      family_formula_fingerprint: digest.repeat(64),
+      self_formula_fingerprint: digest.repeat(64), params: {},
+    },
+  };
+}
+const selectedFactor = frozenFactor("a", "ROC|N:20d|$F:1d", "ROC");
+const staleGlobalFactor = frozenFactor("b", "StaleGlobal", "StaleGlobal");
+const selectedFactorRef = selectedFactor.ref;
+const staleGlobalFactorRef = staleGlobalFactor.ref;
 const configurationGroup = {
   config_group_id: "icg-day-roc",
   batch_id: "icb-day-roc",
@@ -46,7 +50,7 @@ const persistedProductGroup = {
 global.FTTestFactors = {
   selectedFactor: () => staleGlobalFactor,
   selectedFamily: (_state, factor) => ({
-    factor_family_alias: factor.factor_family_alias,
+    alias: factor.identity.family_alias,
   }),
 };
 global.FTTestProducts = {
@@ -60,8 +64,7 @@ global.FTICConfigurationGroupModel = {
   )),
 };
 global.FTTestRunFields = {selection: () => ["ic_series"]};
-global.FTFactorModel = {sourceMetadata: () => ({})};
-
+load("server/manager/web/catalog/factor-model.js");
 load("server/manager/web/workbench/setting-rules.js");
 load("server/manager/web/workbench/test-configuration-compiler.js");
 load("server/manager/web/workbench/ic-configuration.js");
@@ -103,7 +106,7 @@ const state = {
 };
 
 const executionFactors = FTTestConfiguration.executionFactors(state);
-assert.deepEqual(executionFactors.map(item => item.factor_ref), [selectedFactorRef]);
+assert.deepEqual(executionFactors.map(item => item.ref), [selectedFactorRef]);
 
 const compiled = FTTestConfiguration.buildAnalysis(
   state,

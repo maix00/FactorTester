@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import orjson
 import pytest
-from base64 import urlsafe_b64encode
 
 import settings as Settings
 from server.services import research_graphs
@@ -17,13 +16,21 @@ from server.services.research_graph.branch.transition import (
 from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
 from tests.server.data_contract_fixtures import checkpoint, initialize
 from tools.data.sqlite.db import connect_sqlite
+from tools.factors.formula_identity import freeze_factor_identity
 
 
-_FACTOR_REF = (
-    "factor:v1:profile-maxa:cHVibGljX2ZhY3RvcnMvTW1SYXRlT2ZDaGcucHk:"
-    "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk:"
-    + "3" * 40 + ":" + "4" * 40
-)
+def _factor_ref(identity: str) -> str:
+    return freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias=identity.split("|", 1)[0],
+        factor_alias=identity,
+        family_formula_fingerprint="3" * 64,
+        self_formula_fingerprint="4" * 64,
+        params={},
+    )["ref"]
+
+
+_FACTOR_REF = _factor_ref("MmRateOfChg|P:[CA]|N:20d|$F:1d")
 
 def _factor_graph() -> dict:
     return {
@@ -49,7 +56,7 @@ def _factor_graph() -> dict:
             "from_node": "factor_semantics",
             "to_node": "validation_design",
             "guard": {
-                "factor_revision_manifests_bound": True,
+                "frozen_factor_formulas_bound": True,
                 "selected_factor_semantics_resolved": True,
                 "causal_semantics_valid": True,
             },
@@ -80,7 +87,7 @@ def _prepare(path) -> None:
 def _evidence() -> dict:
     return {
         "factor_subject_refs": [_FACTOR_REF],
-        "factor_revision_manifests_bound": False,
+        "frozen_factor_formulas_bound": False,
         "selected_factor_semantics_resolved": False,
         "causal_semantics_valid": True,
     }
@@ -94,8 +101,7 @@ def test_factor_subject_uses_explicit_current_report_binding() -> None:
         "obligation_coverage_submission": {"coverage": [{
             "evidence_uses": [{"scope_match": {"requested_scope": {
                 "factor_refs": [
-                    "factor:v1:profile-maxa:cGF0aA:b3RoZXI:"
-                    + "c" * 40 + ":" + "d" * 40
+                    _factor_ref("Other|N:5d")
                 ],
             }}}],
         }]},
@@ -110,10 +116,7 @@ def test_factor_subject_uses_explicit_current_report_binding() -> None:
 def test_factor_subject_rejects_a_different_frozen_family() -> None:
     current = checkpoint()
     current["obligations"][0]["scope"]["factor_ref"] = _FACTOR_REF
-    other = _FACTOR_REF.replace(
-        "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk",
-        "U2dDQ1N8TjoybXwkeFJldg",
-    )
+    other = _factor_ref("SgCCS|N:2m|$Rev")
 
     with pytest.raises(ValueError, match="accepted research subject"):
         factor_semantics_service._transition_factor_subject_refs(
@@ -201,7 +204,7 @@ def test_factor_semantics_edge_binds_source_free_server_evidence(
     assert envelope["source_refs"] == [_FACTOR_REF]
     assert envelope["facts"]["factor_subject_refs"] == [_FACTOR_REF]
     assert envelope["facts"]["factor_revision_count"] == 1
-    assert envelope["facts"]["factor_family_refs"] == ["MmRateOfChg"]
+    assert "factor_family_refs" not in envelope["facts"]
     assert envelope["facts"]["factor_revision_set_hash"]
     assert "required_market_fields" not in envelope["facts"]
     assert "factor_revision_refs" not in envelope["facts"]
@@ -236,11 +239,3 @@ def test_many_factor_revisions_are_bound_by_set_hash_not_trace_copy(
         ).fetchone()
     assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
     assert '"factor_revision_refs"' not in row["evidence_json"]
-
-
-def _factor_ref(identity: str) -> str:
-    encoded = urlsafe_b64encode(identity.encode()).decode().rstrip("=")
-    return (
-        "factor:v1:profile-maxa:cHVibGljX2ZhY3RvcnMvTW1SYXRlT2ZDaGcucHk:"
-        f"{encoded}:{'3' * 40}:{'4' * 40}"
-    )

@@ -77,11 +77,6 @@ def factor_rows_from_sync(
                     or row.get("principal")
                     or principal
                 ),
-                "factor_family_ref": str(
-                    value.get("factor_family_ref")
-                    or payload.get("factor_family_ref")
-                    or family_alias
-                ),
                 "chinese_name": str(
                     value.get("chinese_name") or payload.get("chinese_name") or ""
                 ),
@@ -114,8 +109,16 @@ def factor_rows_from_sync(
                 ),
                 "updated_at": payload.get("updated_at") or row.get("updated_at") or "",
                 "product_group": scope,
-                **({"factor_git_commit": str(value["factor_git_commit"])}
-                   if value.get("factor_git_commit") else {}),
+                **({
+                    "family_formula_fingerprint": str(
+                        value["family_formula_fingerprint"]
+                    )
+                } if value.get("family_formula_fingerprint") else {}),
+                **({
+                    "self_formula_fingerprint": str(
+                        value["self_formula_fingerprint"]
+                    )
+                } if value.get("self_formula_fingerprint") else {}),
             })
     return result
 

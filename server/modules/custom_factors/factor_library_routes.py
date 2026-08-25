@@ -2,7 +2,6 @@
 from __future__ import annotations
 from hashlib import sha256
 import json
-from typing import cast
 
 from flask import jsonify, request
 
@@ -43,6 +42,7 @@ from tools.data.factor_research_registry import (
 )
 from server.services.factor_registry import get_factor_family_instance
 from server.modules.custom_factors.factor_set_registry import (
+    author_factor_set,
     factor_set_catalog,
     factor_set_detail,
     register_factor_set,
@@ -121,6 +121,18 @@ def api_client_factor_sets():
             'success': unregister_factor_set(username, target_ref),
         })
     data = request.get_json(silent=True) or {}
+    definition = data.get('definition')
+    if isinstance(definition, dict):
+        try:
+            value = author_factor_set(
+                username,
+                definition,
+                persist=data.get('persist') is not False,
+                replace_target_ref=str(data.get('replace_target_ref') or ''),
+            )
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+        return jsonify({'success': True, 'factor_set': value})
     descriptor = data.get('descriptor')
     if not isinstance(descriptor, dict):
         return jsonify({'success': False, 'error': 'descriptor 必须是对象'}), 400

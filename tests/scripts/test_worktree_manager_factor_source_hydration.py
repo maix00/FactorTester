@@ -47,13 +47,15 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         factor_source_hydration, "upsert_factor_source",
-        lambda *args: saved.append(args),
+        lambda *args, **kwargs: saved.append((args, kwargs)),
     )
 
     assert factor_source_hydration.FactorSourceHydrator(State()).hydrate(
         "DemoFactor", principal="alice",
     )
-    assert saved == [("custom", "alice", "DemoFactor", "Demo", source)]
+    assert saved == [(("custom", "alice", "DemoFactor", "Demo", source), {
+        "chinese_name": "", "description": "", "category": "",
+    })]
     assert requested == [("https://public.example:7997/source", None)]
 
 
@@ -246,8 +248,8 @@ def test_hydration_skips_stale_provider_and_uses_current_replica(monkeypatch) ->
     )
     monkeypatch.setattr(
         factor_source_hydration, "upsert_factor_source",
-        lambda *args: saved.append(args),
+        lambda *args, **kwargs: saved.append((args, kwargs)),
     )
 
     assert hydrator.hydrate("DemoFactor", principal="alice")
-    assert saved[0][2] == "DemoFactor"
+    assert saved[0][0][2] == "DemoFactor"

@@ -90,7 +90,8 @@
           pages.factor, route.id, route.mode || "view", route,
         );
         case "factor-set": return guarded(
-          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSet, route.id,
+          context(routeToken), {nav: "factors", title: "因子库"},
+          pages.factorSet, route.id, route.mode || "view", route,
         );
         case "factors": return guarded(
           context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factors, route,

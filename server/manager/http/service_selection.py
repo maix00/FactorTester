@@ -27,6 +27,7 @@ _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/public-factor/",
     "/custom-factors/api/get/",
     "/custom-factors/api/source-versions/",
+    "/custom-factors/api/source-sync/",
     "/api/product-groups",
     "/api/report-references/validate",
     "/api/profile-research",

@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..horizon import ICHorizonPolicy
 from .normalization import entry_delays, required_texts
+from tools.factors.formula_identity import is_factor_reference
 
 
 def _is_frozen_factor_ref(value: str) -> bool:
-    return value.startswith("factor:v1:") or bool(
-        re.fullmatch(r"factor:sha256:[0-9a-f]{64}", value)
-    )
+    return is_factor_reference(value)
 
 
 @dataclass(frozen=True, slots=True)

@@ -566,3 +566,32 @@ class FactorLibraryClientMixin(ClientMixinBase):
         return self._expect_success(
             self.session.post("/custom-factors/api/workspace/git", data)
         )
+
+    def factor_source_sync_manifest(
+        self,
+        *,
+        include_subordinates: bool = True,
+    ) -> dict[str, Any]:
+        """Read visible factor-source metadata for an explicit local pull."""
+        return self._expect_success(self.session.get(
+            "/custom-factors/api/source-sync/manifest",
+            query={
+                "include_subordinates": "1" if include_subordinates else "0",
+            },
+        ))
+
+    def factor_source_download_access(
+        self,
+        *,
+        object_id: str,
+        source_sha256: str,
+    ) -> dict[str, Any]:
+        """Issue a hash-bound 7997 download capability for one source file."""
+        return self._expect_success(self.session.post(
+            "/api/transfers/objects/download-access",
+            {
+                "object_kind": "factor_source",
+                "object_id": object_id,
+                "source_sha256": source_sha256,
+            },
+        ))

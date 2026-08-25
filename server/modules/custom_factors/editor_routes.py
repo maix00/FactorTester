@@ -7,10 +7,6 @@ import json
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
-from server.modules.custom_factors.source_helpers import (
-    assemble_factor_source,
-    strip_factor_meta,
-)
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
@@ -117,7 +113,7 @@ def api_validate_expr():
         if not can_view_user_scope(username, owner_username):
             return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
         loaded_source = load_factor_source(owner_username, factor_id) or ''
-        source_code = strip_factor_meta(loaded_source) if loaded_source else ''
+        source_code = loaded_source
 
     if not source_code:
         return jsonify({'success': True, 'valid': False, 'error': '源码不能为空'})
@@ -128,18 +124,14 @@ def api_validate_expr():
         import tempfile
         import os as _os
 
-        chinese_name = (data.get('chinese_name') or '').strip()
-        description = (data.get('description') or '').strip()
-        full_source = assemble_factor_source(source_code, chinese_name, description)
-
-        class_match = re.search(r'^\s*class\s+(\w+)\s*\(', full_source, re.MULTILINE)
+        class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
         class_name = class_match.group(1) if class_match else 'ValidateFactor'
 
         tmpdir = tempfile.mkdtemp(prefix='cf_validate_')
         tmpfile = _os.path.join(tmpdir, f'{class_name}.py')
         try:
             with open(tmpfile, 'w', encoding='utf-8') as file:
-                file.write(full_source)
+                file.write(source_code)
 
             spec = importlib.util.spec_from_file_location(class_name, tmpfile)
             if spec is None or spec.loader is None:
@@ -177,8 +169,8 @@ def api_validate_expr():
                 'column_refs': fixed_column_refs(factor_family.expr),
                 'factor_name': factor_cls.__name__,
                 'params': [serialize_param_meta(param) for param in factor_family.params],
-                'desc': getattr(factor_family, 'desc', '') or '',
-                'description': getattr(factor_family, 'description', '') or '',
+                'desc': str(data.get('chinese_name') or ''),
+                'description': str(data.get('description') or ''),
                 **instance,
             })
 

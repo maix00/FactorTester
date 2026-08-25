@@ -30,8 +30,8 @@ from server.services.factor_registry import (
 )
 from tools.data.account_manage import (
     account_display_name,
+    direct_subordinate_accounts_for,
     get_account,
-    visible_accounts_for,
 )
 
 
@@ -117,7 +117,8 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
             if isinstance(config.get('metadata'), dict):
                 factors[-1]['metadata'] = config.get('metadata')
                 for key in (
-                    'factor_owner_ref', 'factor_family_ref', 'factor_git_commit',
+                    'factor_owner_ref',
+                    'family_formula_fingerprint', 'self_formula_fingerprint',
                 ):
                     value = config['metadata'].get(key)
                     if value:
@@ -167,11 +168,12 @@ def build_factor_library_overview(
     include_scope_catalog: bool = True,
 ) -> dict:
     product_group = normalize_product_group(product_group) if product_group else None
-    accounts = (
-        visible_accounts_for(current_username, include_self=True)
-        if include_subordinates
-        else [account or get_account(current_username) or {'username': current_username}]
-    )
+    current = account or get_account(current_username) or {
+        'username': current_username,
+    }
+    accounts = [current]
+    if include_subordinates:
+        accounts.extend(direct_subordinate_accounts_for(current_username))
     current_account = account or get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
@@ -248,7 +250,10 @@ def build_factor_library_overview(
 
 def list_factor_library_config_users(current_username: str, ff_alias: str, product_group: str = DEFAULT_SCOPE_KEY) -> dict:
     product_group = normalize_product_group(product_group)
-    accounts = visible_accounts_for(current_username, include_self=True)
+    accounts = [
+        get_account(current_username) or {'username': current_username},
+        *direct_subordinate_accounts_for(current_username),
+    ]
     current_account = get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
@@ -311,8 +316,8 @@ def _clean_library_metadata(metadata: dict | None) -> dict:
         'note',
         'research_report',
         'factor_owner_ref',
-        'factor_family_ref',
-        'factor_git_commit',
+        'family_formula_fingerprint',
+        'self_formula_fingerprint',
         'product_group_id',
         'product_group_name',
         'product_group_paths',
@@ -361,8 +366,10 @@ def _merged_library_metadata(
     group_metadata = _product_group_metadata(current_username, product_group)
     for key, value in group_metadata.items():
         merged[key] = value
-    if isinstance(metadata, dict) and not metadata.get('factor_git_commit'):
-        merged.pop('factor_git_commit', None)
+    if isinstance(metadata, dict):
+        for key in ('family_formula_fingerprint', 'self_formula_fingerprint'):
+            if not metadata.get(key):
+                merged.pop(key, None)
     provided = _clean_library_metadata(metadata)
     for key, value in provided.items():
         merged[key] = value

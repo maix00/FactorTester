@@ -8,6 +8,28 @@ from click.testing import CliRunner
 
 from tools.cli.commands.client_catalog import client_catalog
 from tools.data.catalog import LocalCatalogStore
+from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _factor_record() -> dict:
+    return freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias="MmRateOfChg",
+        factor_alias="MmRateOfChg|P:CA|N:20d|$F:1d",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"P": "CA", "N": "20d", "$F": "1d"},
+    )
+
+
+def _factor_set_record(factor: dict) -> dict:
+    return freeze_factor_set_identity(
+        owner_ref="profile:maxa",
+        set_id="momentum",
+        alias="动量因子集合",
+        members=[factor],
+    )
 
 
 def _source(store: LocalCatalogStore) -> None:
@@ -34,7 +56,7 @@ def test_catalog_initializes_wal_database_and_preserves_counts(tmp_path) -> None
 
     value = store.initialize()
 
-    assert value["schema_version"] == 1
+    assert value["schema_version"] == 2
     assert value["database"].endswith("catalog/catalog.sqlite")
     assert value["products"] == 0
     assert (tmp_path / "FactorTester/catalog/catalog.sqlite-wal").exists() or (
@@ -94,49 +116,35 @@ def test_group_owned_membership_is_atomic_and_does_not_replace_other_groups(tmp_
     assert [tuple(row) for row in subjects] == [("factor", "factor:sha256:roc")]
 
 
-def test_factor_and_factor_set_revisions_are_immutable_by_git_identity(tmp_path) -> None:
+def test_factor_identities_are_formula_frozen_and_git_is_optional_provenance(tmp_path) -> None:
     store = LocalCatalogStore(tmp_path / "FactorTester")
-    store.upsert_factor({
-        "factor_ref": "factor:sha256:roc",
-        "owner_ref": "profile:maxa",
-        "family_name": "MmRateOfChg",
-        "factor_name": "MmRateOfChg|P:[CA]|N:20d|$F:1d",
-    })
-    store.upsert_factor_revision({
-        "factor_revision_ref": "factor-revision:roc:abc",
-        "factor_ref": "factor:sha256:roc",
+    factor_record = _factor_record()
+    store.upsert_factor(factor_record)
+    store.upsert_factor_provenance({
+        "ref": factor_record["ref"],
         "repository_ref": "profile:maxa",
-        "git_commit": "abc",
-        "git_blob": "def",
+        "revision": "abc",
+        "blob_hash": "def",
         "relative_path": "custom_factors/MmRateOfChg.py",
         "source_hash": "sha256:source",
     })
-    store.upsert_factor_set({
-        "set_ref": "factor-set:profile-maxa:momentum",
-        "owner_ref": "profile:maxa",
-        "set_id": "momentum",
-        "title_zh": "动量因子集合",
-        "manifest_path": ".factortester/factor-sets/momentum.json",
-        "git_commit": "abc",
-        "git_blob": "setblob",
-        "member_hash": "sha256:members",
-        "members": ["factor:sha256:roc"],
-    })
+    store.upsert_factor_set(_factor_set_record(factor_record))
 
     with store.connection() as connection:
         factor = connection.execute(
-            "SELECT git_commit, git_blob, dirty FROM factor_revisions"
+            "SELECT revision, blob_hash FROM factor_workspace_provenance"
         ).fetchone()
         factor_set = connection.execute(
-            "SELECT member_count, git_commit FROM factor_sets"
+            "SELECT member_count, member_fingerprint FROM factor_sets"
         ).fetchone()
         member = connection.execute(
             "SELECT factor_ref FROM factor_set_members"
         ).fetchone()
 
-    assert tuple(factor) == ("abc", "def", 0)
-    assert tuple(factor_set) == (1, "abc")
-    assert member[0] == "factor:sha256:roc"
+    assert tuple(factor) == ("abc", "def")
+    assert factor_set[0] == 1
+    assert factor_set[1]
+    assert member[0] == factor_record["ref"]
 
 
 def test_catalog_cli_preflight_is_read_only_and_reports_category_paths(tmp_path) -> None:
@@ -183,12 +191,8 @@ def test_catalog_cli_preflight_is_read_only_and_reports_category_paths(tmp_path)
 
 def test_catalog_cli_lists_owner_scoped_bindings_and_set_members(tmp_path) -> None:
     store = LocalCatalogStore(tmp_path / "client")
-    store.upsert_factor({
-        "factor_ref": "factor:roc",
-        "owner_ref": "profile:maxa",
-        "family_name": "MmRateOfChg",
-        "factor_name": "MmRateOfChg|P:[CA]|N:20d|$F:1d",
-    })
+    factor_record = _factor_record()
+    store.upsert_factor(factor_record)
     store.upsert_group({
         "group_ref": "group:cn",
         "owner_ref": "profile:maxa",
@@ -196,18 +200,10 @@ def test_catalog_cli_lists_owner_scoped_bindings_and_set_members(tmp_path) -> No
     })
     store.replace_group_subjects(
         "group:cn",
-        [{"subject_kind": "factor", "subject_ref": "factor:roc"}],
+        [{"subject_kind": "factor", "subject_ref": factor_record["ref"]}],
     )
-    store.upsert_factor_set({
-        "set_ref": "factor-set:maxa:momentum",
-        "owner_ref": "profile:maxa",
-        "set_id": "momentum",
-        "manifest_path": ".factortester/factor-sets/momentum.json",
-        "git_commit": "abc",
-        "git_blob": "def",
-        "member_hash": "sha256:members",
-        "members": ["factor:roc"],
-    })
+    factor_set_record = _factor_set_record(factor_record)
+    store.upsert_factor_set(factor_set_record)
 
     profile = tmp_path / "profile.json"
     profile.write_text(
@@ -236,5 +232,8 @@ def test_catalog_cli_lists_owner_scoped_bindings_and_set_members(tmp_path) -> No
     assert subjects.exit_code == 0, subjects.output
     assert sets.exit_code == 0, sets.output
     assert json.loads(groups.output)[0]["group_ref"] == "group:cn"
-    assert json.loads(subjects.output)[0]["subject_ref"] == "factor:roc"
-    assert json.loads(sets.output)[0]["members"] == ["factor:roc"]
+    assert json.loads(subjects.output)[0]["subject_ref"] == factor_record["ref"]
+    listed_set = json.loads(sets.output)[0]
+    assert [member["ref"] for member in listed_set["identity"]["members"]] == [
+        factor_record["ref"],
+    ]

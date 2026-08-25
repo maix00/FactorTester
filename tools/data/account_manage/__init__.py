@@ -6,7 +6,7 @@ import re
 import secrets
 import threading
 
-from .user import User
+from .user import User as User
 from tools.data.sqlite.account_manager import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config as _delete_factor_param_config,
@@ -463,6 +463,35 @@ def direct_subordinate_accounts_for(username: str | None) -> list:
             str(item.get('alias') or item.get('username') or '').lower(),
             str(item.get('username') or ''),
         ),
+    )
+
+
+def unique_object_visibility_policy_for(
+    username: str | None,
+    *,
+    profile_refs: list[str] | tuple[str, ...] = (),
+    shared_object_refs: list[str] | tuple[str, ...] = (),
+):
+    """Build the one object-visibility policy used by every catalog domain."""
+    from tools.data.types.object_visibility import UniqueObjectVisibilityPolicy
+
+    principal = str(username or "").strip()
+    if not principal:
+        return UniqueObjectVisibilityPolicy(own_owner_refs=())
+    own_refs = {
+        f"user:{principal}",
+        f"principal:{principal}",
+        *(str(value).strip() for value in profile_refs if str(value).strip()),
+    }
+    direct_refs = {
+        f"user:{account['username']}"
+        for account in direct_subordinate_accounts_for(principal)
+        if str(account.get("username") or "").strip()
+    }
+    return UniqueObjectVisibilityPolicy(
+        own_owner_refs=own_refs,
+        direct_subordinate_owner_refs=direct_refs,
+        shared_object_refs=shared_object_refs,
     )
 
 

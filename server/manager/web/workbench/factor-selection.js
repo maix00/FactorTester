@@ -5,16 +5,18 @@
   }
 
   function factorID(value) {
-    return value?.factor_ref || value?.target_ref || value?.alias || value?.factor_alias
+    return value?.ref || value?.factor_ref || value?.target_ref || value?.alias || value?.factor_alias
       || value?.id || value?.name || "";
   }
 
   function factorAlias(value) {
-    return value?.factor_alias || value?.alias || value?.name || value?.factor_ref || "";
+    return value?.alias || value?.factor_alias || value?.name || value?.ref
+      || value?.factor_ref || "";
   }
 
   function addCandidate(state, value, options = {}) {
-    if (!value || typeof value !== "object" || !factorID(value)) return;
+    if (!value || typeof value !== "object" || value.schema_version !== 2
+        || !value.ref || !value.alias || !value.identity) return;
     const rows = candidates(state);
     const index = rows.findIndex(item => factorID(item) === factorID(value));
     const existing = index >= 0 ? rows[index] : {};
@@ -24,38 +26,11 @@
     const setOnly = index >= 0
       ? Boolean(existing.factor_set_only) && Boolean(value.factor_set_only)
       : Boolean(value.factor_set_only);
-    const metadata = window.FTFactorModel?.sourceMetadata?.(value) || {};
     const candidate = {
       ...existing, ...value,
-      ...(metadata.factor_owner_ref
-        ? {factor_owner_ref: metadata.factor_owner_ref} : {}),
-      ...(metadata.factor_family_ref
-        ? {factor_family_ref: metadata.factor_family_ref} : {}),
-      ...(metadata.factor_params !== undefined
-        && (value.factor_params !== undefined || value.params !== undefined)
-        ? {factor_params: metadata.factor_params} : {}),
-      ...(metadata.factor_git_commit
-        ? {factor_git_commit: metadata.factor_git_commit} : {}),
-      factor_alias: factorAlias(value),
       ...(sourceSets.length ? {factor_set_refs: sourceSets} : {}),
       ...(setOnly ? {factor_set_only: true} : {}),
     };
-    if (!candidate.factor_git_commit) delete candidate.factor_git_commit;
-    // Keep the unprefixed names for the execution adapter, while the
-    // prefixed fields are the per-factor source metadata used by the UI and
-    // RunSpec authoring contract.
-    if (candidate.factor_owner_ref && !candidate.owner_ref) {
-      candidate.owner_ref = candidate.factor_owner_ref;
-    }
-    if (candidate.factor_family_ref && !candidate.family_ref) {
-      candidate.family_ref = candidate.factor_family_ref;
-    }
-    if (candidate.factor_params !== undefined && candidate.params === undefined) {
-      candidate.params = candidate.factor_params;
-    }
-    if (candidate.factor_git_commit && !candidate.git_commit) {
-      candidate.git_commit = candidate.factor_git_commit;
-    }
     if (!setOnly) delete candidate.factor_set_only;
     if (index >= 0) rows[index] = candidate; else rows.push(candidate);
     state.values.factor_candidates = rows;
@@ -192,15 +167,17 @@
   }
 
   function selectedFamily(state, factor = null) {
-    const ref = factor?.factor_family_ref || factor?.family_ref;
+    const selected = factor || selectedFactor(state);
+    const familyRef = selected?.identity?.family_ref || "";
+    const familyAlias = selected?.identity?.family_alias
+      || selected?.family || selected?.factor_family_alias || "";
     const registered = (state.families || []).find(item => [
-      item.family_ref, item.alias, item.factor_family_alias,
-    ].includes(ref || factor?.family || factor?.factor_family_alias));
+      item.ref, item.family_ref, item.alias, item.factor_family_alias,
+    ].includes(familyRef) || [
+      item.alias, item.family, item.factor_family_alias,
+    ].includes(familyAlias));
     if (registered) return registered;
-    if (factor?.family || factor?.factor_family_alias) return {
-      family: factor.family || factor.factor_family_alias,
-      family_ref: ref || "",
-    };
+    if (familyAlias) return {ref: familyRef, alias: familyAlias};
     return null;
   }
 

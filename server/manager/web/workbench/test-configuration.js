@@ -46,7 +46,7 @@
   }
 
   function factorRef(value) {
-    return String(value?.factor_ref || value?.target_ref || "").trim();
+    return String(value?.ref || value?.factor_ref || value?.target_ref || "").trim();
   }
 
   function factorCatalog(state) {
@@ -56,7 +56,14 @@
       ...(state.values?.factor_candidates || []),
     ]) {
       const ref = factorRef(item);
-      if (ref) byRef.set(ref, {...(byRef.get(ref) || {}), ...item});
+      if (!ref) continue;
+      const previous = byRef.get(ref);
+      const left = window.FTFactorModel?.frozenFactorIdentity?.(previous)?.record;
+      const right = window.FTFactorModel?.frozenFactorIdentity?.(item)?.record;
+      if (left && right && JSON.stringify(left) !== JSON.stringify(right)) {
+        throw new Error(`factor ref is bound to conflicting records: ${ref}`);
+      }
+      byRef.set(ref, {...(previous || {}), ...item});
     }
     return [...byRef.values()];
   }
@@ -78,27 +85,10 @@
   }
 
   function factorRecord(factor, family) {
-    const metadata = window.FTFactorModel?.sourceMetadata?.(factor) || {};
-    const ownerRef = metadata.factor_owner_ref || factor.owner_ref || "";
-    const familyRef = metadata.factor_family_ref || factor.family_ref
-      || factor.factor_family_ref || family?.family_ref || "";
-    const params = metadata.factor_params ?? factor.params ?? {};
-    const commit = metadata.factor_git_commit || factor.git_commit || "";
+    const frozen = window.FTFactorModel?.frozenFactorIdentity?.(factor);
+    if (!frozen) throw new Error("factor must be a complete frozen v2 record");
     return {
-      alias: factor.factor_alias || factor.alias || factor.name,
-      factor_family_alias: family?.factor_family_alias || family?.alias || family?.family
-        || factor.factor_family_alias || factor.family_alias
-        || factor.factor_alias || factor.alias,
-      factor_ref: factor.factor_ref || factor.target_ref || "",
-      family_ref: familyRef,
-      owner_ref: ownerRef,
-      git_commit: commit,
-      git_blob: factor.git_blob || "",
-      params,
-      factor_owner_ref: ownerRef,
-      factor_family_ref: familyRef,
-      factor_params: params,
-      ...(commit ? {factor_git_commit: commit} : {}),
+      ...structuredClone(frozen.record),
       ...(factor.source_kind === "transient" ? {
         source_kind: "transient",
         transient_factor_id: factor.transient_factor_id || "",
@@ -176,7 +166,7 @@
     FTTestProducts.synchronize(state);
     const configuration = state.workspace.configuration;
     const payload = structuredClone(configuration.payload || {});
-    payload.schema_version = 1;
+    payload.schema_version = 2;
     payload.shared = payload.shared || {};
     delete payload.shared.factor_families;
     payload.shared.factors = factors.map(item => (

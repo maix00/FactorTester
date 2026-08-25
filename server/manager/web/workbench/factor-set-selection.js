@@ -111,6 +111,17 @@
       selected: selections(state).map(item => item.target_ref),
       loading: FTTestObjectPicker.lazyLoading(state, "factors") && !items.length,
       loadingText: context.t("正在读取因子集合…"),
+      onCreate: context.session ? () => {
+        void FTTestObjectEditorOverlay.open(context, {
+          kind: "factor_set",
+          mode: "create",
+          ref: "new",
+          temporary: true,
+          testState: state,
+          onSaved: value => { void addInlineSet(context, state, value, refresh); },
+        });
+      } : null,
+      createLabel: context.t("新建因子集合"),
       onChange: values => { void updateSelection(values); },
     });
     root.append(picker.element);
@@ -151,7 +162,22 @@
     setSelections(state, [...selections(state), summary(item)]);
   }
 
+  async function addInlineSet(context, state, value, refresh) {
+    if (!value?.target_ref || !value?.manifest) return;
+    const item = {...value, visibility: "temporary", temporary: true};
+    const index = state.factorSetCatalog.items.findIndex(candidate => (
+      candidate.target_ref === item.target_ref
+    ));
+    if (index >= 0) state.factorSetCatalog.items[index] = item;
+    else state.factorSetCatalog.items.push(item);
+    await selectSet(context, state, item);
+    refresh?.();
+  }
+
   async function loadMembers(context, state, item) {
+    if (item.temporary && Array.isArray(item.manifest?.identity?.members)) {
+      return item.manifest.identity.members;
+    }
     const serialization = fieldDescriptor(state)[1].serialization || {};
     const result = [];
     let offset = 0;
@@ -173,16 +199,11 @@
   }
 
   function factorFromReference(reference, setRef) {
-    const target = reference?.target_ref || reference;
-    const decoded = FTFactorModel.decodeFrozenFactorRef(target);
-    if (!decoded) return null;
+    const source = reference?.data || reference;
+    const frozen = FTFactorModel.frozenFactorIdentity(source);
+    if (!frozen) return null;
     return {
-      factor_ref: target, target_ref: target,
-      factor_alias: decoded.alias, alias: decoded.alias,
-      factor_family_alias: decoded.family, family: decoded.family,
-      owner_ref: decoded.ownerRef, git_commit: decoded.gitCommit,
-      git_blob: decoded.gitBlob, relative_path: decoded.relativePath,
-      params: Object.fromEntries(decoded.params.map(item => [item.alias, item.value])),
+      ...source,
       factor_set_refs: [setRef],
       source_kind: "factor_set",
       factor_set_only: true,
@@ -192,7 +213,8 @@
   function summary(item) {
     return Object.fromEntries([
       "target_ref", "set_ref", "set_id", "title_zh", "description_zh",
-      "member_hash", "member_count", "visibility",
+      "member_fingerprint", "member_count", "visibility", "manifest",
+      "temporary",
     ].map(key => [key, item[key]]).filter(([, value]) => value !== undefined));
   }
 
@@ -202,7 +224,7 @@
     const values = [];
     for (const item of selected) values.push(await runInput(context, state, item));
     const declared = new Set(values.flatMap(value => (
-      value.manifest.member_refs.map(ref => FTFactorModel.decodeFrozenFactorRef(ref)?.alias)
+      value.manifest.identity.members.map(member => member.alias)
     )).filter(Boolean));
     const executing = new Set((factors || []).map(FTTestFactorSelection.factorAlias).filter(Boolean));
     const missing = [...executing].filter(alias => !declared.has(alias));
@@ -218,6 +240,11 @@
     if (cached) return cached.descriptor;
     const serialization = fieldDescriptor(state)[1].serialization || {};
     let bundle;
+    if (item.temporary && item.manifest) {
+      bundle = {descriptor: {target_ref: item.target_ref, manifest: item.manifest}};
+      state.factorSetCatalog.runInputs.set(item.target_ref, bundle);
+      return bundle.descriptor;
+    }
     if (item.visibility !== "server") {
       bundle = await nativeRequest(serialization.native_run_input_action, {
         target_ref: item.target_ref,

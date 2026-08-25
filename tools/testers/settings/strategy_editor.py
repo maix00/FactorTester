@@ -183,11 +183,8 @@ def _contract(*, application: str, app: Any | None = None) -> dict[str, Any]:
                     "cardinality": "many",
                     "derived_field": "factor_candidates",
                     "item_fields": [
-                        "factor_ref", "factor_alias", "factor_owner_ref",
-                        "factor_git_commit", "factor_family_ref", "factor_params",
-                        "owner_ref", "git_commit",
-                        "git_blob", "relative_path", "factor_family_alias", "family_ref",
-                        "params", "source_kind", "transient_factor_id",
+                        "schema_version", "ref", "alias", "owner_ref",
+                        "identity", "source_kind", "transient_factor_id",
                     ],
                 },
                 {
@@ -197,11 +194,8 @@ def _contract(*, application: str, app: Any | None = None) -> dict[str, Any]:
                     "cardinality": "many",
                     "derived_field": "factor_candidates",
                     "item_fields": [
-                        "factor_ref", "factor_alias", "factor_owner_ref",
-                        "factor_git_commit", "factor_family_ref", "factor_params",
-                        "owner_ref", "git_commit",
-                        "git_blob", "relative_path", "factor_family_alias", "family_ref",
-                        "params", "source_kind", "transient_factor_id",
+                        "schema_version", "ref", "alias", "owner_ref",
+                        "identity", "source_kind", "transient_factor_id",
                     ],
                 },
             ],

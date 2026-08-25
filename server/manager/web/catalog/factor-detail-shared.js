@@ -54,20 +54,11 @@
       backup.family_alias,
       backup.family,
     ) || "").trim();
-    const ref = String(first(
-      item.factor_family_ref,
-      item.family_ref,
-      backup.factor_family_ref,
-      backup.family_ref,
-      alias,
+    const fingerprint = String(first(
+      item.family_formula_fingerprint,
+      backup.family_formula_fingerprint,
     ) || "").trim();
-    const commit = String(first(
-      item.factor_git_commit,
-      item.git_commit,
-      backup.factor_git_commit,
-      backup.git_commit,
-    ) || "").trim();
-    return {alias, ref, commit};
+    return {alias, fingerprint};
   }
 
   function helpIcon(help, options = {}) {
@@ -248,17 +239,18 @@
     const items = [{
       value: "__current__",
       label: context.t("当前最新版本"),
-      description: context.t("未固定历史提交，使用因子家族当前源码"),
+      description: context.t("使用因子家族当前公式版本"),
       exclusive: true,
     }];
     for (const version of payload?.versions || []) {
-      if (!version?.commit) continue;
+      const fingerprint = version?.family_formula_fingerprint;
+      if (!fingerprint) continue;
       items.push({
-        value: version.commit,
-        label: version.short_commit || version.commit,
+        value: fingerprint,
+        label: fingerprint.slice(0, 12),
         description: [
           version.subject || "",
-          version.committed_at ? FTUI.formatDate(version.committed_at) : "",
+          version.created_at ? FTUI.formatDate(version.created_at) : "",
         ].filter(Boolean).join(" · "),
       });
     }
@@ -341,7 +333,7 @@
 
   function sourceVersionHelp(context, options = {}) {
     const version = options.version || {};
-    const commit = version.commit || "current";
+    const fingerprint = version.family_formula_fingerprint || "current";
     const title = options.title || context.t("源码版本详情");
     return helpIcon({
       mode: "overlay",
@@ -349,7 +341,7 @@
       load: async () => {
         let payload;
         try {
-          payload = await loadSourceVersion(context, options, commit);
+          payload = await loadSourceVersion(context, options, fingerprint);
         } catch (_) {
           const unavailable = document.createElement("p");
           unavailable.className = "factor-source-version-unavailable";
@@ -361,12 +353,10 @@
         const identity = document.createElement("dl");
         identity.className = "factor-source-version-overlay-meta";
         [
-          [context.t("源码版本"), payload.commit || context.t("当前最新版本")],
-          [context.t("源码哈希"), payload.source_hash || "—"],
-          [context.t("源码路径"), payload.relative_path || "—"],
-          [context.t("分支"), (payload.branches || []).join(", ") || "—"],
+          [context.t("家族公式指纹"), payload.family_formula_fingerprint || "—"],
+          [context.t("源码快照哈希"), payload.source_sha256 || "—"],
           [context.t("因子所有者引用"), payload.factor_owner_ref || "—"],
-          [context.t("因子家族引用"), payload.factor_family_ref || "—"],
+          [context.t("因子家族 alias"), payload.factor_family_alias || "—"],
         ].forEach(([label, value]) => {
           const term = document.createElement("dt"); term.textContent = label;
           const detail = document.createElement("dd"); detail.textContent = value;
@@ -389,37 +379,28 @@
     const raw = kind === "factor_ref"
       ? item.factor_ref || item.target_ref || ""
       : kind === "factor_owner_ref"
-        ? item.factor_owner_ref || item.owner_ref || ""
-        : kind === "factor_family_ref"
-          ? item.factor_family_ref || item.family_ref || ""
-          : "";
-    const decoded = kind === "factor_ref"
-      ? window.FTFactorModel?.decodeFrozenFactorRef?.(raw)
-      : null;
+        ? item.factor_owner_ref || ""
+        : "";
     const root = document.createElement("div");
     root.className = "factor-reference-overlay";
     const rows = [];
     appendIdentityRow(rows, context, context.t("引用值"), raw);
     appendIdentityRow(rows, context, context.t("具体因子 alias"),
-      decoded?.alias || item.factor_alias || item.alias);
+      item.factor_alias || item.alias);
     appendIdentityRow(rows, context, context.t("因子所有者"),
-      decoded?.ownerRef || item.factor_owner_ref || item.owner_ref
+      item.factor_owner_ref || item.owner_ref
         || item.owner_username);
     appendIdentityRow(rows, context, context.t("所有者名称"),
       item.owner_alias || item.owner_username);
     appendIdentityRow(rows, context, context.t("组织"),
       item.owner_organization_name || item.organization_name);
-    appendIdentityRow(rows, context, context.t("因子家族引用"),
-      decoded?.family || item.factor_family_ref || item.family_ref);
     appendIdentityRow(rows, context, context.t("因子家族 alias"),
       item.factor_family_alias || item.factor_family_name || item.family_alias
-        || decoded?.family);
-    appendIdentityRow(rows, context, context.t("源码版本"),
-      decoded?.gitCommit || item.factor_git_commit || item.git_commit
-        || context.t("当前最新版本"));
-    appendIdentityRow(rows, context, context.t("源码路径"),
-      item.relative_path);
-    appendIdentityRow(rows, context, context.t("源码对象哈希"), item.git_blob);
+    );
+    appendIdentityRow(rows, context, context.t("家族公式指纹"),
+      item.family_formula_fingerprint);
+    appendIdentityRow(rows, context, context.t("因子公式指纹"),
+      item.self_formula_fingerprint);
     const table = FTUI.table(
       [context.t("字段"), context.t("值")], rows,
     );
@@ -449,12 +430,14 @@
 
   function provenance(context, value) {
     const item = value || {};
-    const owner = item.factor_owner_ref || item.owner_ref || "";
-    const family = item.factor_family_ref || item.family_ref || "";
-    const commit = item.factor_git_commit || item.git_commit || "";
+    const owner = item.factor_owner_ref || "";
+    const family = item.factor_family_alias || item.factor_family_name || "";
+    const familyFingerprint = item.family_formula_fingerprint || "";
+    const selfFingerprint = item.self_formula_fingerprint || "";
     const factorRef = item.factor_ref || item.target_ref || "";
     const params = item.factor_params ?? item.params;
-    if (!owner && !family && !commit && !factorRef && params == null) return null;
+    if (!owner && !family && !familyFingerprint && !selfFingerprint
+      && !factorRef && params == null) return null;
     const rows = [];
     if (factorRef) rows.push([
       context.t("因子引用"), referenceValue(
@@ -467,52 +450,21 @@
         context.t("因子所有者详情"),
       ),
     ]);
-    if (family) rows.push([
-      context.t("factor_family_ref"), referenceValue(
-        context, {...item, factor_family_ref: family}, "factor_family_ref",
-        context.t("因子家族详情"),
-      ),
-    ]);
     const familyIdentityValue = familyIdentity(item);
-    if (familyIdentityValue.alias || familyIdentityValue.ref) {
+    if (familyIdentityValue.alias) {
       const familyValue = document.createElement("span");
       familyValue.className = "factor-reference-value";
       const familyText = document.createElement("span");
-      familyText.textContent = familyIdentityValue.alias || familyIdentityValue.ref;
+      familyText.textContent = familyIdentityValue.alias;
       familyValue.append(familyText);
-      if (familyIdentityValue.ref) familyValue.append(helpIcon({
-        mode: "overlay",
-        title: context.t("冻结因子家族详情"),
-        content: referenceOverlay(context, {
-          ...item,
-          factor_family_ref: familyIdentityValue.ref,
-          factor_family_alias: familyIdentityValue.alias,
-        }, "factor_family_ref"),
-      }, {ariaLabel: context.t("查看冻结的因子家族")}));
       rows.push([context.t("冻结因子家族"), familyValue]);
     }
-    const versionValue = document.createElement("span");
-    versionValue.className = "factor-reference-value";
-    const versionText = document.createElement("span");
-    versionText.textContent = commit || context.t("当前最新版本");
-    versionValue.append(versionText);
-    const versionOptions = sourceOptions(item);
-    if (["custom", "public"].includes(versionOptions.sourceKind)
-      && versionOptions.familyID) {
-      versionValue.append(sourceVersionHelp(context, {
-        ...versionOptions,
-        version: {commit},
-        title: commit
-          ? context.t("历史源码版本详情") : context.t("当前源码版本详情"),
-      }));
-    } else {
-      versionValue.append(helpIcon({
-        mode: "overlay",
-        title: context.t("源码版本详情"),
-        content: referenceOverlay(context, item, "factor_git_commit"),
-      }, {ariaLabel: context.t("查看源码版本身份")}));
-    }
-    rows.push([context.t("factor_git_commit"), versionValue]);
+    if (familyFingerprint) rows.push([
+      context.t("family_formula_fingerprint"), familyFingerprint,
+    ]);
+    if (selfFingerprint) rows.push([
+      context.t("self_formula_fingerprint"), selfFingerprint,
+    ]);
     if (params != null) {
       const valueNode = document.createElement("span");
       valueNode.className = "factor-reference-value";
@@ -564,7 +516,7 @@
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion, parameterEditor,
     parameterRows,
-    familyIdentity, fieldRow, parameterTable, pageClass, provenance, source,
+    familyIdentity, fieldRow, helpIcon, parameterTable, pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,
     sourceUnavailableText, sourceVersionHistory, versionItems, versionPicker,
     summary,

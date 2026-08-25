@@ -11,6 +11,8 @@ import time
 from typing import Any, Iterator
 
 from .schema import connect_catalog, ensure_catalog_schema
+from tools.factors.formula_identity import require_frozen_factor
+from tools.factors.factor_set_identity import require_frozen_factor_set
 
 
 class LocalCatalogStore:
@@ -281,104 +283,109 @@ class LocalCatalogStore:
 
     def upsert_factor(self, value: dict[str, Any]) -> None:
         now = time.time()
-        factor_ref = str(value.get("factor_ref") or "").strip()
-        family_name = str(value.get("family_name") or "").strip()
-        factor_name = str(value.get("factor_name") or "").strip()
-        if not all((factor_ref, family_name, factor_name)):
-            raise ValueError("factor_ref, family_name and factor_name are required")
+        frozen = require_frozen_factor(value)
+        factor_ref = frozen["ref"]
+        identity = frozen["identity"]
+        params = identity["params"]
         with self.connection() as connection:
             connection.execute(
                 """
                 INSERT INTO factors (
-                    factor_ref, owner_ref, family_name, factor_name,
-                    logical_kind, state, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    factor_ref, family_ref, owner_ref, family_alias, factor_alias,
+                    family_formula_fingerprint, self_formula_fingerprint,
+                    params_json, logical_kind, state, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(factor_ref) DO UPDATE SET
+                    family_ref = excluded.family_ref,
                     owner_ref = excluded.owner_ref,
-                    family_name = excluded.family_name,
-                    factor_name = excluded.factor_name,
+                    family_alias = excluded.family_alias,
+                    factor_alias = excluded.factor_alias,
+                    family_formula_fingerprint = excluded.family_formula_fingerprint,
+                    self_formula_fingerprint = excluded.self_formula_fingerprint,
+                    params_json = excluded.params_json,
                     logical_kind = excluded.logical_kind,
                     state = excluded.state,
                     updated_at = excluded.updated_at
                 """,
                 (
-                    factor_ref, str(value.get("owner_ref") or ""), family_name,
-                    factor_name, str(value.get("logical_kind") or "factor"),
+                    factor_ref, identity["family_ref"], frozen["owner_ref"],
+                    identity["family_alias"], frozen["alias"],
+                    identity["family_formula_fingerprint"],
+                    identity["self_formula_fingerprint"],
+                    json.dumps(params, ensure_ascii=False, sort_keys=True),
+                    "factor",
                     str(value.get("state") or "active"), now, now,
                 ),
             )
 
-    def upsert_factor_revision(self, value: dict[str, Any]) -> None:
+    def upsert_factor_provenance(self, value: dict[str, Any]) -> None:
         now = time.time()
-        revision_ref = str(value.get("factor_revision_ref") or "").strip()
-        factor_ref = str(value.get("factor_ref") or "").strip()
-        required = ("repository_ref", "git_commit", "git_blob", "relative_path", "source_hash")
-        if not revision_ref or not factor_ref or not all(
-            str(value.get(key) or "").strip() for key in required
-        ):
-            raise ValueError("factor revision identity and Git fields are required")
+        factor_ref = str(value.get("ref") or "").strip()
+        relative_path = str(value.get("relative_path") or "").strip()
+        source_hash = str(value.get("source_hash") or "").strip()
+        if not factor_ref or not relative_path or not source_hash:
+            raise ValueError("factor provenance requires factor_ref, path and source hash")
         with self.connection() as connection:
             connection.execute(
                 """
-                INSERT INTO factor_revisions (
-                    factor_revision_ref, factor_ref, repository_ref, git_commit,
-                    git_blob, relative_path, source_hash, dirty, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(factor_revision_ref) DO UPDATE SET
-                    factor_ref = excluded.factor_ref, repository_ref = excluded.repository_ref,
-                    git_commit = excluded.git_commit, git_blob = excluded.git_blob,
-                    relative_path = excluded.relative_path, source_hash = excluded.source_hash,
-                    dirty = excluded.dirty
+                INSERT INTO factor_workspace_provenance (
+                    factor_ref, repository_ref, revision, blob_hash,
+                    relative_path, source_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(
+                    factor_ref, repository_ref, revision, blob_hash, relative_path
+                ) DO UPDATE SET source_hash = excluded.source_hash
                 """,
                 (
-                    revision_ref, factor_ref, str(value["repository_ref"]),
-                    str(value["git_commit"]), str(value["git_blob"]),
-                    str(value["relative_path"]), str(value["source_hash"]),
-                    int(bool(value.get("dirty", False))), now,
+                    factor_ref, str(value.get("repository_ref") or ""),
+                    str(value.get("revision") or ""),
+                    str(value.get("blob_hash") or ""), relative_path,
+                    source_hash, now,
                 ),
             )
 
     def upsert_factor_set(self, value: dict[str, Any]) -> None:
         now = time.time()
-        set_ref = str(value.get("set_ref") or "").strip()
-        owner_ref = str(value.get("owner_ref") or "").strip()
-        set_id = str(value.get("set_id") or "").strip()
-        required = ("manifest_path", "git_commit", "git_blob", "member_hash")
-        if not set_ref or not owner_ref or not set_id or not all(
-            str(value.get(key) or "").strip() for key in required
-        ):
-            raise ValueError("factor-set identity and Git fields are required")
-        members = value.get("members") or []
-        if not isinstance(members, list) or any(not str(member).strip() for member in members):
-            raise ValueError("factor-set members must be a non-empty list")
+        frozen = require_frozen_factor_set(value)
+        set_ref = frozen["ref"]
+        owner_ref = frozen["owner_ref"]
+        identity = frozen["identity"]
+        set_id = identity["set_id"]
+        members = identity["members"]
         with self.connection() as connection:
             connection.execute(
                 """
                 INSERT INTO factor_sets (
                     set_ref, owner_ref, set_id, title_zh, description_zh,
-                    manifest_path, git_commit, git_blob, member_hash,
+                    member_fingerprint,
                     member_count, state, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(set_ref) DO UPDATE SET
                     owner_ref = excluded.owner_ref, set_id = excluded.set_id,
                     title_zh = excluded.title_zh, description_zh = excluded.description_zh,
-                    manifest_path = excluded.manifest_path, git_commit = excluded.git_commit,
-                    git_blob = excluded.git_blob, member_hash = excluded.member_hash,
+                    member_fingerprint = excluded.member_fingerprint,
                     member_count = excluded.member_count, state = excluded.state,
                     updated_at = excluded.updated_at
                 """,
                 (
-                    set_ref, owner_ref, set_id, str(value.get("title_zh") or set_id),
-                    str(value.get("description_zh") or ""), str(value["manifest_path"]),
-                    str(value["git_commit"]), str(value["git_blob"]),
-                    str(value["member_hash"]), len(members), str(value.get("state") or "active"),
+                    set_ref, owner_ref, set_id, frozen["alias"],
+                    str(value.get("description") or ""),
+                    identity["member_fingerprint"], len(members),
+                    str(value.get("state") or "active"),
                     now, now,
                 ),
             )
             connection.execute("DELETE FROM factor_set_members WHERE set_ref = ?", (set_ref,))
             connection.executemany(
-                "INSERT INTO factor_set_members (set_ref, ordinal, factor_ref) VALUES (?, ?, ?)",
-                [(set_ref, ordinal, str(member)) for ordinal, member in enumerate(members)],
+                "INSERT INTO factor_set_members "
+                "(set_ref, ordinal, factor_ref, frozen_identity_json) VALUES (?, ?, ?, ?)",
+                [
+                    (
+                        set_ref, ordinal, member["ref"],
+                        json.dumps(member, ensure_ascii=False, sort_keys=True),
+                    )
+                    for ordinal, member in enumerate(members)
+                ],
             )
 
     def list_groups(self, owner_ref: str | None = None) -> list[dict[str, Any]]:
@@ -439,10 +446,10 @@ class LocalCatalogStore:
         if owner_ref:
             query += " WHERE owner_ref = ?"
             args = (owner_ref,)
-        query += " ORDER BY owner_ref, family_name, factor_name, factor_ref"
+        query += " ORDER BY owner_ref, family_alias, factor_alias, factor_ref"
         with self.connection() as connection:
             rows = connection.execute(query, args).fetchall()
-        return [dict(row) for row in rows]
+        return [self._factor_record(dict(row)) for row in rows]
 
     def list_factor_sets(self, owner_ref: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM factor_sets"
@@ -450,19 +457,55 @@ class LocalCatalogStore:
         if owner_ref:
             query += " WHERE owner_ref = ?"
             args = (owner_ref,)
-        query += " ORDER BY owner_ref, set_id, git_commit, git_blob"
+        query += " ORDER BY owner_ref, set_id, member_fingerprint"
         with self.connection() as connection:
             rows = connection.execute(query, args).fetchall()
             result = []
             for row in rows:
-                value = dict(row)
+                stored = dict(row)
                 members = connection.execute(
-                    "SELECT factor_ref FROM factor_set_members "
+                    "SELECT frozen_identity_json FROM factor_set_members "
                     "WHERE set_ref = ? ORDER BY ordinal", (row["set_ref"],)
                 ).fetchall()
-                value["members"] = [item[0] for item in members]
-                result.append(value)
+                result.append({
+                    "schema_version": 2,
+                    "ref": stored["set_ref"],
+                    "alias": stored["title_zh"],
+                    "owner_ref": stored["owner_ref"],
+                    "description": stored["description_zh"],
+                    "identity": {
+                        "set_id": stored["set_id"],
+                        "member_fingerprint": stored["member_fingerprint"],
+                        "members": [json.loads(item[0]) for item in members],
+                    },
+                    "state": stored["state"],
+                })
         return result
+
+    @staticmethod
+    def _factor_record(value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            params = json.loads(value.get("params_json") or "{}")
+        except json.JSONDecodeError as error:
+            raise ValueError("stored factor params are invalid") from error
+        return {
+            "schema_version": 2,
+            "ref": value["factor_ref"],
+            "alias": value["factor_alias"],
+            "owner_ref": value["owner_ref"],
+            "identity": {
+                "family_ref": value["family_ref"],
+                "family_alias": value["family_alias"],
+                "family_formula_fingerprint": value[
+                    "family_formula_fingerprint"
+                ],
+                "self_formula_fingerprint": value[
+                    "self_formula_fingerprint"
+                ],
+                "params": params,
+            },
+            "state": value["state"],
+        }
 
     def replace_group_subjects(self, group_ref: str, subjects: list[dict[str, Any]]) -> None:
         """Replace one group's factor and factor-set bindings atomically."""
@@ -496,7 +539,8 @@ class LocalCatalogStore:
     def _counts(connection: sqlite3.Connection) -> dict[str, int]:
         tables = (
             "catalog_sources", "products", "product_groups", "product_group_products",
-            "factors", "factor_revisions", "factor_sets", "factor_set_members",
+            "factors", "factor_workspace_provenance", "factor_sets",
+            "factor_set_members",
             "product_group_subject_bindings",
         )
         return {

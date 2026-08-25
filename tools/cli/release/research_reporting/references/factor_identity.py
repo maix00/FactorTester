@@ -34,6 +34,16 @@ def validate_canonical_factor_identities(
     requests: list[dict[str, Any]],
 ) -> list[str]:
     """Validate one batch without importing the Factor engine into the client."""
+    return [
+        str(item["canonical_identity"])
+        for item in inspect_canonical_factor_identities(requests)
+    ]
+
+
+def inspect_canonical_factor_identities(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return canonical aliases and formula fingerprints in one engine batch."""
     if not requests:
         raise ValueError("factor identity validation batch is empty")
     command, cwd, environment = _validator_process()
@@ -60,7 +70,7 @@ def validate_canonical_factor_identities(
     rows = payload.get("results")
     if not isinstance(rows, list) or len(rows) != len(requests):
         raise ValueError("factor alias validator returned an incomplete batch")
-    canonical: list[str] = []
+    identities: list[dict[str, Any]] = []
     for request, row in zip(requests, rows, strict=True):
         if not isinstance(row, dict):
             raise ValueError("factor alias validator returned an invalid result")
@@ -72,10 +82,21 @@ def validate_canonical_factor_identities(
             raise ValueError(
                 f"Non-canonical factor identity {identity!r}; expected {expected!r}"
             )
-        canonical.append(expected)
+        family_fingerprint = str(row.get("family_formula_fingerprint") or "")
+        self_fingerprint = str(row.get("self_formula_fingerprint") or "")
+        if len(family_fingerprint) != 64:
+            raise ValueError("factor alias validator omitted family formula identity")
+        if str(request.get("object_kind")) == "factor" and len(self_fingerprint) != 64:
+            raise ValueError("factor alias validator omitted self formula identity")
+        identities.append({
+            "canonical_identity": expected,
+            "family_formula_fingerprint": family_fingerprint,
+            "self_formula_fingerprint": self_fingerprint,
+            "params": dict(row.get("params") or {}),
+        })
     if result.returncode:
         raise ValueError("factor alias validator rejected the identity batch")
-    return canonical
+    return identities
 
 
 def _validator_process() -> tuple[list[str], Path | None, dict[str, str]]:

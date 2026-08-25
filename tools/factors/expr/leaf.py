@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import threading
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
-    Optional, Sequence, Set, Tuple, Union, cast
+    TYPE_CHECKING, Any, Optional, Set
 )
 
 from tools.data.types import DataColumn
@@ -89,7 +87,7 @@ class ColumnRef(FactorExpr):
             dm: ProductDataView = getattr(p, freq.name)
             if source is not None:
                 try:
-                    ds = dm.set_current_source(source)
+                    dm.set_current_source(source)
                 except ValueError as e:
                     raise Warning(f"ColumnRef: source {source.key} is not compatible with product {p.name} at freq {freq.name}") from e
             if dm.next_available_source() is None:
@@ -330,7 +328,7 @@ class ConstExpr(FactorExpr):
     def _structural_key(self) -> tuple:
         v = self.value
         if isinstance(v, np.ndarray):
-            return ('ConstExpr', v.tobytes())
+            return ('ConstExpr', 'ndarray', str(v.dtype), tuple(v.shape), v.tobytes())
         return ('ConstExpr', v)
 
 

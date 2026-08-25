@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from tools.factors.formula_identity import require_frozen_factor
+
 
 def _factor_runtime_scope(payload: dict[str, Any]):
     from server.modules.shared.factor_param_resolver import (
@@ -104,10 +106,14 @@ def _typed_ic_execution_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "paths": paths,
     }
     execution["paths"] = paths
-    factors = [
-        deepcopy(item) for item in execution.get("factors") or []
-        if isinstance(item, dict) and str(item.get("factor_ref") or "") == factor_ref
-    ]
+    factors = []
+    for item in execution.get("factors") or []:
+        try:
+            frozen_factor = require_frozen_factor(item)
+        except (TypeError, ValueError):
+            continue
+        if frozen_factor["ref"] == factor_ref:
+            factors.append(deepcopy(frozen_factor))
     if len(factors) != 1:
         raise ValueError(f"typed IC factor descriptor is not frozen: {factor_ref}")
     execution["factors"] = factors
