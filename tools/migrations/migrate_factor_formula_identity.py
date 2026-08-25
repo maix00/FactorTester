@@ -302,6 +302,11 @@ def migrate_configuration_database(
             f"SELECT configuration_id, payload_json, {owner_expression} "
             "FROM research_configurations WHERE schema_version=1"
         ).fetchall()
+        legacy_manifest_rows = connection.execute(
+            f"SELECT configuration_id, payload_json, {owner_expression} "
+            "FROM research_configurations WHERE schema_version=2 "
+            "AND instr(payload_json, 'factor_revision_manifests') > 0"
+        ).fetchall()
         legacy_alias_family_map = _legacy_alias_family_map(rows)
         migrated: list[tuple[str, str]] = []
         errors: list[dict[str, str]] = []
@@ -335,6 +340,21 @@ def migrate_configuration_database(
                 errors.append({"configuration_id": identifier, "error": str(error)})
             else:
                 migrated.append((identifier, _canonical_json(value)))
+        cleaned_manifests: list[tuple[str, str]] = []
+        legacy_manifest_errors: list[dict[str, str]] = []
+        for row in legacy_manifest_rows:
+            identifier = str(row["configuration_id"])
+            try:
+                payload = json.loads(str(row["payload_json"] or ""))
+                value = _remove_legacy_revision_manifests(payload)
+            except (KeyError, TypeError, ValueError) as error:
+                legacy_manifest_errors.append({
+                    "configuration_id": identifier,
+                    "error": str(error),
+                })
+            else:
+                if value is not None:
+                    cleaned_manifests.append((identifier, _canonical_json(value)))
         factor_set_plan = _factor_set_migration_plan(
             connection, factors_by_legacy_ref,
         )
@@ -343,11 +363,19 @@ def migrate_configuration_database(
             discard_incompatible=discard_incompatible,
         )
         report = {
-            "eligible": len(rows),
-            "planned": len(migrated),
-            "migrated": len(migrated) if apply else 0,
-            "errors": errors,
-            "plan_hash": _plan_hash(migrated),
+            "eligible": len(rows) + len(legacy_manifest_rows),
+            "planned": len(migrated) + len(cleaned_manifests),
+            "migrated": (
+                len(migrated) + len(cleaned_manifests) if apply else 0
+            ),
+            "errors": [*errors, *legacy_manifest_errors],
+            "plan_hash": _plan_hash([*migrated, *cleaned_manifests]),
+            "legacy_revision_manifests": {
+                "eligible": len(legacy_manifest_rows),
+                "planned": len(cleaned_manifests),
+                "migrated": len(cleaned_manifests) if apply else 0,
+                "errors": legacy_manifest_errors,
+            },
             "factor_sets": factor_set_plan["report"],
             "account_domain": account_domain_plan["report"],
         }
@@ -360,6 +388,16 @@ def migrate_configuration_database(
                 "SET schema_version=2, revision=revision+1, payload_json=? "
                 "WHERE configuration_id=? AND schema_version=1",
                 [(payload, identifier) for identifier, payload in migrated],
+            )
+        if cleaned_manifests:
+            connection.executemany(
+                "UPDATE research_configurations "
+                "SET revision=revision+1, payload_json=? "
+                "WHERE configuration_id=? AND schema_version=2",
+                [
+                    (payload, identifier)
+                    for identifier, payload in cleaned_manifests
+                ],
             )
         discarded = _discard_incompatible_configurations(
             connection, errors,
@@ -380,6 +418,31 @@ def migrate_configuration_database(
         return report
     finally:
         connection.close()
+
+
+def _remove_legacy_revision_manifests(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict) or int(payload.get("schema_version") or 0) != 2:
+        raise IncompatibleFactorConfiguration(
+            "legacy revision manifest cleanup requires configuration schema 2"
+        )
+    shared = payload.get("shared")
+    if not isinstance(shared, dict):
+        raise IncompatibleFactorConfiguration("configuration shared section is missing")
+    if "factor_revision_manifests" not in shared:
+        return None
+    factors = shared.get("factors")
+    if not isinstance(factors, list):
+        raise IncompatibleFactorConfiguration("configuration factors are invalid")
+    try:
+        for factor in factors:
+            require_frozen_factor(factor)
+    except (TypeError, ValueError) as error:
+        raise IncompatibleFactorConfiguration(
+            "legacy revision manifests cannot be removed before factors are frozen"
+        ) from error
+    value = deepcopy(payload)
+    value["shared"].pop("factor_revision_manifests", None)
+    return value
 
 
 def _canonical_json(value: Any) -> str:
