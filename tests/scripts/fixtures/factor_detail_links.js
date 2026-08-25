@@ -216,12 +216,44 @@ assert.deepStrictEqual(
     ["N", "20d"],
   );
 
-  const familyContext = {...context, api: async path => {
-    assert.match(path, /source-versions\/custom\/MmRateOfChg/);
-    if (path.includes(`/${"b".repeat(40)}`)) {
+  const currentFamilyContext = {
+    ...context,
+    content: new Element(),
+    toolbar: new Element(),
+    api: async path => {
+      assert.match(path, /source-versions\/custom\/MmRateOfChg\/current/);
       return {
         success: true,
-        commit: "b".repeat(40),
+        source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+        math_expr: "P_t-P_{t-1}",
+        family_formula_fingerprint: "c".repeat(64),
+        params: [{alias: "N", default_value: "10d"}],
+      };
+    },
+  };
+  await window.FTFactorDetails.familyDetail(
+    currentFamilyContext,
+    {
+      ...data,
+      families: [{
+        ...data.families[0],
+        source_code: "",
+        family_formula_fingerprint: "c".repeat(64),
+      }],
+    },
+    "factor-family:sha256:momentum",
+  );
+  const currentSource = currentFamilyContext.content.children[0].children.find(item => (
+    item.className === "factor-detail-source"
+  ));
+  assert.match(currentSource.children[1].children[0].textContent, /MmRateOfChg/);
+
+  const familyContext = {...context, api: async path => {
+    assert.match(path, /source-versions\/custom\/MmRateOfChg/);
+    if (path.includes(`/${"b".repeat(64)}`)) {
+      return {
+        success: true,
+        family_formula_fingerprint: "b".repeat(64),
         source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
         source_hash: "historical-hash",
         math_expr: "P_t-P_{t-1}",
@@ -231,8 +263,10 @@ assert.deepStrictEqual(
     return {
       success: true,
       available: true,
-      current: {commit: "a".repeat(40), is_current: true},
-      versions: [{commit: "b".repeat(40), short_commit: "bbbb", subject: "旧版本"}],
+      current_fingerprint: "a".repeat(64),
+      versions: [{
+        family_formula_fingerprint: "b".repeat(64), subject: "旧版本",
+      }],
     };
   }};
   await window.FTFactorDetails.familyDetail(
@@ -245,7 +279,7 @@ assert.deepStrictEqual(
   assert.ok(familyContext.content.children[0].children[0].children[0]);
   const historyPicker = familyContext.content.children[0].children[0]
     .children[0].children[1].children[0];
-  await historyPicker.pickerOptions.onChange(["b".repeat(40)]);
+  await historyPicker.pickerOptions.onChange(["b".repeat(64)]);
   await new Promise(resolve => setTimeout(resolve, 0));
   const historicalSource = familyContext.content.children[0].children.find(item => (
     item.className === "factor-detail-source"

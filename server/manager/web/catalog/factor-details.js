@@ -71,7 +71,7 @@
       );
     }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
-    family = await withSource(context, family);
+    family = await withCurrentFamilySource(context, family);
     const baseFamily = family;
     context.setHeading(model().familyName(baseFamily), context.t("因子家族"));
     context.updateActiveTab?.({title: model().familyName(baseFamily)});
@@ -260,6 +260,30 @@
       };
     } catch (_) {
       return value;
+    }
+  }
+
+  async function withCurrentFamilySource(context, value) {
+    if (value?.source_code) return value;
+    const options = window.FTFactorDetailShared.sourceOptions(value);
+    if (!["custom", "public"].includes(options.sourceKind)) return value;
+    try {
+      const payload = await window.FTFactorDetailShared.loadSourceVersion(
+        context, value, "current",
+      );
+      return {
+        ...value,
+        ...payload,
+        source_unavailable_reason: "",
+      };
+    } catch (_) {
+      return {
+        ...value,
+        source_code: "",
+        source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
+          context,
+        ),
+      };
     }
   }
 

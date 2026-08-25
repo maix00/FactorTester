@@ -51,28 +51,35 @@ def build_client_library_projection(
         item["factor_alias"],
     ))
 
-    families_by_ref: dict[str, dict[str, Any]] = {}
+    families_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
     for item in payload.get("families") or []:
         if not isinstance(item, dict):
             continue
         family = _family_projection(item)
         if family is not None:
-            families_by_ref[family["family_ref"]] = family
+            key = _family_group_key(family)
+            families_by_identity[key] = {
+                **families_by_identity.get(key, {}),
+                **family,
+            }
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in factors:
-        grouped[
-            (item["owner_username"], item["factor_family_alias"])
-        ].append(item)
-    for (owner_username, family_alias), items in sorted(grouped.items()):
+        grouped[_family_group_key(item)].append(item)
+    for identity, items in sorted(grouped.items()):
         first = items[0]
+        owner_username = first["owner_username"]
+        family_alias = first["factor_family_alias"]
         sources = {
             str(item.get("source") or item.get("factor_kind") or "")
             .strip().lower()
             for item in items
         }
         family_source = (
-            "public" if "public" in sources
+            "public" if (
+                "public" in sources
+                or first.get("factor_owner_ref") in {"public", "__public_jobs__"}
+            )
             else "custom" if "custom" in sources
             else "registered"
         )
@@ -88,17 +95,28 @@ def build_client_library_projection(
             "chinese_name": first["chinese_name"],
             "description": first["description"],
             "math_expr": first["math_expr"],
-            "owner_username": owner_username,
-            "owner_alias": first["owner_alias"],
+            "owner_username": (
+                "__public_jobs__" if family_source == "public"
+                else owner_username
+            ),
+            "owner_alias": (
+                "公共因子库" if family_source == "public"
+                else first["owner_alias"]
+            ),
+            "factor_owner_ref": first["factor_owner_ref"],
+            "family_formula_fingerprint": first[
+                "family_formula_fingerprint"
+            ],
             "factor_kind": family_source,
             "source": family_source,
+            "has_source_definition": False,
             "factor_count": len(items),
             "categories": sorted({
                 item["category"] for item in items if item["category"]
             }),
             "factor_refs": sorted({item["factor_ref"] for item in items}),
         }
-        existing = families_by_ref.get(family_ref)
+        existing = families_by_identity.get(identity)
         if existing is not None:
             family["params"] = existing.get("params") or []
             try:
@@ -114,10 +132,10 @@ def build_client_library_projection(
                     *existing.get("factor_refs", []),
                 }),
             }
-        families_by_ref[family_ref] = family
+        families_by_identity[identity] = family
 
     families = sorted(
-        families_by_ref.values(),
+        families_by_identity.values(),
         key=lambda item: (
             item["factor_family_alias"],
             item["owner_alias"],
@@ -151,6 +169,24 @@ def build_client_library_projection(
         **projection,
         "projection_hash": sha256(encoded).hexdigest(),
     }
+
+
+def _family_group_key(item: dict[str, Any]) -> tuple[str, str]:
+    """Identify a family independently from any registered formula revision."""
+    alias = _safe_text(
+        item.get("factor_family_alias")
+        or item.get("factor_family_name")
+        or item.get("family_alias")
+        or item.get("family")
+    )
+    source = str(item.get("source") or item.get("factor_kind") or "").lower()
+    owner_ref = _safe_text(item.get("factor_owner_ref") or item.get("owner_ref"))
+    owner_username = _safe_text(item.get("owner_username"))
+    if source == "public" or owner_ref in {"public", "__public_jobs__"}:
+        owner = "public"
+    else:
+        owner = owner_username or owner_ref
+    return owner, alias
 
 
 def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -218,6 +254,7 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         ),
         "factor_kind": source,
         "source": source,
+        "has_source_definition": True,
         "factor_count": factor_count,
         "factor_refs": sorted(set(factor_refs)),
         "updated_at": _safe_text(item.get("updated_at")),
