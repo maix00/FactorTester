@@ -601,6 +601,10 @@
         onActivate: jobs.load,
       },
     } : {
+      // A factor is defined by its frozen family formula and parameter values.
+      // Family descriptive metadata belongs to family creation, not factor
+      // creation; keep the shared detail surface for factor view/edit only.
+      overview: {hidden: mode === "create"},
       jobs: {
         hidden: mode === "create" || context.testObjectTemporary === true,
         onActivate: jobs.load,

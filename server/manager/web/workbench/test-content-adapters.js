@@ -93,6 +93,12 @@
       if (detailSource && Object.prototype.hasOwnProperty.call(source, detailSource)) {
         values[detailSource] = source[detailSource];
       }
+      const detailKindSource = chip.detail_overlay?.kind_source_key
+        || chip.detail_overlay?.kindSourceKey;
+      if (detailKindSource
+        && Object.prototype.hasOwnProperty.call(source, detailKindSource)) {
+        values[detailKindSource] = source[detailKindSource];
+      }
     }
     return values;
   }
@@ -155,7 +161,8 @@
         factorCandidateLabel: references.length === 1
           ? factorLabel(factors[0])
           : soleSet?.label || `${references.length} 个`,
-        factor_candidates: [candidateSet],
+        factorCandidateDetailKind: references.length === 1 ? "factor" : "factor_set",
+        factor_candidate_detail: references.length === 1 ? factors[0] : candidateSet,
       };
     }
     if (adapter === "selected_factors") {

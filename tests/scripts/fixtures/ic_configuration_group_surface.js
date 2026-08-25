@@ -131,7 +131,8 @@ const state = {
         source_adapter: "selected_factor_candidates",
         clickable: true,
         detail_overlay: {
-          kind: "factor_set", mode: "view", source_key: "factor_candidates",
+          kind_source_key: "factorCandidateDetailKind", mode: "view",
+          source_key: "factor_candidate_detail",
           ref_key: "target_ref",
         },
       },
@@ -184,7 +185,8 @@ const chipSources = FTTestContentAdapters.chipSources(state, {
   product_path_selection_id: group.product_scope_ref,
 });
 assert.equal(chipSources.factorCandidateLabel, "ROC 1m");
-assert.equal(chipSources.factor_candidates.length, 1);
+assert.equal(chipSources.factorCandidateDetailKind, "factor");
+assert.equal(chipSources.factor_candidate_detail.ref, factorRef);
 
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
@@ -222,8 +224,8 @@ const factorChip = renderedChips.find(chip => chip.children[0]?.textContent === 
 factorChip.listeners.click();
 assert.deepEqual(
   {kind: openedObject.kind, mode: openedObject.mode},
-  {kind: "factor_set", mode: "view"},
-  "IC factor-candidate chip must open the factor-set view overlay",
+  {kind: "factor", mode: "view"},
+  "a one-factor IC candidate chip must open the factor view overlay",
 );
 const productChip = renderedChips.find(chip => chip.children[0]?.textContent === "产品组");
 productChip.listeners.click();
