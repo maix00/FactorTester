@@ -259,6 +259,17 @@ class WindowBarsExpr(FactorExpr):
         return ('WindowBarsExpr', self.window._structural_key())
 
 
+def window_bars(window: Any) -> WindowBarsExpr:
+    """Return the observation count represented by ``window`` at run time.
+
+    Keeping this conversion inside the expression graph makes formulas that
+    depend on their rolling sample size structurally identifiable.  Factor
+    sources must use this helper instead of opaque custom ``FactorExpr``
+    subclasses whose evaluation logic is absent from the semantic key.
+    """
+    return WindowBarsExpr(_to_expr(window))
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # RollingOp — 滚动聚合结果节点
 # ═════════════════════════════════════════════════════════════════════════════

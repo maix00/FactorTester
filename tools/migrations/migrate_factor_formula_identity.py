@@ -126,7 +126,7 @@ def backfill_current_factor_source_versions(
             fingerprint = fingerprint_resolver(source_code, factor_id)
             if version_loader(kind, owner, factor_id, fingerprint) is None:
                 planned.append((kind, owner, factor_id, source_code, fingerprint))
-        except (ImportError, TypeError, ValueError) as error:
+        except Exception as error:
             errors.append({
                 "source_kind": kind,
                 "owner_username": owner,
