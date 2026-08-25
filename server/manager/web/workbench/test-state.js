@@ -20,7 +20,7 @@
   function mergeByID(existing, incoming) {
     const result = new Map();
     for (const item of [...(existing || []), ...(incoming || [])]) {
-      const id = item?.factor_ref || item?.target_ref || item?.family_ref
+      const id = item?.ref || item?.target_ref || item?.family_ref
         || item?.group_ref || item?.product_group_ref || item?.id;
       if (id) result.set(String(id), item);
     }
@@ -77,7 +77,7 @@
     const selectedICGroup = state.kind === "ic"
       ? window.FTICConfigurationGroupModel?.selected?.(state)?.[0] : null;
     state.factorRef = selectedICGroup?.factor_ref
-      || state.savedFactors[0]?.factor_ref || "";
+      || state.savedFactors[0]?.ref || "";
     state.groupRefs = window.FTTestProducts?.restoreReferences
       ? FTTestProducts.restoreReferences(state.analysis, applicationUI)
       : FTTestLazyCode.fallbackGroupReferences(state.analysis, applicationUI);
@@ -220,8 +220,8 @@
 
   function frozenFactorRef(value) {
     if (!value || typeof value !== "object" || value.schema_version !== 2) return "";
-    const ref = String(value.ref || value.factor_ref || "").trim();
-    const alias = String(value.alias || value.factor_alias || "").trim();
+    const ref = String(value.ref || "").trim();
+    const alias = String(value.alias || "").trim();
     if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(ref) || !alias) return "";
     return value.identity && typeof value.identity === "object" ? ref : "";
   }

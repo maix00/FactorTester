@@ -10,16 +10,29 @@ global.FTTestLazyCode = {
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "test-state.js",
 });
+const inlineFactor = {
+  schema_version: 2,
+  ref: `factor:v2:${"a".repeat(43)}`,
+  alias: "InlineFactor",
+  owner_ref: "profile:maxa",
+  identity: {
+    family_ref: `factor-family:v2:${"b".repeat(43)}`,
+    family_alias: "InlineFamily",
+    family_formula_fingerprint: "c".repeat(64),
+    self_formula_fingerprint: "d".repeat(64),
+    params: {},
+  },
+};
 
 const state = {
   kind: "ic",
   workspace: {configuration: {payload: {
     shared: {
-      factors: [{factor_ref: "factor:inline", factor_alias: "InlineFactor"}],
+      factors: [inlineFactor],
       factor_families: [],
       temporary_objects: {
         factors: [{
-          factor_ref: "factor:inline", factor_alias: "InlineFactor", temporary: true,
+          ...inlineFactor, temporary: true,
         }],
         product_groups: [{
           id: "inline-product-group:session", temporary: true, paths: ["CNFutures/**"],
@@ -39,7 +52,7 @@ const state = {
 
 window.FTTestState.applyWorkspaceConfiguration(state);
 window.FTTestState.seedSavedCatalogs(state);
-assert.equal(state.values.factor_candidates[0].factor_alias, "InlineFactor");
+assert.equal(state.values.factor_candidates[0].alias, "InlineFactor");
 assert.equal(state.values.category_candidates[0].id, "inline-category:session");
 assert.equal(state.groups[0].id, "inline-product-group:session");
 assert.equal(state.transientFactorSources[0].source_code, "class InlineFactor: pass\n");

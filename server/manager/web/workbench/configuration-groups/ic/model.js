@@ -16,7 +16,7 @@
     state.analysis = state.analysis && typeof state.analysis === "object"
       ? state.analysis : {};
     if (!Array.isArray(state.analysis.configuration_groups)) {
-      state.analysis.configuration_groups = migrateFlat(state.analysis);
+      state.analysis.configuration_groups = [];
     }
     state.analysis.configuration_groups = state.analysis.configuration_groups.map(normalize);
     const selectionDeclared = Array.isArray(state.selectedICConfigurationGroupIDs);
@@ -147,39 +147,6 @@
         ...(Array.isArray(value.editor_mounted_tabs) ? value.editor_mounted_tabs : []),
       ]),
     };
-  }
-
-  function migrateFlat(analysis) {
-    const local = analysis.local_settings || analysis.settings || {};
-    const factorRefs = unique((analysis.factors || [])
-      .map(item => String(item?.factor_ref || item?.target_ref || "").trim())
-      .filter(Boolean));
-    const productRef = String(
-      analysis.product_path_selection_id || analysis.selection_id || "",
-    ).trim();
-    const delays = unique((local.ic_lags || []).map(Number)
-      .filter(item => Number.isInteger(item) && item >= 0));
-    const hasFlat = factorRefs.length || productRef || delays.length;
-    if (!hasFlat) return [];
-    if (factorRefs.length !== 1 || !productRef || delays.length !== 1) {
-      throw new Error(
-        "cannot migrate flat IC configuration unless it has one factor, product group, and Delay",
-      );
-    }
-    const correlation = String(local.ic_correlation || "rank");
-    analysis.legacy_flat_migrated = true;
-    return [normalize({
-      config_group_id: identifier("icg"),
-      batch_id: identifier("icb"),
-      name: "迁移的 IC 配置组",
-      factor_ref: factorRefs[0],
-      product_scope_ref: productRef,
-      entry_delay_bars: delays[0],
-      horizon: local.forward_return_horizons || {sampling: "scale_aware"},
-      methods: correlation === "both" ? ["rank", "pearson"]
-        : [correlation === "pearson" ? "pearson" : "rank"],
-      return_price_basis: local.return_price_basis || "next_open_to_open_adjusted",
-    })];
   }
 
   function normalizeHorizon(value) {

@@ -1,6 +1,16 @@
 (() => {
   const model = () => window.FTFactorModel;
 
+  function factorAlias(value) {
+    return value?.schema_version === 2
+      ? String(value.alias || "") : String(value?.factor_alias || "");
+  }
+
+  function factorRef(value) {
+    return value?.schema_version === 2
+      ? String(value.ref || "") : String(value?.factor_ref || "");
+  }
+
   async function factorDetail(
     context, data, targetRef, mode = "view", nativeRequest, options = {},
   ) {
@@ -20,20 +30,21 @@
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
       : "未固定公式版本";
-    context.setHeading(factor.factor_alias || context.t("因子详情"), model().familyName(factor));
-    const factorRef = factor.factor_ref || targetRef;
+    const alias = factorAlias(factor);
+    const frozenRef = factorRef(factor) || targetRef;
+    context.setHeading(alias || context.t("因子详情"), model().familyName(factor));
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
-      context.navigate(`/factor-series?factor_ref=${encodeURIComponent(factorRef)}`);
+      context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
     if (factor.can_edit && context.session && !context.testObjectViewOnly) {
       context.toolbar?.append(context.button(context.t("编辑"), () => {
         context.navigate(FTTabReturn.withSource(
-          `/factors/factor/${encodeURIComponent(factor.factor_alias || factorRef)}?mode=edit`,
-          context, {kind: "factor", ref: factor.factor_alias || factorRef},
+          `/factors/factor/${encodeURIComponent(alias || frozenRef)}?mode=edit`,
+          context, {kind: "factor", ref: alias || frozenRef},
         ));
       }, context.t("在独立标签页编辑因子")));
     }
-    context.updateActiveTab?.({title: factor.factor_alias || context.t("因子详情")});
+    context.updateActiveTab?.({title: alias || context.t("因子详情")});
     const root = document.createElement("div");
     root.className = window.FTFactorDetailShared.pageClass("view", "factor-page");
     const top = document.createElement("div");
@@ -42,7 +53,7 @@
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
     const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
-    const jobs = objectJobs(context, "factor", factorRef, factor);
+    const jobs = objectJobs(context, "factor", frozenRef, factor);
     const tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: "factor",
       mode: "view",
@@ -496,7 +507,11 @@
 
   function navigateReference(context, kind, item, path) {
     if (kind === "factor" && context.openFactor) {
-      context.openFactor(item);
+      context.openFactor({
+        ...item,
+        ref: String(item?.target_ref || ""),
+        alias: String(item?.label || item?.title_zh || ""),
+      });
       return;
     }
     context.navigate(path);

@@ -91,14 +91,8 @@ const legacy = {
   },
 };
 model.initialize(legacy);
-assert.equal(legacy.analysis.configuration_groups.length, 1);
-const migrated = legacy.analysis.configuration_groups[0];
-assert.equal(migrated.factor_ref, factorRef);
-assert.equal(migrated.product_scope_ref, "product-group:legacy");
-assert.equal(migrated.entry_delay_bars, 3);
-assert.deepEqual(migrated.methods, ["rank", "pearson"]);
-assert.equal(migrated.return_price_basis, "next_close_to_close_adjusted");
-assert.equal(legacy.analysis.legacy_flat_migrated, true);
+assert.deepEqual(legacy.analysis.configuration_groups, []);
+assert.equal("legacy_flat_migrated" in legacy.analysis, false);
 
 const ambiguous = {
   kind: "ic",
@@ -108,7 +102,8 @@ const ambiguous = {
     local_settings: {ic_lags: [0, 1]},
   },
 };
-assert.throws(() => model.initialize(ambiguous), /cannot migrate flat IC configuration/);
+model.initialize(ambiguous);
+assert.deepEqual(ambiguous.analysis.configuration_groups, []);
 
 model.removeSelected(state);
 assert.deepEqual(state.analysis.configuration_groups, []);

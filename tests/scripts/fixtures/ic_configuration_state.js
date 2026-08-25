@@ -110,11 +110,8 @@ const legacy = {
   values: {},
 };
 window.FTTestState.applyWorkspaceConfiguration(legacy);
-assert.equal(legacy.analysis.legacy_flat_migrated, true);
-assert.equal(legacy.analysis.configuration_groups.length, 1);
-assert.deepEqual(legacy.selectedICConfigurationGroupIDs, [
-  legacy.analysis.configuration_groups[0].config_group_id,
-]);
-assert.deepEqual(legacy.groupRefs, ["product-group:legacy"]);
+assert.equal("legacy_flat_migrated" in legacy.analysis, false);
+assert.deepEqual(legacy.analysis.configuration_groups, []);
+assert.deepEqual(legacy.selectedICConfigurationGroupIDs, []);
 
 console.log("ok");

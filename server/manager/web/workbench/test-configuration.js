@@ -19,7 +19,9 @@
     const groups = window.FTICConfigurationGroupModel?.selected?.(state)
       || (Array.isArray(state.analysis?.configuration_groups)
         ? state.analysis.configuration_groups : []);
-    const refs = [...new Set(groups.map(item => factorRef(item)).filter(Boolean))];
+    const refs = [...new Set(groups.map(item => String(
+      item?.factor_ref || "",
+    ).trim()).filter(Boolean))];
     if (refs.length) {
       const catalog = new Map(factorCatalog(state).map(item => [factorRef(item), item]));
       return refs.map(ref => {
@@ -46,7 +48,7 @@
   }
 
   function factorRef(value) {
-    return String(value?.ref || value?.factor_ref || value?.target_ref || "").trim();
+    return String(value?.ref || "").trim();
   }
 
   function factorCatalog(state) {
@@ -120,7 +122,7 @@
     const factors = executionFactors(state);
     const factor = factors[0] || selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
-    const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
+    const alias = factor.alias;
     const kindTitle = {
       ic: "IC",
       backtest: "Backtest",
@@ -225,9 +227,9 @@
       state.manifest, state.values,
     );
     const factor = factors[0];
-    const alias = factor.factor_alias || factor.alias || factor.name;
-    const family = familyValue?.factor_family_alias || familyValue?.alias
-      || factor.factor_family_alias || factor.family_alias || alias;
+    const alias = factor.alias;
+    const family = factor.identity?.family_alias
+      || familyValue?.factor_family_alias || familyValue?.alias || alias;
     if (state.kind === "ic") {
       return FTICConfiguration.compileAnalysis({
         manifest: state.manifest,
@@ -245,7 +247,7 @@
         paths: selection.selected_paths,
         factor_family_alias: family,
         factor_alias: alias,
-        factor_ref: factor.factor_ref || factor.target_ref || "",
+        factor_ref: factor.ref,
         settings,
         local_settings: settings,
       }, state.values, {stripRootRegistered: true});

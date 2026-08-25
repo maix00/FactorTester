@@ -33,7 +33,7 @@ global.FTTestFactors = {panel: () => {
   return new Element("factor-panel");
 }};
 global.FTTestFactorSelection = {
-  factorAlias: value => value?.factor_alias || value?.alias || "",
+  factorAlias: value => value?.alias || "",
   candidates: state => state.values?.factor_candidates || [],
 };
 window.FTTestFactorSelection = global.FTTestFactorSelection;
@@ -207,28 +207,37 @@ const overlayManifest = {
     },
   ],
 };
+const factorRefs = {
+  roc: `factor:v2:${"a".repeat(43)}`,
+  value: `factor:v2:${"b".repeat(43)}`,
+  value1: `factor:v2:${"c".repeat(43)}`,
+  value2: `factor:v2:${"d".repeat(43)}`,
+  first: `factor:v2:${"e".repeat(43)}`,
+  second: `factor:v2:${"f".repeat(43)}`,
+  history: `factor:v2:${"g".repeat(43)}`,
+};
 const adapterSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
-    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
-    {factor_ref: "factor:value", factor_alias: "Value",
+    {ref: factorRefs.roc, alias: "ROC 1m"},
+    {ref: factorRefs.value, alias: "Value",
       factor_set_refs: ["factor-set:value"], factor_set_only: true},
   ], factor_source_selections: [
-    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {ref: factorRefs.roc, alias: "ROC 1m"},
   ], factor_set_selections: [
     {target_ref: "factor-set:value", title_zh: "价值集合"},
   ]},
   groups: [{group_ref: "group:day", name: "日盘"}],
 }, {
-  factor_candidate_refs: ["factor:roc"],
+  factor_candidate_refs: [factorRefs.roc],
   product_path_selection: {product_group_template_id: "group:day", label: "日盘"},
 });
-assert.equal(adapterSources.factor[0].factor_ref, "factor:roc");
+assert.equal(adapterSources.factor[0].ref, factorRefs.roc);
 assert.equal(adapterSources.factorCandidateLabel, "ROC 1m");
 assert.equal(adapterSources.factor_candidates.length, 1);
 assert.equal(adapterSources.factor_candidates[0].temporary, true);
 assert.deepEqual(adapterSources.factor_candidates[0].related_references, [{
-  target_ref: "factor:roc", label: "ROC 1m",
+  target_ref: factorRefs.roc, label: "ROC 1m",
 }]);
 assert.equal(adapterSources.factor_candidates[0].source_factors.length, 1);
 assert.equal(adapterSources.factor_candidates[0].source_factor_sets.length, 0);
@@ -236,11 +245,11 @@ assert.equal(adapterSources.product_group[0].group_ref, "group:day");
 const pageCandidateSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
-    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
-    {factor_ref: "factor:value", factor_alias: "Value",
+    {ref: factorRefs.roc, alias: "ROC 1m"},
+    {ref: factorRefs.value, alias: "Value",
       factor_set_refs: ["factor-set:value"], factor_set_only: true},
   ], factor_source_selections: [
-    {factor_ref: "factor:roc", factor_alias: "ROC 1m"},
+    {ref: factorRefs.roc, alias: "ROC 1m"},
   ], factor_set_selections: [
     {target_ref: "factor-set:value", title_zh: "价值集合"},
   ]},
@@ -258,9 +267,9 @@ assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [
 const oneSetCandidateSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
-    {factor_ref: "factor:value-1", factor_alias: "Value 1",
+    {ref: factorRefs.value1, alias: "Value 1",
       factor_set_refs: ["factor-set:value"], factor_set_only: true},
-    {factor_ref: "factor:value-2", factor_alias: "Value 2",
+    {ref: factorRefs.value2, alias: "Value 2",
       factor_set_refs: ["factor-set:value"], factor_set_only: true},
   ], factor_source_selections: [], factor_set_selections: [
     {target_ref: "factor-set:value", title_zh: "价值集合"},
@@ -270,14 +279,14 @@ assert.equal(oneSetCandidateSources.factorCandidateLabel, "价值集合");
 const cacheState = {
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: [
-    {factor_ref: "factor:first", factor_alias: "First"},
+    {ref: factorRefs.first, alias: "First"},
   ], factor_source_selections: [], factor_set_selections: []},
 };
 assert.equal(
   FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "First",
 );
 cacheState.values.factor_candidates = [
-  {factor_ref: "factor:second", factor_alias: "Second"},
+  {ref: factorRefs.second, alias: "Second"},
 ];
 assert.equal(
   FTTestContentAdapters.chipSources(cacheState).factorCandidateLabel, "Second",
@@ -288,23 +297,23 @@ const persistedStrategySources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
   values: {factor_candidates: []},
   savedFactors: [{
-    factor_ref: "factor:sgccs-history", factor_alias: "SGCCS 历史版本",
+    ref: factorRefs.history, alias: "SGCCS 历史版本",
   }],
   groups: [{group_ref: "group:night", name: "夜盘"}],
 }, {
-  factor_candidate_refs: ["factor:sgccs-history"],
+  factor_candidate_refs: [factorRefs.history],
   product_path_selection_id: "group:night",
 });
 assert.deepEqual(
   persistedStrategySources.factor,
-  [{factor_ref: "factor:sgccs-history", factor_alias: "SGCCS 历史版本"}],
+  [{ref: factorRefs.history, alias: "SGCCS 历史版本"}],
   "a persisted strategy factor must remain a detail target before catalog loading",
 );
 assert.equal(persistedStrategySources.factorCandidateLabel, "SGCCS 历史版本",
   "a frozen factor ref must resolve through the saved factor descriptor");
 assert.equal(
   persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
-  "factor:sgccs-history",
+  factorRefs.history,
 );
 assert.equal(
   persistedStrategySources.product_path_selection[0],
@@ -312,6 +321,17 @@ assert.equal(
   "a persisted product-group reference must still produce the strategy chip",
 );
 assert.equal(persistedStrategySources.product_group[0].group_ref, "group:night");
+
+const rejectedLegacySources = FTTestContentAdapters.chipSources({
+  kind: "backtest", manifest: overlayManifest,
+  values: {factor_candidates: [
+    {factor_ref: "factor:legacy", factor_alias: "Legacy"},
+  ]},
+}, {factor_candidate_refs: ["factor:legacy"]});
+assert.equal(rejectedLegacySources.factorCandidateLabel, undefined,
+  "legacy factor identity fields must not fall back into a chip");
+assert.deepEqual(rejectedLegacySources.factor, [],
+  "legacy factor identity fields must not resolve a detail target");
 
 const advancedRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "高级");

@@ -274,13 +274,12 @@
 
   function factorReference(value) {
     if (typeof value === "string") return value;
-    return String(value?.factor_ref || value?.target_ref || "").trim();
+    return String(value?.ref || "").trim();
   }
 
   function factorLabel(value) {
     if (typeof value === "string") return "";
-    return String(value?.factor_alias || value?.alias || value?.name
-      || "").trim();
+    return String(value?.alias || "").trim();
   }
 
   function factorObjects(state, refs) {
