@@ -38,8 +38,8 @@ global.FTUI = window.FTUI = {
   },
 };
 
-const factorRef = "factor:v1:profile-maxa:path:alias:commit:blob";
-const setRef = "factor-set:v1:profile-maxa:path:set:commit:blob";
+const factorRef = `factor:v2:${"a".repeat(43)}`;
+const setRef = `factor-set:v2:${"b".repeat(43)}`;
 const calls = {loads: [], sets: [], factors: []};
 window.FTStaticLoader = {
   async loadGroups(groups) { calls.loads.push(groups); },
@@ -48,9 +48,17 @@ window.FTFactors = {
   async setDetail(context, ref) {
     calls.sets.push({ref, viewOnly: context.testObjectViewOnly});
     const member = context.button("因子成员", () => context.openFactor({
-      target_ref: factorRef,
-      label: "Momentum|N:20d",
-      factor_git_commit: "historical-commit",
+      schema_version: 2,
+      ref: factorRef,
+      alias: "Momentum|N:20d",
+      owner_ref: "profile:maxa",
+      identity: {
+        family_ref: `factor-family:v2:${"c".repeat(43)}`,
+        family_alias: "Momentum",
+        family_formula_fingerprint: "d".repeat(64),
+        self_formula_fingerprint: "e".repeat(64),
+        params: {N: "20d"},
+      },
       math_expr: "P_t - P_{t-1}",
     }));
     context.content.append(member);
@@ -60,7 +68,7 @@ window.FTFactors = {
       ref,
       mode,
       viewOnly: context.testObjectViewOnly,
-      commit: context.testObjectInitialValue?.factor_git_commit || "",
+      alias: context.testObjectInitialValue?.alias || "",
     });
   },
 };
@@ -97,14 +105,16 @@ const context = {
   assert.equal(calls.sets.length, 1);
   assert.equal(calls.sets[0].viewOnly, true);
   assert.equal(calls.loads.length, 1);
+  assert.deepEqual(calls.loads[0], ["factor-catalog-detail"]);
   assert.equal(back.hidden, true);
 
   mount.children[0].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(calls.factors, [{
-    ref: factorRef, mode: "view", viewOnly: true, commit: "historical-commit",
+    ref: factorRef, mode: "view", viewOnly: true, alias: "Momentum|N:20d",
   }]);
+  assert.deepEqual(calls.loads[1], ["factor-catalog-detail-rendering"]);
   assert.equal(back.hidden, false);
 
   back.listeners.click();
