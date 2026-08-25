@@ -66,8 +66,9 @@ final class ResearchDocumentReferenceCatalogTests: XCTestCase {
     #if os(macOS)
     func testWebReferenceIconUsesTheCatalogSFSymbol() {
         let data = ResearchDocumentReferenceSymbolImage.pngData(for: "factor")
+        let target = "factor%3Av2%3A" + String(repeating: "a", count: 43)
         let bootstrap = ResearchDocumentReferenceCatalog.webIconBootstrap(
-            for: ["[MmTrend](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"]
+            for: ["[MmTrend](factortester://factor/\(target))"]
         )
 
         XCTAssertNotNil(data)

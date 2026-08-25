@@ -14,7 +14,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
     }
 
     func testMembersUsesOnlyBoundedFrozenReferenceCommand() throws {
-        let reference = "factor-set:v1:profile-maxa:a:b:c:d"
+        let reference = "factor-set:v2:" + String(repeating: "a", count: 43)
         let arguments = try FactorLibraryLocalBridgeContract.arguments(
             message: [
                 "action": "members",
@@ -32,7 +32,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
     }
 
     func testDescriptorUsesExactFrozenReferenceCommand() throws {
-        let reference = "factor-set:v1:profile-maxa:a:b:c:d"
+        let reference = "factor-set:v2:" + String(repeating: "b", count: 43)
         XCTAssertEqual(
             try FactorLibraryLocalBridgeContract.arguments(message: [
                 "action": "descriptor", "target_ref": reference,
@@ -45,7 +45,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
     }
 
     func testRunInputUsesExactFrozenReferenceCommand() throws {
-        let reference = "factor-set:v1:profile-maxa:a:b:c:d"
+        let reference = "factor-set:v2:" + String(repeating: "c", count: 43)
         XCTAssertEqual(
             try FactorLibraryLocalBridgeContract.arguments(message: [
                 "action": "run-input", "target_ref": reference,
@@ -55,6 +55,17 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "run-input", "--target-ref", reference, "--json",
             ]
         )
+    }
+
+    func testFactorSetCommandsRejectLegacyReferences() {
+        for action in ["members", "descriptor", "run-input"] {
+            XCTAssertThrowsError(
+                try FactorLibraryLocalBridgeContract.arguments(message: [
+                    "action": action,
+                    "target_ref": "factor-set:v1:legacy",
+                ])
+            )
+        }
     }
 
     func testBridgeRejectsArbitraryAction() {

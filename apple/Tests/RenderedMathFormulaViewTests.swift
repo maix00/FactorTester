@@ -205,9 +205,7 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         throws
     {
         let label = #"SgCPS|P:\[CA\]|N:20d|$F:1m|$Rev"#
-        let target = "factor:v1:profile-maxa:cGF0aA:YWxpYXM:"
-            + String(repeating: "a", count: 40)
-            + ":" + String(repeating: "b", count: 40)
+        let target = "factor:v2:" + String(repeating: "a", count: 43)
         let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
             "[\(label)](factortester://factor/"
                 + target.addingPercentEncoding(
@@ -256,7 +254,7 @@ final class RenderedMathFormulaViewTests: XCTestCase {
 
     @MainActor
     func testFactorAssignmentMatchesNativeColorIconAndSpacing() throws {
-        let target = "factor-family:v1:momentum"
+        let target = "factor-family:v2:" + String(repeating: "a", count: 43)
         let encoded = try XCTUnwrap(target.addingPercentEncoding(
             withAllowedCharacters: .alphanumerics
         ))

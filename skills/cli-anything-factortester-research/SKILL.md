@@ -276,7 +276,7 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   to that server. Register a committed local set with
   `factor-set sync <profile-id> --set-id '<set-id>' --json`; inspect registered
   objects with `factor-set registered --json`, and remove only the server copy
-  with `factor-set unsync --target-ref '<factor-set:v1:...>' --json`. A set sent
+  with `factor-set unsync --target-ref '<factor-set:v2:...>' --json`. A set sent
   transiently with one Job is not registered. Never infer server visibility
   from the existence of a local manifest.
   Freeze a specific Profile configuration with

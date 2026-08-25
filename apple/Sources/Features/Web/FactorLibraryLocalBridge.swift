@@ -27,7 +27,7 @@ enum FactorLibraryLocalBridgeContract {
             return arguments
         case "members":
             guard let targetRef = message["target_ref"] as? String,
-                  targetRef.hasPrefix("factor-set:v1:") else {
+                  isV2FactorSetReference(targetRef) else {
                 throw FactorLibraryLocalBridgeError.invalidTarget
             }
             let offset = max(0, message["offset"] as? Int ?? 0)
@@ -39,7 +39,7 @@ enum FactorLibraryLocalBridgeContract {
             ]
         case "descriptor":
             guard let targetRef = message["target_ref"] as? String,
-                  targetRef.hasPrefix("factor-set:v1:") else {
+                  isV2FactorSetReference(targetRef) else {
                 throw FactorLibraryLocalBridgeError.invalidTarget
             }
             return [
@@ -48,7 +48,7 @@ enum FactorLibraryLocalBridgeContract {
             ]
         case "run-input":
             guard let targetRef = message["target_ref"] as? String,
-                  targetRef.hasPrefix("factor-set:v1:") else {
+                  isV2FactorSetReference(targetRef) else {
                 throw FactorLibraryLocalBridgeError.invalidTarget
             }
             return [
@@ -117,6 +117,15 @@ enum FactorLibraryLocalBridgeContract {
             throw FactorLibraryLocalBridgeError.invalidMessage
         }
         return text
+    }
+
+    private static func isV2FactorSetReference(_ value: String) -> Bool {
+        let prefix = "factor-set:v2:"
+        guard value.hasPrefix(prefix) else { return false }
+        let digest = value.dropFirst(prefix.count)
+        return digest.count == 43 && digest.allSatisfy {
+            $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-"
+        }
     }
 }
 

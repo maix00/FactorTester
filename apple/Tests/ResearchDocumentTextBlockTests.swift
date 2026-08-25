@@ -3,8 +3,9 @@ import XCTest
 
 final class ResearchDocumentTextBlockTests: XCTestCase {
     func testTypedLinkLabelUnescapesFactorParameterBrackets() {
+        let target = "factor%3Av2%3A" + String(repeating: "a", count: 43)
         let segments = ResearchDocumentTypedLinkParser.segments(
-            in: #"[SgCPS|P:\[CA\]|N:20d](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"#
+            in: "[SgCPS|P:\\[CA\\]|N:20d](factortester://factor/\(target))"
         )
 
         guard case let .reference(reference) = segments.first else {
@@ -14,8 +15,9 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
 
     func testTypedLinkLabelKeepsNestedFactorParameterBrackets() {
+        let target = "factor%3Av2%3A" + String(repeating: "a", count: 43)
         let segments = ResearchDocumentTypedLinkParser.segments(
-            in: #"[SgCPS|P:[[CA]]|N:[[20d]]](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"#
+            in: "[SgCPS|P:[[CA]]|N:[[20d]]](factortester://factor/\(target))"
         )
 
         guard case let .reference(reference) = segments.first else {
@@ -322,14 +324,17 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
 
     #if os(macOS)
     func testHeadingInlinePipelinePreservesLinksCodeAndMathTogether() {
-        let source = """
-        [MmTrend](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) 与 `CLOSE` 及 \\(P_t\\)
-        """
+        let target = "factor:v2:" + String(repeating: "a", count: 43)
+        let encoded = target.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        )!
+        let source = "[MmTrend](factortester://factor/\(encoded))"
+            + " 与 `CLOSE` 及 \\(P_t\\)"
         let binding = ResearchDocumentBinding(
             id: "heading-factor",
             componentID: "heading",
             kind: "factor",
-            targetRef: "factor:v1:profile-test:cGF0aA:TW1UcmVuZA:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            targetRef: target,
             label: "MmTrend",
             detailFields: []
         )
@@ -649,8 +654,11 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
 
     func testDomainReferencesUseSemanticPresentation() {
+        let target = "factor-family%3Av2%3A" + String(
+            repeating: "a", count: 43
+        )
         let factor = ResearchDocumentTypedLinkParser.segments(in:
-            "[SgCPS](factortester://factor/factor-family%3Av1%3Aprofile-test%3AcGF0aA%3AU2dDUFM%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
+            "[SgCPS](factortester://factor/\(target))"
         )
         let product = ResearchDocumentTypedLinkParser.segments(in:
             "[工业硅](factortester://product/product%3ASI.GFE)"

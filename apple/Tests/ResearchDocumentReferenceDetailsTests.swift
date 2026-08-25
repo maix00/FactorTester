@@ -7,22 +7,25 @@ final class ResearchDocumentReferenceDetailsTests: SimplifiedChineseLocalizedTes
             "binding_id": "binding-set",
             "component_id": "component-set",
             "kind": "factor",
-            "target_ref": "factor-set:v1:profile-maxa:set:id:rev:blob",
+            "target_ref": "factor-set:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "label": "动量因子集合",
             "data": [
                 "object_kind": "factor-set",
                 "set_id": "momentum-2025",
-                "member_refs": ["factor:v1:one", "factor:v1:two"],
+                "member_refs": [
+                    "factor:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "factor:v2:ccccccccccccccccccccccccccccccccccccccccccc"
+                ],
                 "related_references": [[
                     "relation": "集合成员",
                     "kind": "factor",
-                    "target_ref": "factor:v1:one",
+                    "target_ref": "factor:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     "label": "TrMomentum|N:20d",
                     "data": ["identity": "TrMomentum|N:20d"],
                 ], [
                     "relation": "集合成员",
                     "kind": "factor",
-                    "target_ref": "factor:v1:two",
+                    "target_ref": "factor:v2:ccccccccccccccccccccccccccccccccccccccccccc",
                     "label": "MmTrend|N:20d",
                     "data": ["identity": "MmTrend|N:20d"],
                 ]],
@@ -33,7 +36,7 @@ final class ResearchDocumentReferenceDetailsTests: SimplifiedChineseLocalizedTes
         )
         let reference = ResearchDocumentTypedLink(
             kind: "factor",
-            targetRef: "factor-set:v1:profile-maxa:set:id:rev:blob",
+            targetRef: "factor-set:v2:" + String(repeating: "a", count: 43),
             label: "动量因子集合",
             componentID: "component-set"
         )
@@ -118,17 +121,23 @@ final class ResearchDocumentReferenceDetailsTests: SimplifiedChineseLocalizedTes
     }
 
     func testEvidenceShowsFrozenFactorAsRelatedFactorLink() throws {
-        let target = "factor:v1:profile-maxa:" +
-            "cHVibGljX2ZhY3RvcnMvTW1SYXRlT2ZDaGcucHk:" +
-            "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk:" +
-            "34ff8590db43f9c5e97f78d56b0c90fd35fb761a:" +
-            "bc623ae669b0970e163a4f62f9328a2f69ce6b86"
+        let target = "factor:v2:" + String(repeating: "a", count: 43)
+        let familyRef = "factor-family:v2:" + String(
+            repeating: "b", count: 43
+        )
         let detail = try decode(ResearchEvidenceDetailPayload.self, """
         {"evidence_ref":"evidence:factor_semantics:sha256:abc",
          "evidence_kind":"factor_semantics","created_at":1,
          "envelope":{"schema_version":3,"evidence_kind":"factor_semantics",
            "title":"端点动量语义","claim_summary":"端点收益定义"},
-         "applicability":{"factor_refs":["\(target)"]}}
+         "applicability":{"factor_refs":["\(target)"],
+           "factor_subjects":[{"schema_version":2,"ref":"\(target)",
+             "alias":"MmRateOfChg|P:[CA]|N:20d|$F:1d",
+             "owner_ref":"profile:maxa","identity":{
+               "family_ref":"\(familyRef)","family_alias":"MmRateOfChg",
+               "family_formula_fingerprint":"\(String(repeating: "c", count: 64))",
+               "self_formula_fingerprint":"\(String(repeating: "d", count: 64))",
+               "params":{"P":["CA"],"N":"20d","$F":"1d"}}}]}}
         """)
         let sections = ResearchDocumentReferenceDetails.sections(
             reference: .init(
@@ -243,7 +252,7 @@ private final class ReferenceDetailTransport: ProfileResearchTransport {
         self.request = request
         return ResearchHTTPResponse(
             data: Data("""
-            {"success":true,"evidence":{"evidence_ref":"evidence:factor_semantics:sha256:abc","evidence_kind":"factor_semantics","created_at":1,"envelope":{"schema_version":2,"evidence_kind":"factor_semantics"},"applicability":{"factor_refs":["factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}}}
+            {"success":true,"evidence":{"evidence_ref":"evidence:factor_semantics:sha256:abc","evidence_kind":"factor_semantics","created_at":1,"envelope":{"schema_version":2,"evidence_kind":"factor_semantics"},"applicability":{"factor_refs":["factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}}}
             """.utf8),
             statusCode: 200,
             etag: nil

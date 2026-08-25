@@ -123,6 +123,9 @@ def _job_applicability(detail: dict[str, Any]) -> dict[str, Any]:
     factor_refs = _job_factor_refs(spec)
     if factor_refs:
         applicability["factor_refs"] = factor_refs
+    factor_subjects = _job_factor_subjects(spec)
+    if factor_subjects:
+        applicability["factor_subjects"] = factor_subjects
     time_window = _job_time_window(spec)
     if time_window is not None:
         applicability["time_window"] = time_window
@@ -172,6 +175,18 @@ def _job_factor_refs(spec: dict[str, Any]) -> list[str]:
                 except (TypeError, ValueError):
                     continue
     return sorted(explicit_refs | _job_factor_set_refs(spec))
+
+
+def _job_factor_subjects(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return complete displayable identities without decoding opaque refs."""
+    subjects: dict[str, dict[str, Any]] = {}
+    for value in _walk_objects(spec):
+        try:
+            frozen = require_frozen_factor(value)
+        except (TypeError, ValueError):
+            continue
+        subjects[frozen["ref"]] = frozen
+    return [subjects[ref] for ref in sorted(subjects)]
 
 
 def _v2_factor_refs(values: Any) -> set[str]:
