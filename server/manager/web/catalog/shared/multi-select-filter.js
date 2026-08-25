@@ -229,6 +229,14 @@
         && menu?.style);
     }
 
+    function portalHost() {
+      // A modal <dialog> makes the rest of the document inert.  Portaling its
+      // menu to document.body therefore paints the menu but prevents real
+      // pointer input from reaching its options.  Keep the fixed-position
+      // menu inside the owning dialog's top-layer subtree instead.
+      return section.closest?.("dialog[open]") || document.body;
+    }
+
     function positionPortaledMenu() {
       if (!menuPortaled) return;
       const rect = summary.getBoundingClientRect();
@@ -249,7 +257,7 @@
 
     function portalMenu() {
       if (menuPortaled || !canPortalMenu()) return;
-      document.body.append(menu);
+      portalHost().append(menu);
       menu.classList.add("is-portaled");
       if (typeof menu.showPopover === "function") {
         menu.setAttribute("popover", "manual");

@@ -52,6 +52,8 @@ class Element {
     while (current) {
       if (selector === ".ft-multi-select-dropdown"
         && String(current.className).includes("ft-multi-select-dropdown")) return current;
+      if (selector === "dialog[open]"
+        && current.tagName === "dialog" && current.open === true) return current;
       current = current.parentNode;
     }
     return null;
@@ -218,6 +220,22 @@ assert.equal(locked.dropdown.open, false);
   assert.equal(redrawSingle.dropdown.open, false);
   assert.equal(redrawSingle.menu.parentNode, redrawSingle.dropdown,
     "a single-choice redraw must restore its portaled menu before replacing the field");
+
+  const modal = new Element("dialog");
+  modal.open = true;
+  body.append(modal);
+  const modalSingle = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "family", label: "已有家族"}, {value: "source", label: "上传源码"}],
+    selected: ["family"], multi: false,
+  });
+  modal.append(modalSingle.element);
+  modalSingle.dropdown.open = true;
+  modalSingle.dropdown.listeners.toggle();
+  assert.equal(modalSingle.menu.parentNode, modal,
+    "a modal picker menu must remain inside the interactive dialog subtree");
+  modalSingle.dropdown.open = false;
+  modalSingle.dropdown.listeners.toggle();
+  assert.equal(modalSingle.menu.parentNode, modalSingle.dropdown);
 
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
