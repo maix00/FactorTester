@@ -8,6 +8,11 @@ import json
 import re
 from typing import Any
 
+from tools.cli.release.research_reporting.references.factor_formula import (
+    build_factor_family_reference,
+    verify_factor_reference,
+)
+
 
 _LOCAL_PATH = re.compile(
     r"(^~[/\\])|(^[/\\])|(^[A-Za-z]:[/\\])|(file://)"
@@ -71,10 +76,10 @@ def build_client_library_projection(
             else "custom" if "custom" in sources
             else "registered"
         )
-        family_ref = _ref(
-            "factor-family",
-            owner_username,
-            family_alias,
+        family_ref = build_factor_family_reference(
+            owner_ref=first["factor_owner_ref"],
+            family_alias=family_alias,
+            family_formula_fingerprint=first["family_formula_fingerprint"],
         )
         family = {
             "family_ref": family_ref,
@@ -100,8 +105,16 @@ def build_client_library_projection(
                 existing_count = max(0, int(existing.get("factor_count") or 0))
             except (TypeError, ValueError):
                 existing_count = 0
-            family["factor_count"] = max(existing_count, family["factor_count"])
-        families_by_ref[family_ref] = {**(existing or {}), **family}
+            family = {
+                **family,
+                **existing,
+                "factor_count": max(existing_count, family["factor_count"]),
+                "factor_refs": sorted({
+                    *family.get("factor_refs", []),
+                    *existing.get("factor_refs", []),
+                }),
+            }
+        families_by_ref[family_ref] = family
 
     families = sorted(
         families_by_ref.values(),
@@ -151,8 +164,16 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
     if not family_alias:
         return None
     owner_username = _safe_text(item.get("owner_username"))
-    family_ref = _safe_text(item.get("family_ref")) or _ref(
-        "factor-family", owner_username, family_alias,
+    owner_ref = _safe_text(
+        item.get("factor_owner_ref") or item.get("owner_ref") or owner_username
+    )
+    family_fingerprint = _safe_text(item.get("family_formula_fingerprint"))
+    if not owner_ref or not family_fingerprint:
+        return None
+    family_ref = build_factor_family_reference(
+        owner_ref=owner_ref,
+        family_alias=family_alias,
+        family_formula_fingerprint=family_fingerprint,
     )
     source = str(
         item.get("source") or item.get("factor_kind") or "registered"
@@ -189,6 +210,8 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         "categories": sorted(set(categories)),
         "params": _params(item.get("params")),
         "owner_username": owner_username,
+        "factor_owner_ref": owner_ref,
+        "family_formula_fingerprint": family_fingerprint,
         "owner_alias": _safe_text(item.get("owner_alias") or owner_username),
         "owner_organization_name": _safe_text(
             item.get("owner_organization_name")
@@ -210,21 +233,24 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         item.get("factor_family_alias")
         or item.get("factor_family_name")
     )
-    family_ref = _safe_text(
-        item.get("factor_family_ref") or item.get("family_ref")
-    ) or _ref("factor-family", owner, family_alias)
     factor_alias = _safe_text(item.get("factor_alias"))
     kind = str(item.get("source") or "").strip().lower()
     if kind not in {"custom", "public"}:
         kind = "registered"
     params = _params(item.get("params"))
+    family_fingerprint = _safe_text(item.get("family_formula_fingerprint"))
+    self_fingerprint = _safe_text(item.get("self_formula_fingerprint"))
+    factor_ref = _safe_text(item.get("factor_ref") or item.get("target_ref"))
+    verify_factor_reference(
+        factor_ref,
+        owner_ref=owner_ref,
+        family_alias=family_alias,
+        factor_alias=factor_alias,
+        family_formula_fingerprint=family_fingerprint,
+        self_formula_fingerprint=self_fingerprint,
+    )
     result = {
-        "factor_ref": _ref(
-            "factor",
-            owner,
-            family_alias,
-            factor_alias,
-        ),
+        "factor_ref": factor_ref,
         "factor_alias": factor_alias,
         "factor_family_alias": family_alias,
         "factor_family_name": _safe_text(
@@ -237,7 +263,8 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "factor_kind": kind,
         "params": params,
         "factor_owner_ref": owner_ref,
-        "factor_family_ref": family_ref,
+        "family_formula_fingerprint": family_fingerprint,
+        "self_formula_fingerprint": self_fingerprint,
         "factor_params": params,
         "params_count": len(params),
         "owner_username": owner,
@@ -251,11 +278,6 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "product_group": _safe_text(item.get("product_group")),
         "updated_at": _safe_text(item.get("updated_at")),
     }
-    commit = _safe_text(item.get("factor_git_commit") or item.get("git_commit"))
-    if commit:
-        # A present commit means this factor is pinned to a historical family
-        # source. Do not serialize an empty marker for current/latest factors.
-        result["factor_git_commit"] = commit
     return result
 
 
@@ -319,8 +341,3 @@ def _safe_math_text(value: Any) -> str:
 
 def _looks_like_local_path(value: str) -> bool:
     return bool(_LOCAL_PATH.search(str(value or "").strip()))
-
-
-def _ref(kind: str, *parts: str) -> str:
-    identity = "\x1f".join(str(part) for part in parts)
-    return f"{kind}:sha256:{sha256(identity.encode()).hexdigest()}"

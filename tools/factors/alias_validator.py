@@ -32,7 +32,7 @@ def canonicalize_factor_aliases(
             raise ValueError(
                 f"alias validation request {index} is missing source identity"
             )
-        canonical = canonical_factor_identity(
+        formula_identity = factor_formula_identity(
             source_file=Path(source_file),
             identity=identity,
             object_kind=object_kind,
@@ -41,8 +41,8 @@ def canonicalize_factor_aliases(
         results.append({
             "index": index,
             "identity": identity,
-            "canonical_identity": canonical,
-            "valid": identity == canonical,
+            **formula_identity,
+            "valid": identity == formula_identity["canonical_identity"],
         })
     return results
 
@@ -55,16 +55,51 @@ def canonical_factor_identity(
     blob_hash: str,
 ) -> str:
     """Return the exact alias emitted by the selected committed family."""
+    return factor_formula_identity(
+        source_file=source_file,
+        identity=identity,
+        object_kind=object_kind,
+        blob_hash=blob_hash,
+    )["canonical_identity"]
+
+
+def factor_formula_identity(
+    *,
+    source_file: Path,
+    identity: str,
+    object_kind: str,
+    blob_hash: str,
+) -> dict[str, Any]:
     family_alias = identity.split("|", 1)[0]
     family = _load_factor_family(
         str(source_file.expanduser().resolve()), family_alias, blob_hash,
     )
     if object_kind == "factor-family":
-        return str(family.alias)
+        return {
+            "canonical_identity": str(family.alias),
+            "family_formula_fingerprint": family.expr.semantic_fingerprint(),
+            "self_formula_fingerprint": "",
+        }
     if object_kind != "factor":
         raise ValueError("factor object kind is invalid")
-    parameters = family.parse_alias(identity)
-    return family.get_alias(**parameters)
+    from server.modules.shared.factor_param_utils import (
+        factor_param_value_display,
+        normalize_factor_param_row,
+    )
+    parameters = normalize_factor_param_row(family, family.parse_alias(identity))
+    factor = family.get_factor(**parameters)
+    expression = getattr(factor, "_source_expr", None) or factor.expr
+    return {
+        "canonical_identity": str(factor.alias),
+        "family_formula_fingerprint": family.expr.semantic_fingerprint(),
+        "self_formula_fingerprint": expression.semantic_fingerprint(),
+        "params": {
+            parameter.alias: factor_param_value_display(
+                parameter, parameters.get(parameter.alias),
+            )
+            for parameter in family.params
+        },
+    }
 
 
 def describe_factor_family(request: dict[str, Any]) -> dict[str, Any]:
@@ -75,6 +110,7 @@ def describe_factor_family(request: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "family": str(family.alias),
+        "family_formula_fingerprint": family.expr.semantic_fingerprint(),
         "title_zh": str(getattr(family, "desc", "") or ""),
         "description": str(getattr(family, "description", "") or ""),
         "math_expr": str(getattr(family, "math_expr", "") or ""),
@@ -95,9 +131,13 @@ def instantiate_factor_family(request: dict[str, Any]) -> dict[str, Any]:
     )
 
     normalized = normalize_factor_param_row(family, params)
+    factor = family.get_factor(**normalized)
+    expression = getattr(factor, "_source_expr", None) or factor.expr
     return {
         "family": str(family.alias),
-        "alias": family.get_alias(**normalized),
+        "alias": str(factor.alias),
+        "family_formula_fingerprint": family.expr.semantic_fingerprint(),
+        "self_formula_fingerprint": expression.semantic_fingerprint(),
         "params": {
             parameter.alias: factor_param_value_display(
                 parameter, normalized.get(parameter.alias),

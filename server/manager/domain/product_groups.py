@@ -6,6 +6,8 @@ import json
 from hashlib import sha256
 from typing import Any, Iterable, Mapping
 
+from tools.data.account_manage import unique_object_visibility_policy_for
+
 
 def project_product_groups(
     *,
@@ -18,12 +20,21 @@ def project_product_groups(
 ) -> list[dict[str, Any]]:
     """Return owner, research, subject, and availability-aware group rows."""
     profile_index = _profile_index(profiles)
+    visibility = unique_object_visibility_policy_for(
+        principal,
+        profile_refs=tuple(
+            ref for ref in profile_index if ref.startswith("profile:")
+        ),
+    )
     research_index = _research_index(research_records)
     product_index = _product_index(product_records)
     visible = []
     for row in store.list_groups():
         owner_ref = str(row.get("owner_ref") or "").strip()
-        if not _visible_owner(owner_ref, principal, profile_index):
+        if not visibility.can_view({
+            "ref": str(row.get("group_ref") or ""),
+            "owner_ref": owner_ref,
+        }):
             continue
         definition = _object(row.get("definition_json"))
         value = dict(row)
@@ -154,18 +165,6 @@ def _research_index(values: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, 
                 if key == "record_id":
                     result[f"work-package:{ref}"] = projected
     return result
-
-
-def _visible_owner(
-    owner_ref: str,
-    principal: str,
-    profiles: Mapping[str, Mapping[str, Any]],
-) -> bool:
-    return not owner_ref or owner_ref in {
-        principal,
-        f"user:{principal}",
-        *profiles.keys(),
-    }
 
 
 def _creator_projection(

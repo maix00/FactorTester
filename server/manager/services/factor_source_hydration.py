@@ -73,6 +73,9 @@ class FactorSourceHydrator:
                 factor_id,
                 str(metadata.get("factor_name") or factor_id),
                 source,
+                chinese_name=str(metadata.get("chinese_name") or ""),
+                description=str(metadata.get("description") or ""),
+                category=str(metadata.get("category") or ""),
             )
             return True
         return False

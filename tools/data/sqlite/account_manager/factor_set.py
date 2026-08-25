@@ -17,7 +17,8 @@ def ensure_factor_set_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS account_factor_sets (
             username TEXT NOT NULL,
             target_ref TEXT NOT NULL,
-            set_ref TEXT NOT NULL,
+            owner_ref TEXT NOT NULL,
+            set_id TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             updated_at REAL NOT NULL,
             PRIMARY KEY (username, target_ref)
@@ -26,8 +27,8 @@ def ensure_factor_set_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_account_factor_sets_stable_ref
-        ON account_factor_sets (username, set_ref, updated_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_account_factor_sets_owner_name
+        ON account_factor_sets (username, owner_ref, set_id, updated_at DESC)
         """
     )
 
@@ -66,6 +67,11 @@ def get_factor_set(username: str, target_ref: str) -> dict[str, Any] | None:
 
 def save_factor_set(username: str, value: dict[str, Any]) -> dict[str, Any]:
     payload = dict(value)
+    identity = payload.get("identity") or {}
+    target_ref = str(payload.get("ref") or "").strip()
+    set_id = str(identity.get("set_id") or "").strip()
+    if not target_ref or not set_id:
+        raise ValueError("factor-set must be a complete frozen record")
     now = time.time()
     payload["updated_at"] = now
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -73,17 +79,19 @@ def save_factor_set(username: str, value: dict[str, Any]) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO account_factor_sets (
-                username, target_ref, set_ref, payload_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?)
+                username, target_ref, owner_ref, set_id, payload_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(username, target_ref) DO UPDATE SET
-                set_ref = excluded.set_ref,
+                owner_ref = excluded.owner_ref,
+                set_id = excluded.set_id,
                 payload_json = excluded.payload_json,
                 updated_at = excluded.updated_at
             """,
             (
                 username,
-                payload["target_ref"],
-                payload["set_ref"],
+                target_ref,
+                payload["owner_ref"],
+                set_id,
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 now,
             ),

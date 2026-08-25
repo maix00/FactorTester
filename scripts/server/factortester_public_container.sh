@@ -17,12 +17,20 @@ Commands:
   build          build both versioned images explicitly
   up             start/reconcile from existing images; never builds or pulls
   restart-app    restart only FactorTester; PostgreSQL remains running
+  stop-app       stop only FactorTester; PostgreSQL remains running
   status         show exactly the two business containers and health
   logs           follow logs (extra docker compose arguments accepted)
   down           stop containers but retain PostgreSQL volume and host data
   backup         write a checksummed PostgreSQL custom dump
   restore-check  restore the newest backup into an ephemeral database, compare,
                  and remove only that temporary database
+  migrate-factor-identities
+                 back up SQLite, migrate source metadata and editable factor
+                 identities, discard irrecoverable v1 drafts, then verify
+  restore-factor-identities
+                 restore the pre-migration SQLite backup after failed release
+  finalize-factor-identities
+                 clear the rollback marker after successful verification
   verify         verify ports, identities, revision, PostgreSQL, and no reload
 
 Set FACTORTESTER_PUBLIC_DOCKER_ENV_FILE for a non-default owner-only env file.
@@ -102,6 +110,82 @@ restore_check() {
     exit 1
   }
   echo "Restore check passed ($restored_count public tables)"
+}
+
+migrate_factor_identities() {
+  image="${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:$revision"
+  docker run --rm --entrypoint /bin/sh \
+    --volume "${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}:/data" \
+    --volume "${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}:/state" \
+    --volume "${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}:/opt/factortester/.settings:ro" \
+    "$image" -c '
+set -eu
+export HOME=/state/home
+export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+cd /opt/factortester/app
+gosu factortester python - <<"PY"
+import sqlite3
+import time
+from pathlib import Path
+import settings
+
+source = Path(settings.CACHE_DB_PATH)
+backup = source.with_name(source.name + f".pre-factor-v2-{int(time.time())}.bak")
+with sqlite3.connect(source) as current, sqlite3.connect(backup) as snapshot:
+    current.backup(snapshot)
+    if snapshot.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise RuntimeError("SQLite migration backup failed integrity check")
+Path("/state/factor-v2-migration-backup-path").write_text(str(backup), encoding="utf-8")
+PY
+gosu factortester python -m tools.migrations.migrate_factor_source_metadata
+gosu factortester python -m tools.migrations.migrate_factor_formula_identity --apply --discard-incompatible
+gosu factortester python - <<"PY"
+import sqlite3
+import settings
+
+with sqlite3.connect(settings.CACHE_DB_PATH) as connection:
+    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise RuntimeError("SQLite failed integrity check after factor migration")
+    legacy = connection.execute(
+        "SELECT count(*) FROM research_configurations WHERE schema_version=1"
+    ).fetchone()[0]
+    if legacy:
+        raise RuntimeError(f"SQLite still contains {legacy} schema-1 configurations")
+PY
+'
+}
+
+restore_factor_identities() {
+  image="${FACTORTESTER_PUBLIC_IMAGE:-factortester-public}:$revision"
+  docker run --rm --entrypoint /bin/sh \
+    --volume "${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}:/data" \
+    --volume "${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}:/state" \
+    --volume "${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}:/opt/factortester/.settings:ro" \
+    "$image" -c '
+set -eu
+export HOME=/state/home
+export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+cd /opt/factortester/app
+gosu factortester python - <<"PY"
+import sqlite3
+from pathlib import Path
+import settings
+
+marker = Path("/state/factor-v2-migration-backup-path")
+backup = Path(marker.read_text(encoding="utf-8").strip())
+if not backup.is_file():
+    raise RuntimeError("pre-migration SQLite backup is unavailable")
+with sqlite3.connect(backup) as snapshot, sqlite3.connect(settings.CACHE_DB_PATH) as current:
+    if snapshot.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise RuntimeError("pre-migration SQLite backup is corrupt")
+    snapshot.backup(current)
+marker.unlink()
+PY
+'
+}
+
+finalize_factor_identities() {
+  rm -f "${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-migration-backup-path"
 }
 
 assert_unpublished_tcp_port() {
@@ -192,11 +276,15 @@ case "$command" in
   build) check_source; "${compose[@]}" build "$@" ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;
+  stop-app) "${compose[@]}" stop factortester-public "$@" ;;
   status) "${compose[@]}" ps "$@" ;;
   logs) "${compose[@]}" logs --follow "$@" ;;
   down) "${compose[@]}" down --remove-orphans "$@" ;;
   backup) backup_database ;;
   restore-check) restore_check "$@" ;;
+  migrate-factor-identities) migrate_factor_identities ;;
+  restore-factor-identities) restore_factor_identities ;;
+  finalize-factor-identities) finalize_factor_identities ;;
   verify) verify ;;
   -h|--help|help) usage ;;
   *) echo "Unknown command: $command" >&2; usage >&2; exit 2 ;;

@@ -67,3 +67,12 @@ def test_factor_family_parser_accepts_frozen_legacy_column_brackets() -> None:
 def test_factor_family_rejects_wrong_or_noncanonical_alias(alias: str) -> None:
     with pytest.raises(ValueError):
         _AliasFamily().parse_alias(alias)
+
+
+def test_factor_family_rejects_legacy_positional_alias() -> None:
+    family = _AliasFamily()
+
+    with pytest.raises(ValueError):
+        family.parse_alias(f"{family.alias}:0")
+
+    assert family.get_alias(AliasWindow="2m").endswith("|AliasWindow:2m")

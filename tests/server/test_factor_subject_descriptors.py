@@ -1,7 +1,3 @@
-from base64 import urlsafe_b64encode
-import hashlib
-import json
-
 import pytest
 
 from server.services.factor_subject_descriptors import (
@@ -10,58 +6,49 @@ from server.services.factor_subject_descriptors import (
     factor_refs_by_alias,
     validate_factor_subject_descriptors,
 )
+from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.formula_identity import (
+    freeze_factor_identity,
+)
 
 
-def _encode(value: str) -> str:
-    return urlsafe_b64encode(value.encode()).decode().rstrip("=")
+def _member(alias: str = "F|N:20d") -> dict:
+    return freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias="F",
+        factor_alias=alias,
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"N": "20d"},
+    )
 
 
 def _descriptor(alias: str = "F|N:20d") -> dict:
-    member = (
-        "factor:v1:profile-maxa:"
-        f"{_encode('custom_factors/F.py')}:{_encode(alias)}:"
-        + "a" * 40 + ":" + "b" * 40
+    member = _member(alias)
+    manifest = freeze_factor_set_identity(
+        owner_ref="profile:maxa",
+        set_id="momentum",
+        alias="动量集合",
+        members=[member],
     )
-    members = [member]
-    manifest = {
-        "schema_version": 1,
-        "set_id": "momentum",
-        "set_ref": "factor-set:profile-maxa:momentum",
-        "title_zh": "动量集合",
-        "member_refs": members,
-        "member_hash": "sha256:" + hashlib.sha256(json.dumps(
-            members, ensure_ascii=False, separators=(",", ":"),
-        ).encode()).hexdigest(),
-    }
-    payload = (
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode()
-    blob = hashlib.sha1(
-        f"blob {len(payload)}\0".encode() + payload
-    ).hexdigest()
     return {
-        "target_ref": (
-            "factor-set:v1:profile-maxa:"
-            f"{_encode('.factortester/factor-sets/momentum.json')}:"
-            f"{_encode('momentum')}:" + "c" * 40 + f":{blob}"
-        ),
+        "target_ref": manifest["ref"],
         "manifest": manifest,
     }
 
 
-def test_descriptor_binds_manifest_to_git_blob_and_run_alias_hash() -> None:
+def test_descriptor_binds_set_and_every_member_formula_identity() -> None:
     values = validate_factor_subject_descriptors([_descriptor()])
     assert values[0]["member_count"] == 1
     assert_factor_sets_match_run(
         values,
-        factor_alias_hashes={hashlib.sha256(b"F|N:20d").hexdigest()},
+        factor_refs={_member()["ref"]},
     )
     assert compact_factor_subject_descriptors(values) == [{
         "target_ref": _descriptor()["target_ref"],
-        "set_ref": "factor-set:profile-maxa:momentum",
-        "member_hash": _descriptor()["manifest"]["member_hash"],
+        "member_fingerprint": values[0]["member_fingerprint"],
         "member_count": 1,
-        "authority": "client_git_blob",
+        "authority": "formula_manifest",
     }]
 
 
@@ -70,7 +57,7 @@ def test_descriptor_rejects_factor_set_not_executed_by_run() -> None:
     with pytest.raises(ValueError, match="exactly match"):
         assert_factor_sets_match_run(
             values,
-            factor_alias_hashes={hashlib.sha256(b"F|N:10d").hexdigest()},
+            factor_refs={_member("F|N:10d")["ref"]},
         )
 
 
@@ -78,4 +65,11 @@ def test_factor_ref_bindings_preserve_each_member_identity() -> None:
     values = validate_factor_subject_descriptors([_descriptor("F|N:20d|X:foo")])
     bindings = factor_refs_by_alias(values)
     assert list(bindings) == ["F|N:20d|X:foo"]
-    assert bindings["F|N:20d|X:foo"].startswith("factor:v1:")
+    assert bindings["F|N:20d|X:foo"].startswith("factor:v2:")
+
+
+def test_descriptor_rejects_member_identity_tampering() -> None:
+    descriptor = _descriptor()
+    descriptor["manifest"]["identity"]["members"][0]["alias"] = "F|N:5d"
+    with pytest.raises(ValueError, match="does not match"):
+        validate_factor_subject_descriptors([descriptor])

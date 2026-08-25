@@ -36,7 +36,7 @@ def test_batch_alias_validation_loads_one_family_once(tmp_path: Path) -> None:
     requests = [{
         "source_file": str(source),
         "blob_hash": "a" * 40,
-        "identity": f"QuickAliasFamily|P:CA|N:{window}",
+        "identity": f"QuickAliasFamily|P:CA|N:{window}|$F:30m",
         "object_kind": "factor",
     } for window in ("5d", "10d", "20d", "60d")]
 
@@ -58,12 +58,14 @@ def test_batch_alias_validation_reports_legacy_display_alias(
         "object_kind": "factor",
     }])
 
-    assert results == [{
-        "index": 0,
-        "identity": "QuickAliasFamily|P:[CA]|N:20d",
-        "canonical_identity": "QuickAliasFamily|P:CA|N:20d",
-        "valid": False,
-    }]
+    assert results[0]["index"] == 0
+    assert results[0]["identity"] == "QuickAliasFamily|P:[CA]|N:20d"
+    assert results[0]["canonical_identity"] == (
+        "QuickAliasFamily|P:CA|N:20d|$F:30m"
+    )
+    assert results[0]["valid"] is False
+    assert results[0]["family_formula_fingerprint"]
+    assert results[0]["self_formula_fingerprint"]
 
 
 def test_standalone_alias_validator_reads_one_json_batch(
@@ -74,7 +76,7 @@ def test_standalone_alias_validator_reads_one_json_batch(
     request_file.write_text(json.dumps({"requests": [{
         "source_file": str(source),
         "blob_hash": "c" * 40,
-        "identity": "QuickAliasFamily|P:CA|N:20d",
+        "identity": "QuickAliasFamily|P:CA|N:20d|$F:30m",
         "object_kind": "factor",
     }]}), encoding="utf-8")
 
@@ -83,7 +85,7 @@ def test_standalone_alias_validator_reads_one_json_batch(
 
     assert exit_code == 0
     assert output["results"][0]["canonical_identity"] == (
-        "QuickAliasFamily|P:CA|N:20d"
+        "QuickAliasFamily|P:CA|N:20d|$F:30m"
     )
 
 

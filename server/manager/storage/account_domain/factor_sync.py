@@ -8,7 +8,8 @@ from typing import Any
 
 _FACTOR_KEYS = (
     "factor_alias", "factor_family_alias", "factor_family_name",
-    "factor_owner_ref", "factor_family_ref", "factor_git_commit",
+    "factor_owner_ref", "family_formula_fingerprint",
+    "self_formula_fingerprint",
     "params", "factor_params", "chinese_name", "description", "math_expr",
     "category", "factor_kind", "source", "owner_username", "owner_alias",
     "owner_organization_id", "owner_organization_name", "updated_at",

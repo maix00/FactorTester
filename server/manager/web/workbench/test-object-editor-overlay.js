@@ -9,9 +9,11 @@
       render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
     },
     factor_set: {
-      title: "因子候选",
+      title: "因子集合",
       load: "catalog",
-      render: (context, ref) => FTFactors.setDetail(context, ref),
+      render: (context, ref, mode, options) => (
+        FTFactors.setDetail(context, ref, mode, options)
+      ),
     },
     product_group: {
       title: "产品组",
@@ -223,30 +225,24 @@
 
   function factorInitialValue(item, targetRef) {
     if (!item || typeof item !== "object") return null;
-    // Frozen references already encode the family commit/blob.  Prefer that
-    // authoritative projection unless the member row carries a complete
-    // inline source view; a row containing only a commit must not suppress
-    // the catalog resolver and leave the nested detail without its formula.
-    const frozen = String(targetRef).startsWith("factor:v1:");
-    const hasInlineSource = ["source_code", "math_expr", "formula", "latex"]
-      .some(key => String(item[key] || "").trim());
-    if (frozen && !hasInlineSource) return null;
+    const frozen = String(targetRef).startsWith("factor:v2:");
     const hasSource = [
-      "factor_git_commit", "git_commit", "source_code", "math_expr",
+      "family_formula_fingerprint", "self_formula_fingerprint",
+      "source_code", "math_expr",
       "formula", "latex", "factor_params", "params",
     ].some(key => item[key] !== undefined && item[key] !== null);
     if (!hasSource) return null;
-    const decoded = frozen ? window.FTFactorModel?.decodeFrozenFactorRef?.(targetRef) : null;
+    const identity = frozen
+      ? window.FTFactorModel?.frozenFactorIdentity?.({...item, factor_ref: targetRef})
+      : null;
     return {
       ...item,
       factor_ref: item.factor_ref || targetRef,
-      ...(decoded ? {
-        factor_alias: item.factor_alias || decoded.alias,
-        factor_family_alias: item.factor_family_alias || decoded.family,
-        factor_git_commit: item.factor_git_commit || decoded.gitCommit,
-        factor_family_ref: item.factor_family_ref || decoded.family,
-        factor_owner_ref: item.factor_owner_ref || decoded.ownerRef,
-        factor_params: item.factor_params || decoded.params,
+      ...(identity ? {
+        factor_alias: item.factor_alias || identity.alias,
+        factor_family_alias: item.factor_family_alias || identity.family,
+        factor_owner_ref: item.factor_owner_ref || identity.ownerRef,
+        factor_params: item.factor_params || identity.params,
       } : {}),
     };
   }

@@ -2,34 +2,37 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import importlib
+import json
 from pathlib import Path
 from typing import Any
 
 import click
 
+from tools.cli.commands.research_report_common import scope_options
+from tools.cli.commands.research_report_job_binding import freeze_report_binding
+from tools.cli.commands.research_report_scope import resolve_branch_report_scope
 from tools.cli.core.context import client_from_config, requested_ports
 from tools.cli.core.errors import friendly_errors
-from tools.cli.state import load_state, save_state
-from tools.cli.step import field_occurrences, render_step_event
-from tools.cli.core.strategy_spec import load_spec
 from tools.cli.core.run_input_dependencies import (
     load as load_run_input_dependencies,
+)
+from tools.cli.core.run_input_dependencies import (
     option as run_input_option,
 )
-from tools.cli.release.profile import load_profile_root
-from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.research_reporting.references.factor_set_git import (
-    validate_factor_set_reference,
-)
+from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.artifact_paths import artifact_destination
 from tools.cli.release.job_cache import job_cache_directory
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_factor_set_queries import profile_factor_context
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
-from tools.cli.commands.research_report_common import scope_options
-from tools.cli.commands.research_report_scope import resolve_branch_report_scope
-from tools.cli.commands.research_report_job_binding import freeze_report_binding
+from tools.cli.release.research_reporting.references.factor_set_workspace import (
+    validate_factor_set_reference,
+)
+from tools.cli.state import load_state, save_state
+from tools.cli.step import field_occurrences, render_step_event
 
 
 def _json(value: Any) -> str:
@@ -88,24 +91,20 @@ def _load_factor_set_descriptors(
     store = LocalProfileStore(client_root)
     values = []
     for target_ref in target_refs:
-        parts = target_ref.split(":")
-        if len(parts) != 7 or not parts[2].startswith("profile-"):
+        matches = []
+        for profile in store.list():
+            try:
+                _repository, roots = profile_factor_context(profile)
+                matches.append(validate_factor_set_reference(
+                    kind="factor", target_ref=target_ref, roots=roots,
+                ))
+            except (OSError, ValueError):
+                continue
+        if len(matches) != 1:
             raise click.ClickException(
-                "--factor-set-ref 必须是 Profile CLI 生成的 factor-set:v1 引用"
+                "--factor-set-ref 必须精确匹配一个已登记工作区中的 v2 因子集合"
             )
-        profile_id = parts[2].removeprefix("profile-")
-        profile = store.load(profile_id)
-        binding = profile.get("factor_workspace_binding") or {}
-        worktree = str(binding.get("worktree_path") or "")
-        if not worktree:
-            raise click.ClickException(
-                f"Profile {profile_id} 没有已注册的 factor worktree"
-            )
-        value = validate_factor_set_reference(
-            kind="factor",
-            target_ref=target_ref,
-            roots={parts[2]: Path(worktree)},
-        )
+        value = matches[0]
         values.append({
             "target_ref": target_ref,
             "manifest": value["descriptor"],

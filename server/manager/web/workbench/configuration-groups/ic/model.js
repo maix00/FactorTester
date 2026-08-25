@@ -109,7 +109,7 @@
 
   function normalize(value = {}) {
     const factorRef = String(value.factor_ref || "").trim();
-    if (!/^factor:(?:v1:|sha256:[0-9a-f]{64}$)/.test(factorRef)) {
+    if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(factorRef)) {
       throw new Error("configuration group requires one frozen factor_ref");
     }
     const productScopeRef = String(value.product_scope_ref || "").trim();

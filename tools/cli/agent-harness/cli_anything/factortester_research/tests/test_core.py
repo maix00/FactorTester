@@ -2,49 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
+from cli_anything.factortester_research.core.backend_evidence import (
+    extract_job_attempt,
+)
 from cli_anything.factortester_research.core.capabilities import (
     evaluate_capability_predicate,
     load_builtin_capability_registry,
     resolve_graph_capabilities,
 )
-from cli_anything.factortester_research.core.backend_evidence import (
-    extract_job_attempt,
-)
-from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
-from cli_anything.factortester_research.core.replay import replay_graph_trace
-from cli_anything.factortester_research.core.external_factor import (
-    validate_dataset_manifest,
-    validate_factor_manifest,
-    validate_handoff_manifest,
-    vibe_pipeline_plan,
-)
-from cli_anything.factortester_research.core.evidence import (
-    persist_command_evidence,
-    validate_evidence_envelope,
-)
-from cli_anything.factortester_research.core.graph import (
-    build_draft_graph,
-    build_observed_graph,
-    graph_content_hash,
-    validate_graph,
-)
-from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
-from cli_anything.factortester_research.core.session import (
-    ResearchSession,
-    record_gap,
-    record_skill_usage,
-    resolve_gap,
-)
-from cli_anything.factortester_research.core.server_guards import (
-    derive_server_guard_facts,
-)
-from cli_anything.factortester_research.core.slices import default_factor_validation_plan
 from cli_anything.factortester_research.core.capability_sources import (
     source_manifest_sha256,
 )
@@ -52,7 +22,43 @@ from cli_anything.factortester_research.core.cycle import (
     validate_next_packet,
     validate_transition_evidence,
 )
-
+from cli_anything.factortester_research.core.evidence import (
+    persist_command_evidence,
+    validate_evidence_envelope,
+)
+from cli_anything.factortester_research.core.external_factor import (
+    validate_dataset_manifest,
+    validate_factor_manifest,
+    validate_handoff_manifest,
+    vibe_pipeline_plan,
+)
+from cli_anything.factortester_research.core.graph import (
+    build_draft_graph,
+    build_observed_graph,
+    graph_content_hash,
+    validate_graph,
+)
+from cli_anything.factortester_research.core.plan import (
+    build_factor_research_plan,
+    validation_checklist,
+)
+from cli_anything.factortester_research.core.replay import replay_graph_trace
+from cli_anything.factortester_research.core.server_guards import (
+    derive_server_guard_facts,
+)
+from cli_anything.factortester_research.core.service import (
+    ManagedWorktree,
+    select_worktree,
+)
+from cli_anything.factortester_research.core.session import (
+    ResearchSession,
+    record_gap,
+    record_skill_usage,
+    resolve_gap,
+)
+from cli_anything.factortester_research.core.slices import (
+    default_factor_validation_plan,
+)
 
 HARNESS_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -616,7 +622,7 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "semantic_discovery_fresh_or_not_triggered"
     ] is True
     assert edges["factor_semantics__validation_design"]["guard"][
-        "factor_revision_manifests_bound"
+        "frozen_factor_formulas_bound"
     ] is True
     assert edges["factor_semantics__validation_design"]["guard"][
         "selected_factor_semantics_resolved"
@@ -1663,7 +1669,7 @@ def test_replay_derives_factor_semantics_guards_from_server_evidence() -> None:
     )
 
     assert facts == {
-        "factor_revision_manifests_bound": True,
+        "frozen_factor_formulas_bound": True,
         "selected_factor_semantics_resolved": True,
     }
 

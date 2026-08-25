@@ -8,7 +8,7 @@ from pathlib import Path
 from tools.cli.core.sqlite import connect_sqlite
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect_catalog(path: str | Path) -> sqlite3.Connection:
@@ -28,6 +28,11 @@ def ensure_catalog_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError(
             f"local catalog schema {current} is newer than supported "
             f"schema {SCHEMA_VERSION}"
+        )
+    if current == 1:
+        raise RuntimeError(
+            "local catalog schema 1 requires the explicit factor formula "
+            "identity migration"
         )
     if current == 0:
         _create_schema(connection)
@@ -105,9 +110,13 @@ def _create_schema(connection: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS factors (
             factor_ref TEXT PRIMARY KEY,
-            owner_ref TEXT NOT NULL DEFAULT '',
-            family_name TEXT NOT NULL,
-            factor_name TEXT NOT NULL,
+            family_ref TEXT NOT NULL,
+            owner_ref TEXT NOT NULL,
+            family_alias TEXT NOT NULL,
+            factor_alias TEXT NOT NULL,
+            family_formula_fingerprint TEXT NOT NULL,
+            self_formula_fingerprint TEXT NOT NULL,
+            params_json TEXT NOT NULL DEFAULT '{}',
             logical_kind TEXT NOT NULL DEFAULT 'factor',
             state TEXT NOT NULL DEFAULT 'active'
                 CHECK (state IN ('active', 'disabled', 'superseded')),
@@ -115,21 +124,20 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             updated_at REAL NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS factor_revisions (
-            factor_revision_ref TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS factor_workspace_provenance (
+            provenance_id INTEGER PRIMARY KEY AUTOINCREMENT,
             factor_ref TEXT NOT NULL REFERENCES factors(factor_ref)
                 ON DELETE CASCADE,
-            repository_ref TEXT NOT NULL,
-            git_commit TEXT NOT NULL,
-            git_blob TEXT NOT NULL,
+            repository_ref TEXT NOT NULL DEFAULT '',
+            revision TEXT NOT NULL DEFAULT '',
+            blob_hash TEXT NOT NULL DEFAULT '',
             relative_path TEXT NOT NULL,
             source_hash TEXT NOT NULL,
-            dirty INTEGER NOT NULL DEFAULT 0 CHECK (dirty IN (0, 1)),
             created_at REAL NOT NULL,
-            UNIQUE (factor_ref, git_commit, git_blob)
+            UNIQUE (factor_ref, repository_ref, revision, blob_hash, relative_path)
         );
-        CREATE INDEX IF NOT EXISTS idx_factor_revisions_factor
-            ON factor_revisions(factor_ref, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_factor_provenance_factor
+            ON factor_workspace_provenance(factor_ref, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS factor_sets (
             set_ref TEXT PRIMARY KEY,
@@ -137,23 +145,21 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             set_id TEXT NOT NULL,
             title_zh TEXT NOT NULL,
             description_zh TEXT NOT NULL DEFAULT '',
-            manifest_path TEXT NOT NULL,
-            git_commit TEXT NOT NULL,
-            git_blob TEXT NOT NULL,
-            member_hash TEXT NOT NULL,
+            member_fingerprint TEXT NOT NULL,
             member_count INTEGER NOT NULL,
             state TEXT NOT NULL DEFAULT 'active'
                 CHECK (state IN ('active', 'disabled', 'superseded')),
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
-            UNIQUE (owner_ref, set_id, git_commit, git_blob)
+            UNIQUE (owner_ref, set_id, member_fingerprint)
         );
 
         CREATE TABLE IF NOT EXISTS factor_set_members (
             set_ref TEXT NOT NULL REFERENCES factor_sets(set_ref)
                 ON DELETE CASCADE,
             ordinal INTEGER NOT NULL,
-            factor_ref TEXT NOT NULL,
+            factor_ref TEXT NOT NULL REFERENCES factors(factor_ref),
+            frozen_identity_json TEXT NOT NULL,
             PRIMARY KEY (set_ref, ordinal),
             UNIQUE (set_ref, factor_ref)
         );

@@ -1,5 +1,3 @@
-import subprocess
-from base64 import urlsafe_b64encode
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,120 +13,71 @@ from tools.cli.release.research_reporting.authoring.tree_schema import (
 from tools.cli.release.research_reporting.references.authority import (
     validate_declared_reference,
 )
-from tools.cli.release.research_reporting.references.factor_git import (
+from tools.cli.release.research_reporting.references.factor_formula import (
     validate_factor_reference,
 )
-from tools.cli.release.research_reporting.references.factor_set_git import (
+from tools.cli.release.research_reporting.references.factor_set_workspace import (
     create_factor_set_manifest,
     freeze_factor_set_reference,
 )
 from tools.cli.release.research_reporting.references.profile_revisions import (
     ProfileRevisionStore,
 )
+from tools.factors.formula_identity import freeze_factor_identity
 
 
-def test_factor_reference_validates_the_exact_commit_and_blob(
-    tmp_path: Path,
-) -> None:
-    repository = tmp_path / "factor-worktree"
-    source = repository / "custom_factors" / "SgCPS.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
-    _commit(repository)
-    revision = _git(repository, "rev-parse", "HEAD")
-    blob = _git(repository, "rev-parse", "HEAD:custom_factors/SgCPS.py")
-    target_ref = (
-        "factor-family:v1:profile-maxa:"
-        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS')}:"
-        f"{revision}:{blob}"
-    )
-
+def test_factor_reference_validates_an_opaque_formula_reference() -> None:
+    factor = _factor("SgCPS|N:20d", "b")
     result = validate_factor_reference(
         kind="factor",
-        target_ref=target_ref,
-        roots={"profile-maxa": repository},
+        target_ref=factor["ref"],
+        roots={},
     )
 
-    assert result["revision"] == revision
-    assert result["blob_hash"] == blob
-    assert result["relative_path"] == "custom_factors/SgCPS.py"
-    assert result["identity"] == "SgCPS"
+    assert result == {
+        "kind": "factor",
+        "object_kind": "factor",
+        "target_ref": factor["ref"],
+    }
 
 
-def test_factor_reference_rejects_a_fabricated_blob(tmp_path: Path) -> None:
-    repository = tmp_path / "factor-worktree"
-    source = repository / "custom_factors" / "SgCPS.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
-    _commit(repository)
-    revision = _git(repository, "rev-parse", "HEAD")
-    target_ref = (
-        "factor-family:v1:profile-maxa:"
-        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS')}:"
-        f"{revision}:{'0' * 40}"
-    )
-
-    with pytest.raises(ValueError, match="blob"):
+def test_factor_reference_rejects_legacy_git_identity() -> None:
+    with pytest.raises(ValueError, match="v2"):
         validate_factor_reference(
             kind="factor",
-            target_ref=target_ref,
-            roots={"profile-maxa": repository},
+            target_ref="factor:v1:profile-maxa:path:alias:commit:blob",
+            roots={},
         )
 
 
-def test_factor_set_reference_validates_its_members_and_manifest_blob(
+def test_factor_set_reference_validates_complete_frozen_members(
     tmp_path: Path,
 ) -> None:
     repository = tmp_path / "factor-worktree"
-    source = repository / "custom_factors" / "SgCPS.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
-    _commit(repository)
-    revision = _git(repository, "rev-parse", "HEAD")
-    blob = _git(repository, "rev-parse", "HEAD:custom_factors/SgCPS.py")
-    member_ref = (
-        "factor:v1:profile-maxa:"
-        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS|N:20d')}:"
-        f"{revision}:{blob}"
-    )
+    member = _factor("SgCPS|N:20d", "b")
     create_factor_set_manifest(
         repository=repository,
         scope="profile-maxa",
         set_id="momentum-column-2025",
         title_zh="2025年动量因子列",
-        member_refs=[member_ref],
+        members=[member],
     )
-    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
-    subprocess.run([
-        "git", "-C", str(repository),
-        "-c", "user.name=Test", "-c", "user.email=test@example.com",
-        "commit", "-qm", "factor set",
-    ], check=True)
 
     value = freeze_factor_set_reference(
         repository=repository,
         scope="profile-maxa",
         set_id="momentum-column-2025",
-        roots={"profile-maxa": repository},
     )
 
-    assert value["set_ref"] == (
-        "factor-set:profile-maxa:momentum-column-2025"
-    )
-    assert value["member_refs"] == [member_ref]
+    assert value["target_ref"].startswith("factor-set:v2:")
+    assert value["member_refs"] == [member["ref"]]
     assert value["member_count"] == 1
     assert value["related_references"] == [{
         "relation": "集合成员",
         "kind": "factor",
-        "target_ref": member_ref,
+        "target_ref": member["ref"],
         "label": "SgCPS|N:20d",
-        "data": {
-            "scope": "profile-maxa",
-            "relative_path": "custom_factors/SgCPS.py",
-            "identity": "SgCPS|N:20d",
-            "revision": revision,
-            "blob_hash": blob,
-        },
+        "data": member,
     }]
 
     client_root = tmp_path / "client"
@@ -138,23 +87,8 @@ def test_factor_set_reference_validates_its_members_and_manifest_blob(
         workspace_root=tmp_path / "workspace",
     )
     profile["factor_workspace_binding"] = {
-        "binding_id": "factor-maxa",
-        "canonical_repo_ref": "local-factor-git:maxa",
-        "base_commit": _git(repository, "rev-parse", "HEAD"),
-        "branch": "research-maxa",
         "worktree_path": str(repository),
-        "research_root": str(tmp_path / "workspace" / "research"),
-        "git_common_dir": str(repository / ".git"),
-        "owner_ref": "owner-1",
-        "sync_policy": {
-            "source_sync_enabled": False,
-            "auto_push": False,
-            "auto_merge": False,
-        },
-        "receipt_hash": "a" * 64,
-        "receipt_ref": (tmp_path / "binding.json").resolve().as_uri(),
     }
-    LocalProfileStore(client_root).save(profile)
     compact = validate_declared_reference(
         reference=DeclaredReportReference(
             kind="factor", target_ref=value["target_ref"], label="动量集合",
@@ -167,33 +101,23 @@ def test_factor_set_reference_validates_its_members_and_manifest_blob(
         ),
     )["data"]
     assert compact["member_count"] == 1
-    assert compact["member_hash"] == value["member_hash"]
+    assert compact["member_fingerprint"] == value["member_fingerprint"]
     assert "member_refs" not in compact
     assert "related_references" not in compact
     assert "descriptor" not in compact
 
 
-def test_factor_set_rejects_parameterized_family_members(tmp_path: Path) -> None:
+def test_factor_set_rejects_duplicate_frozen_members(tmp_path: Path) -> None:
     repository = tmp_path / "factor-worktree"
-    source = repository / "custom_factors" / "SgCPS.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
-    _commit(repository)
-    revision = _git(repository, "rev-parse", "HEAD")
-    blob = _git(repository, "rev-parse", "HEAD:custom_factors/SgCPS.py")
-    family_ref = (
-        "factor-family:v1:profile-maxa:"
-        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS')}:"
-        f"{revision}:{blob}"
-    )
+    member = _factor("SgCPS|N:20d", "b")
 
-    with pytest.raises(ValueError, match="concrete factor:v1"):
+    with pytest.raises(ValueError, match="unique"):
         create_factor_set_manifest(
             repository=repository,
             scope="profile-maxa",
             set_id="invalid-family-set",
             title_zh="无效集合",
-            member_refs=[family_ref],
+            members=[member, member],
         )
 
 
@@ -201,18 +125,8 @@ def test_large_factor_set_report_binding_keeps_only_frozen_identity(
     tmp_path: Path,
 ) -> None:
     repository = tmp_path / "factor-worktree"
-    source = repository / "custom_factors" / "Momentum.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
-    _commit(repository)
-    revision = _git(repository, "rev-parse", "HEAD")
-    blob = _git(repository, "rev-parse", "HEAD:custom_factors/Momentum.py")
     members = [
-        (
-            "factor:v1:profile-maxa:"
-            f"{_encoded('custom_factors/Momentum.py')}:"
-            f"{_encoded(f'Momentum|N:{index}m')}:{revision}:{blob}"
-        )
+        _factor(f"Momentum|N:{index}m", f"{index:064x}")
         for index in range(1, 129)
     ]
     create_factor_set_manifest(
@@ -220,19 +134,12 @@ def test_large_factor_set_report_binding_keeps_only_frozen_identity(
         scope="profile-maxa",
         set_id="momentum-column-128",
         title_zh="128成员动量因子集合",
-        member_refs=members,
+        members=members,
     )
-    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
-    subprocess.run([
-        "git", "-C", str(repository),
-        "-c", "user.name=Test", "-c", "user.email=test@example.com",
-        "commit", "-qm", "large factor set",
-    ], check=True)
     frozen = freeze_factor_set_reference(
         repository=repository,
         scope="profile-maxa",
         set_id="momentum-column-128",
-        roots={"profile-maxa": repository},
     )
     profile = new_local_profile(
         profile_id="maxa", display_name="MaxA",
@@ -658,23 +565,18 @@ def test_authority_uses_immutable_catalog_for_historical_chapter(
     }
 
 
-def _encoded(value: str) -> str:
-    return urlsafe_b64encode(value.encode()).decode().rstrip("=")
-
-
-def _commit(repository: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
-    subprocess.run([
-        "git", "-C", str(repository),
-        "-c", "user.name=Test",
-        "-c", "user.email=test@example.com",
-        "commit", "-qm", "factor",
-    ], check=True)
-
-
-def _git(repository: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repository), *arguments],
-        check=True, capture_output=True, text=True,
-    ).stdout.strip()
+def _factor(alias: str, fingerprint: str) -> dict:
+    family_alias = alias.split("|", 1)[0]
+    params = dict(
+        item.split(":", 1) for item in alias.split("|")[1:]
+    )
+    return freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias=family_alias,
+        factor_alias=alias,
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint=(
+            fingerprint * 64 if len(fingerprint) == 1 else fingerprint
+        ),
+        params=params,
+    )

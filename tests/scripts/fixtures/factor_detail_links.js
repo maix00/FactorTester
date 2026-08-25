@@ -71,14 +71,8 @@ vm.runInThisContext(
 );
 
 const alias = "MmRateOfChg|P:[CA]|N:20d|$F:1d";
-const encodedPath = Buffer.from("custom_factors/MmRateOfChg.py").toString("base64url");
-const encodedAlias = Buffer.from(alias).toString("base64url");
-const factorRef = `factor:v1:profile-maxa:${encodedPath}:${encodedAlias}:${
-  "a".repeat(40)
-}:${"b".repeat(40)}`;
-const setRef = `factor-set:v1:profile-maxa:${
-  Buffer.from(".factortester/factor-sets/one.json").toString("base64url")
-}:${Buffer.from("one").toString("base64url")}:${"a".repeat(40)}:${"c".repeat(40)}`;
+const factorRef = `factor:v2:${"x".repeat(43)}`;
+const setRef = `factor-set:v2:${"y".repeat(43)}`;
 
 const navigated = [];
 const content = new Element();
@@ -109,7 +103,18 @@ const context = {
 };
 const data = {
   factors: [{
-    factor_ref: "factor:sha256:server-projection",
+    schema_version: 2,
+    ref: factorRef,
+    alias,
+    owner_ref: "profile:maxa",
+    identity: {
+      family_ref: `factor-family:v2:${"z".repeat(43)}`,
+      family_alias: "MmRateOfChg",
+      family_formula_fingerprint: "a".repeat(64),
+      self_formula_fingerprint: "b".repeat(64),
+      params: {N: "20d"},
+    },
+    factor_ref: factorRef,
     factor_alias: alias,
     factor_family_name: "MmRateOfChg",
     factor_family_alias: "MmRateOfChg",
@@ -134,7 +139,7 @@ const data = {
 
 assert.deepStrictEqual(
   window.FTFactorDetailShared.familyIdentity({factor_family_ref: "family:momentum"}),
-  {alias: "", ref: "family:momentum", commit: ""},
+  {alias: "", fingerprint: ""},
 );
 
 (async () => {

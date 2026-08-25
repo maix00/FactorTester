@@ -6,7 +6,6 @@ import hashlib
 import re
 from typing import Any
 
-from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from server.services.factor_source_objects import (
     hydrate_source_free_entries,
     portable_source_path,
@@ -14,7 +13,8 @@ from server.services.factor_source_objects import (
     source_free_manifest,
     source_transfer_manifest,
 )
-
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
+from tools.factors.formula_identity import require_frozen_factor
 
 MAX_FILES = 200
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
@@ -27,37 +27,23 @@ def _revision_contracts(
 ) -> dict[str, dict[str, str]]:
     configuration = run_spec.get("configuration")
     shared = configuration.get("shared") if isinstance(configuration, dict) else None
-    manifests = (
-        shared.get("factor_revision_manifests")
-        if isinstance(shared, dict) else None
-    )
-    if not isinstance(manifests, list):
-        raise ValueError("RunSpec has no factor revision manifests")
+    factors = shared.get("factors") if isinstance(shared, dict) else None
+    if not isinstance(factors, list):
+        raise ValueError("RunSpec has no frozen factors")
     contracts: dict[str, dict[str, str]] = {}
-    for item in manifests:
-        if not isinstance(item, dict):
-            raise ValueError("factor revision manifest must be an object")
-        canonical_ref = str(item.get("factor_family_ref") or "").strip()
-        source_hash = str(item.get("family_source_hash") or "").strip()
-        source_policy = str(item.get("source_access_policy") or "").strip()
-        source_owner, factor_id = split_owner_qualified_factor_family(
-            canonical_ref,
-        )
-        if (
-            source_owner is None
-            or not _FACTOR_ID.fullmatch(factor_id)
-            or not _SHA256.fullmatch(source_hash)
-            or not source_policy
-        ):
-            raise ValueError("factor revision manifest source identity is invalid")
+    for raw in factors:
+        item = require_frozen_factor(raw)
+        identity = item["identity"]
+        canonical_ref = f"{item['owner_ref']}:{identity['family_alias']}"
         contract = {
-            "source_sha256": source_hash,
-            "source_access_policy": source_policy,
+            "family_formula_fingerprint": identity[
+                "family_formula_fingerprint"
+            ],
         }
         prior = contracts.setdefault(canonical_ref, contract)
         if prior != contract:
             raise ValueError(
-                f"factor revision manifests disagree for {canonical_ref!r}"
+                f"frozen factors disagree for {canonical_ref!r}"
             )
     return contracts
 
@@ -155,10 +141,7 @@ def freeze_sources(prepared: dict[str, Any], *, owner: str) -> list[dict[str, An
         if not isinstance(item, dict):
             continue
         canonical_ref = f"{owner}:{item.get('factor_id')}"
-        if (
-            expected.get(canonical_ref, {}).get("source_sha256")
-            == str(item.get("source_sha256") or "")
-        ):
+        if canonical_ref in expected:
             already_carried.add(canonical_ref)
 
     entries: list[dict[str, Any]] = []
@@ -166,7 +149,7 @@ def freeze_sources(prepared: dict[str, Any], *, owner: str) -> list[dict[str, An
         owner=owner,
         overrides=transient_overrides,
     ):
-        for canonical_ref, contract in sorted(expected.items()):
+        for canonical_ref in sorted(expected):
             if canonical_ref in already_carried:
                 continue
             source = resolve_factor_family_source(
@@ -180,15 +163,15 @@ def freeze_sources(prepared: dict[str, Any], *, owner: str) -> list[dict[str, An
             source_code = str(source.get("source_code") or "")
             encoded = source_code.encode("utf-8")
             source_hash = hashlib.sha256(encoded).hexdigest()
-            if source_hash != contract["source_sha256"]:
-                raise ValueError(
-                    f"factor source changed after RunSpec freeze: {canonical_ref}"
-                )
             entries.append({
                 "canonical_family_ref": canonical_ref,
                 "source_kind": str(source["source_kind"]),
                 "source_owner": str(source["source_owner"]),
-                "source_access_policy": contract["source_access_policy"],
+                "source_access_policy": str(
+                    source.get("source_access_policy")
+                    or source.get("source_mode")
+                    or "transient_run_source"
+                ),
                 "factor_id": str(source["factor_id"]),
                 "path": _portable_path(canonical_ref),
                 "source_code": source_code,
@@ -208,10 +191,7 @@ def validate_context_sources(prepared: dict[str, Any], *, owner: str) -> None:
     if not isinstance(run_spec, dict):
         raise ValueError("portable factor sources require a RunSpec")
     contracts = _revision_contracts(run_spec)
-    expected = {
-        canonical_ref: contract["source_sha256"]
-        for canonical_ref, contract in contracts.items()
-    }
+    expected = set(contracts)
     transient = validate_transient_entries(prepared.get("transient_sources"))
     portable = validate_entries(hydrate_source_free_entries(
         prepared.get("portable_factor_sources") or [],
@@ -227,36 +207,22 @@ def validate_context_sources(prepared: dict[str, Any], *, owner: str) -> None:
     prepared["transient_sources"] = transient
     prepared["portable_factor_sources"] = portable
 
-    covered: dict[str, str] = {}
+    covered: set[str] = set()
     for item in transient:
         factor_id = str(item.get("factor_id") or "")
-        source_hash = str(item.get("source_sha256") or "")
         canonical_ref = f"{owner}:{factor_id}"
         if canonical_ref in expected:
-            covered[canonical_ref] = source_hash
+            covered.add(canonical_ref)
     for item in portable:
         canonical_ref = str(item["canonical_family_ref"])
         if canonical_ref not in expected:
             raise ValueError(
                 f"portable factor source is not referenced: {canonical_ref}"
             )
-        if (
-            str(item["source_access_policy"])
-            != contracts[canonical_ref]["source_access_policy"]
-        ):
-            raise ValueError(
-                f"portable factor source policy changed: {canonical_ref}"
-            )
-        covered[canonical_ref] = str(item["source_sha256"])
+        covered.add(canonical_ref)
     if covered != expected:
-        missing = sorted(set(expected) - set(covered))
-        changed = sorted(
-            ref for ref in set(expected) & set(covered)
-            if expected[ref] != covered[ref]
-        )
-        detail = ", ".join([*(f"missing {ref}" for ref in missing), *(
-            f"changed {ref}" for ref in changed
-        )])
+        missing = sorted(expected - covered)
+        detail = ", ".join(f"missing {ref}" for ref in missing)
         raise ValueError(
             "portable factor sources do not match the RunSpec"
             + (f": {detail}" if detail else "")

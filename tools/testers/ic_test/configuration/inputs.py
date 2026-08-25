@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable, Mapping
+
+from tools.factors.formula_identity import is_factor_reference
+from tools.factors.factor_set_identity import is_factor_set_reference
 
 
 def factor_refs(value: Any) -> tuple[str, ...]:
@@ -13,11 +15,10 @@ def factor_refs(value: Any) -> tuple[str, ...]:
         factor_ref = str(
             item.get("factor_ref") or item.get("target_ref") or ""
         ).strip() if isinstance(item, dict) else str(item or "").strip()
-        if not (
-            factor_ref.startswith("factor:v1:")
-            or re.fullmatch(r"factor:sha256:[0-9a-f]{64}", factor_ref)
-        ):
-            raise ValueError("each IC core test requires a frozen factor_ref")
+        if not is_factor_reference(factor_ref):
+            raise ValueError(
+                "each IC core test requires a factor:v2 formula reference"
+            )
         refs.append(factor_ref)
     if not refs:
         raise ValueError("IC core tests require at least one frozen factor_ref")
@@ -52,8 +53,10 @@ def factor_set_refs(value: Any) -> tuple[str, ...]:
         target_ref = str(
             item.get("target_ref") or ""
         ).strip() if isinstance(item, dict) else str(item or "").strip()
-        if not target_ref.startswith("factor-set:v1:"):
-            raise ValueError("factor-set selection requires a frozen target_ref")
+        if not is_factor_set_reference(target_ref):
+            raise ValueError(
+                "factor-set selection requires a factor-set:v2 reference"
+            )
         refs.append(target_ref)
     return unique_texts(refs)
 

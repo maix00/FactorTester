@@ -2,34 +2,26 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-import hashlib
 import os
 import re
 import uuid
+from copy import deepcopy
 
 from flask import jsonify, request, session
-import settings as Settings
 
-from server.modules.single_factor_test import sft_bp
-from server.services.research_run_context import (
-    MANAGER_RUN_CONTEXT_KEY,
-    RunRequestError as _RunRequestError,
-    create_manager_run_context,
-    load_manager_run_context,
-)
-from server.services import (
-    external_factor_artifacts,
-    factor_revisions,
-    factor_subject_descriptors,
-    research_configurations,
-    research_configuration_snapshots,
-    research_runs,
-    research_workspaces,
-)
-from server.services.frozen_product_scope import freeze_product_scope
-from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
+import settings as Settings
 from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.entitlements import entitlement_for_owner
+from server.jobs.input_artifacts import (
+    retain_factor_sources,
+    retain_run_dependencies,
+    retain_strategy_sources,
+    retain_strategy_specs,
+    strategy_spec_input_bytes,
+)
+from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
+from server.jobs.models import JobRecord
+from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
     default_output_requests,
     output_capabilities,
@@ -37,31 +29,57 @@ from server.jobs.report_outputs import (
     result_retention_mode_for,
     validate_output_requests,
 )
-from server.jobs.entitlements import entitlement_for_owner
-from server.jobs.input_artifacts import (
-    retain_factor_sources,
-    retain_run_dependencies,
-    retain_strategy_specs,
-    retain_strategy_sources,
-    strategy_spec_input_bytes,
-)
+from server.jobs.repository import JobRepository
 from server.jobs.run_input_dependencies import (
     dependency_input_bytes,
+)
+from server.jobs.run_input_dependencies import (
     source_free_manifest as dependency_manifest,
+)
+from server.jobs.run_input_dependencies import (
     validate_entries as validate_run_input_dependencies,
 )
-from server.jobs.models import JobRecord
-from server.jobs.ports import detect_port
-from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
-from server.services.session_runtime import require_user
-from server.services.federated_factor_sources import (
-    freeze_sources as freeze_federated_factor_sources,
-    source_free_context as source_free_federated_context,
-    source_free_manifest as federated_source_manifest,
-    source_transfer_manifest as federated_source_transfer_manifest,
+from server.modules.single_factor_test import sft_bp
+from server.services import (
+    external_factor_artifacts,
+    factor_revisions,
+    factor_subject_descriptors,
+    research_configuration_snapshots,
+    research_configurations,
+    research_runs,
+    research_workspaces,
 )
 from server.services.factor_registry import transient_factor_source_scope
+from server.services.federated_factor_sources import (
+    freeze_sources as freeze_federated_factor_sources,
+)
+from server.services.federated_factor_sources import (
+    source_free_context as source_free_federated_context,
+)
+from server.services.federated_factor_sources import (
+    source_free_manifest as federated_source_manifest,
+)
+from server.services.federated_factor_sources import (
+    source_transfer_manifest as federated_source_transfer_manifest,
+)
+from server.services.frozen_product_scope import freeze_product_scope
+from server.services.research_graph.trial_plan.sample_identity import (
+    derive_sample_identity,
+)
+from server.services.research_report_presentations import (
+    run_spec_presentation,
+)
+from server.services.research_run_context import (
+    MANAGER_RUN_CONTEXT_KEY,
+    create_manager_run_context,
+    load_manager_run_context,
+)
+from server.services.research_run_context import (
+    RunRequestError as _RunRequestError,
+)
+from server.services.session_runtime import require_user
+from server.services.strategy_plans import normalize_strategy_plan
 from server.services.transient_factor_sources import (
     cleanup_scope,
     create_scope,
@@ -69,16 +87,14 @@ from server.services.transient_factor_sources import (
 )
 from server.services.transient_strategy_sources import (
     cleanup_scope as cleanup_strategy_scope,
+)
+from server.services.transient_strategy_sources import (
     create_scope as create_strategy_scope,
+)
+from server.services.transient_strategy_sources import (
     validate_entries as validate_strategy_entries,
 )
-from server.services.strategy_plans import normalize_strategy_plan
-from server.services.research_graph.trial_plan.sample_identity import (
-    derive_sample_identity,
-)
-from server.services.research_report_presentations import (
-    run_spec_presentation,
-)
+from tools.factors.formula_identity import require_frozen_factor
 from tools.testers.backtest.engines.native.performance_profile import (
     normalize_performance_profile,
 )
@@ -88,7 +104,6 @@ from tools.testers.backtest.modules.margin_budget_impl.observability import (
 from tools.testers.settings.runtime_intent import (
     normalize_backtest_runtime_setting_intent,
 )
-
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
 _TASK_NAME_LIMIT = 160
@@ -359,10 +374,14 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         }
     ic_payload = run_spec["configuration"].get("analyses", {}).get("ic", {})
     if "ic" in analyses and ic_payload.get("schema_version") == 2:
-        from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
+        from tools.testers.ic_test.configuration.grouped import (
+            compile_ic_grouped_configuration,
+        )
         frequencies = {}
         for item in run_spec["configuration"].get("shared", {}).get("factors", []):
-            if not isinstance(item, dict) or not item.get("factor_ref"):
+            try:
+                frozen_factor = require_frozen_factor(item)
+            except (TypeError, ValueError):
                 continue
             frequency = str(
                 item.get("frequency")
@@ -371,11 +390,11 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
                 or ""
             ).strip()
             if not frequency:
-                alias = str(item.get("factor_alias") or item.get("alias") or "")
+                alias = frozen_factor["alias"]
                 match = re.search(r"(?:^|\|)\$F:([^|]+)", alias)
                 frequency = match.group(1).strip() if match else ""
             if frequency:
-                frequencies[str(item["factor_ref"])] = frequency
+                frequencies[frozen_factor["ref"]] = frequency
         run_spec["typed_ic"] = compile_ic_grouped_configuration(
             ic_payload, factor_frequencies=frequencies,
         )
@@ -385,22 +404,14 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     if "backtest" in analyses:
         run_spec["step_mode"] = step_mode
     if factor_subjects:
-        empty_alias_hash = hashlib.sha256(b"").hexdigest()
-        alias_hashes = {
-            str(item.get("factor_alias_hash") or "")
-            for item in (
-                run_spec["configuration"]["shared"].get(
-                    "factor_revision_manifests"
-                ) or []
-            )
-            if isinstance(item, dict)
+        frozen_factor_refs = {
+            require_frozen_factor(item)["ref"]
+            for item in run_spec["configuration"]["shared"].get("factors") or []
         }
-        alias_hashes.discard("")
-        alias_hashes.discard(empty_alias_hash)
         try:
             factor_subject_descriptors.assert_factor_sets_match_run(
                 factor_subjects,
-                factor_alias_hashes=alias_hashes,
+                factor_refs=frozen_factor_refs,
             )
         except ValueError as exc:
             raise _RunRequestError(str(exc)) from exc
@@ -428,32 +439,27 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
             )
         missing_refs: list[str] = []
         for factor in run_shared_factors:
-            if not isinstance(factor, dict):
+            try:
+                frozen_factor = require_frozen_factor(factor)
+            except (TypeError, ValueError):
+                missing_refs.append("<invalid frozen factor>")
                 continue
-            alias = str(factor.get("alias") or "").strip()
-            target_ref = factor_refs.get(alias)
-            if not target_ref:
-                missing_refs.append(alias or "<empty>")
+            if factor_refs.get(frozen_factor["alias"]) != frozen_factor["ref"]:
+                missing_refs.append(frozen_factor["alias"])
+        execution_refs = {}
+        for factor in execution_shared_factors:
+            try:
+                frozen_factor = require_frozen_factor(factor)
+            except (TypeError, ValueError):
                 continue
-            # Keep the exact submitted member reference in the immutable
-            # configuration.  No N/$F parsing or family-level substitution is
-            # allowed here.
-            factor["factor_ref"] = target_ref
-        execution_by_alias = {
-            str(item.get("alias") or "").strip(): item
-            for item in execution_shared_factors
-            if isinstance(item, dict) and str(item.get("alias") or "").strip()
-        }
-        for alias, target_ref in factor_refs.items():
-            item = execution_by_alias.get(alias)
-            if item is not None:
-                item["factor_ref"] = target_ref
+            execution_refs[frozen_factor["alias"]] = frozen_factor["ref"]
+        if execution_refs != factor_refs:
+            missing_refs.append("<execution factor set mismatch>")
         if missing_refs:
             raise _RunRequestError(
                 "factor-set subjects do not bind every RunSpec factor: "
                 + ", ".join(sorted(missing_refs))
             )
-        run_spec["factor_refs"] = dict(sorted(factor_refs.items()))
     if strategy_plan:
         run_spec["strategy_specs"] = deepcopy(strategy_plan)
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
@@ -1172,7 +1178,6 @@ def submit_research_run():
                     (plan for plan in (_plans or ()) if plan.get("kind") == kind),
                     {},
                 )),
-                "factor_refs": dict(run_spec.get("factor_refs") or {}),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
                 "custom_strategy_scope": deepcopy(
@@ -1309,10 +1314,8 @@ def preview_research_run():
             run_spec.get("factor_source_policy") or {}
         ),
         "sample_identity": sample_identity,
-        "factor_revision_manifests": deepcopy(
-            run_spec["configuration"]["shared"].get(
-                "factor_revision_manifests"
-            ) or []
+        "frozen_factors": deepcopy(
+            run_spec["configuration"]["shared"].get("factors") or []
         ),
         "factor_subject_descriptors": deepcopy(
             run_spec.get("factor_subject_descriptors") or []
@@ -1396,6 +1399,14 @@ def clone_research_run_workspace(run_id: str):
     payload = run["run_spec"].get("configuration")
     if not isinstance(payload, dict):
         return jsonify({"success": False, "error": "run has no restorable configuration"}), 409
+    if int(payload.get("schema_version") or 0) != research_configurations.SCHEMA_VERSION:
+        return jsonify({
+            "success": False,
+            "error": (
+                "historical RunSpec configuration is incompatible and cannot be "
+                "restored; create a new editable configuration"
+            ),
+        }), 409
     data = request.get_json(silent=True) or {}
     title = str(data.get("title") or f"Restored run {run_id[:8]}").strip()
     workspace = research_workspaces.create_workspace(

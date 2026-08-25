@@ -30,22 +30,47 @@ assert.deepStrictEqual(
   ["product-group:local-one"],
 );
 
-const encodedPath = Buffer.from("public_factors/MmRateOfChg.py").toString("base64url");
-const encodedAlias = Buffer.from("MmRateOfChg|P:[CA]|N:20d|$F:3d|$Rev").toString("base64url");
-const target = `factor:v1:profile-maxa:${encodedPath}:${encodedAlias}:${"a".repeat(40)}:${"b".repeat(40)}`;
-assert.deepStrictEqual(model.decodeFrozenFactorRef(target), {
+const target = `factor:v2:${"A".repeat(43)}`;
+const frozen = {
+  schema_version: 2,
+  ref: target,
+  alias: "MmRateOfChg|P:CA|N:20d|$F:3d|$Rev",
+  owner_ref: "profile:maxa",
+  identity: {
+    family_ref: `factor-family:v2:${"B".repeat(43)}`,
+    family_alias: "MmRateOfChg",
+    family_formula_fingerprint: "a".repeat(64),
+    self_formula_fingerprint: "b".repeat(64),
+    params: {P: "CA", N: "20d", $F: "3d", $Rev: ""},
+  },
+};
+assert.deepStrictEqual(model.frozenFactorIdentity(frozen), {
   factorRef: target,
-  alias: "MmRateOfChg|P:[CA]|N:20d|$F:3d|$Rev",
+  alias: "MmRateOfChg|P:CA|N:20d|$F:3d|$Rev",
   family: "MmRateOfChg",
   ownerRef: "profile:maxa",
-  gitCommit: "a".repeat(40),
-  gitBlob: "b".repeat(40),
-  relativePath: "public_factors/MmRateOfChg.py",
+  familyFormulaFingerprint: "a".repeat(64),
+  selfFormulaFingerprint: "b".repeat(64),
+  record: frozen,
+  params: {P: "CA", N: "20d", $F: "3d", $Rev: ""},
+});
+assert.deepStrictEqual(model.objectChoice(frozen), {
+  value: target,
+  label: "MmRateOfChg|P:CA|N:20d|$F:3d|$Rev",
+  record: frozen,
+});
+assert.deepStrictEqual(model.frozenFactorIdentity({
+  factor_ref: target,
+  factor_alias: frozen.alias,
+  factor_owner_ref: frozen.owner_ref,
+  factor_family_alias: frozen.identity.family_alias,
+  family_formula_fingerprint: frozen.identity.family_formula_fingerprint,
+  self_formula_fingerprint: frozen.identity.self_formula_fingerprint,
   params: [
-    {alias: "P", value: "[CA]", redacted: false},
+    {alias: "P", value: "CA", redacted: false},
     {alias: "N", value: "20d", redacted: false},
     {alias: "$F", value: "3d", redacted: false},
     {alias: "$Rev", value: "", redacted: false},
   ],
-});
+}), null);
 console.log("ok");

@@ -8,28 +8,6 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
-from tools.data.types import DataFreq
-from tools.data.types.time_index import DataIndex
-from tools.factors import Factor
-from tools.factors.FactorFamily import FactorFamily, _active_tester
-from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
-from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
-from tools.factors.tester_calc.NextReturns import NextReturns
-from tools.factors.tester_calc.single_factor_test.ic import (
-    annotate_ic_temporal_support, build_ic_factor, collect_ic_result,
-    discard_ic_factor, ic_evaluation_end_dt,
-)
-from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
-    expected_sign_for_factor,
-)
-from tools.factors.temporal_support import temporal_support_for_ic
-
-from server.services.eval_progress import (
-    count_evaluation_nodes, setup as setup_progress,
-    teardown as teardown_progress,
-)
-from server.services.factor_registry import factor_from_alias
-from server.services.session_runtime import user_obj_for_name
 from server.modules.shared.factor_tester_runtime import (
     create_isolated_factor_tester_for_run,
     selection_from_request,
@@ -42,22 +20,48 @@ from server.modules.single_factor_test.ic_params import (
     resolve_forward_horizons,
     run_window_datetimes,
 )
-from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
-    normalize_ic_metric_selection,
-)
 from server.modules.single_factor_test.ic_response import (
     _extract_product_names,
-    _extract_signal_index,
-    _forward_ic_half_life,
-    _forward_ic_half_life_exponential,
-    _is_term_contract_product,
-    _safe_round,
     build_ic_response,
 )
 from server.modules.single_factor_test.ic_rolling import (
     normalize_rolling_window_specs,
 )
-
+from server.services.eval_progress import (
+    count_evaluation_nodes,
+)
+from server.services.eval_progress import (
+    setup as setup_progress,
+)
+from server.services.eval_progress import (
+    teardown as teardown_progress,
+)
+from server.services.factor_registry import factor_from_alias
+from server.services.session_runtime import user_obj_for_name
+from tools.data.types import DataFreq
+from tools.data.types.time_index import DataIndex
+from tools.factors import Factor
+from tools.factors.FactorFamily import FactorFamily
+from tools.factors.FactorTester import _active_tester
+from tools.factors.formula_identity import (
+    is_factor_reference,
+    require_frozen_factor,
+)
+from tools.factors.temporal_support import temporal_support_for_ic
+from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
+from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.ic import (
+    annotate_ic_temporal_support,
+    build_ic_factor,
+    collect_ic_result,
+    discard_ic_factor,
+    ic_evaluation_end_dt,
+)
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    expected_sign_for_factor,
+    normalize_ic_metric_selection,
+)
 
 # A single frequency partition can contain one root for every factor ×
 # horizon × delay combination.  Evaluating the whole partition at once keeps
@@ -135,46 +139,40 @@ _run_window_datetimes = run_window_datetimes
 def _factor_execution_refs(data: dict[str, Any]) -> dict[str, str]:
     """Return exact committed factor identities frozen at submission.
 
-    ``factor_revision_manifests`` describe source semantics but are not
-    factor navigation targets.  In particular, never synthesize a report
-    identity from an alias, N/$F, or a family revision hash.  Historical
-    payloads without the new map therefore produce no factor link rather than
-    a misleading transient target.
+    Never synthesize a report identity from an alias, N/$F, or a family
+    fingerprint. The immutable RunSpec's complete frozen factor records are
+    the sole navigation and execution identity source.
     """
-    raw = data.get("factor_refs")
-    if not isinstance(raw, dict) or not raw:
-        # Direct CLI submissions can freeze the exact member references in
-        # the immutable RunSpec's shared factor list without also carrying the
-        # optional root-level convenience map.  Use that frozen payload as a
-        # source of links; never reconstruct a target from N/$F or a family
-        # revision hash.
-        run_spec = data.get("run_spec")
-        if isinstance(run_spec, dict):
-            raw = run_spec.get("factor_refs")
-            if not isinstance(raw, dict) or not raw:
-                shared = run_spec.get("configuration", {}).get("shared", {})
-                factors = shared.get("factors") if isinstance(shared, dict) else None
-                if isinstance(factors, list):
-                    raw = {
-                        str(item.get("alias") or "").strip(): item.get("factor_ref")
-                        for item in factors
-                        if isinstance(item, dict) and item.get("factor_ref")
-                    }
-    if not isinstance(raw, dict) or not raw:
-        raw = {
-            str(item.get("alias") or "").strip(): item.get("factor_ref")
-            for item in data.get("factors") or ()
-            if isinstance(item, dict) and item.get("factor_ref")
-        }
+    raw: dict[str, str] = {}
+    run_spec = data.get("run_spec")
+    if isinstance(run_spec, dict):
+        shared = run_spec.get("configuration", {}).get("shared", {})
+        factors = shared.get("factors") if isinstance(shared, dict) else None
+        if isinstance(factors, list):
+            raw = _refs_from_frozen_factors(factors)
     if not isinstance(raw, dict):
         return {}
     output: dict[str, str] = {}
     for alias, target_ref in raw.items():
         alias_text = str(alias or "").strip()
         target_text = str(target_ref or "").strip()
-        if alias_text and target_text.startswith("factor:v1:"):
-            output[alias_text] = target_text
+        if not alias_text:
+            continue
+        if not is_factor_reference(target_text):
+            continue
+        output[alias_text] = target_text
     return output
+
+
+def _refs_from_frozen_factors(values: Any) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in values if isinstance(values, (list, tuple)) else ():
+        try:
+            frozen = require_frozen_factor(item)
+        except (TypeError, ValueError):
+            continue
+        result[frozen["alias"]] = frozen["ref"]
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -363,7 +361,9 @@ def _merge_ic_result(
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
         if all_products is not None and isinstance(quantile_portfolio_config, dict):
-            from server.modules.single_factor_test.ic_response import _quick_portfolio_statistics
+            from server.modules.single_factor_test.ic_response import (
+                _quick_portfolio_statistics,
+            )
 
             quick = _quick_portfolio_statistics(
                 tester,
@@ -901,9 +901,7 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         user=user_obj_for_name(owner),
     )
     factor_descriptors = [
-        item
-        for item in (data.get("factors") or [])
-        if isinstance(item, dict) and item.get("alias")
+        require_frozen_factor(item) for item in (data.get("factors") or [])
     ]
     from server.services.external_factor_artifacts import load_frozen_artifacts
 
@@ -914,11 +912,7 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
     resolved = []
     for descriptor in factor_descriptors:
         alias = str(descriptor.get("alias") or "").strip()
-        factor_owner = str(
-            descriptor.get("factor_owner_ref")
-            or descriptor.get("owner_ref")
-            or owner
-        ).strip()
+        factor_owner = str(descriptor.get("owner_ref") or owner).strip()
         resolved.append(
             external.get(alias) or factor_from_alias(alias, username=factor_owner)
         )

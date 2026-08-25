@@ -7,6 +7,8 @@ import settings as Settings
 from server.modules.single_factor_test import research_jobs, sft_bp
 import server.modules.shared.submission_helpers  # noqa: F401 - product resolver
 from server.services import factor_registry
+from tools.factors.formula_identity import freeze_factor_identity
+from server.services.run_input_inspection import instantiate_factor_metadata
 
 
 @pytest.fixture()
@@ -51,21 +53,22 @@ class {family}(FactorFamily):
 
 
 def _create_workspace(client):
+    factors = []
+    for family in ("MmRet", "MmMADevRat"):
+        metadata = instantiate_factor_metadata(
+            factor_registry.get_factor_family_instance(f"public:{family}"), {},
+        )
+        factors.append(freeze_factor_identity(
+            owner_ref="public",
+            family_alias=family,
+            factor_alias=metadata["factor_alias"],
+            family_formula_fingerprint=metadata["family_formula_fingerprint"],
+            self_formula_fingerprint=metadata["self_formula_fingerprint"],
+            params=metadata["normalized_params"],
+        ))
     response = client.post("/api/workspaces", json={
         "title": "RunSpec field contract",
-        "factor_families": [{"alias": "MmRet"}, {"alias": "MmMADevRat"}],
-        "factors": [
-            {
-                "factor_ref": "factor:mmret-10d",
-                "factor_family_alias": "MmRet",
-                "alias": "MmRet|P:CA|N:10d|$F:1d",
-            },
-            {
-                "factor_ref": "factor:mmmadevrat-10d",
-                "factor_family_alias": "MmMADevRat",
-                "alias": "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
-            },
-        ],
+        "factors": factors,
     })
     assert response.status_code == 201
     return response.get_json()["workspace"]
@@ -73,8 +76,9 @@ def _create_workspace(client):
 
 def _update(client, workspace) -> None:
     shared = dict(workspace["configuration"]["payload"]["shared"])
+    factor_ref = shared["factors"][0]["ref"]
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "shared": shared,
         "analyses": {
             "ic": {"factor_configs": [{"N": "10d"}], "product_paths": ["core8_path"]},
@@ -87,7 +91,7 @@ def _update(client, workspace) -> None:
                 },
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
-                    "factor_candidate_refs": ["factor:mmret-10d"],
+                    "factor_candidate_refs": [factor_ref],
                     "product_path_selection_id": "core8",
                 }],
                 "product_selections": {
@@ -153,7 +157,9 @@ def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -
     assert run_spec["run_spec_version"] == 3
     assert "factor_families" not in run_spec["configuration"]["shared"]
     group = run_spec["configuration"]["analyses"]["backtest"]["groups"][0]
-    assert group["factor_candidate_refs"] == ["factor:mmret-10d"]
+    assert group["factor_candidate_refs"] == [
+        workspace["configuration"]["payload"]["shared"]["factors"][0]["ref"],
+    ]
     assert {"factorAlias", "factorAliases", "factor_alias", "factor_aliases"}.isdisjoint(group)
     local_settings = run_spec["configuration"]["analyses"]["backtest"]["local_settings"]
     assert local_settings["account_currency"] == "USD"

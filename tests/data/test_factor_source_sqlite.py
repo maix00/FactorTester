@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import sqlite3
 from pathlib import Path
 
 import settings as Settings
-from tools.data.sqlite import factor_source_store
 
 
 def _load_storage_module():
@@ -30,6 +28,12 @@ def test_factor_source_sqlite_roundtrip(monkeypatch, tmp_path):
     username = "default$alice@1"
     factor_id = "DemoFactor"
     source_code = "class DemoFactor(FactorFamily):\n    pass\n"
+
+    monkeypatch.setattr(
+        factor_storage,
+        "load_factor_source_root",
+        lambda _username: str(fallback_root / username),
+    )
 
     factor_storage.save_factor_source(username, factor_id, source_code)
     assert factor_storage.load_factor_source(username, factor_id) == source_code
@@ -88,6 +92,29 @@ def test_factor_source_sqlite_roundtrip(monkeypatch, tmp_path):
         assert row["n"] == 0
 
 
+def test_factor_source_save_does_not_create_server_workspace_without_configuration(
+    monkeypatch, tmp_path,
+):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    fallback_root = tmp_path / "fallback-user-root"
+    factor_storage = _load_storage_module()
+    monkeypatch.setattr(factor_storage, "WORKSPACE_ROOTS_DIR", str(fallback_root))
+    monkeypatch.setattr(factor_storage, "load_factor_source_root", lambda _username: None)
+
+    factor_storage.save_factor_source(
+        "default$alice@1", "NoWorkspaceFactor",
+        "class NoWorkspaceFactor(FactorFamily):\n    pass\n",
+    )
+
+    assert not fallback_root.exists()
+    assert factor_storage.load_factor_source(
+        "default$alice@1", "NoWorkspaceFactor",
+    ) is not None
+
+
 def test_factor_source_sqlite_normalizes_legacy_import_paths(monkeypatch, tmp_path):
     sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
@@ -99,6 +126,11 @@ def test_factor_source_sqlite_normalizes_legacy_import_paths(monkeypatch, tmp_pa
 
     username = "default$alice@1"
     factor_id = "LegacyImportsFactor"
+    monkeypatch.setattr(
+        factor_storage,
+        "load_factor_source_root",
+        lambda _username: str(fallback_root / username),
+    )
     source_code = (
         "from tools import DataFreq\n"
         "from tools.data import DataProviderProductTS\n"

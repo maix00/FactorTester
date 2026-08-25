@@ -183,7 +183,9 @@
       "catalog/factor-details.js"
     ],
     "factor-catalog-editor": [
-      "catalog/factor-editor.js"
+      "catalog/factor-editor.js",
+      "catalog/factor-object-form.js",
+      "catalog/factor-set-editor.js"
     ],
     "output-choice": [
       "core/output-choices.js"
@@ -515,6 +517,8 @@
     "catalog/factor-list.js",
     "catalog/factor-catalog-list.js",
     "catalog/factor-editor.js",
+    "catalog/factor-object-form.js",
+    "catalog/factor-set-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
     "catalog/product-category-model.js",

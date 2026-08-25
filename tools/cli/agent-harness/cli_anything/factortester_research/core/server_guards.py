@@ -6,7 +6,6 @@ from typing import Any
 
 from .evidence import validate_evidence_envelope
 
-
 _DATA_REQUIREMENT_REFS = frozenset({
     "data-availability.scope",
 })
@@ -231,7 +230,7 @@ def _factor_semantics_facts(evidence: dict[str, Any]) -> dict[str, Any]:
     )
     if not isinstance(envelope, dict):
         return {
-            "factor_revision_manifests_bound": False,
+            "frozen_factor_formulas_bound": False,
             "selected_factor_semantics_resolved": False,
         }
     value = validate_evidence_envelope(envelope)
@@ -245,7 +244,7 @@ def _factor_semantics_facts(evidence: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(refs, list) or not refs:
         raise ValueError("factor semantics requires revision references")
     return {
-        "factor_revision_manifests_bound": True,
+        "frozen_factor_formulas_bound": True,
         "selected_factor_semantics_resolved": all(
             isinstance(item, dict)
             and item.get("resolution_status") == "resolved"

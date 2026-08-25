@@ -6,16 +6,18 @@ import importlib.util
 import os
 import tempfile
 import time
-from hashlib import sha256
 
-from server.modules.custom_factors.source_helpers import strip_factor_meta
 from server.modules.shared.param_meta import serialize_param_meta
 from tools.data.account_manage import (
     account_display_name,
-    visible_accounts_for,
+    direct_subordinate_accounts_for,
+    get_account,
 )
 from tools.data.factor_workspace.storage import load_public_factor_source
-from tools.data.sqlite.factor_source_store import list_factor_sources
+from tools.data.sqlite.factor_source_store import (
+    get_factor_source_metadata,
+    list_factor_sources,
+)
 from tools.factors import FactorFamily
 
 
@@ -66,12 +68,12 @@ def list_custom_factors(username: str) -> list:
             factors.append({
                 'id': factor_id,
                 'name': factor_id,
-                'category': '自编',
+                'category': row.get('category') or '自编',
                 'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'params': [],
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
                 'is_public': False,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -84,12 +86,13 @@ def list_custom_factors(username: str) -> list:
             factors.append({
                 'id': factor_id,
                 'name': factor_cls.__name__,
-                'category': getattr(ff, 'category', '') or '自编',
+                'category': row.get('category') or '自编',
                 'factor_family': family,
-                'chinese_name': getattr(ff, 'desc', '') or '',
-                'description': getattr(ff, 'description', '') or '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
+                'family_formula_fingerprint': ff.expr.semantic_fingerprint(),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': False,
                 'updated_at': updated_at,
@@ -98,12 +101,12 @@ def list_custom_factors(username: str) -> list:
             factors.append({
                 'id': factor_id,
                 'name': factor_id,
-                'category': '自编',
+                'category': row.get('category') or '自编',
                 'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'params': [],
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
                 'is_public': False,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -114,7 +117,11 @@ def list_custom_factors(username: str) -> list:
 
 def list_visible_custom_factors(username: str) -> list:
     factors = []
-    for account in visible_accounts_for(username, include_self=True):
+    accounts = [
+        get_account(username) or {'username': username},
+        *direct_subordinate_accounts_for(username),
+    ]
+    for account in accounts:
         owner_username = account.get('username')
         if not owner_username:
             continue
@@ -148,12 +155,12 @@ def list_public_factors() -> list:
             result.append({
                 'id': name,
                 'name': name,
-                'category': '',
+                'category': row.get('category') or '',
                 'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'params': [],
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
                 'is_public': True,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -165,12 +172,13 @@ def list_public_factors() -> list:
             result.append({
                 'id': name,
                 'name': name,
-                'category': getattr(ff, 'category', '') or family,
+                'category': row.get('category') or family,
                 'factor_family': family,
-                'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
-                'description': getattr(ff, 'description', '') or '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
+                'family_formula_fingerprint': ff.expr.semantic_fingerprint(),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': True,
                 'updated_at': updated_at,
@@ -179,12 +187,12 @@ def list_public_factors() -> list:
             result.append({
                 'id': name,
                 'name': name,
-                'category': '',
+                'category': row.get('category') or '',
                 'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
+                'chinese_name': row.get('chinese_name') or '',
+                'description': row.get('description') or '',
                 'params': [],
-                'source_code': strip_factor_meta(source_code),
+                'source_code': source_code,
                 'is_public': True,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -200,6 +208,7 @@ def get_public_factor_detail(factor_name: str) -> dict | None:
         if factor_cls is None:
             return None
         ff = factor_cls()
+        metadata = get_factor_source_metadata('public', '', factor_name)
         tree_repr = ''
         try:
             if ff.expr is not None:
@@ -210,10 +219,12 @@ def get_public_factor_detail(factor_name: str) -> dict | None:
         return {
             'id': factor_name,
             'name': factor_name,
-            'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
-            'description': getattr(ff, 'description', '') or '',
+            'chinese_name': metadata.get('chinese_name', ''),
+            'description': metadata.get('description', ''),
+            'category': metadata.get('category', ''),
             'math_expr': getattr(ff, 'math_expr', '') or '',
-            'source_code': strip_factor_meta(source_code),
+            'source_code': source_code,
+            'family_formula_fingerprint': ff.expr.semantic_fingerprint(),
             'tree_repr': tree_repr,
             'params': [serialize_param_meta(param) for param in ff.params],
             'is_public': True,
@@ -223,11 +234,6 @@ def get_public_factor_detail(factor_name: str) -> dict | None:
             'owner_alias': '公共因子库',
             'factor_owner_ref': '__public_jobs__',
             'factor_family_alias': factor_name,
-            'factor_family_ref': (
-                'factor-family:sha256:' + sha256(
-                    f'__public_jobs__\x1f{factor_name}'.encode()
-                ).hexdigest()
-            ),
         }
     except Exception:
         return None

@@ -155,27 +155,39 @@
   }
 
   function factorAlias(factor) {
-    return String(factor?.factor_alias || factor?.alias || factor?.name || "").trim();
+    return String(factor?.alias || "").trim();
   }
 
   function factorReference(factor) {
-    return String(factor?.factor_ref || factor?.target_ref || "").trim();
+    return String(factor?.ref || "").trim();
   }
 
   function factorSubjects(factors) {
-    return (Array.isArray(factors) ? factors : []).map(factor => {
+    const result = [];
+    const byRef = new Map();
+    for (const factor of Array.isArray(factors) ? factors : []) {
       const alias = factorAlias(factor);
       const factorRef = factorReference(factor);
       if (!alias) throw new Error("因子缺少可执行别名");
-      if (factor?.source_kind === "transient" && factor?.transient_factor_id) {
-        return {alias};
-      }
       if (!factorRef) throw new Error(`因子 ${alias} 缺少稳定引用`);
-      return {
+      const record = {
+        schema_version: factor.schema_version,
+        ref: factorRef,
         alias,
-        factor_ref: factorRef,
+        owner_ref: factor.owner_ref,
+        identity: clone(factor.identity),
       };
-    });
+      const encoded = JSON.stringify(record);
+      if (byRef.has(factorRef)) {
+        if (byRef.get(factorRef) !== encoded) {
+          throw new Error(`因子引用对应了不同的冻结对象: ${factorRef}`);
+        }
+        continue;
+      }
+      byRef.set(factorRef, encoded);
+      result.push(record);
+    }
+    return result;
   }
 
   window.FTTestConfigurationCompiler = Object.freeze({

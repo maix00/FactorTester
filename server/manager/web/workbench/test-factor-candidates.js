@@ -43,7 +43,8 @@
     return [
       source,
       factor?.owner_ref || factor?.owner_alias || "",
-      factor?.git_commit ? factor.git_commit.slice(0, 10) : "",
+      factor?.family_formula_fingerprint
+        ? factor.family_formula_fingerprint.slice(0, 12) : "",
     ].filter(Boolean).join(" · ");
   }
 
