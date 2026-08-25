@@ -146,6 +146,7 @@ gosu factortester python -m tools.migrations.migrate_factor_formula_identity \
   --apply --discard-incompatible \
   --control-plan /state/factor-v2-control-plan.json
 gosu factortester python - <<"PY"
+import json
 import sqlite3
 import settings
 
@@ -157,6 +158,20 @@ with sqlite3.connect(settings.CACHE_DB_PATH) as connection:
     ).fetchone()[0]
     if legacy:
         raise RuntimeError(f"SQLite still contains {legacy} schema-1 configurations")
+    legacy_manifests = sum(
+        "factor_revision_manifests" in (
+            json.loads(raw).get("shared") or {}
+        )
+        for (raw,) in connection.execute(
+            "SELECT payload_json FROM research_configurations "
+            "WHERE schema_version=2"
+        ).fetchall()
+    )
+    if legacy_manifests:
+        raise RuntimeError(
+            "SQLite still contains "
+            f"{legacy_manifests} legacy factor revision manifests"
+        )
 PY
 '
 }

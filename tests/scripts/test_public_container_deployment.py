@@ -445,6 +445,7 @@ def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> Non
     assert "restore-factor-control-identities" in script
     assert "PRAGMA integrity_check" in script
     assert "schema_version=1" in script
+    assert "legacy factor revision manifests" in script
     release_sequence = """bash "$public_script" stop-app
 app_stopped=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \\
