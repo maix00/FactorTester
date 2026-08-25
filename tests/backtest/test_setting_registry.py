@@ -394,8 +394,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert "product_mask" not in chips
     assert chips["factor_candidates"]["source_keys"] == ("factorCandidateLabel",)
     assert chips["factor_candidates"]["detail_overlay"] == {
-        "kind": "factor_set", "mode": "view",
-        "source_key": "factor_candidates", "ref_key": "target_ref",
+        "kind_source_key": "factorCandidateDetailKind", "mode": "view",
+        "source_key": "factor_candidate_detail", "ref_key": "target_ref",
     }
     assert chips["product_path_selection"]["label"] == "产品组"
     assert chips["product_path_selection"]["source_keys"] == ("product_group",)
@@ -520,8 +520,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     for key in ("factor_candidates", "product_path_selection"):
         assert chips[key] == backtest_chips[key]
     assert chips["factor_candidates"]["detail_overlay"] == {
-        "kind": "factor_set", "mode": "view",
-        "source_key": "factor_candidates", "ref_key": "target_ref",
+        "kind_source_key": "factorCandidateDetailKind", "mode": "view",
+        "source_key": "factor_candidate_detail", "ref_key": "target_ref",
     }
     assert chips["product_path_selection"]["source_adapter"] == (
         "selected_product_paths"

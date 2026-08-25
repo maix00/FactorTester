@@ -193,9 +193,15 @@ assert.equal(productChip.children[1].textContent, "未设置（默认）");
 const overlayManifest = {
   chip_fields: [
     {
+      key: "factor_candidates", label: "因子候选", category: "identity",
+      chip_template: "因子候选: {factorCandidateLabel}", target_tab: "factor",
       source_adapter: "selected_factor_candidates",
       source_keys: ["factorCandidateLabel"],
-      detail_overlay: {source_key: "factor_candidates"},
+      clickable: true,
+      detail_overlay: {
+        kind_source_key: "factorCandidateDetailKind",
+        source_key: "factor_candidate_detail", ref_key: "target_ref",
+      },
     },
     {
       source_adapter: "selected_factors", source_keys: ["factorRef", "factorLabel"],
@@ -234,13 +240,18 @@ const adapterSources = FTTestContentAdapters.chipSources({
 });
 assert.equal(adapterSources.factor[0].ref, factorRefs.roc);
 assert.equal(adapterSources.factorCandidateLabel, "ROC 1m");
-assert.equal(adapterSources.factor_candidates.length, 1);
-assert.equal(adapterSources.factor_candidates[0].temporary, true);
-assert.deepEqual(adapterSources.factor_candidates[0].related_references, [{
-  target_ref: factorRefs.roc, label: "ROC 1m",
-}]);
-assert.equal(adapterSources.factor_candidates[0].source_factors.length, 1);
-assert.equal(adapterSources.factor_candidates[0].source_factor_sets.length, 0);
+assert.equal(adapterSources.factorCandidateDetailKind, "factor");
+assert.equal(adapterSources.factor_candidate_detail.ref, factorRefs.roc);
+assert.equal(adapterSources.factor_candidate_detail.alias, "ROC 1m");
+const singleCandidateDescriptor = FTTestSettingChips.descriptors({
+  context: {t: value => value}, manifest: {
+    ...overlayManifest,
+    tab_lists: {"group-settings": [{key: "factor", label: "因子执行"}]},
+  },
+  mountedTabs: ["factor"], sources: adapterSources,
+}).find(item => item.detailOverlay?.kind === "factor");
+assert.equal(singleCandidateDescriptor.detailOverlay.kind, "factor");
+assert.equal(singleCandidateDescriptor.detailOverlay.target.ref, factorRefs.roc);
 assert.equal(adapterSources.product_group[0].group_ref, "group:day");
 const pageCandidateSources = FTTestContentAdapters.chipSources({
   kind: "backtest", manifest: overlayManifest,
@@ -255,13 +266,22 @@ const pageCandidateSources = FTTestContentAdapters.chipSources({
   ]},
 });
 assert.equal(pageCandidateSources.factorCandidateLabel, "2 个");
-assert.equal(pageCandidateSources.factor_candidates[0].related_references.length, 2);
+assert.equal(pageCandidateSources.factorCandidateDetailKind, "factor_set");
+assert.equal(pageCandidateSources.factor_candidate_detail.related_references.length, 2);
+const multipleCandidateDescriptor = FTTestSettingChips.descriptors({
+  context: {t: value => value}, manifest: {
+    ...overlayManifest,
+    tab_lists: {"group-settings": [{key: "factor", label: "因子执行"}]},
+  },
+  mountedTabs: ["factor"], sources: pageCandidateSources,
+}).find(item => item.detailOverlay?.kind === "factor_set");
+assert.equal(multipleCandidateDescriptor.detailOverlay.kind, "factor_set");
 assert.match(
-  pageCandidateSources.factor_candidates[0].target_ref,
+  pageCandidateSources.factor_candidate_detail.target_ref,
   /^factor-candidates:[0-9a-f]{8}:2$/,
 );
-assert.equal(pageCandidateSources.factor_candidates[0].source_factors.length, 1);
-assert.deepEqual(pageCandidateSources.factor_candidates[0].source_factor_sets, [{
+assert.equal(pageCandidateSources.factor_candidate_detail.source_factors.length, 1);
+assert.deepEqual(pageCandidateSources.factor_candidate_detail.source_factor_sets, [{
   target_ref: "factor-set:value", label: "价值集合",
 }]);
 const oneSetCandidateSources = FTTestContentAdapters.chipSources({
@@ -312,7 +332,7 @@ assert.deepEqual(
 assert.equal(persistedStrategySources.factorCandidateLabel, "SGCCS 历史版本",
   "a frozen factor ref must resolve through the saved factor descriptor");
 assert.equal(
-  persistedStrategySources.factor_candidates[0].related_references[0].target_ref,
+  persistedStrategySources.factor_candidate_detail.ref,
   factorRefs.history,
 );
 assert.equal(

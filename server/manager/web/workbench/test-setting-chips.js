@@ -169,6 +169,9 @@
     if (values.length !== 1) return null;
     const value = values[0];
     const object = value && typeof value === "object" ? value : null;
+    const kindSourceKey = action.kind_source_key || action.kindSourceKey;
+    const kind = kindSourceKey ? sources[kindSourceKey] : action.kind;
+    if (!hasValue(kind)) return null;
     const ref = object
       ? object[action.ref_key || "ref"]
         || object.ref || object.group_ref || object.product_group_ref
@@ -178,6 +181,7 @@
     if (!hasValue(ref)) return null;
     return {
       ...action,
+      kind: String(kind),
       target: {ref: String(ref), value},
     };
   }
