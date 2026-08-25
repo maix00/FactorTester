@@ -2,7 +2,7 @@
   const definitions = {
     factor: {
       title: "因子",
-      load: "catalog",
+      load: "factor-catalog-detail-rendering",
       // The embedded editor is deliberately the catalog component itself.
       // The overlay context supplies its mount and onSaved callback, so the
       // catalog create/edit/view behavior is identical to the left-nav tab.
@@ -10,7 +10,7 @@
     },
     factor_set: {
       title: "因子集合",
-      load: "catalog",
+      load: "factor-catalog-detail",
       render: (context, ref, mode, options) => (
         FTFactors.setDetail(context, ref, mode, options)
       ),
@@ -135,7 +135,7 @@
       temporary: options.temporary === true,
     }];
     let renderToken = 0;
-    let loadedGroups = false;
+    const loadedGroups = new Set();
 
     const updateFrameHeading = (frame, name = "") => {
       const frameDefinition = definitions[frame.kind] || definition;
@@ -178,9 +178,9 @@
         },
       );
       try {
-        if (!loadedGroups) {
+        if (!loadedGroups.has(frameDefinition.load)) {
           await window.FTStaticLoader?.loadGroups?.([frameDefinition.load]);
-          loadedGroups = true;
+          loadedGroups.add(frameDefinition.load);
         }
         if (state.closed || token !== renderToken) return;
         await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);

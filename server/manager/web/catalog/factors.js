@@ -24,7 +24,7 @@
     }
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") await ensureEditor();
-    return FTFactorDetails.factorDetail(
+    return window.FTFactorDetails.factorDetail(
       context, data, targetRef, mode, catalog().nativeRequest, options,
     );
   }
@@ -39,7 +39,7 @@
     }
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") await ensureEditor();
-    return FTFactorDetails.familyDetail(
+    return window.FTFactorDetails.familyDetail(
       context, data, targetRef, mode, options,
     );
   }
@@ -63,7 +63,7 @@
         context, data, targetRef, mode, {...options, initialValue},
       );
     }
-    return FTFactorDetails.setDetail(
+    return window.FTFactorDetails.setDetail(
       context, data, targetRef, catalog().nativeRequest,
     );
   }

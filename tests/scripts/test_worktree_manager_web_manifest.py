@@ -2175,6 +2175,24 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
     ]["factor-catalog-detail-rendering"]
 
 
+def test_test_object_overlay_loads_the_detail_group_before_first_factor_chip() -> None:
+    overlay = (
+        ROOT / "server" / "manager" / "web" / "workbench"
+        / "test-object-editor-overlay.js"
+    ).read_text(encoding="utf-8")
+    factors = (
+        ROOT / "server" / "manager" / "web" / "catalog" / "factors.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'load: "factor-catalog-detail-rendering"' in overlay
+    assert 'load: "factor-catalog-detail"' in overlay
+    assert "const loadedGroups = new Set()" in overlay
+    assert "loadedGroups.has(frameDefinition.load)" in overlay
+    assert "window.FTFactorDetails.factorDetail(" in factors
+    assert "window.FTFactorDetails.familyDetail(" in factors
+    assert "window.FTFactorDetails.setDetail(" in factors
+
+
 def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> None:
     import json
 
