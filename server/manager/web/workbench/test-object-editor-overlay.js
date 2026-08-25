@@ -52,6 +52,7 @@
       onSaved,
       testState: options.testState || null,
       testObjectTemporary: options.temporary === true,
+      testObjectSnapshot: options.snapshot === true,
       testObjectInitialValue: options.initialValue || null,
       testObjectViewOnly: options.mode === "view",
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
