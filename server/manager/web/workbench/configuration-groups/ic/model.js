@@ -135,6 +135,14 @@
       batch_id: identifier("icb", value.batch_id),
       name: String(value.name || "").trim(),
       factor_ref: factorRef,
+      ...(Array.isArray(value.factor_source_selections)
+        && value.factor_source_selections.length ? {
+          factor_source_selections: structuredClone(value.factor_source_selections),
+        } : {}),
+      ...(Array.isArray(value.factor_set_selections)
+        && value.factor_set_selections.length ? {
+          factor_set_selections: structuredClone(value.factor_set_selections),
+        } : {}),
       product_scope_ref: productScopeRef,
       entry_delay_bars: delay,
       horizon: normalizeHorizon(value.horizon),

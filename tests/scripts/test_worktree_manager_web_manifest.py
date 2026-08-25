@@ -957,6 +957,12 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "function candidateHeading" in source
     assert "function candidatePicker" in source
     assert "function innerPanel" in source
+    assert "function scopedSourcePanel" in source
+    assert "sources_when_outer_unmounted" in (
+        ROOT / "tools" / "testers" / "settings" / "strategy_editor.py"
+    ).read_text(encoding="utf-8")
+    assert "dependent.append(markInnerContent(next.overrideContent))" not in source
+    assert "if (next.overrideContent) root.append(next.overrideContent)" in source
     assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3

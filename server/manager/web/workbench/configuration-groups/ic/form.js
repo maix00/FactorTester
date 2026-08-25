@@ -33,6 +33,13 @@
     const draft = editor.draft || (editor.draft = {});
     let factorRef = draft.factor_ref ?? current?.factor_ref ?? "";
     let productScopeRef = draft.product_scope_ref ?? current?.product_scope_ref ?? "";
+    const factorSourceState = !factorScopeBlocked && factorScope.source !== "outer"
+      ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
+          factor_candidate_refs: factorRef ? [factorRef] : [],
+          factor_source_selections: current?.factor_source_selections,
+          factor_set_selections: current?.factor_set_selections,
+        })
+      : null;
 
     const name = input("text", current?.name || "");
     name.placeholder = context.t("配置组名称");
@@ -96,14 +103,31 @@
         editorTabs?.refreshChips();
       },
     });
-    const renderFactor = () => FTTestFactorCandidateSources.innerPanel?.(
-      context, state, () => {}, {
-        candidateControl: factor,
-        candidateLabel: context.t("因子"),
-        candidateHelp: context.t("每个 IC 配置组只选择一个冻结因子"),
-        combinationVisible: false,
-      },
-    ) || field(context.t("因子"), factor);
+    const syncFactorSources = () => {
+      if (!factorSourceState) return null;
+      const snapshot = FTTestFactorCandidateSources.scopedSourceSnapshot(factorSourceState);
+      factorRef = snapshot.factor_candidate_refs.length === 1
+        ? snapshot.factor_candidate_refs[0] : "";
+      Object.assign(draft, snapshot, {factor_ref: factorRef});
+      return snapshot;
+    };
+    const renderFactor = () => {
+      if (!factorSourceState) return FTTestFactorCandidateSources.innerPanel?.(
+        context, state, () => {}, {
+          candidateControl: factor,
+          candidateLabel: context.t("因子候选"),
+          candidateHelp: context.t("从外层因子候选中选择一个冻结因子"),
+          combinationVisible: false,
+        },
+      ) || field(context.t("因子候选"), factor);
+      syncFactorSources();
+      return FTTestFactorCandidateSources.scopedSourcePanel(
+        context, factorSourceState, () => {
+          syncFactorSources();
+          editorTabs?.refreshChips();
+        }, {combinationVisible: false},
+      );
+    };
     const renderProduct = () => FTTestProducts.selectionPanel(
       context, state, () => editorTabs?.refreshChips(), {
         groups: productItems,
@@ -129,13 +153,19 @@
       chipValues: () => ({
         ...state.values,
         ic_lags: [delayValue],
-        factor_candidates: factorItems.filter(item => factorIdentity(item) === factorRef),
+        factor_candidates: factorSourceState
+          ? FTTestFactorCandidateSources.scopedSourceSnapshot(
+              factorSourceState,
+            ).factor_candidates
+          : factorItems.filter(item => factorIdentity(item) === factorRef),
         product_path_selection: productScopeRef,
       }),
-      chipSources: () => window.FTTestContentAdapters?.chipSources?.(state, {
+      chipSources: () => window.FTTestContentAdapters?.chipSources?.(
+        factorSourceState || state, {
         factor_candidate_refs: factorRef ? [factorRef] : [],
         product_path_selection_id: productScopeRef,
-      }) || {},
+        },
+      ) || {},
       renderStructure: () => structure,
       renderFactor,
       renderProduct,
@@ -150,7 +180,12 @@
     form.append(editorTabs || structure);
     appendActions(context, form, () => {
       try {
-        if (!factorItems.some(item => factorIdentity(item) === factorRef)) {
+        const sourceSnapshot = syncFactorSources();
+        if (sourceSnapshot && sourceSnapshot.factor_candidate_refs.length !== 1) {
+          throw new Error(context.t("每个 IC 配置组必须恰好选择一个因子候选"));
+        }
+        const availableFactors = sourceSnapshot?.factor_candidates || factorItems;
+        if (!availableFactors.some(item => factorIdentity(item) === factorRef)) {
           throw new Error(context.t("请选择一个当前范围内的因子"));
         }
         if (!productItems.some(item => productIdentity(item) === productScopeRef)) {
@@ -170,6 +205,10 @@
           product_scope_ref: productScopeRef,
           entry_delay_bars: Number(delayValue), horizon, methods,
           return_price_basis: basis.value.trim(),
+          ...(sourceSnapshot ? {
+            factor_source_selections: sourceSnapshot.factor_source_selections,
+            factor_set_selections: sourceSnapshot.factor_set_selections,
+          } : {}),
           editor_mounted_tabs: editorTabs?.value?.().mountedTabs,
         };
         if (current) model().update(state, current.config_group_id, value);
