@@ -9,11 +9,27 @@
     title.textContent = context.t(current ? "编辑配置组" : "新增配置组");
     form.append(title);
 
-    // An IC configuration group owns its factor and product-group selections.
-    // The legacy outer workbench tabs are catalog launchers only for grouped IC;
-    // an empty outer selection must not erase the group-owned candidate lists.
-    const factorItems = Array.isArray(state.factors) ? state.factors : [];
-    const productItems = Array.isArray(state.groups) ? state.groups : [];
+    // An IC configuration group owns its selected factor, but its available
+    // range follows the same registered outer/inner scope contract as a
+    // backtest strategy. Without an outer factor tab it sees the visible
+    // catalog; with one it can only filter the outer candidate pool.
+    const factorScope = window.FTStrategyEditorScope?.scope?.(state, "factor")
+      || {
+        items: Array.isArray(state.factors) ? state.factors : [],
+        required: false, ready: true, source: "visible",
+      };
+    const factorScopeBlocked = factorScope.required && !factorScope.ready;
+    const factorItems = factorScopeBlocked ? []
+      : (Array.isArray(factorScope.items) ? factorScope.items : []);
+    const productScope = window.FTStrategyEditorScope?.scope?.(
+      state, "product_path_selection",
+    ) || {
+      items: Array.isArray(state.groups) ? state.groups : [],
+      required: false, ready: true, source: "visible",
+    };
+    const productScopeBlocked = productScope.required && !productScope.ready;
+    const productItems = productScopeBlocked ? []
+      : (Array.isArray(productScope.items) ? productScope.items : []);
     const draft = editor.draft || (editor.draft = {});
     let factorRef = draft.factor_ref ?? current?.factor_ref ?? "";
     let productScopeRef = draft.product_scope_ref ?? current?.product_scope_ref ?? "";
@@ -68,9 +84,11 @@
       items: factorItems,
       selected: factorRef ? [factorRef] : [],
       multi: false,
-      loading: FTTestObjectPicker.lazyLoading(state, "factors"),
+      loading: !factorScopeBlocked && FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
-      canCreate: true,
+      canCreate: !factorScopeBlocked && inlineCreateAllowed(
+        state, "factor_candidates", factorScope,
+      ),
       name: "ic-configuration-group-factor",
       onChange: values => {
         factorRef = values[0] || "";
@@ -90,9 +108,12 @@
       context, state, () => editorTabs?.refreshChips(), {
         groups: productItems,
         constrain: false,
+        loading: !productScopeBlocked && FTTestObjectPicker.lazyLoading(state, "products"),
         selectedRefs: productScopeRef ? [productScopeRef] : [],
         multi: false,
-        canCreate: true,
+        canCreate: !productScopeBlocked && inlineCreateAllowed(
+          state, "product_path_candidates", productScope,
+        ),
         onChange: values => {
           productScopeRef = values[0] || "";
           draft.product_scope_ref = productScopeRef;
@@ -163,6 +184,18 @@
     const value = String(state.values?.ic_correlation || "rank");
     return value === "both" ? ["rank", "pearson"]
       : [value === "pearson" ? "pearson" : "rank"];
+  }
+
+  function inlineCreateAllowed(state, fieldKey, scope) {
+    if (window.FTStrategyEditorScope?.inlineCreateAllowed) {
+      return FTStrategyEditorScope.inlineCreateAllowed(state, fieldKey, scope);
+    }
+    const descriptor = window.FTStrategyEditorScope?.scopedField?.(
+      state, fieldKey, "inner",
+    ) || {};
+    return scope.source === "outer"
+      ? descriptor.allow_inline_create_when_outer_mounted === true
+      : descriptor.allow_inline_create_when_outer_unmounted !== false;
   }
 
   function firstDelay(value) {
