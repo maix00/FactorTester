@@ -83,6 +83,13 @@ def build_client_library_projection(
             else "custom" if "custom" in sources
             else "registered"
         )
+        existing = families_by_identity.get(identity)
+        if family_source == "public" and existing is None:
+            # Registering parameters for a public factor creates a Factor,
+            # not a user-owned FactorFamily.  Public family rows come only
+            # from the authoritative public source catalog, which is merged
+            # independently from own/subordinate account projections.
+            continue
         family_ref = build_factor_family_reference(
             owner_ref=first["factor_owner_ref"],
             family_alias=family_alias,
@@ -116,7 +123,6 @@ def build_client_library_projection(
             }),
             "factor_refs": sorted({item["factor_ref"] for item in items}),
         }
-        existing = families_by_identity.get(identity)
         if existing is not None:
             family["params"] = existing.get("params") or []
             try:
