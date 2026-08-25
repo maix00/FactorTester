@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from tools.factors.formula_identity import require_frozen_factor
+
 
 def factor_rows_from_sync(
     sync: object,
@@ -59,42 +61,30 @@ def factor_rows_from_sync(
         if not isinstance(factors, list):
             factors = []
         for item in factors[:512]:
-            value = item if isinstance(item, dict) else {}
-            factor_alias = str(value.get("factor_alias") or "").strip()
-            if not factor_alias:
+            try:
+                frozen = require_frozen_factor(item)
+            except (TypeError, ValueError):
                 continue
+            identity = frozen["identity"]
+            factor_alias = frozen["alias"]
+            params = [
+                {"alias": str(alias), "value": value}
+                for alias, value in identity["params"].items()
+            ]
             result.append({
+                "factor_ref": frozen["ref"],
                 "factor_alias": factor_alias,
-                "factor_family_alias": str(
-                    value.get("factor_family_alias") or family_alias
-                ),
-                "factor_family_name": str(
-                    value.get("factor_family_name") or family_name
-                ),
-                "factor_owner_ref": str(
-                    value.get("factor_owner_ref")
-                    or payload.get("factor_owner_ref")
-                    or row.get("principal")
-                    or principal
-                ),
-                "chinese_name": str(
-                    value.get("chinese_name") or payload.get("chinese_name") or ""
-                ),
-                "description": str(
-                    value.get("description") or payload.get("description") or ""
-                ),
-                "math_expr": str(
-                    value.get("math_expr") or payload.get("math_expr") or ""
-                ),
-                "category": str(
-                    value.get("category") or payload.get("category") or ""
-                ),
-                "factor_kind": str(value.get("factor_kind") or "registered"),
-                "source": str(value.get("source") or "custom"),
-                "params": list(value.get("params") or value.get("factor_params") or []),
-                "factor_params": list(
-                    value.get("factor_params") or value.get("params") or []
-                ),
+                "factor_family_alias": identity["family_alias"],
+                "factor_family_name": family_name,
+                "factor_owner_ref": frozen["owner_ref"],
+                "chinese_name": str(payload.get("chinese_name") or ""),
+                "description": str(payload.get("description") or ""),
+                "math_expr": str(payload.get("math_expr") or ""),
+                "category": str(payload.get("category") or ""),
+                "factor_kind": "registered",
+                "source": "registered",
+                "params": params,
+                "factor_params": params,
                 "owner_username": str(row.get("principal") or principal),
                 "owner_alias": _owner_alias(
                     str(row.get("principal") or principal),
@@ -109,16 +99,12 @@ def factor_rows_from_sync(
                 ),
                 "updated_at": payload.get("updated_at") or row.get("updated_at") or "",
                 "product_group": scope,
-                **({
-                    "family_formula_fingerprint": str(
-                        value["family_formula_fingerprint"]
-                    )
-                } if value.get("family_formula_fingerprint") else {}),
-                **({
-                    "self_formula_fingerprint": str(
-                        value["self_formula_fingerprint"]
-                    )
-                } if value.get("self_formula_fingerprint") else {}),
+                "family_formula_fingerprint": identity[
+                    "family_formula_fingerprint"
+                ],
+                "self_formula_fingerprint": identity[
+                    "self_formula_fingerprint"
+                ],
             })
     return result
 

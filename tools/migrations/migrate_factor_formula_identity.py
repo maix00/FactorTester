@@ -192,6 +192,7 @@ def migrate_configuration_database(
     resolver: FactorResolver,
     apply: bool = False,
     discard_incompatible: bool = False,
+    control_plan_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Explicitly migrate editable workspace/template rows in one transaction."""
     path = Path(database).expanduser().resolve()
@@ -253,6 +254,10 @@ def migrate_configuration_database(
         factor_set_plan = _factor_set_migration_plan(
             connection, factors_by_legacy_ref,
         )
+        account_domain_plan = _account_domain_migration_plan(
+            connection, resolver,
+            discard_incompatible=discard_incompatible,
+        )
         report = {
             "eligible": len(rows),
             "planned": len(migrated),
@@ -260,6 +265,7 @@ def migrate_configuration_database(
             "errors": errors,
             "plan_hash": _plan_hash(migrated),
             "factor_sets": factor_set_plan["report"],
+            "account_domain": account_domain_plan["report"],
         }
         if not apply:
             connection.rollback()
@@ -277,7 +283,16 @@ def migrate_configuration_database(
         report["discarded"] = discarded
         _apply_factor_set_migration(connection, factor_set_plan)
         report["factor_sets"]["migrated"] = report["factor_sets"]["planned"]
+        _apply_account_domain_migration(connection, account_domain_plan)
+        report["account_domain"]["migrated"] = report[
+            "account_domain"
+        ]["planned"]
         connection.commit()
+        if control_plan_path is not None:
+            Path(control_plan_path).write_text(
+                _canonical_json({"rows": account_domain_plan["rows"]}),
+                encoding="utf-8",
+            )
         return report
     finally:
         connection.close()
@@ -474,6 +489,197 @@ def _apply_factor_set_migration(
     )
 
 
+def _account_domain_migration_plan(
+    connection: sqlite3.Connection,
+    resolver: FactorResolver,
+    *,
+    discard_incompatible: bool,
+) -> dict[str, Any]:
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='account_domain_entities'"
+    ).fetchone()
+    empty = {
+        "rows": [],
+        "report": {
+            "eligible": 0, "planned": 0, "migrated": 0,
+            "discarded": 0, "errors": [],
+        },
+    }
+    if table is None:
+        return empty
+    rows = connection.execute(
+        "SELECT principal, entity_type, entity_id, payload_json, deleted, "
+        "remote_revision, base_revision FROM account_domain_entities "
+        "WHERE deleted=0 AND entity_type IN ('factor_param_config', 'factor_set')"
+    ).fetchall()
+    planned: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    eligible = 0
+    discarded = 0
+    for row in rows:
+        principal = str(row["principal"] or "").strip()
+        entity_type = str(row["entity_type"] or "").strip()
+        entity_id = str(row["entity_id"] or "").strip()
+        payload: dict[str, Any] = {}
+        try:
+            payload = json.loads(str(row["payload_json"] or ""))
+            if not isinstance(payload, dict):
+                raise IncompatibleFactorConfiguration(
+                    "account-domain payload is not an object"
+                )
+            if entity_type == "factor_set":
+                try:
+                    require_frozen_factor_set(payload)
+                    continue
+                except (TypeError, ValueError) as error:
+                    raise IncompatibleFactorConfiguration(
+                        f"legacy synchronized factor set cannot be recovered: {error}"
+                    ) from error
+            existing = payload.get("resolved_factors")
+            if int(payload.get("schema_version") or 0) == 2 and isinstance(
+                existing, list,
+            ):
+                try:
+                    for item in existing:
+                        require_frozen_factor(item)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    continue
+            eligible += 1
+            params_list = payload.get("params_list")
+            if not isinstance(params_list, list):
+                raise IncompatibleFactorConfiguration(
+                    "factor parameter configuration has no parameter rows"
+                )
+            family_alias = str(
+                payload.get("factor_family_alias") or entity_id.rsplit(":", 1)[-1]
+            ).strip()
+            if not family_alias:
+                raise IncompatibleFactorConfiguration(
+                    "factor parameter configuration has no family alias"
+                )
+            previous = existing if isinstance(existing, list) else []
+            frozen_factors = []
+            for index, parameter_row in enumerate(params_list):
+                if not isinstance(parameter_row, dict):
+                    raise IncompatibleFactorConfiguration(
+                        f"factor parameter row {index} is invalid"
+                    )
+                old = previous[index] if index < len(previous) and isinstance(
+                    previous[index], dict,
+                ) else {}
+                source = str(old.get("source") or old.get("factor_kind") or "")
+                owner_ref = str(
+                    old.get("owner_ref") or old.get("factor_owner_ref") or ""
+                ).strip()
+                if not owner_ref and source == "public":
+                    owner_ref = "public"
+                elif not owner_ref and source == "custom":
+                    owner_ref = f"principal:{principal}"
+                resolved = resolver({
+                    "legacy_ref": str(
+                        old.get("ref") or old.get("factor_ref") or ""
+                    ).strip(),
+                    "owner_ref": owner_ref,
+                    "family_alias": family_alias,
+                    "legacy_alias": str(
+                        old.get("alias") or old.get("factor_alias")
+                        or family_alias
+                    ).strip(),
+                    "params": dict(parameter_row),
+                    "configuration_owner": principal,
+                })
+                frozen_factors.append(require_frozen_factor({
+                    key: value for key, value in resolved.items()
+                    if not str(key).startswith("_")
+                }))
+            migrated = _remove_legacy_identity_fields(payload)
+            migrated["schema_version"] = 2
+            migrated["resolved_factors"] = frozen_factors
+            metadata = dict(migrated.get("metadata") or {})
+            for key in _REMOVED_FACTOR_FIELDS | {"self_formula_fingerprint"}:
+                metadata.pop(key, None)
+            if frozen_factors:
+                metadata["family_formula_fingerprint"] = frozen_factors[0][
+                    "identity"
+                ]["family_formula_fingerprint"]
+            migrated["metadata"] = metadata
+            planned.append(_account_domain_change(row, payload, migrated, False))
+        except (ImportError, KeyError, TypeError, ValueError) as error:
+            errors.append({
+                "principal": principal,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "error": str(error),
+            })
+            if discard_incompatible:
+                eligible += entity_type == "factor_set"
+                discarded += 1
+                tombstone = {
+                    "schema_version": 2,
+                    "discarded_reason": "incompatible formula identity",
+                }
+                planned.append(
+                    _account_domain_change(row, payload, tombstone, True)
+                )
+    return {
+        "rows": planned,
+        "report": {
+            "eligible": eligible,
+            "planned": len(planned),
+            "migrated": 0,
+            "discarded": discarded,
+            "errors": errors,
+        },
+    }
+
+
+def _account_domain_change(
+    row: sqlite3.Row,
+    old_payload: dict[str, Any],
+    new_payload: dict[str, Any],
+    new_deleted: bool,
+) -> dict[str, Any]:
+    revision = int(row["remote_revision"] or 0)
+    return {
+        "principal": str(row["principal"]),
+        "entity_type": str(row["entity_type"]),
+        "entity_id": str(row["entity_id"]),
+        "expected_revision": revision,
+        "old_payload": old_payload,
+        "old_deleted": bool(row["deleted"]),
+        "new_payload": new_payload,
+        "new_deleted": bool(new_deleted),
+    }
+
+
+def _apply_account_domain_migration(
+    connection: sqlite3.Connection,
+    plan: dict[str, Any],
+) -> None:
+    for item in plan["rows"]:
+        cursor = connection.execute(
+            "UPDATE account_domain_entities SET payload_json=?, deleted=?, "
+            "remote_revision=?, base_revision=? "
+            "WHERE principal=? AND entity_type=? AND entity_id=? "
+            "AND remote_revision=?",
+            (
+                _canonical_json(item["new_payload"]),
+                int(item["new_deleted"]),
+                item["expected_revision"] + 1,
+                item["expected_revision"] + 1,
+                item["principal"], item["entity_type"], item["entity_id"],
+                item["expected_revision"],
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise IncompatibleFactorConfiguration(
+                "account-domain mirror changed during formula migration"
+            )
+
+
 def _plan_hash(rows: list[tuple[str, str]]) -> str:
     digest = hashlib.sha256()
     for identifier, payload in sorted(rows):
@@ -562,12 +768,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database", default=str(Settings.CACHE_DB_PATH))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--discard-incompatible", action="store_true")
+    parser.add_argument("--control-plan")
     arguments = parser.parse_args(argv)
     report = migrate_configuration_database(
         arguments.database,
         resolver=resolve_server_factor,
         apply=arguments.apply,
         discard_incompatible=arguments.discard_incompatible,
+        control_plan_path=arguments.control_plan,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     if arguments.apply and arguments.discard_incompatible:

@@ -13,9 +13,13 @@ from server.modules.custom_factors import (
     factor_library_service,
 )
 from server.modules.custom_factors.client_library import build_client_library_projection
+from server.manager.services.account_domain_projection import factor_rows_from_sync
+from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
+from server.manager.services import public_catalog
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 def _frozen_factor(
@@ -81,6 +85,63 @@ def _app() -> Flask:
 def _login(client, username: str = "alice") -> None:
     with client.session_transaction() as session:
         session["username"] = username
+
+
+def test_account_domain_projection_requires_complete_v2_factor_records() -> None:
+    frozen = freeze_factor_identity(
+        owner_ref="principal:alice",
+        family_alias="Momentum",
+        factor_alias="Momentum|N:20d",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"N": "20d"},
+    )
+
+    class Sync:
+        @staticmethod
+        def entities(*_args, **_kwargs):
+            return [{
+                "principal": "alice",
+                "entity_id": "default:Momentum",
+                "payload": {
+                    "schema_version": 2,
+                    "factor_family_alias": "Momentum",
+                    "resolved_factors": [
+                        frozen,
+                        {"factor_alias": "Momentum:0"},
+                    ],
+                },
+            }]
+
+    rows = factor_rows_from_sync(Sync(), "alice")
+
+    assert len(rows) == 1
+    assert rows[0]["factor_ref"] == frozen["ref"]
+    assert rows[0]["factor_alias"] == "Momentum|N:20d"
+    assert rows[0]["family_formula_fingerprint"] == "a" * 64
+
+
+def test_source_family_projections_preserve_formula_fingerprint(monkeypatch) -> None:
+    source = {
+        "id": "Momentum",
+        "name": "Momentum",
+        "family_formula_fingerprint": "c" * 64,
+        "params": [],
+    }
+    monkeypatch.setattr(
+        "server.modules.custom_factors.catalog.list_public_factors",
+        lambda: [source],
+    )
+    monkeypatch.setattr(
+        "server.modules.custom_factors.catalog.list_custom_factors",
+        lambda _username: [source],
+    )
+
+    public = public_catalog.public_factor_library()
+    custom = ClientFactorCatalogMixin._custom_source_families("alice")
+
+    assert public["families"][0]["family_formula_fingerprint"] == "c" * 64
+    assert custom[0]["family_formula_fingerprint"] == "c" * 64
 
 
 def test_public_source_applied_requires_superadmin_and_verifies_source(

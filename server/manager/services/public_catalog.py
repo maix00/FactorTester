@@ -169,6 +169,9 @@ def public_factor_library() -> dict[str, Any]:
             "factor_kind": "public",
             "owner_username": PUBLIC_VISITOR_PRINCIPAL,
             "owner_alias": "公共因子库",
+            "family_formula_fingerprint": item.get(
+                "family_formula_fingerprint"
+            ) or "",
             "updated_at": item.get("updated_at") or "",
         })
     return build_client_library_projection(

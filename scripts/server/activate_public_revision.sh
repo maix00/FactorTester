@@ -169,7 +169,9 @@ rollback() {
   trap - ERR INT TERM
   if [[ "$switched" == "1" ]]; then
     echo "Public release failed; rolling back to $old_revision" >&2
-    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+      bash "$public_script" restore-factor-control-identities || true
+    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
       bash "$public_script" restore-factor-identities || true
     sudo cp "$rollback_env" "$production_env"
     old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
@@ -197,6 +199,8 @@ switched=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" restart-app
 app_stopped=0
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  bash "$public_script" migrate-factor-control-identities
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" verify
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
