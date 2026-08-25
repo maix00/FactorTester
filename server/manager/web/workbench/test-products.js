@@ -181,7 +181,7 @@
       items: pickerItems(),
       selected: selectedRefs,
       multi: options.multi ?? (state.kind === "ic"),
-      loading: FTTestObjectPicker.lazyLoading(state, "products"),
+      loading: options.loading ?? FTTestObjectPicker.lazyLoading(state, "products"),
       loadingText: context.t("正在读取产品组候选…"),
       compact: true,
       name: `test-product-groups-${state.kind}`,

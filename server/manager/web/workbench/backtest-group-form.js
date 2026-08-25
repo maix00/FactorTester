@@ -95,7 +95,11 @@
         groups: productItems,
         selectedRefs: productGroupRef ? [productGroupRef] : [],
         multi: false,
-        canCreate: !productScopeBlocked,
+        canCreate: !productScopeBlocked && (
+          window.FTStrategyEditorScope?.inlineCreateAllowed?.(
+            state, "product_path_candidates", productScope,
+          ) ?? productScope.source !== "outer"
+        ),
         onChange: values => {
           productGroupRef = values[0] || "";
           innerScopeValues.product_path_selection = productGroupRef;

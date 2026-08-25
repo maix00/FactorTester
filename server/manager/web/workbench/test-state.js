@@ -101,8 +101,13 @@
     state.values.factor_candidates = mergeByID(
       state.values.factor_candidates || [], copy("factors"),
     );
+    state.categoryCatalog = mergeByID(
+      state.categoryCatalog || [], [
+        ...(state.values.category_candidates || []), ...copy("categories"),
+      ],
+    );
     state.values.category_candidates = mergeByID(
-      state.values.category_candidates || [], copy("categories"),
+      state.values.category_candidates || [], state.categoryCatalog,
     );
   }
 
@@ -128,6 +133,7 @@
     state.analysis = {};
     state.savedFactors = [];
     state.savedTemporaryObjects = {};
+    state.categoryCatalog = [];
     state.factorRef = "";
     state.groupRef = "";
     state.groupRefs = [];

@@ -157,6 +157,7 @@
       runtimeServers: null, runtimeServersLoaded: false,
       runtimeServersLoading: false,
       lazy: FTTestState.lazyState(),
+      categoryCatalog: [],
       runValues: FTTestState.defaultRunValues(manifest),
       runCode: {status: "idle", error: "", promise: null},
       runBatchCode: {status: "idle", error: "", promise: null},

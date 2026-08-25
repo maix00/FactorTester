@@ -167,20 +167,23 @@
       return mergeByID("factor", [
         ...(state?.factors || []),
         ...(state?.savedFactors || []),
-        ...(state?.values?.factor_candidates || []),
-        ...(state?.values?.factor_selections || []),
       ]);
     }
     if (kind === "category") {
       return constrainedCandidates(state, "category_candidates", mergeByID("category", [
-        ...(state?.values?.category_candidates || []),
+        ...(state?.categoryCatalog || []),
       ]));
     }
     return constrainedCandidates(state, "product_path_candidates", mergeByID("product_group", [
       ...(state?.groups || []),
-      ...(state?.values?.product_path_candidates || []),
-      ...(state?.values?.product_path_selections || []),
     ]));
+  }
+
+  function inlineCreateAllowed(state, fieldKey, currentScope) {
+    const descriptor = scopedField(state, fieldKey, "inner") || {};
+    return currentScope?.source === "outer"
+      ? descriptor.allow_inline_create_when_outer_mounted === true
+      : descriptor.allow_inline_create_when_outer_unmounted !== false;
   }
 
   function outerValues(state, kind) {
@@ -292,6 +295,7 @@
     contract, factorID, factorLabel, groupID, groupLabel,
     categoryID, categoryLabel, innerTabs,
     candidateCompatible, constrainedCandidates,
+    inlineCreateAllowed,
     itemID, itemLabel, mounted, scope, scopedField, scopedFields,
     fieldVisible, fieldRequired, fieldEditable, summary, validate, visibleCatalog,
   });

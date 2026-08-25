@@ -184,8 +184,37 @@ assert.equal(window.FTStrategyEditorScope.validate(state).length, 1);
 state.values.product_path_candidates = [];
 assert.equal(window.FTStrategyEditorScope.validate(state).length, 2);
 state.settingsMountedTabs = [];
-assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].ref, "visible-factor");
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "factor").items.map(item => item.ref),
+  ["visible-factor"],
+  "an unmounted outer factor tab must not leak its derived pool into an inner editor",
+);
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").required, false);
+state.values.factor_candidates = [{ref: "sibling-factor", alias: "Sibling"}];
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "factor").items.map(item => item.ref),
+  ["visible-factor"],
+  "one sibling's candidate values must not redefine another sibling's visible scope",
+);
+state.values.product_path_candidates = [
+  {group_ref: "sibling-group", title_zh: "Sibling group"},
+];
+state.values.product_path_selections = [
+  {group_ref: "selected-sibling-group", title_zh: "Selected sibling group"},
+];
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "product_path_selection")
+    .items.map(item => item.group_ref),
+  ["visible-group"],
+  "one sibling's product values must not redefine another sibling's visible scope",
+);
+state.categoryCatalog = [{id: "visible-category", title_zh: "Visible category"}];
+state.values.category_candidates = [{id: "sibling-category", title_zh: "Sibling category"}];
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "category").items.map(item => item.id),
+  ["visible-category"],
+  "one sibling's category values must not redefine another sibling's visible scope",
+);
 assert.deepEqual(
   window.FTStrategyEditorScope.innerTabs(state, ["cost", "time"])
     .map(item => item.key),

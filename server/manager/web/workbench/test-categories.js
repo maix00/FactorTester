@@ -19,7 +19,8 @@
         const id = categoryID(item);
         if (id) byID.set(String(id), item);
       }
-      state.values.category_candidates = [...byID.values()];
+      state.categoryCatalog = [...byID.values()];
+      state.values.category_candidates = [...state.categoryCatalog];
       state.categoryCandidatesLoaded = true;
       state.categoryError = "";
     } catch (error) {
@@ -32,8 +33,10 @@
   }
 
   function candidates(state) {
-    return Array.isArray(state.values?.category_candidates)
-      ? state.values.category_candidates.filter(item => item && typeof item === "object")
+    const catalog = Array.isArray(state.categoryCatalog)
+      ? state.categoryCatalog : state.values?.category_candidates;
+    return Array.isArray(catalog)
+      ? catalog.filter(item => item && typeof item === "object")
       : [];
   }
 
@@ -72,7 +75,8 @@
     const index = rows.findIndex(value => categoryID(value) === id);
     if (index >= 0) rows[index] = {...rows[index], ...category};
     else rows.push(category);
-    state.values.category_candidates = rows;
+    state.categoryCatalog = rows;
+    state.values.category_candidates = [...rows];
     return rows[index >= 0 ? index : rows.length - 1];
   }
 
