@@ -195,6 +195,30 @@ assert.equal(locked.dropdown.open, false);
     item.className === "primary ft-multi-select-apply"
   )), false, "single-select must not render a save action");
 
+  const redrawOwner = new Element("div");
+  body.append(redrawOwner);
+  let replacement = null;
+  const redrawSingle = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "family", label: "已有家族"}, {value: "source", label: "上传源码"}],
+    selected: ["family"], multi: false,
+    onChange: values => {
+      replacement = new Element("section");
+      replacement.dataset.mode = values[0];
+      redrawOwner.replaceChildren(replacement);
+    },
+  });
+  redrawOwner.append(redrawSingle.element);
+  redrawSingle.dropdown.open = true;
+  redrawSingle.dropdown.listeners.toggle();
+  assert.equal(redrawSingle.menu.parentNode, document.body);
+  const sourceInput = redrawSingle.optionList.children[1].children[0];
+  sourceInput.checked = true;
+  await sourceInput.listeners.change();
+  assert.equal(replacement.dataset.mode, "source");
+  assert.equal(redrawSingle.dropdown.open, false);
+  assert.equal(redrawSingle.menu.parentNode, redrawSingle.dropdown,
+    "a single-choice redraw must restore its portaled menu before replacing the field");
+
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [
