@@ -579,6 +579,28 @@ def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> No
     assert public["factor_count"] == 1
 
 
+def test_public_factor_registration_does_not_manufacture_user_family() -> None:
+    payload = build_client_library_projection({
+        "factors": [{
+            "factor_family_alias": "PublicMomentum",
+            "factor_family_name": "PublicMomentum",
+            "factor_alias": "PublicMomentum|window:20",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "source": "public",
+            "params": [{"alias": "window", "value": "20"}],
+            **_frozen_factor(
+                alias="PublicMomentum|window:20",
+                family="PublicMomentum",
+                owner_ref="public",
+            ),
+        }],
+    }, principal="alice")
+
+    assert len(payload["factors"]) == 1
+    assert payload["families"] == []
+
+
 def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(
     monkeypatch,
 ) -> None:
