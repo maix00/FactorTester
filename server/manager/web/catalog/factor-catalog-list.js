@@ -83,6 +83,7 @@
         || familyScope === "public" && context.session.role === "super_admin"
       )
     );
+    const canAddFactor = Boolean(context.session) && page === "families";
     if (canModify) {
       const label = page === "factors"
         ? context.t("新增因子")
@@ -111,6 +112,7 @@
       tablePage,
       onPageChange: value => { tablePage = value; render(); },
       canModify,
+      canAddFactor,
       onDelete: item => removeItem(context, page, familyScope, item),
       onEdit: item => editItem(context, page, familyScope, item),
       onAddFactor: page === "families"

@@ -2792,7 +2792,8 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'className = "ft-multi-select-filter factor-catalog-search-control"' in catalog_list
     assert "context.toolbar.append(\n      search" not in catalog_list
     assert 'context.t("按下级用户筛选")' in catalog_list
-    assert "decodeFrozenFactorRef" in details
+    assert "model().withSourceMetadata" in details
+    assert "FTFactorDetailShared.loadSourceVersion" in details
 
 
 def test_test_workbench_reads_factor_candidates_from_manager_catalog(

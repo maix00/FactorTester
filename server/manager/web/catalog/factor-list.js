@@ -84,12 +84,12 @@
   function render(context, data, mount, {
     page, query, groupRefs = ["*"], ownerUsernames = ["*"], scope = "public",
     tablePage = 1, onPageChange = () => {}, canModify = false,
-    onDelete = null, onEdit = null, onAddFactor = null,
+    canAddFactor = false, onDelete = null, onEdit = null, onAddFactor = null,
   }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, {
         query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-        canModify, onDelete, onEdit, onAddFactor,
+        canModify, canAddFactor, onDelete, onEdit, onAddFactor,
       });
     }
     return renderSubjects(context, data, mount, {
@@ -100,8 +100,9 @@
 
   function renderFamilies(context, data, mount, {
     query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-    canModify, onDelete, onEdit, onAddFactor,
+    canModify, canAddFactor, onDelete, onEdit, onAddFactor,
   }) {
+    const showAddFactor = canAddFactor || typeof onAddFactor === "function";
     const scoped = dataForScope(data, scope);
     const ownerMatches = ownerPredicate(ownerUsernames);
     const allowedFamilies = familyRefsForGroups(data, scoped, groupRefs);
@@ -127,7 +128,7 @@
       context.t("原类名"), context.t("说明"), context.t("分类"),
       context.t("来源"), context.t("所有者"), context.t("因子数"),
     ];
-    if (canModify) headers.push(context.t("操作"));
+    if (canModify || showAddFactor) headers.push(context.t("操作"));
     const view = FTUI.pagedTable(
       headers,
       rows.map(item => [
@@ -137,8 +138,12 @@
         origin(item, context),
         model().owner(item),
         item.factor_count || 0,
-        ...(canModify ? [actionCell(
-          context, onDelete, onEdit, onAddFactor, item,
+        ...(canModify || showAddFactor ? [actionCell(
+          context,
+          canModify ? onDelete : null,
+          canModify ? onEdit : null,
+          showAddFactor ? onAddFactor : null,
+          item,
         )] : []),
       ]),
       pagingOptions(context, tablePage, onPageChange),

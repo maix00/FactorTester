@@ -808,8 +808,9 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTTestFieldRow.create" in source
     assert "FTFactorDetailShared.parameterEditor" in source
     assert "factor-editor-source-metadata" in source
-    assert "FTUI.iconButton" in source
-    assert "factor-editor-upload-action" in source
+    assert "FTUI.actionButton" in source
+    assert "FTUI.codeEditor" in source
+    assert "factor-editor-upload-action" not in source
     assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source
 
@@ -2101,6 +2102,25 @@ def test_shared_action_button_contract() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() -> None:
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
+    object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
+        encoding="utf-8",
+    )
+    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'context.t("上传因子源码")' in editor
+    assert 'FTUI.actionButton(context.t("校验源码")' in editor
+    assert "FTUI.codeEditor(state.sourceCode" in editor
+    assert "factor-editor-upload-action" not in editor
+    assert 'FTUI.actionButton(context.t("取消")' in editor
+    assert "FTUI.actionButton(" in object_form
+    assert "familyScopes?.mine" in set_editor
+    assert "mine?.factors" in set_editor
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:

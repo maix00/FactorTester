@@ -139,6 +139,43 @@
     return button;
   }
 
+  function codeEditor(value = "", options = {}) {
+    const root = document.createElement("div");
+    root.className = ["editable-code-editor", options.className || ""]
+      .filter(Boolean).join(" ");
+    const highlight = document.createElement("pre");
+    highlight.setAttribute("aria-hidden", "true");
+    const codeNode = document.createElement("code");
+    const language = text(options.language || "text").trim();
+    if (language) codeNode.className = `language-${language}`;
+    highlight.append(codeNode);
+    const textarea = document.createElement("textarea");
+    textarea.value = text(value);
+    textarea.required = options.required === true;
+    textarea.spellcheck = false;
+    textarea.placeholder = text(options.placeholder);
+    textarea.setAttribute("aria-label", text(options.ariaLabel || options.placeholder));
+    const render = () => {
+      codeNode.removeAttribute("data-highlighted");
+      codeNode.textContent = `${textarea.value}\n`;
+      window.hljs?.highlightElement?.(codeNode);
+    };
+    textarea.addEventListener("input", render);
+    textarea.addEventListener("scroll", () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    });
+    root.append(highlight, textarea);
+    render();
+    return {
+      element: root,
+      textarea,
+      value: () => textarea.value,
+      setValue(next) { textarea.value = text(next); render(); },
+      focus: () => textarea.focus(),
+    };
+  }
+
   function iconButton(context, symbol, label, action, options = {}) {
     const translated = context?.t ? context.t(label) : text(label);
     const button = typeof context?.button === "function"
@@ -170,7 +207,7 @@
   }
 
   window.FTUI = {
-    actionButton, appendRow, code, empty, fieldRows, formatDate, helpIcon, iconButton,
+    actionButton, appendRow, code, codeEditor, empty, fieldRows, formatDate, helpIcon, iconButton,
     loading, pagedTable, table, text,
   };
 })();
