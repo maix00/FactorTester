@@ -120,6 +120,10 @@ class FederatedGateway:
         page: int = 1,
         limit: int = 100,
         username: str = "",
+        object_kind: str = "",
+        object_ref: str = "",
+        object_owner_ref: str = "",
+        object_alias: str = "",
     ) -> dict[str, object]:
         """Query one peer's local job projection through WireGuard 17998.
 
@@ -140,6 +144,14 @@ class FederatedGateway:
         }
         if username:
             payload["username"] = str(username)
+        for key, value in (
+            ("object_kind", object_kind),
+            ("object_ref", object_ref),
+            ("object_owner_ref", object_owner_ref),
+            ("object_alias", object_alias),
+        ):
+            if str(value or "").strip():
+                payload[key] = str(value).strip()
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
             self._peer_url(route, "/api/federation/jobs/query"),

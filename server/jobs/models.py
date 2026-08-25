@@ -7,6 +7,7 @@ from typing import Any
 
 from .assurance import TerminalAssuranceSummary
 from .states import JobStatus
+from .subjects import job_subjects
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,15 @@ class JobRecord:
             "source_revision": self.source_revision,
             "job_spec_hash": self.job_spec_hash,
             "run_spec_hash": self.run_spec_hash,
+            "object_subjects": [
+                {
+                    "object_kind": item.object_kind,
+                    "object_ref": item.object_ref,
+                    "owner_ref": item.owner_ref,
+                    "alias": item.alias,
+                }
+                for item in job_subjects(self.job_spec)
+            ],
             "factor_source_policy": factor_source_policy,
             "strategy_specs": list(run_spec.get("strategy_plan") or run_spec.get("strategy_specs") or ()) if isinstance(run_spec, dict) else [],
             "strategy_source_policy": strategy_source_policy,

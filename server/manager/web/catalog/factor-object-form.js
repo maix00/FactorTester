@@ -54,16 +54,26 @@
       definition.mode,
       `factor-object-page factor-${definition.objectKind}-page ${definition.className || ""}`,
     );
+    const mounts = Object.create(null);
+    const mount = key => {
+      const resolved = key || "overview";
+      if (!mounts[resolved]) {
+        mounts[resolved] = document.createElement("div");
+        mounts[resolved].className = `factor-object-tab-fields factor-object-tab-${resolved}`;
+      }
+      return mounts[resolved];
+    };
     for (const spec of definition.fields || []) {
       const value = control(context, spec, state);
       const row = window.FTFactorDetailShared.fieldRow(
         context, context.t(spec.label), value,
       );
       if (spec.help) row.append(window.FTFactorDetailShared.helpIcon(spec.help));
-      form.append(row);
+      mount(spec.tab).append(row);
     }
     for (const section of definition.sections || []) {
-      if (section) form.append(section);
+      const content = section?.content || section;
+      if (content) mount(section?.tab).append(content);
     }
     const status = document.createElement("small");
     status.className = "form-error";
@@ -75,7 +85,18 @@
     save.type = "button";
     save.className = "primary";
     actions.append(cancel, save);
-    form.append(status, actions);
+    const definitions = window.FTObjectDetailTabs.definitions(
+      definition.objectKind, definition.tabOverrides || {},
+    );
+    const tabs = window.FTObjectDetailTabs.create(context, {
+      objectKind: definition.objectKind,
+      mode: definition.mode,
+      tabs: definitions.filter(item => mounts[item.key] || item.hidden !== true),
+      panels: mounts,
+    });
+    form.append(tabs.root, status, actions);
+    form.addEventListener("input", markDirty);
+    form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
       event.preventDefault();
       save.disabled = true;
@@ -90,7 +111,12 @@
     context.setHeading(definition.title, definition.subtitle || "");
     context.updateActiveTab?.({title: definition.title});
     context.content.replaceChildren(form);
-    return {form, state, status};
+    return {form, state, status, tabs};
+
+    function markDirty(event) {
+      const panel = event.target?.closest?.(".object-detail-tab-panel");
+      if (panel?.dataset?.tabKey) tabs.setDirty(panel.dataset.tabKey, true);
+    }
   }
 
   window.FTFactorObjectForm = Object.freeze({render});

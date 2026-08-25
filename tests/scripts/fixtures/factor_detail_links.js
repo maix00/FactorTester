@@ -8,14 +8,28 @@ class Element {
     this.children = [];
     this.listeners = {};
     this.dataset = {};
+    this.attributes = {};
+    this.className = "";
+    this.classList = {
+      toggle: (name, enabled) => {
+        const values = new Set(this.className.split(/\s+/).filter(Boolean));
+        if (enabled) values.add(name); else values.delete(name);
+        this.className = [...values].join(" ");
+      },
+    };
   }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  focus() { this.focused = true; }
 }
 
 global.Node = Element;
 global.document = {createElement: tagName => new Element(tagName)};
+global.CustomEvent = class CustomEvent { constructor(type, options) {
+  this.type = type; this.detail = options?.detail;
+} };
 global.navigator.clipboard = {async writeText(value) { navigator.copied = value; }};
 global.window = {};
 vm.runInThisContext(
@@ -25,6 +39,14 @@ vm.runInThisContext(
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-detail-shared.js", "utf8"),
   {filename: "factor-detail-shared.js"},
+);
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/shared/object-detail-tabs.js", "utf8"),
+  {filename: "object-detail-tabs.js"},
+);
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/shared/object-job-table.js", "utf8"),
+  {filename: "object-job-table.js"},
 );
 global.FTUI = window.FTUI = {
   code(value, options = {}) {
@@ -137,6 +159,17 @@ const data = {
   sets: [{target_ref: setRef, visibility: "server"}],
 };
 
+function walk(root) {
+  const result = [];
+  const visit = value => {
+    if (!value || typeof value !== "object") return;
+    result.push(value);
+    (value.children || []).forEach(visit);
+  };
+  visit(root);
+  return result;
+}
+
 assert.deepStrictEqual(
   window.FTFactorDetailShared.familyIdentity({factor_family_ref: "family:momentum"}),
   {alias: "", fingerprint: ""},
@@ -163,12 +196,12 @@ assert.deepStrictEqual(
   assert.strictEqual(
     navigated.at(-1), `/factor-series?factor_ref=${encodeURIComponent(factorRef)}`,
   );
-  const parameterTable = content.children[0].children.find(item => (
+  const parameterTable = walk(content).find(item => (
     item.headers?.[0] === "参数"
   ));
   assert.ok(parameterTable);
   assert.ok(parameterTable.values.some(row => row[0] === "N"));
-  const provenance = content.children[0].children.find(item => (
+  const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
   assert.ok(provenance.values.some(row => row[0] === "冻结因子家族"));
@@ -207,7 +240,7 @@ assert.deepStrictEqual(
     },
     historicalFactorRef,
   );
-  const historicalParameterTable = historicalContext.content.children[0].children.find(
+  const historicalParameterTable = walk(historicalContext.content).find(
     item => item.headers?.[0] === "参数",
   );
   assert.ok(historicalParameterTable);
@@ -243,7 +276,7 @@ assert.deepStrictEqual(
     },
     "factor-family:sha256:momentum",
   );
-  const currentSource = currentFamilyContext.content.children[0].children.find(item => (
+  const currentSource = walk(currentFamilyContext.content).find(item => (
     item.className === "factor-detail-source"
   ));
   assert.match(currentSource.children[1].children[0].textContent, /MmRateOfChg/);
@@ -273,15 +306,19 @@ assert.deepStrictEqual(
     familyContext, data, "factor-family:sha256:momentum",
   );
   assert.strictEqual(
-    familyContext.content.children[0].children[0].className,
+    walk(familyContext.content).find(item => (
+      item.className === "factor-source-version-history"
+    )).className,
     "factor-source-version-history",
   );
-  assert.ok(familyContext.content.children[0].children[0].children[0]);
-  const historyPicker = familyContext.content.children[0].children[0]
-    .children[0].children[1].children[0];
+  const history = walk(familyContext.content).find(item => (
+    item.className === "factor-source-version-history"
+  ));
+  assert.ok(history.children[0]);
+  const historyPicker = walk(history).find(item => item.pickerOptions);
   await historyPicker.pickerOptions.onChange(["b".repeat(64)]);
   await new Promise(resolve => setTimeout(resolve, 0));
-  const historicalSource = familyContext.content.children[0].children.find(item => (
+  const historicalSource = walk(familyContext.content).find(item => (
     item.className === "factor-detail-source"
   ));
   assert.match(
@@ -291,7 +328,7 @@ assert.deepStrictEqual(
   assert.strictEqual(rendered.at(-1).expression, "P_t-P_{t-1}");
 
   await window.FTFactorDetails.setDetail(context, data, setRef, async () => ({}));
-  const memberMount = content.children[0].children.at(-1);
+  const memberMount = walk(content).find(item => item.className === "factor-set-members");
   const table = memberMount.children[0];
   assert.strictEqual(table.values[0][0], alias);
   assert.ok(table._row);
@@ -314,7 +351,9 @@ assert.deepStrictEqual(
     context, {sets: [temporarySet], factors: []}, temporarySet.target_ref,
     async () => ({}),
   );
-  const detailRows = content.children[0].children[0].values;
+  const detailRows = walk(content).find(item => (
+    item.values?.some(row => row[0] === "来源因子")
+  )).values;
   const sourceFactorRow = detailRows.find(row => row[0] === "来源因子");
   const sourceSetRow = detailRows.find(row => row[0] === "来源因子集合");
   assert.ok(sourceFactorRow);

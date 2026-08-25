@@ -838,6 +838,62 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert 'context.t("读取版本历史")' not in editor
 
 
+def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
+    import subprocess
+
+    source = (
+        WEB_ROOT / "catalog" / "shared" / "object-detail-tabs.js"
+    ).read_text(encoding="utf-8")
+    details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
+        encoding="utf-8"
+    )
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8"
+    )
+    object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
+        encoding="utf-8"
+    )
+    object_jobs = (
+        WEB_ROOT / "catalog" / "shared" / "object-job-table.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'family: [' in source
+    assert 'factor: [' in source
+    assert 'set: [' in source
+    assert '"未保存"' in source
+    assert '"只读"' in source
+    assert "FTObjectDetailTabs.create" in details
+    assert "FTObjectDetailTabs.create" in editor
+    assert "FTObjectDetailTabs.create" in object_form
+    assert editor.index("topMount") < editor.index("FTObjectDetailTabs.create")
+    assert "FTUI.pagedTable" in object_jobs
+    assert '"visible"' in object_jobs
+    assert "object_kind" in object_jobs
+    assert "context.navigate(`/jobs/${encodeURIComponent" in object_jobs
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "object_detail_tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_factor_object_jobs_are_lazy_and_use_visible_paginated_query() -> None:
+    import subprocess
+
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures" / "factor_object_job_table.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
     source = (WEB_ROOT / "catalog" / "factor-list.js").read_text(encoding="utf-8")
     catalog = (WEB_ROOT / "catalog" / "factor-catalog-list.js").read_text(
