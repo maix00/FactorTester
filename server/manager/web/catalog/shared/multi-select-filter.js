@@ -394,11 +394,16 @@
           if (!multi) {
             const previous = [...committedSelected];
             try {
+              // A single-choice callback may synchronously redraw and replace
+              // the owning field (for example the inline factor source mode).
+              // Close and unportal this control before invoking application
+              // code so its detached menu cannot survive or race the redraw.
+              dropdown.open = false;
+              restoreMenu();
               const commit = options.onChange || options.onApply;
               const result = commit?.([...selected]);
               if (result && typeof result.then === "function") await result;
               committedSelected = [...selected];
-              dropdown.open = false;
             } catch (error) {
               selected = previous;
               render();

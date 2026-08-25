@@ -814,6 +814,10 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source
 
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+    assert ".editable-code-editor textarea" in styles
+    assert "background: transparent !important" in styles
+
 
 def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker() -> None:
     shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
