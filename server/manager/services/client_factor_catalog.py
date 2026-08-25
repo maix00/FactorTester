@@ -36,6 +36,9 @@ class ClientFactorCatalogMixin:
                 "source": "custom",
                 "factor_count": 0,
                 "factor_refs": [],
+                "family_formula_fingerprint": item.get(
+                    "family_formula_fingerprint"
+                ) or "",
                 "updated_at": item.get("updated_at") or "",
             })
         return families
@@ -111,7 +114,6 @@ class ClientFactorCatalogMixin:
             subordinate_factor_rows,
         )
 
-        owner_account = self._local_account(principal)
         mine = self.factor_library(principal)
         account_store = self.local_account_store
         if account_store is None:

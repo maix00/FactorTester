@@ -436,7 +436,11 @@ def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> Non
 
     assert "migrate-factor-identities" in script
     assert "migrate_factor_source_metadata" in script
-    assert "migrate_factor_formula_identity --apply --discard-incompatible" in script
+    assert "migrate_factor_formula_identity" in script
+    assert "--apply --discard-incompatible" in script
+    assert "--control-plan /state/factor-v2-control-plan.json" in script
+    assert "migrate-factor-control-identities" in script
+    assert "restore-factor-control-identities" in script
     assert "PRAGMA integrity_check" in script
     assert "schema_version=1" in script
     release_sequence = """bash "$public_script" stop-app
@@ -449,7 +453,11 @@ switched=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
   bash "$public_script" restart-app"""
     assert release_sequence in activate
+    assert activate.index("migrate-factor-control-identities") < activate.index(
+        'bash "$public_script" verify'
+    )
     assert "restore-factor-identities" in activate
+    assert "restore-factor-control-identities" in activate
     assert "finalize-factor-identities" in activate
 
 

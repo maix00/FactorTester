@@ -5,7 +5,10 @@ import sqlite3
 
 import pytest
 
-from tools.factors.formula_identity import freeze_factor_identity
+from tools.factors.formula_identity import (
+    freeze_factor_identity,
+    require_frozen_factor,
+)
 from tools.migrations.migrate_factor_formula_identity import (
     IncompatibleFactorConfiguration,
     migrate_configuration_database,
@@ -243,3 +246,80 @@ def test_explicit_migration_rebuilds_legacy_factor_set_with_principal_owner(
     migrated = json.loads(raw)
     assert migrated["ref"].startswith("factor-set:v2:")
     assert migrated["identity"]["members"][0]["ref"].startswith("factor:v2:")
+
+
+def test_explicit_migration_updates_account_domain_and_writes_control_plan(
+    tmp_path,
+) -> None:
+    database = tmp_path / "manager.sqlite3"
+    control_plan = tmp_path / "control-plan.json"
+    factor_config = {
+        "factor_family_alias": "Momentum",
+        "params_list": [{"N": "20d"}],
+        "resolved_factors": [{
+            "factor_alias": "Momentum:0",
+            "source": "custom",
+        }],
+    }
+    legacy_set = {
+        "schema_version": 1,
+        "target_ref": "factor-set:v1:legacy",
+        "member_refs": ["factor:v1:legacy"],
+    }
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE research_configurations ("
+            "configuration_id TEXT PRIMARY KEY, schema_version INTEGER, "
+            "revision INTEGER, payload_json TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE account_domain_entities ("
+            "principal TEXT, entity_type TEXT, entity_id TEXT, "
+            "payload_json TEXT, deleted INTEGER, remote_revision INTEGER, "
+            "base_revision INTEGER, PRIMARY KEY (principal, entity_type, entity_id))"
+        )
+        connection.executemany(
+            "INSERT INTO account_domain_entities VALUES (?, ?, ?, ?, 0, 3, 3)",
+            [
+                (
+                    "alice", "factor_param_config", "default:Momentum",
+                    json.dumps(factor_config),
+                ),
+                (
+                    "alice", "factor_set", "legacy-set",
+                    json.dumps(legacy_set),
+                ),
+            ],
+        )
+
+    report = migrate_configuration_database(
+        database,
+        resolver=_resolved,
+        apply=True,
+        discard_incompatible=True,
+        control_plan_path=control_plan,
+    )
+
+    assert report["account_domain"]["eligible"] == 2
+    assert report["account_domain"]["planned"] == 2
+    assert report["account_domain"]["migrated"] == 2
+    assert report["account_domain"]["discarded"] == 1
+    assert len(report["account_domain"]["errors"]) == 1
+    with sqlite3.connect(database) as connection:
+        factor_raw, factor_deleted, factor_revision = connection.execute(
+            "SELECT payload_json, deleted, remote_revision "
+            "FROM account_domain_entities WHERE entity_type='factor_param_config'"
+        ).fetchone()
+        set_raw, set_deleted = connection.execute(
+            "SELECT payload_json, deleted FROM account_domain_entities "
+            "WHERE entity_type='factor_set'"
+        ).fetchone()
+    factor_payload = json.loads(factor_raw)
+    require_frozen_factor(factor_payload["resolved_factors"][0])
+    assert factor_payload["schema_version"] == 2
+    assert (factor_deleted, factor_revision) == (0, 4)
+    assert set_deleted == 1
+    assert json.loads(set_raw)["schema_version"] == 2
+    plan = json.loads(control_plan.read_text(encoding="utf-8"))["rows"]
+    assert len(plan) == 2
+    assert {item["expected_revision"] for item in plan} == {3}

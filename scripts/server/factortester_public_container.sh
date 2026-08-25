@@ -29,6 +29,10 @@ Commands:
                  identities, discard irrecoverable v1 drafts, then verify
   restore-factor-identities
                  restore the pre-migration SQLite backup after failed release
+  migrate-factor-control-identities
+                 apply the prepared account-domain plan to PostgreSQL
+  restore-factor-control-identities
+                 restore PostgreSQL account-domain rows after failed release
   finalize-factor-identities
                  clear the rollback marker after successful verification
   verify         verify ports, identities, revision, PostgreSQL, and no reload
@@ -138,7 +142,9 @@ with sqlite3.connect(source) as current, sqlite3.connect(backup) as snapshot:
 Path("/state/factor-v2-migration-backup-path").write_text(str(backup), encoding="utf-8")
 PY
 gosu factortester python -m tools.migrations.migrate_factor_source_metadata
-gosu factortester python -m tools.migrations.migrate_factor_formula_identity --apply --discard-incompatible
+gosu factortester python -m tools.migrations.migrate_factor_formula_identity \
+  --apply --discard-incompatible \
+  --control-plan /state/factor-v2-control-plan.json
 gosu factortester python - <<"PY"
 import sqlite3
 import settings
@@ -153,6 +159,34 @@ with sqlite3.connect(settings.CACHE_DB_PATH) as connection:
         raise RuntimeError(f"SQLite still contains {legacy} schema-1 configurations")
 PY
 '
+}
+
+migrate_factor_control_identities() {
+  marker="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-control-applied"
+  plan="${FACTORTESTER_STATE_ROOT}/factor-v2-control-plan.json"
+  [[ -f "$plan" ]] || { echo "factor control-domain plan is unavailable" >&2; exit 1; }
+  "${compose[@]}" exec -T factortester-public sh -lc '
+set -eu
+export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+cd /opt/factortester/app
+python -m tools.migrations.migrate_factor_control_domain \
+  --plan /state/factor-v2-control-plan.json
+'
+  touch "$marker"
+  chmod 0600 "$marker"
+}
+
+restore_factor_control_identities() {
+  marker="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-control-applied"
+  [[ -f "$marker" ]] || return 0
+  "${compose[@]}" exec -T factortester-public sh -lc '
+set -eu
+export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+cd /opt/factortester/app
+python -m tools.migrations.migrate_factor_control_domain \
+  --plan /state/factor-v2-control-plan.json --restore
+'
+  rm -f "$marker"
 }
 
 restore_factor_identities() {
@@ -185,7 +219,10 @@ PY
 }
 
 finalize_factor_identities() {
-  rm -f "${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-migration-backup-path"
+  state_root="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}"
+  rm -f "$state_root/factor-v2-migration-backup-path" \
+    "$state_root/factor-v2-control-applied" \
+    "$state_root/factor-v2-control-plan.json"
 }
 
 assert_unpublished_tcp_port() {
@@ -283,6 +320,8 @@ case "$command" in
   backup) backup_database ;;
   restore-check) restore_check "$@" ;;
   migrate-factor-identities) migrate_factor_identities ;;
+  migrate-factor-control-identities) migrate_factor_control_identities ;;
+  restore-factor-control-identities) restore_factor_control_identities ;;
   restore-factor-identities) restore_factor_identities ;;
   finalize-factor-identities) finalize_factor_identities ;;
   verify) verify ;;
