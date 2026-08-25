@@ -42,12 +42,14 @@
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
     const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
+    const jobs = objectJobs(context, "factor", factorRef, factor);
     const tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: "factor",
       mode: "view",
       overrides: {
         parameters: {hidden: !parameters},
         identity: {hidden: !provenance},
+        jobs: {onActivate: jobs.load},
       },
       panels: {
         overview: FTUI.table(
@@ -56,6 +58,7 @@
         source: window.FTFactorDetailShared.source(context, factor),
         parameters,
         identity: provenance,
+        jobs: jobs.mount,
       },
     });
     root.append(tabs.root);
@@ -168,6 +171,9 @@
       const parameters = window.FTFactorDetailShared.parameterTable(
         context, displayFamily,
       );
+      const jobs = objectJobs(
+        context, "family", baseFamily.family_ref || targetRef, baseFamily,
+      );
       const tabs = window.FTObjectDetailTabs.create(context, {
         objectKind: "family",
         mode: "view",
@@ -175,6 +181,7 @@
           parameters: {hidden: !parameters},
           members: {hidden: !members.length},
           identity: {hidden: !provenance},
+          jobs: {onActivate: jobs.load},
         },
         panels: {
           overview: FTUI.table(
@@ -184,6 +191,7 @@
           parameters,
           members: view.shell,
           identity: provenance,
+          jobs: jobs.mount,
         },
       });
       root.append(tabs.root);
@@ -347,12 +355,14 @@
     memberMount.className = "factor-set-members";
     const sourceRows = factorSetSourceRows(context, value);
     const provenance = window.FTFactorDetailShared.provenance(context, value);
+    const jobs = objectJobs(context, "set", frozenRef, value);
     const tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: "set",
       mode: "view",
       overrides: {
         sources: {hidden: !sourceRows.length},
         identity: {hidden: !provenance},
+        jobs: {onActivate: jobs.load},
       },
       panels: {
         overview: FTUI.table(
@@ -363,6 +373,7 @@
           [context.t("字段"), context.t("值")], sourceRows,
         ).shell : null,
         identity: provenance,
+        jobs: jobs.mount,
       },
     });
     root.append(tabs.root);
@@ -388,6 +399,20 @@
       ]);
     }
     return rows;
+  }
+
+  function objectJobs(context, objectKind, objectRef, value) {
+    const item = value || {};
+    return window.FTFactorObjectJobs.create(context, {
+      objectKind,
+      objectRef: String(objectRef || ""),
+      ownerRef: String(
+        item.factor_owner_ref || item.owner_ref || "",
+      ),
+      alias: objectKind === "family" ? String(
+        item.factor_family_alias || item.factor_family_name || item.family_alias || "",
+      ) : "",
+    });
   }
 
   function referenceLinks(context, raw, kind) {

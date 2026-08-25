@@ -18,12 +18,17 @@ from tools.data.sqlite.db import connect_sqlite
 
 from ..assurance import BackendAssuranceValidator, canonical_hash
 from ..models import JobRecord
-from ..states import JobStatus, NON_TERMINAL_STATUSES, TERMINAL_STATUSES, require_transition
+from ..states import (
+    NON_TERMINAL_STATUSES,
+    TERMINAL_STATUSES,
+    JobStatus,
+    require_transition,
+)
 from .artifacts import JobArtifactImplementation
 from .custom_analyses import JobCustomAnalysisImplementation
 from .detail import JobDetailQueryImplementation
 from .queries import JobQueryImplementation
-from .schema import ensure_job_schema
+from .schema import ensure_job_schema, index_job_subjects
 from .terminal import evaluate_terminal_assurance
 
 
@@ -157,6 +162,7 @@ class JobRepository(
                         now,
                     ),
                 )
+                index_job_subjects(conn, record.job_id, record.job_spec)
             except sqlite3.IntegrityError as exc:
                 if record.step_mode and "research_jobs.owner" in str(exc):
                     raise ValueError("step job already active") from exc

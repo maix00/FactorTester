@@ -8,32 +8,29 @@ import time
 from copy import deepcopy
 from pathlib import Path
 
-from flask import Response, jsonify, request, session, stream_with_context
 import orjson
+from flask import Response, jsonify, request, session, stream_with_context
 
-from server.jobs.artifacts import (
-    artifact_root,
-    default_user_quota_bytes,
-)
-from server.jobs.input_artifacts import artifact_role, FACTOR_SOURCE_PREFIX
-from server.jobs.ports import detect_port
+from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.input_artifacts import FACTOR_SOURCE_PREFIX, artifact_role
 from server.jobs.ipc import DaemonUnavailable
+from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
     artifact_description,
     output_declarations,
     output_requests_for_artifacts,
 )
-from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.jobs.repository import JobRepository
+from server.jobs.states import TERMINAL_STATUSES, JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
     job_evidence,
-    job_urls,
     job_owner_for_gateway,
+    job_research_binding,
+    job_urls,
     repository,
     require_job,
     require_job_detail,
-    job_research_binding,
 )
 from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
@@ -425,6 +422,14 @@ def list_test_jobs():
         service_port = None if gateway else _port_filter()
         limit = min(100, max(1, int(request.args.get("limit", "20") or 20)))
         page = max(1, int(request.args.get("page", "1") or 1))
+        object_filter = {
+            "object_kind": str(request.args.get("object_kind") or "").strip(),
+            "object_ref": str(request.args.get("object_ref") or "").strip(),
+            "object_owner_ref": str(
+                request.args.get("object_owner_ref") or ""
+            ).strip(),
+            "object_alias": str(request.args.get("object_alias") or "").strip(),
+        }
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     scope = str(request.args.get("scope") or "").strip().lower()
@@ -470,8 +475,9 @@ def list_test_jobs():
             before_updated_at=before_updated_at,
             before_job_id=before_job_id,
             include_artifacts=True,
+            **object_filter,
         )
-        total = JobRepository().count_global_summaries()
+        total = JobRepository().count_global_summaries(**object_filter)
         jobs = []
         for summary in public_rows:
             record = JobRepository().load(str(summary["job_id"]))
@@ -483,6 +489,7 @@ def list_test_jobs():
                 "task_name": identity.get("task_name") or "",
                 "acting_profile_ref": identity.get("acting_profile_ref") or "",
                 "acting_profile_name": identity.get("acting_profile_name") or "",
+                "object_subjects": identity.get("object_subjects") or [],
                 "port": record.service_port or _server_port(),
                 "server_context": _server_context(record),
                 "artifact_count": int(summary.get("artifact_count") or 0),
@@ -529,6 +536,7 @@ def list_test_jobs():
             "success": False,
             "error": "visitor job owner is unavailable",
         }), 401
+    visible_owners: list[str] | None = None
     if scope == "subordinates":
         users = _subordinate_users(owner)
         requested_user = str(
@@ -553,6 +561,12 @@ def list_test_jobs():
         if requested_user not in {item["username"] for item in users}:
             return jsonify({"success": False, "error": "无权查看该下级用户任务"}), 403
         job_owner = requested_user
+    elif scope == "visible":
+        visible_owners = [
+            owner,
+            *[item["username"] for item in _subordinate_users(owner)],
+        ]
+        job_owner = owner
     elif scope == "mine":
         job_owner = owner
     else:
@@ -567,6 +581,8 @@ def list_test_jobs():
         run_id=str(request.args.get("run_id") or "").strip(),
         statuses=statuses,
         service_port=service_port,
+        owners=visible_owners,
+        **object_filter,
         limit=limit,
         offset=(page - 1) * limit,
     )
@@ -577,6 +593,8 @@ def list_test_jobs():
         run_id=str(request.args.get("run_id") or "").strip(),
         statuses=statuses,
         service_port=service_port,
+        owners=visible_owners,
+        **object_filter,
     )
     return jsonify({
         "success": True,

@@ -513,6 +513,15 @@
     const sourceMount = document.createElement("div");
     const parameterMount = document.createElement("div");
     const identityMount = document.createElement("div");
+    const jobObjectKind = familyMode ? "family" : "factor";
+    const jobObjectRef = familyMode
+      ? loaded.family_ref || targetRef : loaded.factor_ref || targetRef;
+    const jobs = window.FTFactorObjectJobs.create(context, {
+      objectKind: jobObjectKind,
+      objectRef: jobObjectRef,
+      ownerRef: loaded.factor_owner_ref || loaded.owner_ref || "",
+      alias: familyMode ? familyAlias(loaded) : "",
+    });
     let tabs;
     const status = document.createElement("small");
     status.className = "form-error";
@@ -596,7 +605,16 @@
     const overrides = state.familyMode ? {
       members: {hidden: true},
       parameters: {editable: false},
-    } : {};
+      jobs: {
+        hidden: mode === "create" || context.testObjectTemporary === true,
+        onActivate: jobs.load,
+      },
+    } : {
+      jobs: {
+        hidden: mode === "create" || context.testObjectTemporary === true,
+        onActivate: jobs.load,
+      },
+    };
     tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: state.familyMode ? "family" : "factor",
       mode,
@@ -606,6 +624,7 @@
         source: sourceMount,
         parameters: parameterMount,
         identity: identityMount,
+        jobs: jobs.mount,
       },
     });
     form.append(topMount, tabs.root, status, actions);

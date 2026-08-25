@@ -74,6 +74,14 @@ class JobListRoutesMixin:
             visitor = self._visitor_mode()
             query = parse_qs(parsed.query, keep_blank_values=True)
             scope = str(query.get("scope", [""])[0] or "").strip().lower()
+            object_filter = {
+                key: str(query.get(key, [""])[0] or "").strip()
+                for key in (
+                    "object_kind", "object_ref",
+                    "object_owner_ref", "object_alias",
+                )
+                if str(query.get(key, [""])[0] or "").strip()
+            }
             if not scope:
                 if session is None or str(session.get("role") or "") == "super_admin":
                     scope = "server"
@@ -159,6 +167,7 @@ class JobListRoutesMixin:
                         page=requested_page,
                         limit=limit,
                         source_scope=source_scope,
+                        **object_filter,
                     )
                 except (ConnectionError, OSError, TypeError, ValueError) as exc:
                     json_response(self, {
@@ -181,9 +190,11 @@ class JobListRoutesMixin:
                     if session is not None and str(session.get("role") or "") == "super_admin":
                         payload = self.state.aggregate_server_jobs(
                             principal=principal, cursor=cursor, limit=limit,
+                            **object_filter,
                         )
                         projection = getattr(self.state, "local_run_projection", None)
-                        if projection is not None and not cursor:
+                        if (projection is not None and not cursor
+                                and not object_filter.get("object_kind")):
                             payload = _merge_local_run_page(
                                 payload,
                                 projection.page(principal, page=1, limit=limit),
@@ -192,6 +203,7 @@ class JobListRoutesMixin:
                     else:
                         payload = self.state.aggregate_public_jobs(
                             cursor=cursor, limit=limit,
+                            **object_filter,
                         )
                 except TargetUnavailable as exc:
                     json_response(self, {"success": False, "error": str(exc)}, 503)
@@ -232,7 +244,7 @@ class JobListRoutesMixin:
                 }, 400)
                 return True
             try:
-                if scope == "mine":
+                if scope in {"mine", "visible"}:
                     # Account history is a federation-wide view too.  The
                     # cross-server aggregator queries each Manager's local
                     # SQLite projection in parallel and keeps the source
@@ -241,10 +253,11 @@ class JobListRoutesMixin:
                         principal=principal,
                         page=requested_page,
                         limit=limit,
-                        source_scope="mine",
+                        source_scope=scope,
+                        **object_filter,
                     )
                     projection = getattr(self.state, "local_run_projection", None)
-                    if projection is not None:
+                    if projection is not None and not object_filter.get("object_kind"):
                         payload = _merge_local_run_page(
                             payload,
                             projection.page(principal, page=requested_page, limit=limit),
@@ -285,9 +298,10 @@ class JobListRoutesMixin:
                         limit=limit,
                         source_scope="subordinates",
                         username=requested_user,
+                        **object_filter,
                     )
                     projection = getattr(self.state, "local_run_projection", None)
-                    if projection is not None:
+                    if projection is not None and not object_filter.get("object_kind"):
                         payload = _merge_local_run_page(
                             payload,
                             projection.page(requested_user, page=requested_page, limit=limit),

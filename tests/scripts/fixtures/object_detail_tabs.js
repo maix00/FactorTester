@@ -51,7 +51,7 @@ const definitions = window.FTObjectDetailTabs.definitions("family", {
 });
 assert.deepStrictEqual(
   definitions.map(item => item.key),
-  ["overview", "source", "parameters", "identity"],
+  ["overview", "source", "parameters", "identity", "jobs"],
 );
 
 const panels = Object.fromEntries(definitions.map(item => [

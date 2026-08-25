@@ -44,6 +44,10 @@ vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/shared/object-detail-tabs.js", "utf8"),
   {filename: "object-detail-tabs.js"},
 );
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/shared/object-job-table.js", "utf8"),
+  {filename: "object-job-table.js"},
+);
 global.FTUI = window.FTUI = {
   code(value, options = {}) {
     const pre = new Element("pre");

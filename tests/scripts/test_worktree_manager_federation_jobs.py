@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import threading
 from urllib.request import Request, urlopen
+
 from server.manager import runtime as manager
 from server.manager.http.peer_handler import peer_control_handler
 from tests.federation_fixtures import federation_registration as _registration
+
 
 def test_cross_server_jobs_are_fetched_on_demand_without_local_projection_sync(
     tmp_path, monkeypatch,
@@ -134,6 +136,63 @@ def test_cross_server_jobs_query_local_and_peer_sources_concurrently(
     assert [item["job_id"] for item in payload["jobs"]] == [
         "remote-job", "local-job",
     ]
+
+
+def test_cross_server_visible_object_jobs_forward_stable_filter(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path / "visible-repo",
+        "python",
+        server_role="feat",
+        server_id="local-feat",
+        state_root=tmp_path / "visible-state",
+    )
+    state.federation_registry.register(
+        _registration("remote-main", latency_ms=8, load=1),
+    )
+    route = state.federation_registry.find(
+        server_id="remote-main", port=8000,
+    )
+    monkeypatch.setattr(state, "_federation_manager_routes", lambda: [route])
+    calls = []
+
+    def local_jobs(**kwargs):
+        calls.append(("local", kwargs))
+        return {"jobs": [], "total": 0, "has_more": False}
+
+    monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
+
+    class Gateway:
+        def query_jobs(self, _route, **kwargs):
+            calls.append(("remote", kwargs))
+            return {"jobs": [], "total": 0, "has_more": False}
+
+    state.federation_gateway = Gateway()
+    state.aggregate_cross_server_jobs(
+        principal="alice",
+        source_scope="visible",
+        limit=20,
+        object_kind="family",
+        object_owner_ref="principal:alice",
+        object_alias="Momentum",
+    )
+
+    expected = {
+        "object_kind": "family",
+        "object_owner_ref": "principal:alice",
+        "object_alias": "Momentum",
+    }
+    observed = dict(calls)
+    assert observed["local"] == {
+        "principal": "alice", "scope": "visible", "page": 1,
+        "limit": 20, "_allow_federation": False, **expected,
+    }
+    assert observed["remote"] == {
+        "requester_server_id": "local-feat", "principal": "alice",
+        "scope": "visible", "page": 1, "limit": 20, "username": "",
+        **expected,
+    }
 
 
 def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monkeypatch) -> None:

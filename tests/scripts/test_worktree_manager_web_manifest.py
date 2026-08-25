@@ -853,6 +853,9 @@ def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8"
     )
+    object_jobs = (
+        WEB_ROOT / "catalog" / "shared" / "object-job-table.js"
+    ).read_text(encoding="utf-8")
 
     assert 'family: [' in source
     assert 'factor: [' in source
@@ -863,8 +866,26 @@ def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
     assert "FTObjectDetailTabs.create" in editor
     assert "FTObjectDetailTabs.create" in object_form
     assert editor.index("topMount") < editor.index("FTObjectDetailTabs.create")
+    assert "FTUI.pagedTable" in object_jobs
+    assert '"visible"' in object_jobs
+    assert "object_kind" in object_jobs
+    assert "context.navigate(`/jobs/${encodeURIComponent" in object_jobs
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "object_detail_tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_factor_object_jobs_are_lazy_and_use_visible_paginated_query() -> None:
+    import subprocess
+
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures" / "factor_object_job_table.js"
+    )
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
         check=False,

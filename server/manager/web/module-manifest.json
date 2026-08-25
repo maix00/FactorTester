@@ -171,6 +171,7 @@
       "catalog/factor-model.js",
       "catalog/factor-detail-shared.js",
       "catalog/shared/object-detail-tabs.js",
+      "catalog/shared/object-job-table.js",
       "catalog/shared/multi-select-filter.js",
       "catalog/factor-catalog-runtime.js",
       "catalog/factors.js"
@@ -514,6 +515,7 @@
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",
     "catalog/shared/object-detail-tabs.js",
+    "catalog/shared/object-job-table.js",
     "catalog/factor-catalog-runtime.js",
     "catalog/factor-group-filter.js",
     "catalog/factor-list.js",

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import sqlite3
+from collections.abc import Iterable
 from typing import Any
 
 import orjson
 
 from ..assurance import TerminalAssuranceSummary
 from ..models import JobRecord, SchedulingEntitlement
-from ..states import JobStatus, TERMINAL_STATUSES
+from ..states import TERMINAL_STATUSES, JobStatus
 
 
 def _loads(value: str | None, default: Any = None) -> Any:
@@ -22,6 +22,37 @@ def _loads(value: str | None, default: Any = None) -> Any:
         # A legacy job must remain inspectable even when one optional JSON
         # column was truncated or written by an older schema.
         return default
+
+
+def _append_subject_clause(
+    clauses: list[str], args: list[Any], *, table: str,
+    object_kind: str, object_ref: str, owner_ref: str, alias: str,
+) -> None:
+    kind = str(object_kind or "").strip().lower()
+    ref = str(object_ref or "").strip()
+    owner = str(owner_ref or "").strip()
+    name = str(alias or "").strip()
+    if not kind and not ref and not owner and not name:
+        return
+    if kind not in {"family", "factor", "set"}:
+        raise ValueError("object_kind must be family, factor, or set")
+    if kind == "family" and owner and name:
+        clauses.append(
+            f"EXISTS (SELECT 1 FROM research_job_subjects AS subjects "
+            f"WHERE subjects.job_id={table}.job_id "
+            "AND subjects.object_kind=? AND subjects.owner_ref=? "
+            "AND subjects.alias=?)"
+        )
+        args.extend((kind, owner, name))
+        return
+    if not ref:
+        raise ValueError("object_ref is required")
+    clauses.append(
+        f"EXISTS (SELECT 1 FROM research_job_subjects AS subjects "
+        f"WHERE subjects.job_id={table}.job_id "
+        "AND subjects.object_kind=? AND subjects.object_ref=?)"
+    )
+    args.extend((kind, ref))
 
 
 class JobQueryImplementation:
@@ -230,6 +261,10 @@ class JobQueryImplementation:
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
         service_port: int | None = None,
+        object_kind: str = "",
+        object_ref: str = "",
+        object_owner_ref: str = "",
+        object_alias: str = "",
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -263,6 +298,11 @@ class JobQueryImplementation:
         if service_port is not None:
             clauses.append("jobs.service_port=?")
             args.append(max(0, int(service_port)))
+        _append_subject_clause(
+            clauses, args, table="jobs",
+            object_kind=object_kind, object_ref=object_ref,
+            owner_ref=object_owner_ref, alias=object_alias,
+        )
         args.append(min(200, max(1, int(limit))))
         args.append(max(0, int(offset)))
         with self._connection() as conn:
@@ -368,6 +408,10 @@ class JobQueryImplementation:
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
         service_port: int | None = None,
+        object_kind: str = "",
+        object_ref: str = "",
+        object_owner_ref: str = "",
+        object_alias: str = "",
     ) -> int:
         """Count the same owner-scoped projection without loading job specs."""
         normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
@@ -397,6 +441,11 @@ class JobQueryImplementation:
         if service_port is not None:
             clauses.append("service_port=?")
             args.append(max(0, int(service_port)))
+        _append_subject_clause(
+            clauses, args, table="research_jobs",
+            object_kind=object_kind, object_ref=object_ref,
+            owner_ref=object_owner_ref, alias=object_alias,
+        )
         with self._connection() as conn:
             row = conn.execute(
                 f"SELECT COUNT(*) AS total FROM research_jobs WHERE {' AND '.join(clauses)}",
@@ -411,11 +460,20 @@ class JobQueryImplementation:
         before_updated_at: float | None = None,
         before_job_id: str = "",
         include_artifacts: bool = False,
+        object_kind: str = "",
+        object_ref: str = "",
+        object_owner_ref: str = "",
+        object_alias: str = "",
     ) -> tuple[list[dict[str, Any]], bool]:
         """Return a bounded, non-sensitive all-owner administrative view."""
         bounded_limit = min(100, max(1, int(limit)))
         clauses: list[str] = ["research_jobs.job_role='primary'"]
         args: list[Any] = []
+        _append_subject_clause(
+            clauses, args, table="research_jobs",
+            object_kind=object_kind, object_ref=object_ref,
+            owner_ref=object_owner_ref, alias=object_alias,
+        )
         if before_updated_at is not None:
             clauses.append(
                 "(MAX(research_jobs.updated_at, "
@@ -560,11 +618,23 @@ class JobQueryImplementation:
                 })
         return result, has_more
 
-    def count_global_summaries(self) -> int:
+    def count_global_summaries(
+        self, *, object_kind: str = "", object_ref: str = "",
+        object_owner_ref: str = "", object_alias: str = "",
+    ) -> int:
         """Return the number of durable jobs in the shared service store."""
+        clauses = ["job_role='primary'"]
+        args: list[Any] = []
+        _append_subject_clause(
+            clauses, args, table="research_jobs",
+            object_kind=object_kind, object_ref=object_ref,
+            owner_ref=object_owner_ref, alias=object_alias,
+        )
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS total FROM research_jobs WHERE job_role='primary'",
+                f"SELECT COUNT(*) AS total FROM research_jobs "
+                f"WHERE {' AND '.join(clauses)}",
+                args,
             ).fetchone()
         return int(row["total"] or 0) if row is not None else 0
 

@@ -6,18 +6,21 @@
       ["parameters", "参数定义", false],
       ["members", "成员因子", false],
       ["identity", "身份与来源", false],
+      ["jobs", "测试任务", false],
     ],
     factor: [
       ["overview", "详情", true],
       ["source", "源码", true],
       ["parameters", "参数", true],
       ["identity", "身份与来源", false],
+      ["jobs", "测试任务", false],
     ],
     set: [
       ["overview", "详情", true],
       ["members", "成员因子", true],
       ["sources", "来源", false],
       ["identity", "身份与来源", false],
+      ["jobs", "测试任务", false],
     ],
   });
 
@@ -96,6 +99,7 @@
         buttons[item.key].tabIndex = active ? 0 : -1;
         panels[item.key].hidden = !active;
       });
+      items.find(item => item.key === selected)?.onActivate?.();
       if (emit) {
         root.dispatchEvent(new CustomEvent(
           "object-detail-tab-change", {detail: {key: selected}},

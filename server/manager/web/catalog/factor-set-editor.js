@@ -58,6 +58,10 @@
     };
     const title = mode === "create"
       ? context.t("新增因子集合") : state.alias || context.t("编辑因子集合");
+    const jobs = window.FTFactorObjectJobs.create(context, {
+      objectKind: "set",
+      objectRef: current.target_ref || targetRef,
+    });
     window.FTFactorObjectForm.render(context, {
       objectKind: "set",
       mode,
@@ -82,7 +86,15 @@
           searchPlaceholder: context.t("搜索因子"),
         },
       ],
-      tabOverrides: {sources: {hidden: true}},
+      sections: mode === "edit" && !context.testObjectTemporary
+        ? [{tab: "jobs", content: jobs.mount}] : [],
+      tabOverrides: {
+        sources: {hidden: true},
+        jobs: {
+          hidden: mode !== "edit" || context.testObjectTemporary === true,
+          onActivate: jobs.load,
+        },
+      },
       onCancel: () => cancel(context),
       onSubmit: async values => {
         const members = values.members.map(ref => (
