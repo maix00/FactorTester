@@ -162,7 +162,8 @@
           ? factorLabel(factors[0])
           : soleSet?.label || `${references.length} 个`,
         factorCandidateDetailKind: references.length === 1 ? "factor" : "factor_set",
-        factor_candidate_detail: references.length === 1 ? factors[0] : candidateSet,
+        factor_candidate_detail: references.length === 1
+          ? factorDetailSnapshot(factors[0]) : candidateSet,
       };
     }
     if (adapter === "selected_factors") {
@@ -287,6 +288,13 @@
   function factorLabel(value) {
     if (typeof value === "string") return "";
     return String(value?.alias || "").trim();
+  }
+
+  function factorDetailSnapshot(value) {
+    const ref = factorReference(value);
+    const alias = factorLabel(value);
+    if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(ref) || !alias) return value;
+    return {...value, schema_version: 2, ref, alias};
   }
 
   function factorObjects(state, refs) {
