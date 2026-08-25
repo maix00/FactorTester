@@ -242,18 +242,6 @@
     );
   }
 
-  function markInnerContent(content) {
-    if (!content) return content;
-    content.classList?.add("factor-candidate-child-content");
-    content.querySelectorAll?.(".test-setting-row")?.forEach(row => {
-      row.classList.add("factor-candidate-child-row");
-    });
-    content.querySelectorAll?.(".factor-role-section")?.forEach(section => {
-      section.classList.add("factor-candidate-child-section");
-    });
-    return content;
-  }
-
   // The nested strategy editor uses the same candidate surface as the outer
   // factor tab.  Only the candidate control and the optional combination
   // control are supplied by the strategy form; row structure, help icons,
@@ -285,14 +273,14 @@
         }
         dependent.append(row);
       }
-      if (next.overrideContent) dependent.append(markInnerContent(next.overrideContent));
+      if (next.overrideContent) root.append(next.overrideContent);
     };
     root.update = update;
     update(options);
     return root;
   }
 
-  function panel(context, state, refresh) {
+  function panel(context, state, refresh, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
     root.append(candidateHeading(
@@ -307,7 +295,8 @@
     const direct = directControl(context, state, refresh);
     direct.classList.add("factor-candidate-child-row");
     root.append(direct);
-    const roleField = state.manifest?.defaults?.factor_role_bindings;
+    const roleField = options.includeRoles === false
+      ? null : state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)
       && window.FTTestFactorRoles?.section) {
       root.append(FTTestFactorRoles.section({
@@ -331,7 +320,74 @@
     return root;
   }
 
+  function scopedSourceState(state, owner, initial = {}) {
+    let local = owner?.factorSourceState;
+    if (!local) {
+      const wanted = new Set((initial.factor_candidate_refs || []).map(String));
+      const candidates = catalogItems(state).filter(item => wanted.has(factorID(item)));
+      const direct = Array.isArray(initial.factor_source_selections)
+        ? structuredClone(initial.factor_source_selections)
+        : candidates.filter(item => !(item.factor_set_refs || []).length);
+      local = {
+        ...state,
+        values: {
+          ...(state.values || {}),
+          factor_candidates: structuredClone(candidates),
+          factor_source_selections: direct,
+          factor_set_selections: structuredClone(initial.factor_set_selections || []),
+          factor_role_bindings: structuredClone(initial.factor_role_bindings || {}),
+        },
+      };
+      if (owner) owner.factorSourceState = local;
+    }
+    local.manifest = state.manifest;
+    local.factors = state.factors;
+    local.savedFactors = state.savedFactors;
+    local.factorSetCatalog = state.factorSetCatalog;
+    local.lazy = state.lazy;
+    return local;
+  }
+
+  function scopedSourceSnapshot(state) {
+    const candidates = FTTestFactorSelection.candidates(state);
+    return {
+      factor_candidate_refs: candidates.map(factorID).filter(Boolean),
+      factor_candidates: candidates,
+      factor_source_selections: structuredClone(selections(state)),
+      factor_set_selections: structuredClone(
+        window.FTTestFactorSets?.selections?.(state) || [],
+      ),
+    };
+  }
+
+  function scopedSourcePanel(context, state, refresh, options = {}) {
+    const root = panel(context, state, refresh, {includeRoles: false});
+    root.classList.add("test-factor-candidate-sources-scoped");
+    if (options.combinationVisible && options.combinationControl) {
+      const row = FTTestFieldRow.create(
+        options.combinationLabel || context.t("组合方式"),
+        controlElement(options.combinationControl),
+        options.combinationHelp || context.t("多个因子候选需要一种组合方式"),
+        {className: "factor-candidate-child-row"},
+      );
+      if (options.combinationEmpty) {
+        const empty = document.createElement("small");
+        empty.className = "backtest-group-empty-combination-mode";
+        empty.textContent = options.combinationEmpty;
+        row.querySelector(".test-field-row-control")?.append(empty);
+      }
+      root.append(row);
+    }
+    // Factor mode, warmup mode/window and other registered overrides are
+    // peers of the candidate field. They must never inherit candidate-child
+    // indentation merely because they share the Factor Execution tab.
+    if (options.overrideContent) root.append(options.overrideContent);
+    return root;
+  }
+
   window.FTTestFactorCandidateSources = Object.freeze({
-    candidateHeading, candidatePicker, innerPanel, panel, selections, syncCandidates,
+    candidateHeading, candidatePicker, innerPanel, panel,
+    scopedSourcePanel, scopedSourceSnapshot, scopedSourceState,
+    selections, syncCandidates,
   });
 })();

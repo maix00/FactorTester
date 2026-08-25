@@ -66,6 +66,8 @@ let sharedFactorPickers = 0;
 let sharedFactorPanels = 0;
 let sharedFactorPanelUpdates = 0;
 let factorPickerOptions;
+let factorScopeSource = "outer";
+let scopedSourceInitial;
 let tabOptions;
 let chipSourceItem;
 global.FTStrategyEditorTabs = {
@@ -106,8 +108,27 @@ global.FTTestFactorCandidateSources = {
     panel.update = () => { sharedFactorPanelUpdates += 1; };
     return panel;
   },
+  scopedSourceState: (_state, _owner, initial) => {
+    scopedSourceInitial = initial;
+    return {values: {factor_candidates: []}};
+  },
+  scopedSourceSnapshot: local => ({
+    factor_candidate_refs: (local.values.factor_candidates || []).map(item => item.ref),
+    factor_candidates: local.values.factor_candidates || [],
+    factor_source_selections: [], factor_set_selections: [],
+  }),
+  scopedSourcePanel: () => new Element("shared-factor-source-panel"),
 };
 window.FTTestFactorCandidateSources = global.FTTestFactorCandidateSources;
+global.FTStrategyEditorScope = {
+  scope: (state, kind) => kind === "factor"
+    ? {items: state.factors, required: false, ready: true, source: factorScopeSource}
+    : {items: state.groups, required: false, ready: true, source: "visible"},
+  inlineCreateAllowed: () => true,
+  fieldVisible: () => false,
+  validate: () => [],
+};
+window.FTStrategyEditorScope = global.FTStrategyEditorScope;
 
 const groups = [
   {id: "g1", name: "第一组"},
@@ -150,7 +171,7 @@ const context = {
 const state = {
   analysis: {groups: [], ls_configs: []},
   groups,
-  factors: [{alias: "ROC"}],
+  factors: [{ref: "factor:v2:roc", alias: "ROC"}],
   values: {split_count: 5, group_index: 1},
   manifest: {defaults: {}},
   groupRef: "g1",
@@ -176,6 +197,13 @@ assert.deepEqual(chipSourceItem.factor_candidate_refs, ["ROC"],
   "backtest chip sources use the selected factor references");
 assert.equal(chipSourceItem.product_path_selection_id, "g1",
   "backtest chip sources use the selected product group");
+factorScopeSource = "visible";
+state.values.factor_candidates = [{ref: "factor:v2:sibling", alias: "Sibling"}];
+assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
+  context, state, {mode: "base"}, () => {},
+), "an unmounted outer factor tab must render the local source builder");
+assert.deepEqual(scopedSourceInitial.factor_candidate_refs, [],
+  "a new strategy must not inherit another strategy or the global primary factor");
 assert.doesNotThrow(() => window.FTBacktestGroupForm.render(
   context, state, {mode: "ls", groupIDs: ["g1", "g2"]}, () => {},
 ), "opening the Long-Short form must mount picker elements");

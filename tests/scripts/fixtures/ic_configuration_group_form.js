@@ -12,6 +12,15 @@ global.FTStrategyEditorScope={
   validate:()=>[{message:"outer selection is empty"}],
 }; window.FTStrategyEditorScope=global.FTStrategyEditorScope;
 let factorOptions; global.FTTestFactorCandidateSources={candidatePicker:(_c,_s,o)=>{factorOptions=o;return new E("picker")},innerPanel:()=>new E("factor")};
+global.FTTestFactorCandidateSources.scopedSourceState=(_state,_owner,initial)=>({
+  values:{factor_candidates:(initial.factor_candidate_refs||[]).map(ref=>({ref}))},
+});
+global.FTTestFactorCandidateSources.scopedSourceSnapshot=local=>({
+  factor_candidate_refs:(local.values.factor_candidates||[]).map(item=>item.ref),
+  factor_candidates:local.values.factor_candidates||[],
+  factor_source_selections:[],factor_set_selections:[],
+});
+global.FTTestFactorCandidateSources.scopedSourcePanel=()=>new E("factor-sources");
 global.FTTestObjectPicker={lazyLoading:()=>false};
 global.FTTestFieldRow={create:(label,control,help)=>{const row=new E("field");row.label=label;row.help=help;row.append(control);return row;}};
 let productOptions;

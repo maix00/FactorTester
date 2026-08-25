@@ -2,6 +2,7 @@
   const structuralKeys = new Set([
     "id", "name", "parentId", "product_path_selection",
     "product_path_selection_id", "factor_candidate_refs",
+    "factor_source_selections", "factor_set_selections",
     "factor_combination_mode", "factorCombinationMode", "splitCount", "groupIndex",
     "isAllGroups", "productMask", "needsRegenerate",
     "batchId", "override_mounted_tabs",
@@ -130,6 +131,8 @@
         product_path_selection: projection(selection),
         product_path_selection_id: selectionId,
         factor_candidate_refs: [...factorRefs],
+        factor_source_selections: structuredClone(draft.factor_source_selections || []),
+        factor_set_selections: structuredClone(draft.factor_set_selections || []),
         factor_combination_mode: factorCombinationMode,
         splitCount, groupIndex: index, isAllGroups: false,
         productMask: productMaskFrom(draft.productMask),
@@ -176,6 +179,12 @@
         product_path_selection_id: parent.product_path_selection_id,
       } : {}),
       factor_candidate_refs: [...factorRefs],
+      factor_source_selections: structuredClone(
+        draft.factor_source_selections ?? parent.factor_source_selections ?? [],
+      ),
+      factor_set_selections: structuredClone(
+        draft.factor_set_selections ?? parent.factor_set_selections ?? [],
+      ),
       factor_combination_mode: factorCombinationMode,
       ...(parent.splitCount ? {splitCount: parent.splitCount} : {}),
       ...(parent.groupIndex ? {groupIndex: parent.groupIndex} : {}),
