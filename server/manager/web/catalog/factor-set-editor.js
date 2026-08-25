@@ -4,7 +4,14 @@
   }
 
   function candidates(data, current = []) {
-    const values = [...(data?.factors || [])];
+    const mine = data?.factorScopes?.mine || data?.factor_scopes?.mine
+      || data?.familyScopes?.mine || data?.family_scopes?.mine;
+    const personal = Array.isArray(mine?.factors)
+      ? mine.factors
+      : (data?.factors || []).filter(item => (
+        String(item?.owner_username || "") === String(data?.principal || "")
+      ));
+    const values = [...personal];
     current.forEach(item => values.push(item?.data || item));
     const seen = new Set();
     return values.flatMap(value => {

@@ -79,11 +79,12 @@
     status.className = "form-error";
     const actions = document.createElement("div");
     actions.className = "detail-actions";
-    const cancel = context.button(context.t("取消"), () => definition.onCancel?.(state));
-    cancel.type = "button";
-    const save = context.button(context.t("保存"), () => form.requestSubmit());
-    save.type = "button";
-    save.className = "primary";
+    const cancel = FTUI.actionButton(
+      context.t("取消"), () => definition.onCancel?.(state), {variant: "secondary"},
+    );
+    const save = FTUI.actionButton(
+      context.t("保存"), () => form.requestSubmit(), {variant: "primary"},
+    );
     actions.append(cancel, save);
     const definitions = window.FTObjectDetailTabs.definitions(
       definition.objectKind, definition.tabOverrides || {},
