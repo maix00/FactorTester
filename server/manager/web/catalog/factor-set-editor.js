@@ -71,16 +71,18 @@
         },
         {key: "alias", label: "因子集合", required: true},
         {key: "description", label: "说明", multiline: true},
-        {key: "owner", label: "所有者", kind: "readonly"},
+        {key: "owner", label: "所有者", kind: "readonly", tab: "identity"},
         {
           key: "members",
           label: "因子",
           kind: "picker",
+          tab: "members",
           multi: true,
           items,
           searchPlaceholder: context.t("搜索因子"),
         },
       ],
+      tabOverrides: {sources: {hidden: true}},
       onCancel: () => cancel(context),
       onSubmit: async values => {
         const members = values.members.map(ref => (

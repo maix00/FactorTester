@@ -254,13 +254,6 @@
     }
     if (!options.fileInput) root.append(file);
     root.append(actions, field(context.t("Python 源码"), source), status);
-    if (state.inspection) {
-      root.append(window.FTFactorDetailShared.summary(context, {
-        ...state.inspection,
-        math_expr: state.inspection.math_expr || state.inspection.expression,
-        description: state.inspection.description || state.inspection.desc,
-      }));
-    }
     return root;
   }
 
@@ -512,30 +505,40 @@
     const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
     const description = textField(context, "说明", loaded.description || "");
     const category = textField(context, "分类", loaded.category || "自编");
+    const topMount = document.createElement("div");
+    topMount.className = "factor-detail-top";
+    const overviewMount = document.createElement("div");
+    overviewMount.className = "factor-editor-overview";
+    overviewMount.append(name, chineseName, description, category);
     const sourceMount = document.createElement("div");
     const parameterMount = document.createElement("div");
+    const identityMount = document.createElement("div");
+    let tabs;
     const status = document.createElement("small");
     status.className = "form-error";
     const redraw = () => {
+      topMount.replaceChildren();
+      if (state.familyMode && state.mode === "edit") {
+        const version = sourceVersionPicker(context, state, redraw);
+        if (version) topMount.append(version);
+      }
+      const formulaSource = state.inspection || state.family || state.loaded;
+      topMount.append(window.FTFactorDetailShared.summary(context, {
+        ...(formulaSource || {}),
+        math_expr: formulaSource?.math_expr || formulaSource?.expression || "",
+      }));
       sourceMount.replaceChildren();
       if (state.familyMode) {
         sourceMount.append(sourceControls(context, state, redraw, {
           fileInput: familyFileInput,
           showUpload: false,
         }));
-        if (state.mode === "edit") {
-          const version = sourceVersionPicker(context, state, redraw);
-          if (version) sourceMount.append(version);
-        }
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
         if (state.sourceMode === "family") {
           sourceMount.append(familyPicker(context, data, state, redraw));
           const version = sourceVersionPicker(context, state, redraw);
           if (version) sourceMount.append(version);
-          if (state.family) {
-            sourceMount.append(window.FTFactorDetailShared.summary(context, state.family));
-          }
         } else {
           sourceMount.append(sourceControls(context, state, redraw));
         }
@@ -543,7 +546,9 @@
         sourceMount.append(sourceControls(context, state, redraw));
       }
       const metadata = sourceMetadata(context, state);
-      if (metadata) sourceMount.append(metadata);
+      identityMount.replaceChildren();
+      if (metadata) identityMount.append(metadata);
+      else identityMount.append(emptyState(context, "暂无身份与来源信息"));
       if (state.sourceVersionLoading) {
         const loading = document.createElement("small");
         loading.className = "factor-editor-source-status";
@@ -563,11 +568,9 @@
         // object on state so edits made in the shared editor reach the save
         // request without inventing a second parameter form.
         state.parameterValues = editor.values;
-        parameterMount.append(
-          Object.assign(document.createElement("h3"), {textContent: context.t("参数")}),
-          editor.root,
-        );
-      }
+        parameterMount.append(editor.root);
+      } else parameterMount.append(emptyState(context, state.familyMode
+        ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
     const familyFileInput = familyMode ? filePicker(context, state, redraw) : null;
     if (familyFileInput) {
@@ -590,10 +593,26 @@
     save.type = "button"; save.className = "primary";
     actions.append(cancel, save);
     if (familyFileInput) form.append(familyFileInput);
-    form.append(name, chineseName, description, category, sourceMount,
-      parameterMount, status, actions);
+    const overrides = state.familyMode ? {
+      members: {hidden: true},
+      parameters: {editable: false},
+    } : {};
+    tabs = window.FTObjectDetailTabs.create(context, {
+      objectKind: state.familyMode ? "family" : "factor",
+      mode,
+      overrides,
+      panels: {
+        overview: overviewMount,
+        source: sourceMount,
+        parameters: parameterMount,
+        identity: identityMount,
+      },
+    });
+    form.append(topMount, tabs.root, status, actions);
     context.content.replaceChildren(form);
     redraw();
+    form.addEventListener("input", markDirty);
+    form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
       event.preventDefault(); save.disabled = true; status.textContent = "";
       try {
@@ -633,6 +652,18 @@
         save.disabled = false;
       }
     });
+
+    function markDirty(event) {
+      const panel = event.target?.closest?.(".object-detail-tab-panel");
+      if (panel?.dataset?.tabKey) tabs.setDirty(panel.dataset.tabKey, true);
+    }
+  }
+
+  function emptyState(context, text) {
+    const value = document.createElement("p");
+    value.className = "catalog-source-note";
+    value.textContent = context.t(text);
+    return value;
   }
 
   function textField(context, labelText, value, options = {}) {
