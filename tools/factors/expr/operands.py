@@ -4,25 +4,17 @@
 # =============================================================================
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-import threading
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
-    Optional, Sequence, Set, Tuple, Union, cast
+    TYPE_CHECKING, Any, List, Sequence, Tuple
 )
 
-from tools.data.types import DataColumn
-from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
-    from tools.products.Product import Product
-    from tools.data.providers import DataProviderProductTS as DataSource
-    from tools.data.views.ProductDataView import ProductDataView
-    from tools.parameters.Parameter import Parameter
+    pass
 
 
-from .core import FactorExpr, EvaluateContext
+from .core import FactorExpr, EvaluateContext, semantic_structural_key
 
 class OperandExpr(FactorExpr):
     """
@@ -97,7 +89,7 @@ class OperandExpr(FactorExpr):
         op_tag = self.op
         op_keys_raw = [opnd._structural_key() for opnd in self._operands]
         if op_tag in FactorExpr._SYMMETRIC_OPS:
-            op_keys = tuple(sorted(op_keys_raw, key=str))
+            op_keys = tuple(sorted(op_keys_raw, key=semantic_structural_key))
         else:
             op_keys = tuple(op_keys_raw)
         extra = self._structural_extra()

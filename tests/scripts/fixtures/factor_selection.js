@@ -8,18 +8,33 @@ vm.runInThisContext(fs.readFileSync(
 ), {filename: "factor-selection.js"});
 
 const selection = window.FTTestFactorSelection;
-const first = {factor_ref: "factor:one", factor_alias: "One", family: "Momentum"};
-const second = {factor_ref: "factor:two", factor_alias: "Two", family: "Value"};
+function factor(digest, alias, family) {
+  return {
+    schema_version: 2,
+    ref: `factor:v2:${digest.repeat(43)}`,
+    alias,
+    owner_ref: "user:alice",
+    identity: {
+      family_ref: `factor-family:v2:${family[0].repeat(43)}`,
+      family_alias: family,
+      family_formula_fingerprint: digest.repeat(64),
+      self_formula_fingerprint: digest.repeat(64),
+      params: {},
+    },
+  };
+}
+const first = factor("A", "One", "Momentum");
+const second = factor("B", "Two", "Value");
 const state = {
   kind: "ic", factorRef: "", factors: [], families: [],
   values: {factor_candidates: [], factor_selections: []},
 };
 selection.addCandidate(state, first);
 selection.addCandidate(state, second);
-assert.deepEqual(selection.selectedIDs(state), ["factor:one", "factor:two"]);
-assert.equal(selection.selectedFactor(state).factor_ref, "factor:two");
+assert.deepEqual(selection.selectedIDs(state), [first.ref, second.ref]);
+assert.equal(selection.selectedFactor(state).alias, "Two");
 selection.setSelected(state, first, false);
-assert.deepEqual(selection.selectedIDs(state), ["factor:two"]);
+assert.deepEqual(selection.selectedIDs(state), [second.ref]);
 selection.removeCandidate(state, second);
 assert.deepEqual(selection.candidates(state), [first]);
 
@@ -30,20 +45,20 @@ selection.detachFactorSet(state, "factor-set:one");
 assert.equal(selection.candidates(state).length, 1,
   "a directly selected candidate must survive set removal");
 const setOnly = {
-  factor_ref: "factor:set-only", factor_alias: "SetOnly",
+  ...factor("C", "SetOnly", "Momentum"),
   factor_set_refs: ["factor-set:one"], factor_set_only: true,
 };
 selection.addCandidate(state, setOnly);
 selection.detachFactorSet(state, "factor-set:one");
-assert.equal(selection.candidates(state).some(item => item.factor_ref === "factor:set-only"), false);
+assert.equal(selection.candidates(state).some(item => item.ref === setOnly.ref), false);
 
 const familyState = {
-  kind: "backtest", factorRef: "factor:one", factors: [first],
-  families: [{family_ref: "family:momentum", family: "Momentum"}],
-  values: {factor_candidates: [first], factor_family_ref: "family:momentum"},
+  kind: "backtest", factorRef: first.ref, factors: [first],
+  families: [{ref: first.identity.family_ref, alias: "Momentum"}],
+  values: {factor_candidates: [first], factor_family_ref: first.identity.family_ref},
   factorCatalog: {selectedFamily: null},
 };
-assert.equal(selection.selectedFamily(familyState).family, "Momentum");
+assert.equal(selection.selectedFamily(familyState).alias, "Momentum");
 const backtestState = {
   kind: "backtest", factorRef: "", factors: [],
   values: {factor_candidates: [], factor: ""},

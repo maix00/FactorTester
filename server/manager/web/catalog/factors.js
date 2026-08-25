@@ -44,16 +44,50 @@
     );
   }
 
-  async function setDetail(context, targetRef) {
+  async function setDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
     const inline = context.testObjectTemporary && context.testObjectInitialValue;
-    const data = inline
+    let data = inline
       ? {sets: [context.testObjectInitialValue], factors: []}
-      : await catalog().load(context, {sets: true});
+      : await catalog().load(context, {
+        sets: true, library: mode === "create" || mode === "edit",
+      });
     if (!catalog().isCurrent(context)) return;
+    if (mode === "create" || mode === "edit") {
+      await ensureEditor();
+      let initialValue = options.initialValue || context.testObjectInitialValue || null;
+      if (mode === "edit" && !initialValue) {
+        initialValue = await editableSet(context, data, targetRef);
+      }
+      return FTFactorSetEditor.render(
+        context, data, targetRef, mode, {...options, initialValue},
+      );
+    }
     return FTFactorDetails.setDetail(
       context, data, targetRef, catalog().nativeRequest,
     );
+  }
+
+  async function editableSet(context, data, targetRef) {
+    const selected = data.sets.find(item => (
+      item.target_ref === targetRef || item.set_ref === targetRef
+    ));
+    if (!selected?.can_edit) {
+      throw new Error(context.t("当前因子集合为只读，不能编辑"));
+    }
+    const related = [];
+    let offset = 0;
+    for (let page = 0; page < 11; page += 1) {
+      const payload = await context.api(
+        `/custom-factors/api/client/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}`
+        + `&offset=${offset}&limit=100`,
+      );
+      const value = payload.factor_set || payload;
+      related.push(...(value.related_references || []));
+      if (!value.has_more) return {...selected, ...value, related_references: related};
+      offset = Number(value.next_offset || related.length);
+    }
+    throw new Error(context.t("因子集合成员超过允许上限"));
   }
 
   window.FTFactors = Object.freeze({factorDetail, familyDetail, setDetail});

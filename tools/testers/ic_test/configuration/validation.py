@@ -12,6 +12,8 @@ from tools.testers.ic_test.core import ICCoreTestBlock, expand_core_test_blocks
 
 from .authoring import ICCoreTestRequest
 from .horizon_resolution import ResolvedICHorizon
+from tools.factors.formula_identity import is_factor_reference
+from tools.factors.factor_set_identity import is_factor_set_reference
 
 
 def validate_frozen_configuration(
@@ -58,12 +60,14 @@ def _validate_partitions(cores, partitions) -> None:
 
 def _validate_subjects(subjects, executable_factors) -> None:
     for subject in subjects:
-        if subject.startswith("factor:v1:") or subject.startswith("factor:sha256:"):
+        if is_factor_reference(subject):
             if subject not in executable_factors:
                 raise ValueError("standalone factor subject is not executable")
             continue
-        if not subject.startswith("factor-set:v1:"):
-            raise ValueError("factor_subject_refs must contain frozen factor identities")
+        if not is_factor_set_reference(subject):
+            raise ValueError(
+                "factor_subject_refs must contain v2 formula identities"
+            )
 
 
 def _expand_resolved_requests(authoring, resolutions):

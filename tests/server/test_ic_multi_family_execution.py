@@ -6,18 +6,24 @@ import pytest
 
 from server.modules.single_factor_test import ic
 from server.modules.single_factor_test.research_jobs import _execution_payload
+from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _factor(alias: str, *, owner_ref: str = "public") -> dict:
+    return freeze_factor_identity(
+        owner_ref=owner_ref,
+        family_alias=alias.split("|", 1)[0],
+        factor_alias=alias,
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={},
+    )
 
 
 def test_ic_execution_payload_preserves_each_factor_family() -> None:
     factors = [
-        {
-            "factor_family_alias": "MmRateOfChg",
-            "alias": "MmRateOfChg|P:CA|N:20d|$F:1d",
-        },
-        {
-            "factor_family_alias": "SgCCS",
-            "alias": "SgCCS|N:20d|$F:1d|$Rev",
-        },
+        _factor("MmRateOfChg|P:CA|N:20d|$F:1d"),
+        _factor("SgCCS|N:20d|$F:1d|$Rev"),
     ]
     configuration = {
         "configuration_id": "multi-family",
@@ -60,6 +66,7 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         "create_isolated_factor_tester_for_run",
         lambda *_args, **_kwargs: object(),
     )
+    monkeypatch.setattr(ic, "user_obj_for_name", lambda _owner: object())
     monkeypatch.setattr(
         ic,
         "factor_from_alias",
@@ -86,8 +93,8 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         "run_id": "multi-family-ic",
         "product_path_selection_id": "strict-day",
         "factors": [
-            {"alias": aliases[0], "factor_owner_ref": "GTHT@owner-a@1"},
-            {"alias": aliases[1], "factor_owner_ref": "GTHT@owner-b@2"},
+            _factor(aliases[0], owner_ref="GTHT@owner-a@1"),
+            _factor(aliases[1], owner_ref="GTHT@owner-b@2"),
         ],
         "start_date": "2024-01-01",
         "end_date": "2024-01-31",
@@ -162,36 +169,30 @@ def test_ic_run_spec_rejects_missing_frozen_window(monkeypatch) -> None:
         )
 
 
-def test_ic_factor_links_use_frozen_execution_identity() -> None:
+def test_ic_factor_links_ignore_top_level_convenience_refs() -> None:
     alias = "MmRateOfChg|P:CA|N:20d|$F:1d"
-    target_ref = (
-        "factor:v1:profile-maxa:path:identity:" + "a" * 40 + ":" + "b" * 40
-    )
+    target_ref = _factor(alias)["ref"]
     payload = {
         "factor_refs": {alias: target_ref},
     }
 
-    assert ic._factor_execution_refs(payload) == {
-        alias: target_ref,
-    }
+    assert ic._factor_execution_refs(payload) == {}
 
 
-def test_ic_factor_links_fall_back_to_run_spec_shared_factors() -> None:
+def test_ic_factor_links_use_run_spec_shared_factors() -> None:
     alias = "MmRateOfChg|P:CA|N:20d|$F:1d"
-    target_ref = (
-        "factor:v1:profile-maxa:path:identity:" + "c" * 40 + ":" + "d" * 40
-    )
+    factor = _factor(alias)
 
     assert ic._factor_execution_refs({
         "factor_refs": {},
         "run_spec": {
             "configuration": {
                 "shared": {
-                    "factors": [{"alias": alias, "factor_ref": target_ref}],
+                    "factors": [factor],
                 },
             },
         },
-    }) == {alias: target_ref}
+    }) == {alias: factor["ref"]}
 
 
 def test_ic_factor_links_do_not_reconstruct_from_alias_or_manifest() -> None:

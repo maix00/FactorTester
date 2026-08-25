@@ -163,12 +163,21 @@ sudo cp "$production_env" "$rollback_env"
 sudo chmod 0600 "$rollback_env"
 
 switched=0
+app_stopped=0
 rollback() {
   status=$?
   trap - ERR INT TERM
   if [[ "$switched" == "1" ]]; then
     echo "Public release failed; rolling back to $old_revision" >&2
+    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+      bash "$public_script" restore-factor-identities || true
     sudo cp "$rollback_env" "$production_env"
+    old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
+    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+      bash "$old_script" restart-app || true
+  elif [[ "$app_stopped" == "1" ]]; then
+    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+      bash "$public_script" restore-factor-identities || true
     old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
     sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
       bash "$old_script" restart-app || true
@@ -177,10 +186,17 @@ rollback() {
 }
 trap rollback ERR INT TERM
 
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  bash "$public_script" stop-app
+app_stopped=1
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  bash "$public_script" migrate-factor-identities
+
 sudo mv "$next_env" "$production_env"
 switched=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" restart-app
+app_stopped=0
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" verify
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
@@ -196,6 +212,8 @@ postgres_after="$(sudo docker inspect --format '{{.Id}}' "$postgres_after")"
   echo "PostgreSQL container changed during application release" >&2
   exit 1
 }
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  bash "$public_script" finalize-factor-identities
 
 switched=0
 trap - ERR INT TERM

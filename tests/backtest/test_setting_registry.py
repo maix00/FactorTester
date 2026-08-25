@@ -483,13 +483,21 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "kind": "factor_selection_list", "display_order": 30,
         "item_kind": "factor", "multi": True,
         "candidate_field": "factor_candidates", "fallback": "candidates",
-        "id_keys": ("alias", "name", "factor_alias"),
-        "label_keys": ("alias", "name", "label"),
+        "id_keys": ("ref",),
+        "label_keys": ("alias",),
+        "item_fields": (
+            "schema_version", "ref", "alias", "owner_ref", "identity",
+            "source_kind", "transient_factor_id",
+        ),
     }
     item_fields = index["defaults"]["factor_candidates"]["serialization"]["item_fields"]
-    assert {
-        "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
-    }.issubset(item_fields)
+    assert {"schema_version", "ref", "alias", "owner_ref", "identity"}.issubset(
+        item_fields
+    )
+    assert not {
+        "factor_git_commit", "git_commit", "git_blob", "relative_path",
+        "factor_family_ref", "family_ref",
+    }.intersection(item_fields)
     assert index["default_mounted_tabs"] == {
         "local-settings": ["test_template", "time"],
         "group-settings": [],
@@ -742,7 +750,7 @@ def test_horizon_sampling_policy_is_explicitly_described() -> None:
 
 
 def test_forward_ic_half_life_uses_first_half_amplitude_crossing() -> None:
-    from server.modules.single_factor_test.ic import _forward_ic_half_life
+    from server.modules.single_factor_test.ic_response import _forward_ic_half_life
 
     stats = {
         "MIN1": {0: pd.Series({"mean": 0.04})},

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
 from server.manager.http.responses import json_response
+from server.manager.objects.adapters.factor_source import FactorSourceStore
 from server.manager.objects.models import TransferObjectKind
 from server.manager.objects.references import research_object_id
 from server.manager.services.federated_public_data import VISITOR_PRINCIPAL
@@ -14,6 +17,8 @@ from tools.cli.release.research_reporting.public_research.object_store import (
 )
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
+from tools.data.account_manage import can_view_user_scope
+from scripts.data_dir import CACHE_DB_PATH
 
 
 _ACCESS_PATH = "/api/transfers/objects/access"
@@ -25,6 +30,7 @@ _RESEARCH_KINDS = frozenset({
 })
 _DOWNLOADABLE_KINDS = _RESEARCH_KINDS | frozenset({
     TransferObjectKind.PROFILE_WORKSPACE.value,
+    TransferObjectKind.FACTOR_SOURCE.value,
 })
 
 
@@ -66,6 +72,39 @@ class ObjectTransferRoutesMixin:
                     metadata.get("storage_server_id") or self.state.server_id
                 ).strip()
                 object_id = str(metadata.get("object_id") or "").strip()
+            elif object_kind == TransferObjectKind.FACTOR_SOURCE.value:
+                if session is None:
+                    raise PermissionError("login required")
+                object_id = str(payload.get("object_id") or "").strip()
+                if not object_id:
+                    raise ValueError("object_id is required")
+                factor_store = FactorSourceStore(database=CACHE_DB_PATH)
+                metadata = factor_store.metadata(object_id)
+                owner = str(metadata.get("source_owner") or "").strip()
+                if owner != "public" and owner != principal and not can_view_user_scope(
+                    principal, owner,
+                ):
+                    raise PermissionError("factor source is outside your visible scope")
+                supplied_hash = str(
+                    payload.get("source_sha256") or payload.get("sha256") or ""
+                ).strip().lower()
+                expected_sha256 = str(
+                    metadata.get("source_sha256") or ""
+                ).strip().lower()
+                if supplied_hash and supplied_hash != expected_sha256:
+                    raise ValueError("factor source hash does not match metadata")
+                expected_size = int(metadata.get("source_bytes") or 0)
+                storage_server_id = str(
+                    payload.get("storage_server_id")
+                    or os.environ.get("FACTORTESTER_SERVER_ID")
+                    or self.state.server_id
+                ).strip()
+                metadata = {
+                    **metadata,
+                    "filename": f"{metadata.get('factor_id') or 'factor'}.py",
+                    "content_type": "text/x-python",
+                    "storage_server_id": storage_server_id,
+                }
             else:
                 publication_id = str(payload.get("publication_id") or "").strip()
                 item_id = str(payload.get("item_id") or payload.get("object_id") or "").strip()

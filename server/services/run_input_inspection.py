@@ -26,6 +26,8 @@ def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, An
     formula = expression.to_latex() if expression is not None else ""
     return {
         "factor_alias": str(factor.alias),
+        "family_formula_fingerprint": family.expr.semantic_fingerprint(),
+        "self_formula_fingerprint": expression.semantic_fingerprint(),
         "normalized_params": {
             parameter.alias: factor_param_value_display(
                 parameter, normalized.get(parameter.alias),

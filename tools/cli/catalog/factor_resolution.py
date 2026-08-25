@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.release.research_reporting.references.factor_git import (
+from tools.cli.release.research_reporting.references.workspace_factor_reference import (
     freeze_factor_reference_at_revision,
 )
 from tools.cli.release.user_layout import default_user_factor_library
@@ -99,12 +99,8 @@ def describe_local_factor_family(
     )
     return {
         **metadata,
-        "owner_ref": owner_ref,
-        "git_commit": commit,
-        "git_blob": frozen["blob_hash"],
-        "relative_path": relative_path,
-        "family": family,
-        "family_ref": frozen["target_ref"],
+        **frozen["record"],
+        "workspace_provenance": frozen["workspace_provenance"],
     }
 
 
@@ -147,7 +143,8 @@ def instantiate_local_factor(
         alias=alias,
         revision=commit,
     )
-    frozen["params"] = candidate.get("params") or {}
+    if frozen["identity"]["params"] != (candidate.get("params") or {}):
+        raise ValueError("factor parameter normalization changed during freeze")
     return frozen
 
 
@@ -183,26 +180,11 @@ def resolve_local_factor_reference(
         identity=alias,
         revision=commit,
     )
-    family_frozen = freeze_factor_reference_at_revision(
-        object_kind="factor-family",
-        scope=scope,
-        repository=repository,
-        relative_path=relative_path,
-        identity=family,
-        revision=commit,
-    )
     return {
-        "schema_version": 1,
-        "owner_ref": owner_ref,
+        **frozen["record"],
         "repository": str(repository),
         "scope": scope,
-        "family": family,
-        "alias": alias,
-        "git_commit": frozen["revision"],
-        "git_blob": frozen["blob_hash"],
-        "relative_path": frozen["relative_path"],
-        "factor_ref": frozen["target_ref"],
-        "family_ref": family_frozen["target_ref"],
+        "workspace_provenance": frozen["workspace_provenance"],
     }
 
 

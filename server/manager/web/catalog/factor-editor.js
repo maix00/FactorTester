@@ -10,7 +10,7 @@
 
   function familyRef(value) {
     return String(
-      value?.factor_family_ref || value?.family_ref || familyAlias(value),
+      value?.family_ref || familyAlias(value),
     ).trim();
   }
 
@@ -83,7 +83,7 @@
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
         state.latestFamily = state.family;
         state.parameterValues = defaults(state.family?.params || []);
-        state.sourceVersionCommit = "";
+        state.sourceVersionFingerprint = "";
         state.sourceVersions = null;
         state.sourceVersionError = "";
         state.inspection = null;
@@ -100,7 +100,7 @@
       context, state.family, {
         ...options,
         payload: state.sourceVersions,
-        selected: state.sourceVersionCommit || "__current__",
+        selected: state.sourceVersionFingerprint || "__current__",
         onLoaded: payload => {
           state.sourceVersions = payload;
           redraw();
@@ -120,12 +120,12 @@
   }
 
   async function selectSourceVersion(context, state, selected, redraw) {
-    const commit = selected === "__current__" ? "" : String(selected || "");
-    state.sourceVersionCommit = commit;
+    const fingerprint = selected === "__current__" ? "" : String(selected || "");
+    state.sourceVersionFingerprint = fingerprint;
     state.sourceVersionError = "";
-    state.sourceVersionLoading = Boolean(commit);
+    state.sourceVersionLoading = Boolean(fingerprint);
     redraw();
-    if (!commit) {
+    if (!fingerprint) {
       state.family = state.latestFamily || state.family;
       state.sourceCode = state.family?.source_code || state.sourceCode;
       state.sourceVersionLoading = false;
@@ -134,13 +134,13 @@
     }
     try {
       const payload = await window.FTFactorDetailShared.loadSourceVersion(
-        context, state.latestFamily || state.family, commit,
+        context, state.latestFamily || state.family, fingerprint,
       );
       state.family = {
         ...(state.latestFamily || state.family || {}),
         ...payload,
-        factor_git_commit: payload.commit || commit,
-        git_commit: payload.commit || commit,
+        family_formula_fingerprint:
+          payload.family_formula_fingerprint || fingerprint,
       };
       state.sourceCode = payload.source_code || "";
       const nextParameters = payload.params || state.family.params || [];
@@ -268,28 +268,31 @@
     const family = state.family || state.inspection || {};
     const loaded = state.loaded || {};
     const identity = window.FTFactorDetailShared.familyIdentity(loaded, family);
-    const owner = loaded.factor_owner_ref || loaded.owner_ref
-      || family.factor_owner_ref || family.owner_ref
+    const owner = loaded.factor_owner_ref
+      || family.factor_owner_ref
       || family.owner_alias || "";
-    const familyValue = identity.ref || identity.alias;
-    const commit = state.sourceVersionCommit || identity.commit;
-    const familyLabel = commit
+    const familyValue = identity.alias;
+    const fingerprint = state.sourceVersionFingerprint || identity.fingerprint;
+    const familyLabel = fingerprint
       ? context.t("冻结因子家族") : context.t("选定因子家族");
-    if (!owner && !familyValue && !commit && !state.family && !state.inspection) {
+    if (!owner && !familyValue && !fingerprint && !state.family && !state.inspection) {
       return null;
     }
     const root = document.createElement("section");
     root.className = "factor-editor-source-metadata";
-    const version = commit
-      ? `${context.t("历史源码版本")} · ${commit}`
-      : context.t("当前因子家族最新源码");
+    const version = fingerprint
+      ? `${context.t("公式版本")} · ${fingerprint.slice(0, 12)}`
+      : context.t("尚未校验公式版本");
     root.append(
       field(
         familyLabel,
-        readOnlyValue(identity.alias || identity.ref || context.t("未选择")),
+        readOnlyValue(identity.alias || context.t("未选择")),
       ),
       field(context.t("因子所有者"), readOnlyValue(owner || context.t("未设置"))),
-      field(context.t("因子家族引用"), readOnlyValue(identity.ref || context.t("未设置"))),
+      field(
+        context.t("家族公式指纹"),
+        readOnlyValue(fingerprint || context.t("尚未校验")),
+      ),
       field(context.t("源码版本"), readOnlyValue(version)),
     );
     return root;
@@ -316,9 +319,6 @@
       || saved.owner_username || context.session?.username || "";
     const familyAliasValue = saved.factor_family_alias || saved.family
       || familyAlias(family) || alias;
-    const familyRefValue = saved.factor_family_ref || saved.family_ref
-      || familyRef(family) || familyAliasValue;
-    const commit = saved.factor_git_commit || saved.git_commit || "";
     return {
       ...saved,
       id: saved.id || alias,
@@ -326,15 +326,14 @@
       factor_ref: saved.factor_ref || saved.id || alias,
       factor_alias: alias,
       factor_owner_ref: owner,
-      factor_family_ref: familyRefValue,
       factor_params: params,
-      owner_ref: saved.owner_ref || owner,
-      family_ref: saved.family_ref || familyRefValue,
       params,
       factor_family_alias: familyAliasValue,
       source_kind: saved.source_kind || "factor_library",
       can_edit: saved.can_edit ?? true,
-      ...(commit ? {factor_git_commit: commit, git_commit: commit} : {}),
+      family_formula_fingerprint:
+        saved.family_formula_fingerprint || family?.family_formula_fingerprint || "",
+      self_formula_fingerprint: saved.self_formula_fingerprint || "",
     };
   }
 
@@ -359,7 +358,13 @@
         method: "PUT",
         body: JSON.stringify({
           params_list: [state.parameterValues || {}],
-          metadata: {factor_git_commit: state.sourceVersionCommit || null},
+          metadata: {
+            family_formula_fingerprint:
+              state.inspection?.family_formula_fingerprint
+              || state.family?.family_formula_fingerprint || null,
+            self_formula_fingerprint:
+              state.inspection?.self_formula_fingerprint || null,
+          },
         }),
       },
     );
@@ -458,7 +463,7 @@
       : null;
     const loadedFamily = temporaryFamilyEdit
       ? data.families.find(item => familyRef(item) === (
-        loaded.factor_family_ref || loaded.family_ref
+        loaded.family_ref
       ) || familyAlias(item) === (
         loaded.factor_family_alias || loaded.family_alias
       )) || null
@@ -486,7 +491,7 @@
         ]),
       ),
       loaded,
-      sourceVersionCommit: loaded.factor_git_commit || loaded.git_commit || "",
+      sourceVersionFingerprint: loaded.family_formula_fingerprint || "",
       sourceVersions: null,
       sourceVersionError: "",
       sourceVersionLoading: false,
@@ -613,7 +618,7 @@
         }
         if (context.onSaved) { context.onSaved(result); return; }
         const ref = state.familyMode
-          ? result.family_ref || result.factor_family_ref || result.id
+          ? result.family_ref || result.id
             || result.name || state.factorID
           : result.factor_ref || result.factor_alias || result.name;
         const kind = state.familyMode ? "family" : "factor";

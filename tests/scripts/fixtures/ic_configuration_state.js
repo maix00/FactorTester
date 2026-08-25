@@ -16,7 +16,7 @@ load("server/manager/web/workbench/configuration-groups/ic/model.js");
 global.FTICConfigurationGroupModel = window.FTICConfigurationGroupModel;
 load("server/manager/web/workbench/test-state.js");
 
-const factorRef = "factor:v1:profile-max:path:roc:commit:blob";
+const factorRef = `factor:v2:${"a".repeat(43)}`;
 const group = {
   config_group_id: "icg-day",
   batch_id: "icb-day",

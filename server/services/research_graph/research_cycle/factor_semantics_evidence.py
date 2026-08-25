@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
-from tools.cli.factor_subject_refs import frozen_factor_family
 
 
 def project_factor_semantics_evidence(
@@ -20,9 +21,6 @@ def project_factor_semantics_evidence(
     facts = {
         "factor_revision_count": len(subjects),
         "factor_subject_refs": subjects,
-        "factor_family_refs": sorted({
-            frozen_factor_family(item) for item in subjects
-        }),
         "factor_revision_set_hash": json_hash(subjects),
         "selected_factor_semantics_resolved": True,
     }

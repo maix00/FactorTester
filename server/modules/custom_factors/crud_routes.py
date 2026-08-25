@@ -2,27 +2,22 @@
 from __future__ import annotations
 
 import re
-from hashlib import sha256
 from typing import cast
 
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
 from server.modules.custom_factors.catalog import (
+    _load_factor_family_from_source,
     list_custom_factors,
     list_public_factors,
 )
-from server.modules.custom_factors.source_helpers import (
-    assemble_factor_source,
-    parse_class_meta,
-    strip_factor_meta,
-)
+from server.modules.custom_factors.source_helpers import factor_class_name
 from server.services.factor_registry import (
     get_custom_factor_instance,
     invalidate_custom_factor_cache,
     invalidate_factor_family_cache,
 )
-from server.services.factor_workspace import commit_factor_source_change
 from server.services.http_auth import login_required
 from server.services.research_configurations import rename_factor_family_alias
 from server.services.session_runtime import current_user
@@ -41,8 +36,9 @@ from tools.data.factor_workspace.storage import (
 )
 from tools.data.sqlite.factor_source_store import (
     delete_factor_source as delete_factor_source_row,
+    get_factor_source_metadata,
 )
-from tools.data.sqlite.factor_source_versions import record_factor_source_version
+from tools.data.sqlite.factor_source_versions import record_factor_formula_version
 
 
 def _current_user_is_super_admin() -> bool:
@@ -57,44 +53,38 @@ def _username():
     return u
 
 
-def _commit_saved_source(username: str, operation: str, factor_id: str) -> str:
+def _family_formula_fingerprint(source_code: str, factor_id: str) -> str:
+    factor_cls, _ = _load_factor_family_from_source(
+        source_code, f"_factor_formula_{factor_id}"
+    )
+    if factor_cls is None:
+        raise ValueError("因子家族源码无法加载")
     try:
-        result = commit_factor_source_change(
-            username,
-            f"factor: {operation} {factor_id}",
-        )
+        family = factor_cls()
+        expression = family.expr
+        return expression.semantic_fingerprint()
     except Exception as error:
-        raise RuntimeError(f"源码已保存，但 Git 提交失败：{error}") from error
-    commit_sha = str(result.get("git_commit_sha") or "").strip()
-    if not commit_sha:
-        raise RuntimeError("源码已保存，但没有生成 Git 提交记录")
-    return commit_sha
+        raise ValueError(f"因子家族公式无法解析: {error}") from error
 
 
-def _record_saved_source_version(
+def _record_saved_formula_version(
     source_kind: str,
     owner_username: str,
     factor_id: str,
-    commit_sha: str,
     source_code: str,
+    family_formula_fingerprint: str,
 ) -> None:
     source = (source_code or '').strip()
     if not source:
         raise RuntimeError('源码已保存，但无法建立不可变源码快照')
-    record_factor_source_version(
+    record_factor_formula_version(
         source_kind,
         owner_username,
         factor_id,
-        commit_sha,
         source,
-        relative_path=f"{'public_factors' if source_kind == 'public' else 'custom_factors'}/{factor_id}.py",
+        family_formula_fingerprint=family_formula_fingerprint,
         subject=f"factor: {source_kind} {factor_id}",
     )
-
-
-def _factor_family_ref(owner: str, family: str) -> str:
-    identity = f"{owner}\x1f{family}"
-    return f"factor-family:sha256:{sha256(identity.encode()).hexdigest()}"
 
 
 @cf_bp.route('/api/create', methods=['POST'])
@@ -122,13 +112,21 @@ def api_create_factor():
     chinese_name = (data.get('chinese_name') or '').strip()
     description = (data.get('description') or '').strip()
     category = (data.get('category') or '自编').strip()
-    full_source = assemble_factor_source(source_code, chinese_name, description, category)
-
-    save_factor_source(username, factor_id, full_source)
     try:
-        git_commit_sha = _commit_saved_source(username, "create", factor_id)
-        _record_saved_source_version(
-            'custom', username, factor_id, git_commit_sha, full_source,
+        formula_fingerprint = _family_formula_fingerprint(source_code, factor_id)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    save_factor_source(
+        username,
+        factor_id,
+        source_code,
+        chinese_name=chinese_name,
+        description=description,
+        category=category,
+    )
+    try:
+        _record_saved_formula_version(
+            'custom', username, factor_id, source_code, formula_fingerprint,
         )
     except RuntimeError as error:
         return jsonify({'success': False, 'error': str(error)}), 500
@@ -141,9 +139,9 @@ def api_create_factor():
             'chinese_name': chinese_name,
             'description': description,
             'category': category,
-            'source_code': strip_factor_meta(full_source),
+            'source_code': source_code,
             'is_public': False,
-            'git_commit_sha': git_commit_sha,
+            'family_formula_fingerprint': formula_fingerprint,
         }
     })
 
@@ -164,34 +162,39 @@ def api_create_public_factor():
     factor_id = class_match.group(1)
     if any(str(item.get('id') or '') == factor_id for item in list_public_factors()):
         return jsonify({'success': False, 'error': f'公共因子家族 "{factor_id}" 已存在'}), 400
-    full_source = assemble_factor_source(
+    chinese_name = (data.get('chinese_name') or '').strip()
+    description = (data.get('description') or '').strip()
+    category = (data.get('category') or '公共').strip()
+    try:
+        formula_fingerprint = _family_formula_fingerprint(source_code, factor_id)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    save_public_factor_source(
+        factor_id,
         source_code,
-        (data.get('chinese_name') or '').strip(),
-        (data.get('description') or '').strip(),
-        (data.get('category') or '公共').strip(),
+        chinese_name=chinese_name,
+        description=description,
+        category=category,
     )
-    save_public_factor_source(factor_id, full_source)
     invalidate_factor_family_cache(factor_id)
     try:
-        git_commit_sha = _commit_saved_source(_username(), "create public", factor_id)
-        _record_saved_source_version(
-            'public', '', factor_id, git_commit_sha, full_source,
+        _record_saved_formula_version(
+            'public', '', factor_id, source_code, formula_fingerprint,
         )
     except RuntimeError as error:
         return jsonify({'success': False, 'error': str(error)}), 500
-    meta = parse_class_meta(full_source)
     return jsonify({
         'success': True,
         'factor': {
             'id': factor_id,
             'name': factor_id,
-            'chinese_name': meta.get('chinese_name', ''),
-            'description': meta.get('description', ''),
-            'category': meta.get('category', '公共'),
-            'source_code': strip_factor_meta(full_source),
+            'chinese_name': chinese_name,
+            'description': description,
+            'category': category,
+            'source_code': source_code,
             'is_public': True,
             'type': 'public',
-            'git_commit_sha': git_commit_sha,
+            'family_formula_fingerprint': formula_fingerprint,
         },
     })
 
@@ -207,7 +210,10 @@ def api_update_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     data = request.get_json(silent=True) or {}
-    old_meta = parse_class_meta(existing_source)
+    old_meta = get_factor_source_metadata(
+        'custom', username, factor_id,
+    )
+    old_meta['name'] = factor_class_name(existing_source)
     old_name = old_meta.get('name', '')
 
     source_code = (data.get('source_code') or '').strip()
@@ -227,22 +233,25 @@ def api_update_factor(factor_id):
             if new_name in existing_names:
                 return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{new_name}"'}), 400
 
-        full_source = assemble_factor_source(
-            source_code,
-            chinese_name or old_meta.get('chinese_name', ''),
-            description or old_meta.get('description', ''),
-            category,
-        )
+        source_to_save = source_code
     else:
-        old_editor_source = strip_factor_meta(existing_source)
-        full_source = assemble_factor_source(
-            old_editor_source,
-            chinese_name or old_meta.get('chinese_name', ''),
-            description or old_meta.get('description', ''),
-            category,
-        )
+        source_to_save = existing_source
 
-    save_factor_source(username, factor_id, full_source)
+    try:
+        formula_fingerprint = _family_formula_fingerprint(source_to_save, new_name)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+    chinese_name = chinese_name or old_meta.get('chinese_name', '')
+    description = description or old_meta.get('description', '')
+    save_factor_source(
+        username,
+        factor_id,
+        source_to_save,
+        chinese_name=chinese_name,
+        description=description,
+        category=category,
+    )
     invalidate_custom_factor_cache(username, factor_id)
     if old_name and old_name != new_name:
         invalidate_factor_family_cache(old_name)
@@ -253,14 +262,16 @@ def api_update_factor(factor_id):
             factor_id = new_name
 
     try:
-        git_commit_sha = _commit_saved_source(username, "update", factor_id)
-        _record_saved_source_version(
-            'custom', username, factor_id, git_commit_sha, full_source,
+        _record_saved_formula_version(
+            'custom', username, factor_id, source_to_save, formula_fingerprint,
         )
     except RuntimeError as error:
         return jsonify({'success': False, 'error': str(error)}), 500
 
-    new_meta = parse_class_meta(full_source)
+    new_meta = {
+        **get_factor_source_metadata('custom', username, factor_id),
+        'name': new_name,
+    }
     return jsonify({
         'success': True,
         'factor': {
@@ -269,9 +280,9 @@ def api_update_factor(factor_id):
             'chinese_name': new_meta.get('chinese_name', ''),
             'description': new_meta.get('description', ''),
             'category': new_meta.get('category', '自编'),
-            'source_code': strip_factor_meta(full_source),
+            'source_code': source_to_save,
             'is_public': False,
-            'git_commit_sha': git_commit_sha,
+            'family_formula_fingerprint': formula_fingerprint,
         }
     })
 
@@ -296,23 +307,31 @@ def api_update_public_factor(factor_id):
     if class_name != factor_id:
         return jsonify({'success': False, 'error': '公共因子家族暂不支持重命名，请保持 class 名与文件名一致'}), 400
 
-    old_meta = parse_class_meta(existing_source)
+    old_meta = get_factor_source_metadata('public', '', factor_id)
     chinese_name = (data.get('chinese_name') or old_meta.get('chinese_name', '')).strip()
     description = (data.get('description') or old_meta.get('description', '')).strip()
     category = (data.get('category') or old_meta.get('category', '') or '公共').strip()
-    full_source = assemble_factor_source(source_code, chinese_name, description, category)
-
-    save_public_factor_source(factor_id, full_source)
+    try:
+        formula_fingerprint = _family_formula_fingerprint(source_code, factor_id)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    save_public_factor_source(
+        factor_id,
+        source_code,
+        chinese_name=chinese_name,
+        description=description,
+        category=category,
+    )
     invalidate_factor_family_cache(factor_id)
     try:
-        git_commit_sha = _commit_saved_source(_username(), "update public", factor_id)
-        _record_saved_source_version(
-            'public', '', factor_id, git_commit_sha, full_source,
+        _record_saved_formula_version(
+            'public', '', factor_id, source_code, formula_fingerprint,
         )
     except RuntimeError as error:
         return jsonify({'success': False, 'error': str(error)}), 500
 
-    new_meta = parse_class_meta(full_source)
+    new_meta = get_factor_source_metadata('public', '', factor_id)
+    new_meta['name'] = factor_id
     return jsonify({
         'success': True,
         'factor': {
@@ -321,10 +340,10 @@ def api_update_public_factor(factor_id):
             'chinese_name': new_meta.get('chinese_name', ''),
             'description': new_meta.get('description', ''),
             'category': new_meta.get('category', '公共'),
-            'source_code': strip_factor_meta(full_source),
+            'source_code': source_code,
             'is_public': True,
             'type': 'public',
-            'git_commit_sha': git_commit_sha,
+            'family_formula_fingerprint': formula_fingerprint,
         }
     })
 
@@ -339,8 +358,7 @@ def api_delete_factor(factor_id):
     if existing_source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
-    old_meta = parse_class_meta(existing_source)
-    old_name = old_meta.get('name', '')
+    old_name = factor_class_name(existing_source)
     delete_factor_source(username, factor_id)
 
     invalidate_custom_factor_cache(username, factor_id)
@@ -379,28 +397,32 @@ def api_get_factor(factor_id):
     if source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
-    meta = parse_class_meta(source)
+    family_alias = factor_class_name(source) or factor_id
+    stored_meta = get_factor_source_metadata('custom', owner_username, factor_id)
     factor_family = get_custom_factor_instance(owner_username, factor_id)
+    formula_fingerprint = (
+        factor_family.expr.semantic_fingerprint()
+        if factor_family is not None and factor_family.expr is not None
+        else ''
+    )
     from server.modules.shared.param_meta import serialize_param_meta
     return jsonify({
         'success': True,
         'factor': {
             'id': factor_id,
-            'name': meta.get('name', ''),
-            'chinese_name': meta.get('chinese_name', ''),
-            'description': meta.get('description', ''),
-            'category': meta.get('category', '自编'),
-            'source_code': strip_factor_meta(source),
+            'name': family_alias,
+            'chinese_name': stored_meta.get('chinese_name', ''),
+            'description': stored_meta.get('description', ''),
+            'category': stored_meta.get('category', '自编'),
+            'source_code': source,
             'is_public': False,
             'source': 'custom',
             'factor_kind': 'custom',
             'owner_username': owner_username,
             'owner_alias': owner_username,
             'factor_owner_ref': owner_username,
-            'factor_family_alias': meta.get('name', '') or factor_id,
-            'factor_family_ref': _factor_family_ref(
-                owner_username, meta.get('name', '') or factor_id,
-            ),
+            'factor_family_alias': family_alias,
+            'family_formula_fingerprint': formula_fingerprint,
             'can_edit': owner_username == username,
             'math_expr': getattr(factor_family, 'math_expr', '') if factor_family is not None else '',
             'params': [serialize_param_meta(param) for param in factor_family.params] if factor_family is not None else [],

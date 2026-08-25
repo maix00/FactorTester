@@ -1,44 +1,26 @@
-from base64 import urlsafe_b64encode
-import hashlib
-import json
-
 from server.modules.custom_factors import factor_set_registry as registry
-
-
-def _encode(value: str) -> str:
-    return urlsafe_b64encode(value.encode()).decode().rstrip("=")
+from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 def _descriptor() -> dict:
-    member = (
-        "factor:v1:profile-maxa:"
-        f"{_encode('custom_factors/F.py')}:{_encode('F|N:20d')}:"
-        + "a" * 40 + ":" + "b" * 40
+    member = freeze_factor_identity(
+        owner_ref="profile:maxa",
+        family_alias="F",
+        factor_alias="F|N:20d",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"N": "20d"},
     )
-    members = [member]
-    manifest = {
-        "schema_version": 1,
-        "set_id": "momentum",
-        "set_ref": "factor-set:profile-maxa:momentum",
-        "title_zh": "动量集合",
-        "description_zh": "服务器可检索版本",
-        "member_refs": members,
-        "member_hash": "sha256:" + hashlib.sha256(json.dumps(
-            members, ensure_ascii=False, separators=(",", ":"),
-        ).encode()).hexdigest(),
-    }
-    payload = (
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode()
-    blob = hashlib.sha1(
-        f"blob {len(payload)}\0".encode() + payload
-    ).hexdigest()
+    manifest = freeze_factor_set_identity(
+        owner_ref="profile:maxa",
+        set_id="momentum",
+        alias="动量集合",
+        members=[member],
+    )
+    manifest["description"] = "服务器可检索版本"
     return {
-        "target_ref": (
-            "factor-set:v1:profile-maxa:"
-            f"{_encode('.factortester/factor-sets/momentum.json')}:"
-            f"{_encode('momentum')}:" + "c" * 40 + f":{blob}"
-        ),
+        "target_ref": manifest["ref"],
         "manifest": manifest,
     }
 
@@ -60,7 +42,7 @@ def test_registered_factor_set_is_server_owned_and_member_paged(monkeypatch) -> 
 
     saved = registry.register_factor_set("alice", _descriptor())
     assert saved["owner_username"] == "alice"
-    assert saved["set_ref"] == "factor-set:profile-maxa:momentum"
+    assert saved["owner_ref"] == "profile:maxa"
     assert registry.factor_set_catalog("alice", "动量")[0]["member_count"] == 1
 
     detail = registry.factor_set_detail(
@@ -68,16 +50,62 @@ def test_registered_factor_set_is_server_owned_and_member_paged(monkeypatch) -> 
     )
     assert detail is not None
     assert detail["has_more"] is False
-    assert detail["related_references"][0]["target_ref"].startswith("factor:v1:")
-    descriptor = registry.factor_set_descriptor("alice", saved["target_ref"])
-    assert descriptor == _descriptor()
+    assert detail["related_references"][0]["label"] == "F|N:20d"
+    assert detail["related_references"][0]["target_ref"].startswith("factor:v2:")
+    assert registry.factor_set_descriptor("alice", saved["target_ref"]) == _descriptor()
 
 
 def test_unregistered_factor_set_is_not_visible(monkeypatch) -> None:
     monkeypatch.setattr(registry, "get_factor_set", lambda *_args: None)
     assert registry.factor_set_detail(
-        "alice", "factor-set:v1:missing", offset=0, limit=10,
+        "alice", "factor-set:v2:" + "x" * 43, offset=0, limit=10,
     ) is None
     assert registry.factor_set_descriptor(
-        "alice", "factor-set:v1:missing",
+        "alice", "factor-set:v2:" + "x" * 43,
     ) is None
+
+
+def test_web_authored_factor_set_uses_current_principal_owner(monkeypatch) -> None:
+    descriptor = _descriptor()
+    member = descriptor["manifest"]["identity"]["members"][0]
+    stored = []
+    monkeypatch.setattr(
+        registry, "save_factor_set",
+        lambda username, value: stored.append((username, value)) or value,
+    )
+
+    value = registry.author_factor_set(
+        "GTHT@alice@1",
+        {
+            "set_id": "momentum",
+            "alias": "动量集合",
+            "description": "Web 创建",
+            "members": [member],
+        },
+        persist=True,
+    )
+
+    assert stored[0][0] == "GTHT@alice@1"
+    assert stored[0][1]["owner_ref"] == "principal:GTHT@alice@1"
+    assert value["owner_ref"] == "principal:GTHT@alice@1"
+    assert value["can_edit"] is True
+    assert value["manifest"]["identity"]["members"] == [member]
+
+
+def test_inline_factor_set_is_frozen_without_persistence(monkeypatch) -> None:
+    descriptor = _descriptor()
+    member = descriptor["manifest"]["identity"]["members"][0]
+    monkeypatch.setattr(
+        registry, "save_factor_set",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not persist")),
+    )
+
+    value = registry.author_factor_set(
+        "alice",
+        {"set_id": "inline", "alias": "现场集合", "members": [member]},
+        persist=False,
+    )
+
+    assert value["temporary"] is True
+    assert value["owner_ref"] == "principal:alice"
+    assert value["manifest"]["ref"] == value["target_ref"]

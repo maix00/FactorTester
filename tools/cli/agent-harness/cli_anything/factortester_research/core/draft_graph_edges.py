@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def edge(
     edge_id: str,
     from_node: str,
@@ -109,7 +110,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             guard={
                 "causal_semantics_valid": True,
                 "semantic_discovery_fresh_or_not_triggered": True,
-                "factor_revision_manifests_bound": True,
+                "frozen_factor_formulas_bound": True,
                 "selected_factor_semantics_resolved": True,
             },
             server_action="bind_factor_semantics",

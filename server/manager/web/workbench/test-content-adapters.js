@@ -267,9 +267,9 @@
   }
 
   function factorSetLabel(value) {
-    if (typeof value === "string") return value;
+    if (typeof value === "string") return "";
     return String(value?.title_zh || value?.set_id || value?.name
-      || factorSetReference(value)).trim();
+      || "").trim();
   }
 
   function factorReference(value) {
@@ -278,9 +278,9 @@
   }
 
   function factorLabel(value) {
-    if (typeof value === "string") return value;
+    if (typeof value === "string") return "";
     return String(value?.factor_alias || value?.alias || value?.name
-      || factorReference(value)).trim();
+      || "").trim();
   }
 
   function factorObjects(state, refs) {
@@ -293,10 +293,10 @@
       window.FTTestFactorSelection?.candidates?.(state),
     );
     const matched = indexedValues(candidates, candidateIndexes, factorReference);
-    // Strategy rows are rendered before the catalog is necessarily loaded.
-    // Preserve their stable factor reference/alias so the detail overlay stays
-    // clickable; the catalog detail view resolves the full object lazily.
-    return [...wanted].map(ref => matched.get(ref) || {factor_ref: ref});
+    // An opaque formula ref is never a display label.  The frozen factor row
+    // is restored with the editable draft and supplies the canonical alias;
+    // defer this chip until that row is available instead of leaking a hash.
+    return [...wanted].map(ref => matched.get(ref)).filter(Boolean);
   }
 
   function mergeFactorCatalogs(...catalogs) {

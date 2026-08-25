@@ -234,7 +234,7 @@
     const headers = kind === "factor-set"
       ? [context.t("因子集合"), context.t("成员数"), context.t("所有者"), context.t("可见范围"), context.t("产品组")]
       : [context.t("因子"), context.t("原类名"), context.t("说明"), context.t("来源"), context.t("所有者"), context.t("产品组")];
-    if (canModify && kind === "factor") {
+    if (canModify) {
       headers.push(context.t("操作"));
     }
     const rows = items.map(item => kind === "factor-set" ? [
@@ -243,6 +243,13 @@
       model().owner(item.value),
       visibility(item.value, context),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
+      ...(canModify ? [actionCell(
+        context,
+        item.value.can_edit ? onDelete : null,
+        item.value.can_edit ? onEdit : null,
+        null,
+        item.value,
+      )] : []),
     ] : [
       item.value.factor_alias,
       model().familyName(item.value),
@@ -250,7 +257,7 @@
       origin(item.value, context),
       model().owner(item.value),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
-      ...(canModify && kind === "factor"
+      ...(canModify
         ? [actionCell(context, onDelete, onEdit, null, item.value)] : []),
     ]);
     const view = FTUI.pagedTable(

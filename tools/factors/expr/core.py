@@ -4,25 +4,100 @@
 # =============================================================================
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+from enum import Enum
+
 import numpy as np
 import pandas as pd
-import threading
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
+    TYPE_CHECKING, Any, Dict, Iterator, List, NamedTuple,
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
 from tools.decorators import factor_workspace
-from tools.data.types import DataColumn
 from tools.data.types import DataFreq
+
+
+def _semantic_value(value: Any) -> Any:
+    """Return a deterministic JSON value for one structural-key value.
+
+    Semantic fingerprints are persistent business identities, so they must not
+    depend on Python's randomized ``hash()`` or an object's process-specific
+    ``repr``.  Unknown values fail closed instead of silently producing an
+    unstable identity.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value):
+            return {"type": "float", "value": "nan"}
+        if math.isinf(value):
+            return {"type": "float", "value": "inf" if value > 0 else "-inf"}
+        return value
+    if isinstance(value, bytes):
+        return {"type": "bytes", "hex": value.hex()}
+    if isinstance(value, Enum):
+        return {
+            "type": "enum",
+            "class": f"{type(value).__module__}.{type(value).__qualname__}",
+            "value": _semantic_value(value.value),
+        }
+    if isinstance(value, np.generic):
+        return {
+            "type": "numpy-scalar",
+            "dtype": str(value.dtype),
+            "value": _semantic_value(value.item()),
+        }
+    if isinstance(value, np.dtype):
+        return {"type": "numpy-dtype", "value": str(value)}
+    if isinstance(value, pd.Timedelta):
+        return {"type": "timedelta", "nanoseconds": int(value.value)}
+    if isinstance(value, pd.Timestamp):
+        return {
+            "type": "timestamp",
+            "nanoseconds": int(value.value),
+            "timezone": str(value.tz or ""),
+        }
+    if isinstance(value, tuple):
+        return {"type": "tuple", "items": [_semantic_value(item) for item in value]}
+    if isinstance(value, list):
+        return {"type": "list", "items": [_semantic_value(item) for item in value]}
+    if isinstance(value, (set, frozenset)):
+        items = [_semantic_value(item) for item in value]
+        return {"type": "set", "items": sorted(items, key=_semantic_json)}
+    if isinstance(value, dict):
+        items = [
+            (_semantic_value(key), _semantic_value(item))
+            for key, item in value.items()
+        ]
+        items.sort(key=lambda pair: _semantic_json(pair[0]))
+        return {"type": "dict", "items": items}
+    raise TypeError(
+        "factor semantic fingerprint contains an unsupported value: "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+def _semantic_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def semantic_structural_key(value: Any) -> str:
+    """Serialize a structural key for persistent identity and stable sorting."""
+    return _semantic_json(_semantic_value(value))
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data.providers import DataProviderProductTS as DataSource
-    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
-    from .leaf import ConstExpr, ColumnRef, ParamRef
-    from .composite import CompositeExpr
+    from .leaf import ConstExpr, ColumnRef
     from .rolling import RollingExpr, RollingOp
     from .shift import ShiftOp
     from .cross_sectional import CrossSectionalOp
@@ -136,6 +211,11 @@ class FactorExpr:
         对于非对称运算，按原始顺序计算。
         """
         return hash(self._structural_key())
+
+    def semantic_fingerprint(self) -> str:
+        """Return the stable SHA-256 identity of this formula's semantics."""
+        payload = semantic_structural_key(self._structural_key()).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
     def _structural_key(self) -> tuple:
         """

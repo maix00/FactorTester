@@ -3,17 +3,13 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const modules = process.argv.slice(2);
-global.atob = value => Buffer.from(value, "base64").toString("binary");
 global.window = {
   webkit: {messageHandlers: {factorTesterLocalFactorSets: {
     postMessage: async message => {
       assert.equal(message.action, "run-input");
       return {
         descriptor: global.descriptor,
-        transient_factor_sources: [{
-          factor_id: "Momentum", path: "custom_factors/Momentum.py",
-          source_code: "class Momentum: pass\n",
-        }],
+        transient_factor_sources: [],
       };
     },
   }}},
@@ -36,16 +32,32 @@ for (const module of modules) {
 global.FTFactorModel = window.FTFactorModel;
 global.FTTestFactorSelection = window.FTTestFactorSelection;
 
-function encode(value) {
-  return Buffer.from(value).toString("base64url");
-}
-const factorRef = [
-  "factor", "v1", "profile-maxa", encode("custom_factors/Momentum.py"),
-  encode("Momentum|N:20d"), "a".repeat(40), "b".repeat(40),
-].join(":");
+const member = {
+  schema_version: 2,
+  ref: `factor:v2:${"A".repeat(43)}`,
+  alias: "Momentum|N:20d",
+  owner_ref: "profile:maxa",
+  identity: {
+    family_ref: `factor-family:v2:${"B".repeat(43)}`,
+    family_alias: "Momentum",
+    family_formula_fingerprint: "a".repeat(64),
+    self_formula_fingerprint: "b".repeat(64),
+    params: {N: "20d"},
+  },
+};
 global.descriptor = {
-  target_ref: "factor-set:v1:profile-maxa:path:set:commit:blob",
-  manifest: {member_refs: [factorRef]},
+  target_ref: `factor-set:v2:${"C".repeat(43)}`,
+  manifest: {
+    schema_version: 2,
+    ref: `factor-set:v2:${"C".repeat(43)}`,
+    alias: "Momentum set",
+    owner_ref: "profile:maxa",
+    identity: {
+      set_id: "momentum",
+      member_fingerprint: "d".repeat(64),
+      members: [member],
+    },
+  },
 };
 const state = {
   kind: "ic",
@@ -65,9 +77,7 @@ const state = {
     factor_alias: "Momentum|N:20d",
   }]);
   assert.deepEqual(values, [global.descriptor]);
-  assert.equal(state.transientFactorSources.length, 1);
-  assert.equal(state.transientFactorSources[0].factor_id, "Momentum");
-  assert.equal(state.transientFactorSources[0].source_origin, "factor_set");
+  assert.equal(state.transientFactorSources.length, 0);
   await assert.rejects(
     window.FTTestFactorSets.descriptors(
       context, state, [{factor_alias: "Other|N:20d"}],

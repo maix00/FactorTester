@@ -8,6 +8,10 @@ from tools.data.factor_workspace.git import (
     run_factor_workspace_git_action,
 )
 from tools.data.factor_workspace.repository import FactorWorkspaceRepository
+from tools.data.factor_workspace.storage import existing_factor_workspace_root
+from tools.data.sqlite.factor_source_workspace_settings import (
+    load_factor_source_workspace_settings,
+)
 from tools.data.factor_workspace.sync import (
     push_factor_workspace,
     sync_database_to_workspace,
@@ -17,13 +21,21 @@ from tools.data.factor_workspace.sync import (
 
 
 def commit_factor_source_change(username: str, message: str) -> dict:
-    """Persist the current factor sources and commit the upload workspace.
+    """Optionally mirror a saved source into an explicitly configured Git workspace.
 
-    The returned commit is the workspace history record for the save.  It is
-    intentionally not exposed as ``factor_git_commit``: that field pins a
-    factor to an historical source revision, while this commit records the
-    current source change.
+    The SQLite source registry is authoritative.  A Web save must remain
+    successful when the user has no server workspace or has disabled Git; in
+    those cases the returned commit is empty and the caller records a server
+    source revision instead.
     """
+    root = existing_factor_workspace_root(username)
+    settings = load_factor_source_workspace_settings(username) or {}
+    if not root or not bool(settings.get("git_enabled")):
+        return {
+            "git_commit_sha": "",
+            "workspace_root": root or "",
+            "git": {"git_enabled": False, "git_repo_root": ""},
+        }
     result = sync_database_to_workspace(
         username, branch_mode="auto", clear_existing=False,
     )

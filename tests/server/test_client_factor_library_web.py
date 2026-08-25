@@ -13,6 +13,27 @@ from server.modules.custom_factors import (
     factor_library_service,
 )
 from server.modules.custom_factors.client_library import build_client_library_projection
+from tools.cli.release.research_reporting.references.factor_formula import (
+    build_factor_reference,
+)
+
+
+def _frozen_factor(
+    *, alias: str, family: str, owner_ref: str = "principal:alice",
+) -> dict[str, str]:
+    identity = {
+        "owner_ref": owner_ref,
+        "family_alias": family,
+        "factor_alias": alias,
+        "family_formula_fingerprint": "a" * 64,
+        "self_formula_fingerprint": "b" * 64,
+    }
+    return {
+        "factor_ref": build_factor_reference(**identity),
+        "factor_owner_ref": owner_ref,
+        "family_formula_fingerprint": identity["family_formula_fingerprint"],
+        "self_formula_fingerprint": identity["self_formula_fingerprint"],
+    }
 
 
 def test_projection_overview_can_skip_expensive_product_scope_catalog(monkeypatch) -> None:
@@ -146,6 +167,7 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
                 "owner_organization_name": "Research",
                 "product_group": "CNFutures",
                 "updated_at": "2026-07-20",
+                **_frozen_factor(alias="SgCCS|N:2m", family="SgCCS"),
             }],
             "errors": [{
                 "error": "/Users/alice/private_factor.py failed",
@@ -207,6 +229,7 @@ def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -
         "owner_username": "alice",
         "owner_alias": "Alice",
         "source": "custom",
+        **_frozen_factor(alias="SgCCS|N:2m", family="SgCCS"),
     }
 
     payload = build_client_library_projection({
@@ -221,21 +244,26 @@ def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -
     assert "product_group_refs" not in payload["factors"][0]
     assert "product_group_names" not in payload["factors"][0]
     assert "product_groups" not in payload
-    assert payload["factors"][0]["factor_owner_ref"] == "alice"
-    assert payload["factors"][0]["factor_family_ref"]
+    assert payload["factors"][0]["factor_owner_ref"] == "principal:alice"
+    assert "factor_family_ref" not in payload["factors"][0]
     assert payload["factors"][0]["factor_params"] == payload["factors"][0]["params"]
     assert "factor_git_commit" not in payload["factors"][0]
 
 
-def test_factor_projection_preserves_historical_source_marker_per_factor() -> None:
+def test_factor_projection_preserves_formula_identity_per_factor() -> None:
     payload = build_client_library_projection({
         "factors": [{
             "factor_alias": "Momentum|window:20",
             "factor_family_alias": "Momentum",
             "owner_username": "alice",
             "factor_owner_ref": "profile:alice",
-            "factor_family_ref": "family:momentum",
-            "factor_git_commit": "a" * 40,
+            "family_formula_fingerprint": "a" * 64,
+            "self_formula_fingerprint": "b" * 64,
+            **_frozen_factor(
+                alias="Momentum|window:20",
+                family="Momentum",
+                owner_ref="profile:alice",
+            ),
             "params": [{"alias": "window", "value": "20"}],
             "source": "custom",
         }],
@@ -243,25 +271,37 @@ def test_factor_projection_preserves_historical_source_marker_per_factor() -> No
 
     factor = payload["factors"][0]
     assert factor["factor_owner_ref"] == "profile:alice"
-    assert factor["factor_family_ref"] == "family:momentum"
     assert factor["factor_params"] == factor["params"]
-    assert factor["factor_git_commit"] == "a" * 40
+    assert factor["family_formula_fingerprint"] == "a" * 64
+    assert factor["self_formula_fingerprint"] == "b" * 64
+    assert "factor_git_commit" not in factor
+    assert "factor_family_ref" not in factor
 
 
 def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch) -> None:
     source = "class Momentum(FactorFamily):\n    pass\n"
+    fingerprint = "a" * 64
     monkeypatch.setattr(catalog_routes, "can_view_user_scope", lambda *_: True)
     monkeypatch.setattr(
         catalog_routes, "load_factor_source", lambda _owner, _family: source,
     )
     monkeypatch.setattr(
         catalog_routes,
-        "list_factor_source_versions",
-        lambda **_kwargs: {
-            "available": True,
-            "versions": [],
-            "current": {"commit": "a" * 40, "is_current": True},
-        },
+        "get_factor_source_metadata",
+        lambda *_args: {"chinese_name": "", "description": "", "category": ""},
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "_source_detail",
+        lambda *_args, **_kwargs: {"family_formula_fingerprint": fingerprint},
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "list_factor_formula_versions",
+        lambda *_args, **_kwargs: [{
+            "family_formula_fingerprint": fingerprint,
+            "is_current": True,
+        }],
     )
     client = _app().test_client()
     _login(client, "alice")
@@ -273,34 +313,38 @@ def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch)
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["factor_owner_ref"] == "alice"
-    assert payload["factor_family_ref"].startswith("factor-family:sha256:")
-    assert payload["current"]["commit"] == "a" * 40
+    assert payload["factor_family_alias"] == "Momentum"
+    assert "factor_family_ref" not in payload
+    assert payload["current_fingerprint"] == fingerprint
+    assert payload["versions"][0]["family_formula_fingerprint"] == fingerprint
 
 
 def test_source_version_route_returns_persisted_snapshot_without_current_source(
     monkeypatch,
 ) -> None:
-    commit = "b" * 40
+    fingerprint = "b" * 64
     source = "class Momentum(FactorFamily):\n    pass\n"
     monkeypatch.setattr(
         catalog_routes, "load_public_factor_source", lambda _factor_id: None,
     )
     monkeypatch.setattr(
         catalog_routes,
-        "load_factor_source_version",
-        lambda **_kwargs: {
-            "commit": commit,
+        "load_factor_formula_version",
+        lambda *_args, **_kwargs: {
+            "family_formula_fingerprint": fingerprint,
             "source_code": source,
-            "source_hash": "hash",
-            "relative_path": "public_factors/Momentum.py",
-            "branches": [],
-            "is_current": False,
+            "source_sha256": "hash",
         },
     )
     monkeypatch.setattr(
         catalog_routes,
+        "get_factor_source_metadata",
+        lambda *_args: {"chinese_name": "动量", "description": "历史版本", "category": ""},
+    )
+    monkeypatch.setattr(
+        catalog_routes,
         "_source_detail",
-        lambda **_kwargs: {
+        lambda *_args, **_kwargs: {
             "source_code": source,
             "math_expr": "P_t",
             "chinese_name": "动量",
@@ -312,12 +356,12 @@ def test_source_version_route_returns_persisted_snapshot_without_current_source(
     _login(client)
 
     response = client.get(
-        f"/custom-factors/api/source-versions/public/Momentum/{commit}",
+        f"/custom-factors/api/source-versions/public/Momentum/{fingerprint}",
     )
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["commit"] == commit
+    assert payload["family_formula_fingerprint"] == fingerprint
     assert payload["source_code"] == source
     assert payload["source_kind"] == "public"
 
@@ -331,6 +375,8 @@ def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> No
             "owner_username": "__public_jobs__",
             "owner_alias": "公共因子库",
             "source": "public",
+            "factor_owner_ref": "public",
+            "family_formula_fingerprint": "a" * 64,
             "params": [{"alias": "window", "value": "20"}],
         }],
         "factors": [{
@@ -341,22 +387,19 @@ def test_client_library_keeps_public_family_templates_out_of_factor_rows() -> No
             "owner_alias": "Alice",
             "source": "public",
             "params": [{"alias": "window", "value": "20"}],
+            **_frozen_factor(
+                alias="PublicMomentum|window:20",
+                family="PublicMomentum",
+                owner_ref="public",
+            ),
         }],
     }, principal="alice")
 
-    assert len(payload["families"]) == 2
-    public = next(
-        item for item in payload["families"]
-        if item["owner_username"] == "__public_jobs__"
-    )
-    mine = next(
-        item for item in payload["families"]
-        if item["owner_username"] == "alice"
-    )
+    assert len(payload["families"]) == 1
+    public = payload["families"][0]
     assert payload["factors"][0]["owner_username"] == "alice"
-    assert public["factor_count"] == 0
     assert public["params"][0]["alias"] == "window"
-    assert mine["factor_count"] == 1
+    assert public["factor_count"] == 1
 
 
 def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(

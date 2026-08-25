@@ -8,18 +8,18 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config
-from .research_graph_obligations import (
-    record_evidence_lifecycle_report,
-)
-from .research_graph_cycle_contract import (
-    validate_research_cycle_envelope,
-)
 
 from .research_evidence_common import (
     emit,
     library_for_profile,
     profile_options,
     read_object,
+)
+from .research_graph_cycle_contract import (
+    validate_research_cycle_envelope,
+)
+from .research_graph_obligations import (
+    record_evidence_lifecycle_report,
 )
 
 
@@ -390,7 +390,7 @@ def _guide(topic: str) -> dict[str, Any]:
         ],
         "search": [
             "先使用结构化 scope，再使用系统 Facet 和 Agent Tag",
-            "因子集合必须使用 factor-set:v1 冻结 target_ref，不得使用稳定 set_ref",
+            "因子集合必须使用完整冻结记录对应的 factor-set:v2 target_ref",
             "成员 Evidence 不会自动提升为集合 Evidence；集合结论必须明确绑定集合范围",
         ],
         "capture": [
@@ -409,7 +409,7 @@ def _guide(topic: str) -> dict[str, Any]:
         "tag": ["先 propose；仅在现有标签不适用时 create"],
         "bind": [
             "EvidenceUse 必须包含义务、小类、理由和资格",
-            "当前研究主体是因子集合时，requested_scope 必须保留精确 factor-set:v1 引用",
+            "当前研究主体是因子集合时，requested_scope 必须保留精确 factor-set:v2 引用",
         ],
         "exclude": [
             "exclude 必须绑定当前 Graph branch、Agent 和明确 parent_id",

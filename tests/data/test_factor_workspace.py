@@ -283,6 +283,16 @@ def test_factor_source_change_commits_current_upload_workspace(monkeypatch):
         },
     )
     monkeypatch.setattr(
+        factor_workspace,
+        "existing_factor_workspace_root",
+        lambda _username: "/tmp/factor-workspace",
+    )
+    monkeypatch.setattr(
+        factor_workspace,
+        "load_factor_source_workspace_settings",
+        lambda _username: {"git_enabled": True},
+    )
+    monkeypatch.setattr(
         FactorWorkspaceRepository,
         "commit_generated",
         lambda self, message: observed.append((self.username, message)) or "abc1234",

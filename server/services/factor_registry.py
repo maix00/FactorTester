@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
-from flask import session
+from flask import has_request_context, session
 
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.factors.FactorFamily import FactorFamily
@@ -186,7 +186,7 @@ def register_page(page_uuid: str) -> None:
 def unregister_page(page_uuid: str) -> None:
     """注销页面，释放其持有的 FactorFamily 和 Factor。"""
     with _page_cache_lock:
-        families = page_families.pop(page_uuid, {})
+        page_families.pop(page_uuid, {})
         factors = page_factors.pop(page_uuid, {})
     # 清理 Factor（调 clear 释放中间数据）
     for f in factors.values():
@@ -312,7 +312,8 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     for source identity or sharing.
     """
     owner, factor_id = _split_factor_owner_ref(module_name)
-    active_user = str(username or session.get('username') or "").strip() or None
+    session_user = session.get("username") if has_request_context() else ""
+    active_user = str(username or session_user or "").strip() or None
     if owner == "public":
         return "public", "public", factor_id, f"public:{factor_id}"
     if owner:

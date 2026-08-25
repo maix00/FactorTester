@@ -9,11 +9,23 @@ from click.testing import CliRunner
 from tools.cli.catalog import factor_resolution
 from tools.cli.commands import client_catalog as catalog_commands
 from tools.cli.commands.client_catalog import client_catalog
-from tools.cli.release.research_reporting.references.factor_git import (
-    validate_frozen_factor_identity,
-    validate_frozen_factor_identities,
+from tools.factors.formula_identity import (
+    require_frozen_factor,
+    require_frozen_factor_family,
 )
-from tools.data.sqlite.factor_source_store import load_factor_source
+
+
+_FACTOR_SOURCE = """
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class MmRateOfChg(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        P = DataColumnParam('P', default_value='CA')
+        N = WindowParam('N', default_value='10d')
+        return (P - P.shift(N)) / (P.shift(N) + 1e-10)
+"""
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -30,9 +42,7 @@ def _factor_repository(tmp_path: Path) -> tuple[Path, str, str]:
     repository = tmp_path / "factor-library"
     source = repository / "public_factors" / "MmRateOfChg.py"
     source.parent.mkdir(parents=True)
-    canonical = load_factor_source("public", "", "MmRateOfChg")
-    assert canonical
-    source.write_text(canonical, encoding="utf-8")
+    source.write_text(_FACTOR_SOURCE, encoding="utf-8")
     _git(repository, "init")
     _git(repository, "config", "user.name", "FactorTester Test")
     _git(repository, "config", "user.email", "factor@test.invalid")
@@ -62,25 +72,20 @@ def test_selected_commit_freezes_exact_blob_without_checkout(
     value = factor_resolution.resolve_local_factor_reference(
         client_root=tmp_path / "client",
         owner_ref="profile:maxa",
-        alias="MmRateOfChg|N:20d|$F:1d",
+        alias="MmRateOfChg|P:CA|N:20d|$F:1d",
         revision=first,
     )
 
-    assert value["owner_ref"] == "profile:maxa"
-    assert value["git_commit"] == first
-    assert value["git_commit"] != second
-    assert value["relative_path"] == "public_factors/MmRateOfChg.py"
-    assert value["factor_ref"].startswith("factor:v1:profile-maxa:")
-    assert value["family_ref"].startswith("factor-family:v1:profile-maxa:")
-    validated = validate_frozen_factor_identity(
-        target_ref=value["factor_ref"], roots={"profile-maxa": repository},
-    )
-    assert validated["revision"] == first
-    batch = validate_frozen_factor_identities(
-        target_refs=[value["factor_ref"]],
-        roots={"profile-maxa": repository},
-    )
-    assert batch[0]["revision"] == first
+    frozen = require_frozen_factor(value)
+    assert frozen["owner_ref"] == "profile:maxa"
+    assert frozen["ref"].startswith("factor:v2:")
+    assert frozen["identity"]["family_ref"].startswith("factor-family:v2:")
+    assert value["workspace_provenance"] == {
+        "relative_path": "public_factors/MmRateOfChg.py",
+        "revision": first,
+        "blob_hash": value["workspace_provenance"]["blob_hash"],
+    }
+    assert value["workspace_provenance"]["revision"] != second
 
 
 def test_missing_family_at_selected_commit_does_not_fall_back(
@@ -144,13 +149,15 @@ def test_selected_owner_revision_lists_families_and_instantiates_candidate(
     assert [item["family"] for item in families] == ["MmRateOfChg"]
     assert families[0]["git_commit"] == first
     assert "params" not in families[0]
-    assert family["family_ref"].startswith("factor-family:v1:profile-maxa:")
+    assert require_frozen_factor_family(family)["ref"].startswith(
+        "factor-family:v2:"
+    )
     assert {item["alias"] for item in family["params"]} >= {
         "P", "N", "$F", "$Rev",
     }
     assert factor["alias"] == "MmRateOfChg|P:CA|N:20d|$F:1d"
-    assert factor["git_commit"] == first
-    assert factor["factor_ref"].startswith("factor:v1:profile-maxa:")
+    assert factor["workspace_provenance"]["revision"] == first
+    assert require_frozen_factor(factor)["ref"].startswith("factor:v2:")
 
 
 def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
@@ -164,7 +171,13 @@ def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
 
     def resolve(**kwargs):
         captured.update(kwargs)
-        return {"factor_ref": "factor:v1:personal:path:alias:commit:blob"}
+        return {
+            "schema_version": 2,
+            "ref": "factor:v2:" + "a" * 43,
+            "alias": "MmRateOfChg|N:20d|$F:1d",
+            "owner_ref": "user:18717974771",
+            "identity": {},
+        }
 
     monkeypatch.setattr(catalog_commands, "client_from_config", lambda: Client())
     monkeypatch.setattr(catalog_commands, "resolve_local_factor_reference", resolve)

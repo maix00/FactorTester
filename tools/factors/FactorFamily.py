@@ -15,41 +15,29 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import uuid
 import pandas as pd
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from tools.decorators import factor_workspace
 from tools.factors.Factors import Factor
-from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
     FactorExpr,
-    ColumnRef,
-    ConstExpr,
-    ParamRef,
-    RollingOp,
-    ShiftOp,
-    CrossSectionalOp,
     CompositeExpr,
-    OperandExpr,
 )
-from tools.data.types import DataColumn, DataFreq
-from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
+from tools.data.types import DataFreq
+from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam
 from tools.data.types import UniqueNameObject
-from tools.data.views import ProductDataView
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 
-from settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
 if TYPE_CHECKING:
-    from tools.products.Product import Product
+    pass
 
-# ── 从 FactorTester 导入运行时上下文（避免循环导入） ──
-# _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
-from tools.factors.FactorTester import _active_tester, _active_user_prefix
+# ── 从 FactorTester 导入用户前缀上下文（避免循环导入） ──
+from tools.factors.FactorTester import _active_user_prefix
 
 @factor_workspace
 class FactorFamily(UniqueNameObject, FactorExpr):
@@ -71,6 +59,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         basepoint / daily_basepoint / end_session_skip — 信号对齐配置
         depends_on  — 中间因子依赖声明
     """
+    ref_prefix = "factor-family:v2:"
     _runtime_ctx: threading.local
     _source_freqs_lock: threading.Lock
 
@@ -98,6 +87,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                  expr: Optional[FactorExpr] = None,
                  family_ref: Optional[str] = None,
                  owner_ref: Optional[str] = None,
+                 frozen_identity: Optional[dict] = None,
                  desc: Optional[str] = None,
                  source_freq: Optional[str] = None,
                  description: Optional[str] = None,
@@ -111,6 +101,14 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                  *args, **kwargs):
         # alias 保持纯净；冻结对象以 family_ref 作为语义身份。
         # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
+        if frozen_identity is not None:
+            from tools.factors.formula_identity import require_frozen_factor_family
+            frozen_identity = require_frozen_factor_family(frozen_identity)
+            if family_ref not in {None, "", frozen_identity["ref"]}:
+                raise ValueError("family_ref conflicts with frozen identity")
+            family_ref = frozen_identity["ref"]
+            alias = frozen_identity["alias"]
+            owner_ref = frozen_identity["owner_ref"]
         core_alias = alias if alias else cls.__name__
         selected_owner = str(owner_ref or _active_user_prefix.get() or "public")
         if selected_owner == "$COMMON":
@@ -123,7 +121,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             name = f"runtime-factor-family:{core_alias}:{uuid.uuid4().hex}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
-        instance = UniqueNameObject.__new__(cls, name=name, alias=alias, **kwargs)
+        instance = UniqueNameObject.__new__(
+            cls,
+            name=name,
+            alias=alias,
+            frozen_identity=frozen_identity,
+            **kwargs,
+        )
         
         if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)

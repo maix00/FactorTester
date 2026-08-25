@@ -28,14 +28,13 @@ from __future__ import annotations
 #
 # 由 FactorFamily.get_factor() / get_factors() 创建。
 # =============================================================================
-import numpy as np
 import pandas as pd
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence
 
 from tools.decorators import factor_workspace
 from tools.data.types import DataFreq, UniqueNameObject
 from tools.products.Product import Product
-from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
+from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult
 
 if TYPE_CHECKING:
@@ -63,6 +62,24 @@ class Factor(UniqueNameObject, FactorExpr):
         returns        (DataFrame)   : 因子对应的收益率序列（calc_returns 后设置）
         _source_freq   (DataFreq)    : 数据源频率（从 family 继承）
     """
+
+    ref_prefix = "factor:v2:"
+
+    @classmethod
+    def from_frozen_identity(cls, value: object, *, resolver):
+        from tools.factors.formula_identity import require_frozen_factor
+
+        frozen = require_frozen_factor(value)
+        hydrated = resolver(frozen)
+        if not isinstance(hydrated, dict) or not isinstance(
+            hydrated.get("expr"), FactorExpr,
+        ):
+            raise ValueError("Factor resolver must return an expression")
+        return cls(
+            hydrated["expr"],
+            family=hydrated.get("family"),
+            frozen_identity=frozen,
+        )
 
     # 运行时动态属性（calc 后设置）
     name: str
@@ -144,22 +161,36 @@ class Factor(UniqueNameObject, FactorExpr):
                 family: Optional[FactorFamily] = None,
                 factor_ref: Optional[str] = None,
                 owner_ref: Optional[str] = None,
+                frozen_identity: Optional[dict] = None,
                 *args, **kwargs):
         if expr.param_deps:
             raise ValueError(f"Factor 表达式不能包含未解析的参数引用：{expr.param_deps}")
+        if frozen_identity is not None:
+            from tools.factors.formula_identity import require_frozen_factor
+            frozen_identity = require_frozen_factor(frozen_identity)
+            if factor_ref not in {None, "", frozen_identity["ref"]}:
+                raise ValueError("factor_ref conflicts with frozen identity")
+            factor_ref = frozen_identity["ref"]
+            alias = frozen_identity["alias"]
+            owner_ref = frozen_identity["owner_ref"]
         core_alias = alias or cls.__name__
         selected_owner = str(owner_ref or cls._get_user_prefix(family) or "public")
         if factor_ref:
             name = str(factor_ref)
         elif selected_owner:
-            name = f"runtime-factor:{selected_owner}:{core_alias}"
+            name = (
+                f"runtime-factor:{selected_owner}:{core_alias}:"
+                f"{expr.semantic_fingerprint()}"
+            )
         else:
-            name = f"runtime-factor:{core_alias}"
+            name = f"runtime-factor:{core_alias}:{expr.semantic_fingerprint()}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
 
         # 去重由 UniqueNameObject.__new__ 按 name 完成
-        instance = UniqueNameObject.__new__(cls, name=name, alias=alias)
+        instance = UniqueNameObject.__new__(
+            cls, name=name, alias=alias, frozen_identity=frozen_identity,
+        )
 
         if not hasattr(instance, '_initialized'):
             instance._expr = expr

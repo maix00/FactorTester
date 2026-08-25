@@ -12,8 +12,8 @@ from tools.cli.release.local_profile import LocalProfileStore
 from ..authoring.declared_links import DeclaredReportReference
 from .cycle_authority import validate_cycle_reference
 from .entry_requirements import validate_entry_requirement_reference
-from .factor_git import validate_factor_reference
-from .factor_set_git import validate_factor_set_reference
+from .factor_formula import validate_factor_reference
+from .factor_set_workspace import validate_factor_set_reference
 from .profile_revisions import ProfileRevisionStore
 
 _PRODUCT_KINDS = {"product", "contract", "continuous_contract"}
@@ -35,7 +35,7 @@ def validate_declared_reference(
             else validate_factor_reference
         )
         data = validator(kind=kind, target_ref=target_ref, roots=_factor_roots(scope))
-        if data.get("object_kind") == "factor-set":
+        if data.get("object_class") == "FactorSet":
             data = {
                 key: value for key, value in data.items()
                 if key not in {"member_refs", "related_references", "descriptor"}

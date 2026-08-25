@@ -229,8 +229,7 @@ def register_factor_selection_base(
             "candidate_field": "factor_candidates",
             # 模块内单选为空时回退到页面共享的 factor。
             "shared_page_field": "factor",
-            "id_keys": ("alias", "name", "factor_alias"),
-            "label_keys": ("alias", "name", "label"),
+            **factor_identity_serialization(),
         },
     ))
 
@@ -263,7 +262,6 @@ def register_factor_selections_base(
             "candidate_field": "factor_candidates",
             # 多选为空时回退到候选列表本身：先本地 candidate_field，再其页面全局候选
             "fallback": "candidates",
-            "id_keys": ("alias", "name", "factor_alias"),
-            "label_keys": ("alias", "name", "label"),
+            **factor_identity_serialization(),
         },
     ))

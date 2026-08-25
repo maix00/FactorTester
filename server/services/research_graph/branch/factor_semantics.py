@@ -16,17 +16,13 @@ from server.services.research_graph.research_cycle.factor_semantics_evidence imp
     project_factor_semantics_evidence,
 )
 from server.services.research_graph.versions import load_graph_from_conn
+from tools.cli.factor_subject_refs import factor_subject_kind
 from tools.data.sqlite.db import connect_sqlite
-from tools.cli.factor_subject_refs import (
-    frozen_factor_family,
-    factor_subject_kind,
-)
-
 
 SERVER_ACTION = "bind_factor_semantics"
 REQUEST_FIELD = "factor_semantics_request"
 _SERVER_GUARDS = (
-    "factor_revision_manifests_bound",
+    "frozen_factor_formulas_bound",
     "selected_factor_semantics_resolved",
 )
 
@@ -75,7 +71,7 @@ def prepare_transition(
     return {
         "expected": expected,
         "guard_facts": {
-            "factor_revision_manifests_bound": True,
+            "frozen_factor_formulas_bound": True,
             "selected_factor_semantics_resolved": resolved,
         },
         "envelope": envelope,
@@ -182,17 +178,14 @@ def _transition_factor_subject_refs(
 def _validate_subject_matches_checkpoint(
     checkpoint: dict[str, Any], refs: set[str],
 ) -> None:
-    expected_families = {
-        frozen_factor_family(str(scope.get("factor_ref") or ""))
+    expected_refs = {
+        str(scope.get("factor_ref") or "").strip()
         for collection in ("claims", "obligations")
         for item in checkpoint.get(collection) or []
         for scope in [item.get("scope") if isinstance(item, dict) else None]
         if isinstance(scope, dict) and scope.get("factor_ref")
     }
-    observed_families = {
-        frozen_factor_family(value) for value in refs
-    }
-    if expected_families and not observed_families.issubset(expected_families):
+    if expected_refs and not refs.issubset(expected_refs):
         raise ValueError(
             "frozen factor subjects do not match the accepted research subject"
         )

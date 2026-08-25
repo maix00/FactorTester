@@ -140,9 +140,7 @@ def _compact_execution_projections(
             continue
         for canonical, duplicate in (
             ("factor_owner_ref", "owner_ref"),
-            ("factor_family_ref", "family_ref"),
             ("factor_params", "params"),
-            ("factor_git_commit", "git_commit"),
         ):
             if canonical in factor and factor.get(duplicate) == factor[canonical]:
                 factor.pop(duplicate, None)

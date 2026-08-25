@@ -3,17 +3,25 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 global.window = {};
-const factor = {
-  factor_alias: "ROC", factor_ref: "factor:v1:roc", family_ref: "family:v1:roc",
-};
-const secondFactor = {
-  factor_alias: "Momentum", factor_ref: "factor:v1:momentum", family_ref: "family:v1:momentum",
-};
+function frozenFactor(digest, alias, family) {
+  return {
+    schema_version: 2, ref: `factor:v2:${digest.repeat(43)}`, alias,
+    owner_ref: "profile:maxa",
+    identity: {
+      family_ref: `factor-family:v2:${digest.toUpperCase().repeat(43)}`,
+      family_alias: family,
+      family_formula_fingerprint: digest.repeat(64),
+      self_formula_fingerprint: digest.repeat(64), params: {},
+    },
+  };
+}
+const factor = frozenFactor("a", "ROC", "MmRateOfChg");
+const secondFactor = frozenFactor("b", "Momentum", "Momentum");
 const configurationGroup = {
   config_group_id: "icg-day-roc",
   batch_id: "icb-day-roc",
   name: "日盘 ROC",
-  factor_ref: factor.factor_ref,
+  factor_ref: factor.ref,
   product_scope_ref: "product-group:persisted",
   entry_delay_bars: 0,
   horizon: {sampling: "scale_aware"},
@@ -23,7 +31,7 @@ const configurationGroup = {
 };
 global.FTTestFactors = {
   selectedFactor: state => state.noOuterFactor ? null : factor,
-  selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
+  selectedFamily: () => ({alias: "MmRateOfChg", ref: factor.identity.family_ref}),
 };
 global.FTTestProducts = {
   synchronize() {}, groupID: group => group.group_ref || group.id,
@@ -41,11 +49,14 @@ global.FTTestConfigurationCompiler = {
   executionSettings: (_manifest, values) => structuredClone(values),
   sanitizeExecutionPayload: (_manifest, payload) => structuredClone(payload),
   factorSubjects: factors => (factors || []).map(item => ({
-    alias: item.factor_alias || item.alias,
-    factor_ref: item.factor_ref,
+    alias: item.alias,
+    factor_ref: item.ref,
   })),
 };
 global.FTTestRunFields = {selection: () => [{name: "ic_statistics_data"}]};
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/catalog/factor-model.js", "utf8",
+), {filename: "factor-model.js"});
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/workbench/ic-configuration.js", "utf8",
 ), {filename: "ic-configuration.js"});
@@ -72,7 +83,7 @@ const state = {
   }], analysis: {configuration_groups: [configurationGroup]},
   selectedICConfigurationGroupIDs: [configurationGroup.config_group_id],
   settingsMountedTabs: ["factor", "delay"],
-  factorRef: factor.factor_ref, groupRef: "day", groupRefs: ["day"],
+  factorRef: factor.ref, groupRef: "day", groupRefs: ["day"],
   outputCapabilities: [], outputRequests: [],
   transientFactorSources: [{
     factor_id: "InlineFactor", path: "inline/InlineFactor.py",
@@ -85,8 +96,8 @@ assert.deepEqual(
   window.FTTestConfiguration.executionFactors({
     ...state,
     values: {...state.values, factor_selections: []},
-  }).map(item => item.factor_ref),
-  [factor.factor_ref],
+  }).map(item => item.ref),
+  [factor.ref],
   "grouped IC execution must use the group's frozen factor, not the legacy global selection",
 );
 const context = {t: value => value, api: async (path, options) => {
@@ -102,8 +113,8 @@ const context = {t: value => value, api: async (path, options) => {
   );
   const temporary = requests[0].body.payload.shared.temporary_objects;
   assert.deepEqual(
-    requests[0].body.payload.shared.factors.map(item => item.factor_ref),
-    [factor.factor_ref],
+    requests[0].body.payload.shared.factors.map(item => item.ref),
+    [factor.ref],
     "workspace subjects must contain only the registered IC factor selection",
   );
   const icAnalysis = requests[0].body.payload.analyses.ic;
@@ -120,11 +131,11 @@ const context = {t: value => value, api: async (path, options) => {
   assert.equal(icAnalysis.paths, undefined);
   assert.equal(icAnalysis.settings, undefined);
   assert.deepEqual(
-    requests[0].body.payload.ui.ic.settings.factor_selections.map(item => item.factor_ref),
-    [factor.factor_ref],
+    requests[0].body.payload.ui.ic.settings.factor_selections.map(item => item.ref),
+    [factor.ref],
     "authoring settings must persist the registered selection field",
   );
-  assert.equal(temporary.factors[0].factor_ref, factor.factor_ref);
+  assert.equal(temporary.factors[0].ref, factor.ref);
   assert.equal(temporary.product_groups[0].id, "inline-product-group:session");
   assert.equal(temporary.categories[0].id, "inline-category:session");
   assert.equal(temporary.factor_sources[0].factor_id, "InlineFactor");
@@ -135,7 +146,7 @@ const context = {t: value => value, api: async (path, options) => {
     analysis: {
       groups: [{
         id: "strategy-1",
-        factor_candidate_refs: ["factor:v1:roc"],
+        factor_candidate_refs: [factor.ref],
         product_path_selection_id: "product-group:persisted",
         product_path_selection: {
           product_path_selection_id: "product-group:persisted",

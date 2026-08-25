@@ -31,7 +31,9 @@
   }
 
   function subjectRefs(item) {
-    if (item.kind === "factor") return [item.value.factor_ref].filter(Boolean);
+    if (item.kind === "factor") {
+      return [item.value.ref || item.value.factor_ref].filter(Boolean);
+    }
     return [item.value.target_ref, item.value.set_ref].filter(Boolean);
   }
 
@@ -99,20 +101,24 @@
 
   function sourceMetadata(value) {
     const item = value || {};
+    const frozen = frozenFactorIdentity(item);
+    if (frozen) return {
+      factor_owner_ref: frozen.ownerRef,
+      factor_params: frozen.params,
+      family_formula_fingerprint: frozen.familyFormulaFingerprint,
+      self_formula_fingerprint: frozen.selfFormulaFingerprint,
+    };
     const owner = item.factor_owner_ref || item.owner_ref
       || item.owner_username || item.profile_id || "";
-    const family = item.factor_family_ref || item.family_ref
-      || item.factor_family_alias || item.family || "";
     const params = item.factor_params ?? item.params ?? [];
     const result = {
       factor_owner_ref: owner,
-      factor_family_ref: family,
       factor_params: params,
     };
-    const commit = item.factor_git_commit || item.git_commit || "";
-    // An absent commit means the current/latest family source.  Do not write
-    // an empty marker: presence of this field is the historical-source bit.
-    if (commit) result.factor_git_commit = commit;
+    for (const key of ["family_formula_fingerprint", "self_formula_fingerprint"]) {
+      const fingerprint = String(item[key] || "").trim();
+      if (fingerprint) result[key] = fingerprint;
+    }
     return result;
   }
 
@@ -142,18 +148,6 @@
     return values;
   }
 
-  function decodeBase64URL(value) {
-    const padded = String(value || "").replace(/-/g, "+").replace(/_/g, "/")
-      .padEnd(Math.ceil(String(value || "").length / 4) * 4, "=");
-    const bytes = Uint8Array.from(atob(padded), character => character.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  }
-
-  function ownerRef(scope) {
-    const match = /^([a-z][a-z0-9_]*)-(.+)$/i.exec(scope);
-    return match ? `${match[1]}:${match[2]}` : scope;
-  }
-
   function aliasParams(alias) {
     return String(alias || "").split("|").slice(1).map(part => {
       const separator = part.indexOf(":");
@@ -165,28 +159,53 @@
     }).filter(item => item.alias);
   }
 
-  function decodeFrozenFactorRef(targetRef) {
-    const parts = String(targetRef || "").split(":");
-    if (parts.length !== 7 || parts[0] !== "factor" || parts[1] !== "v1") return null;
-    try {
-      const alias = decodeBase64URL(parts[4]);
-      return {
-        factorRef: targetRef,
-        alias,
-        family: alias.split("|", 1)[0],
-        ownerRef: ownerRef(parts[2]),
-        gitCommit: parts[5],
-        gitBlob: parts[6],
-        relativePath: decodeBase64URL(parts[3]),
-        params: aliasParams(alias),
-      };
-    } catch (_) {
-      return null;
-    }
+  function frozenFactorIdentity(value) {
+    const item = value && typeof value === "object" ? value : {};
+    const identity = item.identity && typeof item.identity === "object"
+      ? item.identity : null;
+    if (item.schema_version !== 2 || !identity) return null;
+    const factorRef = String(item.ref || "").trim();
+    const alias = String(item.alias || "").trim();
+    const family = String(identity.family_alias || "").trim();
+    const ownerRef = String(item.owner_ref || "").trim();
+    const familyFormulaFingerprint = String(
+      identity.family_formula_fingerprint || "",
+    ).trim();
+    const selfFormulaFingerprint = String(
+      identity.self_formula_fingerprint || "",
+    ).trim();
+    if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(factorRef)
+        || !alias || !family || !ownerRef
+        || !/^[0-9a-f]{64}$/.test(familyFormulaFingerprint)
+        || !/^[0-9a-f]{64}$/.test(selfFormulaFingerprint)) return null;
+    const record = {
+      schema_version: 2,
+      ref: factorRef,
+      alias,
+      owner_ref: ownerRef,
+      identity: structuredClone(identity),
+    };
+    return {
+      factorRef, alias, family, ownerRef,
+      familyFormulaFingerprint, selfFormulaFingerprint,
+      record,
+      params: identity.params || {},
+    };
+  }
+
+  function objectChoice(value) {
+    const item = value && typeof value === "object" ? value : {};
+    const ref = String(item.ref || "").trim();
+    const alias = String(item.alias || "").trim();
+    if (item.schema_version !== 2 || !ref || !alias
+        || !item.identity || typeof item.identity !== "object") return null;
+    const frozen = frozenFactorIdentity(item);
+    return frozen ? {value: ref, label: alias, record: frozen.record} : null;
   }
 
   window.FTFactorModel = Object.freeze({
-    decodeFrozenFactorRef,
+    frozenFactorIdentity,
+    objectChoice,
     description,
     factorExpression,
     sourceMetadata,

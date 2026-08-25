@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from tools.factors.formula_identity import require_frozen_factor
+
 
 def _factor_source_alias(alias: str, data: dict) -> str:
     """Restore the source owner for a frozen concrete factor alias.
@@ -31,16 +33,12 @@ def _factor_source_alias(alias: str, data: dict) -> str:
     if item is None:
         return alias
 
-    family_alias = str(
-        item.get("factor_family_alias")
-        or item.get("factor_family_ref")
-        or item.get("family_ref")
-        or alias.split("|", 1)[0]
-        or ""
-    ).strip()
-    owner_ref = str(
-        item.get("factor_owner_ref") or item.get("owner_ref") or ""
-    ).strip()
+    try:
+        frozen = require_frozen_factor(item)
+    except (TypeError, ValueError):
+        return alias
+    family_alias = str(frozen["identity"]["family_alias"]).strip()
+    owner_ref = str(frozen["owner_ref"]).strip()
     if not family_alias or not owner_ref or ":" in family_alias:
         return alias
     family_ref = f"{owner_ref}:{family_alias}"
@@ -92,14 +90,18 @@ def resolve_factor_ref(
     factor = page_factors.get(wanted)
     if factor is not None:
         return factor
-    descriptor = next((
-        item for item in data.get("factors") or ()
-        if isinstance(item, Mapping)
-        and str(item.get("factor_ref") or item.get("target_ref") or "").strip() == wanted
-    ), None)
+    descriptor = None
+    for item in data.get("factors") or ():
+        try:
+            frozen = require_frozen_factor(item)
+        except (TypeError, ValueError):
+            continue
+        if frozen["ref"] == wanted:
+            descriptor = frozen
+            break
     if descriptor is None:
         raise ValueError(f"未找到因子引用 {wanted}")
-    alias = str(descriptor.get("alias") or descriptor.get("factor_alias") or "").strip()
+    alias = str(descriptor["alias"]).strip()
     if not alias:
         raise ValueError(f"冻结因子描述缺少显示别名: {wanted}")
     return resolve_factor(

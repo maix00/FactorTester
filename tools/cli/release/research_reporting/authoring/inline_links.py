@@ -10,23 +10,20 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
+from tools.factors.factor_set_identity import require_factor_set_reference
+from tools.factors.formula_identity import (
+    require_factor_family_reference,
+    require_factor_reference,
+)
+
 from ...report_link_kinds import REPORT_LINK_KINDS
 from .reference_target_paths import (
     validate_product_object_target,
     validate_product_series_target,
 )
 
-
 INLINE_LINK_KINDS = REPORT_LINK_KINDS
 _REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
-_VERSIONED_FACTOR_REFERENCE = re.compile(
-    r"^(factor|factor-family|factor-set):v1:"
-    r"[A-Za-z0-9._-]+:"
-    r"[A-Za-z0-9_-]+:"
-    r"[A-Za-z0-9_-]+:"
-    r"[0-9a-f]{40,64}:"
-    r"[0-9a-f]{40,64}$"
-)
 _PROFILE_REVISION_REFERENCE = re.compile(
     r"^profile-revision:v1:[a-z0-9][a-z0-9._-]{0,63}:"
     r"sha256:[0-9a-f]{64}$"
@@ -127,12 +124,14 @@ def _validate_domain_reference(
     *, kind: str, target_ref: str, field: str,
 ) -> None:
     if kind == "factor":
-        match = _VERSIONED_FACTOR_REFERENCE.fullmatch(target_ref)
-        if match is None or match.group(1) not in {
-            "factor", "factor-family", "factor-set",
-        }:
+        validators = (
+            require_factor_reference,
+            require_factor_family_reference,
+            require_factor_set_reference,
+        )
+        if not any(_accepts(validator, target_ref) for validator in validators):
             raise ValueError(
-                f"{field} factor reference must identify one committed source version"
+                f"{field} factor reference must identify one frozen formula"
             )
     elif kind in {"product", "contract"}:
         try:
@@ -160,6 +159,14 @@ def _validate_domain_reference(
 def _validate_label(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
         raise ValueError("typed report reference label is invalid")
+
+
+def _accepts(validator, value: str) -> bool:
+    try:
+        validator(value)
+    except ValueError:
+        return False
+    return True
     if any(character in value for character in "\n\r"):
         raise ValueError("typed report reference label is invalid")
 

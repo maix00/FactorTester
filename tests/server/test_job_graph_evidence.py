@@ -23,6 +23,8 @@ from server.services.research_graph.research_cycle.replay import (
 from server.services.research_run_schema import ensure_schema
 from tests.server.data_contract_fixtures import checkpoint, initialize
 from tools.data.sqlite.db import connect_sqlite
+from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 PLAN_HASH = "3" * 64
@@ -30,34 +32,43 @@ RUN_SPEC = {"prehashed": True}
 RUN_SPEC_HASH = hashlib.sha256(
     orjson.dumps(RUN_SPEC, option=orjson.OPT_SORT_KEYS)
 ).hexdigest()
+EVIDENCE_FACTOR = freeze_factor_identity(
+    owner_ref="public",
+    family_alias="SgCPS",
+    factor_alias="SgCPS|P:[CA]|N:20d|$F:1m",
+    family_formula_fingerprint="8" * 64,
+    self_formula_fingerprint="9" * 64,
+    params={"P": "[CA]", "N": "20d", "$F": "1m"},
+)
 
 
-def test_multi_factor_job_pairs_each_alias_with_its_own_manifest() -> None:
+def test_multi_factor_job_preserves_each_frozen_formula_identity() -> None:
     aliases = ["F|N:10d", "F|N:20d"]
     hashes = ["1" * 64, "2" * 64]
-    spec = {
-        "factor_selections": [{"alias": alias} for alias in aliases],
-        "factor_revision_manifests": [
-            {
-                "factor_alias_hash": hashlib.sha256(alias.encode()).hexdigest(),
-                "resolved_factor_expr_hash": revision,
-            }
-            for alias, revision in zip(aliases, hashes, strict=True)
-        ],
-    }
-
-    assert _job_factor_refs(spec) == [
-        f"factor-expr:{alias}@sha256:{revision}"
+    factors = [
+        freeze_factor_identity(
+            owner_ref="public",
+            family_alias="F",
+            factor_alias=alias,
+            family_formula_fingerprint="a" * 64,
+            self_formula_fingerprint=revision,
+            params={"N": alias.split(":", 1)[1]},
+        )
         for alias, revision in zip(aliases, hashes, strict=True)
     ]
+    spec = {"configuration": {"shared": {"factors": factors}}}
+
+    assert _job_factor_refs(spec) == sorted(item["ref"] for item in factors)
 
 
 def test_job_preserves_exact_frozen_factor_set_subject() -> None:
-    target = (
-        "factor-set:v1:profile-maxa:cGF0aA:aWQ:"
-        + "a" * 40 + ":" + "b" * 40
+    manifest = freeze_factor_set_identity(
+        owner_ref="public", set_id="one", alias="one",
+        members=[EVIDENCE_FACTOR],
     )
-    assert _job_factor_refs({"factor_set_refs": [target]}) == [target]
+    assert _job_factor_refs({"factor_set_refs": [manifest["ref"]]}) == [
+        manifest["ref"],
+    ]
 
 
 def _graph() -> dict:
@@ -212,12 +223,7 @@ def _prepare(path, *, run_branch: str = "branch-1") -> JobRepository:
                     "Product/Futures/CNFutures/_products/AP.CZC",
                 ],
             },
-            "factor_selections": [{
-                "alias": "SgCPS|P:[CA]|N:20d|$F:1m",
-            }],
-            "factor_revision_manifests": [{
-                "resolved_factor_expr_hash": "9" * 64,
-            }],
+            "configuration": {"shared": {"factors": [EVIDENCE_FACTOR]}},
             "settings": {
                 "start_date": "2025-01-02",
                 "end_date": "2025-02-14",
@@ -320,7 +326,7 @@ def test_backtest_edge_binds_trusted_job_evidence(tmp_path, monkeypatch) -> None
         "product:SI.GFE",
     ]
     assert canonical["applicability"]["factor_refs"] == [
-        "factor-expr:SgCPS|P:[CA]|N:20d|$F:1m@sha256:" + "9" * 64,
+        EVIDENCE_FACTOR["ref"],
     ]
     assert canonical["applicability"]["time_window"] == {
         "start": "2025-01-02",

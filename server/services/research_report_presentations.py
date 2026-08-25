@@ -7,7 +7,6 @@ from typing import Any
 
 import orjson
 
-
 _ANALYSIS_ZH = {
     "ic": "截面 IC",
     "backtest": "回测",
@@ -134,9 +133,7 @@ def strict_process_batch_candidate_key(
             (sample_identity or {}).get("sample_hash") or ""
         ),
         "configuration": configuration,
-        "factor_revision_manifests": shared.get(
-            "factor_revision_manifests"
-        ) or [],
+        "factors": shared.get("factors") or [],
     }
     return hashlib.sha256(orjson.dumps(
         payload, option=orjson.OPT_SORT_KEYS,
@@ -146,11 +143,11 @@ def strict_process_batch_candidate_key(
 def _factor_families(run_spec: dict[str, Any]) -> list[str]:
     shared = ((run_spec.get("configuration") or {}).get("shared") or {})
     result: list[str] = []
-    for item in shared.get("factor_revision_manifests") or []:
+    for item in shared.get("factors") or []:
         if not isinstance(item, dict):
             continue
-        ref = str(item.get("factor_family_ref") or "")
-        alias = ref.split(":")[-1]
+        identity = item.get("identity") or {}
+        alias = str(identity.get("family_alias") or "")
         if alias and alias not in result:
             result.append(alias)
     for analysis in _selected_analysis_configs(run_spec):

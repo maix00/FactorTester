@@ -10,7 +10,7 @@ import click
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.references.factor_git import (
+from tools.cli.release.research_reporting.references.workspace_factor_reference import (
     freeze_factor_reference,
 )
 

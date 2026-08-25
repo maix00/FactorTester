@@ -38,6 +38,27 @@ def test_structural_key_changes_when_formula_changes():
     assert _expr()._structural_key() != _expr(seed=2)._structural_key()
 
 
+def test_semantic_fingerprint_is_stable_and_normalizes_symmetric_operands():
+    left = ColumnRef(DataColumn.CLOSE)
+    right = ColumnRef(DataColumn.OPEN)
+
+    assert (left + right).semantic_fingerprint() == (
+        right + left
+    ).semantic_fingerprint()
+    assert (left - right).semantic_fingerprint() != (
+        right - left
+    ).semantic_fingerprint()
+
+
+def test_semantic_fingerprint_distinguishes_array_shape_and_dtype():
+    left = ConstExpr(np.array([1, 2], dtype=np.int16))
+    reshaped = ConstExpr(np.array([[1, 2]], dtype=np.int16))
+    recast = ConstExpr(np.array([1, 2], dtype=np.int32))
+
+    assert left.semantic_fingerprint() != reshaped.semantic_fingerprint()
+    assert left.semantic_fingerprint() != recast.semantic_fingerprint()
+
+
 def test_tree_repr_shows_nested_branch_connectors():
     expr = CompositeExpr(
         "mul",
