@@ -89,22 +89,31 @@
 
   async function authoritativePage(state, params = {}, viewOverride = "") {
     const pageParams = P.itemPageParams(params);
+    const view = viewOverride || state.itemView || "results";
     const query = new URLSearchParams({
       profile_id: state.profileID,
       conversation_id: state.conversationID,
       limit: String(pageParams.limit),
-      view: viewOverride || state.itemView || "results",
+      view,
       order: pageParams.order,
     });
-    if (pageParams.after) query.set("after", pageParams.after);
+    const after = P.chronologicalPageAfter(
+      state.itemPage, pageParams.after, view,
+    );
+    if (after) query.set("after", after);
     const payload = await state.context.api(
       `/api/client/profile-agent/conversation-items?${query}`,
     );
+    const order = payload?.order || pageParams.order;
     return {
-      items: Array.isArray(payload?.items) ? payload.items : [],
+      // Provider pagination stays newest-first for efficient latest-page
+      // reads.  ChatKit renders the returned page in the order it receives,
+      // so its public adapter must always receive an oldest-to-newest page.
+      items: P.chronologicalItems(payload?.items, order),
       has_more: Boolean(payload?.has_more),
       after: payload?.after || null,
-      order: payload?.order || pageParams.order,
+      order,
+      view,
     };
   }
 
@@ -114,7 +123,7 @@
     // omits the final assistant answer.
     const page = await authoritativePage(state, {}, "results");
     const history = page.items;
-    const newestFirst = page.order === "asc" ? [...history].reverse() : history;
+    const newestFirst = [...history].reverse();
     const assistant = newestFirst.find(item => {
       const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
       return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type)

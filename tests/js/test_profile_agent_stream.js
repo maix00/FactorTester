@@ -190,6 +190,11 @@ const state = {
   assert.match(output, /assistant_message\.content_part\.done/);
   assert.match(output, /thread\.item\.replaced/);
   assert.equal(global.__observedRuntime, true);
+  assert.deepEqual(
+    state.items.map(item => item.id),
+    ['history-assistant-old', 'history-assistant-1'],
+    'authoritative history is stored oldest-first after reconciliation',
+  );
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=results')
   )));

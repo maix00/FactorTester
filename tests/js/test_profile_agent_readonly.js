@@ -74,9 +74,12 @@ const context = {
     }
     const process = url.includes("view=process");
     return {
-      items: process ? processItems : items,
+      // The Provider/Profile directory keeps the default desc page efficient:
+      // newest item first.  The ChatKit adapter must expose it chronologically.
+      items: process ? processItems : [...items].reverse(),
       has_more: true,
       after: "older-turn-cursor",
+      order: "desc",
     };
   },
 };
@@ -116,14 +119,14 @@ const adapter = window.FTProfileChatKit.create(
     params: {
       thread_id: conversation.conversation_id,
       limit: 7,
-      after: "current-cursor",
+      after: "item-2",
     },
   })).json();
   assert.deepEqual(page.data.map(item => item.id), ["item-1", "item-2"]);
   assert.equal(page.has_more, true);
   assert.equal(page.after, "older-turn-cursor");
   assert.ok(requestedURLs.some(url => (
-    url.includes("limit=7") && url.includes("after=current-cursor")
+    url.includes("limit=7") && url.includes("after=item-1")
     && url.includes("view=results") && url.includes("order=desc")
   )));
 

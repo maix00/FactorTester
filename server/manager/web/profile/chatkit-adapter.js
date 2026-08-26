@@ -39,6 +39,11 @@
     const params = body?.params && typeof body.params === "object"
       ? body.params : (body || {});
 
+    function rememberPage(state, page) {
+      state.items = page.items;
+      state.itemPage = page;
+    }
+
     if (operation === "threads.list") {
       const conversations = await C.loadConversations(profileState);
       return P.jsonResponse(P.page(conversations.map(conversation => {
@@ -54,6 +59,7 @@
         profileState, C.conversationIDFrom(params), !profileState.historyOnly,
       );
       const page = await S.authoritativePage(state, {}, itemView);
+      rememberPage(state, page);
       return P.jsonResponse(P.threadObject(
         {...state, items: page.items, itemPage: page},
         {locked: profileState.historyOnly},
@@ -64,6 +70,7 @@
         profileState, C.conversationIDFrom(params), false,
       );
       const page = await S.authoritativePage(state, params, itemView);
+      rememberPage(state, page);
       return P.jsonResponse(P.page(page.items, page));
     }
     if (operation === "threads.update") {
@@ -243,19 +250,30 @@
   async function readOnlyItems(
     profileState, itemView, conversationID, params = {},
   ) {
+    const pageParams = P.itemPageParams(params);
+    const pageKey = `${itemView}:${conversationID}`;
+    const previous = profileState.itemPages.get(pageKey);
+    const after = P.chronologicalPageAfter(
+      previous, pageParams.after, itemView,
+    );
+    const requestParams = {...pageParams, after};
     const payload = await readOnlyJSON(
       profileState,
       itemView,
       "/api/client/profile-directory/conversation-items",
       conversationID,
-      P.itemPageParams(params),
+      requestParams,
     );
-    return {
-      items: Array.isArray(payload.items) ? payload.items : [],
+    const order = payload.order || pageParams.order;
+    const page = {
+      items: P.chronologicalItems(payload.items, order),
       has_more: Boolean(payload.has_more),
       after: payload.after || null,
-      order: payload.order || P.itemPageParams(params).order,
+      order,
+      view: itemView,
     };
+    profileState.itemPages.set(pageKey, page);
+    return page;
   }
 
   async function fetchReadOnlyAdapter(profileState, itemView, input, init = {}) {
@@ -325,6 +343,7 @@
         onConversationChange: options.onConversationChange,
         conversationCache: null,
         conversationCacheAt: 0,
+        itemPages: new Map(),
       };
       let defaultView = "results";
       const fetchForView = value => {
