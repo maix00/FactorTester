@@ -260,6 +260,30 @@ def test_manager_authorized_direct_child_source_is_executable(
     assert source["canonical_family_ref"] == "child:UserAlpha"
 
 
+def test_manager_authorized_principal_ref_is_executable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
+    monkeypatch.setattr(
+        factor_registry,
+        "load_factor_source",
+        lambda username, factor_id: (
+            _FACTOR_SOURCE
+            if (username, factor_id) == ("principal:child", "UserAlpha")
+            else None
+        ),
+    )
+
+    with factor_registry.authorized_factor_source_owners([
+        "parent", "principal:parent", "child", "principal:child",
+    ]):
+        source = factor_registry.resolve_factor_family_source(
+            "principal:child:UserAlpha", username="parent",
+        )
+
+    assert source["canonical_family_ref"] == "principal:child:UserAlpha"
+
+
 def test_manager_authorization_does_not_include_unlisted_owner(monkeypatch) -> None:
     monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
 
