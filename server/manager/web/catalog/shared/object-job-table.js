@@ -1,17 +1,42 @@
 (() => {
   const PAGE_SIZE = 20;
 
+  function subjectRef(object) {
+    const kind = String(object.objectKind || "");
+    if (kind === "factor") {
+      const fingerprint = String(object.selfFormulaFingerprint || "").trim();
+      return fingerprint ? `factor-formula:v1:${fingerprint}` : "";
+    }
+    if (kind === "family") {
+      const fingerprint = String(object.familyFormulaFingerprint || "").trim();
+      return fingerprint ? `factor-family-formula:v1:${fingerprint}` : "";
+    }
+    return String(object.objectRef || "").trim();
+  }
+
   function create(context, object = {}) {
     const mount = document.createElement("section");
     mount.className = "factor-object-job-table";
     let loaded = false;
     let loading = false;
     let page = 1;
+    let requestVersion = 0;
 
     async function load(requestedPage = page) {
       if (loading) return;
       loading = true;
+      const version = ++requestVersion;
       page = Math.max(1, Number(requestedPage) || 1);
+      const objectRef = subjectRef(object);
+      if (!objectRef) {
+        mount.replaceChildren(FTUI.empty(
+          context.t("暂无相关测试任务"),
+          context.t("此对象尚未登记公式指纹"),
+        ));
+        loaded = true;
+        loading = false;
+        return;
+      }
       mount.replaceChildren(FTUI.loading(context.t("正在读取相关测试任务…")));
       try {
         const query = new URLSearchParams({
@@ -20,15 +45,19 @@
           page: String(page),
           limit: String(PAGE_SIZE),
           object_kind: String(object.objectKind || ""),
-          object_ref: String(object.objectRef || ""),
+          object_ref: objectRef,
         });
-        if (object.ownerRef) query.set("object_owner_ref", object.ownerRef);
-        if (object.alias) query.set("object_alias", object.alias);
         const payload = await context.api(`/api/jobs?${query.toString()}`);
-        if (context.isRouteCurrent?.() === false) return;
+        // This component can remain mounted in a cached left-navigation tab.
+        // Its page-level route token is stale after the tab is restored, but
+        // the component itself is still live and must be allowed to finish
+        // lazy loading.  Only a newer request from this instance supersedes
+        // the response.
+        if (version !== requestVersion) return;
         render(payload || {});
         loaded = true;
       } catch (error) {
+        if (version !== requestVersion) return;
         const failure = FTUI.empty(
           context.t("相关测试任务读取失败"),
           error.message || context.t("请稍后重试"),
@@ -38,7 +67,7 @@
         ));
         mount.replaceChildren(failure);
       } finally {
-        loading = false;
+        if (version === requestVersion) loading = false;
       }
     }
 
@@ -91,7 +120,12 @@
     return Object.freeze({
       mount,
       load: () => loaded ? Promise.resolve() : load(1),
-      refresh: () => { loaded = false; return load(page); },
+      refresh: () => {
+        loaded = false;
+        requestVersion += 1;
+        loading = false;
+        return load(page);
+      },
     });
   }
 

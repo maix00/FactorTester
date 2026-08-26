@@ -520,6 +520,8 @@
     const jobs = window.FTFactorObjectJobs.create(context, {
       objectKind: jobObjectKind,
       objectRef: jobObjectRef,
+      familyFormulaFingerprint: loaded.family_formula_fingerprint || "",
+      selfFormulaFingerprint: loaded.self_formula_fingerprint || "",
       ownerRef: loaded.factor_owner_ref || loaded.owner_ref || "",
       alias: familyMode ? familyAlias(loaded) : "",
     });
