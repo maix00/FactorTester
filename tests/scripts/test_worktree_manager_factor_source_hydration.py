@@ -181,7 +181,9 @@ def test_run_context_passes_direct_child_source_authority() -> None:
     )
 
     assert result == {"prepared": True}
-    assert calls[0]["authorized_factor_owners"] == ["parent", "child"]
+    assert calls[0]["authorized_factor_owners"] == [
+        "parent", "principal:parent", "child", "principal:child",
+    ]
 
 
 def test_hydration_repairs_missing_provider_metadata_from_control_store() -> None:

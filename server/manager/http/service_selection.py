@@ -576,12 +576,17 @@ class ServiceSelectionRoutesMixin:
                 store = LocalAccountStore()
             except (ImportError, OSError, RuntimeError, TypeError, ValueError):
                 store = None
-        owners = [str(principal or "").strip()]
-        owners.extend(
+        usernames = [str(principal or "").strip()]
+        usernames.extend(
             str(item.get("username") or "").strip()
             for item in direct_subordinate_accounts(principal, store)
         )
-        return [owner for owner in dict.fromkeys(owners) if owner]
+        owners: list[str] = []
+        for username in dict.fromkeys(usernames):
+            if not username:
+                continue
+            owners.extend([username, f"principal:{username}"])
+        return owners
 
     def _capable_service_route(
         self,
