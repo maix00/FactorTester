@@ -614,7 +614,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         *,
         limit: int = 10,
         after: str = "",
-        view: str = "results",
+        view: str = "timeline",
         order: str = "desc",
     ) -> dict[str, Any]:
         route = self._profile_route(source_server_id)
@@ -631,7 +631,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 "conversation_id": conversation_id,
                 "limit": max(1, min(int(limit), 50)),
                 "after": str(after or ""),
-                "view": str(view or "results"),
+                "view": str(view or "timeline"),
                 "order": str(order or "desc"),
             },
         )
@@ -641,7 +641,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
             "has_more": bool(response.get("has_more")),
             "after": response.get("after"),
             "turn_count": int(response.get("turn_count") or 0),
-            "view": str(response.get("view") or view or "results"),
+            "view": str(response.get("view") or view or "timeline"),
             "order": str(response.get("order") or order or "desc"),
         }
 

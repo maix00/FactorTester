@@ -87,9 +87,9 @@
     return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
   }
 
-  async function authoritativePage(state, params = {}, viewOverride = "") {
+  async function authoritativePage(state, params = {}) {
     const pageParams = P.itemPageParams(params);
-    const view = viewOverride || state.itemView || "results";
+    const view = "timeline";
     const query = new URLSearchParams({
       profile_id: state.profileID,
       conversation_id: state.conversationID,
@@ -118,10 +118,9 @@
   }
 
   async function reconcileThreadHistory(state, controller) {
-    // A turn always reconciles against the result projection.  The user may
-    // currently be browsing the lazy process projection, which deliberately
-    // omits the final assistant answer.
-    const page = await authoritativePage(state, {}, "results");
+    // Reconcile the complete durable timeline so final answers never replace
+    // the public progress, workflow, and tool records emitted during a turn.
+    const page = await authoritativePage(state);
     const history = page.items;
     const newestFirst = [...history].reverse();
     const assistant = newestFirst.find(item => {

@@ -114,6 +114,13 @@ const state = {
               content: [{type: 'output_text', text: '第一句\n第二句', annotations: []}],
             },
             {
+              id: 'command-1',
+              type: 'workflow',
+              workflow: {type: 'custom', tasks: [{
+                type: 'custom', title: 'command', status_indicator: 'complete',
+              }]},
+            },
+            {
               id: 'history-assistant-old',
               type: 'assistant_message',
               content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
@@ -164,7 +171,6 @@ const state = {
   active: false,
   threadPromise: null,
   restored: true,
-  itemView: 'process',
   runtimeObserver: payload => {
     if (payload.method === 'thread/tokenUsage/updated') {
       global.__observedRuntime = true;
@@ -192,11 +198,11 @@ const state = {
   assert.equal(global.__observedRuntime, true);
   assert.deepEqual(
     state.items.map(item => item.id),
-    ['history-assistant-old', 'history-assistant-1'],
+    ['history-assistant-old', 'command-1', 'history-assistant-1'],
     'authoritative history is stored oldest-first after reconciliation',
   );
   assert.ok(requestedURLs.some(url => (
-    url.includes('conversation-items') && url.includes('view=results')
+    url.includes('conversation-items') && url.includes('view=timeline')
   )));
   assert.deepEqual(
     rpcMethods.slice(0, 2),

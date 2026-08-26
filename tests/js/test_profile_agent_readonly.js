@@ -48,7 +48,7 @@ const items = [
     created_at: "2026-08-20T00:00:02+00:00",
   },
 ];
-const processItems = [{
+const processItem = {
   id: "process-1",
   type: "workflow",
   thread_id: conversation.conversation_id,
@@ -63,7 +63,7 @@ const processItems = [{
     }],
   },
   created_at: "2026-08-20T00:00:01+00:00",
-}];
+};
 const requestedURLs = [];
 
 const context = {
@@ -72,11 +72,10 @@ const context = {
     if (!url.includes("conversation-items")) {
       return {conversations: [conversation]};
     }
-    const process = url.includes("view=process");
     return {
       // The Provider/Profile directory keeps the default desc page efficient:
       // newest item first.  The ChatKit adapter must expose it chronologically.
-      items: process ? processItems : [...items].reverse(),
+      items: [items[1], processItem, items[0]],
       has_more: true,
       after: "older-turn-cursor",
       order: "desc",
@@ -105,14 +104,14 @@ const adapter = window.FTProfileChatKit.create(
   assert.equal(thread.status.type, "locked");
   assert.deepEqual(
     thread.items.data.map(item => item.id),
-    ["item-1", "item-2"],
+    ["item-1", "process-1", "item-2"],
   );
   assert.equal(
-    thread.items.data[1].content[0].text,
+    thread.items.data[2].content[0].text,
     "这是历史回答\n\n```bash\nfactortester products list\n```",
   );
-  assert.deepEqual(thread.items.data[1].content[0].annotations, []);
-  assert.equal(thread.items.data[1].annotations, undefined);
+  assert.deepEqual(thread.items.data[2].content[0].annotations, []);
+  assert.equal(thread.items.data[2].annotations, undefined);
 
   const page = await (await get({
     type: "items.list",
@@ -122,36 +121,17 @@ const adapter = window.FTProfileChatKit.create(
       after: "item-2",
     },
   })).json();
-  assert.deepEqual(page.data.map(item => item.id), ["item-1", "item-2"]);
+  assert.deepEqual(
+    page.data.map(item => item.id),
+    ["item-1", "process-1", "item-2"],
+  );
   assert.equal(page.has_more, true);
   assert.equal(page.after, "older-turn-cursor");
   assert.ok(requestedURLs.some(url => (
     url.includes("limit=7") && url.includes("after=item-1")
-    && url.includes("view=results") && url.includes("order=desc")
+    && url.includes("view=timeline") && url.includes("order=desc")
   )));
-
-  const getProcess = async body => adapter.fetchForView("process")(
-    "/api/client/profile-agent/chatkit",
-    {method: "POST", body: JSON.stringify(body)},
-  );
-  const processPage = await (await getProcess({
-    type: "items.list",
-    params: {thread_id: conversation.conversation_id, limit: 5},
-  })).json();
-  assert.deepEqual(processPage.data.map(item => item.id), ["process-1"]);
-  assert.ok(requestedURLs.some(url => (
-    url.includes("limit=5") && url.includes("view=process")
-  )));
-  const resultsAgain = await (await get({
-    type: "items.list",
-    params: {thread_id: conversation.conversation_id, limit: 5},
-  })).json();
-  assert.deepEqual(
-    resultsAgain.data.map(item => item.id),
-    ["item-1", "item-2"],
-    "the process projection must not mutate the mounted results projection",
-  );
-  console.log("PASS: read-only Profile Agent history uses valid locked threads and stable item ids");
+  console.log("PASS: read-only Profile Agent history retains the complete timeline");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;
