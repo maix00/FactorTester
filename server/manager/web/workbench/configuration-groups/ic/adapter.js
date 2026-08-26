@@ -26,6 +26,13 @@
     if (editor?.groupID && !FTICConfigurationGroupModel.find(state, editor.groupID)) {
       state.icConfigurationGroupEditor = null;
     }
+    if (state.icConfigurationGroupEditor && editorCatalogsNeedLoad(state)) {
+      loadEditorCatalogs(
+        context, state,
+        {kind: state.icConfigurationGroupEditor.groupID ? "edit" : "create"},
+        refresh,
+      );
+    }
     return FTConfigurationGroupSurface.render({
       context, state, refresh, adapters, initialize,
       title: "配置组设置",
@@ -129,6 +136,12 @@
       state.icConfigurationGroupCatalogError = error.message || String(error);
       refresh();
     });
+  }
+
+  function editorCatalogsNeedLoad(state) {
+    return ["factors", "products"].some(key => (
+      state.lazy?.[key]?.status === "idle"
+    ));
   }
 
   function hydrateSummaryProducts(context, state, refresh) {
