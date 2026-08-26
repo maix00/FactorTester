@@ -65,6 +65,8 @@
         state.sourceMode = values[0] || "family";
         state.inspection = state.sourceMode === "source"
           ? state.inspection : null;
+        state.validationError = "";
+        state.validationMessage = "";
         redraw();
       },
     });
@@ -87,6 +89,8 @@
         state.sourceVersions = null;
         state.sourceVersionError = "";
         state.inspection = null;
+        state.validationError = "";
+        state.validationMessage = "";
         redraw();
       },
     });
@@ -166,6 +170,18 @@
     ]).filter(([alias]) => alias));
   }
 
+  function normalizedInspection(value) {
+    const item = value || {};
+    const factor = item.factor || item.frozen_factor || {};
+    return {
+      ...item,
+      math_expr: item.math_expr || item.resolved_math_expr
+        || factor.math_expr || factor.formula || factor.latex || "",
+      description: item.description || item.desc
+        || factor.description || factor.desc || "",
+    };
+  }
+
   function parameters(state) {
     if (state.familyMode) return [];
     if (state.sourceMode === "source") return state.inspection?.params || [];
@@ -191,30 +207,41 @@
       if (!file) return;
       state.sourceCode = await file.text();
       state.inspection = null;
+      state.validationError = "";
+      state.validationMessage = "";
       redraw();
     });
     return input;
   }
 
-  async function inspect(context, state, redraw, status) {
+  async function inspect(context, state, redraw) {
     if (!state.sourceCode.trim()) {
-      status.textContent = context.t("源码不能为空");
+      state.validationError = context.t("源码不能为空");
+      state.validationMessage = state.validationError;
+      redraw();
       return;
     }
     state.inspecting = true;
-    status.textContent = context.t("正在校验源码并解析参数…");
+    state.validationError = "";
+    state.validationMessage = context.t("正在校验源码并解析参数…");
+    redraw();
     try {
       const value = await context.api("/custom-factors/api/validate", {
         method: "POST",
-        body: JSON.stringify({source_code: state.sourceCode}),
+        body: JSON.stringify({
+          source_code: state.sourceCode,
+          params: state.parameterValues || {},
+        }),
       });
       if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
-      state.inspection = value;
+      state.inspection = normalizedInspection(value);
+      state.validationError = "";
+      state.validationMessage = context.t("源码有效，参数已解析");
       state.parameterValues = defaults(value.params || []);
-      status.textContent = context.t("源码有效，参数已解析");
     } catch (error) {
       state.inspection = null;
-      status.textContent = error.message || context.t("因子源码无法通过检查");
+      state.validationError = error.message || context.t("因子源码无法通过检查");
+      state.validationMessage = state.validationError;
     } finally {
       state.inspecting = false;
       redraw();
@@ -234,7 +261,7 @@
       actions.append(upload);
     }
     const validate = FTUI.actionButton(context.t("校验源码"), () => {
-      void inspect(context, state, redraw, status);
+      void inspect(context, state, redraw);
     }, {variant: "secondary"});
     actions.append(validate);
     const editor = FTUI.codeEditor(state.sourceCode, {
@@ -246,12 +273,17 @@
     editor.textarea.addEventListener("input", () => {
       state.sourceCode = editor.value();
       state.inspection = null;
+      state.validationError = "";
+      state.validationMessage = "";
     });
     const status = document.createElement("small");
-    status.className = "form-error factor-editor-source-status";
-    if (state.inspection) {
-      status.className = "factor-editor-source-status";
-      status.textContent = context.t("源码已通过校验");
+    status.className = state.validationError
+      ? "form-error factor-editor-source-status"
+      : "factor-editor-source-status";
+    status.textContent = state.validationMessage || (state.inspection
+      ? context.t("源码已通过校验") : "");
+    if (state.inspecting) {
+      status.textContent = context.t("正在校验源码并解析参数…");
     }
     if (!options.fileInput) root.append(file);
     root.append(actions, field(context.t("Python 源码"), editor.element), status);
@@ -305,19 +337,25 @@
 
   function normalizeSaved(value, state, context) {
     const saved = value || {};
+    const frozen = saved.factor || saved.frozen_factor || {};
     const family = state.family || state.inspection || {};
-    const alias = saved.factor_alias || saved.name || saved.id
+    const alias = saved.factor_alias || saved.alias || frozen.alias
+      || saved.name || saved.id
       || state.inspection?.factor_name || familyAlias(family);
-    const params = saved.params || saved.factor_params || state.parameterValues || {};
-    const owner = saved.factor_owner_ref || saved.owner_ref
+    const params = saved.params || saved.factor_params
+      || frozen.identity?.params || state.parameterValues || {};
+    const owner = saved.factor_owner_ref || saved.owner_ref || frozen.owner_ref
       || saved.owner_username || context.session?.username || "";
     const familyAliasValue = saved.factor_family_alias || saved.family
-      || familyAlias(family) || alias;
+      || frozen.identity?.family_alias || familyAlias(family) || alias;
+    const ref = saved.ref || frozen.ref || saved.factor_ref || saved.id || alias;
     return {
       ...saved,
+      ...frozen,
       id: saved.id || alias,
       name: saved.name || alias,
-      factor_ref: saved.factor_ref || saved.id || alias,
+      ref,
+      factor_ref: saved.factor_ref || frozen.ref || ref,
       factor_alias: alias,
       factor_owner_ref: owner,
       factor_params: params,
@@ -336,9 +374,30 @@
     if (!alias) throw new Error(context.t("请先选择因子家族"));
     if (state.sourceVersionError) throw new Error(state.sourceVersionError);
     if (context.testObjectTemporary) {
+      const owner = String(
+        state.family?.owner_username || state.family?.owner_ref
+        || context.session?.username || "",
+      ).trim();
+      const isPublic = state.family?.factor_kind === "public"
+        || state.family?.source === "public"
+        || owner === "public" || owner === "__public_jobs__";
+      const value = await context.api("/custom-factors/api/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          resolve_factor: true,
+          factor_family_alias: alias,
+          owner_username: owner,
+          is_public: isPublic,
+          params: state.parameterValues || {},
+        }),
+      });
+      if (!value.valid || !value.factor) {
+        throw new Error(value.error || context.t("因子解析失败"));
+      }
       return {
+        ...value.factor,
         factor_family_alias: alias,
-        factor_alias: alias,
+        factor_alias: value.factor.alias,
         params: state.parameterValues || {},
         parameter_definitions: state.family?.params || [],
         source_kind: "factor_library",
@@ -382,10 +441,21 @@
     if (context.testObjectTemporary) {
       const alias = state.inspection?.factor_name || state.factorID
         || readInput(fields.name);
+      const value = await context.api("/custom-factors/api/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          source_code: state.sourceCode,
+          params: state.parameterValues || {},
+        }),
+      });
+      if (!value.valid || !value.factor) {
+        throw new Error(value.error || context.t("因子解析失败"));
+      }
       return {
         ...payload,
+        ...value.factor,
         name: alias,
-        factor_alias: alias,
+        factor_alias: value.factor.alias || alias,
         params: state.parameterValues || {},
         parameter_definitions: state.inspection?.params || [],
         source_kind: "transient",
@@ -410,16 +480,26 @@
     });
     const saved = value.factor || value;
     const alias = saved.name || saved.id || state.factorID;
+    let registered = null;
     if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
-      await context.api(
+      const libraryValue = await context.api(
         `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
         {
           method: "PUT",
           body: JSON.stringify({params_list: [state.parameterValues]}),
         },
       );
+      registered = libraryValue.factors?.[0] || null;
     }
-    return saved;
+    // Creating source-backed factors has two server-side steps: register the
+    // family source, then register the selected parameter row.  The second
+    // response is the only one that contains the frozen Factor v2 identity
+    // required by candidate pickers and detail routes.  Return that complete
+    // row so the caller never tries to resolve the family class name as a
+    // factor reference.
+    return registered
+      ? {...saved, ...registered, source_code: saved.source_code || payload.source_code}
+      : saved;
   }
 
   async function render(context, data, targetRef, mode, options = {}) {
@@ -485,6 +565,8 @@
         ]),
       ),
       loaded,
+      validationError: "",
+      validationMessage: "",
       sourceVersionFingerprint: loaded.family_formula_fingerprint || "",
       sourceVersions: null,
       sourceVersionError: "",
@@ -534,10 +616,17 @@
         const version = sourceVersionPicker(context, state, redraw);
         if (version) topMount.append(version);
       }
+      // The validated formula is part of the editor header, above the detail
+      // tabs.  Keep this mount separate from the source panel so validation
+      // does not move the formula into the source tab or make it disappear
+      // when the tab content is rebuilt.
       const formulaSource = state.inspection || state.family || state.loaded;
       topMount.append(window.FTFactorDetailShared.summary(context, {
         ...(formulaSource || {}),
-        math_expr: formulaSource?.math_expr || formulaSource?.expression || "",
+        math_expr: formulaSource?.math_expr
+          || formulaSource?.expression
+          || formulaSource?.resolved_math_expr || "",
+        description: formulaSource?.description || formulaSource?.desc || "",
       }));
       sourceMount.replaceChildren();
       if (state.familyMode) {
@@ -638,6 +727,7 @@
             name, chineseName, description, category,
           });
         const result = normalizeSaved(saved, state, context);
+        window.FTFactorCatalog?.upsertFactor?.(result);
         if (context.testObjectTemporary && result.source_code && context.testState) {
           window.FTTestInputState?.putFactor?.(context.testState, {
             factor_id: result.factor_alias,

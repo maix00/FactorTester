@@ -1,6 +1,12 @@
 (() => {
   function expression(value) {
-    return window.FTFactorModel?.factorExpression?.(value) || "";
+    const modelValue = window.FTFactorModel?.factorExpression?.(value) || "";
+    if (modelValue) return modelValue;
+    for (const key of ["math_expr", "resolved_math_expr", "formula", "latex", "factor_expr", "expression"]) {
+      const candidate = value?.[key];
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    return "";
   }
 
   function summary(context, value) {
@@ -16,14 +22,19 @@
       copy.textContent = description;
       root.append(copy);
     }
-    if (expressionValue && window.katex) {
+    if (expressionValue) {
       const heading = document.createElement("h3");
       heading.textContent = context.t("FactorExpr 公式");
       const formula = document.createElement("div");
       formula.className = "factor-family-formula display-math";
-      window.katex.render(expressionValue, formula, {
-        displayMode: true, throwOnError: false,
-      });
+      if (window.katex) {
+        window.katex.render(expressionValue, formula, {
+          displayMode: true, throwOnError: false,
+        });
+      } else {
+        formula.textContent = expressionValue;
+        formula.classList.add("factor-family-formula-raw");
+      }
       root.append(heading, formula);
     }
     return root;

@@ -2,13 +2,19 @@
   const model = () => window.FTFactorModel;
 
   function factorAlias(value) {
-    return value?.schema_version === 2
-      ? String(value.alias || "") : String(value?.factor_alias || "");
+    return String(value?.factor_alias || value?.alias || "");
   }
 
   function factorRef(value) {
-    return value?.schema_version === 2
-      ? String(value.ref || "") : String(value?.factor_ref || "");
+    return String(value?.factor_ref || value?.ref || "");
+  }
+
+  function factorMatches(value, targetRef) {
+    const target = String(targetRef || "");
+    return String(value?.factor_ref || "") === target
+      || String(value?.ref || "") === target
+      || String(value?.factor_alias || "") === target
+      || String(value?.alias || "") === target;
   }
 
   async function factorDetail(
@@ -20,9 +26,7 @@
     let factor = (context.testObjectTemporary || context.testObjectSnapshot)
       && context.testObjectInitialValue
       ? context.testObjectInitialValue
-      : data.factors.find(item => (
-        item.factor_ref === targetRef || item.factor_alias === targetRef
-      ));
+      : data.factors.find(item => factorMatches(item, targetRef));
     if (!factor) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
     }

@@ -822,6 +822,16 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTTestFieldRow.create" in source
     assert "FTFactorDetailShared.parameterEditor" in source
     assert "factor-editor-source-metadata" in source
+    source_controls = source.split("function sourceControls", 1)[1].split(
+        "function sourceMetadata", 1,
+    )[0]
+    assert "FTFactorDetailShared.summary" not in source_controls
+    assert "const formulaSource = state.inspection || state.family || state.loaded" in source
+    assert "topMount.append(window.FTFactorDetailShared.summary(context, {" in source
+    assert "function normalizedInspection" in source
+    assert "state.validationMessage" in source
+    assert "state.validationError" in source
+    assert 'params: state.parameterValues || {}' in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
     assert "factor-editor-upload-action" not in source
@@ -868,6 +878,8 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     )[0]
 
     assert "function pageClass" in shared
+    assert "resolved_math_expr" in shared
+    assert "factor-family-formula-raw" in shared
     assert "FTFactorDetailShared.pageClass" in factor_view
     assert "FTFactorDetailShared.pageClass" in family_view
     assert "sourceVersionHistory" not in factor_view
@@ -2188,6 +2200,8 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'context.t("上传因子源码")' in editor
     assert 'FTUI.actionButton(context.t("校验源码")' in editor
     assert "FTUI.codeEditor(state.sourceCode" in editor
+    assert "registered = libraryValue.factors?.[0] || null" in editor
+    assert "frozen Factor v2 identity" in editor
     assert "factor-editor-upload-action" not in editor
     assert 'FTUI.actionButton(context.t("取消")' in editor
     assert "FTUI.actionButton(" in object_form

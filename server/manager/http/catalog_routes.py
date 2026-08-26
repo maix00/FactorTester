@@ -339,6 +339,7 @@ class CatalogRoutesMixin:
         if factor_service is None:
             factor_service = self.state.client_state
         query = parse_qs(parsed.query, keep_blank_values=True)
+        refresh = str(query.get("refresh", [""])[0] or "") == "1"
         try:
             if parsed.path == "/api/catalog/factors":
                 if visitor is not None:
@@ -369,9 +370,16 @@ class CatalogRoutesMixin:
                     )
                     scopes = {"public": public_factor_library()}
                     if callable(scope_reader):
-                        scopes.update(scope_reader(principal))
+                        scopes.update(
+                            scope_reader(principal, refresh=refresh)
+                            if refresh else scope_reader(principal)
+                        )
                     else:
-                        scopes["mine"] = factor_service.factor_library(principal)
+                        scopes["mine"] = (
+                            factor_service.factor_library(
+                                principal, refresh=True,
+                            ) if refresh else factor_service.factor_library(principal)
+                        )
                     value = compose_factor_library_scopes(
                         scopes, principal=principal,
                     )
@@ -379,7 +387,11 @@ class CatalogRoutesMixin:
                     return True
                 json_response(self, {
                     "success": True,
-                    **factor_service.factor_library(principal),
+                    **(
+                        factor_service.factor_library(
+                            principal, refresh=True,
+                        ) if refresh else factor_service.factor_library(principal)
+                    ),
                 })
                 return True
             if parsed.path == "/api/catalog/factor-sets":

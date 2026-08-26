@@ -60,6 +60,16 @@ async function main() {
   ]);
   assert.strictEqual(data.factors[0].factor_ref, "factor:one");
 
+  const savedFactor = {
+    schema_version: 2,
+    ref: "factor:v2:saved",
+    alias: "SavedInline|N:5d",
+    owner_ref: "alice",
+    identity: {params: {N: "5d"}},
+  };
+  const upserted = window.FTFactorCatalog.upsertFactor(savedFactor);
+  assert.ok(upserted.factors.some(item => item.ref === savedFactor.ref));
+
   calls.length = 0;
   await Promise.all([
     window.FTFactorCatalog.load(context, {sets: true}),

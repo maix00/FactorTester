@@ -31,6 +31,7 @@ from server.modules.shared.price_data_helpers import to_epoch_ms
 from server.modules.shared.price_services import reflect_public_fields
 from server.services.api_response import api_fail, api_ok, route_guard
 from server.services.factor_registry import get_factor_family_instance
+from server.services.run_input_inspection import family_template_latex
 from tools.data.types import finest_index
 
 
@@ -67,9 +68,14 @@ def factor_list():
         factor_freq = f.freq
         factor_freq_str2 = factor_freq.name if factor_freq is not None else ''
         try:
-            latex = f._source_expr.to_latex()
+            resolved_latex = f._source_expr.to_latex()
         except Exception:
-            latex = None
+            resolved_latex = None
+        # The catalog formula describes the configurable family.  A Factor
+        # instance has already resolved ParamRef nodes to its selected values;
+        # exposing that expression here made a default ``25d`` look like the
+        # definition and caused duration values to be rendered as Python text.
+        latex = family_template_latex(f.family) or resolved_latex
         try:
             backend_fields = reflect_public_fields(f._source_expr)
         except Exception:
