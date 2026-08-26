@@ -59,7 +59,7 @@
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), !profileState.historyOnly,
       );
-      const page = await S.authoritativePage(state);
+      const page = await S.stableAuthoritativePage(state);
       rememberPage(state, page);
       return P.jsonResponse(P.threadObject(
         {...state, items: page.items, itemPage: page},
@@ -70,7 +70,9 @@
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
-      const page = await S.authoritativePage(state, params);
+      const page = params.after
+        ? await S.authoritativePage(state, params)
+        : await S.stableAuthoritativePage(state);
       rememberPage(state, page);
       return P.jsonResponse(P.page(page.items, page));
     }

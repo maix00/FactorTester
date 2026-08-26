@@ -69,6 +69,18 @@ global.EventSource = class {
         lastEventId: String(index + 1),
         data: JSON.stringify(payload),
       }));
+      // Codex may persist and emit the final item after turn/completed.  The
+      // browser stream must remain attached during authoritative reconciliation.
+      setTimeout(() => this.onmessage?.({
+        lastEventId: String(events.length + 1),
+        data: JSON.stringify({
+          method: 'item/completed',
+          params: {
+            turnId: 'turn-1',
+            item: {id: 'late-final', type: 'agentMessage', text: '第一句\n第二句'},
+          },
+        }),
+      }), 5);
     });
   }
 
