@@ -123,6 +123,7 @@ AUTHOR_SDK_MODULES = (
         + "    ColumnRef as ColumnRef, expr_max as expr_max, expr_min as expr_min,\n"
         + "    where as where,\n"
         + "    term_spread as term_spread, term_ratio as term_ratio, term_slope as term_slope,\n"
+        + "    term_carry_annualized as term_carry_annualized,\n"
         + "    SMALL_VAL as SMALL_VAL,\n"
         + ")\n"
         + "from tools.factors.Parameters import (\n"
@@ -159,7 +160,10 @@ AUTHOR_SDK_MODULES = (
         "tools/factors/expr/__init__.pyi",
         content=_HEADER
         + "from tools.factors.expr.core import FactorExpr as FactorExpr\n"
-        + "from tools.factors.FactorExpr import where as where\n",
+        + "from tools.factors.FactorExpr import (\n"
+        + "    where as where,\n"
+        + "    term_carry_annualized as term_carry_annualized,\n"
+        + ")\n",
     ),
     AuthorSdkModule(
         "tools/factors/expr/core.pyi",
@@ -216,6 +220,7 @@ AUTHOR_SDK_MODULES = (
         + "def term_spread(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
         + "def term_ratio(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
         + "def term_slope(*args: Any, **kwargs: Any) -> FactorExpr: ...\n\n"
+        + "def term_carry_annualized(*args: Any, **kwargs: Any) -> FactorExpr: ...\n\n"
         + "OPEN: ColumnRef\nHIGH: ColumnRef\nLOW: ColumnRef\nCLOSE: ColumnRef\n"
         + "VOLUME: ColumnRef\nTURNOVER: ColumnRef\nOPEN_INTEREST: ColumnRef\n"
         + "VWAP: ColumnRef\nSETTLE: ColumnRef\nOPEN_RAW: ColumnRef\nHIGH_RAW: ColumnRef\n"
