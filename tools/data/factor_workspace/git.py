@@ -9,14 +9,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from scripts.data_dir import get_feat_root
+from tools.data.factor_workspace import storage as factor_workspace_storage
 from tools.data.sqlite.factor_source_workspace_settings import (
     FIXED_DOWNLOAD_BRANCH,
     FIXED_UPLOAD_BRANCH,
     load_factor_source_workspace_settings,
     save_factor_source_workspace_settings,
 )
-from tools.data.factor_workspace import storage as factor_workspace_storage
-from scripts.data_dir import get_feat_root
 
 
 def _workspace_root(username: str) -> str:
@@ -204,6 +204,7 @@ def _ensure_git_workspace(root: str, username: str) -> dict[str, Any]:
             subprocess.run(["git", "init", root], check=False, capture_output=True, text=True)
             subprocess.run(["git", "-C", root, "checkout", "-B", "main"], check=False, capture_output=True, text=True)
 
+    _ensure_git_commit_identity(root)
     repo_root = _git_repo_root(root) or root
     current_branch = _git_current_branch(root) or "main"
     branches = _git_branch_names(root)
@@ -223,6 +224,21 @@ def _ensure_git_workspace(root: str, username: str) -> dict[str, Any]:
         "git_force_sync_branch": FIXED_DOWNLOAD_BRANCH,
         "git_branches": branches,
     }
+
+
+def _ensure_git_commit_identity(root: str) -> None:
+    """Configure a local identity only when Git has no usable identity."""
+    defaults = {
+        "user.name": "FactorTester Workspace",
+        "user.email": "factor-workspace@localhost",
+    }
+    for key, value in defaults.items():
+        configured = _run_git(root, "config", "--get", key)
+        if configured.returncode == 0 and configured.stdout.strip():
+            continue
+        saved = _run_git(root, "config", "--local", key, value)
+        if saved.returncode != 0:
+            raise RuntimeError(f"cannot configure generated workspace {key}")
 
 
 def _resolve_workspace_branch(username: str, branch_mode: str) -> str:
