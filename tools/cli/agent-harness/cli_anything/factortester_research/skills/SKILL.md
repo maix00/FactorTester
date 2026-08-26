@@ -102,6 +102,23 @@ copy connection details into this research Skill.
 Use `--help` or `<group> --help` for stable command syntax. Use `--json` for
 machine consumption; parse structured output, never CLI prose.
 
+The server factor catalog uses the same business hierarchy and permission
+projection as Web and Swift. Inspect it explicitly instead of using the
+client-local offline catalog:
+
+```bash
+factortester custom_factors factor-library families --scope all --json
+factortester custom_factors factor-library factors --scope mine --json
+factortester custom_factors factor-library factor-sets --scope subordinates --json
+factortester custom_factors factor-library parameter-configs
+```
+
+`families`, `factors`, and `factor-sets` read the Manager-owned public, own,
+and direct-subordinate scopes. `parameter-configs` is only the older explicit
+parameter-configuration store. `factortester client catalog` remains a
+client-local/offline SQLite catalog and must not be used to infer that the
+server factor library is empty.
+
 ## Ownership and safety boundaries
 
 - Workspace is editable configuration; `ResearchRun` owns an immutable RunSpec;

@@ -267,8 +267,8 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
             }
 
     monkeypatch.setattr(
-        "tools.cli.release.profile_research_create.FactorTesterClient",
-        lambda session: FakeClient(),
+        "tools.cli.release.profile_research_create.client_from_config",
+        lambda: FakeClient(),
     )
     monkeypatch.setattr(client_research, "load_profile_root", lambda path: tmp_path)
     result = CliRunner().invoke(cli, [

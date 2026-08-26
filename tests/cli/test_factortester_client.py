@@ -337,6 +337,30 @@ def fake_server() -> Iterator[str]:
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
 
+    @app.get("/api/catalog/factors")
+    def factor_catalog():
+        return jsonify(
+            success=True,
+            schema_version=2,
+            family_scopes={
+                "mine": {
+                    "families": [{"factor_family_alias": "SgCCS"}],
+                    "factors": [{"factor_alias": "SgCCS|N:2m"}],
+                },
+            },
+        )
+
+    @app.get("/api/catalog/factor-sets")
+    def factor_sets():
+        assert request.args.get("query") == "momentum"
+        return jsonify(
+            success=True,
+            item_scopes={
+                "mine": [{"target_ref": "factor-set:momentum"}],
+                "subordinates": [],
+            },
+        )
+
     with running_server(app) as url:
         yield url
 
@@ -357,6 +381,12 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         source="LocalCNFuturesDAY1",
         as_of="2024-12-31",
     )["evidence_hash"] == "sha256:liquidity"
+    assert client.factor_catalog()["family_scopes"]["mine"]["families"][0][
+        "factor_family_alias"
+    ] == "SgCCS"
+    assert client.factor_set_catalog(query="momentum")["item_scopes"]["mine"][0][
+        "target_ref"
+    ] == "factor-set:momentum"
     assert client.submit_run(
         "workspace-1",
         1,

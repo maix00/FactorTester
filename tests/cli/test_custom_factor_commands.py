@@ -51,6 +51,127 @@ class _OwnedCatalogClient(_CatalogClient):
         }
 
 
+class _BusinessCatalogClient:
+    def factor_catalog(self):
+        return {
+            "schema_version": 2,
+            "principal": "GTHT@MaxJJW@1",
+            "family_scopes": {
+                "public": {
+                    "families": [{
+                        "family_ref": "family:public:MmTrend",
+                        "factor_family_alias": "MmTrend",
+                        "owner_alias": "公共因子库",
+                    }],
+                    "factors": [],
+                },
+                "mine": {
+                    "families": [{
+                        "family_ref": "family:mine:SgCCS",
+                        "factor_family_alias": "SgCCS",
+                        "owner_alias": "MaxJJW",
+                    }],
+                    "factors": [{
+                        "factor_ref": "factor:mine:SgCCS:1",
+                        "factor_alias": "SgCCS|N:3m|$F:1m|$Rev",
+                        "factor_family_alias": "SgCCS",
+                        "owner_alias": "MaxJJW",
+                    }],
+                },
+                "subordinates": {
+                    "families": [{
+                        "family_ref": "family:child:ChildFactor",
+                        "factor_family_alias": "ChildFactor",
+                        "owner_alias": "testB",
+                    }],
+                    "factors": [],
+                },
+            },
+        }
+
+    def factor_set_catalog(self, *, query=""):
+        return {
+            "schema_version": 1,
+            "item_scopes": {
+                "mine": [{
+                    "target_ref": "factor-set:mine:momentum",
+                    "title_zh": "动量集合",
+                    "owner_username": "GTHT@MaxJJW@1",
+                    "member_count": 2,
+                }],
+                "subordinates": [{
+                    "target_ref": "factor-set:child:one",
+                    "title_zh": "下级集合",
+                    "owner_username": "GTHT@testB@2",
+                    "member_count": 1,
+                }],
+            },
+            "query": query,
+        }
+
+
+def test_factor_library_families_uses_server_scopes(monkeypatch) -> None:
+    from tools.cli.modules.custom_factors import library_catalog
+
+    monkeypatch.setattr(
+        library_catalog, "client_from_config", lambda: _BusinessCatalogClient(),
+    )
+    result = CliRunner().invoke(cli, [
+        "custom_factors", "factor-library", "families",
+        "--scope", "subordinates", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["object_type"] == "factor_family"
+    assert payload["scope"] == "subordinates"
+    assert [item["factor_family_alias"] for item in payload["items"]] == [
+        "ChildFactor",
+    ]
+
+
+def test_factor_library_factors_and_sets_share_web_projection(monkeypatch) -> None:
+    from tools.cli.modules.custom_factors import library_catalog
+
+    monkeypatch.setattr(
+        library_catalog, "client_from_config", lambda: _BusinessCatalogClient(),
+    )
+    factors = CliRunner().invoke(cli, [
+        "custom_factors", "factor-library", "factors",
+        "--scope", "mine", "--json",
+    ])
+    sets = CliRunner().invoke(cli, [
+        "custom_factors", "factor-library", "factor-sets",
+        "--scope", "mine", "--query", "momentum", "--json",
+    ])
+
+    assert factors.exit_code == 0, factors.output
+    assert sets.exit_code == 0, sets.output
+    assert json.loads(factors.output)["items"][0]["factor_alias"].startswith(
+        "SgCCS|",
+    )
+    assert json.loads(sets.output)["items"][0]["title_zh"] == "动量集合"
+
+
+def test_legacy_parameter_listing_is_explicit(monkeypatch) -> None:
+    fake = type("ParameterClient", (), {
+        "factor_library_overview": lambda self, **_values: {"factors": []},
+    })()
+    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+
+    old = CliRunner().invoke(cli, [
+        "custom_factors", "factor-library", "list",
+    ])
+    explicit = CliRunner().invoke(cli, [
+        "custom_factors", "factor-library", "parameter-configs", "--json",
+    ])
+
+    assert old.exit_code != 0
+    assert "parameter-configs" in old.output
+    assert explicit.exit_code == 0
+    assert json.loads(explicit.output)["items"] == []
+
+
 def test_owner_qualified_describe_resolves_metadata_without_source(
     monkeypatch,
 ) -> None:

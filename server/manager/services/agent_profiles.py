@@ -32,7 +32,6 @@ from server.manager.storage.agent_provider_store import (
 from server.manager.storage.agent_conversation_store import AgentConversationStore
 from server.manager.storage.agent_skill_store import AgentSkillStore
 from server.manager.storage.profile_runtime_store import (
-    ProfileClaimConflict,
     ProfileRuntimeError,
     ProfileRuntimeStore,
 )
@@ -504,6 +503,7 @@ class AgentProfileService:
                 "token": str(agent_session.get("token") or "").strip(),
                 "profile_id": profile_id,
                 "claim_id": str(claim.get("claim_id") or "").strip(),
+                "principal": principal,
             }
             if not factor_tester_auth["token"]:
                 raise ProfileRuntimeError(

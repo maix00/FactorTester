@@ -387,6 +387,17 @@ class FactorLibraryClientMixin(ClientMixinBase):
             query=query or None,
         ))
 
+    def factor_catalog(self) -> dict[str, Any]:
+        """Read the Manager-owned factor catalog used by Web and Swift."""
+        return self._expect_success(self.session.get("/api/catalog/factors"))
+
+    def factor_set_catalog(self, *, query: str = "") -> dict[str, Any]:
+        """Read scoped immutable Factor Sets from the Manager catalog."""
+        params = {"query": query} if query else None
+        return self._expect_success(self.session.get(
+            "/api/catalog/factor-sets", query=params,
+        ))
+
     def factor_library_source_projection(
         self,
         owner_ref: str,
