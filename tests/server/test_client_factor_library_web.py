@@ -334,6 +334,17 @@ def test_factor_projection_preserves_formula_identity_per_factor() -> None:
     }, principal="alice")
 
     factor = payload["factors"][0]
+    assert factor["schema_version"] == 2
+    assert factor["ref"] == factor["factor_ref"]
+    assert factor["alias"] == factor["factor_alias"]
+    assert factor["owner_ref"] == "profile:alice"
+    assert factor["identity"] == {
+        "family_ref": factor["identity"]["family_ref"],
+        "family_alias": "Momentum",
+        "family_formula_fingerprint": "a" * 64,
+        "self_formula_fingerprint": "b" * 64,
+        "params": {"window": "20"},
+    }
     assert factor["factor_owner_ref"] == "profile:alice"
     assert factor["factor_params"] == factor["params"]
     assert factor["family_formula_fingerprint"] == "a" * 64
