@@ -43,9 +43,9 @@ def _root_option(function):
     )(function)
 
 
-@click.group("catalog")
+@click.group("catalog", hidden=True)
 def client_catalog() -> None:
-    """Manage the client-local product, factor and binding catalog."""
+    """Internal embedded storage bridge; not a business-object hierarchy."""
 
 
 @client_catalog.group("source")

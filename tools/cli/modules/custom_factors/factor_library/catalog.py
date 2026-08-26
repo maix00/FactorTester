@@ -1,4 +1,4 @@
-"""CLI presentation for the Manager-owned factor business catalog."""
+"""CLI presentation for the Manager-owned factor business library."""
 
 from __future__ import annotations
 

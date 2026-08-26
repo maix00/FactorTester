@@ -31,11 +31,12 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
 
     assert PACKAGED.read_text(encoding="utf-8") == canonical
-    assert "client catalog factor resolve" in canonical
-    assert "--owner-ref profile:maxa" in canonical
-    assert "--git-commit <commit>" in canonical
-    assert "--alias '<complete-factor-alias>'" in canonical
-    assert "returned `factor_ref` or `family_ref`" in canonical
+    assert "client profile factor-worktree reference" in canonical
+    assert "client catalog factor" not in canonical
+    assert "--source-file '<custom_factors-or-public_factors>/<family>.py'" in canonical
+    assert "--revision <commit>" in canonical
+    assert "--identity '<complete-factor-alias>'" in canonical
+    assert "Use the returned `target_ref`" in canonical
     assert "Do not fall back to an older commit" in canonical
     assert "factortester://factor/factor-family%3A" in canonical
     assert "factortester://factor_family/" not in canonical

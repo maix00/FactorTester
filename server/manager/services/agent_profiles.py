@@ -53,6 +53,9 @@ class AgentProfileService:
         agent_session_issuer: Callable[[str, str, str], dict[str, object]] | None = None,
         agent_session_revoker: Callable[[str], None] | None = None,
         manager_endpoint_provider: Callable[[], str] | None = None,
+        profile_factor_worktree_preparer: Callable[
+            [str, str, Path, Path], dict[str, Any]
+        ] | None = None,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
@@ -62,6 +65,9 @@ class AgentProfileService:
         self.agent_session_issuer = agent_session_issuer
         self.agent_session_revoker = agent_session_revoker
         self.manager_endpoint_provider = manager_endpoint_provider
+        self.profile_factor_worktree_preparer = (
+            profile_factor_worktree_preparer
+        )
         self.runtime_store = ProfileRuntimeStore(db_path)
         self.conversation_store = AgentConversationStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
@@ -484,6 +490,13 @@ class AgentProfileService:
             principal,
             profile_id,
         )
+        if self.profile_factor_worktree_preparer is not None:
+            self.profile_factor_worktree_preparer(
+                principal,
+                profile_id,
+                skill_runtime.workspace_root,
+                skill_runtime.factor_tester_client_root,
+            )
         factor_tester_auth: dict[str, object] = {}
         if self.agent_session_issuer is not None:
             endpoint = ""
