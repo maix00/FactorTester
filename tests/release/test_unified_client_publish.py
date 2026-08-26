@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from hashlib import sha256
+from pathlib import Path
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from scripts.release import publish
 from tools.cli.commands.client_release import client, operator_client
@@ -614,6 +614,7 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert result.exit_code == 0
     assert "--channel [stable|beta]" in result.output
     assert "--sparkle-generate-appcast" in result.output
+    assert "--server-ca-file" in result.output
     assert "--notary-profile" in result.output
     assert "--delta-only" in result.output
     assert "--from-clean-commit" in result.output
