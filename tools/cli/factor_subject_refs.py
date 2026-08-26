@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tools.factors.factor_set_identity import is_factor_set_reference
-from tools.factors.formula_identity import (
+from tools.cli.identities.factor_set import is_factor_set_reference
+from tools.cli.identities.factor import (
     is_factor_family_reference,
     is_factor_reference,
 )

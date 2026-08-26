@@ -25,11 +25,11 @@ def products(ctx: click.Context) -> None:
         click.echo("下一层: factortester products list")
         click.echo(
             "可用功能: factortester products info <产品>；"
-            "factortester products product-groups list|add|subjects"
+            "factortester products groups list|add|subjects"
         )
 
 
-@products.command("list")
+@products.command("modules", hidden=True)
 @friendly_errors
 def list_products_children() -> None:
     """List product module children."""
@@ -291,7 +291,7 @@ def product_capabilities(json_output: bool, compact_json: bool) -> None:
             click.echo(line)
 
 
-@products.group("product-groups", invoke_without_command=True)
+@products.group("groups", invoke_without_command=True)
 @click.pass_context
 @friendly_errors
 def product_groups(ctx: click.Context) -> None:
@@ -349,7 +349,7 @@ def product_group_subjects(ctx: click.Context) -> None:
     """Manage factors and factor sets associated with a product group."""
     if ctx.invoked_subcommand is None:
         click.echo(
-            "可用功能: factortester products product-groups subjects "
+            "可用功能: factortester products groups subjects "
             "list|add|remove"
         )
 

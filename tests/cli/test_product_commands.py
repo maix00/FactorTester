@@ -295,7 +295,7 @@ def test_product_group_subject_commands_use_one_canonical_cli(monkeypatch) -> No
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products", "product-groups", "subjects", "add",
+        "products", "groups", "subjects", "add",
         "product-group:pg-metals",
         "--factor-ref", "factor:sha256:factor-a",
         "--factor-set-ref", "factor-set:profile-alice:momentum",
@@ -319,7 +319,7 @@ def test_product_group_creation_freezes_profile_and_research_refs(
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products", "product-groups", "add",
+        "products", "groups", "add",
         "--name", "硅产业",
         "--path", "Products/Futures/CNFutures/_products/SI.GFE",
         "--profile-id", "maxa",

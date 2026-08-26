@@ -1,4 +1,4 @@
-"""Evidence preparation and doctor checks for ``research-graph node advance``."""
+"""Evidence preparation and doctor checks for ``research graphs node advance``."""
 
 from __future__ import annotations
 

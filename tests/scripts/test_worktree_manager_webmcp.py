@@ -35,8 +35,7 @@ def test_webmcp_capability_catalog_covers_public_cli_root_commands() -> None:
         "configure", "client", "login", "logout", "doctor", "factor-plan",
         "list", "protocol", "describe", "edit", "strategy-intent", "strategy",
         "margin-budget", "workspace", "external-factor", "run", "job",
-        "research", "agent-flow", "research-graph", "report",
-        "research-evidence", "profile-agent", "trial-plan", "products",
+        "research", "agents", "trial-plan", "products",
         "custom_factors", "factor-library",
     ):
         assert f'"{command}"' in source

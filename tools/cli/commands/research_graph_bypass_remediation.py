@@ -36,7 +36,7 @@ def bypass_remediation(
             "仍必须写入 obligation_requirement 特殊小节"
         ),
         "command_template": (
-            "factortester report add --profile <profile> "
+            "factortester research reports add --profile <profile> "
             "--work-package-id <work-package> --branch-id <branch> "
             f"--target-chapter-id {source_chapter_id} "
             "--component-id <component-id> --title <title> ..."

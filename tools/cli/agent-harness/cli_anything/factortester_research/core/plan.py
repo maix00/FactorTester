@@ -89,7 +89,7 @@ def build_factor_research_plan(
                 "最新数据只有在因子与计划冻结后未参与选择时才可作为 holdout。"
             ),
             "command": (
-                "factortester research-graph node info "
+                "factortester research graphs node info "
                 "<instance_id> <branch_id> --json"
             ),
             "agent_action": (

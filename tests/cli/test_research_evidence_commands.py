@@ -83,7 +83,7 @@ class _EvidenceLibrary:
 
 
 def test_research_evidence_help_exposes_fragment_workflow():
-    result = CliRunner().invoke(cli, ["research-evidence", "--help"])
+    result = CliRunner().invoke(cli, ["research", "evidence", "--help"])
     assert result.exit_code == 0, result.output
     assert all(
         name in result.output
@@ -95,7 +95,7 @@ def test_research_evidence_help_exposes_fragment_workflow():
 
 def test_exclude_help_uses_evidence_then_graph_scope_order():
     result = CliRunner().invoke(cli, [
-        "research-evidence", "exclude", "--help",
+        "research", "evidence", "exclude", "--help",
     ])
     assert result.exit_code == 0, result.output
     assert "EVIDENCE_REF INSTANCE_ID" in result.output
@@ -104,19 +104,19 @@ def test_exclude_help_uses_evidence_then_graph_scope_order():
 
 def test_guide_returns_machine_executable_next_action():
     result = CliRunner().invoke(cli, [
-        "research-evidence", "guide", "fragment", "--json",
+        "research", "evidence", "guide", "fragment", "--json",
     ])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["topic"] == "fragment"
-    assert payload["next_actions"][0]["argv"][:2] == [
-        "factortester", "research-evidence",
+    assert payload["next_actions"][0]["argv"][:3] == [
+        "factortester", "research", "evidence",
     ]
 
 
 def test_capture_guide_prefers_primary_sources_and_rejects_agent_reports():
     result = CliRunner().invoke(cli, [
-        "research-evidence", "guide", "capture", "--json",
+        "research", "evidence", "guide", "capture", "--json",
     ])
     assert result.exit_code == 0, result.output
     rules = "\n".join(json.loads(result.output)["rules"])
@@ -132,7 +132,7 @@ def test_search_sends_scope_before_facets(monkeypatch):
         research_evidence_query, "client_from_config", lambda: fake,
     )
     result = CliRunner().invoke(cli, [
-        "research-evidence", "search",
+        "research", "evidence", "search",
         "--product-ref", "product:SI.GFE",
         "--factor-ref", _FACTOR_REF,
         "--time-start", "2025-01-01",
@@ -158,7 +158,7 @@ def test_tag_propose_returns_existing_candidate_without_create_token(
         research_evidence_tags, "client_from_config", lambda: fake,
     )
     result = CliRunner().invoke(cli, [
-        "research-evidence", "tag", "propose",
+        "research", "evidence", "tag", "propose",
         "--title-zh", "日内证据",
         "--description-zh", "用于描述日内窗口的验证材料",
         "--profile-id", "maxa",
@@ -215,7 +215,7 @@ def test_exclude_reports_then_finalizes_and_refreshes_local_mirror(
         record_report,
     )
     result = CliRunner().invoke(cli, [
-        "research-evidence", "exclude",
+        "research", "evidence", "exclude",
         "evidence:one", "instance-1", "branch-1",
         "--profile-id", "maxa",
         "--agent-id", "research-maxa",

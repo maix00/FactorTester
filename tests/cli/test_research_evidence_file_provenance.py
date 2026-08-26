@@ -74,14 +74,14 @@ def test_capture_file_requires_reproducible_provenance(
     )
 
     missing = CliRunner().invoke(cli, [
-        "research-evidence", "source", "capture-file", str(source),
+        "research", "evidence", "source", "capture-file", str(source),
         "--profile-id", "maxa",
     ])
     assert missing.exit_code != 0
     assert "--provenance-file" in missing.output
 
     result = CliRunner().invoke(cli, [
-        "research-evidence", "source", "capture-file", str(source),
+        "research", "evidence", "source", "capture-file", str(source),
         "--profile-id", "maxa", "--provenance-file", str(provenance),
         "--json",
     ])
@@ -113,7 +113,7 @@ def test_capture_file_rejects_agent_authored_file_without_authority_path(
     )
 
     result = CliRunner().invoke(cli, [
-        "research-evidence", "source", "capture-file", str(source),
+        "research", "evidence", "source", "capture-file", str(source),
         "--profile-id", "maxa", "--provenance-file", str(provenance),
     ])
     assert result.exit_code != 0

@@ -77,7 +77,7 @@ def create(
         "next_actions": [{
             "action": "search_or_bind",
             "argv": [
-                "factortester", "research-evidence", "search",
+                "factortester", "research", "evidence", "search",
                 "--json",
             ],
         }],
@@ -314,7 +314,7 @@ def _change_lifecycle(
                 else "add_new_evidence_use_if_needed"
             ),
             "argv": [
-                "factortester", "research-graph", "obligation", "status",
+                "factortester", "research", "graphs", "obligation", "status",
                 instance_id, branch_id,
                 "--profile-id", profile_id,
                 "--agent-id", agent_id,
@@ -419,14 +419,14 @@ def _guide(topic: str) -> dict[str, Any]:
         ],
     }[topic]
     next_action = {
-        "overview": ["factortester", "research-evidence", "guide", "search", "--json"],
-        "search": ["factortester", "research-evidence", "search", "--json"],
-        "capture": ["factortester", "research-evidence", "source", "--help"],
-        "fragment": ["factortester", "research-evidence", "fragment", "add", "--help"],
-        "create": ["factortester", "research-evidence", "create", "--help"],
-        "tag": ["factortester", "research-evidence", "tag", "list", "--json"],
-        "bind": ["factortester", "research-graph", "obligation", "change", "--help"],
-        "exclude": ["factortester", "research-evidence", "exclude", "--help"],
+        "overview": ["factortester", "research", "evidence", "guide", "search", "--json"],
+        "search": ["factortester", "research", "evidence", "search", "--json"],
+        "capture": ["factortester", "research", "evidence", "source", "--help"],
+        "fragment": ["factortester", "research", "evidence", "fragment", "add", "--help"],
+        "create": ["factortester", "research", "evidence", "create", "--help"],
+        "tag": ["factortester", "research", "evidence", "tag", "list", "--json"],
+        "bind": ["factortester", "research", "graphs", "obligation", "change", "--help"],
+        "exclude": ["factortester", "research", "evidence", "exclude", "--help"],
     }[topic]
     return {
         "topic": topic,

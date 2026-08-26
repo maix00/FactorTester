@@ -40,26 +40,26 @@ for _name in (
     "guide", "create", "get", "search", "admit", "admit-graph", "exclude",
     "restore",
 ):
-    _leaf(evidence, _name, ["research-evidence", _name])
+    _leaf(evidence, _name, ["research", "evidence", _name])
 
 _source = _group(evidence, "source")
 for _name in (
     "capture-job", "capture-terminal", "capture-file", "capture-url",
 ):
-    _leaf(_source, _name, ["research-evidence", "source", _name])
+    _leaf(_source, _name, ["research", "evidence", "source", _name])
 
 _fragment = _group(evidence, "fragment")
 for _name in ("add", "list"):
-    _leaf(_fragment, _name, ["research-evidence", "fragment", _name])
+    _leaf(_fragment, _name, ["research", "evidence", "fragment", _name])
 
 _facet = _group(evidence, "facet")
-_leaf(_facet, "list", ["research-evidence", "facet", "list"])
+_leaf(_facet, "list", ["research", "evidence", "facet", "list"])
 
 _tag = _group(evidence, "tag")
 for _name in (
     "list", "propose", "create", "update", "retire", "attach", "detach",
 ):
-    _leaf(_tag, _name, ["research-evidence", "tag", _name])
+    _leaf(_tag, _name, ["research", "evidence", "tag", _name])
 
 
 def _forward(argv: list[str]) -> None:

@@ -96,10 +96,10 @@ artifact contracts produced by the workflow.
 
 ### Active Graph activation orchestration
 
-- `research-graph activation-status GRAPH_ID VERSION` returns one compact,
+- `research graphs activation-status GRAPH_ID VERSION` returns one compact,
   server-derived readiness receipt with the current pointer, target version,
   completed gates, missing gates, and rollback target.
-- The ordinary `research-graph activate GRAPH_ID VERSION` path never asks the
+- The ordinary `research graphs activate GRAPH_ID VERSION` path never asks the
   caller to copy proposal IDs, Graph hashes, diff hashes, or conversation refs.
 - Activation remains fail-closed until independent review, deterministic
   validation, grill audit, and an authenticated human approval are all bound
@@ -119,7 +119,7 @@ artifact contracts produced by the workflow.
 - Continuation remains fail-closed unless the target is a descendant of the
   source Graph through one complete immutable parent lineage and contains the
   branch's current node.
-- `research-graph continue ... --yes` obtains the exact target hash through
+- `research graphs continue ... --yes` obtains the exact target hash through
   `continuation-preview` and immediately submits that hash through the existing
   continuation endpoint. The server recomputes it before mutation.
 - `--expected-target-hash` remains available for audit and recovery, but Agents
@@ -422,7 +422,7 @@ history or writes progress rows.
   absent TrialPlan remains legal, and the existing local scope contributes
   only bounded field names plus a canonical hash, never raw scope values.
 - `tests/cli/test_client_research_commands.py`: publish the same carrier from
-  stdin or a file through `factortester client research checkpoint publish
+  stdin or a file through `factortester research workspaces checkpoint publish
   --json`, without constructing an HTTP client or reading a database.
 - Existing `test_report_rendering.py` remains the renderer compatibility suite;
   the CLI-Anything import path must re-export the single public implementation
@@ -583,7 +583,7 @@ feature.
 
 ## CLI workflow plan
 
-- `research-graph node advance` owns this workflow. Its first call reads the
+- `research graphs node advance` owns this workflow. Its first call reads the
   compact current packet, current requirement details and one factor
   description, writes an editable draft, and returns without Graph mutation.
 - Rerunning the same command validates the draft offline and fails with
@@ -994,7 +994,7 @@ passed all 20 `test_full_e2e.py` tests.
 ### Test inventory plan
 
 - `tests/cli/test_research_report_component_removal.py`: exercise the public
-  `factortester report remove` command through the real report tree,
+  `factortester research reports remove` command through the real report tree,
   submission sequence, Graph-container authorization and Git finalization.
 
 ### Acceptance contract
@@ -1023,7 +1023,7 @@ conda run -n GTHT pytest -q \
 209 passed in 9.00s
 ```
 
-The installed GTHT `factortester report remove --help` command also resolved
+The installed GTHT `factortester research reports remove --help` command also resolved
 the new command from the active source environment. The suite verifies
 delete-and-recreate with the same component and binding identifiers so stale
 derived locators cannot make removed content appear authoritative.

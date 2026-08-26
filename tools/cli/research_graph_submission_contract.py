@@ -1,4 +1,4 @@
-"""Build and validate one fresh public ``research-graph node advance``."""
+"""Build and validate one fresh public ``research graphs node advance``."""
 
 from __future__ import annotations
 

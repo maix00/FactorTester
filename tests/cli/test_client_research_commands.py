@@ -96,8 +96,8 @@ def test_client_research_list_exposes_stable_json(monkeypatch) -> None:
     )
 
     result = CliRunner().invoke(cli, [
-        "client",
-        "research",
+            "research",
+            "workspaces",
         "list",
         "--workspace-ref",
         "workspace:workspace-a",
@@ -120,8 +120,8 @@ def test_client_research_show_returns_work_package(monkeypatch) -> None:
     )
 
     result = CliRunner().invoke(cli, [
-        "client",
-        "research",
+            "research",
+            "workspaces",
         "show",
         "work-package:instance-a",
         "--json",
@@ -141,8 +141,8 @@ def test_client_research_lifecycle_is_cross_platform(monkeypatch) -> None:
     )
 
     result = CliRunner().invoke(cli, [
-        "client",
-        "research",
+            "research",
+            "workspaces",
         "lifecycle",
         "work-package:instance-a",
         "--target",
@@ -167,11 +167,11 @@ def test_client_research_branch_and_timeline_are_public(monkeypatch) -> None:
     runner = CliRunner()
 
     branch = runner.invoke(cli, [
-        "client", "research", "branch",
+        "research", "workspaces", "branch",
         "work-package:instance-a", "branch-1", "--json",
     ])
     timeline = runner.invoke(cli, [
-        "client", "research", "timeline",
+        "research", "workspaces", "timeline",
         "work-package:instance-a", "branch-1",
         "--limit", "9", "--json",
     ])
@@ -272,7 +272,7 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
     )
     monkeypatch.setattr(client_research, "load_profile_root", lambda path: tmp_path)
     result = CliRunner().invoke(cli, [
-        "client", "research", "create",
+        "research", "workspaces", "create",
         "--profile", "maxa",
         "--title", "MaxA research",
         "--product-group", "core",
@@ -326,7 +326,7 @@ def test_client_research_checkpoint_publish_accepts_bounded_file(
     )
 
     result = CliRunner().invoke(cli, [
-        "client", "research", "checkpoint", "publish", "maxa",
+        "research", "workspaces", "checkpoint", "publish", "maxa",
         "--agent-id", "research-maxa",
         "--checkpoint-file", str(carrier_path),
         "--narrative-file", str(narrative_path),
@@ -367,7 +367,7 @@ def test_client_research_checkpoint_publish_accepts_stdin(
     result = CliRunner().invoke(
         cli,
         [
-            "client", "research", "checkpoint", "publish", "maxa",
+            "research", "workspaces", "checkpoint", "publish", "maxa",
             "--agent-id", "research-maxa",
             "--checkpoint-file", "-",
             "--narrative-file", str(narrative_path),
@@ -401,7 +401,7 @@ def test_client_research_checkpoint_rejects_oversized_input_before_publish(
     result = CliRunner().invoke(
         cli,
         [
-            "client", "research", "checkpoint", "publish", "maxa",
+            "research", "workspaces", "checkpoint", "publish", "maxa",
             "--agent-id", "research-maxa",
             "--checkpoint-file", "-",
             "--narrative-file", str(narrative_path),

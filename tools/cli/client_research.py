@@ -11,6 +11,38 @@ from .http import DEFAULT_BINARY_LIMIT, BinaryResponse
 
 
 class ResearchClientMixin(ClientMixinBase):
+    def research_report_catalog(self, *, scope: str) -> dict[str, Any]:
+        """Read one Web-equivalent research-report visibility scope."""
+        selected = str(scope or "mine").strip()
+        if selected == "mine":
+            return self._expect_success(
+                self.session.get("/api/research-publications/settings")
+            )
+        if selected not in {"shared", "subordinates"}:
+            raise ValueError("research report scope is invalid")
+        return self._expect_success(self.session.get(
+            "/api/public-research", query={"scope": selected},
+        ))
+
+    def profile_directory(
+        self,
+        *,
+        scope: str = "mine",
+        query: str = "",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """Read the bounded Research > Profiles directory projection."""
+        return self._expect_success(self.session.get(
+            "/api/client/profile-directory",
+            query={
+                "scope": scope,
+                "query": query,
+                "page": page,
+                "page_size": page_size,
+            },
+        ))
+
     def create_direct_trial_plan(
         self,
         *,
