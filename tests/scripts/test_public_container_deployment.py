@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
@@ -562,6 +563,43 @@ def test_legacy_push_entrypoint_delegates_to_synchronous_container_publish(
         "field-history-synchronization\n"
     )
     assert result.stderr == ""
+
+
+def test_field_history_sync_rotates_completed_backups(tmp_path: Path) -> None:
+    backup_dir = tmp_path / "field history"
+    backup_dir.mkdir()
+    paths = []
+    for index in range(5):
+        path = backup_dir / f"unifieddata-before-2026082{index}T000000Z.sqlite"
+        path.write_text(str(index), encoding="utf-8")
+        os.utime(path, (index, index))
+        paths.append(path)
+
+    result = subprocess.run(
+        [
+            str(ROOT / "scripts/server/prune_field_history_backups.sh"),
+            str(backup_dir),
+            "3",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "field_history_backups_retained=3 pruned=2\n"
+    assert sorted(path.name for path in backup_dir.glob("*.sqlite")) == [
+        path.name for path in paths[-3:]
+    ]
+
+
+def test_field_history_sync_declares_bounded_backup_retention() -> None:
+    sync = (
+        ROOT / "scripts/server/sync_public_field_history.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "FACTORTESTER_FIELD_HISTORY_BACKUP_RETENTION:-3" in sync
+    assert "/scripts/server/prune_field_history_backups.sh" in sync
 
 
 def test_public_activation_staging_uses_deployer_writable_temp_directory() -> None:
