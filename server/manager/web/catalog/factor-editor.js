@@ -65,6 +65,8 @@
         state.sourceMode = values[0] || "family";
         state.inspection = state.sourceMode === "source"
           ? state.inspection : null;
+        state.validationError = "";
+        state.validationMessage = "";
         redraw();
       },
     });
@@ -87,6 +89,8 @@
         state.sourceVersions = null;
         state.sourceVersionError = "";
         state.inspection = null;
+        state.validationError = "";
+        state.validationMessage = "";
         redraw();
       },
     });
@@ -166,6 +170,18 @@
     ]).filter(([alias]) => alias));
   }
 
+  function normalizedInspection(value) {
+    const item = value || {};
+    const factor = item.factor || item.frozen_factor || {};
+    return {
+      ...item,
+      math_expr: item.math_expr || item.resolved_math_expr
+        || factor.math_expr || factor.formula || factor.latex || "",
+      description: item.description || item.desc
+        || factor.description || factor.desc || "",
+    };
+  }
+
   function parameters(state) {
     if (state.familyMode) return [];
     if (state.sourceMode === "source") return state.inspection?.params || [];
@@ -191,30 +207,38 @@
       if (!file) return;
       state.sourceCode = await file.text();
       state.inspection = null;
+      state.validationError = "";
+      state.validationMessage = "";
       redraw();
     });
     return input;
   }
 
-  async function inspect(context, state, redraw, status) {
+  async function inspect(context, state, redraw) {
     if (!state.sourceCode.trim()) {
-      status.textContent = context.t("源码不能为空");
+      state.validationError = context.t("源码不能为空");
+      state.validationMessage = state.validationError;
+      redraw();
       return;
     }
     state.inspecting = true;
-    status.textContent = context.t("正在校验源码并解析参数…");
+    state.validationError = "";
+    state.validationMessage = context.t("正在校验源码并解析参数…");
+    redraw();
     try {
       const value = await context.api("/custom-factors/api/validate", {
         method: "POST",
         body: JSON.stringify({source_code: state.sourceCode}),
       });
       if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
-      state.inspection = value;
+      state.inspection = normalizedInspection(value);
+      state.validationError = "";
+      state.validationMessage = context.t("源码有效，参数已解析");
       state.parameterValues = defaults(value.params || []);
-      status.textContent = context.t("源码有效，参数已解析");
     } catch (error) {
       state.inspection = null;
-      status.textContent = error.message || context.t("因子源码无法通过检查");
+      state.validationError = error.message || context.t("因子源码无法通过检查");
+      state.validationMessage = state.validationError;
     } finally {
       state.inspecting = false;
       redraw();
@@ -234,7 +258,7 @@
       actions.append(upload);
     }
     const validate = FTUI.actionButton(context.t("校验源码"), () => {
-      void inspect(context, state, redraw, status);
+      void inspect(context, state, redraw);
     }, {variant: "secondary"});
     actions.append(validate);
     const editor = FTUI.codeEditor(state.sourceCode, {
@@ -246,12 +270,17 @@
     editor.textarea.addEventListener("input", () => {
       state.sourceCode = editor.value();
       state.inspection = null;
+      state.validationError = "";
+      state.validationMessage = "";
     });
     const status = document.createElement("small");
-    status.className = "form-error factor-editor-source-status";
-    if (state.inspection) {
-      status.className = "factor-editor-source-status";
-      status.textContent = context.t("源码已通过校验");
+    status.className = state.validationError
+      ? "form-error factor-editor-source-status"
+      : "factor-editor-source-status";
+    status.textContent = state.validationMessage || (state.inspection
+      ? context.t("源码已通过校验") : "");
+    if (state.inspecting) {
+      status.textContent = context.t("正在校验源码并解析参数…");
     }
     if (!options.fileInput) root.append(file);
     root.append(actions, field(context.t("Python 源码"), editor.element), status);
@@ -533,6 +562,8 @@
         ]),
       ),
       loaded,
+      validationError: "",
+      validationMessage: "",
       sourceVersionFingerprint: loaded.family_formula_fingerprint || "",
       sourceVersions: null,
       sourceVersionError: "",
