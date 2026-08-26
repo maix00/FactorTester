@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
-from urllib.parse import urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
-from scripts.release.sparkle import validate_sparkle_appcast
-from scripts.release.update_manifest import create_update_manifest, write_update_manifest
 from tools.cli.release.client_release_bundle import build_client_release_bundle
+from tools.cli.release.sparkle_appcast import validate_sparkle_appcast
 from tools.cli.release.update_channel import validate_update_manifest
+from tools.cli.release.update_manifest_authoring import (
+    create_update_manifest,
+    write_update_manifest,
+)
 
 
 def build_target_beta_package(
@@ -29,7 +32,11 @@ def build_target_beta_package(
     source_manifest_path = root / "beta.json"
     source_appcast_path = root / "appcast.xml"
     dmg = root / "FactorTester-Client.dmg"
-    if not source_manifest_path.is_file() or not source_appcast_path.is_file() or not dmg.is_file():
+    if (
+        not source_manifest_path.is_file()
+        or not source_appcast_path.is_file()
+        or not dmg.is_file()
+    ):
         raise ValueError("Beta release directory is missing DMG or metadata")
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     if not isinstance(source_manifest, dict):
@@ -124,7 +131,9 @@ def _origin(value: str):
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Beta Manager origin is invalid")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("Beta Manager origin must not contain credentials or query data")
+        raise ValueError(
+            "Beta Manager origin must not contain credentials or query data",
+        )
     return parsed
 
 

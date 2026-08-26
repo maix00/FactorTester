@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import ast
 import os
-from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
 import zipfile
-
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLIENT_ROOT = REPO_ROOT / "tools" / "cli"
@@ -135,6 +134,8 @@ def test_client_wheel_contains_only_remote_client(tmp_path: Path) -> None:
             ):
                 violations.append(f"{name}: {module}")
     assert not violations
+    target_payload = payloads["tools/cli/release/client_release_targets.py"]
+    assert b"scripts.release" not in target_payload
 
 
 def test_built_client_runs_from_outside_repository(tmp_path: Path) -> None:
@@ -179,6 +180,24 @@ def test_built_client_runs_from_outside_repository(tmp_path: Path) -> None:
     assert "agents" in root_help
     assert "research" in root_help
     assert "profile-agent" not in root_help
+
+    release_target_import = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from tools.cli.release.client_release_targets import "
+                "build_target_beta_package; "
+                "print(build_target_beta_package.__name__)"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert release_target_import.stdout.strip() == "build_target_beta_package"
 
     products_help = subprocess.run(
         [sys.executable, "-m", "tools.cli.app", "products", "--help"],
