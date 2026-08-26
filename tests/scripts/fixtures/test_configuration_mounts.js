@@ -96,6 +96,26 @@ const state = {
   workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
 };
 
+const equivalentVisibleFactor = structuredClone(factor);
+equivalentVisibleFactor.alias = "同公式的目录别名";
+equivalentVisibleFactor.owner_ref = "profile:subordinate";
+state.factors.unshift(equivalentVisibleFactor);
+assert.equal(
+  window.FTTestConfiguration.executionFactors(state)[0].owner_ref,
+  factor.owner_ref,
+  "formula-identical catalog records use the selected candidate provenance",
+);
+const conflictingFactor = structuredClone(equivalentVisibleFactor);
+conflictingFactor.identity.self_formula_fingerprint = "f".repeat(64);
+assert.throws(
+  () => window.FTTestConfiguration.executionFactors({
+    ...state,
+    factors: [conflictingFactor],
+  }),
+  /factor ref is bound to conflicting records/,
+  "a genuine executable-formula conflict remains rejected",
+);
+
 assert.deepEqual(
   window.FTTestConfiguration.executionFactors({
     ...state,

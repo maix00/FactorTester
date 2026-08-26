@@ -62,7 +62,18 @@
       const previous = byRef.get(ref);
       const left = window.FTFactorModel?.frozenFactorIdentity?.(previous)?.record;
       const right = window.FTFactorModel?.frozenFactorIdentity?.(item)?.record;
-      if (left && right && JSON.stringify(left) !== JSON.stringify(right)) {
+      const leftFingerprint = String(
+        left?.identity?.self_formula_fingerprint || "",
+      );
+      const rightFingerprint = String(
+        right?.identity?.self_formula_fingerprint || "",
+      );
+      // owner_ref and alias are catalog/display provenance. Two visible
+      // owners may register the same immutable formula and therefore share
+      // one formula-derived factor ref. Only a disagreement in executable
+      // formula identity is a real conflict; later candidate state is the
+      // authoritative presentation record for the current editor.
+      if (left && right && leftFingerprint !== rightFingerprint) {
         throw new Error(`factor ref is bound to conflicting records: ${ref}`);
       }
       byRef.set(ref, {...(previous || {}), ...item});
