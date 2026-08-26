@@ -6,7 +6,9 @@ from pathlib import Path
 
 import settings as Settings
 from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite
-from tools.data.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
+from tools.data.sqlite import (
+    factor_source_workspace_settings as factor_source_workspace_settings_sqlite,
+)
 
 
 def _load_storage_module():
@@ -40,7 +42,15 @@ def test_factor_source_root_roundtrip_and_resolution(monkeypatch, tmp_path):
 
     factor_source_settings_sqlite.save_factor_source_root(username, "")
     assert factor_source_settings_sqlite.load_factor_source_root(username) is None
-    assert factor_storage.custom_factor_dir(username) == os.path.join(str(fallback_root / username), "custom_factors")
+    assert factor_storage.custom_factor_dir(username) == os.path.join(
+        str(
+            fallback_root
+            / username
+            / "personal-workspace"
+            / "factor-library"
+        ),
+        "custom_factors",
+    )
 
 
 def test_factor_source_workspace_git_settings_roundtrip(monkeypatch, tmp_path):

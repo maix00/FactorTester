@@ -115,6 +115,33 @@ def test_factor_source_save_does_not_create_server_workspace_without_configurati
     ) is not None
 
 
+def test_default_server_factor_workspace_uses_portable_user_layout(
+    monkeypatch, tmp_path,
+):
+    factor_storage = _load_storage_module()
+    users_root = tmp_path / "users"
+    monkeypatch.setattr(
+        factor_storage,
+        "WORKSPACE_ROOTS_DIR",
+        str(users_root),
+    )
+    monkeypatch.setattr(
+        factor_storage,
+        "load_factor_source_root",
+        lambda _username: None,
+    )
+
+    root = Path(factor_storage.factor_source_root("default$alice@1"))
+
+    assert root == (
+        users_root
+        / "default$alice@1"
+        / "personal-workspace"
+        / "factor-library"
+    )
+    assert root.is_dir()
+
+
 def test_factor_source_sqlite_normalizes_legacy_import_paths(monkeypatch, tmp_path):
     sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
