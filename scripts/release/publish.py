@@ -9,15 +9,15 @@ artifact has been uploaded.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from hashlib import sha256
 import ipaddress
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -31,16 +31,17 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.release.assets import build_installer_dmg, embed_client_runtime
-from scripts.release.package_layout import validate_client_package_layout
 from scripts.release.build import (
     REPO,
     _sign_embedded_app,
     _validate_source_checkout,
     discard_xcode_app,
     prepare_xcode_build_root,
-    xcodebuild_environment,
     validate_embedded_sparkle_key,
+    xcodebuild_environment,
 )
+from scripts.release.package_layout import validate_client_package_layout
+from scripts.release.source_checkout import clean_worktree
 from scripts.release.sparkle import (
     generate_sparkle_appcast,
     validate_sparkle_appcast,
@@ -50,12 +51,10 @@ from scripts.release.update_manifest import (
     verify_installer,
     write_update_manifest,
 )
-from scripts.release.source_checkout import clean_worktree
 from tools.cli.release.beta_version import (
     read_installed_beta_release,
     resolve_beta_identity,
 )
-
 
 CHANNELS = {"stable", "beta"}
 SHARED_SIGNING_IDENTITY = "FTClient Beta Release"
@@ -425,6 +424,7 @@ def publish_release(**options: Any) -> PublishedRelease:
             build=options.get("build"),
             sources=sources,
             project_file=REPO / "apple/project.yml",
+            ca_file=options.get("server_ca_file"),
         )
         options["version"] = version
         options["build"] = build
@@ -435,6 +435,7 @@ def publish_release(**options: Any) -> PublishedRelease:
         raise ValueError("Stable release requires an explicit --version")
     elif str(options.get("build") or "").strip().lower() == "auto":
         raise ValueError("Stable release requires an explicit --build")
+    options.pop("server_ca_file", None)
     return release_client(**options)
 
 
@@ -935,6 +936,7 @@ def main() -> None:
     parser.add_argument("--legacy-private-key", type=Path, required=True)
     parser.add_argument("--legacy-public-key", type=Path, required=True)
     parser.add_argument("--server-origin")
+    parser.add_argument("--server-ca-file", type=Path)
     parser.add_argument("--release-root", type=Path)
     parser.add_argument(
         "--github-repository",

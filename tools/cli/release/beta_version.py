@@ -7,16 +7,16 @@ manifests that the publisher is about to update.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import plistlib
-from pathlib import Path
 import re
+import ssl
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
-
 
 _BETA_VERSION = re.compile(
     r"^(?P<major>0|[1-9][0-9]*)\."
@@ -30,6 +30,14 @@ _BASE_VERSION = re.compile(
     r"(?P<patch>0|[1-9][0-9]*)"
 )
 _MAX_MANIFEST_BYTES = 64 * 1024
+
+
+class BetaSourceUnavailable(OSError):
+    """A source that could not establish a network connection."""
+
+
+class BetaSourceTrustError(RuntimeError):
+    """A reachable source whose TLS identity could not be verified."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +103,7 @@ def resolve_beta_identity(
     build: int | str | None,
     sources: Iterable[str | Path],
     project_file: Path,
+    ca_file: Path | None = None,
 ) -> tuple[str, int, tuple[ExistingBetaRelease, ...]]:
     """Resolve or validate a Beta version and monotonically increasing build.
 
@@ -108,9 +117,9 @@ def resolve_beta_identity(
             release = (
                 read_installed_beta_release(source)
                 if isinstance(source, Path) and source.name == "Info.plist"
-                else read_beta_release(source)
+                else read_beta_release(source, ca_file=ca_file)
             )
-        except OSError:
+        except BetaSourceUnavailable:
             # A server that is currently offline cannot receive this release
             # either. It is intentionally omitted from the high-water mark;
             # a later, explicit administrator invocation may publish to it.
@@ -158,9 +167,13 @@ def resolve_beta_identity(
     return resolved_version, resolved_build, discovered
 
 
-def read_beta_release(source: str | Path) -> ExistingBetaRelease | None:
+def read_beta_release(
+    source: str | Path,
+    *,
+    ca_file: Path | None = None,
+) -> ExistingBetaRelease | None:
     """Read one Beta manifest; return None only when the source has no release."""
-    label, raw = _read_source(source)
+    label, raw = _read_source(source, ca_file=ca_file)
     if raw is None:
         return None
     try:
@@ -226,7 +239,11 @@ def format_beta_key(value: tuple[int, int, int, int]) -> str:
     return f"{major}.{minor}.{patch}-beta.{ordinal}"
 
 
-def _read_source(source: str | Path) -> tuple[str, bytes | None]:
+def _read_source(
+    source: str | Path,
+    *,
+    ca_file: Path | None = None,
+) -> tuple[str, bytes | None]:
     if isinstance(source, Path):
         path = source / "beta.json" if source.is_dir() else source
         if not path.exists():
@@ -248,18 +265,54 @@ def _read_source(source: str | Path) -> tuple[str, bytes | None]:
             "User-Agent": "FactorTester-Manager/beta-version-v1",
         },
     )
+    context = (
+        ssl.create_default_context(cafile=str(ca_file))
+        if ca_file is not None
+        else None
+    )
     try:
-        with urlopen(request, timeout=15) as response:
+        with urlopen(request, timeout=15, context=context) as response:
             raw = response.read(_MAX_MANIFEST_BYTES + 1)
     except HTTPError as exc:
         if exc.code == 404:
             return url, None
-        raise OSError(f"cannot read Beta manifest {url}: HTTP {exc.code}") from exc
+        raise ValueError(
+            f"cannot read Beta manifest {url}: HTTP {exc.code}"
+        ) from exc
+    except URLError as exc:
+        if _is_certificate_error(exc):
+            raise BetaSourceTrustError(
+                f"cannot verify Beta manifest TLS identity for {url}"
+            ) from exc
+        raise BetaSourceUnavailable(
+            f"cannot connect to Beta manifest {url}: {exc}"
+        ) from exc
     except OSError as exc:
-        raise OSError(f"cannot read Beta manifest {url}: {exc}") from exc
+        if _is_certificate_error(exc):
+            raise BetaSourceTrustError(
+                f"cannot verify Beta manifest TLS identity for {url}"
+            ) from exc
+        raise BetaSourceUnavailable(
+            f"cannot connect to Beta manifest {url}: {exc}"
+        ) from exc
     if len(raw) > _MAX_MANIFEST_BYTES:
         raise ValueError(f"Beta manifest from {url} is too large")
     return url, raw
+
+
+def _is_certificate_error(error: BaseException) -> bool:
+    pending: BaseException | None = error
+    seen: set[int] = set()
+    while pending is not None and id(pending) not in seen:
+        seen.add(id(pending))
+        if isinstance(pending, ssl.SSLCertVerificationError):
+            return True
+        reason = getattr(pending, "reason", None)
+        if isinstance(reason, BaseException):
+            pending = reason
+            continue
+        pending = pending.__cause__ or pending.__context__
+    return False
 
 
 def _parse_base_version(value: str) -> tuple[int, int, int]:

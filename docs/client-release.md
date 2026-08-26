@@ -36,6 +36,11 @@ Release operations intentionally have two authorities:
   `--release-root` explicitly; it does not discover either value by logging in
   to or restarting a Manager.
 
+  A Beta Manager using a private CA or pinned self-signed certificate is
+  passed explicitly with `--server-ca-file`. TLS verification failures abort
+  before the build; only a connection that cannot be established is treated
+  as an offline target.
+
   After a signed Beta package has been built, an administrator can publish it
   to several online Managers through the application protocol:
 

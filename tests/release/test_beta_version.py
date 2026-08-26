@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import ssl
 from pathlib import Path
+from urllib.error import URLError
 
 import pytest
 
 from scripts.release import publish
 from tools.cli.release import beta_version
 from tools.cli.release.beta_version import (
+    BetaSourceTrustError,
     ExistingBetaRelease,
     next_beta_version,
     parse_beta_version,
@@ -103,6 +106,73 @@ def test_resolve_beta_identity_skips_an_offline_server(
     assert len(discovered) == 1
 
 
+def test_resolve_beta_identity_fails_closed_on_tls_trust_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project(tmp_path / "project.yml")
+
+    def untrusted(*_args, **_kwargs):
+        raise URLError(ssl.SSLCertVerificationError("self-signed certificate"))
+
+    monkeypatch.setattr(beta_version, "urlopen", untrusted)
+    with pytest.raises(BetaSourceTrustError, match="TLS identity"):
+        resolve_beta_identity(
+            version="auto",
+            build="auto",
+            sources=("https://reachable.example",),
+            project_file=project,
+        )
+
+
+def test_beta_manifest_uses_the_explicit_ca_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ca_file = tmp_path / "manager-ca.pem"
+    ca_file.write_text("test certificate", encoding="utf-8")
+    context = object()
+    observed: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size: int) -> bytes:
+            return b'{"version":"0.1.3-beta.36","build":43}'
+
+    def create_context(*, cafile: str):
+        observed["cafile"] = cafile
+        return context
+
+    def open_manifest(_request, *, timeout: int, context: object):
+        observed["timeout"] = timeout
+        observed["context"] = context
+        return Response()
+
+    monkeypatch.setattr(beta_version.ssl, "create_default_context", create_context)
+    monkeypatch.setattr(beta_version, "urlopen", open_manifest)
+
+    release = beta_version.read_beta_release(
+        "https://manager.example",
+        ca_file=ca_file,
+    )
+
+    assert release == ExistingBetaRelease(
+        "0.1.3-beta.36",
+        43,
+        "https://manager.example/api/client/releases/beta.json",
+    )
+    assert observed == {
+        "cafile": str(ca_file),
+        "timeout": 15,
+        "context": context,
+    }
+
+
 def test_explicit_beta_version_must_be_newer_than_discovered_release(
     tmp_path: Path,
 ) -> None:
@@ -188,3 +258,36 @@ def test_publish_transaction_resolves_auto_identity_before_build(
     assert captured["version"] == "0.1.3-beta.33"
     assert captured["build"] == 36
     assert project.is_file()
+
+
+def test_publish_transaction_stops_before_build_on_tls_trust_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _project(repo / "apple/project.yml")
+    monkeypatch.setattr(publish, "REPO", repo)
+    monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
+    monkeypatch.setattr(publish, "read_installed_beta_release", lambda *_args: None)
+    built = False
+
+    def untrusted(*_args, **_kwargs):
+        raise URLError(ssl.SSLCertVerificationError("untrusted"))
+
+    def release_client(**_options):
+        nonlocal built
+        built = True
+
+    monkeypatch.setattr(beta_version, "urlopen", untrusted)
+    monkeypatch.setattr(publish, "release_client", release_client)
+
+    with pytest.raises(BetaSourceTrustError):
+        publish.publish_release(
+            channel="beta",
+            version="auto",
+            build="auto",
+            source_revision="a" * 40,
+            server_origin="https://manager.example",
+        )
+
+    assert built is False

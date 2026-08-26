@@ -203,6 +203,11 @@ def app_update_restart(as_json: bool) -> None:
     required=True,
 )
 @click.option("--server-origin")
+@click.option(
+    "--server-ca-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="CA/certificate used to verify the Beta Manager during discovery.",
+)
 @click.option("--release-root", type=click.Path(path_type=Path))
 @click.option(
     "--github-repository",
