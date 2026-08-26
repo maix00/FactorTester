@@ -14,7 +14,11 @@ from tools.data.sqlite.factor_source_versions import (
     load_factor_formula_version,
 )
 
-from .storage import WORKSPACE_ROOTS_DIR, factor_source_root
+from .storage import (
+    WORKSPACE_ROOTS_DIR,
+    default_factor_source_root,
+    factor_source_root,
+)
 
 _SOURCE_DIRS = {
     "custom": "custom_factors",
@@ -109,7 +113,7 @@ def _workspace_candidates(
             values.append(root)
     if source_kind == "public" and os.path.isdir(WORKSPACE_ROOTS_DIR):
         for name in sorted(os.listdir(WORKSPACE_ROOTS_DIR)):
-            root = os.path.join(WORKSPACE_ROOTS_DIR, name)
+            root = default_factor_source_root(name)
             if os.path.isdir(root) and root not in values:
                 values.append(root)
     return values

@@ -345,6 +345,12 @@
   const initializeTabs = tabs.initializeTabs;
   const currentTabContext = tabs.currentTabContext;
   const detailTabIDForPath = tabs.detailTabIDForPath;
+  const webMCP = window.FTWebMCP?.bind?.({
+    navigate,
+    root: content,
+    session: () => state.session,
+  });
+  document.documentElement.dataset.webmcp = webMCP?.supported ? "available" : "unavailable";
   let tabWorkspace = null;
 
   function restoreWorkspaceForSession() {

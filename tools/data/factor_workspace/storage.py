@@ -4,21 +4,37 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from scripts.data_dir import DATA_DIR
+from tools.data.sqlite.factor_source_settings import load_factor_source_root
 from tools.data.sqlite.factor_source_store import (
     canonical_factor_source_code,
     normalize_factor_source_code,
 )
-from tools.data.sqlite.factor_source_settings import load_factor_source_root
 from tools.data.sqlite.factor_source_store import (
     delete_factor_source as delete_factor_source_row,
+)
+from tools.data.sqlite.factor_source_store import (
     load_factor_source as load_factor_source_row,
+)
+from tools.data.sqlite.factor_source_store import (
     rename_factor_source as rename_factor_source_row,
+)
+from tools.data.sqlite.factor_source_store import (
     upsert_factor_source as upsert_factor_source_row,
 )
 
-from scripts.data_dir import DATA_DIR
+WORKSPACE_ROOTS_DIR = os.path.join(DATA_DIR, "users")
 
-WORKSPACE_ROOTS_DIR = os.path.join(DATA_DIR, "factor_workspaces")
+
+def default_factor_source_root(username: str) -> str:
+    """Return the portable canonical factor-library path for one principal."""
+    return os.path.join(
+        WORKSPACE_ROOTS_DIR,
+        username,
+        "personal-workspace",
+        "factor-library",
+    )
 
 
 def is_profile_factor_worktree_root(path: str | os.PathLike[str] | None) -> bool:
@@ -65,7 +81,7 @@ def factor_source_root(username: str) -> str:
     configured_root = configured_factor_source_root(username)
     if configured_root:
         return configured_root
-    directory = os.path.join(WORKSPACE_ROOTS_DIR, username)
+    directory = default_factor_source_root(username)
     os.makedirs(directory, exist_ok=True)
     return directory
 
@@ -89,7 +105,7 @@ def existing_factor_workspace_root(username: str) -> str | None:
     configured = configured_factor_source_root(username)
     if configured:
         return configured
-    fallback = os.path.join(WORKSPACE_ROOTS_DIR, username)
+    fallback = default_factor_source_root(username)
     manifest_path = os.path.join(fallback, ".factor_workspace", "manifest.json")
     if not os.path.isfile(manifest_path):
         return None
