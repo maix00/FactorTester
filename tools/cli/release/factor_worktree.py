@@ -110,9 +110,10 @@ def plan_factor_worktree_binding(
         row.get("branch") == f"refs/heads/{branch_name}"
         for row in _worktree_rows(repo)
     )
-    recoverable_branch = (
-        branch_exists and branch_head == base and not branch_checked_out
+    branch_is_base_ancestor = bool(
+        branch_exists and _is_ancestor(repo, branch_head, base)
     )
+    recoverable_branch = branch_is_base_ancestor and not branch_checked_out
     target_exists = target.exists()
     target_is_adoptable = is_adoptable_factor_worktree_target(
         target,
@@ -174,7 +175,11 @@ def plan_factor_worktree_binding(
                 not branch_exists or idempotent or recoverable_branch
             ),
             "branch_recovery": (
-                "recoverable_same_base"
+                (
+                    "recoverable_same_base"
+                    if branch_head == base
+                    else "recoverable_behind_base"
+                )
                 if recoverable_branch
                 else (
                     "manual_repair_required_unique_commits"
@@ -268,7 +273,7 @@ def apply_factor_worktree_binding(
         )
         recover_branch = (
             branch_exists
-            and branch_head == plan["base_commit"]
+            and _is_ancestor(repo, branch_head, str(plan["base_commit"]))
             and not checked_out
         )
         if branch_exists and not recover_branch:
@@ -289,6 +294,14 @@ def apply_factor_worktree_binding(
         branch_started_at_base = not branch_exists or recover_branch
         try:
             if recover_branch:
+                if branch_head != plan["base_commit"]:
+                    _git_checked(
+                        repo,
+                        "branch",
+                        "-f",
+                        str(plan["branch"]),
+                        str(plan["base_commit"]),
+                    )
                 _git_checked(
                     repo, "worktree", "add",
                     str(staging), str(plan["branch"]),

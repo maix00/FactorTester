@@ -280,6 +280,40 @@ def test_collisions_and_post_plan_changes_fail_closed(tmp_path: Path) -> None:
     ).returncode != 0
 
 
+def test_unchecked_profile_branch_behind_canonical_base_is_recovered(
+    tmp_path: Path,
+) -> None:
+    repo, base = _canonical(tmp_path)
+    client_root = tmp_path / "support"
+    store = LocalProfileStore(client_root)
+    _profile(store, tmp_path, "maxa")
+    CanonicalFactorRepoStore(client_root).register(repo, owner_ref=OWNER)
+
+    _git(repo, "branch", "agent/maxa", base)
+    _git(repo, "restore", "custom_factors/Trend.py")
+    (repo / "local-note.txt").unlink()
+    (repo / "custom_factors/NewFromDatabase.py").write_text("value: int = 2\n")
+    _git(repo, "add", "custom_factors/NewFromDatabase.py")
+    _git(repo, "commit", "-m", "sync newer database sources")
+    current = _git(repo, "rev-parse", "HEAD")
+
+    plan = plan_factor_worktree_binding(client_root, "maxa")
+    assert plan["ready"] is True
+    assert plan["checks"]["branch_recovery"] == "recoverable_behind_base"
+
+    receipt = apply_factor_worktree_binding(client_root, plan)
+    target = Path(receipt["worktree_path"])
+    assert receipt["base_commit"] == current
+    assert (target / "custom_factors/NewFromDatabase.py").is_file()
+    assert _git(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        current,
+        _git(target, "rev-parse", "HEAD"),
+    ) == ""
+
+
 def test_cli_requires_preview_and_keeps_sync_manual(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
