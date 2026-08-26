@@ -34,6 +34,10 @@ const state = {
         factors: [{
           ...inlineFactor, temporary: true,
         }],
+        factor_sets: [{
+          target_ref: "factor-set:v1:temporary", temporary: true,
+          manifest: {identity: {members: []}},
+        }],
         product_groups: [{
           id: "inline-product-group:session", temporary: true, paths: ["CNFutures/**"],
         }],
@@ -56,4 +60,8 @@ assert.equal(state.values.factor_candidates[0].alias, "InlineFactor");
 assert.equal(state.values.category_candidates[0].id, "inline-category:session");
 assert.equal(state.groups[0].id, "inline-product-group:session");
 assert.equal(state.transientFactorSources[0].source_code, "class InlineFactor: pass\n");
+assert.equal(
+  state.savedTemporaryObjects.factor_sets[0].target_ref,
+  "factor-set:v1:temporary",
+);
 console.log("ok");

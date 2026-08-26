@@ -103,6 +103,20 @@ sourceState.values.data_source = [];
 assert.equal(window.FTStrategyEditorScope.candidateCompatible(
   sourceState, "product_path_candidates", compatibleGroup,
 ), false);
+sourceState.values.data_source = [
+  {id: "source-a", label: "Source A"},
+];
+assert.deepEqual(
+  window.FTStrategyEditorScope.selectedSourceIDs(sourceState),
+  ["source-a"],
+  "shared source scope must normalize object-valued multi-select entries",
+);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", {
+    temporary: true,
+    path_sources: [{path: "Product/Futures", source_ids: ["source-a"]}],
+  },
+), true, "an inline group remains visible after the editor redraws");
 
 if (process.argv[3]) {
   state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));

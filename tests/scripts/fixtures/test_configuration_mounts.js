@@ -89,6 +89,10 @@ const state = {
     factor_id: "InlineFactor", path: "inline/InlineFactor.py",
     source_code: "class InlineFactor: pass\n",
   }],
+  factorSetCatalog: {items: [{
+    target_ref: "factor-set:v1:temporary", temporary: true,
+    manifest: {identity: {members: []}},
+  }]},
   workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
 };
 
@@ -136,6 +140,7 @@ const context = {t: value => value, api: async (path, options) => {
     "authoring settings must persist the registered selection field",
   );
   assert.equal(temporary.factors[0].ref, factor.ref);
+  assert.equal(temporary.factor_sets[0].target_ref, "factor-set:v1:temporary");
   assert.equal(temporary.product_groups[0].id, "inline-product-group:session");
   assert.equal(temporary.categories[0].id, "inline-category:session");
   assert.equal(temporary.factor_sources[0].factor_id, "InlineFactor");
