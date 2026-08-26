@@ -11,6 +11,7 @@ import re
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
+from tools.factors.formula_identity import freeze_factor_identity
 from tools.parameters import TypeParam
 
 
@@ -165,10 +166,22 @@ def build_factor_param_item(
         family_formula_fingerprint=family_formula_fingerprint,
         self_formula_fingerprint=self_formula_fingerprint,
     )
+    frozen = freeze_factor_identity(
+        owner_ref=owner_ref,
+        family_alias=family_alias,
+        factor_alias=str(factor.alias),
+        family_formula_fingerprint=family_formula_fingerprint,
+        self_formula_fingerprint=self_formula_fingerprint,
+        params={
+            item['alias']: item['value']
+            for item in params_display
+        },
+    )
     # 条目级 category 优先于因子家族 meta category
     row_category = params.get('category', '') if isinstance(params, dict) else ''
     family_category = meta.get('category') or ''
     return {
+        **frozen,
         'id': f"{owner_username}:{getattr(factor_family, 'alias', '')}:{config.get('id')}:{row_idx}",
         'factor_ref': factor_ref,
         'factor_alias': str(factor.alias),

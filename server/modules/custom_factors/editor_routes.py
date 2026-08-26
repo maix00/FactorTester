@@ -1,30 +1,37 @@
 """Routes supporting custom-factor source validation and visual editor metadata."""
 
-import os
 import hashlib
 import json
+import os
 
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
+from server.modules.shared.factor_param_utils import (
+    factor_param_value_display,
+    normalize_factor_param_row,
+)
 from server.modules.shared.param_meta import serialize_param_meta
-from tools.data.account_manage import can_view_user_scope
-from server.services.http_auth import login_required
-from server.services.session_runtime import current_user
-from tools.data.account_manage import get_account, is_super_admin_account
 from server.services.factor_registry import (
     get_factor_family_instance,
     invalidate_factor_family_cache,
 )
-from server.services.run_input_inspection import instantiate_factor_metadata
 from server.services.factor_workspace import (
     build_factor_workspace,
     get_factor_workspace_git_state,
     push_factor_workspace,
     run_factor_workspace_git_action,
     sync_factor_workspace,
+)
+from server.services.http_auth import login_required
+from server.services.run_input_inspection import instantiate_factor_metadata
+from server.services.session_runtime import current_user
+from tools.data.account_manage import (
+    can_view_user_scope,
+    get_account,
+    is_super_admin_account,
 )
 from tools.data.factor_workspace.storage import (
     assert_canonical_factor_workspace_root,
@@ -33,6 +40,28 @@ from tools.data.factor_workspace.storage import (
     load_public_factor_source,
 )
 from tools.data.sqlite.factor_source_store import list_factor_sources
+from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _freeze_validated_factor(factor_family, params, owner_ref):
+    """Return the canonical Factor v2 record without persisting it."""
+    normalized = normalize_factor_param_row(factor_family, params)
+    factor = factor_family.get_factor(**normalized)
+    expression = getattr(factor, '_source_expr', None) or factor.expr
+    display_params = {
+        parameter.alias: factor_param_value_display(
+            parameter, normalized.get(parameter.alias),
+        )
+        for parameter in factor_family.params
+    }
+    return freeze_factor_identity(
+        owner_ref=str(owner_ref or '').strip(),
+        family_alias=str(getattr(factor_family, 'alias', '') or '').strip(),
+        factor_alias=str(factor.alias),
+        family_formula_fingerprint=factor_family.expr.semantic_fingerprint(),
+        self_formula_fingerprint=expression.semantic_fingerprint(),
+        params=display_params,
+    )
 
 
 @cf_bp.route('/api/internal/public-source-applied', methods=['POST'])
@@ -72,6 +101,49 @@ def api_validate_expr():
     data = request.get_json(silent=True) or {}
     username = current_user()
 
+    if data.get('resolve_factor') and data.get('factor_family_alias'):
+        family_alias = str(data.get('factor_family_alias') or '').strip()
+        owner_username = str(
+            data.get('owner_username') or username or ''
+        ).strip()
+        is_public = bool(data.get('is_public')) or owner_username in {
+            'public', '__public_jobs__',
+        }
+        family_ref = (
+            f'public:{family_alias}' if is_public
+            else f'{owner_username}:{family_alias}'
+        )
+        try:
+            factor_family = get_factor_family_instance(
+                family_ref, username=username,
+            )
+            instance = instantiate_factor_metadata(
+                factor_family, data.get('params'),
+            )
+            owner_ref = 'public' if is_public else owner_username
+            return jsonify({
+                'success': True,
+                'valid': True,
+                'error': None,
+                'factor_name': factor_family.__class__.__name__,
+                'params': [
+                    serialize_param_meta(param)
+                    for param in factor_family.params
+                ],
+                'desc': getattr(factor_family, 'desc', '') or '',
+                'description': getattr(factor_family, 'description', '') or '',
+                'factor': _freeze_validated_factor(
+                    factor_family, data.get('params'), owner_ref,
+                ),
+                **instance,
+            })
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            return jsonify({
+                'success': True,
+                'valid': False,
+                'error': f'因子解析失败: {exc!s}',
+            })
+
     if data.get('is_public') and data.get('factor_name'):
         factor_name = data['factor_name']
         try:
@@ -95,13 +167,16 @@ def api_validate_expr():
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': getattr(factor_family, 'desc', '') or '',
                 'description': getattr(factor_family, 'description', '') or '',
+                'factor': _freeze_validated_factor(
+                    factor_family, data.get('params'), 'public',
+                ),
                 **instance,
             })
         except Exception as exc:
             return jsonify({
                 'success': True,
                 'valid': False,
-                'error': f'因子加载失败: {str(exc)}',
+                'error': f'因子加载失败: {exc!s}',
                 'tree_repr': '',
             })
 
@@ -120,9 +195,9 @@ def api_validate_expr():
 
     try:
         import importlib.util
+        import os as _os
         import re
         import tempfile
-        import os as _os
 
         class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
         class_name = class_match.group(1) if class_match else 'ValidateFactor'
@@ -159,6 +234,11 @@ def api_validate_expr():
             instance = instantiate_factor_metadata(
                 factor_family, data.get('params')
             )
+            owner_ref = str(
+                data.get('owner_ref')
+                or ('public' if data.get('is_public') else username)
+                or ''
+            ).strip()
 
             return jsonify({
                 'success': True,
@@ -171,6 +251,9 @@ def api_validate_expr():
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': str(data.get('chinese_name') or ''),
                 'description': str(data.get('description') or ''),
+                'factor': _freeze_validated_factor(
+                    factor_family, data.get('params'), owner_ref,
+                ),
                 **instance,
             })
 
@@ -185,7 +268,7 @@ def api_validate_expr():
         return jsonify({
             'success': True,
             'valid': False,
-            'error': f'{type(exc).__name__}: {str(exc)}',
+            'error': f'{type(exc).__name__}: {exc!s}',
             'traceback': traceback.format_exc(),
         })
 
@@ -277,7 +360,9 @@ def api_workspace_git_settings():
         return jsonify({'success': True, **get_factor_workspace_git_state(username)})
 
     data = request.get_json(silent=True) or {}
-    from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
+    from tools.data.sqlite.factor_source_workspace_settings import (
+        save_factor_source_workspace_settings,
+    )
     git_enabled = bool(data.get('git_enabled'))
     git_repo_root = (data.get('git_repo_root') or '').strip()
     if git_repo_root:

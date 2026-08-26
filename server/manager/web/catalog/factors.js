@@ -1,6 +1,12 @@
 (() => {
   const catalog = () => window.FTFactorCatalog;
 
+  function factorMatches(item, targetRef) {
+    const target = String(targetRef || "");
+    return item?.ref === target || item?.factor_ref === target
+      || item?.alias === target || item?.factor_alias === target;
+  }
+
   async function ensureEditor() {
     if (window.FTFactorEditor?.render || !window.FTStaticLoader?.loadGroups) return;
     await window.FTStaticLoader.loadGroups(["factor-catalog-editor"]);
@@ -17,9 +23,8 @@
     let data = inline
       ? {factors: [context.testObjectInitialValue], families: []}
       : await catalog().load(context, {library: true});
-    if (!inline && mode === "view" && targetRef && !data.factors.some(item =>
-      item.factor_ref === targetRef || item.factor_alias === targetRef
-    )) {
+    if (!inline && mode === "view" && targetRef
+        && !data.factors.some(item => factorMatches(item, targetRef))) {
       data = await catalog().load(context, {refresh: true, library: true});
     }
     if (!catalog().isCurrent(context)) return;
