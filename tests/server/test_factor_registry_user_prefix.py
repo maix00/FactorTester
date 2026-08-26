@@ -5,8 +5,11 @@ import sqlite3
 import pytest
 
 from server.services import factor_registry
-from server.services.factor_registry import _build_factor_from_source, factor_from_alias, get_factor_family_instance
-
+from server.services.factor_registry import (
+    _build_factor_from_source,
+    factor_from_alias,
+    get_factor_family_instance,
+)
 
 _FACTOR_SOURCE = """
 from tools.data.types import DataColumn
@@ -217,6 +220,56 @@ def test_visible_hydrated_other_user_factor_is_executable_before_library_sync(
 
     assert source["canonical_family_ref"] == "18717974771:UserAlpha"
     assert source["source_code"] == _FACTOR_SOURCE
+
+
+def test_manager_authorized_direct_child_source_is_executable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "factor-sharing.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE account_factor_param_configs (
+                username TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                ff_alias TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, scope_key, ff_alias)
+            )
+            """
+        )
+    monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
+    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
+    monkeypatch.setattr(
+        factor_registry,
+        "load_factor_source",
+        lambda username, factor_id: (
+            _FACTOR_SOURCE
+            if (username, factor_id) == ("child", "UserAlpha")
+            else None
+        ),
+    )
+
+    with factor_registry.authorized_factor_source_owners(["parent", "child"]):
+        source = factor_registry.resolve_factor_family_source(
+            "child:UserAlpha", username="parent",
+        )
+
+    assert source["canonical_family_ref"] == "child:UserAlpha"
+
+
+def test_manager_authorization_does_not_include_unlisted_owner(monkeypatch) -> None:
+    monkeypatch.setattr(factor_registry, "can_view_user_scope", lambda *_: False)
+
+    with (
+        factor_registry.authorized_factor_source_owners(["parent", "child"]),
+        pytest.raises(PermissionError, match="not accessible"),
+    ):
+        factor_registry.resolve_factor_family_source(
+            "grandchild:UserAlpha", username="parent",
+        )
 
 
 def test_namespaced_owner_reference_is_not_truncated() -> None:

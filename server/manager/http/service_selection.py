@@ -514,6 +514,7 @@ class ServiceSelectionRoutesMixin:
     ) -> dict[str, object]:
         """Hydrate only missing referenced sources, then freeze once more."""
         attempted: set[str] = set()
+        authorized_owners = self._authorized_factor_source_owners(principal)
         while True:
             try:
                 return self.state.test_authoring.prepare_run_context(
@@ -522,6 +523,7 @@ class ServiceSelectionRoutesMixin:
                     source_free=True,
                     storage_server_id=self.state.server_id,
                     source_collector=source_entries.extend,
+                    authorized_factor_owners=authorized_owners,
                 )
             except TypeError as exc:
                 if "unexpected keyword" not in str(exc):
@@ -545,6 +547,28 @@ class ServiceSelectionRoutesMixin:
                     factor_ref, principal=principal,
                 ):
                     raise
+
+    def _authorized_factor_source_owners(self, principal: str) -> list[str]:
+        """Use the same direct-child mirror that supplies catalog visibility."""
+        from server.manager.services.subordinate_factor_library import (
+            direct_subordinate_accounts,
+        )
+
+        client_state = getattr(self.state, "client_state", None)
+        store = getattr(client_state, "local_account_store", None)
+        if store is None:
+            try:
+                from server.manager.storage.local_accounts import LocalAccountStore
+
+                store = LocalAccountStore()
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+                store = None
+        owners = [str(principal or "").strip()]
+        owners.extend(
+            str(item.get("username") or "").strip()
+            for item in direct_subordinate_accounts(principal, store)
+        )
+        return [owner for owner in dict.fromkeys(owners) if owner]
 
     def _capable_service_route(
         self,

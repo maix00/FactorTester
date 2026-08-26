@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
-from server.manager.services import factor_source_hydration
-from server.manager.services import data_plane_client
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
+from server.manager.services import data_plane_client, factor_source_hydration
 from server.manager.services.test_authoring import TestAuthoringError as AuthoringError
 
 
@@ -140,6 +139,49 @@ def test_run_context_retries_after_hydrating_missing_source(monkeypatch) -> None
     assert result == {"prepared": True}
     assert hydrated == [("DemoFactor", "alice")]
     assert len(calls) == 2
+
+
+def test_run_context_passes_direct_child_source_authority() -> None:
+    calls = []
+
+    class Accounts:
+        @staticmethod
+        def load_accounts():
+            return [
+                {"username": "parent", "organization_id": "org"},
+                {
+                    "username": "child", "organization_id": "org",
+                    "parent_username": "parent", "active": True,
+                },
+                {
+                    "username": "grandchild", "organization_id": "org",
+                    "parent_username": "child", "active": True,
+                },
+            ]
+
+    class Authoring:
+        @staticmethod
+        def prepare_run_context(*args, **kwargs):
+            calls.append(kwargs)
+            return {"prepared": True}
+
+    class ClientState:
+        local_account_store = Accounts()
+
+    class State:
+        server_id = "public-1"
+        test_authoring = Authoring()
+        client_state = ClientState()
+
+    class Routes(ServiceSelectionRoutesMixin):
+        state = State()
+
+    result = Routes()._prepare_run_context_with_sources(
+        {}, principal="parent", source_entries=[],
+    )
+
+    assert result == {"prepared": True}
+    assert calls[0]["authorized_factor_owners"] == ["parent", "child"]
 
 
 def test_hydration_repairs_missing_provider_metadata_from_control_store() -> None:
