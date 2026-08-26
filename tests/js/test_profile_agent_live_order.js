@@ -35,7 +35,6 @@ const state = {
       };
     },
   },
-  itemView: "results",
   items: [],
   itemPage: null,
 };

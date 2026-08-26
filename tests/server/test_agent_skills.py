@@ -476,9 +476,13 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "profile-chatkit-readonly-composer" in chat_source
     assert "不能发送问题" in chat_source
     assert "options.settingsHost?.replaceChildren(runtimeControls.element)" in chat_source
-    assert "host.replaceChildren(viewActions, chatStage)" in chat_source
+    assert "host.replaceChildren(chatStage)" in chat_source
     assert "chatSlot.replaceChildren(target)" not in chat_source
-    assert "fetchForView(view)" in chat_source
+    assert 'context.t("结果")' not in chat_source
+    assert 'context.t("过程")' not in chat_source
+    assert 'context.t("启动 Agent")' not in chat_source
+    assert 'context.t("停止 Agent")' not in chat_source
+    assert "fetch: adapter.fetch" in chat_source
     protocol_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-protocol.js"
     ).read_text(encoding="utf-8")

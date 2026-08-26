@@ -5,6 +5,7 @@
   const CHATKIT_SCRIPT =
     "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js";
   const CHATKIT_ENDPOINT = "/api/client/profile-agent/chatkit";
+  const ITEM_VIEW = "timeline";
   let scriptLoad = null;
 
   async function load() {
@@ -32,7 +33,7 @@
     return scriptLoad;
   }
 
-  async function fetchAdapter(profileState, itemView, input, init = {}) {
+  async function fetchAdapter(profileState, input, init = {}) {
     const body = await P.parseBody(input, init);
     const operation = P.operation(body);
     if (!operation) return window.fetch(input, init);
@@ -58,7 +59,7 @@
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), !profileState.historyOnly,
       );
-      const page = await S.authoritativePage(state, {}, itemView);
+      const page = await S.authoritativePage(state);
       rememberPage(state, page);
       return P.jsonResponse(P.threadObject(
         {...state, items: page.items, itemPage: page},
@@ -69,7 +70,7 @@
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
       );
-      const page = await S.authoritativePage(state, params, itemView);
+      const page = await S.authoritativePage(state, params);
       rememberPage(state, page);
       return P.jsonResponse(P.page(page.items, page));
     }
@@ -208,7 +209,7 @@
   }
 
   function readOnlyURL(
-    path, profileState, itemView, conversationID = "", pageParams = {},
+    path, profileState, conversationID = "", pageParams = {},
   ) {
     const params = new URLSearchParams({
       profile_key: profileState.profileKey,
@@ -218,27 +219,26 @@
     if (pageParams.limit) params.set("limit", String(pageParams.limit));
     if (pageParams.after) params.set("after", pageParams.after);
     if (pageParams.order) params.set("order", pageParams.order);
-    params.set("view", itemView);
+    params.set("view", ITEM_VIEW);
     return `${path}?${params}`;
   }
 
   async function readOnlyJSON(
-    profileState, itemView, path, conversationID = "", pageParams = {},
+    profileState, path, conversationID = "", pageParams = {},
   ) {
     const payload = await profileState.context.api(
-      readOnlyURL(path, profileState, itemView, conversationID, pageParams),
+      readOnlyURL(path, profileState, conversationID, pageParams),
     );
     return payload || {};
   }
 
-  async function readOnlyConversations(profileState, itemView) {
+  async function readOnlyConversations(profileState) {
     if (profileState.conversationCache
         && Date.now() - profileState.conversationCacheAt < 5000) {
       return profileState.conversationCache;
     }
     const payload = await readOnlyJSON(
       profileState,
-      itemView,
       "/api/client/profile-directory/conversations",
     );
     profileState.conversationCache = Array.isArray(payload.conversations)
@@ -247,19 +247,16 @@
     return profileState.conversationCache;
   }
 
-  async function readOnlyItems(
-    profileState, itemView, conversationID, params = {},
-  ) {
+  async function readOnlyItems(profileState, conversationID, params = {}) {
     const pageParams = P.itemPageParams(params);
-    const pageKey = `${itemView}:${conversationID}`;
+    const pageKey = conversationID;
     const previous = profileState.itemPages.get(pageKey);
     const after = P.chronologicalPageAfter(
-      previous, pageParams.after, itemView,
+      previous, pageParams.after, ITEM_VIEW,
     );
     const requestParams = {...pageParams, after};
     const payload = await readOnlyJSON(
       profileState,
-      itemView,
       "/api/client/profile-directory/conversation-items",
       conversationID,
       requestParams,
@@ -270,13 +267,13 @@
       has_more: Boolean(payload.has_more),
       after: payload.after || null,
       order,
-      view: itemView,
+      view: ITEM_VIEW,
     };
     profileState.itemPages.set(pageKey, page);
     return page;
   }
 
-  async function fetchReadOnlyAdapter(profileState, itemView, input, init = {}) {
+  async function fetchReadOnlyAdapter(profileState, input, init = {}) {
     const body = await P.parseBody(input, init);
     const operation = P.operation(body);
     if (!operation) return window.fetch(input, init);
@@ -284,13 +281,13 @@
       ? body.params : (body || {});
     const conversationID = readOnlyConversationID(params);
     if (operation === "threads.list") {
-      const conversations = await readOnlyConversations(profileState, itemView);
+      const conversations = await readOnlyConversations(profileState);
       return P.jsonResponse(P.page(conversations.map(item => (
         readOnlyThread(profileState.profileKey, item)
       ))));
     }
     if (operation === "threads.get_by_id") {
-      const conversations = await readOnlyConversations(profileState, itemView);
+      const conversations = await readOnlyConversations(profileState);
       const conversation = conversations.find(
         item => String(item.conversation_id || "") === conversationID,
       );
@@ -302,14 +299,14 @@
       return P.jsonResponse(readOnlyThread(
         profileState.profileKey,
         conversation,
-        await readOnlyItems(profileState, itemView, conversationID),
+        await readOnlyItems(profileState, conversationID),
       ));
     }
     if (operation === "items.list") {
       const page = await readOnlyItems(
-        profileState, itemView, conversationID, params,
+        profileState, conversationID, params,
       );
-      const conversations = await readOnlyConversations(profileState, itemView);
+      const conversations = await readOnlyConversations(profileState);
       const conversation = conversations.find(
         item => String(item.conversation_id || "") === conversationID,
       );
@@ -345,21 +342,10 @@
         conversationCacheAt: 0,
         itemPages: new Map(),
       };
-      let defaultView = "results";
-      const fetchForView = value => {
-        const view = value === "process" ? "process" : "results";
-        return (input, init) => fetchReadOnlyAdapter(
-          profileState, view, input, init,
-        );
-      };
       return {
-        fetch: (input, init) => fetchForView(defaultView)(input, init),
-        fetchForView,
+        fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
         endpoint: CHATKIT_ENDPOINT,
         locale: P.chatLocale(context),
-        setItemView(value) {
-          defaultView = value === "process" ? "process" : "results";
-        },
         dispose() {},
       };
     }
@@ -370,19 +356,10 @@
     for (const state of profileState.conversations.values()) {
       state.runtimeObserver = profileState.runtimeObserver;
     }
-    let defaultView = "results";
-    const fetchForView = value => {
-      const view = value === "process" ? "process" : "results";
-      return (input, init) => fetchAdapter(profileState, view, input, init);
-    };
     return {
-      fetch: (input, init) => fetchForView(defaultView)(input, init),
-      fetchForView,
+      fetch: (input, init) => fetchAdapter(profileState, input, init),
       endpoint: CHATKIT_ENDPOINT,
       locale: P.chatLocale(context),
-      setItemView(value) {
-        defaultView = value === "process" ? "process" : "results";
-      },
       dispose() {
         C.dispose(profileState, S.closeSource);
       },

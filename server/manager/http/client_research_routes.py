@@ -153,7 +153,7 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
                         scope=scope,
                         limit=int(query.get("limit", ["10"])[0] or 10),
                         after=str(query.get("after", [""])[0] or ""),
-                        view=str(query.get("view", ["results"])[0] or "results"),
+                        view=str(query.get("view", ["timeline"])[0] or "timeline"),
                         order=str(query.get("order", ["desc"])[0] or "desc"),
                     )
                     value = {"success": True, **page}

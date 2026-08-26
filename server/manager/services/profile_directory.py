@@ -696,7 +696,7 @@ class ProfileDirectoryService:
         scope: str = "servers",
         limit: int = 10,
         after: str = "",
-        view: str = "results",
+        view: str = "timeline",
         order: str = "desc",
     ) -> dict[str, Any]:
         item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)

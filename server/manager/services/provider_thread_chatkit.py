@@ -412,7 +412,7 @@ def provider_thread_page(
     *,
     limit: int = 10,
     after: str = "",
-    view: str = "results",
+    view: str = "timeline",
     order: str = "desc",
 ) -> dict[str, Any]:
     """Return one newest-first navigation page in chronological item order.
@@ -459,19 +459,9 @@ def provider_thread_page(
     projected = provider_thread_items(
         page_thread, conversation_id, turn_offset=start,
     )
-    selected_view = str(view or "results").strip().casefold()
-    if selected_view not in {"results", "process"}:
+    selected_view = str(view or "timeline").strip().casefold()
+    if selected_view != "timeline":
         raise ValueError("conversation item view is invalid")
-    if selected_view == "results":
-        projected = [
-            item for item in projected
-            if item.get("type") in {"user_message", "assistant_message"}
-        ]
-    else:
-        projected = [
-            item for item in projected
-            if item.get("type") != "assistant_message"
-        ]
     if selected_order == "desc":
         projected.reverse()
     return {

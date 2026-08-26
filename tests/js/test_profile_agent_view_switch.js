@@ -51,7 +51,6 @@ window.FTProfileChatKit = {
       endpoint: "/chatkit",
       locale: "zh-CN",
       fetch: () => {},
-      fetchForView: view => ({view}),
       dispose() {},
     };
     adapters.push(adapter);
@@ -78,9 +77,13 @@ vm.runInThisContext(
 (async () => {
   const context = {
     t: value => value,
-    api: async url => url.includes("profile-skills")
-      ? {skills: []}
-      : {status: {running: true}},
+    calls: [],
+    api: async function(url, init = {}) {
+      this.calls.push({url, init});
+      return url.includes("profile-skills")
+        ? {skills: []}
+        : {status: {running: false}};
+    },
   };
   const root = await window.FTAgentChat.render(context, {
     profile_id: "profile-1",
@@ -89,48 +92,24 @@ vm.runInThisContext(
   });
   await flush();
   const buttons = findAll(root, item => item.tagName === "button");
-  const resultsButton = buttons.find(item => item.textContent === "结果");
-  const processButton = buttons.find(item => item.textContent === "过程");
+  assert.equal(buttons.some(item => [
+    "结果", "过程", "启动 Agent", "停止 Agent",
+  ].includes(item.textContent)), false);
   const initialChats = findAll(root, item => item.tagName === "openai-chatkit");
-  assert.equal(initialChats.length, 1, "only results should mount initially");
-  const resultsChat = initialChats[0];
-  assert.equal(resultsChat.options.api.fetch.view, "results");
-  resultsChat.dispatch("chatkit.thread.change", {threadId: "conversation-1"});
-
-  processButton.click();
+  assert.equal(initialChats.length, 1, "one timeline uses one ChatKit element");
+  assert.equal(initialChats[0].options.api.fetch, adapters[0].fetch);
+  assert.equal(context.calls.filter(
+    call => call.url === "/api/client/profile-agent/start",
+  ).length, 1, "entering the tab starts the Agent exactly once");
+  const lifecycleHost = findAll(
+    root, item => item.dataset?.ftRerenderOnTabRestore === "true",
+  )[0];
+  lifecycleHost.__ftBeforeTabSave();
   await flush();
-  const bothChats = findAll(root, item => item.tagName === "openai-chatkit");
-  assert.equal(bothChats.length, 2, "process should mount lazily once");
-  const processChat = bothChats.find(item => item !== resultsChat);
-  const resultsSlot = findAll(
-    root, item => item.dataset?.itemView === "results",
-  )[0];
-  const processSlot = findAll(
-    root, item => item.dataset?.itemView === "process",
-  )[0];
-  assert.equal(processChat.options.api.fetch.view, "process");
-  assert.equal(processChat.options.initialThread, "conversation-1");
-  assert.equal(processChat.threadID, "conversation-1");
-  assert.equal(resultsSlot.hidden, true);
-  assert.equal(processSlot.hidden, false);
-
-  resultsButton.click();
-  assert.equal(resultsChat.threadID, "conversation-1");
-  assert.equal(resultsSlot.hidden, false);
-  assert.equal(processSlot.hidden, true);
-  processButton.click();
-  assert.equal(
-    findAll(root, item => item.tagName === "openai-chatkit").length,
-    2,
-    "repeated switches must reuse both ChatKit elements",
-  );
-  assert.equal(
-    findAll(root, item => item.tagName === "openai-chatkit")[0],
-    resultsChat,
-    "the results conversation DOM must keep its identity",
-  );
-  assert.equal(adapters.length, 1, "both projections must share one conversation adapter");
-  console.log("PASS: Profile Agent switches projections without rebuilding ChatKit");
+  assert.equal(context.calls.filter(
+    call => call.url === "/api/client/profile-agent/stop",
+  ).length, 1, "leaving the tab stops the Agent exactly once");
+  console.log("PASS: Profile Agent uses one timeline and tab-scoped lifecycle");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

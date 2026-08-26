@@ -249,7 +249,7 @@ class AgentAppServerSupervisor:
         *,
         limit: int = 10,
         after: str = "",
-        view: str = "results",
+        view: str = "timeline",
         order: str = "desc",
     ) -> dict[str, Any]:
         """Read one ChatKit page from the authoritative local Provider thread."""

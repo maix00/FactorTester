@@ -1034,7 +1034,7 @@ def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_pat
         "/api/client/profile-agent/conversation-items"
         f"?profile_id={PROFILE_ID}"
         f"&conversation_id={conversation['conversation_id']}"
-        "&limit=7&view=results",
+        "&limit=7&view=timeline",
     ))
     history = _response(handler)
     assert history["success"] is True
