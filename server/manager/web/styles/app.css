@@ -539,8 +539,6 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-workspace-browser .table-link:hover { text-decoration: underline; }
 .profile-projection-note { margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--soft) 58%, var(--panel)); }
 .profile-agent-chat { min-width: 0; }
-.profile-agent-actions-bar { display: flex; flex-wrap: wrap; gap: 8px; }
-.profile-agent-message-view { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
 .profile-agent-settings-host { min-width: 0; margin-top: 12px; }
 .profile-agent-runtime-controls { margin: 0; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 94%, var(--soft)); }
 .profile-agent-runtime-controls > summary { padding: 11px 12px; cursor: pointer; font-weight: 600; }
@@ -557,8 +555,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-runtime-notice[data-kind="error"] { color: var(--danger, #b42318); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
-.profile-chatkit-stage, .profile-chatkit-slot, .profile-chatkit-host openai-chatkit { display: block; width: 100%; min-width: 0; }
-.profile-chatkit-slot[hidden] { display: none; }
+.profile-chatkit-stage, .profile-chatkit-host openai-chatkit { display: block; width: 100%; min-width: 0; }
 .profile-chatkit-host openai-chatkit { height: 600px; }
 .profile-directory { width: 100%; max-width: none; min-width: 0; }
 .profile-directory-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }

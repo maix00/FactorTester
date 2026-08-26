@@ -140,7 +140,7 @@ def test_provider_thread_pages_by_complete_turn_and_keeps_cursor_stable():
         )
 
 
-def test_provider_thread_lazily_separates_results_from_visible_process():
+def test_provider_thread_preserves_complete_visible_timeline():
     thread = {"turns": [{
         "id": "turn-1",
         "items": [
@@ -154,13 +154,9 @@ def test_provider_thread_lazily_separates_results_from_visible_process():
         ],
     }]}
 
-    results = provider_thread_page(thread, "conversation-1", view="results")
-    process = provider_thread_page(thread, "conversation-1", view="process")
+    timeline = provider_thread_page(thread, "conversation-1", view="timeline")
 
-    assert [item["type"] for item in results["items"]] == [
-        "assistant_message", "user_message",
+    assert [item["type"] for item in timeline["items"]] == [
+        "assistant_message", "workflow", "workflow", "user_message",
     ]
-    assert [item["type"] for item in process["items"]] == [
-        "workflow", "workflow", "user_message",
-    ]
-    assert "PRIVATE_CHAIN_OF_THOUGHT" not in repr(process)
+    assert "PRIVATE_CHAIN_OF_THOUGHT" not in repr(timeline)
