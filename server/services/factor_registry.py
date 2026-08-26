@@ -32,10 +32,13 @@ from typing import TYPE_CHECKING
 from flask import has_request_context, session
 
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
-from tools.factors.FactorFamily import FactorFamily
 from tools.data.account_manage import can_view_user_scope
-from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source
+from tools.data.factor_workspace.storage import (
+    load_factor_source,
+    load_public_factor_source,
+)
 from tools.data.sqlite.db import connect_sqlite
+from tools.factors.FactorFamily import FactorFamily
 
 if TYPE_CHECKING:
     from tools.factors.Factors import Factor
@@ -72,6 +75,24 @@ _active_portable_source_overrides: ContextVar[dict[str, dict[str, str]]] = Conte
 _active_transient_source_owner: ContextVar[str] = ContextVar(
     "active_transient_factor_source_owner", default=""
 )
+_authorized_factor_source_owners: ContextVar[frozenset[str]] = ContextVar(
+    "authorized_factor_source_owners", default=frozenset()
+)
+
+
+@contextmanager
+def authorized_factor_source_owners(owners: object):
+    """Apply Manager-validated source visibility to one freeze operation."""
+    normalized = frozenset(
+        str(owner or "").strip()
+        for owner in (owners if isinstance(owners, (list, tuple, set, frozenset)) else [])
+        if str(owner or "").strip()
+    )
+    token = _authorized_factor_source_owners.set(normalized)
+    try:
+        yield
+    finally:
+        _authorized_factor_source_owners.reset(token)
 
 
 @contextmanager
@@ -323,6 +344,7 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
             active_user
             and (
                 owner == active_user
+                or owner in _authorized_factor_source_owners.get()
                 or can_view_user_scope(active_user, owner)
             )
         )

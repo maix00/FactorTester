@@ -8,8 +8,8 @@ actions cross a selected service port.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote
 
@@ -94,21 +94,26 @@ class TestAuthoringService:
         source_free: bool = False,
         storage_server_id: str = "",
         source_collector=None,
+        authorized_factor_owners: object = (),
     ) -> dict[str, Any]:
         """Freeze local authoring state into a portable execution context."""
         from server.modules.single_factor_test.research_jobs import (
             prepare_manager_run_context,
         )
+        from server.services.factor_registry import (
+            authorized_factor_source_owners,
+        )
         from server.services.research_run_context import RunRequestError
 
         try:
-            return prepare_manager_run_context(
-                payload,
-                owner=owner,
-                source_free=source_free,
-                storage_server_id=storage_server_id,
-                source_collector=source_collector,
-            )
+            with authorized_factor_source_owners(authorized_factor_owners):
+                return prepare_manager_run_context(
+                    payload,
+                    owner=owner,
+                    source_free=source_free,
+                    storage_server_id=storage_server_id,
+                    source_collector=source_collector,
+                )
         except RunRequestError as exc:
             raise TestAuthoringError(
                 str(exc), exc.status_code, **exc.details,
