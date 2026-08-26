@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from tools.factors.factor_set_identity import (
+from tools.cli.identities.factor_set import (
     build_factor_set_reference,
     factor_set_identity_payload,
     require_factor_set_reference,
     verify_factor_set_reference,
 )
-from tools.factors.formula_identity import require_factor_reference
+from tools.cli.identities.factor import require_factor_reference
 
 
 def canonical_factor_set_members(member_refs: Iterable[str]) -> list[str]:

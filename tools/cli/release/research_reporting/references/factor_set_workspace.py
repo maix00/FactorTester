@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from tools.factors.factor_set_identity import (
+from tools.cli.identities.factor_set import (
     freeze_factor_set_identity,
     require_factor_set_reference,
     require_frozen_factor_set,

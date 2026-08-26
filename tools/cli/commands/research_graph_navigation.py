@@ -84,7 +84,7 @@ def _json(value: Any) -> str:
 
 def _with_next_action(value: dict[str, Any]) -> dict[str, Any]:
     # Server responses contain state and validation contracts only.  The local
-    # ``research-graph next-local`` command is the sole source of navigation
+    # ``research graphs next-local`` command is the sole source of navigation
     # advice; never re-promote a legacy server action into the CLI response.
     value.pop("next_actions", None)
     value.pop("next_action", None)

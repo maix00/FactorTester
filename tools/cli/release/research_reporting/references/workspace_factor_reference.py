@@ -7,7 +7,7 @@ import re
 import subprocess
 from tempfile import TemporaryDirectory
 
-from tools.factors.formula_identity import (
+from tools.cli.identities.factor import (
     freeze_factor_family_identity,
     freeze_factor_identity,
 )

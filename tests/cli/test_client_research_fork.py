@@ -106,7 +106,7 @@ def test_fork_inherits_source_report_tree(
         client_research_fork, "client_from_config", lambda: FakeClient(),
     )
     result = CliRunner().invoke(cli, [
-        "client", "research", "fork",
+        "research", "workspaces", "fork",
         "graph-branch:instance-a:branch-source",
         "--profile", "maxa",
         "--label", "成本假设",

@@ -137,7 +137,7 @@ def _invoke(monkeypatch, tmp_path, client, *, acting=True):
     evidence = tmp_path / f"evidence-{client.advance_calls}.json"
     evidence.write_text('{"ready": true}', encoding="utf-8")
     args = [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
     ]
     if acting:
@@ -193,7 +193,7 @@ def test_bound_profile_without_branch_record_blocks_before_advance(
     evidence = tmp_path / "evidence.json"
     evidence.write_text('{"ready": true}', encoding="utf-8")
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
         "--acting-profile-ref", "profile:maxa",
     ])

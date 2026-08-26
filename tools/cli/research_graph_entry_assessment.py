@@ -1,4 +1,4 @@
-"""Entry-assessment authoring managed by ``research-graph node advance``."""
+"""Entry-assessment authoring managed by ``research graphs node advance``."""
 
 from __future__ import annotations
 

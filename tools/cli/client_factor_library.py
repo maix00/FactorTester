@@ -8,6 +8,14 @@ from .client_base import ClientMixinBase
 
 
 class FactorLibraryClientMixin(ClientMixinBase):
+    def product_catalog(self) -> dict[str, Any]:
+        """Read the same server product catalog used by Web and Swift."""
+        return self._expect_success(self.session.get("/api/catalog/products"))
+
+    def product_source_catalog(self) -> dict[str, Any]:
+        """Read the same server data-source catalog used by Web and Swift."""
+        return self._expect_success(self.session.get("/api/catalog/sources"))
+
     def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
         if parent is None:
             return self.home_modules()

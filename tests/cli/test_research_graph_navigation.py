@@ -60,7 +60,7 @@ def test_node_info_does_not_expose_server_navigation_advice(monkeypatch):
     monkeypatch.setattr(navigation, "client_from_config", lambda: client)
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "info", "instance-1", "branch-1",
+        "research", "graphs", "node", "info", "instance-1", "branch-1",
     ])
 
     assert result.exit_code == 0
@@ -75,7 +75,7 @@ def test_edge_choose_is_read_only_and_returns_next_action(monkeypatch, tmp_path)
     output = tmp_path / "edge-choice.json"
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "edge", "choose", "instance-1", "branch-1",
+        "research", "graphs", "edge", "choose", "instance-1", "branch-1",
         "edge-1", "--output", str(output),
     ])
 
@@ -95,7 +95,7 @@ def test_node_advance_returns_post_transition_state_without_server_advice(
     evidence.write_text('{"ready": true}', encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
     ])
 
@@ -130,7 +130,7 @@ def test_node_advance_doctor_blocks_missing_dynamic_report(
     evidence.write_text('{"ready": true}', encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
     ])
 
@@ -155,7 +155,7 @@ def test_node_advance_carries_entry_assessment_projection(
     }), encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
         "--entry-assessment-file", str(assessment),
     ])
@@ -191,7 +191,7 @@ def test_node_advance_creates_entry_draft_without_mutating(
     evidence.write_text('{"ready": true}', encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
         "--entry-assessment-file", str(draft),
         "--factor-family", "SgCPS",
@@ -208,7 +208,7 @@ def test_node_advance_creates_entry_draft_without_mutating(
 
 def test_node_help_exposes_one_advance_orchestrator() -> None:
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "--help",
+        "research", "graphs", "node", "--help",
     ])
 
     assert result.exit_code == 0, result.output
@@ -248,7 +248,7 @@ def test_node_advance_automatically_binds_declared_target_capabilities(
     evidence.write_text('{"ready": true}', encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
     ])
 
@@ -412,7 +412,7 @@ def test_node_advance_keeps_local_report_publication(
     )
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
         "--profile-id", "maxa", "--agent-id", "research-maxa",
         "--narrative-file", str(narrative),
@@ -472,7 +472,7 @@ def test_profile_bound_node_advance_cannot_bypass_obligation_ledger(
     evidence.write_text('{"ready": true}', encoding="utf-8")
 
     result = CliRunner().invoke(cli, [
-        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "research", "graphs", "node", "advance", "instance-1", "branch-1",
         "--edge-id", "edge-1", "--evidence-file", str(evidence),
         "--profile-id", "maxa", "--agent-id", "research-maxa",
     ])

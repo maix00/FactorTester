@@ -56,7 +56,7 @@ def capture_job(
         "next_actions": [{
             "action": "select_fragment",
             "argv": [
-                "factortester", "research-evidence", "fragment", "add",
+                "factortester", "research", "evidence", "fragment", "add",
                 value["source_ref"], "--profile-id", profile_id, "--help",
             ],
         }],
@@ -134,7 +134,7 @@ def capture_terminal(
         "next_actions": [{
             "action": "create_output_fragment",
             "argv": [
-                "factortester", "research-evidence", "fragment", "add",
+                "factortester", "research", "evidence", "fragment", "add",
                 value["source_ref"], "--profile-id", profile_id,
                 "--selector-file", "<selector.json>",
                 "--fragment-file", "<stdout-or-stderr-file>",
@@ -310,7 +310,7 @@ def add_fragment(
         "next_actions": [{
             "action": "create_evidence",
             "argv": [
-                "factortester", "research-evidence", "create",
+                "factortester", "research", "evidence", "create",
                 "--profile-id", profile_id,
                 "--metadata-file", "<evidence.json>",
             ],

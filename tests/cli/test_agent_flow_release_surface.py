@@ -7,10 +7,10 @@ from tools.cli.manager_app import manager_cli
 def test_public_cli_does_not_offer_backend_maintenance_authority() -> None:
     runner = CliRunner()
 
-    resume = runner.invoke(cli, ["agent-flow", "resume", "--help"])
+    resume = runner.invoke(cli, ["agents", "flow", "resume", "--help"])
     research_reserve = runner.invoke(
         cli,
-        ["agent-flow", "invocation", "reserve", "--help"],
+        ["agents", "flow", "invocation", "reserve", "--help"],
     )
     assert resume.exit_code == 0
     assert research_reserve.exit_code != 0

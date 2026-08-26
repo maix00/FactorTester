@@ -46,17 +46,17 @@
     },
     {
       id: "research", path: "/research?section=reports", title: "Research reports", access: "public",
-      cli: ["research", "report", "research-evidence", "agent-flow"],
+      cli: ["research"],
       description: "Inspect research reports, evidence and agent workflow outputs.",
     },
     {
       id: "research_graph", path: "/research?section=graph", title: "Research graph", access: "authenticated",
-      cli: ["research-graph", "research"],
+      cli: ["research"],
       description: "Inspect and advance the research decision graph.",
     },
     {
       id: "profiles", path: "/research?section=profiles", title: "Research profiles", access: "authenticated",
-      cli: ["profile-agent", "client", "agent-flow"],
+      cli: ["research", "agents"],
       description: "Manage research identities, agents, skills and conversations.",
     },
     {

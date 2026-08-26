@@ -159,7 +159,7 @@
         "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py",
         "skills/research-obligation-cycle/scripts/validate-trial-synthesis.py"
       ],
-      "sha256": "79a404eccee3256f8a96d21cc2c065b4e48122bbdbd62827d6c3b75b3ba2a0aa"
+      "sha256": "c2b02070e3dcb05c8fc885853f0b6b212e9d5405ce822f0fd0f017028cc3518a"
     }
   }
 }

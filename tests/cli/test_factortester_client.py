@@ -361,6 +361,46 @@ def fake_server() -> Iterator[str]:
             },
         )
 
+    @app.get("/api/catalog/products")
+    def product_catalog():
+        return jsonify(
+            success=True,
+            products=[{"name": "RB.SHF", "description": "螺纹钢"}],
+        )
+
+    @app.get("/api/catalog/sources")
+    def product_sources():
+        return jsonify(
+            success=True,
+            sources=[{"source_id": "LocalCNFutures", "frequency": "MIN1"}],
+        )
+
+    @app.get("/api/research-publications/settings")
+    def research_publications():
+        assert session.get("username") == "alice"
+        return jsonify(success=True, reports=[{"title": "我的研究"}])
+
+    @app.get("/api/public-research")
+    def public_research():
+        assert request.args.get("scope") == "subordinates"
+        return jsonify(success=True, reports=[{"title": "下级研究"}])
+
+    @app.get("/api/client/profile-directory")
+    def profile_directory():
+        assert session.get("username") == "alice"
+        assert request.args.get("scope") == "mine"
+        assert request.args.get("page_size") == "20"
+        return jsonify(success=True, items=[{"profile_id": "maxa"}], total=1)
+
+    @app.get("/api/client/agent-models")
+    def agent_models():
+        assert session.get("username") == "alice"
+        assert request.args.get("runtime_kind") == "server"
+        return jsonify(
+            success=True,
+            providers=[{"provider_id": "codex", "runtime_kind": "server"}],
+        )
+
     with running_server(app) as url:
         yield url
 
@@ -387,6 +427,22 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.factor_set_catalog(query="momentum")["item_scopes"]["mine"][0][
         "target_ref"
     ] == "factor-set:momentum"
+    assert client.product_catalog()["products"][0]["name"] == "RB.SHF"
+    assert client.product_source_catalog()["sources"][0]["source_id"] == (
+        "LocalCNFutures"
+    )
+    assert client.research_report_catalog(scope="mine")["reports"][0][
+        "title"
+    ] == "我的研究"
+    assert client.research_report_catalog(scope="subordinates")["reports"][0][
+        "title"
+    ] == "下级研究"
+    assert client.profile_directory(scope="mine")["items"][0]["profile_id"] == (
+        "maxa"
+    )
+    assert client.list_agent_models(runtime_kind="server")[0]["provider_id"] == (
+        "codex"
+    )
     assert client.submit_run(
         "workspace-1",
         1,

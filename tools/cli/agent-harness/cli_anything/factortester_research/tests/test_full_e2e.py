@@ -323,7 +323,7 @@ class TestCLISubprocess:
             "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "assert sys.argv[1:] == [\n"
-            "  'research-evidence', 'source', 'capture-job', 'job-1', '--json'\n"
+            "  'research', 'evidence', 'source', 'capture-job', 'job-1', '--json'\n"
             "]\n"
             f"print(json.dumps({backend!r}))\n",
             encoding="utf-8",

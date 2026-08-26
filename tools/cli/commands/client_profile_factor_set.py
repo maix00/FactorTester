@@ -25,7 +25,7 @@ from tools.cli.release.research_reporting.references.factor_set_workspace import
     read_factor_set_manifest,
     validate_factor_set_reference,
 )
-from tools.factors.formula_identity import require_frozen_factor
+from tools.cli.identities.factor import require_frozen_factor
 
 
 def register_factor_set_commands(group: click.Group) -> None:
@@ -296,7 +296,7 @@ def reference_factor_set(
         "action": "search_evidence",
         "description_zh": "按冻结集合身份检索可复用证据",
         "argv": [
-            "factortester", "research-evidence", "search",
+            "factortester", "research", "evidence", "search",
             "--factor-ref", value["target_ref"], "--json",
         ],
     }]

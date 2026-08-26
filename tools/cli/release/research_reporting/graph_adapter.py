@@ -54,13 +54,13 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
             deduped[ref] = item
     value["report_packet"] = {
         "document_commands": [
-            "factortester research-graph node info <instance> <branch>",
-            "factortester research-graph edge info <instance> <branch> <edge-id>",
-            "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|list|table|image|code|math|result",
-            "factortester report asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
-            "factortester report manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
-            "factortester report validate --profile <profile> --work-package-id <package> --branch-id <branch>",
-            "factortester research-graph node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
+            "factortester research graphs node info <instance> <branch>",
+            "factortester research graphs edge info <instance> <branch> <edge-id>",
+            "factortester research reports add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|list|table|image|code|math|result",
+            "factortester research reports asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
+            "factortester research reports manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
+            "factortester research reports validate --profile <profile> --work-package-id <package> --branch-id <branch>",
+            "factortester research graphs node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
         ],
         "current_node": str(node),
         "required_tasks": list(deduped.values()),
@@ -78,8 +78,8 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "mode": "automatic_local_node_entry",
             "anchor": "current Graph node",
             "command": (
-                "factortester client research create | "
-                "factortester research-graph node advance"
+                "factortester research workspaces create | "
+                "factortester research graphs node advance"
             ),
             "idempotent": True,
             "data_policy": "chapter ownership stays in the current branch Work Package source",
@@ -90,7 +90,7 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         },
         "manifest_contract": {
             "command": (
-                "factortester report manifest --profile <profile> "
+                "factortester research reports manifest --profile <profile> "
                 "--work-package-id <package> --branch-id <branch>"
             ),
             "purpose": "content-free receipt for local report identity",
@@ -165,7 +165,7 @@ def _requirement_task(
     title_zh = str(item.get("title_zh") or "").strip()
     if is_obligation_requirement:
         next_command = (
-            "factortester report add --profile <profile> "
+            "factortester research reports add --profile <profile> "
             "--work-package-id <package> --branch-id <branch> "
             "--component-id <component-id> --kind special "
             f"--title {shlex.quote(title_zh or '<short-title-zh>')} "
@@ -179,7 +179,7 @@ def _requirement_task(
         )
     else:
         next_command = (
-            "factortester report add --profile <profile> "
+            "factortester research reports add --profile <profile> "
             "--work-package-id <package> --branch-id <branch> "
             "--component-id <component-id> --kind <content-kind> "
             + report_options

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.factors.formula_identity import (
+from tools.cli.identities.factor import (
     build_factor_family_reference,
     build_factor_reference,
     factor_family_identity_payload,

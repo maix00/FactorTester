@@ -167,3 +167,26 @@ def test_built_client_runs_from_outside_repository(tmp_path: Path) -> None:
     )
     assert "negotiate" in result.stdout
     assert "show" in result.stdout
+
+    root_help = subprocess.run(
+        [sys.executable, "-m", "tools.cli.app", "--help"],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "agents" in root_help
+    assert "research" in root_help
+    assert "profile-agent" not in root_help
+
+    products_help = subprocess.run(
+        [sys.executable, "-m", "tools.cli.app", "products", "--help"],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    for command in ("list", "groups", "categories", "sources"):
+        assert command in products_help
