@@ -12,6 +12,7 @@ from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_family_reference,
     verify_factor_reference,
 )
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 _LOCAL_PATH = re.compile(
@@ -292,7 +293,22 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         family_formula_fingerprint=family_fingerprint,
         self_formula_fingerprint=self_fingerprint,
     )
+    frozen = freeze_factor_identity(
+        owner_ref=owner_ref,
+        family_alias=family_alias,
+        factor_alias=factor_alias,
+        family_formula_fingerprint=family_fingerprint,
+        self_formula_fingerprint=self_fingerprint,
+        params={
+            str(value["alias"]): value.get("value")
+            for value in params
+            if value.get("alias")
+        },
+    )
+    if frozen["ref"] != factor_ref:
+        raise ValueError("factor projection reference does not match frozen identity")
     result = {
+        **frozen,
         "factor_ref": factor_ref,
         "factor_alias": factor_alias,
         "factor_family_alias": family_alias,
