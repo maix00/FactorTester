@@ -9,6 +9,12 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/factortester-field-history.XXXXXX")
 snapshot="$temporary_root/field-history.sqlite"
 compressed_snapshot="$snapshot.gz"
 remote_snapshot="/tmp/factortester-field-history-$$.sqlite.gz"
+backup_retention="${FACTORTESTER_FIELD_HISTORY_BACKUP_RETENTION:-3}"
+
+if [[ ! "$backup_retention" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FACTORTESTER_FIELD_HISTORY_BACKUP_RETENTION must be a positive integer" >&2
+  exit 2
+fi
 
 cleanup() {
   rm -rf "$temporary_root"
@@ -41,12 +47,14 @@ gzip -c "$snapshot" > "$compressed_snapshot"
 "${ssh_command[@]}" "$remote" \
   "umask 077; tee '$remote_snapshot' >/dev/null" < "$compressed_snapshot"
 "${ssh_command[@]}" "$remote" bash -s -- \
-  "$remote_snapshot" "$remote_container_root" "$remote_env" <<'REMOTE'
+  "$remote_snapshot" "$remote_container_root" "$remote_env" \
+  "$backup_retention" <<'REMOTE'
 set -Eeuo pipefail
 
 snapshot="$1"
 container_root="$2"
 production_env="$3"
+backup_retention="$4"
 expanded_snapshot="${snapshot%.gz}"
 revision="$(sudo sed -n 's/^FACTORTESTER_REVISION=//p' "$production_env" | head -n 1)"
 release_root="$container_root/releases"
@@ -76,4 +84,7 @@ python -m tools.migrations.sync_field_history_snapshot \
 python -m tools.migrations.sync_field_history_snapshot \
   install "$1" "$destination" "$2" --apply
 ' sh "$container_snapshot" "$container_backup"
+sudo docker exec "$container" bash \
+  /opt/factortester/app/scripts/server/prune_field_history_backups.sh \
+  /data/backups/field-history "$backup_retention"
 REMOTE
