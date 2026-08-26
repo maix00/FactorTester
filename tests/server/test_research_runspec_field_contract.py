@@ -8,6 +8,8 @@ from server.modules.single_factor_test import research_jobs, sft_bp
 import server.modules.shared.submission_helpers  # noqa: F401 - product resolver
 from server.services import factor_registry
 from tools.factors.formula_identity import freeze_factor_identity
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
 from server.services.run_input_inspection import instantiate_factor_metadata
 
 
@@ -72,6 +74,26 @@ def _create_workspace(client):
     })
     assert response.status_code == 201
     return response.get_json()["workspace"]
+
+
+def test_factor_metadata_uses_template_latex_and_keeps_resolved_formula_separate():
+    class AroonMetadataFamily(FactorFamily):
+        @staticmethod
+        def factor_expr():
+            high = DataColumnParam("H", default_value="HA")
+            window = WindowParam("N", default_value="25d")
+            rolling = high.rolling(window)
+            highest = rolling.argmax_raw().as_intermediate("最高价位置")
+            bars = rolling.bars
+            days_since_high = (bars - 1.0 - highest).as_intermediate("距最高价天数")
+            return ((bars - days_since_high) / bars * 100.0).as_intermediate("Aroon上轨")
+
+    metadata = instantiate_factor_metadata(AroonMetadataFamily(), {"N": "25d"})
+
+    assert r"\textcolor{red}{N}" in metadata["math_expr"]
+    assert r"\mathrm{Bars}\left(\textcolor{red}{N}\right)" in metadata["math_expr"]
+    assert "25 days 00:00:00" not in metadata["math_expr"]
+    assert r"25\,\mathrm{d}" in metadata["resolved_math_expr"]
 
 
 def _update(client, workspace) -> None:
