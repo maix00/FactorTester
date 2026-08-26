@@ -228,7 +228,10 @@
     try {
       const value = await context.api("/custom-factors/api/validate", {
         method: "POST",
-        body: JSON.stringify({source_code: state.sourceCode}),
+        body: JSON.stringify({
+          source_code: state.sourceCode,
+          params: state.parameterValues || {},
+        }),
       });
       if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
       state.inspection = normalizedInspection(value);

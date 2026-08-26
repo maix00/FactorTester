@@ -831,6 +831,7 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "function normalizedInspection" in source
     assert "state.validationMessage" in source
     assert "state.validationError" in source
+    assert 'params: state.parameterValues || {}' in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
     assert "factor-editor-upload-action" not in source
