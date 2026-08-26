@@ -28,15 +28,15 @@ edge selection, evidence judgments, obligations, report authoring, and locally
 selected test execution still belong to the local research workspace and must
 continue when the Manager is offline. Download a graph YAML/version from the
 Manager when available, then use the local graph store and
-`factortester research-graph next-local` to evaluate candidate edges. Do not
+`factortester research graphs next-local` to evaluate candidate edges. Do not
 wait for a server packet to decide the next action.
 
 The server-side Graph instance/branch commands documented below are retained
 only as compatibility imports for existing shared progress and remote Jobs;
 they are not the source of truth for a new offline research session. A shared
-report is still edited locally. `factortester report publication publish`
+report is still edited locally. `factortester research reports publication publish`
 persists a source-free projection and its 7997 objects in the local outbox;
-`factortester report publication sync` flushes it when a connection returns.
+`factortester research reports publication sync` flushes it when a connection returns.
 Unshared local facts and session state never enter that outbox.
 
 ## Start and discover the current action
@@ -46,7 +46,7 @@ Use an explicit local session and JSON output:
 ```bash
 cli-anything-factortester-research \
   --session /path/to/research-session.json doctor --json
-factortester research-graph next-local \
+factortester research graphs next-local \
   --graph-file /path/to/graph.yaml --current-node entry --json
 ```
 
@@ -58,7 +58,7 @@ the local graph document and the evidence/facts needed by the current node.
 older remote Jobs; it is not part of offline research navigation.
 
 ```bash
-factortester research-graph next-local \
+factortester research graphs next-local \
   --graph-file graph.yaml --current-node validation_design --json
 ```
 
@@ -71,7 +71,7 @@ selected server, but the server does not own the research transition.
 
 - `plan`, `workspace`, `run-step`: prepare a bounded research configuration and
   delegate to the real client
-- `factortester research-graph`: download a graph and evaluate the next local
+- `factortester research graphs`: download a graph and evaluate the next local
   edge from the local session and facts
 - `factortester trial-plan`: validate, freeze, and read a direct TrialPlan
   without entering Research Graph
@@ -268,12 +268,12 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   `product_group_refs`. Read and change that relation only through the native
   product-group CLI:
   ```bash
-  factortester products product-groups subjects list \
+  factortester products groups subjects list \
     product-group:<id> --json
-  factortester products product-groups subjects add \
+  factortester products groups subjects add \
     product-group:<id> --factor-ref '<stable-factor-ref>' \
     --factor-set-ref '<stable-factor-set-ref>' --json
-  factortester products product-groups subjects remove \
+  factortester products groups subjects remove \
     product-group:<id> --factor-ref '<stable-factor-ref>' \
     --factor-set-ref '<stable-factor-set-ref>' --json
   ```
@@ -318,9 +318,9 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   exact IDs returned for the current Research Graph branch; copy them from the
   current cycle packet or object response and never derive them from the prose.
 - Copy `trial_plan_refs` and `run_spec_refs` from
-  `factortester client research timeline <work-package-ref> <branch-id> --json`.
+  `factortester research workspaces timeline <work-package-ref> <branch-id> --json`.
   Inspect the exact checkpoint-bound body with
-  `factortester research-graph cycle-object <instance-id> <branch-id>
+  `factortester research graphs cycle-object <instance-id> <branch-id>
   trial_plan|run_spec <object-id> --trace-id <trace-id>`. A RunSpec target is
   always `runspec:sha256:<run_spec_hash>`; a TrialPlan target is the exact
   `trial-plan:` reference returned by the timeline.
@@ -414,16 +414,16 @@ Do not memorize the mutable graph schema in this Skill. Ask the local CLI for
 the current graph contract and let it evaluate the local YAML:
 
 ```bash
-factortester research-graph next-local --graph-file <graph.yaml> --current-node <node>
-factortester research-evidence guide --json
-factortester research-evidence guide search --json
+factortester research graphs next-local --graph-file <graph.yaml> --current-node <node>
+factortester research evidence guide --json
+factortester research evidence guide search --json
 ```
 
 Search by product, committed factor version, sample and time window before
 using system facets or Agent tags. Reuse compatible Evidence before capturing
 a new source. When no compatible Evidence exists, capture one immutable source,
 select a precise fragment, compose Evidence, and only then bind it through
-`research-graph obligation change`.
+`research graphs obligation change`.
 
 Prefer an existing external Web/API Evidence, then a real Terminal or Job
 capture. A local file is eligible only when it freezes an authoritative
@@ -432,7 +432,7 @@ with repository, commit and blob identity. A download script, request manifest
 or local cache accompanies the SourceCapture as provenance; it does not replace
 the original content. Agent-authored reports, audit Markdown and copied command
 output are report assets, never primary Evidence sources. Use
-`research-evidence guide capture --json` for the current provenance contract.
+`research evidence guide capture --json` for the current provenance contract.
 
 Before proposing a new tag, list existing tags and use `tag propose`. Create
 only with the returned revision-bound token. Similar tags require an explicit
@@ -499,7 +499,7 @@ Work Package and Git-tracked before publishing the report link.
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning
-2. Read the downloaded Graph with `factortester research-graph next-local`; let
+2. Read the downloaded Graph with `factortester research graphs next-local`; let
    the local result select the required decision or detailed contract
 3. Add only the report components and bindings required by that node, scoped to
    its Profile, Work Package and branch; never create a loose report file
@@ -564,12 +564,12 @@ infer obligation coverage from prose, headings, or a completed report item.
 Use the branch-local ledger commands in this order:
 
 ```bash
-factortester research-graph obligation status \
+factortester research graphs obligation status \
   <instance-id> <branch-id> --profile-id <profile> --agent-id <agent>
-factortester research-graph obligation change \
+factortester research graphs obligation change \
   <instance-id> <branch-id> --profile-id <profile> --agent-id <agent> \
   --change-file <accepted-obligation-change.json>
-factortester research-graph edge choose \
+factortester research graphs edge choose \
   <instance-id> <branch-id> <edge-id> \
   --profile-id <profile> --agent-id <agent> \
   --reason-file <portable-markdown>
@@ -682,7 +682,7 @@ explicit in the frozen run or TrialPlan rather than inferring them later.
 
 ## Report authoring
 
-The harness exposes the production `factortester report` command group. Every
+The harness exposes the production `factortester research reports` command group. Every
 write is scoped to a Profile, Work Package and branch; no `--file` report path
 exists. Start from `report --help`, use JSON output, and validate after a
 related batch.
@@ -699,49 +699,49 @@ requirement push, resolve, resume, or abandon belong to the Graph timeline;
 never copy their event JSON into the research report. For example:
 
 ```bash
-factortester report create \
+factortester research reports create \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id findings --kind section --parent-id <node-chapter> \
   --title '研究发现' --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id finding --kind entry --parent-id findings \
   --body-file finding.md --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id prerequisite --kind entry --parent-id findings \
   --before-component-id finding --body-file prerequisite.md --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id constraints --kind list --parent-id findings \
   --item '2026 样本保持封存' \
   --item '费用与保证金写入冻结配置' \
   --item '每个窗口登记为独立试验' --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id formula --kind math --parent-id findings \
   --latex 's_t = z_t / \\sigma_t' --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id grill-decision --kind special \
   --display-kind grill_resolution --parent-id <node-chapter> \
   --title 'Grill 决议：方向门控' --json
-factortester report add \
+factortester research reports add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id external-audit --kind special \
   --display-kind external_review --parent-id grill-decision \
   --title '外部审计：门控边界' --json
-factortester report remove \
+factortester research reports remove \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id incorrect-entry --json
-factortester report validate \
+factortester research reports validate \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
-factortester report export \
+factortester research reports export \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --format markdown --output ./research-report.md --json
-factortester report export \
+factortester research reports export \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --format pdf --output ./research-report.pdf --json
 ```
@@ -764,8 +764,8 @@ Before moving an existing component or replacing its authored content, do not
 invent the batch JSON. Read the current machine contract and its exact template:
 
 ```bash
-factortester report mutation-guide --operation move --json
-factortester report mutation-guide --operation replace --json
+factortester research reports mutation-guide --operation move --json
+factortester research reports mutation-guide --operation replace --json
 ```
 
 Run the returned `inspect_command`, fill the returned
@@ -823,7 +823,7 @@ published version counter. After an interrupted Agent run, use `report show
 and the required retry action before attempting any report write.
 
 If the intended logical submission has been deliberately abandoned before its
-report generation was published, use `factortester report abandon-pending`
+report generation was published, use `factortester research reports abandon-pending`
 with the same Profile, Work Package, and branch scope. This command is only for
 `reserved` or `rejected` submissions: it restores any materialized business
 sidecar to its committed base and releases the sequence. Never delete

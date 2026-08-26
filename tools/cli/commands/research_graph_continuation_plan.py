@@ -49,7 +49,7 @@ def with_agent_plan(preview: dict[str, Any]) -> dict[str, Any]:
             "new_detour": "only_after_existing_episode_is_closed",
         },
         "next_packet_command": (
-            "factortester research-graph node info "
+            "factortester research graphs node info "
             "<target-instance-id> <target-branch-id>"
         ),
     }

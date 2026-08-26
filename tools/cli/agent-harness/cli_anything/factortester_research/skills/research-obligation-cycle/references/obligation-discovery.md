@@ -82,7 +82,7 @@ source. Do not copy the output into Markdown and cite the Markdown file as the
 primary Evidence:
 
 ```text
-factortester research-evidence source capture-terminal --profile-id <profile> -- \
+factortester research evidence source capture-terminal --profile-id <profile> -- \
   factortester products availability \
     --product <product> --source <source> --frequency <frequency> \
     --field <logical-field> --field-catalog --historical-fields --json

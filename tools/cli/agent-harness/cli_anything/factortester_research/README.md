@@ -26,7 +26,7 @@ Use one role-specific startup packet rather than assembling infrastructure
 context with an Agent:
 
 ```bash
-factortester agent-flow resume research-agent-1 --role research \
+factortester agents flow resume research-agent-1 --role research \
   --instance-id <instance-id> --branch-id <branch-id>
 ```
 
@@ -54,12 +54,12 @@ cli-anything-factortester-research plan \
 cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect \
   --factor-family SgCCS --json
-factortester client research create \
+factortester research workspaces create \
   --profile maxa --title "SgCCS research" \
   --product-group china_futures
 # product-group is the implementation group; exact products and masks are
 # frozen later in the TrialPlan/RunSpec.
-factortester client research fork \
+factortester research workspaces fork \
   graph-branch:<instance>:<branch> --profile maxa \
   --label "alternative hypothesis"
 # The command inherits the source branch's current report-tree snapshot and
@@ -105,13 +105,13 @@ cli-anything-factortester-research graph capabilities \
   --approve-implementation local.research-obligation-cycle \
   --json > capability-resolution.json
 
-factortester research-graph start factor-research \
+factortester research graphs start factor-research \
   --product-group china_futures \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
 
-factortester research-graph node info <instance_id> <branch_id>
-factortester research-graph node advance \
+factortester research graphs node info <instance_id> <branch_id>
+factortester research graphs node advance \
   <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file transition-evidence.json \
@@ -136,9 +136,9 @@ complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.
 Conditional capabilities use machine predicates first and ask an Agent only
 when the predicate is genuinely undetermined.
 
-`research-graph node info` is read-only and fails closed if the server packet
+`research graphs node info` is read-only and fails closed if the server packet
 exceeds its calibrated byte ceiling or leaks a heavy/legacy field.
-`research-graph node advance` performs local Research Cycle validation,
+`research graphs node advance` performs local Research Cycle validation,
 rebuilds the exact selected-edge contract, validates report coverage, prepares
 the declared target capability resolution, and then invokes the server once.
 When the current node has Entry Requirements, its first invocation writes one
@@ -146,8 +146,8 @@ compact editable assessment document and returns `state_changed: false`.
 The Agent completes that document and reruns the same command. `node advance`
 then validates the Chinese content, derives assessment/report hashes and
 submits them without exposing separate prepare or validate commands.
-`research-graph continuation-preview` performs no write and returns the exact
-current-node re-entry hash. `research-graph continue` applies only that exact
+`research graphs continuation-preview` performs no write and returns the exact
+current-node re-entry hash. `research graphs continue` applies only that exact
 hash, preserves the logical Work Package and Hypothesis Branch, and creates a
 new physical incarnation for the target Graph version.
 
@@ -189,8 +189,8 @@ After independent review, inspect and activate through the compact
 server-derived workflow:
 
 ```bash
-factortester research-graph activation-status factor-research <version>
-factortester research-graph activate factor-research <version> --yes
+factortester research graphs activation-status factor-research <version>
+factortester research graphs activate factor-research <version> --yes
 ```
 
 The ordinary activation command derives the exact proposal, Graph hash, diff
@@ -204,7 +204,7 @@ Existing research is never migrated by activation. Continue one Work Package
 through its target Graph lineage with:
 
 ```bash
-factortester research-graph continue <instance_id> <branch_id> \
+factortester research graphs continue <instance_id> <branch_id> \
   --target-version <version> --yes
 ```
 
@@ -249,8 +249,8 @@ Bounded closure is defeasible: an accepted new or reopened
 decision-blocking obligation clears accepted or pending closure atomically.
 Rejected or non-blocking deltas leave closure unchanged.
 
-`research-graph node info` returns bounded Claim and open-obligation summaries.
-Use `factortester research-graph cycle-object <instance> <branch>
+`research graphs node info` returns bounded Claim and open-obligation summaries.
+Use `factortester research graphs cycle-object <instance> <branch>
 <claim|obligation> <id>` only when the referenced full current body is
 necessary; it performs one current-checkpoint read and never scans the full
 trace.

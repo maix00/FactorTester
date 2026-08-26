@@ -26,7 +26,6 @@ from tools.cli.commands.client_profile_factor_set import (
 from tools.cli.commands.client_profile_revision import (
     register_profile_revision_commands,
 )
-from tools.cli.commands.client_research import client_research
 from tools.cli.commands.strategy_profile import register_strategy_profile_commands
 from tools.cli.core.errors import friendly_errors
 from tools.cli.local_sources import default_local_sources_root
@@ -110,7 +109,6 @@ def _run_release_with_host_python(
 client.add_command(client_adapter)
 client.add_command(client_catalog)
 client.add_command(client_profile)
-client.add_command(client_research)
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 register_factor_reference_commands(profile_factor_worktree)

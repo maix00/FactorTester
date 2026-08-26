@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
-from tools.factors.factor_set_identity import require_factor_set_reference
-from tools.factors.formula_identity import (
+from tools.cli.identities.factor_set import require_factor_set_reference
+from tools.cli.identities.factor import (
     require_factor_family_reference,
     require_factor_reference,
 )

@@ -11,8 +11,8 @@ import time
 from typing import Any, Iterator
 
 from .schema import connect_catalog, ensure_catalog_schema
-from tools.factors.formula_identity import require_frozen_factor
-from tools.factors.factor_set_identity import require_frozen_factor_set
+from tools.cli.identities.factor import require_frozen_factor
+from tools.cli.identities.factor_set import require_frozen_factor_set
 
 
 class LocalCatalogStore:

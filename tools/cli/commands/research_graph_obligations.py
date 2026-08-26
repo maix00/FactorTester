@@ -701,7 +701,7 @@ def _record_change_payload(
         "git": finalized["git"],
         "next_action": {
             "command": (
-                "factortester research-graph edge choose "
+                "factortester research graphs edge choose "
                 f"{instance_id} {branch_id} <edge-id> "
                 f"--profile-id {profile_id} --agent-id {agent_id} "
                 "--reason-file <portable-markdown>"

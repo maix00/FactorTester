@@ -61,11 +61,11 @@ def test_server_profile_agent_commands_use_explicit_profile(monkeypatch) -> None
     runner = CliRunner()
 
     models = runner.invoke(cli, [
-        "profile-agent", "--profile-id", "maxc", "models", "--refresh",
+        "agents", "profile", "--profile-id", "maxc", "models", "--refresh",
         "--json",
     ])
     settings = runner.invoke(cli, [
-        "profile-agent", "--profile-id", "maxc", "conversation", "settings",
+        "agents", "profile", "--profile-id", "maxc", "conversation", "settings",
         "conversation-1", "--model", "research-model", "--effort", "high",
         "--service-tier", "fast", "--json",
     ])
@@ -98,9 +98,9 @@ def test_server_profile_agent_capability_is_locked_to_issued_profile(
     )
     runner = CliRunner()
 
-    implicit = runner.invoke(cli, ["profile-agent", "status", "--json"])
+    implicit = runner.invoke(cli, ["agents", "profile", "status", "--json"])
     rejected = runner.invoke(cli, [
-        "profile-agent", "--profile-id", "maxb", "status", "--json",
+        "agents", "profile", "--profile-id", "maxb", "status", "--json",
     ])
 
     assert implicit.exit_code == 0, implicit.output
@@ -114,7 +114,7 @@ def test_server_profile_agent_requires_profile_outside_agent_runtime(
 ) -> None:
     monkeypatch.setattr(server_profile_agent, "load_capability", lambda: None)
 
-    result = CliRunner().invoke(cli, ["profile-agent", "status"])
+    result = CliRunner().invoke(cli, ["agents", "profile", "status"])
 
     assert result.exit_code != 0
     assert "--profile-id is required" in result.output

@@ -74,7 +74,7 @@ def test_checkpoint_report_names_local_and_server_receipts(
     )
 
     result = CliRunner().invoke(cli, [
-        "research-graph",
+        "research", "graphs",
         "checkpoint-report",
         "instance",
         "branch",

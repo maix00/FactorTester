@@ -19,7 +19,7 @@ def _move_guide() -> dict[str, Any]:
         "schema_version": 1,
         "operation": "move",
         "purpose": "移动或重新排序一个既有报告组件并保留稳定 component_id 和子树",
-        "inspect_command": f"factortester report show {_SCOPE} --json",
+        "inspect_command": f"factortester research reports show {_SCOPE} --json",
         "operations_file_template": {
             "operations": [{
                 "op": "move",
@@ -37,7 +37,7 @@ def _move_guide() -> dict[str, Any]:
             "父子组件类型必须符合报告树层级合同",
         ],
         "submit_command": (
-            f"factortester report add-batch {_SCOPE} "
+            f"factortester research reports add-batch {_SCOPE} "
             "--operations-file <operations.json> --json"
         ),
     }
@@ -48,7 +48,7 @@ def _replace_guide() -> dict[str, Any]:
         "schema_version": 1,
         "operation": "replace",
         "purpose": "替换一个既有组件的作者字段并保留类型、父级、子项和工作流绑定",
-        "inspect_command": f"factortester report show {_SCOPE} --json",
+        "inspect_command": f"factortester research reports show {_SCOPE} --json",
         "operations_file_template": {
             "operations": [{
                 "op": "replace",
@@ -71,7 +71,7 @@ def _replace_guide() -> dict[str, Any]:
             "研究图系统容器和系统生命周期特殊小节不能由 Agent 替换",
         ],
         "submit_command": (
-            f"factortester report add-batch {_SCOPE} "
+            f"factortester research reports add-batch {_SCOPE} "
             "--operations-file <operations.json> --json"
         ),
     }

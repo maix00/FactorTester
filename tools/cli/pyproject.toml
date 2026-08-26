@@ -27,11 +27,13 @@ packages = [
   "tools.cli.catalog",
   "tools.cli.commands",
   "tools.cli.core",
+  "tools.cli.identities",
   "tools.cli.local_sources",
   "tools.cli.manager",
   "tools.cli.protocols",
   "tools.cli.modules",
   "tools.cli.modules.custom_factors",
+  "tools.cli.modules.custom_factors.factor_library",
   "tools.cli.modules.products",
   "tools.cli.step",
   "tools.cli.release",
@@ -52,11 +54,13 @@ packages = [
 "tools.cli.catalog" = "catalog"
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"
+"tools.cli.identities" = "identities"
 "tools.cli.local_sources" = "local_sources"
 "tools.cli.manager" = "manager"
 "tools.cli.protocols" = "protocols"
 "tools.cli.modules" = "modules"
 "tools.cli.modules.custom_factors" = "modules/custom_factors"
+"tools.cli.modules.custom_factors.factor_library" = "modules/custom_factors/factor_library"
 "tools.cli.modules.products" = "modules/products"
 "tools.cli.step" = "step"
 "tools.cli.release" = "release"

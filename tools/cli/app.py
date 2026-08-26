@@ -5,7 +5,6 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
-from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.client_release import client
 from tools.cli.commands.navigation import list_modules
@@ -18,11 +17,10 @@ from tools.cli.commands.margin_budget import margin_budget
 from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_step import research
-from tools.cli.commands.research_report import report
-from tools.cli.commands.research_evidence import research_evidence
-from tools.cli.commands.server_profile_agent import profile_agent
 from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
+from tools.cli.modules.agents import agents
+from tools.cli.modules.research import register_research_domain
 
 
 def _research_graph_command():
@@ -98,11 +96,8 @@ cli.add_command(run)
 cli.add_command(job)
 cli.add_command(research)
 register_job_order_commands(job)
-cli.add_command(agent_flow)
-cli.add_command(_research_graph_command())
-cli.add_command(report)
-cli.add_command(research_evidence)
-cli.add_command(profile_agent)
+register_research_domain(research, graph_command=_research_graph_command())
+cli.add_command(agents)
 cli.add_command(trial_plan)
 register_cli_modules(cli)
 

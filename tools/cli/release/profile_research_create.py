@@ -103,7 +103,7 @@ def create_profile_research(
         "evidence_refs": [],
         "artifacts": [],
         "provenance": {
-            "created_by": "factortester client research create",
+            "created_by": "factortester research workspaces create",
             "profile_ref": context.profile_ref,
             "factor_worktree_ref": str(
                 context.profile["factor_workspace_binding"].get("receipt_ref") or ""
