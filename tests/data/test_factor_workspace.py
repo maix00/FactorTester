@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -410,7 +411,9 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
         lambda source_kind: [],
     )
 
-    from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
+    from tools.data.sqlite.factor_source_workspace_settings import (
+        save_factor_source_workspace_settings,
+    )
     save_factor_source_workspace_settings(
         "default$alice@1",
         git_enabled=True,
@@ -422,6 +425,43 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     current_branch = subprocess.check_output(["git", "-C", str(workspace_root), "branch", "--show-current"], text=True).strip()
     assert current_branch == "download"
     assert result["git_selected_branch"] == "download"
+
+
+def test_new_workspace_can_commit_without_global_git_identity(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "generated-workspace"
+    workspace_root.mkdir()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setattr(
+        factor_workspace_git,
+        "save_factor_source_workspace_settings",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        factor_workspace_git,
+        "_install_git_autosync_hooks",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda _username: str(workspace_root),
+    )
+    repository = FactorWorkspaceRepository("default$alice@1")
+
+    repository.ensure()
+    (workspace_root / "source.py").write_text("value = 1\n", encoding="utf-8")
+    commit = repository.commit_generated("chore: initialize workspace")
+
+    assert commit
+    assert len(repository.head()) == 40
+    assert subprocess.check_output(
+        ["git", "-C", str(workspace_root), "config", "--local", "user.name"],
+        text=True,
+    ).strip() == "FactorTester Workspace"
 
 
 def test_factor_workspace_exports_only_singletons():
