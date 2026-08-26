@@ -822,6 +822,8 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTTestFieldRow.create" in source
     assert "FTFactorDetailShared.parameterEditor" in source
     assert "factor-editor-source-metadata" in source
+    assert "root.append(window.FTFactorDetailShared.summary(context, {" in source
+    assert "const formulaSource = state.inspection" in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
     assert "factor-editor-upload-action" not in source
