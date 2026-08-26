@@ -255,13 +255,6 @@
     }
     if (!options.fileInput) root.append(file);
     root.append(actions, field(context.t("Python 源码"), editor.element), status);
-    if (state.inspection) {
-      root.append(window.FTFactorDetailShared.summary(context, {
-        ...state.inspection,
-        math_expr: state.inspection.math_expr || state.inspection.expression,
-        description: state.inspection.description || state.inspection.desc,
-      }));
-    }
     return root;
   }
 
@@ -589,15 +582,17 @@
         const version = sourceVersionPicker(context, state, redraw);
         if (version) topMount.append(version);
       }
-      // A freshly inspected source belongs to the source panel.  Keeping its
-      // summary there makes the result follow the same redraw lifecycle as
-      // the validation status and source editor.  The outer summary remains
-      // for already selected/loaded family metadata only.
-      const formulaSource = state.inspection
-        ? null : state.family || state.loaded;
+      // The validated formula is part of the editor header, above the detail
+      // tabs.  Keep this mount separate from the source panel so validation
+      // does not move the formula into the source tab or make it disappear
+      // when the tab content is rebuilt.
+      const formulaSource = state.inspection || state.family || state.loaded;
       topMount.append(window.FTFactorDetailShared.summary(context, {
         ...(formulaSource || {}),
-        math_expr: formulaSource?.math_expr || formulaSource?.expression || "",
+        math_expr: formulaSource?.math_expr
+          || formulaSource?.expression
+          || formulaSource?.resolved_math_expr || "",
+        description: formulaSource?.description || formulaSource?.desc || "",
       }));
       sourceMount.replaceChildren();
       if (state.familyMode) {
