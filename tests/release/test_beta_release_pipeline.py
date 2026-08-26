@@ -88,6 +88,7 @@ def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "scripts/release/assets.py").read_text()
     assert "RUNTIME_CACHE_SCHEMA = 8" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
+    assert '"--collect-data",\n                "tools.cli.release"' in source
     assert "research_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
 
