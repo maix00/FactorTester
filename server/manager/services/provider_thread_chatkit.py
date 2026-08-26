@@ -145,12 +145,17 @@ def _workflow(
     workflow_type: str = "custom",
     tasks: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    summary_title = str(
+        next((task.get("title") for task in tasks if task.get("title")),
+             "Research process")
+    )
     return {
         **base,
         "type": "workflow",
         "workflow": {
             "type": workflow_type,
             "tasks": tasks,
+            "summary": {"title": summary_title},
             "expanded": False,
         },
     }

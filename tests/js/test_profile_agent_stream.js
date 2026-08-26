@@ -47,18 +47,10 @@ global.EventSource = class {
           },
         },
         {
-          method: 'item/agentMessage/delta',
-          params: {turnId: 'turn-1', delta: '第一句'},
-        },
-        {
-          method: 'item/agentMessage/delta',
-          params: {turnId: 'turn-1', delta: '\n第二句'},
-        },
-        {
           method: 'item/completed',
           params: {
             turnId: 'turn-1',
-            item: {id: 'history-assistant-1', type: 'agentMessage', text: '第一句\n第二句'},
+            item: {id: 'command-1', type: 'commandExecution'},
           },
           chatkit_item: {
             id: 'command-1',
@@ -95,6 +87,7 @@ const chunks = [];
 const requestedURLs = [];
 const rpcMethods = [];
 let runtimeResumed = false;
+let historyReads = 0;
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
 const state = {
   profileID: 'profile-main',
@@ -106,6 +99,17 @@ const state = {
         return {status: {event_sequence: 0}};
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
+        historyReads += 1;
+        if (historyReads < 3) return {
+          items: [{
+            id: 'history-assistant-old',
+            type: 'assistant_message',
+            content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+          }],
+          has_more: false,
+          after: null,
+          order: 'desc',
+        };
         return {
           items: [
             {
@@ -114,10 +118,19 @@ const state = {
               content: [{type: 'output_text', text: '第一句\n第二句', annotations: []}],
             },
             {
+              id: 'file-history-only',
+              type: 'workflow',
+              workflow: {type: 'custom', tasks: [{
+                type: 'custom', title: 'updated report.py',
+                content: '```diff\n+result\n```', status_indicator: 'complete',
+              }]},
+            },
+            {
               id: 'command-1',
               type: 'workflow',
               workflow: {type: 'custom', tasks: [{
-                type: 'custom', title: 'command', status_indicator: 'complete',
+                type: 'custom', title: 'command',
+                content: '```text\n98 products\n```', status_indicator: 'complete',
               }]},
             },
             {
@@ -164,7 +177,11 @@ const state = {
   threadTitle: '',
   createdAt: new Date(0).toISOString(),
   cursor: 0,
-  items: [],
+  items: [{
+    id: 'history-assistant-old',
+    type: 'assistant_message',
+    content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+  }],
   source: null,
   turnID: '',
   assistant: null,
@@ -193,17 +210,21 @@ const state = {
   assert.doesNotMatch(output, /旧回答不应覆盖/);
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
   assert.doesNotMatch(output, /TOOL_STDOUT/);
+  assert.match(output, /98 products/);
   assert.match(output, /assistant_message\.content_part\.done/);
   assert.match(output, /thread\.item\.replaced/);
   assert.equal(global.__observedRuntime, true);
   assert.deepEqual(
     state.items.map(item => item.id),
-    ['history-assistant-old', 'command-1', 'history-assistant-1'],
+    ['history-assistant-old', 'command-1', 'file-history-only', 'history-assistant-1'],
     'authoritative history is stored oldest-first after reconciliation',
   );
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
+  assert.equal(historyReads, 3, 'final history is retried until this turn is durable');
+  assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
+  assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
   assert.deepEqual(
     rpcMethods.slice(0, 2),
     ['thread/resume', 'turn/start'],
