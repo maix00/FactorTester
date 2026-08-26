@@ -128,10 +128,20 @@ class ServiceSelectionRoutesMixin:
             )
             return None
         port = int(raw_port) if raw_port else None
+        server_id = str(query.get("server_id", [""])[0] or "").strip()
+        if self._is_local_agent_request():
+            if server_id not in {"", "local", self.state.server_id}:
+                json_response(self, {
+                    "success": False,
+                    "error": "Profile Agent service requests must stay local",
+                    "code": "agent_service_target_must_be_local",
+                }, 403)
+                return None
+            server_id = self.state.server_id
         try:
             return self.state.route_for(
                 port=port,
-                server_id=str(query.get("server_id", [""])[0] or ""),
+                server_id=server_id,
                 branch=str(query.get("branch", [""])[0] or ""),
                 feature=str(query.get("feature", [""])[0] or ""),
             )
@@ -237,7 +247,10 @@ class ServiceSelectionRoutesMixin:
         return True
 
     def _proxy_service_get(self, parsed) -> bool:
-        if not any(parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES):
+        registered_route = any(
+            parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES
+        )
+        if not registered_route and not self._is_local_agent_request():
             return False
         session = self._session()
         visitor = self._visitor_mode()

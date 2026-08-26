@@ -52,7 +52,10 @@ class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
-        if not any(re.fullmatch(pattern, parsed.path) for pattern in patterns):
+        registered_route = any(
+            re.fullmatch(pattern, parsed.path) for pattern in patterns
+        )
+        if not registered_route and not self._is_local_agent_request():
             return False
         session = self._session()
         visitor = self._visitor_mode()
