@@ -41,7 +41,10 @@
     const byID = new Map();
     for (const group of storedGroups) {
       const id = FTTestLazyCode.groupID(group);
-      if (id) byID.set(id, group);
+      if (!id) continue;
+      const previous = byID.get(id);
+      byID.set(id, previous && typeof previous === "object"
+        && typeof group === "object" ? {...group, ...previous} : group);
     }
     for (const id of state.groupRefs || []) {
       if (!byID.has(id)) byID.set(id, {
