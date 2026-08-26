@@ -254,6 +254,27 @@ def test_window_bars_preserves_timedelta_dependency_for_frequency_inference():
     assert any(ref.value == pd.Timedelta("9m") for ref in resolved.const_refs)
 
 
+def test_window_latex_keeps_template_parameter_and_formats_resolved_duration():
+    window = WindowParam("LatexWindow", default_value="25d")
+    volume = _FrameExpr(pd.DataFrame({"P": [1.0]}))
+    volume_window = volume.rolling(window)
+
+    template_latex = volume_window.argmax_raw().to_latex()
+    template_bars_latex = volume_window.bars.to_latex()
+    assert r"\textcolor{red}{LatexWindow}" in template_latex
+    assert r"\mathrm{Bars}\left(\textcolor{red}{LatexWindow}\right)" == template_bars_latex
+
+    resolved = volume_window.resolve(
+        param_values={"LatexWindow": pd.Timedelta("25d")},
+    )
+    resolved_latex = resolved.argmax_raw().to_latex()
+    resolved_bars_latex = resolved.bars.to_latex()
+    assert r"25\,\mathrm{d}" in resolved_latex
+    assert r"25\,\mathrm{d}" in resolved_bars_latex
+    assert "days" not in resolved_latex
+    assert "00:00:00" not in resolved_latex
+
+
 def test_intermediate_name_collision_is_detectable():
     class MockFactor:
         _intermediate_factor_data = {}
