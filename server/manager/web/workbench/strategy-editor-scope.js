@@ -65,9 +65,25 @@
   }
 
   function sourceIDs(value) {
-    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    if (Array.isArray(value)) return value.map(sourceID).filter(Boolean);
     if (value === undefined || value === null || value === "") return [];
+    if (typeof value === "object") return [sourceID(value)].filter(Boolean);
     return String(value).split(",").map(item => item.trim()).filter(Boolean);
+  }
+
+  function sourceID(value) {
+    if (value === undefined || value === null) return "";
+    if (typeof value !== "object") return String(value).trim();
+    return String(
+      value.source_id || value.data_source_id || value.ref
+      || value.id || value.value || "",
+    ).trim();
+  }
+
+  function selectedSourceIDs(state) {
+    const rule = contract(state).candidate_constraints?.product_path_candidates
+      || contract(state).candidate_constraints?.category_candidates || {};
+    return sourceIDs(state?.values?.[rule.source_field || "data_source"]);
   }
 
   function candidateSourceIDs(value) {
@@ -297,6 +313,7 @@
     candidateCompatible, constrainedCandidates,
     inlineCreateAllowed,
     itemID, itemLabel, mounted, scope, scopedField, scopedFields,
+    selectedSourceIDs,
     fieldVisible, fieldRequired, fieldEditable, summary, validate, visibleCatalog,
   });
 })();

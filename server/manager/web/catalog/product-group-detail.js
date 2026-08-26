@@ -316,8 +316,9 @@
             paths,
           };
           const localID = groupPath(group) || `inline-product-group:${payload.name}`;
-          const selectedSources = Array.isArray(context.testState?.values?.data_source)
-            ? context.testState.values.data_source.map(String).filter(Boolean) : [];
+          const selectedSources = window.FTStrategyEditorScope?.selectedSourceIDs?.(
+            context.testState,
+          ) || [];
           const value = context.testObjectTemporary
             ? {group: {
               ...payload,

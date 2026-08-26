@@ -68,8 +68,9 @@
     if (context.testObjectTemporary) {
       const name = payload.name || payload.title_zh || payload.alias || "category";
       const id = category?.id || `inline-category:${name}`;
-      const selectedSources = Array.isArray(context.testState?.values?.data_source)
-        ? context.testState.values.data_source.map(String).filter(Boolean) : [];
+      const selectedSources = window.FTStrategyEditorScope?.selectedSourceIDs?.(
+        context.testState,
+      ) || [];
       const paths = (payload.items || []).flatMap(item => item?.paths || [])
         .map(String).map(path => path.replace(/^-/, ""))
         .filter(Boolean);
