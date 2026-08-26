@@ -141,6 +141,42 @@
     };
   }
 
+  function orderedLatestExchange(items) {
+    let latestUser = -1;
+    let latestAssistant = -1;
+    (items || []).forEach((item, index) => {
+      const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
+      if (type === "usermessage") latestUser = index;
+      if (isAssistantMessage(item)) latestAssistant = index;
+    });
+    return latestUser < 0 || latestAssistant < 0 || latestAssistant > latestUser;
+  }
+
+  function pageFingerprint(page) {
+    return JSON.stringify((page?.items || []).map(item => [
+      String(item?.id || ""), String(item?.type || ""), itemText(item),
+    ]));
+  }
+
+  async function stableAuthoritativePage(state) {
+    // A read-only app-server can briefly expose a partially rebuilt latest
+    // turn immediately after a live session stops.  Require two identical,
+    // correctly ordered thread/read snapshots before restoring the UI.
+    const delays = [0, 100, 200, 400, 800, 1200, 1800];
+    let previous = "";
+    let page = null;
+    for (const delay of delays) {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      page = await authoritativePage(state);
+      const fingerprint = pageFingerprint(page);
+      if (orderedLatestExchange(page.items) && fingerprint === previous) {
+        return page;
+      }
+      previous = orderedLatestExchange(page.items) ? fingerprint : "";
+    }
+    return page || authoritativePage(state);
+  }
+
   async function reconcileThreadHistory(state, controller, priorAssistantIDs) {
     // Reconcile the complete durable timeline so final answers never replace
     // the public progress, workflow, and tool records emitted during a turn.
@@ -153,19 +189,29 @@
     for (const delay of retryDelays) {
       if (delay) await new Promise(resolve => setTimeout(resolve, delay));
       page = await authoritativePage(state);
-      assistant = [...page.items].reverse().find(item => (
+      const assistantIndex = page.items.findLastIndex(item => (
         isAssistantMessage(item)
         && Boolean(itemText(item))
         && !priorAssistantIDs.has(String(item.id || ""))
       ));
+      const latestUserIndex = page.items.findLastIndex(item => (
+        String(item?.type || "").replace(/[-_]/g, "").toLowerCase()
+        === "usermessage"
+      ));
+      assistant = assistantIndex > latestUserIndex
+        ? page.items[assistantIndex]
+        : null;
       if (assistant) break;
     }
     const history = page?.items || [];
     // SSE is the fast path.  If it missed a delta or the provider emits a
     // different event name, recover the authoritative text from the durable
     // provider thread before closing the browser stream.
-    if (assistant) appendAssistantText(state, controller, itemText(assistant));
     reconcileProcessItems(state, controller, history);
+    // Process records must be committed before the final answer.  Otherwise
+    // a delayed history reconciliation briefly places the answer above the
+    // commands that produced it until the next full refresh.
+    if (assistant) appendAssistantText(state, controller, itemText(assistant));
     if (!assistant && state.assistant?.text) return state.items;
     state.items = history;
     state.itemPage = page;
@@ -211,7 +257,7 @@
       return "";
     }
     if (!state.threadPromise) {
-      state.threadPromise = authoritativePage(state).then(page => {
+      state.threadPromise = stableAuthoritativePage(state).then(page => {
         state.threadID = providerThreadID;
         state.items = page.items;
         state.itemPage = page;
@@ -297,6 +343,7 @@
     state.source = source;
     const pending = [];
     let settled = false;
+    let turnCompleted = false;
     let opened = false;
     const finish = result => {
       if (settled) return;
@@ -305,6 +352,11 @@
       if (state.source === source) state.source = null;
       signal.removeEventListener("abort", abort);
       resolveDone(result);
+    };
+    const completeTurn = () => {
+      if (turnCompleted) return;
+      turnCompleted = true;
+      resolveDone("turn_completed");
     };
     const abort = () => finish("aborted");
     signal.addEventListener("abort", abort, {once: true});
@@ -380,7 +432,9 @@
           finish("error");
           return;
         }
-        finish("done");
+        // Keep SSE attached while the caller reconciles durable history.  The
+        // final assistant item may legally arrive after turn/completed.
+        completeTurn();
         return;
       }
       if (P.terminalMethod(method)) finish("done");
@@ -503,6 +557,7 @@
   window.FTProfileChatKitStream = Object.freeze({
     closeSource,
     authoritativePage,
+    stableAuthoritativePage,
     restoreThread,
     resumeThread,
     rpc,
