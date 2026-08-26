@@ -989,6 +989,18 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "border-bottom: 1px solid var(--line);" in styles
 
 
+def test_scoped_factor_picker_refreshes_after_visible_catalog_load() -> None:
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures" / "scoped_factor_catalog_refresh.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_object_picker_places_create_action_beside_the_shared_control() -> None:
     shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
         encoding="utf-8",
