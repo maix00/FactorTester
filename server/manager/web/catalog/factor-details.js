@@ -418,6 +418,12 @@
     return window.FTFactorObjectJobs.create(context, {
       objectKind,
       objectRef: String(objectRef || ""),
+      familyFormulaFingerprint: String(
+        item.family_formula_fingerprint || "",
+      ),
+      selfFormulaFingerprint: String(
+        item.self_formula_fingerprint || "",
+      ),
       ownerRef: String(
         item.factor_owner_ref || item.owner_ref || "",
       ),
