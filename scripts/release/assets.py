@@ -329,6 +329,8 @@ def embed_client_runtime(
                 "cli_anything.factortester_research",
                 "--collect-all",
                 "pyright",
+                "--collect-data",
+                "tools.cli.release",
                 "--hidden-import",
                 "nodejs_wheel",
                 "--add-binary",
