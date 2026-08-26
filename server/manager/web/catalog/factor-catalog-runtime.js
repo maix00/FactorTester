@@ -9,6 +9,7 @@
       factors: [], families: [], familyScopes: {}, principal: "", visitor: false,
       sets: [], setScopes: {}, groups: [],
       libraryLoaded: false, setsLoaded: false, groupsLoaded: false,
+      pendingFactors: [],
     };
   }
 
@@ -27,12 +28,17 @@
   function applyLibrary(library) {
     const value = library || {};
     const data = ensureCache();
+    const factors = mergeFactors(
+      Array.isArray(value.factors) ? value.factors : [],
+      data.pendingFactors,
+    );
+    data.pendingFactors = [];
     // Mutate the shared cache object instead of replacing it.  List pages can
     // request the library and the set/group catalogs concurrently during a
     // route transition; replacing the object would let one in-flight loader
     // write into a detached cache and lose its result.
     Object.assign(data, {
-      factors: Array.isArray(value.factors) ? value.factors : [],
+      factors,
       families: Array.isArray(value.families) ? value.families : [],
       familyScopes: value.family_scopes || value.family_tabs || {},
       principal: String(value.principal || ""),
@@ -42,11 +48,43 @@
     return data;
   }
 
-  async function loadLibrary(context) {
+  function factorKey(value) {
+    return String(
+      value?.ref || value?.factor_ref || value?.alias || value?.factor_alias || "",
+    ).trim();
+  }
+
+  function mergeFactors(...lists) {
+    const byKey = new Map();
+    for (const list of lists) {
+      for (const item of Array.isArray(list) ? list : []) {
+        const key = factorKey(item);
+        if (!key) continue;
+        byKey.set(key, {...(byKey.get(key) || {}), ...item});
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  function upsertFactor(value) {
+    const data = ensureCache();
+    const factor = value?.factor || value;
+    if (!factorKey(factor)) return data;
+    data.factors = mergeFactors(data.factors, [factor]);
+    if (!data.libraryLoaded) data.pendingFactors = mergeFactors(
+      data.pendingFactors, [factor],
+    );
+    return data;
+  }
+
+  async function loadLibrary(context, refresh = false) {
     const data = ensureCache();
     if (data.libraryLoaded) return data;
     if (!libraryPromise) {
-      libraryPromise = context.api("/api/catalog/factors")
+      const request = refresh
+        ? context.api("/api/catalog/factors?refresh=1")
+        : context.api("/api/catalog/factors");
+      libraryPromise = request
         .then(applyLibrary)
         .catch(error => {
           libraryPromise = null;
@@ -104,7 +142,7 @@
     const includeGroups = options === true || options.groups === true;
     if (refresh) reset();
     let data = ensureCache();
-    if (includeLibrary) data = await loadLibrary(context);
+    if (includeLibrary) data = await loadLibrary(context, refresh);
     if (includeSets) data = await loadSets(context);
     if (includeGroups) data = await loadGroups(context);
     return data;
@@ -124,5 +162,7 @@
     return value && typeof value === "object" ? value : {};
   }
 
-  window.FTFactorCatalog = Object.freeze({load, isCurrent, nativeRequest});
+  window.FTFactorCatalog = Object.freeze({
+    load, isCurrent, nativeRequest, upsertFactor,
+  });
 })();

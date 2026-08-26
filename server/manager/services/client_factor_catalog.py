@@ -43,7 +43,9 @@ class ClientFactorCatalogMixin:
             })
         return families
 
-    def factor_library(self, principal: str) -> dict[str, Any]:
+    def factor_library(
+        self, principal: str, *, refresh: bool = False,
+    ) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""
         self._refresh_account_domain_async(principal)
         from server.modules.custom_factors.client_library import (
@@ -57,6 +59,16 @@ class ClientFactorCatalogMixin:
         )
 
         owner_account = self._local_account(principal)
+        if refresh and self.account_domain_sync is not None:
+            try:
+                self.account_domain_sync.reconcile_factor_catalog(
+                    principal, force=True,
+                )
+            except (
+                AttributeError, ConnectionError, OSError, RuntimeError,
+                TypeError, ValueError,
+            ):
+                pass
         source_families = self._custom_source_families(
             principal,
             str(owner_account.get("alias") or owner_account.get("username") or principal),
@@ -95,7 +107,9 @@ class ClientFactorCatalogMixin:
         payload["families"] = source_families
         return build_client_library_projection(payload, principal=principal)
 
-    def factor_library_scopes(self, principal: str) -> dict[str, dict[str, Any]]:
+    def factor_library_scopes(
+        self, principal: str, *, refresh: bool = False,
+    ) -> dict[str, dict[str, Any]]:
         """Return the user's own and managed-user factor-family scopes.
 
         ``factor_library`` intentionally remains the small own-account API
@@ -114,7 +128,10 @@ class ClientFactorCatalogMixin:
             subordinate_factor_rows,
         )
 
-        mine = self.factor_library(principal)
+        mine = (
+            self.factor_library(principal, refresh=True)
+            if refresh else self.factor_library(principal)
+        )
         account_store = self.local_account_store
         if account_store is None:
             try:

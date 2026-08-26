@@ -69,4 +69,27 @@ assert.equal(backtestState.values.factor, "One",
   "outer backtest primary factor is selected automatically from the pool");
 selection.removeCandidate(backtestState, first);
 assert.equal(backtestState.values.factor, "Two");
+
+// The factor editor returns a canonical v2 record after saving a parameter
+// row.  This is the exact shape that used to be lost by normalizeSaved().
+const inlineSaved = {
+  schema_version: 2,
+  ref: "factor:v2:" + "C".repeat(43),
+  alias: "InlineMomentum|N:5d",
+  owner_ref: "user:alice",
+  identity: {
+    family_ref: "factor-family:v2:" + "D".repeat(43),
+    family_alias: "InlineMomentum",
+    family_formula_fingerprint: "e".repeat(64),
+    self_formula_fingerprint: "f".repeat(64),
+    params: {N: "5d"},
+  },
+};
+const savedState = {
+  kind: "backtest", factorRef: "", factors: [],
+  values: {factor_candidates: [], factor: ""},
+};
+selection.addCandidate(savedState, inlineSaved);
+assert.equal(selection.candidates(savedState)[0].alias, "InlineMomentum|N:5d");
+assert.equal(savedState.values.factor, "InlineMomentum|N:5d");
 console.log("ok");
