@@ -18,13 +18,9 @@ from server.manager.storage.profile_runtime_store import ProfileRuntimeError
 _SENSITIVE_EVENT_KEYS = frozenset({
     "api_key",
     "authorization",
-    "cwd",
     "env",
-    "home",
-    "path",
     "secret",
     "token",
-    "workspace",
 })
 
 _PUBLIC_CONVERSATION_KEYS = frozenset({
@@ -50,7 +46,7 @@ _PUBLIC_CONVERSATION_KEYS = frozenset({
 
 
 def _public_value(value: object, key: str = "") -> object:
-    """Remove server-local paths and credential-shaped fields from payloads."""
+    """Remove credential-bearing fields while retaining research records."""
     if key.casefold() in _SENSITIVE_EVENT_KEYS:
         return None
     if isinstance(value, dict):

@@ -87,6 +87,30 @@
     return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
   }
 
+  function isAssistantMessage(item) {
+    const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
+    return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type);
+  }
+
+  function isConversationMessage(item) {
+    const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
+    return type === "usermessage" || isAssistantMessage(item);
+  }
+
+  function reconcileProcessItems(state, controller, history) {
+    const liveByID = new Map(state.items.map(item => [String(item.id || ""), item]));
+    for (const item of history) {
+      if (isConversationMessage(item)) continue;
+      const existing = liveByID.get(String(item.id || ""));
+      if (!existing) {
+        writeEvent(controller, {type: "thread.item.added", item});
+        writeEvent(controller, {type: "thread.item.done", item});
+      } else if (JSON.stringify(existing) !== JSON.stringify(item)) {
+        writeEvent(controller, {type: "thread.item.replaced", item});
+      }
+    }
+  }
+
   async function authoritativePage(state, params = {}) {
     const pageParams = P.itemPageParams(params);
     const view = "timeline";
@@ -117,24 +141,38 @@
     };
   }
 
-  async function reconcileThreadHistory(state, controller) {
+  async function reconcileThreadHistory(state, controller, priorAssistantIDs) {
     // Reconcile the complete durable timeline so final answers never replace
     // the public progress, workflow, and tool records emitted during a turn.
-    const page = await authoritativePage(state);
-    const history = page.items;
-    const newestFirst = [...history].reverse();
-    const assistant = newestFirst.find(item => {
-      const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
-      return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type)
-        && Boolean(itemText(item));
-    });
+    // A completed turn can precede the Provider's durable thread update by a
+    // short interval, so retry this local latest-page read instead of closing
+    // ChatKit before the final answer exists.
+    const retryDelays = [0, 100, 200, 400, 800, 1200, 1800];
+    let page = null;
+    let assistant = null;
+    for (const delay of retryDelays) {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      page = await authoritativePage(state);
+      assistant = [...page.items].reverse().find(item => (
+        isAssistantMessage(item)
+        && Boolean(itemText(item))
+        && !priorAssistantIDs.has(String(item.id || ""))
+      ));
+      if (assistant) break;
+    }
+    const history = page?.items || [];
     // SSE is the fast path.  If it missed a delta or the provider emits a
     // different event name, recover the authoritative text from the durable
     // provider thread before closing the browser stream.
     if (assistant) appendAssistantText(state, controller, itemText(assistant));
+    reconcileProcessItems(state, controller, history);
+    if (!assistant && state.assistant?.text) return state.items;
     state.items = history;
     state.itemPage = page;
     state.restored = true;
+    if (!assistant && !state.assistant?.text) {
+      throw new Error("Profile Agent final response is not yet available");
+    }
     return history;
   }
 
@@ -390,6 +428,9 @@
     const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
     state.assistant = null;
     state.turnID = "";
+    const priorAssistantIDs = new Set(state.items
+      .filter(isAssistantMessage)
+      .map(item => String(item.id || "")));
     try {
       await ensureThread(state);
       if (!hadThread) writeEvent(controller, {
@@ -430,10 +471,11 @@
       }
       if (!signal.aborted) {
         try {
-          await reconcileThreadHistory(state, controller);
-        } catch (_) {
+          await reconcileThreadHistory(state, controller, priorAssistantIDs);
+        } catch (error) {
           // Keep a successfully streamed response visible even if the
           // post-turn history reconciliation is temporarily unavailable.
+          if (!state.assistant?.text) writeError(controller, error);
         }
       }
       if (state.assistant && !signal.aborted) {
