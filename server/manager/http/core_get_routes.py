@@ -272,8 +272,7 @@ class CoreGetRoutesMixin:
             self.end_headers()
             self.wfile.write(body)
             return True
-        self.send_error(404)
-        return True
+        return False
 
     def do_GET(self) -> None:
         if self._redirect_plain_http_to_https():
@@ -290,6 +289,7 @@ class CoreGetRoutesMixin:
             self._get_client_research_routes,
             self._get_public_research_routes,
             self._get_session_and_shell_routes,
+            self._proxy_service_get,
         )
         for handler in handlers:
             if handler(parsed):
