@@ -519,6 +519,8 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
     assert "def shift(" in combined
     assert "def tanh(" in combined
     assert "def where(" in combined
+    assert "term_carry_annualized as term_carry_annualized" in combined
+    assert "def term_carry_annualized(" in combined
 
     for stub_path in workspace_root.rglob("*.pyi"):
         tree = ast.parse(stub_path.read_text(encoding="utf-8"), filename=str(stub_path))
@@ -538,14 +540,20 @@ def test_generated_factor_workspace_passes_real_pyright(tmp_path):
     (workspace_root / "custom_factors" / "ClientAlpha.py").write_text(
         "from tools.data.types import DataColumn\n"
         "from tools.factors import FactorFamily, where\n"
-        "from tools.factors.FactorExpr import ColumnRef\n\n"
+        "from tools.factors import term_carry_annualized\n"
+        "from tools.factors.expr import term_carry_annualized as expr_carry\n"
+        "from tools.factors.FactorExpr import ColumnRef\n"
+        "from tools.factors.FactorExpr import term_carry_annualized as direct_carry\n\n"
         "class ClientAlpha(FactorFamily):\n"
         "    @staticmethod\n"
         "    def factor_expr():\n"
         "        close = ColumnRef(DataColumn.CLOSE)\n"
         "        bounded = close.tanh()\n"
         "        method_form = bounded.where(close > 0, other=0.0)\n"
-        "        return where(close <= 0, 0.0, method_form)\n",
+        "        carry = term_carry_annualized(0, 1, DataColumn.CLOSE)\n"
+        "        direct = direct_carry(0, 1, DataColumn.CLOSE)\n"
+        "        expr = expr_carry(0, 1, DataColumn.CLOSE)\n"
+        "        return where(close <= 0, carry + expr, method_form + direct)\n",
         encoding="utf-8",
     )
 
