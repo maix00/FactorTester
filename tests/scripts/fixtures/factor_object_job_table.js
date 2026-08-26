@@ -37,6 +37,9 @@ const navigations = [];
 const context = {
   t: value => value,
   session: {role: "user"},
+  // A restored left-navigation tab keeps its mounted component but its
+  // original route token is intentionally stale.
+  isRouteCurrent: () => false,
   async api(path) {
     requests.push(path);
     return {
@@ -58,6 +61,7 @@ assert.deepStrictEqual(requests, []);
 (async () => {
   await table.load();
   assert.strictEqual(requests.length, 1);
+  assert.strictEqual(table.mount.children[0].body.rows.length, 1);
   const query = new URL(requests[0], "https://example.invalid").searchParams;
   assert.strictEqual(query.get("scope"), "visible");
   assert.strictEqual(query.get("object_kind"), "family");
