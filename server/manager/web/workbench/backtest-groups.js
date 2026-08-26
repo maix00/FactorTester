@@ -45,6 +45,13 @@
   }
 
   function render(context, state, refresh) {
+    const restoredEditor = state.backtestGroupEditor;
+    const restoredFlow = restoredEditor?.mode === "edit" ? "edit"
+      : restoredEditor?.mode === "derived" ? "derive"
+        : restoredEditor?.mode === "base" ? "create" : "";
+    if (restoredFlow && editorCatalogsNeedLoad(state)) {
+      loadEditorCatalogs(context, state, {kind: restoredFlow}, refresh);
+    }
     return FTConfigurationGroupSurface.render({
       context, state, refresh, adapters, initialize,
       title: "策略组设置",
@@ -82,6 +89,12 @@
       state.backtestGroupCatalogError = error.message || String(error);
       refresh();
     });
+  }
+
+  function editorCatalogsNeedLoad(state) {
+    return ["factors", "products"].some(key => (
+      state.lazy?.[key]?.status === "idle"
+    ));
   }
 
   function groupList(context, state, surface, refresh) {
