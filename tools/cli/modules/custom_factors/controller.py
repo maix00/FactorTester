@@ -14,7 +14,9 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
-from tools.cli.table import render_table
+from tools.cli.modules.custom_factors.library_catalog import (
+    register_factor_library_catalog_commands,
+)
 from tools.cli.research_metrics import (
     RESEARCH_METRIC_REGISTRY,
     default_display_metric,
@@ -22,6 +24,7 @@ from tools.cli.research_metrics import (
     research_stability_rows,
     resolve_research_rank_preset,
 )
+from tools.cli.table import render_table
 
 
 @click.group("custom_factors", invoke_without_command=True)
@@ -34,7 +37,10 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("因子管理")
         click.echo("下一层: factortester custom_factors list")
         click.echo("可用功能:")
-        click.echo("  factortester custom_factors factor-library list|add")
+        click.echo(
+            "  factortester custom_factors factor-library "
+            "families|factors|factor-sets|parameter-configs|add"
+        )
         click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push|merge-download")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
@@ -203,29 +209,38 @@ def describe_factor(
 @click.pass_context
 @friendly_errors
 def factor_library(ctx: click.Context, factor_family: str, product_group: str) -> None:
-    """Manage factor parameter library from the existing SQL store."""
+    """Browse the server factor catalog and manage parameter configurations."""
     ctx.ensure_object(dict)
     ctx.obj["factor_family"] = factor_family
     ctx.obj["product_group"] = product_group
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_factors, factor_family=factor_family, product_group=product_group, include_subordinates=False, with_research=False)
+        click.echo("因子库")
+        click.echo("  families          因子家族（公共/我的/下一级用户）")
+        click.echo("  factors           已登记因子（公共/我的/下一级用户）")
+        click.echo("  factor-sets       因子集合（我的/下一级用户）")
+        click.echo("  parameter-configs 旧参数配置记录")
 
 
-@factor_library.command("list")
+register_factor_library_catalog_commands(factor_library)
+
+
+@factor_library.command("parameter-configs")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
 @click.option("--include-subordinates", is_flag=True, help="包含下级用户可见配置。")
 @click.option("--with-research", is_flag=True, help="附带最近结构化研究摘要。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @click.pass_context
 @friendly_errors
-def list_factors(
+def list_parameter_configs(
     ctx: click.Context,
     factor_family: str,
     product_group: str,
     include_subordinates: bool,
     with_research: bool,
+    as_json: bool,
 ) -> None:
-    """List factor parameter candidates."""
+    """List explicit legacy factor parameter configurations."""
     factor_family = factor_family or ctx.obj.get("factor_family", "")
     product_group = product_group or ctx.obj.get("product_group", "")
     overview = client_from_config().factor_library_overview(
@@ -234,14 +249,47 @@ def list_factors(
         include_subordinates=include_subordinates,
     )
     factors = overview.get("factors") or []
-    if not factors:
-        click.echo("暂无因子参数候选")
-        return
-    research_by_alias = _latest_research_by_alias(factor_family, product_group, include_subordinates=include_subordinates) if with_research else {}
+    research_by_alias = _latest_research_by_alias(
+        factor_family,
+        product_group,
+        include_subordinates=include_subordinates,
+    ) if with_research else {}
+    values = []
     for factor in factors:
+        value = dict(factor)
+        alias = str(
+            factor.get("factor_alias")
+            or factor.get("alias")
+            or factor.get("name")
+            or ""
+        )
+        if research_by_alias.get(alias):
+            value["latest_research"] = research_by_alias[alias]
+        values.append(value)
+    if as_json:
+        click.echo(json.dumps({
+            "schema_version": 1,
+            "object_type": "factor_parameter_config",
+            "count": len(values),
+            "items": values,
+        }, ensure_ascii=False, indent=2))
+        return
+    if not values:
+        click.echo("暂无因子参数配置")
+        return
+    for factor in values:
         line = factor_line(factor, default_family=factor_family, default_product_group=product_group)
-        summary = research_by_alias.get(str(factor.get("factor_alias") or factor.get("alias") or factor.get("name") or ""))
+        summary = factor.get("latest_research")
         click.echo(line + (f" · 研究={summary}" if summary else ""))
+
+
+@factor_library.command("list")
+def deprecated_factor_library_list() -> None:
+    """Reject the old ambiguous listing instead of reporting a fake empty library."""
+    raise click.ClickException(
+        "factor-library list 已移除；请明确使用 families、factors、"
+        "factor-sets 或 parameter-configs"
+    )
 
 
 @factor_library.command("add")
