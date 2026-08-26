@@ -15,7 +15,8 @@ from ..subjects import job_subjects
 
 
 def index_job_subjects(
-    conn: sqlite3.Connection, job_id: str, job_spec: object,
+    conn: sqlite3.Connection, job_id: str, job_spec: object, *,
+    include_formula_subjects: bool = True,
 ) -> None:
     """Replace one Job's derived object references transactionally."""
     identity = str(job_id)
@@ -29,7 +30,9 @@ def index_job_subjects(
                 identity, item.object_kind, item.object_ref,
                 item.owner_ref, item.alias,
             )
-            for item in job_subjects(job_spec)
+            for item in job_subjects(
+                job_spec, include_formula_subjects=include_formula_subjects,
+            )
         ],
     )
     conn.execute(
@@ -51,7 +54,13 @@ def _backfill_job_subjects(conn: sqlite3.Connection) -> None:
             payload = orjson.loads(row["job_spec_json"] or "{}")
         except (TypeError, ValueError, orjson.JSONDecodeError):
             payload = {}
-        index_job_subjects(conn, str(row["job_id"]), payload)
+        # Historical Jobs keep their original object-ref projection. Formula
+        # subjects are admission-time facts for Jobs submitted after this
+        # capability is installed, not a runtime compatibility backfill.
+        index_job_subjects(
+            conn, str(row["job_id"]), payload,
+            include_formula_subjects=False,
+        )
 
 
 def ensure_job_schema(conn: sqlite3.Connection) -> None:
