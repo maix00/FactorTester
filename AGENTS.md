@@ -39,8 +39,9 @@
   并行冲突的改动。
 - 无法明确判断规模时按大改动处理；如果改动虽小但正在被另一个 worktree
   修改同一文件，也按大改动隔离。
-- 任务分支提交后应推送同名远端分支，使其他设备和集成 Agent 能读取；发布任务
-  分支不等于获准合入 `feat`。
+- **任务分支默认只保留在本地 worktree，不得自行推送同名远端分支**。只有人类
+  明确要求共享某个任务分支时，才可推送该分支；常规远端只保留 `feat` 与
+  `main`。
 - 人类明确授权 `codex/*` 或 `fix/* → feat` 合并时，该授权包含集成前后的
   `origin/feat` 同步、必要的冲突处理和聚焦复测，以及把结果 `git push origin
   feat`。`feat → main`、`origin/main` push 和生产部署仍须另行明确授权。
@@ -145,21 +146,20 @@ git status -sb
    git commit -m "<type>: <描述> (refs #N)"
    ```
    无 Issue 的小修复使用 `git commit -m "<type>: <描述>"`，不得伪造 Issue 编号。
-5. 提交并通过聚焦测试后发布任务分支：
+5. 提交并通过聚焦测试后同步共享基线：
    ```bash
    git fetch origin
    git merge origin/feat
    # 若吸收了新提交或解决了冲突，重新运行聚焦测试
-   git push -u origin fix/issue-N-<slug>
    ```
-   小改动把最后一行替换为 `git push -u origin codex/<short-slug>`。禁止 force
-   push；push 被拒绝时重新 fetch、合并并复测。
+   吸收共享基线后重新运行聚焦测试。不得自行推送任务分支；仅在人类明确要求
+   共享该分支时才执行 `git push -u origin <task-branch>`，且禁止 force push。
 
 ### 4. Agent 完成后如何合并（并行默认：不自动合回 feat）
 
 > 为避免多个 agent 同时 merge 造成冲突放大：  
-> **并行模式下，agent 完成后默认只提交并推送自己的 `codex/*` 或
-> `fix/issue-N-*` 任务分支，不要自行合回 `feat`。**
+> **并行模式下，agent 完成后默认只提交本地 `codex/*` 或 `fix/issue-N-*`
+> 任务分支，不推送任务分支，也不自行合回 `feat`。**
 >
 > 合并顺序由人类（或人类明确指定的“集成 agent”）统一执行：`fix/* → origin/feat → main`。
 
@@ -225,7 +225,7 @@ git push origin main
 - 大改动和已分配 Issue 的任务以 GitHub Issues 为准，使用 `gh issue list` 或
   `gh issue view <N>` 查看。
 - 人类直接要求的小修复可以不创建 Issue，但必须使用一次性的 `codex/<slug>`
-  分支和独立 worktree，并遵守同样的同步、测试、远端任务分支发布和集成规则。
+  分支和独立 worktree，并遵守同样的同步、测试与集成规则。
 
 ### 2. Issue 创建规范
 
@@ -265,17 +265,16 @@ git push origin main
 origin/main ───────────────────────────── (线上稳定分支)
      │
      └── origin/feat ──────────────────── (唯一共享开发集成分支)
-              │
-              ├── origin/fix/issue-N-*   (Issue 任务分支)
-              ├── origin/codex/*         (无 Issue 的短期小改动分支)
-              └── ...
+
+local codex/* / fix/issue-N-* ─────────── (仅本地短期任务分支 + worktree)
 ```
 
 - **`origin/main`**：线上唯一稳定分支，只接收获授权的 `origin/feat` 发布。
 - **`origin/feat`**：所有设备共享的唯一开发集成分支；本地 `feat` 必须保持为其
   干净镜像，禁止直接开发和 force push。
-- **任务分支**：一项任务一个短期分支，从最新 `origin/feat` 创建；提交后推送
-  同名远端分支，获授权后串行合入 `origin/feat`。
+- **任务分支**：一项任务一个本地短期分支，从最新 `origin/feat` 创建；默认不
+  推送，获授权后串行合入 `origin/feat`。只有人类明确要求共享某个任务分支时
+  才推送该分支，并在用途结束后清理。
 - **禁止**：建立长期 `feat-2` 或设备专属集成分支、直接在 `main` 开发、把
   `origin/feat` reset 到某台设备的本地状态，或 force push 共享分支。
 - GitHub 上应保护 `main` 和 `feat`：禁止 force push 与删除；`feat` 仅允许
@@ -353,7 +352,8 @@ git worktree add .workspace/integration/main main
 
 | 操作 | Agent 权限 | 规则 |
 |------|-----------|------|
-| 任务分支 commit + push | ✅ 允许 | 仅限自己的 `codex/*` 或 `fix/issue-N-*`；先同步 `origin/feat`，禁止 force push |
+| 任务分支 commit | ✅ 允许 | 仅限自己的本地 `codex/*` 或 `fix/issue-N-*`；先同步 `origin/feat` |
+| 任务分支 push | ❌ **默认禁止** | 只有人类明确要求共享该任务分支时才允许；禁止 force push |
 | `codex/*` / `fix/* → feat` merge + `push origin feat` | ❌ **默认禁止** | 必须人类明确说“合并”或同意；授权后，同步与 push 是该集成动作的必要组成 |
 | `feat → main` merge | ❌ **禁止** | 必须人类明确说“合并”或同意后才能执行 |
 | `git push origin main` | ❌ **禁止** | 必须人类明确说“push”或同意后才能执行 |
@@ -374,8 +374,8 @@ git worktree add .workspace/integration/main main
 > 🛑🛑🛑 **以下规则必须严格遵守，违规可能导致并发冲突、数据丢失。** 🛑🛑🛑
 
 **权限分层（Agent 启动时自我判定）**：
-- **VS Code Agent（低权限）**：可以在自己的短期任务分支执行命令、提交并推送
-  同名远端任务分支。合入/推送共享 `feat` 以及合入/推送 `main` 必须经人类同意。
+- **VS Code Agent（低权限）**：可以在自己的本地短期任务分支执行命令和提交；
+  不得自行推送任务分支。合入/推送共享 `feat` 以及合入/推送 `main` 必须经人类同意。
 - **Codex Agent（高权限）**：权限边界相同；高风险或破坏性操作（如 `rm -rf`、
   `git reset --hard`、force push、删除远程分支）仍需人类明确确认。
 
@@ -434,7 +434,6 @@ git commit -m "<type>: <描述> (refs #<N>)"
 git fetch origin
 git merge origin/feat
 # 吸收更新后重新测试
-git push -u origin fix/issue-<N>-<描述>
 
 # 2. 在 Issue 下留 Done-by comment，等待人类指示 merge
 ```
@@ -532,7 +531,6 @@ git commit -m "<type>: <描述> (refs #<号码>)"
 git fetch origin
 git merge origin/feat
 # 吸收更新后重新运行聚焦测试
-git push -u origin fix/issue-<号码>-<简短描述>
 ```
 
 ### 5. 合并回 feat（⛔ 必须人类同意）
@@ -573,7 +571,8 @@ git push origin main
 - ❌ 不擅自关闭 Issue
 - ❌ 不提交 secrets / token / 密码 / `.env`
 - ❌ **不自行 merge 到共享 `feat` 或 `main` — 见 🚫🛑 MERGE 权限**
-- ❌ **不自行 push `origin/feat` 或 `origin/main`；任务分支 push 除外**
+- ❌ **不自行 push 任务分支、`origin/feat` 或 `origin/main`；任一 push 都需符合
+  对应的人类明确授权**
 - ✅ 大改动前先解释计划
 - ✅ 每次 commit 前展示 `git diff` 摘要
 - ✅ 测试失败先修复，修不了说明原因
