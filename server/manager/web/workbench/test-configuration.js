@@ -106,6 +106,7 @@
     const copy = value => structuredClone(value || []);
     return {
       factors: copy((state.values?.factor_candidates || []).filter(temporary)),
+      factor_sets: copy((state.factorSetCatalog?.items || []).filter(temporary)),
       product_groups: copy((state.groups || []).filter(temporary)),
       categories: copy((state.values?.category_candidates || []).filter(temporary)),
       factor_sources: copy(state.transientFactorSources),

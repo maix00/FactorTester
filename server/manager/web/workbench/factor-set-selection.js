@@ -32,8 +32,10 @@
   // cache needed by a later submission is prepared.
   function prepare(state) {
     if (!fieldDescriptor(state)) return;
+    const restored = Array.isArray(state.savedTemporaryObjects?.factor_sets)
+      ? state.savedTemporaryObjects.factor_sets : [];
     state.factorSetCatalog = state.factorSetCatalog || {
-      items: [], busy: false, error: "", runInputs: new Map(),
+      items: [...restored], busy: false, error: "", runInputs: new Map(),
     };
   }
 
@@ -51,9 +53,14 @@
         ? nativeRequest(serialization.native_catalog_action, {query})
         : Promise.resolve({items: []});
       const [server, local] = await Promise.all([serverRequest, localRequest]);
-      state.factorSetCatalog.items = FTFactorModel.mergeFactorSets(
+      const merged = FTFactorModel.mergeFactorSets(
         server.items || [], local.items || [],
-      ).filter(item => item.target_ref);
+      );
+      const byRef = new Map((state.factorSetCatalog.items || []).map(item => [
+        item.target_ref, item,
+      ]));
+      for (const item of merged) byRef.set(item.target_ref, item);
+      state.factorSetCatalog.items = [...byRef.values()].filter(item => item.target_ref);
     } catch (error) {
       state.factorSetCatalog.error = error.message || String(error);
     } finally {
