@@ -14,9 +14,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
-from tools.cli.modules.custom_factors.library_catalog import (
-    register_factor_library_catalog_commands,
-)
+from tools.cli.modules.custom_factors.factor_library import factor_library
 from tools.cli.research_metrics import (
     RESEARCH_METRIC_REGISTRY,
     default_display_metric,
@@ -38,10 +36,10 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("下一层: factortester custom_factors list")
         click.echo("可用功能:")
         click.echo(
-            "  factortester custom_factors factor-library "
-            "families|factors|factor-sets|parameter-configs|add"
+            "  factortester factor-library "
+            "families|factors|factor-sets|parameter-configs"
         )
-        click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
+        click.echo("  factortester factor-library add|metrics|history|rank|stability|import-result|save-result")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push|merge-download")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
         click.echo("  factortester custom_factors operators")
@@ -201,27 +199,6 @@ def describe_factor(
         click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     _print_factor_description(payload, include_source=source_code, include_debug_graph=debug_graph)
-
-
-@custom_factors.group("factor-library", invoke_without_command=True)
-@click.option("--factor-family", "--factor_family", default="", help="因子家族。")
-@click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
-@click.pass_context
-@friendly_errors
-def factor_library(ctx: click.Context, factor_family: str, product_group: str) -> None:
-    """Browse the server factor catalog and manage parameter configurations."""
-    ctx.ensure_object(dict)
-    ctx.obj["factor_family"] = factor_family
-    ctx.obj["product_group"] = product_group
-    if ctx.invoked_subcommand is None:
-        click.echo("因子库")
-        click.echo("  families          因子家族（公共/我的/下一级用户）")
-        click.echo("  factors           已登记因子（公共/我的/下一级用户）")
-        click.echo("  factor-sets       因子集合（我的/下一级用户）")
-        click.echo("  parameter-configs 旧参数配置记录")
-
-
-register_factor_library_catalog_commands(factor_library)
 
 
 @factor_library.command("parameter-configs")

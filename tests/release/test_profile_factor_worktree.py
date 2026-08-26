@@ -18,6 +18,10 @@ from tools.cli.release.factor_worktree import (
 )
 from tools.cli.release import factor_worktree
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from server.manager.services.agent_workspace import ensure_server_profile_workspace
+from server.manager.services.profile_factor_worktree import (
+    ensure_server_profile_factor_worktree,
+)
 
 
 OWNER = "factor-owner"
@@ -176,6 +180,52 @@ def test_two_profiles_use_isolated_branches_over_shared_object_store(
     assert _git(repo, "show-ref", "--verify", "refs/heads/agent/maxa")
     assert _git(repo, "cat-file", "-t", maxa_commit) == "commit"
     assert path_b.is_dir()
+
+
+def test_server_profile_adopts_portable_empty_factor_worktree_directory(
+    tmp_path: Path,
+) -> None:
+    repo, base = _canonical(tmp_path)
+    workspace = ensure_server_profile_workspace(
+        tmp_path / "server-data",
+        OWNER,
+        "maxa",
+    )
+    target = workspace / "factor-worktree"
+    assert target.is_dir() and not list(target.iterdir())
+
+    first = ensure_server_profile_factor_worktree(
+        OWNER,
+        "maxa",
+        workspace,
+        workspace / ".factortester-client",
+        canonical_root=repo,
+    )
+    def unexpected_sync(_principal: str) -> dict[str, object]:
+        raise AssertionError("existing Profile binding must not resync canonical data")
+
+    second = ensure_server_profile_factor_worktree(
+        OWNER,
+        "maxa",
+        workspace,
+        workspace / ".factortester-client",
+        synchronize=unexpected_sync,
+    )
+
+    profile = LocalProfileStore(
+        workspace / ".factortester-client",
+    ).load("maxa")
+    binding = profile["factor_workspace_binding"]
+    assert first["created"] is True
+    assert second["created"] is False
+    assert first["verification"]["valid"] is True
+    assert binding["branch"] == "agent/maxa"
+    assert binding["base_commit"] == base
+    assert Path(binding["worktree_path"]) == target
+    assert (target / "custom_factors" / "Trend.py").read_text() == (
+        "value: int = 1\n"
+    )
+    assert not (target / "local-note.txt").exists()
 
 
 def test_collisions_and_post_plan_changes_fail_closed(tmp_path: Path) -> None:

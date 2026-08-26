@@ -59,6 +59,9 @@ from server.manager.http.auth_routes import AuthenticationRoutesMixin
 from server.manager.http.client_release_routes import ClientReleaseRoutesMixin
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.agent_profiles import AgentProfileService
+from server.manager.services.profile_factor_worktree import (
+    ensure_server_profile_factor_worktree,
+)
 from server.manager.services.server_research import ServerResearchService
 from server.manager.services.agent_app_server import AgentAppServerSupervisor
 from server.manager.services.profile_directory import ProfileDirectoryService
@@ -434,6 +437,9 @@ class ManagerState(
             agent_session_issuer=self.issue_agent_session,
             agent_session_revoker=self.revoke_agent_session,
             manager_endpoint_provider=lambda: self.agent_manager_endpoint,
+            profile_factor_worktree_preparer=(
+                ensure_server_profile_factor_worktree
+            ),
         )
         self.server_research = ServerResearchService(
             self.data_root,

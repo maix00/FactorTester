@@ -111,13 +111,13 @@ class _BusinessCatalogClient:
 
 
 def test_factor_library_families_uses_server_scopes(monkeypatch) -> None:
-    from tools.cli.modules.custom_factors import library_catalog
+    from tools.cli.modules.custom_factors.factor_library import catalog
 
     monkeypatch.setattr(
-        library_catalog, "client_from_config", lambda: _BusinessCatalogClient(),
+        catalog, "client_from_config", lambda: _BusinessCatalogClient(),
     )
     result = CliRunner().invoke(cli, [
-        "custom_factors", "factor-library", "families",
+        "factor-library", "families",
         "--scope", "subordinates", "--json",
     ])
 
@@ -130,18 +130,28 @@ def test_factor_library_families_uses_server_scopes(monkeypatch) -> None:
     ]
 
 
+def test_factor_library_is_top_level_and_internal_catalog_is_hidden() -> None:
+    root_help = CliRunner().invoke(cli, ["--help"])
+    client_help = CliRunner().invoke(cli, ["client", "--help"])
+
+    assert root_help.exit_code == 0
+    assert "factor-library" in root_help.output
+    assert client_help.exit_code == 0
+    assert "catalog" not in client_help.output
+
+
 def test_factor_library_factors_and_sets_share_web_projection(monkeypatch) -> None:
-    from tools.cli.modules.custom_factors import library_catalog
+    from tools.cli.modules.custom_factors.factor_library import catalog
 
     monkeypatch.setattr(
-        library_catalog, "client_from_config", lambda: _BusinessCatalogClient(),
+        catalog, "client_from_config", lambda: _BusinessCatalogClient(),
     )
     factors = CliRunner().invoke(cli, [
-        "custom_factors", "factor-library", "factors",
+        "factor-library", "factors",
         "--scope", "mine", "--json",
     ])
     sets = CliRunner().invoke(cli, [
-        "custom_factors", "factor-library", "factor-sets",
+        "factor-library", "factor-sets",
         "--scope", "mine", "--query", "momentum", "--json",
     ])
 
@@ -160,10 +170,10 @@ def test_legacy_parameter_listing_is_explicit(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     old = CliRunner().invoke(cli, [
-        "custom_factors", "factor-library", "list",
+        "factor-library", "list",
     ])
     explicit = CliRunner().invoke(cli, [
-        "custom_factors", "factor-library", "parameter-configs", "--json",
+        "factor-library", "parameter-configs", "--json",
     ])
 
     assert old.exit_code != 0
