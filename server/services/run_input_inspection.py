@@ -17,13 +17,34 @@ from tools.testers.backtest.engines.native.strategy import STRATEGY_CALLBACKS
 _STRATEGY_BASES = {"Strategy", "BarStrategy", "EventStrategy", "OrderAwareStrategy"}
 
 
+def family_template_latex(family: Any) -> str:
+    """Render the configurable family expression, preserving ParamRef nodes."""
+    expression = getattr(family, "expr", None)
+    if expression is not None:
+        try:
+            formula = expression.to_latex()
+        except Exception:
+            formula = ""
+        if formula:
+            return str(formula)
+    return str(getattr(family, "math_expr", "") or "")
+
+
 def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, Any]:
-    """Return the executable alias and formula for one selected parameter row."""
+    """Return factor identity plus template and resolved formula views.
+
+    ``math_expr`` is the family template: parameter references remain visible
+    (for example ``\\textcolor{red}{N}``) so the formula describes the
+    configurable factor rather than silently turning into its default
+    instance.  ``resolved_math_expr`` is retained for callers that need to
+    audit the concrete parameterized expression used for this row.
+    """
     raw = params if isinstance(params, dict) else {}
     normalized = normalize_factor_param_row(family, raw)
     factor = family.get_factor(**normalized)
     expression = getattr(factor, "_source_expr", None) or getattr(factor, "expr", None)
-    formula = expression.to_latex() if expression is not None else ""
+    resolved_formula = expression.to_latex() if expression is not None else ""
+    template_formula = family_template_latex(family)
     return {
         "factor_alias": str(factor.alias),
         "family_formula_fingerprint": family.expr.semantic_fingerprint(),
@@ -34,7 +55,8 @@ def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, An
             )
             for parameter in family.params
         },
-        "math_expr": str(formula or getattr(family, "math_expr", "") or ""),
+        "math_expr": str(template_formula or resolved_formula or ""),
+        "resolved_math_expr": str(resolved_formula or ""),
     }
 
 

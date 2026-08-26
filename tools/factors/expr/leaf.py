@@ -22,6 +22,37 @@ if TYPE_CHECKING:
 
 from .core import FactorExpr, EvaluateContext
 
+
+_LATEX_TIME_UNITS = {
+    'days': r'\mathrm{d}',
+    'hours': r'\mathrm{h}',
+    'minutes': r'\mathrm{min}',
+    'seconds': r'\mathrm{s}',
+    'milliseconds': r'\mathrm{ms}',
+    'microseconds': r'\mu\mathrm{s}',
+    'nanoseconds': r'\mathrm{ns}',
+}
+
+
+def _format_latex_value(value: Any) -> str:
+    """Format scalar expression values without leaking Python repr syntax.
+
+    ``str(pd.Timedelta)`` is a human-readable Python value such as
+    ``25 days 00:00:00``.  In a math environment that becomes a sequence of
+    implicit variables and punctuation.  Keep the canonical duration while
+    making every unit an upright LaTeX operator (``25\\,\\mathrm{d}``).
+    """
+    if isinstance(value, pd.Timedelta):
+        sign = '-' if value < pd.Timedelta(0) else ''
+        components = abs(value).components
+        parts = [
+            rf"{int(getattr(components, name))}\,{unit}"
+            for name, unit in _LATEX_TIME_UNITS.items()
+            if int(getattr(components, name))
+        ]
+        return sign + r'\,'.join(parts) if parts else '0'
+    return str(value)
+
 class ColumnRef(FactorExpr):
     """
     数据列引用 — 表达式树的叶子节点。
@@ -317,7 +348,7 @@ class ConstExpr(FactorExpr):
         sk = self._structural_key()
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
-        return str(self.value)
+        return _format_latex_value(self.value)
 
     def _get_alias(self) -> str:
         v = self.value
