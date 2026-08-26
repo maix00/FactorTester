@@ -37,6 +37,26 @@
     };
   }
 
+  function chronologicalItems(items, order = "desc") {
+    const values = Array.isArray(items) ? [...items] : [];
+    return String(order || "desc").toLowerCase() === "desc"
+      ? values.reverse()
+      : values;
+  }
+
+  function chronologicalPageAfter(previous, requested, view = "") {
+    const value = String(requested || "").trim();
+    if (!value || !previous || previous.order !== "desc") return value;
+    if (previous.view && view && previous.view !== view) return value;
+    if (value === previous.after || !previous.items?.length) return value;
+    const lastVisible = previous.items[previous.items.length - 1];
+    if (String(lastVisible?.id || "") !== value) return value;
+    // A descending backend page is normalized before it reaches ChatKit.
+    // When ChatKit uses the last visible item as its cursor, that item is
+    // now the newest one.  The older-page boundary is the first item.
+    return String(previous.items[0]?.id || value);
+  }
+
   function threadObject(state, options = {}) {
     const includeItems = options.includeItems !== false;
     return {
@@ -247,6 +267,8 @@
     historyTimestamp,
     jsonResponse,
     itemPageParams,
+    chronologicalItems,
+    chronologicalPageAfter,
     operation,
     page,
     parseBody,
