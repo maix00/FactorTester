@@ -1001,6 +1001,21 @@ def test_scoped_factor_picker_refreshes_after_visible_catalog_load() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_restored_nested_editors_restart_idle_catalog_loads() -> None:
+    backtest = (WEB_ROOT / "workbench" / "backtest-groups.js").read_text(
+        encoding="utf-8",
+    )
+    ic = (
+        WEB_ROOT / "workbench" / "configuration-groups" / "ic" / "adapter.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const restoredEditor = state.backtestGroupEditor" in backtest
+    assert "if (restoredFlow && editorCatalogsNeedLoad(state))" in backtest
+    assert "if (state.icConfigurationGroupEditor && editorCatalogsNeedLoad(state))" in ic
+    for source in (backtest, ic):
+        assert 'state.lazy?.[key]?.status === "idle"' in source
+
+
 def test_object_picker_places_create_action_beside_the_shared_control() -> None:
     shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
         encoding="utf-8",
