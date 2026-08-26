@@ -1,6 +1,19 @@
 (() => {
   const PAGE_SIZE = 20;
 
+  function subjectRef(object) {
+    const kind = String(object.objectKind || "");
+    if (kind === "factor") {
+      const fingerprint = String(object.selfFormulaFingerprint || "").trim();
+      return fingerprint ? `factor-formula:v1:${fingerprint}` : "";
+    }
+    if (kind === "family") {
+      const fingerprint = String(object.familyFormulaFingerprint || "").trim();
+      return fingerprint ? `factor-family-formula:v1:${fingerprint}` : "";
+    }
+    return String(object.objectRef || "").trim();
+  }
+
   function create(context, object = {}) {
     const mount = document.createElement("section");
     mount.className = "factor-object-job-table";
@@ -14,6 +27,16 @@
       loading = true;
       const version = ++requestVersion;
       page = Math.max(1, Number(requestedPage) || 1);
+      const objectRef = subjectRef(object);
+      if (!objectRef) {
+        mount.replaceChildren(FTUI.empty(
+          context.t("暂无相关测试任务"),
+          context.t("此对象尚未登记公式指纹"),
+        ));
+        loaded = true;
+        loading = false;
+        return;
+      }
       mount.replaceChildren(FTUI.loading(context.t("正在读取相关测试任务…")));
       try {
         const query = new URLSearchParams({
@@ -22,10 +45,8 @@
           page: String(page),
           limit: String(PAGE_SIZE),
           object_kind: String(object.objectKind || ""),
-          object_ref: String(object.objectRef || ""),
+          object_ref: objectRef,
         });
-        if (object.ownerRef) query.set("object_owner_ref", object.ownerRef);
-        if (object.alias) query.set("object_alias", object.alias);
         const payload = await context.api(`/api/jobs?${query.toString()}`);
         // This component can remain mounted in a cached left-navigation tab.
         // Its page-level route token is stale after the tab is restored, but

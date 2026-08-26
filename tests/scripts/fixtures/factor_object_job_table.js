@@ -53,6 +53,7 @@ const context = {
 const table = window.FTFactorObjectJobs.create(context, {
   objectKind: "family",
   objectRef: "factor-family:v2:current",
+  familyFormulaFingerprint: "a".repeat(64),
   ownerRef: "principal:alice",
   alias: "Momentum",
 });
@@ -65,8 +66,11 @@ assert.deepStrictEqual(requests, []);
   const query = new URL(requests[0], "https://example.invalid").searchParams;
   assert.strictEqual(query.get("scope"), "visible");
   assert.strictEqual(query.get("object_kind"), "family");
-  assert.strictEqual(query.get("object_owner_ref"), "principal:alice");
-  assert.strictEqual(query.get("object_alias"), "Momentum");
+  assert.strictEqual(
+    query.get("object_ref"), `factor-family-formula:v1:${"a".repeat(64)}`,
+  );
+  assert.strictEqual(query.has("object_owner_ref"), false);
+  assert.strictEqual(query.has("object_alias"), false);
   table.mount.children[0].body?.rows?.[0]?.listeners?.click?.();
   assert.deepStrictEqual(navigations, ["/jobs/job-1"]);
   console.log("ok");

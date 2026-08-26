@@ -17,7 +17,25 @@ class JobSubject:
     alias: str = ""
 
 
-def job_subjects(job_spec: object) -> tuple[JobSubject, ...]:
+def factor_formula_subject_ref(fingerprint: object) -> str:
+    """Return the searchable content subject for one frozen Factor."""
+    value = str(fingerprint or "").strip()
+    if not value:
+        raise ValueError("self_formula_fingerprint must be non-empty")
+    return f"factor-formula:v1:{value}"
+
+
+def family_formula_subject_ref(fingerprint: object) -> str:
+    """Return the searchable content subject for one FactorFamily formula."""
+    value = str(fingerprint or "").strip()
+    if not value:
+        raise ValueError("family_formula_fingerprint must be non-empty")
+    return f"factor-family-formula:v1:{value}"
+
+
+def job_subjects(
+    job_spec: object, *, include_formula_subjects: bool = False,
+) -> tuple[JobSubject, ...]:
     """Return factor/family/set references without retaining the RunSpec."""
     result: dict[tuple[str, str], JobSubject] = {}
     for value in _objects(job_spec):
@@ -42,10 +60,18 @@ def job_subjects(job_spec: object) -> tuple[JobSubject, ...]:
         fingerprint = str(
             identity.get("family_formula_fingerprint") or ""
         ).strip()
+        self_fingerprint = str(
+            identity.get("self_formula_fingerprint") or ""
+        ).strip()
         if factor_ref.startswith("factor:v2:"):
             _put(result, JobSubject(
                 "factor", factor_ref, owner_ref, factor_alias,
             ))
+            if include_formula_subjects and self_fingerprint:
+                _put(result, JobSubject(
+                    "factor", factor_formula_subject_ref(self_fingerprint),
+                    owner_ref, factor_alias,
+                ))
         if ref.startswith("factor-family:v2:"):
             _put(result, JobSubject(
                 "family", ref, owner_ref, family_alias,
@@ -58,6 +84,11 @@ def job_subjects(job_spec: object) -> tuple[JobSubject, ...]:
             )
             _put(result, JobSubject(
                 "family", family_ref, owner_ref, family_alias,
+            ))
+        if include_formula_subjects and fingerprint:
+            _put(result, JobSubject(
+                "family", family_formula_subject_ref(fingerprint),
+                owner_ref, family_alias,
             ))
     return tuple(sorted(result.values()))
 
@@ -97,4 +128,9 @@ def _append_typed(
             return
 
 
-__all__ = ["JobSubject", "job_subjects"]
+__all__ = [
+    "JobSubject",
+    "factor_formula_subject_ref",
+    "family_formula_subject_ref",
+    "job_subjects",
+]
