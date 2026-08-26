@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -65,17 +66,32 @@ def read_factor_set_manifest(
     path = factor_set_manifest_path(repository, set_id)
     if not path.is_file():
         raise ValueError(f"factor-set does not exist: {set_id}")
+    return _manifest_value(
+        path.read_text(encoding="utf-8"),
+        scope=scope,
+        set_id=set_id,
+        manifest_path=path,
+    )
+
+
+def _manifest_value(
+    raw: str,
+    *,
+    scope: str,
+    set_id: str,
+    manifest_path: Path,
+) -> dict[str, Any]:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        parsed = json.loads(raw)
     except json.JSONDecodeError as error:
         raise ValueError("factor-set manifest is not valid JSON") from error
-    value = require_frozen_factor_set(raw)
+    value = require_frozen_factor_set(parsed)
     if value["owner_ref"] != _owner_ref(scope):
         raise ValueError("factor-set owner does not match its workspace")
     if value["identity"]["set_id"] != set_id:
         raise ValueError("factor-set id does not match its manifest path")
-    value["description"] = str(raw.get("description") or "")
-    value["manifest_path"] = str(path)
+    value["description"] = str(parsed.get("description") or "")
+    value["manifest_path"] = str(manifest_path)
     return value
 
 
@@ -95,7 +111,6 @@ def validate_factor_set_reference(
     if kind != "factor":
         raise ValueError("factor-set reference kind is invalid")
     require_factor_set_reference(target_ref)
-    matches = []
     for scope, repository in roots.items():
         directory = factor_set_manifest_path(repository, "placeholder").parent
         for path in sorted(directory.glob("*.json")) if directory.is_dir() else ():
@@ -103,10 +118,70 @@ def validate_factor_set_reference(
                 repository=repository, scope=scope, set_id=path.stem,
             )
             if value["ref"] == target_ref:
-                matches.append(value)
-    if len(matches) != 1:
-        raise ValueError("factor-set ref is unavailable or ambiguous")
-    return _projection(matches[0])
+                return _projection(value)
+    for scope, repository in roots.items():
+        value = _historical_manifest(
+            repository,
+            scope=scope,
+            target_ref=target_ref,
+        )
+        if value is not None:
+            return _projection(value)
+    raise ValueError("factor-set ref is unavailable or ambiguous")
+
+
+def _historical_manifest(
+    repository: Path,
+    *,
+    scope: str,
+    target_ref: str,
+) -> dict[str, Any] | None:
+    """Resolve immutable Factor Sets retained in the local Git history."""
+    if not (repository / ".git").exists():
+        return None
+    directory = ".factortester/factor-sets"
+    revisions = _git_lines(
+        repository, "log", "--all", "--format=%H", "--", directory,
+    )[:512]
+    for revision in revisions:
+        paths = _git_lines(
+            repository, "ls-tree", "-r", "--name-only", revision, "--", directory,
+        )
+        for relative in paths:
+            if not relative.endswith(".json"):
+                continue
+            result = subprocess.run(
+                ["git", "-C", str(repository), "show", f"{revision}:{relative}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode:
+                continue
+            try:
+                value = _manifest_value(
+                    result.stdout,
+                    scope=scope,
+                    set_id=Path(relative).stem,
+                    manifest_path=repository / relative,
+                )
+            except (TypeError, ValueError):
+                continue
+            if value["ref"] == target_ref:
+                return value
+    return None
+
+
+def _git_lines(repository: Path, *arguments: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def factor_set_manifest_path(repository: Path, set_id: str) -> Path:
