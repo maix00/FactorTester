@@ -249,7 +249,7 @@ def test_profile_factor_set_local_catalog_aggregates_all_profiles(
         _commit_all(factor_source.parents[1], f"{profile_id} factor set")
 
     result = runner.invoke(client, [
-        "profile", "factor-worktree", "factor-set", "local-catalog",
+        "profile", "factor-worktree", "factor-set", "profiles",
         "--json",
     ])
 
@@ -273,7 +273,7 @@ def test_profile_factor_set_local_catalog_aggregates_all_profiles(
         1,
     )
     bounded = runner.invoke(client, [
-        "profile", "factor-worktree", "factor-set", "local-catalog",
+        "profile", "factor-worktree", "factor-set", "profiles",
         "--json",
     ])
     assert bounded.exit_code == 0, bounded.output

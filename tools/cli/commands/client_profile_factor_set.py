@@ -152,7 +152,7 @@ def list_factor_sets(
     _echo(list_profile_factor_sets(profile=profile, query=query), as_json)
 
 
-@factor_set.command("local-catalog")
+@factor_set.command("profiles")
 @click.option("--query", default="")
 @click.option(
     "--release-profile",
@@ -160,12 +160,12 @@ def list_factor_sets(
 )
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def local_factor_set_catalog(
+def profile_factor_sets(
     query: str,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
-    """List local factor sets from every registered Profile in one process."""
+    """List factor sets from every local Profile in one bounded read."""
     root = load_profile_root(release_profile)
     profiles = LocalProfileStore(root).list()
     _echo(list_local_factor_sets(profiles=profiles, query=query), as_json)

@@ -102,22 +102,21 @@ copy connection details into this research Skill.
 Use `--help` or `<group> --help` for stable command syntax. Use `--json` for
 machine consumption; parse structured output, never CLI prose.
 
-The server factor catalog uses the same business hierarchy and permission
-projection as Web and Swift. Inspect it explicitly instead of using the
-client-local offline catalog:
+The server factor library uses the same business hierarchy and permission
+projection as Web and Swift:
 
 ```bash
-factortester custom_factors factor-library families --scope all --json
-factortester custom_factors factor-library factors --scope mine --json
-factortester custom_factors factor-library factor-sets --scope subordinates --json
-factortester custom_factors factor-library parameter-configs
+factortester factor-library families --scope all --json
+factortester factor-library factors --scope mine --json
+factortester factor-library factor-sets --scope subordinates --json
+factortester factor-library parameter-configs
 ```
 
 `families`, `factors`, and `factor-sets` read the Manager-owned public, own,
 and direct-subordinate scopes. `parameter-configs` is only the older explicit
-parameter-configuration store. `factortester client catalog` remains a
-client-local/offline SQLite catalog and must not be used to infer that the
-server factor library is empty.
+parameter-configuration store. Never use the internal client SQLite store as
+a factor-library reader. A Profile's local factor source is its own
+`factor-worktree`; a server Profile has the same workspace layout.
 
 ## Ownership and safety boundaries
 
@@ -223,12 +222,12 @@ admitting any of that Evidence into Graph remains a separate explicit action.
 - Resolve a committed Profile factor and its navigation-only family reference
   before writing either link:
   ```bash
-  factortester client catalog factor resolve \
-    --owner-ref profile:maxa \
-    --git-commit <commit> \
-    --alias 'SgCPS|P:[CA]|N:20d|$F:1m' --json
+  factortester client profile factor-worktree reference maxa \
+    --source-file public_factors/SgCPS.py \
+    --identity 'SgCPS|P:[CA]|N:20d|$F:1m' \
+    --object-kind factor --revision <commit> --json
   ```
-  Use the returned `factor_ref` or `family_ref` verbatim in the corresponding
+  Use the returned `target_ref` verbatim in the corresponding
   `factortester://factor/` link. The command reads the exact selected commit and
   rejects an alias that is absent or non-canonical there.
 - A multi-factor subject is a first-class `factor-set`, not a factor family and
@@ -262,7 +261,7 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   The manifest is an unordered set saved in canonical sorted order. Do not use
   its storage order as research meaning.
   To discover local factor sets across every registered Profile in one bounded
-  read, use `factor-set local-catalog --json`. This local catalog does not imply
+  read, use `factor-set profiles --json`. This Profile listing does not imply
   that any returned set is registered on a server.
   Product-group applicability is a separate registry relation owned by each
   product group. A factor or factor-set manifest never stores
@@ -390,7 +389,7 @@ qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
 Any Evidence or EvidenceUse factor scope must use the exact frozen `factor_ref`
-returned by `factortester client catalog factor resolve` (or the frozen
+returned by `factortester client profile factor-worktree reference` (or the frozen
 factor-set reference command). Select the Profile owner and Git commit in local
 settings, then resolve the complete alias. A Profile already owns its factor
 worktree, so never ask for another workspace path. If source settings are
@@ -399,10 +398,11 @@ its latest commit. Copy the returned reference verbatim into `factor_refs`;
 display names and shortened identities are not object identity.
 
 ```bash
-factortester client catalog factor resolve \
-  --owner-ref profile:maxa \
-  --git-commit <commit> \
-  --alias '<complete-factor-alias>' \
+factortester client profile factor-worktree reference maxa \
+  --source-file '<custom_factors-or-public_factors>/<family>.py' \
+  --identity '<complete-factor-alias>' \
+  --object-kind factor \
+  --revision <commit> \
   --json
 ```
 

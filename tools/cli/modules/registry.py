@@ -12,7 +12,7 @@ from typing import Iterable
 
 import click
 
-from tools.cli.modules.custom_factors import custom_factors
+from tools.cli.modules.custom_factors import custom_factors, factor_library
 from tools.cli.modules.products import products
 
 
@@ -52,3 +52,4 @@ class ControllerRegistry:
 def register_cli_modules(cli: click.Group) -> None:
     for command in ControllerRegistry().commands():
         cli.add_command(command)
+    cli.add_command(factor_library)

@@ -18,6 +18,7 @@ from .authoring_runtime import (
     refresh_authoring_metadata,
     run_bundled_pyright,
 )
+from .factor_worktree_paths import is_adoptable_factor_worktree_target
 from .local_profile import LocalProfileStore
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
@@ -113,6 +114,10 @@ def plan_factor_worktree_binding(
         branch_exists and branch_head == base and not branch_checked_out
     )
     target_exists = target.exists()
+    target_is_adoptable = is_adoptable_factor_worktree_target(
+        target,
+        profile_root=profile_root,
+    )
     existing_binding = profile.get("factor_workspace_binding") or {}
     idempotent = bool(
         existing_binding
@@ -125,7 +130,7 @@ def plan_factor_worktree_binding(
     collisions = []
     if branch_exists and not idempotent and not recoverable_branch:
         collisions.append("branch_exists")
-    if target_exists and not idempotent:
+    if target_exists and not idempotent and not target_is_adoptable:
         collisions.append("target_exists")
     existing_paths = {
         Path(item["worktree"]).resolve()
@@ -177,7 +182,9 @@ def plan_factor_worktree_binding(
                     else "not_needed"
                 )
             ),
-            "target_available": not target_exists or idempotent,
+            "target_available": (
+                not target_exists or target_is_adoptable or idempotent
+            ),
             "collisions": sorted(set(collisions)),
             "pyright_config_at_base": _tracked_at(repo, base, "pyrightconfig.json"),
             "pyi_at_base": bool(_tracked_glob(repo, base, "*.pyi")),
@@ -268,9 +275,15 @@ def apply_factor_worktree_binding(
             raise ValueError(
                 "factor worktree branch has unique commits or is checked out; "
                 "manual repair is required"
-            )
+        )
         if target.exists():
-            raise ValueError("factor worktree target collision")
+            profile_root = Path(str(profile["workspace_root"])).resolve()
+            if not is_adoptable_factor_worktree_target(
+                target,
+                profile_root=profile_root,
+            ):
+                raise ValueError("factor worktree target collision")
+            target.rmdir()
         staging = target.parent / f".{target.name}.staging-{uuid.uuid4().hex}"
         target.parent.mkdir(parents=True, exist_ok=True)
         branch_started_at_base = not branch_exists or recover_branch

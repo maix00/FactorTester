@@ -45,10 +45,11 @@ Workspace 中出现过的 family/alias 不得成为后续提交门禁。
 ## CLI 合同
 
 ```bash
-factortester client catalog factor resolve \
-  --owner-ref profile:maxa \
-  --git-commit <commit> \
-  --alias 'MmRateOfChg|N:20d|$F:1d' \
+factortester client profile factor-worktree reference maxa \
+  --source-file public_factors/MmRateOfChg.py \
+  --identity 'MmRateOfChg|N:20d|$F:1d' \
+  --object-kind factor \
+  --revision <commit> \
   --json
 ```
 

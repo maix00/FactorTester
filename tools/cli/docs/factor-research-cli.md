@@ -146,19 +146,14 @@ tradable action.
 Tiger is a device-local FTClient source for the OSE products `JNI.OSE`,
 `JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. FTClient installs its
 manifest and connector below `~/Documents/FactorTester/sources/Tiger`; the
-server does not register, enumerate, or probe that source, and the catalog
+server does not register, enumerate, or probe that source, and the local-data
 request never leaves the device. Ordinary Web clients therefore cannot select
-Tiger. The Swift client exposes the same Web catalog through a bounded local
-CLI bridge and stores connector credentials in the device Keychain.
-
-```bash
-factortester client catalog source request \
-  --path '/api/client/product_sources?data_source=Tiger' \
-  --json
-```
+Tiger. The Swift client exposes the same product and data-source hierarchy
+through a bounded internal bridge and stores connector credentials in the
+device Keychain. That bridge is not a public factor-library CLI.
 
 The local manifest declares a live OSE order-book stream with L2 market depth.
-It does not declare MIN1 or DAY1 bars. Static catalog discovery never imports
+It does not declare MIN1 or DAY1 bars. Static local-data discovery never imports
 or connects the Tiger SDK; a separate explicit local probe is required before
 availability or latency may be claimed.
 
