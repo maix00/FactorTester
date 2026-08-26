@@ -883,6 +883,7 @@ class _SSESupervisor:
                         "type": "commandExecution",
                         "command": "factortester products list",
                         "aggregatedOutput": "98 products",
+                        "cwd": "/research/maxc",
                         "status": "completed",
                     }},
                 },
@@ -921,6 +922,8 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     assert chunk_body.startswith(sse_payload)
     assert b'"chatkit_item": {"id": "command-1"' in raw
     assert b'"type": "workflow"' in raw
+    assert b'"summary": {"title": "factortester products list"}' in raw
+    assert b'"cwd": "/research/maxc"' in raw
     assert supervisor.calls[0][0] == 0
 
 
