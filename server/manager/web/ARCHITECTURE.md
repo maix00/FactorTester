@@ -62,7 +62,12 @@ single source of truth for the script order and semantic module groups.
   `workbench/test-settings.js` remains the tab/chip orchestration Module
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
-  final application coordinator (`app/coordinator.js`)
+  final application coordinator (`app/coordinator.js`). `app/webmcp.js` owns
+  the browser-agent boundary: it maps CLI command families and Web-only
+  features to visible routes, then exposes bounded inspection, form-fill and
+  confirmed action tools over the current rendered surface. It must continue
+  to drive the existing DOM/navigation seams so WebMCP never bypasses page
+  state, authentication, role checks, or server business APIs.
 - `styles/`: global shell and domain stylesheets; `styles/app.css` is the
   current shared shell stylesheet, while `styles/report.css` contains report
   presentation rules. Generic Job styles live under `styles/jobs/`; output
