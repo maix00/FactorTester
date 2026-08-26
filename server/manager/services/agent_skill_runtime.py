@@ -6,8 +6,9 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -36,6 +37,9 @@ class AgentSkillRuntime:
         self.config_root = self.codex_home / "config"
         self.data_root = self.codex_home / "data"
         self.state_root = self.codex_home / "state"
+        self.factor_tester_client_root = (
+            self.workspace_root / ".factortester-client"
+        )
         self.manifest_path = self.codex_home / "factortester-skill-projection.json"
 
     @staticmethod
@@ -74,6 +78,7 @@ class AgentSkillRuntime:
             self.config_root,
             self.data_root,
             self.state_root,
+            self.factor_tester_client_root,
         ):
             path.mkdir(parents=True, exist_ok=True)
         for path in (
@@ -84,6 +89,7 @@ class AgentSkillRuntime:
             self.config_root,
             self.data_root,
             self.state_root,
+            self.factor_tester_client_root,
         ):
             try:
                 os.chmod(path, 0o700)

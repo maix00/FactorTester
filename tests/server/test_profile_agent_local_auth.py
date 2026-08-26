@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from server.manager.services.agent_app_server_launch import AgentAppServerLaunch
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
 from server.manager.state.sessions import SessionStateMixin
 from server.manager.storage.session_store import ManagerSessionStore
+from tools.cli.catalog.store import LocalCatalogStore
 
 
 class _SessionState(SessionStateMixin):
@@ -57,6 +57,7 @@ def test_agent_cli_files_are_private_and_cleaned(tmp_path: Path) -> None:
             "token": "agent-session-token",
             "profile_id": "profile-main",
             "claim_id": "claim-1",
+            "principal": "GTHT@MaxJJW@1",
         },
         proxy_url="http://127.0.0.1:7890",
     )
@@ -81,9 +82,37 @@ def test_agent_cli_files_are_private_and_cleaned(tmp_path: Path) -> None:
     assert environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] == str(
         launch.factor_tester_capability_path,
     )
+    assert environment["FACTORTESTER_CLIENT_ROOT"] == str(
+        runtime.factor_tester_client_root,
+    )
+    assert environment["FACTORTESTER_PROFILE"] == "profile-main"
     assert environment["FACTORTESTER_AGENT_TOKEN"] == "provider-secret"
+    profile = json.loads(
+        (
+            runtime.factor_tester_client_root
+            / "profiles"
+            / "profile-main.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert profile["profile_id"] == "profile-main"
+    assert profile["session_binding"]["principal_ref"] == "GTHT@MaxJJW@1"
+    assert profile["workspace_root"] == str(runtime.workspace_root)
+    catalog = LocalCatalogStore(runtime.factor_tester_client_root).initialize()
+    assert catalog["schema_version"] > 0
 
     launch.cleanup_factor_tester_config()
 
     assert not launch.factor_tester_config_path.exists()
     assert not launch.factor_tester_capability_path.exists()
+
+
+def test_agent_profiles_have_distinct_writable_client_roots(tmp_path: Path) -> None:
+    first = AgentSkillRuntime(tmp_path / "first")
+    second = AgentSkillRuntime(tmp_path / "second")
+
+    first.environment()
+    second.environment()
+
+    assert first.factor_tester_client_root != second.factor_tester_client_root
+    assert first.factor_tester_client_root.is_dir()
+    assert second.factor_tester_client_root.is_dir()

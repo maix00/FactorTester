@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -9,8 +9,11 @@ from tools.cli.commands import (
     client_profile_factor_set,
 )
 from tools.cli.commands.client_release import client
-from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release import profile_factor_set_queries
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+
+CANONICAL_20D = "SgCPS|P:CA|N:20d|$F:30m"
+CANONICAL_40D = "SgCPS|P:CA|N:40d|$F:30m"
 
 
 def test_profile_factor_reference_freezes_the_committed_blob(
@@ -26,7 +29,7 @@ def test_profile_factor_reference_freezes_the_committed_blob(
     result = CliRunner().invoke(client, [
         "profile", "factor-worktree", "reference", "maxa",
         "--source-file", str(source),
-        "--identity", "SgCPS|N:20d",
+        "--identity", CANONICAL_20D,
         "--object-kind", "factor",
         "--json",
     ])
@@ -35,10 +38,9 @@ def test_profile_factor_reference_freezes_the_committed_blob(
     value = json.loads(result.output)
     assert value["kind"] == "factor"
     assert value["object_kind"] == "factor"
-    assert value["identity"] == "SgCPS|N:20d"
-    assert value["target_ref"].startswith(
-        "factor:v1:profile-maxa:"
-    )
+    assert value["factor_alias"] == CANONICAL_20D
+    assert value["record"]["alias"] == CANONICAL_20D
+    assert value["target_ref"].startswith("factor:v2:")
     assert "factortester://" not in result.output
 
 
@@ -61,7 +63,7 @@ def test_profile_factor_reference_rejects_uncommitted_source(
     ])
 
     assert result.exit_code != 0
-    assert "commit it first" in result.output
+    assert "differs from the selected workspace revision" in result.output
 
 
 def test_profile_factor_reference_rejects_noncanonical_display_alias(
@@ -84,7 +86,7 @@ def test_profile_factor_reference_rejects_noncanonical_display_alias(
 
     assert result.exit_code != 0
     assert "Non-canonical factor identity" in result.output
-    assert "SgCPS|P:CA|N:20d" in result.output
+    assert CANONICAL_20D in result.output
 
 
 def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
@@ -96,25 +98,24 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     member_result = CliRunner().invoke(client, [
         "profile", "factor-worktree", "reference", "maxa",
         "--source-file", str(source),
-        "--identity", "SgCPS|N:20d",
+        "--identity", CANONICAL_20D,
         "--object-kind", "factor",
         "--json",
     ])
     assert member_result.exit_code == 0, member_result.output
-    member_ref = json.loads(member_result.output)["target_ref"]
+    member = json.loads(member_result.output)
+    member_ref = member["target_ref"]
 
     created = CliRunner().invoke(client, [
         "profile", "factor-worktree", "factor-set", "create", "maxa",
         "--set-id", "momentum-column-2025",
         "--title-zh", "2025年动量因子列",
-        "--member-ref", member_ref,
+        "--member-record", json.dumps(member["record"]),
         "--json",
     ])
     assert created.exit_code == 0, created.output
     created_value = json.loads(created.output)
-    assert created_value["set_ref"] == (
-        "factor-set:profile-maxa:momentum-column-2025"
-    )
+    assert created_value["set_ref"].startswith("factor-set:v2:")
     assert created_value["member_count"] == 1
     assert "member_refs" not in created_value
 
@@ -132,11 +133,12 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     ])
     assert frozen.exit_code == 0, frozen.output
     value = json.loads(frozen.output)
-    assert value["object_kind"] == "factor-set"
-    assert value["set_ref"] == created_value["set_ref"]
+    assert value["kind"] == "factor"
+    assert value["object_class"] == "FactorSet"
+    assert value["target_ref"] == created_value["set_ref"]
     assert value["member_count"] == 1
     assert "member_refs" not in value
-    assert value["target_ref"].startswith("factor-set:v1:profile-maxa:")
+    assert value["target_ref"].startswith("factor-set:v2:")
 
     members = CliRunner().invoke(client, [
         "profile", "factor-worktree", "factor-set", "members",
@@ -155,7 +157,9 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert descriptor.exit_code == 0, descriptor.output
     descriptor_value = json.loads(descriptor.output)
     assert descriptor_value["target_ref"] == value["target_ref"]
-    assert descriptor_value["manifest"]["member_refs"] == [member_ref]
+    assert descriptor_value["manifest"]["identity"]["members"][0][
+        "ref"
+    ] == member_ref
 
     run_input = CliRunner().invoke(client, [
         "profile", "factor-worktree", "factor-set", "run-input",
@@ -164,13 +168,7 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert run_input.exit_code == 0, run_input.output
     run_input_value = json.loads(run_input.output)
     assert run_input_value["descriptor"] == descriptor_value
-    assert run_input_value["transient_factor_sources"] == [{
-        "factor_id": "SgCPS",
-        "path": "custom_factors/SgCPS.py",
-        "source_code": source.read_text(encoding="utf-8"),
-        "source_revision": member_ref.split(":")[-2],
-        "source_blob": member_ref.split(":")[-1],
-    }]
+    assert run_input_value["transient_factor_sources"] == []
 
 
 def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
@@ -179,13 +177,14 @@ def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
     root, source = _profile_with_factor_worktree(tmp_path)
     for module in (client_profile_factor_reference, client_profile_factor_set):
         monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
-    member_ref = _factor_ref(source, "SgCPS|N:20d")
+    member = _factor_record(source, CANONICAL_20D)
+    member_ref = member["ref"]
     runner = CliRunner()
     created = runner.invoke(client, [
         "profile", "factor-worktree", "factor-set", "create", "maxa",
         "--set-id", "server-visible",
         "--title-zh", "服务器可见集合",
-        "--member-ref", member_ref,
+        "--member-record", json.dumps(member),
         "--json",
     ])
     assert created.exit_code == 0, created.output
@@ -197,7 +196,7 @@ def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
             captured.update(descriptor)
             return {"factor_set": {
                 "target_ref": descriptor["target_ref"],
-                "set_ref": descriptor["manifest"]["set_ref"],
+                "set_ref": descriptor["manifest"]["ref"],
             }}
 
     monkeypatch.setattr(
@@ -210,9 +209,9 @@ def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
 
     assert result.exit_code == 0, result.output
     value = json.loads(result.output)
-    assert value["set_ref"] == "factor-set:profile-maxa:server-visible"
-    assert captured["target_ref"].startswith("factor-set:v1:profile-maxa:")
-    assert captured["manifest"]["member_refs"] == [member_ref]
+    assert value["set_ref"].startswith("factor-set:v2:")
+    assert captured["target_ref"].startswith("factor-set:v2:")
+    assert captured["manifest"]["identity"]["members"][0]["ref"] == member_ref
 
 
 def test_profile_factor_set_local_catalog_aggregates_all_profiles(
@@ -236,14 +235,14 @@ def test_profile_factor_set_local_catalog_aggregates_all_profiles(
         ("maxa", source, "maxa-set"),
         ("analyst", second_source, "analyst-set"),
     ):
-        member_ref = _factor_ref_for_profile(
-            runner, profile_id, factor_source, "SgCPS|N:20d",
+        member = _factor_record_for_profile(
+            runner, profile_id, factor_source, CANONICAL_20D,
         )
         created = runner.invoke(client, [
             "profile", "factor-worktree", "factor-set", "create", profile_id,
             "--set-id", set_id,
             "--title-zh", f"{profile_id}因子集合",
-            "--member-ref", member_ref,
+            "--member-record", json.dumps(member),
             "--json",
         ])
         assert created.exit_code == 0, created.output
@@ -302,25 +301,24 @@ def test_profile_factor_set_rejects_legacy_noncanonical_member(
         ["git", "-C", str(worktree), "rev-parse", "HEAD:custom_factors/SgCPS.py"],
         check=True, capture_output=True, text=True,
     ).stdout.strip()
-    from base64 import urlsafe_b64encode
-    encode = lambda value: urlsafe_b64encode(value.encode()).decode().rstrip("=")
-    legacy_ref = (
-        "factor:v1:profile-maxa:"
-        f"{encode('custom_factors/SgCPS.py')}:"
-        f"{encode('SgCPS|P:[CA]|N:20d')}:{revision}:{blob}"
-    )
+    legacy_record = {
+        "schema_version": 1,
+        "ref": f"factor:v1:{revision}:{blob}",
+        "alias": "SgCPS|P:[CA]|N:20d",
+        "owner_ref": "profile:maxa",
+        "identity": {},
+    }
 
     result = CliRunner().invoke(client, [
         "profile", "factor-worktree", "factor-set", "create", "maxa",
         "--set-id", "legacy-members",
         "--title-zh", "旧别名集合",
-        "--member-ref", legacy_ref,
+        "--member-record", json.dumps(legacy_record),
         "--json",
     ])
 
     assert result.exit_code != 0
-    assert "Non-canonical factor identity" in result.output
-    assert "SgCPS|P:CA|N:20d" in result.output
+    assert "schema version 2" in result.output
 
 
 def test_factor_set_introspection_and_guarded_update(
@@ -329,15 +327,16 @@ def test_factor_set_introspection_and_guarded_update(
     root, source = _profile_with_factor_worktree(tmp_path)
     for module in (client_profile_factor_reference, client_profile_factor_set):
         monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
-    first_ref = _factor_ref(source, "SgCPS|N:20d")
-    second_ref = _factor_ref(source, "SgCPS|N:40d")
+    first_record = _factor_record(source, CANONICAL_20D)
+    second_record = _factor_record(source, CANONICAL_40D)
+    second_ref = second_record["ref"]
     runner = CliRunner()
     created = runner.invoke(client, [
         "profile", "factor-worktree", "factor-set", "create", "maxa",
         "--set-id", "momentum-column",
         "--title-zh", "动量因子集合",
         "--description-zh", "用于窗口参数比较",
-        "--member-ref", first_ref,
+        "--member-record", json.dumps(first_record),
         "--json",
     ])
     assert created.exit_code == 0, created.output
@@ -367,14 +366,14 @@ def test_factor_set_introspection_and_guarded_update(
 
     member_file = tmp_path / "members.json"
     member_file.write_text(
-        json.dumps([first_ref, second_ref]), encoding="utf-8",
+        json.dumps([first_record, second_record]), encoding="utf-8",
     )
     stale = runner.invoke(client, [
         "profile", "factor-worktree", "factor-set", "update", "maxa",
         "--set-id", "momentum-column",
-        "--expected-member-hash", "sha256:" + ("0" * 64),
+        "--expected-member-fingerprint", "0" * 64,
         "--title-zh", "动量因子集合",
-        "--member-ref-file", str(member_file),
+        "--member-record-file", str(member_file),
     ])
     assert stale.exit_code != 0
     assert "stale" in stale.output
@@ -382,17 +381,17 @@ def test_factor_set_introspection_and_guarded_update(
     updated = runner.invoke(client, [
         "profile", "factor-worktree", "factor-set", "update", "maxa",
         "--set-id", "momentum-column",
-        "--expected-member-hash", created_value["member_hash"],
+        "--expected-member-fingerprint", created_value["member_fingerprint"],
         "--title-zh", "动量因子集合",
         "--description-zh", "用于窗口参数比较",
-        "--member-ref-file", str(member_file),
+        "--member-record-file", str(member_file),
         "--json",
     ])
     assert updated.exit_code == 0, updated.output
     updated_value = json.loads(updated.output)
     assert updated_value["member_count"] == 2
     assert "member_refs" not in updated_value
-    assert updated_value["next_actions"][2]["argv"][6] == "maxa"
+    assert updated_value["next_actions"][0]["argv"][6] == "maxa"
     _commit_all(worktree, "factor set v2")
     second = _factor_set_reference(runner, "momentum-column")
 
@@ -466,9 +465,11 @@ def _profile_with_factor_worktree(
 
 
 def _factor_ref(source: Path, identity: str) -> str:
-    return _factor_ref_for_profile(
-        CliRunner(), "maxa", source, identity,
-    )
+    return _factor_record(source, identity)["ref"]
+
+
+def _factor_record(source: Path, identity: str) -> dict:
+    return _factor_record_for_profile(CliRunner(), "maxa", source, identity)
 
 
 def _factor_ref_for_profile(
@@ -477,6 +478,17 @@ def _factor_ref_for_profile(
     source: Path,
     identity: str,
 ) -> str:
+    return _factor_record_for_profile(
+        runner, profile_id, source, identity,
+    )["ref"]
+
+
+def _factor_record_for_profile(
+    runner: CliRunner,
+    profile_id: str,
+    source: Path,
+    identity: str,
+) -> dict:
     result = runner.invoke(client, [
         "profile", "factor-worktree", "reference", profile_id,
         "--source-file", str(source),
@@ -485,7 +497,7 @@ def _factor_ref_for_profile(
         "--json",
     ])
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)["target_ref"]
+    return json.loads(result.output)["record"]
 
 
 def _factor_set_reference(runner: CliRunner, set_id: str) -> dict:

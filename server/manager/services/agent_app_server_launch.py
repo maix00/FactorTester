@@ -6,8 +6,9 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
@@ -16,6 +17,7 @@ from server.manager.services.agent_provider_health import (
     AgentProviderHealthError,
 )
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
 def _toml_string(value: object) -> str:
@@ -42,7 +44,9 @@ class AgentAppServerLaunch:
         self.runtime = runtime
         self.provider = dict(provider)
         self.codex_binary = str(codex_binary or "codex").strip() or "codex"
-        configured_cli = str(factor_tester_cli or os.environ.get("FACTORTESTER_CLI") or "").strip()
+        configured_cli = str(
+            factor_tester_cli or os.environ.get("FACTORTESTER_CLI") or ""
+        ).strip()
         self.factor_tester_cli = configured_cli or str(
             shutil.which("factortester") or ""
         )
@@ -121,7 +125,10 @@ class AgentAppServerLaunch:
             'wire_api = "responses"',
             "",
             "[shell_environment_policy]",
-            "# Keep the provider token in app-server only; do not pass it to shell tools.",
+            (
+                "# Keep the provider token in app-server only; "
+                "do not pass it to shell tools."
+            ),
             "ignore_default_excludes = false",
             "",
         ])
@@ -149,12 +156,17 @@ class AgentAppServerLaunch:
         """Materialize a private local CLI config and Agent capability."""
         if not self.factor_tester_auth:
             return
-        base_url = str(self.factor_tester_auth.get("base_url") or "").strip().rstrip("/")
+        base_url = str(
+            self.factor_tester_auth.get("base_url") or ""
+        ).strip().rstrip("/")
         token = str(self.factor_tester_auth.get("token") or "").strip()
         profile_id = str(self.factor_tester_auth.get("profile_id") or "").strip()
         claim_id = str(self.factor_tester_auth.get("claim_id") or "").strip()
-        if not base_url or not token or not profile_id or not claim_id:
-            raise AgentAppServerError("Profile Agent FactorTester capability is incomplete")
+        principal = str(self.factor_tester_auth.get("principal") or "").strip()
+        if not all((base_url, token, profile_id, claim_id, principal)):
+            raise AgentAppServerError(
+                "Profile Agent FactorTester capability is incomplete"
+            )
         self._write_private_json(
             self.factor_tester_config_path,
             {"base_url": base_url},
@@ -170,6 +182,30 @@ class AgentAppServerLaunch:
                 "claim_id": claim_id,
             },
         )
+        self._ensure_local_profile(profile_id, principal)
+
+    def _ensure_local_profile(self, profile_id: str, principal: str) -> None:
+        """Project the current server Profile into its isolated client root."""
+        root = self.runtime.factor_tester_client_root
+        root.mkdir(parents=True, exist_ok=True)
+        store = LocalProfileStore(root)
+        existing = {
+            str(item.get("profile_id") or ""): item
+            for item in store.list()
+        }.get(profile_id)
+        if existing is not None:
+            binding = existing.get("session_binding") or {}
+            if str(binding.get("principal_ref") or "") != principal:
+                raise AgentAppServerError(
+                    "Profile Agent local projection principal does not match"
+                )
+            return
+        store.save(new_local_profile(
+            profile_id=profile_id,
+            display_name=profile_id,
+            workspace_root=self.runtime.workspace_root,
+            principal_ref=principal,
+        ))
 
     @staticmethod
     def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
@@ -226,6 +262,12 @@ class AgentAppServerLaunch:
             environment["FACTORTESTER_CONFIG"] = str(self.factor_tester_config_path)
             environment["FACTORTESTER_HOME"] = str(
                 self.runtime.home_root / "factortester"
+            )
+            environment["FACTORTESTER_CLIENT_ROOT"] = str(
+                self.runtime.factor_tester_client_root
+            )
+            environment["FACTORTESTER_PROFILE"] = str(
+                self.factor_tester_auth.get("profile_id") or ""
             )
             environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] = str(
                 self.factor_tester_capability_path
