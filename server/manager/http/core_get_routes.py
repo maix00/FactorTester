@@ -12,6 +12,7 @@ from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
 from server.manager.web.assets import asset_revision, shell_bytes, static_file
 
+
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
@@ -294,4 +295,13 @@ class CoreGetRoutesMixin:
         for handler in handlers:
             if handler(parsed):
                 return
+        self.send_error(404)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        """Serve bodyless release metadata needed by Sparkle downloads."""
+        if self._redirect_plain_http_to_https():
+            return
+        parsed = urlparse(self.path)
+        if self._serve_client_release(parsed.path):
+            return
         self.send_error(404)

@@ -131,7 +131,8 @@ class ClientReleaseRoutesMixin:
         self.send_header("Cache-Control", "public, max-age=60")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(raw)
+        if self.command != "HEAD":
+            self.wfile.write(raw)
 
     def _release_asset(self, digest: str, suffix: str) -> None:
         asset = self.state.release_root / "assets/beta" / f"{digest}.{suffix}"
@@ -177,6 +178,8 @@ class ClientReleaseRoutesMixin:
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
+        if self.command == "HEAD":
+            return
         with resolved.open("rb") as stream:
             stream.seek(start)
             remaining = end - start + 1
