@@ -52,6 +52,9 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
     assert items[2]["workflow"]["tasks"][0]["content"] == (
         "```text\n98 products\n```\n\nExit code: 0"
     )
+    assert items[2]["workflow"]["summary"] == {
+        "title": "factortester products list",
+    }
     assert items[4]["arguments"] == {"limit": 20}
     assert items[-2]["workflow"]["tasks"][0]["title"] == "Agent progress"
     assert items[-1]["content"][0]["text"].startswith("完成。\n\n```bash")
