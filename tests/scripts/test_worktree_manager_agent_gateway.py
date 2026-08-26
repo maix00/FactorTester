@@ -204,3 +204,29 @@ def test_manager_owned_routes_precede_profile_agent_service_fallback(
             value = json.loads(response.read())
 
     assert value["preferences"]["language"] == "system"
+
+
+def test_profile_agent_research_catalog_precedes_service_fallback(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state,
+        "route_request",
+        lambda *_args, **_values: pytest.fail(
+            "Manager research routes must stay local"
+        ),
+    )
+    headers = agent_headers(state)
+    paths = (
+        "/api/public-research?scope=shared",
+        "/api/research-publications/settings",
+    )
+    with running_manager(state) as base_url:
+        for path in paths:
+            with urlopen(Request(f"{base_url}{path}", headers=headers)) as response:
+                value = json.loads(response.read())
+                status = response.status
+
+            assert status == 200
+            assert value["reports"] == []

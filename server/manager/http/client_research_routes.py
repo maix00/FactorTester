@@ -376,6 +376,4 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
             return True
         if self._serve_sqlite_web(parsed, method="GET"):
             return True
-        if self._proxy_service_get(parsed):
-            return True
         return False
