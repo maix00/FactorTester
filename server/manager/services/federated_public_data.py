@@ -647,10 +647,11 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
 
     def factor_library(
         self, principal: str, *, visitor: bool = False,
+        refresh: bool = False,
     ) -> dict[str, Any]:
         viewer = VISITOR_PRINCIPAL if visitor else str(principal)
         key = ("factors", viewer)
-        cached = self._cached(key)
+        cached = None if refresh else self._cached(key)
         if cached is not None:
             return dict(cached)
         public = public_factor_library()
@@ -660,10 +661,16 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 self.client_state, "factor_library_scopes", None,
             )
             if callable(scope_reader):
-                local_scopes.update(scope_reader(principal))
+                local_scopes.update(
+                    scope_reader(principal, refresh=refresh)
+                    if refresh else scope_reader(principal)
+                )
             else:
                 # Keep a bounded fallback for older test seams and Managers.
-                local_scopes["mine"] = self.client_state.factor_library(principal)
+                local_scopes["mine"] = (
+                    self.client_state.factor_library(principal, refresh=True)
+                    if refresh else self.client_state.factor_library(principal)
+                )
         local = compose_factor_library_scopes(
             local_scopes, principal=str(principal or viewer),
         )

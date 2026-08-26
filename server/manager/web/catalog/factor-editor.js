@@ -305,19 +305,25 @@
 
   function normalizeSaved(value, state, context) {
     const saved = value || {};
+    const frozen = saved.factor || saved.frozen_factor || {};
     const family = state.family || state.inspection || {};
-    const alias = saved.factor_alias || saved.name || saved.id
+    const alias = saved.factor_alias || saved.alias || frozen.alias
+      || saved.name || saved.id
       || state.inspection?.factor_name || familyAlias(family);
-    const params = saved.params || saved.factor_params || state.parameterValues || {};
-    const owner = saved.factor_owner_ref || saved.owner_ref
+    const params = saved.params || saved.factor_params
+      || frozen.identity?.params || state.parameterValues || {};
+    const owner = saved.factor_owner_ref || saved.owner_ref || frozen.owner_ref
       || saved.owner_username || context.session?.username || "";
     const familyAliasValue = saved.factor_family_alias || saved.family
-      || familyAlias(family) || alias;
+      || frozen.identity?.family_alias || familyAlias(family) || alias;
+    const ref = saved.ref || frozen.ref || saved.factor_ref || saved.id || alias;
     return {
       ...saved,
+      ...frozen,
       id: saved.id || alias,
       name: saved.name || alias,
-      factor_ref: saved.factor_ref || saved.id || alias,
+      ref,
+      factor_ref: saved.factor_ref || frozen.ref || ref,
       factor_alias: alias,
       factor_owner_ref: owner,
       factor_params: params,
@@ -336,9 +342,30 @@
     if (!alias) throw new Error(context.t("请先选择因子家族"));
     if (state.sourceVersionError) throw new Error(state.sourceVersionError);
     if (context.testObjectTemporary) {
+      const owner = String(
+        state.family?.owner_username || state.family?.owner_ref
+        || context.session?.username || "",
+      ).trim();
+      const isPublic = state.family?.factor_kind === "public"
+        || state.family?.source === "public"
+        || owner === "public" || owner === "__public_jobs__";
+      const value = await context.api("/custom-factors/api/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          resolve_factor: true,
+          factor_family_alias: alias,
+          owner_username: owner,
+          is_public: isPublic,
+          params: state.parameterValues || {},
+        }),
+      });
+      if (!value.valid || !value.factor) {
+        throw new Error(value.error || context.t("因子解析失败"));
+      }
       return {
+        ...value.factor,
         factor_family_alias: alias,
-        factor_alias: alias,
+        factor_alias: value.factor.alias,
         params: state.parameterValues || {},
         parameter_definitions: state.family?.params || [],
         source_kind: "factor_library",
@@ -382,10 +409,21 @@
     if (context.testObjectTemporary) {
       const alias = state.inspection?.factor_name || state.factorID
         || readInput(fields.name);
+      const value = await context.api("/custom-factors/api/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          source_code: state.sourceCode,
+          params: state.parameterValues || {},
+        }),
+      });
+      if (!value.valid || !value.factor) {
+        throw new Error(value.error || context.t("因子解析失败"));
+      }
       return {
         ...payload,
+        ...value.factor,
         name: alias,
-        factor_alias: alias,
+        factor_alias: value.factor.alias || alias,
         params: state.parameterValues || {},
         parameter_definitions: state.inspection?.params || [],
         source_kind: "transient",
@@ -410,16 +448,26 @@
     });
     const saved = value.factor || value;
     const alias = saved.name || saved.id || state.factorID;
+    let registered = null;
     if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
-      await context.api(
+      const libraryValue = await context.api(
         `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
         {
           method: "PUT",
           body: JSON.stringify({params_list: [state.parameterValues]}),
         },
       );
+      registered = libraryValue.factors?.[0] || null;
     }
-    return saved;
+    // Creating source-backed factors has two server-side steps: register the
+    // family source, then register the selected parameter row.  The second
+    // response is the only one that contains the frozen Factor v2 identity
+    // required by candidate pickers and detail routes.  Return that complete
+    // row so the caller never tries to resolve the family class name as a
+    // factor reference.
+    return registered
+      ? {...saved, ...registered, source_code: saved.source_code || payload.source_code}
+      : saved;
   }
 
   async function render(context, data, targetRef, mode, options = {}) {
@@ -638,6 +686,7 @@
             name, chineseName, description, category,
           });
         const result = normalizeSaved(saved, state, context);
+        window.FTFactorCatalog?.upsertFactor?.(result);
         if (context.testObjectTemporary && result.source_code && context.testState) {
           window.FTTestInputState?.putFactor?.(context.testState, {
             factor_id: result.factor_alias,
