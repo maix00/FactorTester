@@ -828,6 +828,9 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTFactorDetailShared.summary" not in source_controls
     assert "const formulaSource = state.inspection || state.family || state.loaded" in source
     assert "topMount.append(window.FTFactorDetailShared.summary(context, {" in source
+    assert "function normalizedInspection" in source
+    assert "state.validationMessage" in source
+    assert "state.validationError" in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
     assert "factor-editor-upload-action" not in source
@@ -874,6 +877,8 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     )[0]
 
     assert "function pageClass" in shared
+    assert "resolved_math_expr" in shared
+    assert "factor-family-formula-raw" in shared
     assert "FTFactorDetailShared.pageClass" in factor_view
     assert "FTFactorDetailShared.pageClass" in family_view
     assert "sourceVersionHistory" not in factor_view
