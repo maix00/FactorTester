@@ -281,18 +281,18 @@ class FactorLibraryClientMixin(ClientMixinBase):
     def list_registered_factor_sets(self, *, query: str = "") -> dict[str, Any]:
         params = {"query": query} if query else None
         return self._expect_success(self.session.get(
-            "/custom-factors/api/client/factor-sets", query=params,
+            "/api/catalog/factor-sets", query=params,
         ))
 
     def register_factor_set(self, descriptor: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/client/factor-sets",
+            "/api/catalog/factor-sets",
             {"descriptor": descriptor},
         ))
 
     def unregister_factor_set(self, target_ref: str) -> dict[str, Any]:
         return self._expect_success(self.session.delete(
-            "/custom-factors/api/client/factor-sets",
+            "/api/catalog/factor-sets",
             query={"target_ref": target_ref},
         ))
 
