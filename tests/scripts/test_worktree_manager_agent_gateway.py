@@ -105,7 +105,7 @@ def test_local_profile_agent_cannot_target_a_remote_service(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/custom-factors/api/get/FactorOne"
+                f"{base_url}/api/profile-research"
                 "?server_id=remote-main",
                 headers=agent_headers(state),
             ))
