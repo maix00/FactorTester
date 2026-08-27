@@ -247,7 +247,7 @@ class ServiceSelectionRoutesMixin:
         registered_route = any(
             parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES
         )
-        if not registered_route and not self._is_local_agent_request():
+        if not registered_route:
             return False
         session = self._session()
         visitor = self._visitor_mode()
