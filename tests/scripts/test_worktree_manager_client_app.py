@@ -3468,6 +3468,50 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
 
 
+def test_product_group_summary_does_not_expand_catalog_memberships(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.client_state,
+        "product_group_summaries",
+        lambda principal: [{
+            "group_ref": "product-group:one",
+            "name": "Group One",
+            "path_count": 2944,
+            "principal": principal,
+        }],
+    )
+    monkeypatch.setattr(
+        state.client_state,
+        "product_groups",
+        lambda _principal: pytest.fail(
+            "summary list must not expand product-group memberships"
+        ),
+    )
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail(
+            "summary list must not use a business service port"
+        ),
+    )
+
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/product-groups?view=summary",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["groups"] == [{
+        "group_ref": "product-group:one",
+        "name": "Group One",
+        "path_count": 2944,
+        "principal": "user@1",
+    }]
+
+
 def test_manager_product_catalog_passes_parallel_category_selection(
     tmp_path, monkeypatch,
 ) -> None:
