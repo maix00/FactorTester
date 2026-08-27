@@ -11,6 +11,7 @@ from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.core.json_output import echo_json, json_text
 from tools.cli.table import render_table
+
 from .liquidity import product_liquidity
 
 
@@ -304,8 +305,9 @@ def product_groups(ctx: click.Context) -> None:
 @click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def list_product_groups(json_output: bool = False) -> None:
-    """List saved product groups from the existing SQL store."""
-    groups = client_from_config().list_candidates("product_path_candidates")
+    """List saved product groups from the shared Manager catalog."""
+    payload = client_from_config().product_group_catalog()
+    groups = payload.get("groups") or []
     if json_output:
         echo_json({"success": True, "groups": groups})
         return

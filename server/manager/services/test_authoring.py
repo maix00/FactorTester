@@ -62,6 +62,7 @@ class TestAuthoringService:
                     "/api/configuration-templates",
                     "/api/data_source_categories",
                     "/api/jobs/artifact-capabilities",
+                    "/api/testers/modules",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
                 or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
@@ -119,7 +120,30 @@ class TestAuthoringService:
                 str(exc), exc.status_code, **exc.details,
             ) from exc
 
-    def get(self, path: str, *, owner: str) -> TestAuthoringResponse:
+    def get(
+        self,
+        path: str,
+        *,
+        owner: str,
+        query: dict[str, list[str]] | None = None,
+    ) -> TestAuthoringResponse:
+        if path == "/api/testers/modules":
+            from server.modules.single_factor_test.backtest_settings import (
+                _navigation_children,
+            )
+            from tools.testers.home import HomeModuleRegistry
+
+            values = query or {}
+            parent = str(values.get("parent", [""])[0] or "").strip()
+            try:
+                modules = _navigation_children(HomeModuleRegistry(), parent)
+            except KeyError as exc:
+                raise TestAuthoringError(str(exc), 404) from exc
+            return TestAuthoringResponse({
+                "success": True,
+                "parent": parent or None,
+                "modules": modules,
+            })
         if match := self._SETTINGS_SUMMARY_RE.fullmatch(path):
             return TestAuthoringResponse(self._settings_manifest(
                 unquote(match.group(1)), mode="summary",

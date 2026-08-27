@@ -48,14 +48,14 @@ class ClientFactorCatalogMixin:
     ) -> dict[str, Any]:
         """Return the Manager-owned, source-free factor catalog."""
         self._refresh_account_domain_async(principal)
+        from server.manager.services.account_domain_projection import (
+            factor_rows_from_account_entities,
+        )
         from server.modules.custom_factors.client_library import (
             build_client_library_projection,
         )
         from server.modules.custom_factors.factor_library_service import (
             build_factor_library_overview,
-        )
-        from server.manager.services.account_domain_projection import (
-            factor_rows_from_sync,
         )
 
         owner_account = self._local_account(principal)
@@ -74,8 +74,13 @@ class ClientFactorCatalogMixin:
             str(owner_account.get("alias") or owner_account.get("username") or principal),
         )
         if self.account_domain_sync is not None:
-            mirrored = factor_rows_from_sync(
-                self.account_domain_sync, principal,
+            mirrored = factor_rows_from_account_entities(
+                self._account_catalog_entities(
+                    principal,
+                    entity_type="factor_param_config",
+                    include_shared=False,
+                ),
+                principal,
                 owner_account=owner_account,
             )
             try:
@@ -87,8 +92,13 @@ class ClientFactorCatalogMixin:
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                 pass
             if not mirrored:
-                mirrored = factor_rows_from_sync(
-                    self.account_domain_sync, principal,
+                mirrored = factor_rows_from_account_entities(
+                    self._account_catalog_entities(
+                        principal,
+                        entity_type="factor_param_config",
+                        include_shared=False,
+                    ),
+                    principal,
                     owner_account=owner_account,
                 )
             if mirrored:
@@ -117,15 +127,17 @@ class ClientFactorCatalogMixin:
         that the current account can manage; same-level peers are not treated
         as subordinates merely because they are visible in an older listing.
         """
+        from server.manager.services.account_domain_projection import (
+            factor_rows_from_account_entities,
+        )
+        from server.manager.services.subordinate_factor_library import (
+            direct_subordinate_accounts,
+        )
         from server.modules.custom_factors.client_library import (
             build_client_library_projection,
         )
         from server.modules.custom_factors.factor_library_service import (
             build_factor_library_overview,
-        )
-        from server.manager.services.subordinate_factor_library import (
-            direct_subordinate_accounts,
-            subordinate_factor_rows,
         )
 
         mine = (
@@ -141,9 +153,20 @@ class ClientFactorCatalogMixin:
             except (ImportError, OSError, RuntimeError, TypeError, ValueError):
                 account_store = None
         accounts = direct_subordinate_accounts(principal, account_store)
-        subordinate_rows = subordinate_factor_rows(
-            self.account_domain_sync, accounts,
-        )
+        subordinate_rows: list[dict[str, Any]] = []
+        for account in accounts:
+            owner = str(account.get("username") or "").strip()
+            if not owner:
+                continue
+            subordinate_rows.extend(factor_rows_from_account_entities(
+                self._account_catalog_entities(
+                    owner,
+                    entity_type="factor_param_config",
+                    include_shared=False,
+                ),
+                owner,
+                owner_account=account,
+            ))
         subordinate_families: list[dict[str, Any]] = []
         for account in accounts:
             owner = str(account.get("username") or "").strip()
@@ -174,7 +197,6 @@ class ClientFactorCatalogMixin:
 
     def factor_sets(self, principal: str, query: str = "") -> list[dict[str, Any]]:
         """Return explicitly synchronized immutable factor sets."""
-        self._refresh_account_domain_async(principal)
         from server.modules.custom_factors.factor_set_registry import (
             factor_set_catalog,
         )
@@ -182,19 +204,20 @@ class ClientFactorCatalogMixin:
         values = factor_set_catalog(principal, query)
         if self.account_domain_sync is None:
             return values
-        try:
-            rows = self.account_domain_sync.entities(
-                principal, entity_type="factor_set", include_shared=False,
-                sync=False,
-            )
-            if not rows:
+        rows = self._account_catalog_entities(
+            principal, entity_type="factor_set", include_shared=False,
+        )
+        if not rows:
+            try:
                 self.account_domain_sync.reconcile_factor_catalog(principal)
-                rows = self.account_domain_sync.entities(
-                    principal, entity_type="factor_set", include_shared=False,
-                    sync=False,
-                )
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-            rows = []
+            except (
+                AttributeError, ConnectionError, OSError, RuntimeError,
+                TypeError, ValueError,
+            ):
+                pass
+            rows = self._account_catalog_entities(
+                principal, entity_type="factor_set", include_shared=False,
+            )
         known = {str(item.get("target_ref") or "") for item in values}
         for row in rows:
             payload = row.get("payload") if isinstance(row, dict) else None
@@ -255,9 +278,8 @@ class ClientFactorCatalogMixin:
         )
         if value is not None or self.account_domain_sync is None:
             return value
-        rows = self.account_domain_sync.entities(
+        rows = self._account_catalog_entities(
             principal, entity_type="factor_set", include_shared=False,
-            sync=False,
         )
         payload = next(
             (
@@ -295,14 +317,15 @@ class ClientFactorCatalogMixin:
         principal: str, target_ref: str,
     ) -> dict[str, Any] | None:
         """Return one server-registered immutable Factor Set descriptor."""
-        from server.modules.custom_factors.factor_set_registry import factor_set_descriptor
+        from server.modules.custom_factors.factor_set_registry import (
+            factor_set_descriptor,
+        )
 
         value = factor_set_descriptor(principal, target_ref)
         if value is not None or self.account_domain_sync is None:
             return value
-        rows = self.account_domain_sync.entities(
+        rows = self._account_catalog_entities(
             principal, entity_type="factor_set", include_shared=False,
-            sync=False,
         )
         payload = next(
             (

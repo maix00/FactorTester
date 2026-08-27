@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import hashlib
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -132,8 +132,10 @@ def fake_server() -> Iterator[str]:
             b"<svg><title>curve</title></svg>", "image/svg+xml",
         ),
         "order_audit": (
-            b'{"run_id":"run-1","strategies":{"A1":{"groups":['
-            b'{"order_group_id":"G1"}]}}}',
+            (
+                b'{"run_id":"run-1","strategies":{"A1":{"groups":['
+                b'{"order_group_id":"G1"}]}}}'
+            ),
             "application/json",
         ),
     }
@@ -291,9 +293,9 @@ def fake_server() -> Iterator[str]:
             settings=[{"key": "engine_mode", "label": "执行模式", "editor": "select", "default": "auto", "tab": tab_key}],
         )
 
-    @app.get("/api/product-groups")
+    @app.get("/api/catalog/product-groups")
     def product_groups():
-        return jsonify(success=True, product_groups=[{"id": "pg-1", "name": "中国期货日盘"}])
+        return jsonify(success=True, groups=[{"id": "pg-1", "name": "中国期货日盘"}])
 
     @app.post("/api/data-availability")
     def data_availability():
@@ -564,7 +566,9 @@ def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> N
 
     assert client.manifest("group_test")["application"] == "group_test"
     assert client.tab_manifest("group_test", "engine")["tab"]["key"] == "engine"
-    assert client.list_candidates("product_path_selection")[0]["id"] == "pg-1"
+    assert client.product_group_catalog()["groups"][0]["id"] == "pg-1"
+    with pytest.raises(ValueError, match="暂不支持候选列表类型"):
+        client.list_candidates("product_path_selection")
     assert client.list_candidates("factor_candidates")[0]["alias"] == "SgCCS|N:2m"
 
 
