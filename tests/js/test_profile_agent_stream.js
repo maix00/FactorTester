@@ -36,6 +36,12 @@ global.EventSource = class {
           params: {turnId: 'turn-1', delta: 'PRIVATE_REASONING'},
         },
         {
+          // Provider text may begin before later workflow records.  The
+          // completed assistant message still belongs after those records.
+          method: 'item/agentMessage/delta',
+          params: {turnId: 'turn-1', delta: '第一句'},
+        },
+        {
           method: 'item/commandExecution/outputDelta',
           params: {turnId: 'turn-1', delta: 'TOOL_STDOUT'},
           chatkit_item: {
@@ -237,6 +243,18 @@ const state = {
   assert.equal(historyReads, 3, 'final history is retried until this turn is durable');
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
   assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
+  const assistantAdded = chunks.findIndex(value => (
+    value.includes('"type":"thread.item.added"')
+    && value.includes('"type":"assistant_message"')
+  ));
+  const lastWorkflowDone = chunks.findLastIndex(value => (
+    value.includes('"type":"thread.item.done"')
+    && value.includes('"type":"workflow"')
+  ));
+  assert.ok(
+    assistantAdded > lastWorkflowDone,
+    'the final assistant item is created after every process item',
+  );
   assert.deepEqual(
     rpcMethods.slice(0, 2),
     ['thread/resume', 'turn/start'],

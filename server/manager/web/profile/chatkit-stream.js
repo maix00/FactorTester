@@ -20,41 +20,52 @@
     });
   }
 
-  function ensureAssistant(state, controller) {
+  function ensureAssistant(state) {
     if (state.assistant) return state.assistant;
     state.assistant = {
       id: P.randomID("assistant"),
       created_at: new Date().toISOString(),
       text: "",
     };
+    return state.assistant;
+  }
+
+  function appendAssistantText(state, text) {
+    if (!text) return;
+    const assistant = ensureAssistant(state);
+    const current = assistant.text || "";
+    if (text === current) return;
+    if (text.startsWith(current)) {
+      assistant.text = text;
+      return;
+    }
+    if (text.length >= current.length) assistant.text = text;
+  }
+
+  function emitAssistant(state, controller) {
+    if (!state.assistant?.text) return null;
+    const item = P.assistantItem(state, state.assistant.text);
     writeEvent(controller, {
       type: "thread.item.added",
-      item: {...P.assistantItem(state), content: []},
+      item: {...item, content: []},
     });
     writeEvent(controller, {
       type: "assistant_message.content_part.added",
       content_index: 0,
       content: {type: "output_text", text: "", annotations: []},
     });
-    return state.assistant;
-  }
-
-  function appendAssistantText(state, controller, text) {
-    if (!text) return;
-    const assistant = ensureAssistant(state, controller);
-    const current = assistant.text || "";
-    if (text === current) return;
-    if (text.startsWith(current)) {
-      const delta = text.slice(current.length);
-      assistant.text = text;
-      if (delta) writeEvent(controller, {
-        type: "assistant_message.content_part.text_delta",
-        content_index: 0,
-        delta,
-      });
-      return;
-    }
-    if (text.length >= current.length) assistant.text = text;
+    writeEvent(controller, {
+      type: "assistant_message.content_part.text_delta",
+      content_index: 0,
+      delta: state.assistant.text,
+    });
+    writeEvent(controller, {
+      type: "assistant_message.content_part.done",
+      content_index: 0,
+      content: item.content[0],
+    });
+    writeEvent(controller, {type: "thread.item.done", item});
+    return item;
   }
 
   async function rpc(state, method, params) {
@@ -211,7 +222,7 @@
     // Process records must be committed before the final answer.  Otherwise
     // a delayed history reconciliation briefly places the answer above the
     // commands that produced it until the next full refresh.
-    if (assistant) appendAssistantText(state, controller, itemText(assistant));
+    if (assistant) appendAssistantText(state, itemText(assistant));
     if (!assistant && state.assistant?.text) return state.items;
     state.items = history;
     state.itemPage = page;
@@ -413,11 +424,10 @@
         return;
       }
       const completed = P.completedText(payload);
-      if (completed) appendAssistantText(state, controller, completed);
+      if (completed) appendAssistantText(state, completed);
       if (delta) {
         appendAssistantText(
           state,
-          controller,
           `${state.assistant?.text || ""}${delta}`,
         );
       }
@@ -532,16 +542,11 @@
           if (!state.assistant?.text) writeError(controller, error);
         }
       }
-      if (state.assistant && !signal.aborted) {
-        const item = P.assistantItem(state, state.assistant.text || "");
+      if (state.assistant?.text && !signal.aborted) {
+        const item = emitAssistant(state, controller);
         if (!state.items.some(existing => itemKey(existing) === itemKey(item))) {
           state.items.push(item);
         }
-        writeEvent(controller, {
-          type: "assistant_message.content_part.done",
-          content_index: 0, content: item.content[0],
-        });
-        writeEvent(controller, {type: "thread.item.done", item});
       }
       await updateConversation(profileState, state, {
         title: state.threadTitle || text.slice(0, 80),
