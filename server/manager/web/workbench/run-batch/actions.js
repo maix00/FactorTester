@@ -50,7 +50,7 @@
     const factorSets = window.FTTestFactorSets;
     const descriptors = factorSets?.selections?.(state)?.length
       ? await factorSets.descriptors(
-        context, state, FTTestConfiguration.executionFactors(state),
+        context, state, window.FTTestConfiguration.executionFactors(state),
       )
       : [];
     return {
@@ -103,7 +103,7 @@
 
   async function requestForPreview(context, state, group) {
     if (!window.FTTestConfiguration) throw new Error("运行配置提交模块不可用");
-    const configuration = await FTTestConfiguration.save(context, state, group);
+    const configuration = await window.FTTestConfiguration.save(context, state, group);
     const request = {
       ...await runRequest(context, state),
       configuration_revision: configuration.revision,

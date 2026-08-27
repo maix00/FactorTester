@@ -11,6 +11,7 @@ window.FTICConfigurationGroupModel = global.FTICConfigurationGroupModel;
 window.FTTestProducts = global.FTTestProducts;
 let savedGroup;
 global.FTTestConfiguration = {save: async (_context, _state, group) => { savedGroup = group; }};
+window.FTTestConfiguration = global.FTTestConfiguration;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process.argv[2]});
 const state = {
   kind: "ic", templates: [], selectedICConfigurationGroupIDs: ["icg-one"],
