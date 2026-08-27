@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import sqlite3
 import io
 import json
+import sqlite3
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
 
+from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_provider_health import AgentProviderHealth
-from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.services.agent_workspace import (
     WORKSPACE_DIRECTORIES,
     profile_workspace_relative_path,
@@ -23,7 +23,6 @@ from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
     ProfileRuntimeStore,
 )
-
 
 PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
@@ -408,7 +407,7 @@ def test_live_profile_claim_cannot_switch_its_frozen_provider_binding(tmp_path):
         )
 
 
-def test_stale_claim_expires_without_creating_agent_temp_directory(tmp_path):
+def test_profile_agent_binding_survives_missing_heartbeats(tmp_path):
     store = ProfileRuntimeStore(tmp_path / "manager.sqlite")
     store.bind(
         PRINCIPAL,
@@ -426,22 +425,95 @@ def test_stale_claim_expires_without_creating_agent_temp_directory(tmp_path):
         provider_id="provider-local",
         agent_id="agent-local",
         now=100.0,
-        lease_seconds=10.0,
     )
     assert store.active_claim(
         PRINCIPAL,
         PROFILE_ID,
-        now=105.0,
-        lease_seconds=10.0,
     )["claim_id"] == claim["claim_id"]
-    assert store.active_claim(
-        PRINCIPAL,
-        PROFILE_ID,
-        now=111.0,
-        lease_seconds=10.0,
-    ) is None
+    assert store.active_claim(PRINCIPAL, PROFILE_ID)["claim_id"] == claim["claim_id"]
+    with pytest.raises(ProfileClaimConflict):
+        store.claim(
+            PRINCIPAL,
+            PROFILE_ID,
+            runtime_kind="client",
+            executor_id="device-1",
+            provider_id="provider-local",
+            agent_id="replacement-agent",
+            now=10_000.0,
+        )
     assert not list(tmp_path.rglob("agent-temp"))
     assert not list(tmp_path.rglob("agent-sessions"))
+
+
+def test_multiple_profiles_can_bind_the_same_agent_identity(tmp_path):
+    store = ProfileRuntimeStore(tmp_path / "manager.sqlite")
+    for profile_id in ("self", "research-a"):
+        store.bind(
+            PRINCIPAL,
+            profile_id,
+            runtime_kind="server",
+            executor_id="public-1",
+            workspace_relpath=profile_workspace_relative_path(PRINCIPAL, profile_id),
+        )
+        store.claim(
+            PRINCIPAL,
+            profile_id,
+            runtime_kind="server",
+            executor_id="public-1",
+            provider_id="provider-server",
+            agent_id="shared-agent",
+        )
+
+    claims = {item["profile_id"]: item for item in store.claims(PRINCIPAL)}
+    assert set(claims) == {"self", "research-a"}
+    assert {item["agent_id"] for item in claims.values()} == {"shared-agent"}
+    assert claims["self"]["claim_id"] != claims["research-a"]["claim_id"]
+
+
+def test_legacy_expired_binding_is_restored_but_explicit_release_is_not(tmp_path):
+    db_path = tmp_path / "manager.sqlite"
+    store = ProfileRuntimeStore(db_path)
+    for profile_id in ("self", "released-profile"):
+        store.bind(
+            PRINCIPAL,
+            profile_id,
+            runtime_kind="server",
+            executor_id="public-1",
+            workspace_relpath=profile_workspace_relative_path(PRINCIPAL, profile_id),
+        )
+    expired = store.claim(
+        PRINCIPAL,
+        "self",
+        runtime_kind="server",
+        executor_id="public-1",
+        agent_id="shared-agent",
+    )
+    released = store.claim(
+        PRINCIPAL,
+        "released-profile",
+        runtime_kind="server",
+        executor_id="public-1",
+        agent_id="shared-agent",
+    )
+    with store._connection() as db:
+        db.execute(
+            """UPDATE manager_profile_agent_claims
+               SET released_at = 200, status = 'expired' WHERE claim_id = ?""",
+            (expired["claim_id"],),
+        )
+    assert store.release(
+        PRINCIPAL,
+        released["claim_id"],
+        agent_id="shared-agent",
+    ) is True
+
+    migrated = ProfileRuntimeStore(db_path)
+
+    restored = migrated.active_claim(PRINCIPAL, "self")
+    assert restored is not None
+    assert restored["claim_id"] == expired["claim_id"]
+    assert restored["status"] == "stopped"
+    assert migrated.active_claim(PRINCIPAL, "released-profile") is None
 
 
 def test_paused_server_claim_survives_stop_and_can_resume(tmp_path):
@@ -462,7 +534,6 @@ def test_paused_server_claim_survives_stop_and_can_resume(tmp_path):
         provider_id="provider-server",
         agent_id="agent-server",
         now=100.0,
-        lease_seconds=10.0,
     )
 
     assert store.pause(
@@ -474,8 +545,6 @@ def test_paused_server_claim_survives_stop_and_can_resume(tmp_path):
     paused = store.active_claim(
         PRINCIPAL,
         PROFILE_ID,
-        now=10_000.0,
-        lease_seconds=10.0,
     )
     assert paused is not None
     assert paused["status"] == "stopped"

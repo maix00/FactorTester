@@ -14,9 +14,13 @@ or Profile metadata.
 
 ## Decisions
 
-1. A Profile has one canonical workspace and at most one live Agent claim. A
-   claim is a renewable local SQLite lease; an expired lease is no longer an
-   active owner and can be claimed by another Agent.
+1. A Profile has one canonical workspace and at most one durable Agent binding.
+   Heartbeats describe whether the bound Agent is currently online; they are
+   not ownership leases and never release or replace a binding. Only an
+   explicit release, an authorized administrative release, or Profile deletion
+   removes the binding. Multiple Profiles may bind the same `agent_id`; their
+   workspaces, conversations, permissions and runtime states remain scoped by
+   `principal + profile_id`.
 2. Every runtime is explicit: `client` is bound to one client device and
    `server` is bound to one Manager `server_id`. A server Profile cannot be
    claimed by a different Manager. The UI exposes both runtime kinds in the
@@ -52,8 +56,12 @@ or Profile metadata.
 
 - The Manager can coordinate ownership and display a Profile's runtime without
   running a resident research Agent or deciding the next research-graph edge.
-- A server restart preserves runtime bindings and claims in the Manager's
-  existing SQLite database; heartbeat expiry prevents abandoned claims from
-  blocking future work.
+- A server restart, stopped Agent process, missed heartbeat, browser closure or
+  page eviction preserves runtime bindings in the Manager's existing SQLite
+  database. A disconnected binding continues to block implicit replacement
+  until it is explicitly released.
+- On upgrade, the newest legacy row marked `expired` is restored as a stopped
+  binding only when that Profile has no current binding. Rows marked by an
+  explicit `released` operation are never restored.
 - A real Agent runner still has to use these APIs and the canonical workspace;
   this ADR does not authorize an additional temporary execution directory.
