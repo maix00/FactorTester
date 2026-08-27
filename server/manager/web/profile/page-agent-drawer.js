@@ -61,6 +61,7 @@
       if (!opening) {
         opening = (async () => {
           await context.pageAgentLifecycle.open(profileID, context.tabID);
+          await options.assistance.prepare?.();
           bridge = window.FTPageAgentContext.create(
             context, profileID, options.assistance, {isActive: () => !shell.hidden},
           );

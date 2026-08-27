@@ -1,6 +1,6 @@
 (() => {
   function documentFor(state) {
-    const payload = FTTestConfiguration.configurationPayload(
+    const payload = window.FTTestConfiguration.configurationPayload(
       state, null, {allowIncomplete: true},
     );
     return {
@@ -29,6 +29,7 @@
 
   function register(context, state, refresh) {
     return FTPageAssistance.register(context, {
+      prepare: () => FTTestLazyCode.loadGroup("workbench-run-submit"),
       schema: () => schemaFor(state),
       exportDocument: () => documentFor(state),
       validate: document => {
