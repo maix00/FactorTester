@@ -20,6 +20,15 @@ endpoint into the Agent environment. Do not run `factortester configure`,
 CLI uses the injected capability automatically. A normal client or standalone
 terminal still follows the explicit configure/login setup below.
 
+When the Web page opens this Profile as its assistance Agent, use
+`factortester assist inspect` to read the page-registered schema, complete
+structured document and optimistic revision. Prepare the entire document,
+validate it once with `factortester assist validate --stdin`, then atomically
+apply it with `factortester assist apply --stdin --tab-id ...
+--expected-revision ...`. Never fill the page one field at a time, manipulate
+DOM, or invent fields outside the published schema. A revision conflict means
+the person edited the page; inspect again instead of overwriting them.
+
 ## Current local-first boundary
 
 The Manager does not own the Research Graph state or decide graph transitions.

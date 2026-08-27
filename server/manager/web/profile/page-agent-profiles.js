@@ -30,11 +30,5 @@
     return profile;
   }
 
-  async function attachSelf(context, options = {}) {
-    const profile = await self(context);
-    if (context.isRouteCurrent?.() === false) return null;
-    return window.FTPageAgentDrawer.attach(context, {...options, profile});
-  }
-
-  window.FTPageAgentProfiles = Object.freeze({attachSelf, bound, self});
+  window.FTPageAgentProfiles = Object.freeze({bound, self});
 })();

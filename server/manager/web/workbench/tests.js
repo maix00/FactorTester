@@ -498,7 +498,7 @@
       );
     };
     window.FTTestPageAssistance?.register?.(
-      context, state, () => render(context, state), root,
+      context, state, () => render(context, state),
     );
     if (!window.FTTestSettings || !state.settingsInitialized) {
       const loading = FTUI.loading(context.t("正在读取测试设置代码…"));

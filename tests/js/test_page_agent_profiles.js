@@ -28,8 +28,7 @@ vm.runInThisContext(
   };
 
   assert.equal((await window.FTPageAgentProfiles.self(context)).profile_id, "self-profile");
-  await window.FTPageAgentProfiles.attachSelf(context);
-  assert.deepEqual(attached, ["self-profile"]);
+  assert.deepEqual(attached, []);
   assert.equal(
     (await window.FTPageAgentProfiles.bound(context, "profile:research-profile")).profile_id,
     "research-profile",

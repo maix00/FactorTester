@@ -186,6 +186,7 @@
       "catalog/factor-details.js"
     ],
     "factor-catalog-editor": [
+      "catalog/factor-assistance.js",
       "catalog/factor-editor.js",
       "catalog/factor-object-form.js",
       "catalog/factor-set-editor.js"
@@ -234,6 +235,7 @@
       "jobs/detail-tabs.js",
       "jobs/supplementals.js",
       "jobs/result-tabs.js",
+      "jobs/custom-analysis-assistance.js",
       "jobs/custom-analyses.js",
       "jobs/result-viewers.js",
       "jobs/detail.js"
@@ -426,6 +428,7 @@
       "profile/page-agent-context.js",
       "profile/page-agent-drawer.js",
       "profile/page-agent-profiles.js",
+      "profile/page-assistance.js",
       "app/navigation.js",
       "app/route-dispatch.js",
       "app/tab-workspace.js",
@@ -456,6 +459,7 @@
     "profile/page-agent-context.js",
     "profile/page-agent-drawer.js",
     "profile/page-agent-profiles.js",
+    "profile/page-assistance.js",
     "docs/source.js",
     "docs/reader.js",
     "core/highcharts-range-loader.js",
@@ -521,6 +525,7 @@
     "jobs/detail-tabs.js",
     "jobs/supplementals.js",
     "jobs/result-tabs.js",
+    "jobs/custom-analysis-assistance.js",
     "jobs/custom-analyses.js",
     "jobs/result-viewers.js",
     "jobs/detail.js",
@@ -532,6 +537,7 @@
     "catalog/factor-group-filter.js",
     "catalog/factor-list.js",
     "catalog/factor-catalog-list.js",
+    "catalog/factor-assistance.js",
     "catalog/factor-editor.js",
     "catalog/factor-object-form.js",
     "catalog/factor-set-editor.js",

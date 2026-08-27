@@ -1,0 +1,45 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+let imported = null;
+let attached = null;
+let current = {name: "old"};
+global.window = {
+  FTPageAgentProfiles: {self: async () => ({profile_id: "self"})},
+  FTPageAgentDrawer: {attach: (_context, options) => { attached = options; }},
+};
+global.structuredClone = value => JSON.parse(JSON.stringify(value));
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/profile/page-assistance.js", "utf8"),
+  {filename: "page-assistance.js"},
+);
+
+(async () => {
+  const context = {tabID: "tab-1", tabSession: {durable: {}}, t: value => value};
+  const controller = window.FTPageAssistance.register(context, {
+    schema: () => ({type: "object"}),
+    exportDocument: () => current,
+    validate: document => {
+      if (!document.name) throw new Error("name is required");
+    },
+    importDocument: document => { imported = document; current = document; },
+  }, {pageKind: "factor-create"});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(attached.profile.profile_id, "self", "registration mounts the drawer itself");
+  assert.equal(controller.snapshot().revision, 0);
+  current = {name: "person edit"};
+  assert.equal(controller.snapshot().revision, 1, "person edits advance the revision");
+  await controller.apply({expected_revision: 1, document: {name: "new"}});
+  assert.deepEqual(imported, {name: "new"});
+  assert.equal(controller.snapshot().revision, 2);
+  await assert.rejects(
+    controller.apply({expected_revision: 1, document: {name: "stale"}}),
+    /revision conflict/,
+  );
+  console.log("PASS: structured assistance is atomic and auto-mounts its drawer");
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

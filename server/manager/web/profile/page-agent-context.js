@@ -1,5 +1,5 @@
 (() => {
-  function create(context, profileID, options = {}) {
+  function create(context, profileID, assistance, options = {}) {
     let sequence = 0;
     let timer = null;
     let disposed = false;
@@ -7,13 +7,13 @@
     const interval = Math.max(500, Number(options.interval) || 1000);
 
     async function publish() {
-      const value = context.pageState?.describe?.() || {schema_version: 1, sections: []};
+      const value = assistance.snapshot();
       const serialized = JSON.stringify(value);
       if (serialized === lastPublished) return;
-      await context.api("/api/client/profile-agent/page-context", {
+      await context.api("/api/client/profile-agent/assistance/publish", {
         method: "POST",
         body: JSON.stringify({
-          profile_id: profileID, tab_id: context.tabID, context: value,
+          profile_id: profileID, tab_id: context.tabID, assistance: value,
         }),
       });
       lastPublished = serialized;
@@ -21,16 +21,32 @@
 
     async function syncOnce() {
       if (disposed) return;
+      if (options.isActive?.() === false) return;
       await publish();
       const payload = await context.api(
-        `/api/client/profile-agent/page-actions?profile_id=${encodeURIComponent(profileID)}`
+        `/api/client/profile-agent/assistance/applications?profile_id=${encodeURIComponent(profileID)}`
         + `&tab_id=${encodeURIComponent(context.tabID)}&after=${sequence}`,
       );
-      for (const item of payload.actions || []) {
+      for (const item of payload.applications || []) {
         sequence = Math.max(sequence, Number(item.sequence || 0));
-        context.pageState?.apply?.(item.section_id, item.action);
+        let result;
+        try {
+          if (Number(item.expires_at || 0) > 0
+              && Number(item.expires_at) * 1000 < Date.now()) {
+            throw new Error("page assistance application expired before it reached the page");
+          }
+          const revision = item.kind === "replace_document"
+            ? await assistance.apply(item) : assistance.snapshot().revision;
+          result = {success: true, revision};
+        } catch (error) {
+          result = {success: false, error: String(error?.message || error)};
+        }
+        await context.api("/api/client/profile-agent/assistance/acknowledge", {
+          method: "POST",
+          body: JSON.stringify({profile_id: profileID, sequence: item.sequence, ...result}),
+        });
       }
-      if ((payload.actions || []).length) {
+      if ((payload.applications || []).length) {
         lastPublished = "";
         await publish();
         context.checkpointTabSession?.();

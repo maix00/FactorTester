@@ -737,33 +737,15 @@
           state.parameterValues = value?.parameter_values || state.parameterValues;
           tabs.select(value?.active_tab || tabs.current(), false);
         },
-        describe: () => ({
-          page: state.familyMode ? "factor-family-create" : "factor-create",
-          section: tabs.current(),
-          fields: [
-            ["name", name.value], ["chinese_name", chineseName.value],
-            ["description", description.value], ["category", category.value],
-            ["source_code", state.sourceCode],
-          ].map(([key, value]) => ({key, value, editable: true})),
-        }),
-        apply: action => {
-          const controls = {name, chinese_name: chineseName, description, category};
-          if (controls[action?.field]) controls[action.field].value = String(action.value || "");
-          else if (action?.field === "source_code") {
-            state.sourceCode = String(action.value || ""); redraw();
-          } else return false;
-          return true;
-        },
       });
     }
     form.append(topMount, tabs.root, status, actions);
     context.content.replaceChildren(form);
     redraw();
     if (mode === "create") {
-      void window.FTPageAgentProfiles.attachSelf(context, {
-        pageKind: state.familyMode ? "factor-family-create" : "factor-create",
-        section: tabs.current(),
-      }).catch(() => {});
+      FTFactorAssistance.register(context, {
+        state, name, chineseName, description, category, tabs, redraw, markDirty,
+      });
     }
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);

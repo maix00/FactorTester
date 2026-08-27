@@ -160,26 +160,34 @@ class AgentProfileClientMixin(ClientMixinBase):
             {"profile_id": profile_id},
         ))
 
-    def profile_agent_page_context(self, profile_id: str) -> dict[str, Any]:
+    def inspect_profile_agent_assistance(self, profile_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(
-            "/api/client/profile-agent/page-context",
+            "/api/client/profile-agent/assistance",
             query={"profile_id": profile_id},
         ))
 
-    def apply_profile_agent_page_action(
+    def validate_profile_agent_assistance(
+        self, profile_id: str, document: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/client/profile-agent/assistance/validate",
+            {"profile_id": profile_id, "document": document},
+        ))
+
+    def apply_profile_agent_assistance(
         self,
         profile_id: str,
         *,
         tab_id: str,
-        section_id: str,
-        action: dict[str, Any],
+        expected_revision: int,
+        document: dict[str, Any],
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/api/client/profile-agent/page-actions",
+            "/api/client/profile-agent/assistance/apply",
             {
                 "profile_id": profile_id,
                 "tab_id": tab_id,
-                "section_id": section_id,
-                "action": action,
+                "expected_revision": expected_revision,
+                "document": document,
             },
         ))

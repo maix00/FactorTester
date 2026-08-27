@@ -177,9 +177,32 @@
     }
     // Backtest still restores the optional outer catalog selection for the
     // authoring UI; it is not used to build the task's execution scope.
-    FTTestProducts.synchronize(state);
     const configuration = state.workspace.configuration;
-    const payload = structuredClone(configuration.payload || {});
+    const payload = configurationPayload(state, group);
+    state.analysis = structuredClone(payload.analyses[state.kind]);
+    const value = await context.api(
+      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
+      {
+        method: "PUT",
+        body: JSON.stringify({expected_revision: configuration.revision, payload}),
+      },
+    );
+    state.workspace.configuration = value.configuration;
+    return value.configuration;
+  }
+
+  function configurationPayload(state, group, options = {}) {
+    let factors;
+    try { factors = executionFactors(state); }
+    catch (error) {
+      if (!options.allowIncomplete) throw error;
+      factors = [];
+    }
+    const factor = factors[0] || selectedFactor(state);
+    if (!factor && !options.allowIncomplete) throw new Error("请选择因子");
+    const isBacktest = state.kind === "backtest";
+    FTTestProducts.synchronize(state);
+    const payload = structuredClone(state.workspace?.configuration?.payload || {});
     payload.schema_version = 2;
     payload.shared = payload.shared || {};
     delete payload.shared.factor_families;
@@ -188,8 +211,15 @@
     ));
     payload.shared.temporary_objects = temporaryObjects(state);
     payload.analyses = payload.analyses || {};
-    state.analysis = buildAnalysis(state, factors, selectedFamily(state, factor), group);
-    payload.analyses[state.kind] = state.analysis;
+    const analysis = factor
+      ? buildAnalysis(state, factors, selectedFamily(state, factor), group)
+      : {
+        ...(state.analysis || {}),
+        local_settings: FTTestConfigurationCompiler.executionSettings(
+          state.manifest, state.values || {},
+        ),
+      };
+    payload.analyses[state.kind] = analysis;
     payload.ui = payload.ui || {};
     const ui = {
       settings: FTTestConfigurationCompiler.authoringSettings(
@@ -200,9 +230,11 @@
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
     };
-    if (state.kind === "ic" && group?.config_group_id) {
-      ui.selected_configuration_group_ids = [String(group.config_group_id)];
-      if (group.product_scope_ref) {
+    if (state.kind === "ic") {
+      ui.selected_configuration_group_ids = group?.config_group_id
+        ? [String(group.config_group_id)]
+        : [...(state.selectedICConfigurationGroupIDs || [])];
+      if (group?.product_scope_ref) {
         ui.product_group_ref = String(group.product_scope_ref);
         ui.product_group_refs = [String(group.product_scope_ref)];
       }
@@ -222,15 +254,7 @@
       }
     }
     payload.ui[state.kind] = ui;
-    const value = await context.api(
-      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
-      {
-        method: "PUT",
-        body: JSON.stringify({expected_revision: configuration.revision, payload}),
-      },
-    );
-    state.workspace.configuration = value.configuration;
-    return value.configuration;
+    return payload;
   }
 
   function buildAnalysis(state, factors, familyValue, group) {
@@ -246,7 +270,8 @@
       return FTICConfiguration.compileAnalysis({
         manifest: state.manifest,
         values: state.values,
-        configurationGroups: group ? [group] : [],
+        configurationGroups: group ? [group]
+          : (state.analysis?.configuration_groups || []),
         productCatalog: state.groups || [],
       });
     }
@@ -305,6 +330,6 @@
   }
 
   window.FTTestConfiguration = Object.freeze({
-    ensureWorkspace, save, buildAnalysis, executionFactors,
+    ensureWorkspace, save, buildAnalysis, configurationPayload, executionFactors,
   });
 })();

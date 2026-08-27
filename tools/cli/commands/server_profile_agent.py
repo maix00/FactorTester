@@ -104,61 +104,6 @@ def profile_agent_stop(target: _ProfileAgentTarget, as_json: bool) -> None:
     click.echo(_json(value) if as_json else f"Profile {target.profile_id}: stopped")
 
 
-@profile_agent.group("page")
-def profile_agent_page() -> None:
-    """Inspect the active assisted page and update registered fields."""
-
-
-@profile_agent_page.command("show")
-@click.option("--json", "as_json", is_flag=True)
-@click.pass_obj
-@friendly_errors
-def profile_agent_page_show(target: _ProfileAgentTarget, as_json: bool) -> None:
-    value = client_from_config().profile_agent_page_context(target.profile_id)
-    page = value.get("page")
-    if as_json:
-        click.echo(_json(page))
-        return
-    if not isinstance(page, dict):
-        click.echo("No assisted page is currently open")
-        return
-    context = page.get("context") or {}
-    click.echo(f"Tab: {page.get('tab_id') or ''}")
-    for section in context.get("sections") or []:
-        click.echo(
-            f"[{section.get('id') or ''}] "
-            f"{section.get('page') or ''} / {section.get('section') or ''}"
-        )
-        for field in section.get("fields") or []:
-            marker = "editable" if field.get("editable") else "read-only"
-            click.echo(f"  {field.get('key') or ''} ({marker}): {field.get('value')!r}")
-
-
-@profile_agent_page.command("set")
-@click.option("--tab-id", required=True)
-@click.option("--section", "section_id", required=True)
-@click.option("--field", required=True)
-@click.option("--value", required=True)
-@click.option("--json", "as_json", is_flag=True)
-@click.pass_obj
-@friendly_errors
-def profile_agent_page_set(
-    target: _ProfileAgentTarget,
-    tab_id: str,
-    section_id: str,
-    field: str,
-    value: str,
-    as_json: bool,
-) -> None:
-    result = client_from_config().apply_profile_agent_page_action(
-        target.profile_id,
-        tab_id=tab_id,
-        section_id=section_id,
-        action={"field": field, "value": value},
-    )
-    click.echo(_json(result) if as_json else f"Queued update for {section_id}.{field}")
-
-
 @profile_agent.group("conversation")
 def profile_agent_conversation() -> None:
     """List conversations and update one conversation's runtime settings."""
