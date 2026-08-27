@@ -343,6 +343,8 @@ class WriteRoutesMixin:
             return
         if self._mihomo_write(parsed, "PATCH"):
             return
+        if self._patch_profile_research_routes(parsed):
+            return
         if self._proxy_job_request(parsed, method="PATCH"):
             return
         if self._proxy_service_write(parsed, method="PATCH"):

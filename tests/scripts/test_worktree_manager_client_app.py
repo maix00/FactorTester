@@ -300,23 +300,20 @@ def test_registration_rejects_an_organization_outside_manager_scope(
         state.register("public_user", "secret", "default")
 
 
-def test_client_business_api_keeps_service_path_and_manager_selects_port(
+def test_profile_research_reads_manager_projection_without_business_port(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
-
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
-            status=200,
-            body=b'{"success":true,"items":[]}',
-            content_type="application/json",
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        "server.manager.http.profile_research_routes."
+        "ProfileResearchProjection.list_research",
+        lambda _self, **values: calls.append(values) or {"items": []},
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("profile research must not use a business port"),
+    )
     with running_manager(state) as base_url:
         request_value = Request(
             f"{base_url}/api/profile-research?lifecycle=active&limit=200",
@@ -325,11 +322,13 @@ def test_client_business_api_keeps_service_path_and_manager_selects_port(
         with urlopen(request_value) as response:
             value = json.loads(response.read())
 
-    assert value["port"] == 8141
+    assert value["success"] is True
     assert calls == [{
-        "port": 8141,
-        "path": "/api/profile-research?lifecycle=active&limit=200",
-        "principal": "user@1",
+        "owner": "user@1",
+        "workspace_ref": "",
+        "lifecycle": "active",
+        "limit": 200,
+        "after": "",
     }]
 
 
@@ -463,22 +462,19 @@ def test_factor_source_detail_does_not_hydrate_an_unreadable_owner(
     assert raised.value.code == 403
 
 
-def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatch) -> None:
+def test_research_lifecycle_patch_uses_manager_database(tmp_path, monkeypatch) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
-
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
-            status=200,
-            body=b'{"success":true,"lifecycle":"archived"}',
-            content_type="application/json",
-            etag='"revision-8"',
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        "server.manager.http.profile_research_routes.transition_lifecycle",
+        lambda **values: calls.append(values) or {
+            "lifecycle": "archived", "revision": 8,
+        },
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("profile research must not use a business port"),
+    )
     body = b'{"target":"archived","expected_revision":7}'
     with running_manager(state) as base_url:
         with urlopen(Request(
@@ -493,14 +489,14 @@ def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatc
             value = json.loads(response.read())
 
     assert value["lifecycle"] == "archived"
-    assert response.headers["ETag"] == '"revision-8"'
+    assert response.headers["ETag"]
     assert calls == [{
-        "port": 8141,
-        "path": "/api/profile-research/work-package%3Aone/lifecycle",
-        "principal": "user@1",
-        "method": "PATCH",
-        "body": body,
-        "content_type": "application/json",
+        "owner": "user@1",
+        "work_package_ref": "work-package:one",
+        "target": "archived",
+        "expected_revision": 7,
+        "actor": "user@1",
+        "reason": "",
     }]
 
 

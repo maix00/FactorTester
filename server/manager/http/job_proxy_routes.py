@@ -37,7 +37,6 @@ _SERVICE_WRITE_PATTERNS = {
     "DELETE": (
         r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}",
     ),
-    "PATCH": (r"/api/profile-research/[^/]{1,512}/lifecycle",),
 }
 _JOB_ANALYSIS_PATHS = {
     "/group-detail": "/get_group_detail",
