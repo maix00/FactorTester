@@ -17,9 +17,11 @@ class FactorLibraryClientMixin(ClientMixinBase):
         return self._expect_success(self.session.get("/api/catalog/sources"))
 
     def product_group_catalog(self) -> dict[str, Any]:
-        """Read account product groups from the Manager-owned catalog mirror."""
+        """Read bounded product-group rows from the Manager-owned catalog."""
         return self._expect_success(
-            self.session.get("/api/catalog/product-groups")
+            self.session.get(
+                "/api/catalog/product-groups", query={"view": "summary"},
+            )
         )
 
     def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:

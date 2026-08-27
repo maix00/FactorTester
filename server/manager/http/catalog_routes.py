@@ -286,6 +286,7 @@ class CatalogRoutesMixin:
                     end_date=query.get("end_date", [None])[0],
                 )
             elif parsed.path == "/api/catalog/product-groups":
+                summary = str(query.get("view", [""])[0] or "") == "summary"
                 value = {
                     "success": True,
                     "origin": "server",
@@ -293,7 +294,11 @@ class CatalogRoutesMixin:
                     # that visitor's UUID namespace.  They are temporary
                     # authoring objects, not another user's private groups.
                     "visitor": visitor is not None,
-                    "groups": self.state.client_state.product_groups(principal),
+                    "groups": (
+                        self.state.client_state.product_group_summaries(principal)
+                        if summary
+                        else self.state.client_state.product_groups(principal)
+                    ),
                 }
             else:
                 subjects = re.fullmatch(
