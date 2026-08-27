@@ -7,6 +7,7 @@
     return new Promise(resolve => {
       let resolved = false;
       const dialog = document.createElement("dialog");
+      dialog.dataset.ftTabID = context.tabID || "";
       dialog.className = "product-category-dialog";
       const card = document.createElement("form");
       card.method = "dialog";

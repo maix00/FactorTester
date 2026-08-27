@@ -34,7 +34,10 @@
     const existing = context.tabSession.jobLists;
     const identity = sessionKey(context);
     if (existing && existing.byScope && existing.identityKey === identity
-        && existing.cacheGeneration === cacheGeneration) return existing;
+        && existing.cacheGeneration === cacheGeneration) {
+      registerPageState(context, existing);
+      return existing;
+    }
     // The server feed is the default for both anonymous and authenticated
     // visits.  Private scopes remain available as explicit account tabs, and
     // a pending private tab survives the login round-trip.
@@ -51,7 +54,31 @@
       },
     };
     context.tabSession.jobLists = value;
+    registerPageState(context, value);
     return value;
+  }
+
+  function registerPageState(context, state) {
+    context.pageState?.register?.("job-list", {
+      capture: () => ({
+        activeScope: state.activeScope,
+        scopes: Object.fromEntries(Object.entries(state.byScope).map(([key, value]) => [key, {
+          page: value.page, pages: value.pages, username: value.username,
+        }])),
+      }),
+      restore: value => {
+        if (value?.activeScope && state.byScope[value.activeScope]) {
+          state.activeScope = value.activeScope;
+        }
+        Object.entries(value?.scopes || {}).forEach(([key, saved]) => {
+          if (!state.byScope[key]) return;
+          state.byScope[key].page = Number(saved.page || 1);
+          state.byScope[key].pages = saved.pages || {};
+          state.byScope[key].username = saved.username || "";
+        });
+      },
+      describe: () => ({page: "jobs", section: state.activeScope, fields: []}),
+    });
   }
 
   function invalidate() {

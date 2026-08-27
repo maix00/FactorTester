@@ -15,6 +15,21 @@
     session.durable ||= {};
     const reading = session.durable.reportReading ||= {disclosures: {}};
     reading.disclosures ||= {};
+    context.pageState?.register?.("research-report", {
+      capture: () => ({
+        selected_chapter_id: reading.selectedChapterID || "",
+        disclosures: reading.disclosures,
+      }),
+      restore: value => {
+        reading.selectedChapterID = value?.selected_chapter_id || reading.selectedChapterID || "";
+        reading.disclosures = value?.disclosures || reading.disclosures;
+      },
+      describe: () => ({
+        page: "research-report",
+        section: reading.selectedChapterID || "",
+        fields: [],
+      }),
+    });
     const hadPriorReading = Boolean(reading.visited)
       || (session.publicationID === publicationID && Number.isFinite(session.scrollY));
     const restoreScrollY = hadPriorReading && session.publicationID === publicationID
@@ -50,6 +65,19 @@
     toolbar.append(context.button("↻", () => render(publicationID, context), t("刷新")));
     if (value.access?.can_manage) {
       toolbar.append(context.button("⚙", context.openReportSettings, t("研究报告设置")));
+    }
+    const boundProfileID = String(
+      value.profile_ref || value.profile_id || value.generation?.profile_id || "",
+    ).trim();
+    if (boundProfileID && context.session) {
+      void window.FTPageAgentProfiles.bound(context, boundProfileID).then(profile => (
+        isCurrent() ? window.FTPageAgentDrawer.attach(context, {
+          profile,
+          pageKind: "research-report",
+          section: reading.selectedChapterID || "",
+          profileKey: value.profile_key || "",
+        }) : null
+      )).catch(() => {});
     }
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";

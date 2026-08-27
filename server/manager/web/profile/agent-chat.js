@@ -224,7 +224,7 @@
         );
         return;
       }
-      if (!payload.status?.running) {
+      if (!options.lifecycleManaged && !payload.status?.running) {
         status.textContent = context.t("正在启动 Agent…");
         await context.api("/api/client/profile-agent/start", {
           method: "POST",
@@ -255,7 +255,10 @@
       }).catch(() => {});
     }
 
-    host.__ftBeforeTabSave = () => { void deactivateAgent(); };
+    host.__ftBeforeTabSave = () => {
+      if (options.lifecycleManaged) disposeChat();
+      else void deactivateAgent();
+    };
     activationPromise = activateAgent();
     activationPromise.catch(error => {
       if (leaving) return;

@@ -285,6 +285,7 @@ class CoreGetRoutesMixin:
             self._get_transfer_access_status,
             self._get_job_list_routes,
             self._get_agent_app_routes,
+            self._get_page_assistance_routes,
             self._get_agent_routes,
             self._get_server_research_routes,
             self._get_profile_research_routes,

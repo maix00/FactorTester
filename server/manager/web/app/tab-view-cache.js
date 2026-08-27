@@ -4,6 +4,7 @@
       state, content, title, eyebrow, toolbar, notice,
       persistSession, restoreSession, removeSession,
     } = options;
+    const onTabEvicted = options.onTabEvicted;
     const liveViewLimit = Math.max(1, Number(options.liveViewLimit) || 3);
     const coldViewMemory = new Map();
 
@@ -71,13 +72,25 @@
       (Array.isArray(values) ? values : []).forEach(item => {
         const control = (item.key && byKey.get(item.key)) || controls[item.index];
         if (!control) return;
-        if (item.value !== undefined && "value" in control) control.value = item.value;
-        if (item.checked !== undefined && "checked" in control) control.checked = item.checked;
+        let changed = false;
+        if (item.value !== undefined && "value" in control && control.value !== item.value) {
+          control.value = item.value; changed = true;
+        }
+        if (item.checked !== undefined && "checked" in control
+            && Boolean(control.checked) !== item.checked) {
+          control.checked = item.checked; changed = true;
+        }
         if (item.selectedIndex !== undefined && "selectedIndex" in control) {
+          if (control.selectedIndex !== item.selectedIndex) changed = true;
           control.selectedIndex = item.selectedIndex;
         }
         if (item.open !== undefined && control.tagName === "DETAILS") control.open = item.open;
         if (item.scrollTop !== undefined) control.scrollTop = item.scrollTop;
+        if (changed && typeof control.dispatchEvent === "function"
+            && typeof Event === "function") {
+          control.dispatchEvent(new Event("input", {bubbles: true}));
+          control.dispatchEvent(new Event("change", {bubbles: true}));
+        }
       });
     }
 
@@ -169,9 +182,35 @@
       ));
     }
 
+    function parkPageAgent(tabID, session) {
+      const drawers = [...(document.querySelectorAll?.("[data-ft-page-agent-tab]") || [])]
+        .filter(item => item.dataset.ftPageAgentTab === tabID);
+      session.pageAgentDrawers = drawers.map(drawer => {
+        const open = !drawer.hidden;
+        drawer.hidden = true;
+        return {drawer, open};
+      });
+    }
+
+    function restorePageAgent(tabID, session) {
+      const records = Array.isArray(session.pageAgentDrawers)
+        ? session.pageAgentDrawers : [];
+      session.pageAgentDrawers = records.filter(item => item.drawer?.isConnected !== false);
+      session.pageAgentDrawers.forEach(item => { item.drawer.hidden = !item.open; });
+    }
+
     function tabSession(tabID) {
       if (!state.tabSessions.has(tabID)) state.tabSessions.set(tabID, {});
       return state.tabSessions.get(tabID);
+    }
+
+    function pageState(tabID) {
+      const session = tabSession(tabID);
+      session.durable = session.durable || {};
+      if (!session.pageState && window.FTPageState?.create) {
+        session.pageState = window.FTPageState.create({durable: session.durable});
+      }
+      return session.pageState || null;
     }
 
     function isResearchReportTab(tabID) {
@@ -227,6 +266,9 @@
     function coldifySession(tabID, session) {
       const view = session.view;
       if (!view?.content || tabID === state.activeTabID) return;
+      pageState(tabID)?.capture();
+      session.pageState?.dispose?.();
+      session.pageState = null;
       const snapshot = {
         title: view.title || "",
         eyebrow: view.eyebrow || "",
@@ -241,6 +283,7 @@
         coldKey: key, pendingRestore: false, ready: true,
         lastUsedAt: view.lastUsedAt || Date.now(),
       };
+      Promise.resolve(onTabEvicted?.(tabID)).catch(() => {});
     }
 
     function saveView(session) {
@@ -320,6 +363,7 @@
       }
       restoreActiveNav(view.navRoute);
       restoreOverlays(tabID, session);
+      restorePageAgent(tabID, session);
       state.pendingScrollCapture = null;
       window.requestAnimationFrame?.(() => window.scrollTo({
         top: Number.isFinite(session.scrollY) ? session.scrollY : 0,
@@ -359,6 +403,7 @@
       view.pendingRestore = false;
       view.lastUsedAt = Date.now();
       restoreOverlays(state.activeTabID, session);
+      restorePageAgent(state.activeTabID, session);
       window.requestAnimationFrame?.(() => window.scrollTo({
         top: Number.isFinite(snapshot.scrollY) ? snapshot.scrollY : 0,
         behavior: "auto",
@@ -368,10 +413,13 @@
 
     function discardView(tabID) {
       const session = tabSession(tabID);
+      session.pageState?.dispose?.();
+      session.pageState = null;
       session.view = null;
       session.viewReady = false;
       session.overlays = [];
       deleteColdView(tabID);
+      Promise.resolve(onTabEvicted?.(tabID)).catch(() => {});
     }
 
     function hydrateSession(tabID) {
@@ -399,6 +447,7 @@
       const pending = state.pendingScrollCapture?.tabID === state.activeTabID
         ? state.pendingScrollCapture : null;
       const session = tabSession(state.activeTabID);
+      pageState(state.activeTabID)?.capture();
       return {
         scrollY: pending ? pending.scrollY : window.scrollY,
         path: location.pathname,
@@ -430,6 +479,7 @@
       const session = tabSession(state.activeTabID);
       saveView(session);
       parkOverlays(state.activeTabID, session);
+      parkPageAgent(state.activeTabID, session);
     }
 
     function captureScrollPosition() {
@@ -448,7 +498,7 @@
 
     observeDialogs();
     return Object.freeze({
-      tabSession, saveActiveTabSession, captureScrollPosition,
+      tabSession, pageState, saveActiveTabSession, captureScrollPosition,
       checkpointActiveSession,
       markActiveViewLoading, markActiveViewReady, restoreView,
       restoreColdView, discardView, hydrateSession, activeTabHasOverlay,

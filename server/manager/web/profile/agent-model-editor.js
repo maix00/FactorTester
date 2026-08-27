@@ -67,6 +67,7 @@
 
   function open(context, item, capabilities, refresh) {
     const dialog = document.createElement("dialog");
+    dialog.dataset.ftTabID = context.tabID || "";
     dialog.className = "ft-dialog agent-model-dialog";
     const card = document.createElement("div");
     card.className = "dialog-card wide";

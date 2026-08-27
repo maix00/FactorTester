@@ -893,3 +893,24 @@ button.reference-item { cursor: pointer; }
   .custom-product-row { grid-template-columns: 1fr 1fr; }
   .test-inline-creator span { grid-column: 1; }
 }
+.page-agent-drawer {
+  position: fixed;
+  z-index: 1200;
+  inset: 1rem 1rem 1rem auto;
+  width: min(32rem, calc(100vw - 2rem));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d9dce3);
+  border-radius: 1rem;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 18%);
+  overflow: hidden;
+}
+
+.page-agent-drawer[hidden] { display: none; }
+.page-agent-drawer > header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border, #d9dce3);
+}
+.page-agent-drawer-body { min-height: 0; overflow: auto; padding: .75rem; }
+.page-agent-drawer-close { font-size: 1.5rem; line-height: 1; }

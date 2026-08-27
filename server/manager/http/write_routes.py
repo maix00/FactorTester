@@ -58,6 +58,8 @@ class WriteRoutesMixin:
             return
         if self._post_agent_app_routes(parsed):
             return
+        if self._post_page_assistance_routes(parsed):
+            return
         if self._post_agent_routes(parsed):
             return
         if self._post_server_research_routes(parsed):

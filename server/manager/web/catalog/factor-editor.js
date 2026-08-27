@@ -714,9 +714,57 @@
         jobs: jobs.mount,
       },
     });
+    if (mode === "create") {
+      const stateKey = `factor-create:${state.familyMode ? "family" : "factor"}`;
+      context.pageState?.register?.(stateKey, {
+        capture: () => ({
+          active_tab: tabs.current(),
+          name: name.value,
+          chinese_name: chineseName.value,
+          description: description.value,
+          category: category.value,
+          source_mode: state.sourceMode,
+          source_code: state.sourceCode,
+          parameter_values: state.parameterValues,
+        }),
+        restore: value => {
+          name.value = value?.name || "";
+          chineseName.value = value?.chinese_name || "";
+          description.value = value?.description || "";
+          category.value = value?.category || "";
+          state.sourceMode = value?.source_mode || state.sourceMode;
+          state.sourceCode = value?.source_code || "";
+          state.parameterValues = value?.parameter_values || state.parameterValues;
+          tabs.select(value?.active_tab || tabs.current(), false);
+        },
+        describe: () => ({
+          page: state.familyMode ? "factor-family-create" : "factor-create",
+          section: tabs.current(),
+          fields: [
+            ["name", name.value], ["chinese_name", chineseName.value],
+            ["description", description.value], ["category", category.value],
+            ["source_code", state.sourceCode],
+          ].map(([key, value]) => ({key, value, editable: true})),
+        }),
+        apply: action => {
+          const controls = {name, chinese_name: chineseName, description, category};
+          if (controls[action?.field]) controls[action.field].value = String(action.value || "");
+          else if (action?.field === "source_code") {
+            state.sourceCode = String(action.value || ""); redraw();
+          } else return false;
+          return true;
+        },
+      });
+    }
     form.append(topMount, tabs.root, status, actions);
     context.content.replaceChildren(form);
     redraw();
+    if (mode === "create") {
+      void window.FTPageAgentProfiles.attachSelf(context, {
+        pageKind: state.familyMode ? "factor-family-create" : "factor-create",
+        section: tabs.current(),
+      }).catch(() => {});
+    }
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {

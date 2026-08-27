@@ -46,6 +46,7 @@
 
   function dialog(context, title) {
     const root = document.createElement("dialog");
+    root.dataset.ftTabID = context.tabID || "";
     root.className = "manager-directory-dialog";
     const form = document.createElement("form");
     form.method = "dialog";
