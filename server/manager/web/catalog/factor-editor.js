@@ -517,16 +517,17 @@
     if (mode === "edit" && !factorID) throw new Error(context.t("因子不存在"));
     let loaded = factor ? {...factor} : {};
     if (mode === "edit" && !context.testObjectTemporary) {
-      const endpoint = familyMode && publicMode
-        ? `/custom-factors/api/public-factor/${encodeURIComponent(factorID)}`
-        : familyMode
-          ? `/custom-factors/api/get/${encodeURIComponent(factorID)}`
-            + `?owner_username=${encodeURIComponent(factor?.owner_username || context.session.username || "")}`
-          : `/custom-factors/api/get/${encodeURIComponent(factorID)}`;
-      const value = await context.api(
-        endpoint,
+      const familyID = familyMode
+        ? factorID
+        : loaded.factor_family_alias || loaded.family_alias || factorID;
+      const value = await window.FTFactorDetailShared.loadSourceVersion(
+        context, loaded, "current", {
+          familyID,
+          sourceKind: publicMode ? "public" : undefined,
+          ownerUsername: loaded.owner_username || context.session.username || "",
+        },
       );
-      loaded = {...loaded, ...(value.factor || {})};
+      loaded = {...loaded, ...value};
     }
     const temporaryFamilyEdit = mode === "edit" && context.testObjectTemporary
       && loaded.source_kind !== "transient" && !loaded.source_code;

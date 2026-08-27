@@ -367,6 +367,66 @@ class CatalogRoutesMixin:
         query = parse_qs(parsed.query, keep_blank_values=True)
         refresh = str(query.get("refresh", [""])[0] or "") == "1"
         try:
+            source_match = re.fullmatch(
+                r"/api/catalog/factor-sources/(custom|public)/([^/]+)"
+                r"/versions(?:/([^/]+))?",
+                parsed.path,
+            )
+            if source_match is not None:
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取因子家族源码"
+                    )
+                from server.services.factor_source_catalog import (
+                    FactorSourceCatalog,
+                )
+
+                catalog = FactorSourceCatalog()
+                kind = source_match.group(1)
+                factor_id = unquote(source_match.group(2))
+                fingerprint = source_match.group(3)
+                owner = str(
+                    query.get("owner_username", [""])[0] or ""
+                )
+                selected_version = (
+                    unquote(fingerprint)
+                    if fingerprint is not None else None
+                )
+
+                def read_source_catalog():
+                    if selected_version is not None:
+                        return catalog.version(
+                            principal,
+                            kind,
+                            factor_id,
+                            selected_version,
+                            owner_username=owner,
+                        )
+                    return catalog.versions(
+                        principal,
+                        kind,
+                        factor_id,
+                        owner_username=owner,
+                        limit=query.get("limit", ["100"])[0] or 100,
+                    )
+
+                try:
+                    value = read_source_catalog()
+                except FileNotFoundError:
+                    from server.manager.services.factor_source_hydration import (
+                        FactorSourceHydrator,
+                    )
+
+                    source_owner = (
+                        "public" if kind == "public" else owner or principal
+                    )
+                    if not FactorSourceHydrator(self.state).hydrate(
+                        f"{source_owner}:{factor_id}", principal=principal,
+                    ):
+                        raise
+                    value = read_source_catalog()
+                json_response(self, value)
+                return True
             if parsed.path == "/api/catalog/factors":
                 if visitor is not None:
                     from server.manager.services.factor_library_scopes import (
@@ -488,8 +548,17 @@ class CatalogRoutesMixin:
                 "success": False, "error": str(exc),
             }, int(getattr(exc, "status", 403)))
             return True
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+            return True
+        except FileNotFoundError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
+        except ValueError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
         except (
-            OSError, RuntimeError, ImportError, TypeError, ValueError, KeyError,
+            OSError, RuntimeError, ImportError, TypeError, KeyError,
         ) as exc:
             json_response(self, {
                 "success": False, "error": str(exc),
@@ -801,6 +870,13 @@ class CatalogRoutesMixin:
 
     def _serve_manager_application(self, parsed, *, method: str) -> bool:
         """Dispatch Manager-owned application state under one import boundary."""
+        if method == "GET" and parsed.path.startswith(
+            "/api/catalog/factor-sources/"
+        ):
+            # A missing source is fetched over the object data plane.  Keep
+            # that bounded network wait outside the global first-import lock
+            # so one source cannot stall unrelated catalog and authoring UI.
+            return self._serve_factor_catalog(parsed)
         with self.state.application_request_lock:
             if method == "GET":
                 return bool(
