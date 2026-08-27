@@ -6,6 +6,8 @@
       content, title, eyebrow, toolbar, notice, beforeTabChange,
       liveViewLimit,
       onTabClosed,
+      onTabEvicted,
+      pageAgentLifecycle,
     } = options;
     let workspace = null;
     let checkpointTimer = null;
@@ -15,6 +17,7 @@
       restoreSession: tabID => workspace?.restoreSession?.(tabID),
       removeSession: tabID => workspace?.removeSession?.(tabID),
       liveViewLimit,
+      onTabEvicted,
     });
 
     function checkpointWorkspace() {
@@ -376,6 +379,8 @@
       return {
         tabID: state.activeTabID,
         tabSession: viewCache.tabSession(state.activeTabID),
+        pageState: viewCache.pageState(state.activeTabID),
+        pageAgentLifecycle,
       };
     }
 

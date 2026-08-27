@@ -224,9 +224,11 @@
   function reportContext(routeToken = activeRouteToken) {
     return {
       state, api, t, content, toolbar, button,
+      ...currentTabContext(),
       tabID: state.activeTabID, tabSession, activeNav, setHeading, updateActiveTab,
       openReportSettings, saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
+      checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
       isRouteCurrent: () => routeToken === activeRouteToken,
     };
   }
@@ -267,6 +269,14 @@
 
   let routeDispatch;
   let tabs = null;
+  const pageAgentLifecycle = window.FTPageAgentLifecycle.create({
+    start: profileID => api("/api/client/profile-agent/start", {
+      method: "POST", body: JSON.stringify({profile_id: profileID}),
+    }),
+    stop: profileID => api("/api/client/profile-agent/stop", {
+      method: "POST", body: JSON.stringify({profile_id: profileID}),
+    }),
+  });
 
   // Route protection is checked before loading the route's code group.  This
   // keeps an unauthenticated deep link on the small login view instead of
@@ -323,6 +333,7 @@
     state, embeddedPresentation, t, renderRoute,
     content, title, eyebrow, toolbar, notice,
     beforeTabChange: () => { activeRouteToken += 1; },
+    onTabEvicted: tabID => pageAgentLifecycle.evict(tabID),
     onTabClosed: (_tab, session) => {
       const drafts = session?.durable?.testDrafts;
       const workspaceIDs = new Set(Object.values(drafts || {}).map(
@@ -334,6 +345,7 @@
       )));
     },
     modulePath, isPinnedPath, titleForPath, tabIcon,
+    pageAgentLifecycle,
   });
   const tabSession = tabs.tabSession;
   const saveActiveTabSession = tabs.saveActiveTabSession;
