@@ -11,6 +11,9 @@ import yaml
 
 import settings as Settings
 from server.manager import runtime as manager
+from server.manager.http.research_graph_catalog_routes import (
+    is_public_research_graph_catalog_read,
+)
 from server.services.research_graph.protocol import graph_content_hash
 
 
@@ -190,3 +193,24 @@ def test_manager_graph_user_library_is_owner_scoped(manager_server) -> None:
         method="DELETE",
     )
     assert status == 200
+
+
+def test_only_immutable_server_graph_catalog_paths_are_public() -> None:
+    prefix = "/api/catalog/research-graphs/factor-research"
+    assert is_public_research_graph_catalog_read(f"{prefix}/versions")
+    assert is_public_research_graph_catalog_read(f"{prefix}/active")
+    assert is_public_research_graph_catalog_read(
+        f"{prefix}/versions/1/presentations"
+    )
+    assert is_public_research_graph_catalog_read(
+        f"{prefix}/versions/1/yaml"
+    )
+    assert not is_public_research_graph_catalog_read(
+        "/api/catalog/research-graphs/versions"
+    )
+    assert not is_public_research_graph_catalog_read(
+        "/api/catalog/research-graphs/user-library"
+    )
+    assert not is_public_research_graph_catalog_read(
+        f"{prefix}/versions/1/activate"
+    )
