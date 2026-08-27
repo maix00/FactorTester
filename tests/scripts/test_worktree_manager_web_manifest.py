@@ -283,6 +283,8 @@ def test_product_contract_rows_keep_no_data_navigation_and_adjustment_metadata()
     assert "context.t(\"后复权乘法\")" in details
     assert "context.t(\"换月比值\")" in details
     assert "FTProductPricePanel.render" in details
+    assert "context.api(`/api/report-references/validate" in details
+    assert "servicePath(`/api/report-references/validate" not in details
     assert "query.get(\"has_data\") === \"0\"" in details
     assert "正在解析产品引用…" in details
 

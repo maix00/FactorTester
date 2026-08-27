@@ -18,7 +18,6 @@ def register_routes() -> None:
         "price_data",
         "product_liquidity",
         "protocol_manifest",
-        "report_references",
         "submissions",
         "time_range",
     )
