@@ -588,7 +588,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
     ) -> dict[str, Any]:
         """Read visible factor-source metadata for an explicit local pull."""
         return self._expect_success(self.session.get(
-            "/custom-factors/api/source-sync/manifest",
+            "/api/catalog/factor-sources/manifest",
             query={
                 "include_subordinates": "1" if include_subordinates else "0",
             },

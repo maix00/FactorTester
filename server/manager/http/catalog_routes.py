@@ -445,6 +445,23 @@ class CatalogRoutesMixin:
                     value = read_source_catalog()
                 json_response(self, value)
                 return True
+            if parsed.path == "/api/catalog/factor-sources/manifest":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能同步因子家族源码"
+                    )
+                from server.services.factor_source_manifest import (
+                    FactorSourceManifest,
+                )
+
+                json_response(self, FactorSourceManifest().build(
+                    principal,
+                    server_id=self.state.server_id,
+                    include_subordinates=str(
+                        query.get("include_subordinates", ["1"])[0] or "1"
+                    ) == "1",
+                ))
+                return True
             if parsed.path == "/api/catalog/factors":
                 if visitor is not None:
                     from server.manager.services.factor_library_scopes import (
