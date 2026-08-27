@@ -281,6 +281,7 @@
 
   function showProvidersOverlay(context, descriptor) {
     const dialog = document.createElement("dialog");
+    dialog.dataset.ftTabID = context.tabID || "";
     dialog.className = "catalog-source-providers-dialog";
     const card = document.createElement("form");
     card.method = "dialog";

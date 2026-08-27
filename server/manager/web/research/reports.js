@@ -18,6 +18,14 @@
     state.pages ||= {};
     if (!context.session && state.scope !== "shared") state.scope = "shared";
     context.tabSession.researchReports = state;
+    context.pageState?.register?.("research-report-list", {
+      capture: () => ({scope: state.scope, pages: state.pages}),
+      restore: value => {
+        if (value?.scope) state.scope = value.scope;
+        if (value?.pages) state.pages = value.pages;
+      },
+      describe: () => ({page: "research-reports", section: state.scope, fields: []}),
+    });
     return state;
   }
 

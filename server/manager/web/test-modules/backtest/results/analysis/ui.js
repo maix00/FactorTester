@@ -35,6 +35,7 @@
 
   function dialog(context, title, subtitle = "") {
     const root = document.createElement("dialog");
+    root.dataset.ftTabID = context.tabID || "";
     root.className = "backtest-analysis-dialog";
     const card = document.createElement("article");
     card.className = "dialog-card backtest-analysis-card";

@@ -49,7 +49,10 @@
     const panels = Object.create(null);
     const buttons = Object.create(null);
     const dirty = new Set(options.dirty || []);
-    let selected = options.active || items[0]?.key || "";
+    const stateKey = options.stateKey
+      || `object-detail-tabs:${options.objectKind || "object"}`;
+    const saved = context.pageState?.saved?.(stateKey);
+    let selected = saved?.selected || options.active || items[0]?.key || "";
 
     items.forEach((item, index) => {
       const button = document.createElement("button");
@@ -80,6 +83,15 @@
 
     root.append(tablist, ...items.map(item => panels[item.key]));
     select(selected, false);
+    context.pageState?.register?.(stateKey, {
+      capture: () => ({selected}),
+      restore: value => select(value?.selected, false),
+      describe: () => ({
+        page: options.pageKind || options.objectKind || "object-detail",
+        section: selected,
+        fields: [],
+      }),
+    });
     return Object.freeze({
       root, tablist, panels, buttons,
       current: () => selected,

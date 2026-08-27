@@ -197,6 +197,14 @@
     state.sources ||= [];
     state.page ||= 1;
     context.tabSession.researchGraphs = state;
+    context.pageState?.register?.("research-graph-list", {
+      capture: () => ({sources: state.sources, page: state.page}),
+      restore: value => {
+        if (Array.isArray(value?.sources)) state.sources = value.sources;
+        if (Number(value?.page) > 0) state.page = Number(value.page);
+      },
+      describe: () => ({page: "research-graphs", section: "list", fields: []}),
+    });
     mount.replaceChildren(FTUI.loading(context.t("正在读取研究图…")));
     const data = await loadData(context);
     if (!current(context)) return;

@@ -152,6 +152,7 @@
       "core/i18n.js",
       "core/icons.js",
       "core/help-popover.js",
+      "core/page-state.js",
       "core/shared-ui.js"
     ],
     "charts": [
@@ -291,6 +292,7 @@
       "catalog/details.js"
     ],
     "workbench-core": [
+      "workbench/test-page-assistance.js",
       "workbench/setting-rules.js",
       "workbench/test-lazy-code.js",
       "workbench/templates/actions.js",
@@ -420,6 +422,10 @@
       "manager/mihomo.js"
     ],
     "app": [
+      "profile/page-agent-lifecycle.js",
+      "profile/page-agent-context.js",
+      "profile/page-agent-drawer.js",
+      "profile/page-agent-profiles.js",
       "app/navigation.js",
       "app/route-dispatch.js",
       "app/tab-workspace.js",
@@ -445,6 +451,11 @@
     "core/i18n.js",
     "core/icons.js",
     "core/help-popover.js",
+    "core/page-state.js",
+    "profile/page-agent-lifecycle.js",
+    "profile/page-agent-context.js",
+    "profile/page-agent-drawer.js",
+    "profile/page-agent-profiles.js",
     "docs/source.js",
     "docs/reader.js",
     "core/highcharts-range-loader.js",
@@ -544,6 +555,7 @@
     "catalog/product-group-detail.js",
     "catalog/product-price-panel.js",
     "catalog/details.js",
+    "workbench/test-page-assistance.js",
     "workbench/setting-rules.js",
     "workbench/test-input-state.js",
     "workbench/test-configuration-compiler.js",

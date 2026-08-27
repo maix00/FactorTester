@@ -497,6 +497,9 @@
         window.FTTestRunBatch?.submittedItems?.(state) || [],
       );
     };
+    window.FTTestPageAssistance?.register?.(
+      context, state, () => render(context, state), root,
+    );
     if (!window.FTTestSettings || !state.settingsInitialized) {
       const loading = FTUI.loading(context.t("正在读取测试设置代码…"));
       const error = state.settingsCode?.error;
