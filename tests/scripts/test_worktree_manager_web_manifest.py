@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -1364,6 +1365,17 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert 'run_inputs: "workbench-source-inputs"' in (
         WEB_ROOT / "workbench" / "test-lazy-code.js"
     ).read_text(encoding="utf-8")
+
+
+def test_deferred_configuration_runtime_is_only_read_through_window() -> None:
+    """Dynamic scripts must not rely on a browser-created bare global binding."""
+    for relative in (
+        "workbench/run-batch/actions.js",
+        "workbench/templates/actions.js",
+        "workbench/test-page-assistance.js",
+    ):
+        source = (WEB_ROOT / relative).read_text(encoding="utf-8")
+        assert re.search(r"(?<![.\w])FTTestConfiguration\b", source) is None
 
 
 def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:
