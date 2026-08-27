@@ -2574,6 +2574,7 @@ def test_factor_source_reads_are_not_registered_business_port_routes() -> None:
         "/custom-factors/api/client/factor-library",
         "/custom-factors/api/client/factor-sets",
         "/custom-factors/api/source-sync/",
+        "/api/research-graphs/",
     )
 
     assert all(
@@ -3393,36 +3394,6 @@ def test_research_workspace_source_resolution_fixture() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
-
-
-def test_anonymous_web_research_can_proxy_graph_read_only(tmp_path, monkeypatch) -> None:
-    state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
-    calls = []
-
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
-            status=200,
-            body=b'{"success":true,"versions":[]}',
-            content_type="application/json",
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
-    with running_manager(state) as base_url:
-        with urlopen(
-            f"{base_url}/api/research-graphs/factor-research/versions"
-        ) as response:
-            assert response.status == 200
-            value = json.loads(response.read())
-
-    assert value["success"] is True
-    assert calls == [{
-        "port": 8141,
-        "path": "/api/research-graphs/factor-research/versions",
-        "principal": "__public_graph__",
-    }]
 
 
 def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:

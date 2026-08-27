@@ -111,7 +111,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
 
     def publish_research_graph(self, graph: dict[str, Any]) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
-            "/api/research-graphs/versions",
+            "/api/catalog/research-graphs/versions",
             {"graph": graph},
         ))
         return dict(data.get("graph") or {})
@@ -121,13 +121,13 @@ class ResearchGraphClientMixin(ClientMixinBase):
         graph_id: str,
     ) -> list[dict[str, Any]]:
         data = self._expect_success(self.session.get(
-            f"/api/research-graphs/{graph_id}/versions"
+            f"/api/catalog/research-graphs/{graph_id}/versions"
         ))
         return list(data.get("versions") or [])
 
     def get_active_research_graph(self, graph_id: str) -> dict[str, Any]:
         data = self._expect_success(self.session.get(
-            f"/api/research-graphs/{graph_id}/active"
+            f"/api/catalog/research-graphs/{graph_id}/active"
         ))
         return dict(data.get("graph") or {})
 
@@ -145,7 +145,8 @@ class ResearchGraphClientMixin(ClientMixinBase):
         this method.
         """
         path = (
-            f"/api/research-graphs/{graph_id}/versions/{int(version)}/yaml"
+            f"/api/catalog/research-graphs/{graph_id}/versions/"
+            f"{int(version)}/yaml"
             + (f"?locale={locale}" if locale else "")
         )
         return self.session.download(
@@ -159,7 +160,8 @@ class ResearchGraphClientMixin(ClientMixinBase):
         version: int,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/versions/{version}/activate",
+            f"/api/catalog/research-graphs/{graph_id}/versions/"
+            f"{version}/activate",
             {},
         ))
         return dict(data.get("graph") or {})

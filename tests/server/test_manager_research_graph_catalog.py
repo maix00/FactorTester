@@ -7,9 +7,9 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 import pytest
-import settings as Settings
 import yaml
 
+import settings as Settings
 from server.manager import runtime as manager
 from server.services.research_graph.protocol import graph_content_hash
 
@@ -115,6 +115,13 @@ def test_manager_owns_graph_catalog_without_a_service_port(manager_server) -> No
     )
     assert status == 200
     assert json.loads(body)["versions"][0]["version"] == 1
+
+    with urlopen(
+        f"http://127.0.0.1:{server.server_port}"
+        "/api/catalog/research-graphs/manager-catalog-test/versions"
+    ) as response:
+        assert response.status == 200
+        assert json.loads(response.read())["versions"][0]["version"] == 1
 
     status, _, _ = _request(
         server,
