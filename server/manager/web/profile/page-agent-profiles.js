@@ -1,9 +1,33 @@
 (() => {
+  const retryDelays = [0, 100, 250, 500, 1000];
+
+  function transient(error) {
+    return /failed to fetch|load failed|network|connection|fetch/i.test(
+      String(error?.message || error || ""),
+    );
+  }
+
+  async function requestProfiles(context) {
+    let lastError;
+    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+      if (retryDelays[attempt]) {
+        await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+      }
+      try {
+        const value = await context.api("/api/client/profiles");
+        return value.profiles || [];
+      } catch (error) {
+        lastError = error;
+        if (!transient(error)) break;
+      }
+    }
+    throw lastError;
+  }
+
   async function profiles(context) {
     const session = context.tabSession || {};
     if (!session.pageAgentProfilesPromise) {
-      session.pageAgentProfilesPromise = context.api("/api/client/profiles")
-        .then(value => value.profiles || [])
+      session.pageAgentProfilesPromise = requestProfiles(context)
         .catch(error => {
           delete session.pageAgentProfilesPromise;
           throw error;
