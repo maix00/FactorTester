@@ -22,6 +22,15 @@ _VERSION_DETAIL_PATH = re.compile(
 _USER_FILE_PATH = re.compile(
     rf"{re.escape(GRAPH_CATALOG_PREFIX)}/user-library/([^/]+)$"
 )
+_PUBLIC_CATALOG_READ_PATH = re.compile(
+    rf"{re.escape(GRAPH_CATALOG_PREFIX)}/[^/]+/"
+    r"(?:active|versions(?:/[0-9]+/(?:yaml|presentations))?)$"
+)
+
+
+def is_public_research_graph_catalog_read(path: str) -> bool:
+    """Allow only immutable server Graph projections before login."""
+    return _PUBLIC_CATALOG_READ_PATH.fullmatch(str(path or "")) is not None
 
 
 class ResearchGraphCatalogRoutesMixin:
@@ -56,7 +65,7 @@ class ResearchGraphCatalogRoutesMixin:
             return str(session["username"])
         if self._visitor_mode() is not None:
             return "__public_graph__"
-        if not path.startswith(f"{GRAPH_CATALOG_PREFIX}/user-library"):
+        if is_public_research_graph_catalog_read(path):
             return "__public_graph__"
         json_response(self, {"success": False, "error": "login required"}, 401)
         return None
@@ -373,4 +382,8 @@ class ResearchGraphCatalogRoutesMixin:
         return True
 
 
-__all__ = ["GRAPH_CATALOG_PREFIX", "ResearchGraphCatalogRoutesMixin"]
+__all__ = [
+    "GRAPH_CATALOG_PREFIX",
+    "ResearchGraphCatalogRoutesMixin",
+    "is_public_research_graph_catalog_read",
+]
