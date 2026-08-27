@@ -1,4 +1,4 @@
-"""Local runtime ownership and single-Agent Profile claims.
+"""Local runtime ownership and durable single-Agent Profile bindings.
 
 This state is intentionally Manager-local.  A server Profile is bound to one
 server, while a client Profile is bound to one client device.  The same
@@ -12,12 +12,12 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
-
 
 RUNTIME_TABLE = "manager_profile_runtime_bindings"
 CLAIM_TABLE = "manager_profile_agent_claims"
@@ -113,6 +113,42 @@ class ProfileRuntimeStore:
                 f"""CREATE INDEX IF NOT EXISTS {CLAIM_TABLE}_heartbeat
                     ON {CLAIM_TABLE}(last_heartbeat_at, released_at)"""
             )
+            self._restore_expired_bindings(db)
+
+    @staticmethod
+    def _restore_expired_bindings(db: sqlite3.Connection) -> None:
+        """Repair bindings released by the former heartbeat-lease policy.
+
+        Explicitly released rows use ``status = 'released'`` and are never
+        restored. If a Profile was subsequently rebound, its current binding
+        remains authoritative. Otherwise only the newest legacy-expired row is
+        restored, so the active-Profile uniqueness invariant is preserved.
+        """
+        active_profiles = {
+            (str(row[0]), str(row[1]))
+            for row in db.execute(
+                f"""SELECT principal, profile_id FROM {CLAIM_TABLE}
+                    WHERE released_at IS NULL"""
+            ).fetchall()
+        }
+        repaired_profiles: set[tuple[str, str]] = set()
+        rows = db.execute(
+            f"""SELECT claim_id, principal, profile_id FROM {CLAIM_TABLE}
+                WHERE released_at IS NOT NULL AND status = 'expired'
+                ORDER BY claimed_at DESC, claim_id DESC"""
+        ).fetchall()
+        for row in rows:
+            profile = (str(row[1]), str(row[2]))
+            if profile in active_profiles or profile in repaired_profiles:
+                continue
+            db.execute(
+                f"""UPDATE {CLAIM_TABLE}
+                    SET released_at = NULL, status = 'stopped'
+                    WHERE claim_id = ? AND released_at IS NOT NULL
+                      AND status = 'expired'""",
+                (str(row[0]),),
+            )
+            repaired_profiles.add(profile)
 
     @staticmethod
     def _text(value: object, field: str, *, required: bool = True) -> str:
@@ -238,32 +274,16 @@ class ProfileRuntimeStore:
         self,
         principal: str,
         profile_id: str,
-        *,
-        now: float | None = None,
-        lease_seconds: float = 120.0,
     ) -> dict[str, Any] | None:
         owner = self._text(principal, "principal")
         identifier = self._text(profile_id, "profile_id")
-        current = float(time.time() if now is None else now)
-        cutoff = current - max(1.0, float(lease_seconds))
         with self._connection() as db:
-            self._expire(db, cutoff, current)
             row = db.execute(
                 f"""SELECT * FROM {CLAIM_TABLE}
                     WHERE principal = ? AND profile_id = ? AND released_at IS NULL""",
                 (owner, identifier),
             ).fetchone()
         return self._claim_row(row)
-
-    @staticmethod
-    def _expire(db: sqlite3.Connection, cutoff: float, now: float) -> None:
-        db.execute(
-            f"""UPDATE {CLAIM_TABLE}
-                SET released_at = ?, status = 'expired'
-                WHERE released_at IS NULL AND status = 'claimed'
-                  AND last_heartbeat_at < ?""",
-            (now, cutoff),
-        )
 
     def claim(
         self,
@@ -279,7 +299,6 @@ class ProfileRuntimeStore:
         provider_config_version: float = 0,
         agent_id: str = "",
         now: float | None = None,
-        lease_seconds: float = 120.0,
     ) -> dict[str, Any]:
         owner = self._text(principal, "principal")
         identifier = self._text(profile_id, "profile_id")
@@ -292,10 +311,8 @@ class ProfileRuntimeStore:
         frozen_version = float(provider_config_version or 0)
         agent = self._text(agent_id, "agent_id", required=False)
         current = float(time.time() if now is None else now)
-        cutoff = current - max(1.0, float(lease_seconds))
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            self._expire(db, cutoff, current)
             active = db.execute(
                 f"""SELECT * FROM {CLAIM_TABLE}
                     WHERE principal = ? AND profile_id = ? AND released_at IS NULL""",
@@ -465,9 +482,8 @@ class ProfileRuntimeStore:
         """Pause a Manager-owned Agent without releasing its Profile claim.
 
         An explicit user release remains the only operation that removes
-        ownership.  A paused claim is intentionally not expired by the lease
-        sweeper; starting the same Profile resumes it and refreshes its
-        heartbeat.  This also lets a server Agent be stopped for maintenance
+        ownership. Starting the same Profile resumes it and refreshes its
+        heartbeat. This also lets a server Agent be stopped for maintenance
         without forcing the user through the binding flow again.
         """
         owner = self._text(principal, "principal")
@@ -488,18 +504,9 @@ class ProfileRuntimeStore:
             )
         return bool(cursor.rowcount)
 
-    def claims(
-        self,
-        principal: str,
-        *,
-        now: float | None = None,
-        lease_seconds: float = 120.0,
-    ) -> list[dict[str, Any]]:
+    def claims(self, principal: str) -> list[dict[str, Any]]:
         owner = self._text(principal, "principal")
-        current = float(time.time() if now is None else now)
-        cutoff = current - max(1.0, float(lease_seconds))
         with self._connection() as db:
-            self._expire(db, cutoff, current)
             rows = db.execute(
                 f"""SELECT * FROM {CLAIM_TABLE}
                     WHERE principal = ? AND released_at IS NULL
