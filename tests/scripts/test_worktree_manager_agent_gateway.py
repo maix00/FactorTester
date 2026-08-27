@@ -47,43 +47,16 @@ def agent_headers(state, *, profile_id="profile-main", claim_id="claim-1"):
     }
 
 
-def service_route() -> manager.ServiceRoute:
-    return manager.ServiceRoute(
-        server_id="local-main",
-        role="main",
-        branch="main",
-        revision="revision",
-        port=8000,
-        latency_ms=0,
-        online=True,
-    )
-
-
-def successful_response() -> manager.GatewayResponse:
-    return manager.GatewayResponse(
-        status=200,
-        body=b'{"success":true}',
-        content_type="application/json",
-    )
-
-
-def test_local_profile_agent_get_uses_complete_authenticated_service_gateway(
+def test_local_profile_agent_unknown_get_does_not_fall_back_to_service_gateway(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    selections = []
     monkeypatch.setattr(
-        state,
-        "route_for",
-        lambda **values: selections.append(values) or service_route(),
+        state, "route_request",
+        lambda *_args, **_values: pytest.fail(
+            "unknown Agent GET must not reach a business service"
+        ),
     )
-    calls = []
-
-    def route_request(selected, **values):
-        calls.append((selected.server_id, values))
-        return successful_response()
-
-    monkeypatch.setattr(state, "route_request", route_request)
     headers = agent_headers(state)
     paths = (
         "/custom-factors/api/list",
@@ -92,56 +65,32 @@ def test_local_profile_agent_get_uses_complete_authenticated_service_gateway(
     )
     with running_manager(state) as base_url:
         for path in paths:
-            with urlopen(Request(f"{base_url}{path}", headers=headers)) as response:
-                assert json.loads(response.read())["success"] is True
-
-    assert [values["path"] for _server_id, values in calls] == list(paths)
-    assert all(values["principal"] == "user@1" for _server_id, values in calls)
-    assert all(value["server_id"] == state.server_id for value in selections)
+            with pytest.raises(HTTPError) as failed:
+                urlopen(Request(f"{base_url}{path}", headers=headers))
+            assert failed.value.code == 404
 
 
-def test_local_profile_agent_write_uses_complete_authenticated_service_gateway(
+def test_local_profile_agent_unknown_write_does_not_fall_back_to_service_gateway(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    selections = []
     monkeypatch.setattr(
-        state,
-        "route_for",
-        lambda **values: selections.append(values) or service_route(),
+        state, "route_request",
+        lambda *_args, **_values: pytest.fail(
+            "unknown Agent write must not reach a business service"
+        ),
     )
-    calls = []
-
-    def route_request(selected, **values):
-        calls.append((selected.server_id, values))
-        return successful_response()
-
-    monkeypatch.setattr(state, "route_request", route_request)
     body = b'{"enabled":true}'
     headers = {**agent_headers(state), "Content-Type": "application/json"}
     with running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/future-cli-capability",
-            data=body,
-            headers=headers,
-            method="POST",
-        )) as response:
-            assert json.loads(response.read())["success"] is True
-
-    assert calls == [("local-main", {
-        "path": "/api/future-cli-capability",
-        "principal": "user@1",
-        "method": "POST",
-        "body": body,
-        "content_type": "application/json",
-        "origin_server_id": "",
-    })]
-    assert selections == [{
-        "port": None,
-        "server_id": state.server_id,
-        "branch": "",
-        "feature": "",
-    }]
+        with pytest.raises(HTTPError) as failed:
+            urlopen(Request(
+                f"{base_url}/api/future-cli-capability",
+                data=body,
+                headers=headers,
+                method="POST",
+            ))
+        assert failed.value.code == 404
 
 
 def test_local_profile_agent_cannot_target_a_remote_service(
@@ -156,7 +105,8 @@ def test_local_profile_agent_cannot_target_a_remote_service(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/custom-factors/api/list?server_id=remote-main",
+                f"{base_url}/custom-factors/api/get/FactorOne"
+                "?server_id=remote-main",
                 headers=agent_headers(state),
             ))
 
