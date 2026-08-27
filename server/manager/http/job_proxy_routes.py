@@ -22,7 +22,6 @@ _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/agent-flow/agents/[A-Za-z0-9._-]{1,256}/resume",
         r"/api/research-agent-executions",
-        r"/api/product-groups",
         r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",
         r"/api/runs/[^/]{1,128}/clone-workspace",

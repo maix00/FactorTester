@@ -23,6 +23,20 @@ def factor_rows_from_sync(
         )
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
         return []
+    return factor_rows_from_account_entities(
+        rows,
+        principal,
+        owner_account=owner_account,
+    )
+
+
+def factor_rows_from_account_entities(
+    rows: list[dict[str, Any]],
+    principal: str,
+    *,
+    owner_account: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Project factor rows already read through the shared catalog helper."""
     result: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict) or row.get("deleted"):

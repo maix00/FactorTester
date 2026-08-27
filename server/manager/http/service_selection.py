@@ -28,7 +28,6 @@ _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/get/",
     "/custom-factors/api/source-versions/",
     "/custom-factors/api/source-sync/",
-    "/api/product-groups",
     "/api/report-references/validate",
     "/api/profile-research",
     "/api/research-graphs/",
@@ -36,8 +35,6 @@ _SERVICE_GET_PREFIXES = (
     "/api/trial-plans/direct/",
     "/api/run-specs/",
     "/api/runs/",
-    "/api/client/releases/",
-    "/api/testers/modules",
 )
 _PUBLIC_GRAPH_READ_RE = re.compile(
     r"/api/research-graphs/[^/]+/(?:active|versions(?:/[0-9]+/(?:yaml|presentations))?)$"
@@ -338,7 +335,7 @@ class ServiceSelectionRoutesMixin:
         here would expose private Profile/research/run-spec endpoints through
         the UUID-backed gateway session.
         """
-        return path.startswith("/api/testers/modules")
+        return False
 
     def _service_route_candidates(
         self, parsed,

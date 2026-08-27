@@ -15,19 +15,20 @@ import pytest
 
 from server.manager import runtime as manager
 from server.manager.http import catalog_routes, service_selection
-from server.manager.web import assets as research_static
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
 from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
+from server.manager.services.client_state import ClientStateService
 from server.manager.services.test_authoring import (
-    TestAuthoringService,
     TestAuthoringResponse as _TestAuthoringResponse,
 )
-from server.manager.services.client_state import ClientStateService
+from server.manager.services.test_authoring import (
+    TestAuthoringService,
+)
 from server.manager.storage.control_db import ControlDatabaseUnavailable
 from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.preferences import UserPreferenceStore
+from server.manager.web import assets as research_static
 from tools.data.account_manage import hash_password
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -339,10 +340,14 @@ def test_client_business_api_keeps_service_path_and_manager_selects_port(
             "/custom-factors/api/get/SubordinateFactor?owner_username=GTHT%40child%401",
         ),
         (
-            "/custom-factors/api/source-versions/custom/Momentum"
-            "?owner_username=GTHT%40child%401",
-            "/custom-factors/api/source-versions/custom/Momentum"
-            "?owner_username=GTHT%40child%401",
+            (
+                "/custom-factors/api/source-versions/custom/Momentum"
+                "?owner_username=GTHT%40child%401"
+            ),
+            (
+                "/custom-factors/api/source-versions/custom/Momentum"
+                "?owner_username=GTHT%40child%401"
+            ),
         ),
     ),
 )
@@ -755,6 +760,7 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
         "/api/configuration-templates",
         "/api/jobs/artifact-capabilities",
         "/api/data_source_categories",
+        "/api/testers/modules?parent=ic_test",
     )
 
     with running_manager(state) as base_url:
@@ -772,45 +778,31 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
     assert all(payload.get("success") is not False for _status, payload in responses)
 
 
-def test_product_group_creation_uses_same_manager_gateway(
+def test_legacy_product_group_creation_does_not_reach_business_port(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
-    calls = []
-
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
-            status=201,
-            body=b'{"success":true,"group":{"id":"group-one"}}',
-            content_type="application/json",
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail(
+            "legacy product-group writes must not reach a business port"
+        ),
+    )
     body = b'{"name":"Group One","paths":["Products/Futures/CNFutures/_products/A.DCE"]}'
     with running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/product-groups?port=8141",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer user-token",
-                "Content-Type": "application/json",
-            },
-        )) as response:
-            value = json.loads(response.read())
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(Request(
+                f"{base_url}/api/product-groups?port=8141",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": "Bearer user-token",
+                    "Content-Type": "application/json",
+                },
+            ))
 
-    assert value["group"]["id"] == "group-one"
-    assert calls == [{
-        "port": 8141,
-        "path": "/api/product-groups",
-        "principal": "user@1",
-        "method": "POST",
-        "body": body,
-        "content_type": "application/json",
-    }]
+    assert exc_info.value.code == 404
 
 
 def test_run_submission_skips_route_without_data_capability(
@@ -3386,7 +3378,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "create_product_group",
-        lambda principal, name, paths, category_ids=None: {
+        lambda principal, name, paths, category_ids=None, **_metadata: {
             "group_ref": "product-group:created",
             "name": name,
             "paths": paths,

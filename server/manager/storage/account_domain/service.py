@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from server.manager.storage.account_domain.local import LocalAccountDomainStore
-from server.manager.storage.account_domain.payloads import public_payload, validate_entity
+from server.manager.storage.account_domain.payloads import (
+    public_payload,
+    validate_entity,
+)
 from server.manager.storage.control_db import ControlDatabaseError
 
 
@@ -169,6 +172,7 @@ class AccountDomainSyncService:
         *,
         entity_type: str = "",
         include_shared: bool = True,
+        include_deleted: bool = False,
         sync: bool = True,
     ) -> list[dict[str, Any]]:
         if sync:
@@ -177,6 +181,7 @@ class AccountDomainSyncService:
             principal=principal,
             entity_type=entity_type,
             include_shared=include_shared,
+            include_deleted=include_deleted,
         )
 
     def sync_research_publication(
@@ -310,6 +315,7 @@ class AccountDomainSyncService:
         self._last_reconcile[cooldown_key] = now
         try:
             from tools.data.account_manage import list_factor_sets
+
             from .factor_sync import materialized_factor_configs
 
             values = {
