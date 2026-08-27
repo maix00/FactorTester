@@ -72,7 +72,24 @@ const importState = {
   kind: "backtest", workspace: null, manifest: {}, values: {}, analysis: {},
   settingsMountedTabs: [], outputRequests: [], selectedICConfigurationGroupIDs: [],
 };
+const configurationRuntime = global.FTTestConfiguration;
+delete global.FTTestConfiguration;
+let loadedGroup = "";
+global.FTTestLazyCode = {
+  loadGroup: group => {
+    loadedGroup = group;
+    global.FTTestConfiguration = configurationRuntime;
+    return Promise.resolve();
+  },
+};
 FTTestPageAssistance.register({}, importState, () => { restored += 1; });
+assert.equal(
+  global.FTTestConfiguration, undefined,
+  "registering the page must not eagerly require the deferred configuration runtime",
+);
+registeredAdapter.prepare();
+assert.equal(loadedGroup, "workbench-run-submit");
+assert.equal(global.FTTestConfiguration, configurationRuntime);
 registeredAdapter.importDocument({
   document_kind: "research_configuration",
   configuration: {schema_version: 2, shared: {}, analyses: {backtest: {groups: []}}, ui: {}},

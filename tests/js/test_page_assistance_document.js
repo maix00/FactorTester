@@ -5,6 +5,7 @@ const vm = require("node:vm");
 let imported = null;
 let attached = null;
 let current = {name: "old"};
+let ready = false;
 global.window = {
   FTPageAgentProfiles: {self: async () => ({profile_id: "self"})},
   FTPageAgentDrawer: {attach: (_context, options) => { attached = options; }},
@@ -18,8 +19,12 @@ vm.runInThisContext(
 (async () => {
   const context = {tabID: "tab-1", tabSession: {durable: {}}, t: value => value};
   const controller = window.FTPageAssistance.register(context, {
+    prepare: async () => { ready = true; },
     schema: () => ({type: "object"}),
-    exportDocument: () => current,
+    exportDocument: () => {
+      assert.equal(ready, true, "the document is not exported before preparation");
+      return current;
+    },
     validate: document => {
       if (!document.name) throw new Error("name is required");
     },
@@ -28,6 +33,7 @@ vm.runInThisContext(
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(attached.profile.profile_id, "self", "registration mounts the drawer itself");
+  await controller.prepare();
   assert.equal(controller.snapshot().revision, 0);
   current = {name: "person edit"};
   assert.equal(controller.snapshot().revision, 1, "person edits advance the revision");

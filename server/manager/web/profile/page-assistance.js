@@ -13,12 +13,20 @@
       ? context.tabSession(context.tabID) : (context.tabSession || {});
     session.durable = session.durable || {};
     let revision = Math.max(0, Number(session.durable.assistanceRevision) || 0);
-    let lastSerialized = JSON.stringify(adapter.exportDocument());
+    let prepared = false;
+    let lastSerialized = null;
     const controller = Object.freeze({
+      prepare: async () => {
+        if (prepared) return;
+        await adapter.prepare?.();
+        prepared = true;
+      },
       snapshot: () => {
         const document = clone(adapter.exportDocument());
         const serialized = JSON.stringify(document);
-        if (serialized !== lastSerialized) {
+        if (lastSerialized === null) {
+          lastSerialized = serialized;
+        } else if (serialized !== lastSerialized) {
           revision += 1;
           session.durable.assistanceRevision = revision;
           lastSerialized = serialized;
@@ -33,6 +41,7 @@
         };
       },
       apply: async value => {
+        await controller.prepare();
         const expected = Number(value?.expected_revision);
         if (!Number.isInteger(expected) || expected !== revision) {
           throw new Error(`page assistance revision conflict: expected ${revision}`);
