@@ -22,7 +22,6 @@ from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
 _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/client/factor-library-sources",
-    "/custom-factors/api/source-sync/",
     "/api/report-references/validate",
     "/api/profile-research",
     "/api/research-graphs/",

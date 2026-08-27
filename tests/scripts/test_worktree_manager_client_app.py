@@ -31,6 +31,7 @@ from server.manager.storage.preferences import UserPreferenceStore
 from server.manager.web import assets as research_static
 from server.modules.custom_factors import factor_set_registry
 from server.services.factor_source_catalog import FactorSourceCatalog
+from server.services.factor_source_manifest import FactorSourceManifest
 from tools.data.account_manage import hash_password
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -2572,6 +2573,7 @@ def test_factor_source_reads_are_not_registered_business_port_routes() -> None:
         "/custom-factors/api/source-versions/",
         "/custom-factors/api/client/factor-library",
         "/custom-factors/api/client/factor-sets",
+        "/custom-factors/api/source-sync/",
     )
 
     assert all(
@@ -3055,6 +3057,42 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
     assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
+
+
+def test_manager_factor_source_manifest_does_not_select_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        FactorSourceManifest,
+        "build",
+        lambda _manifest, principal, **options: calls.append(
+            (principal, options)
+        ) or {
+            "success": True,
+            "server_id": options["server_id"],
+            "principal": principal,
+            "items": [],
+        },
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("source manifest must stay in Manager"),
+    )
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sources/manifest"
+            "?include_subordinates=0",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["principal"] == "user@1"
+    assert calls == [("user@1", {
+        "server_id": state.server_id,
+        "include_subordinates": False,
+    })]
 
 
 def test_manager_factor_set_writes_do_not_select_a_service_port(
