@@ -21,7 +21,6 @@ from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
 _SERVICE_GET_PREFIXES = (
-    "/api/profile-research",
     "/api/research-evidence/",
     "/api/trial-plans/direct/",
     "/api/run-specs/",

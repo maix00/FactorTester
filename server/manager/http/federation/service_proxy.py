@@ -41,7 +41,6 @@ class FederationServiceProxyRoutesMixin:
             or path.startswith("/api/research-evidence/")
             or path.startswith("/api/trial-plans/")
             or path.startswith("/api/run-specs/")
-            or path.startswith("/api/profile-research/")
             or path.startswith("/api/product-groups")
             or path == "/custom-factors/api/internal/public-source-applied"
         )
