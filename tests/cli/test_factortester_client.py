@@ -364,6 +364,25 @@ def fake_server() -> Iterator[str]:
             },
         )
 
+    @app.get("/api/catalog/factor-library-sources")
+    def factor_library_sources():
+        return jsonify(success=True, sources=[{
+            "owner_ref": "alice/team",
+            "owner_alias": "Alice",
+            "factor_count": 2,
+        }])
+
+    @app.get(
+        "/api/catalog/factor-library-sources/<path:owner_ref>/projection"
+    )
+    def factor_library_source_projection(owner_ref):
+        assert owner_ref == "alice/team"
+        return jsonify(
+            success=True,
+            projection={"owner_ref": owner_ref, "factors": []},
+            projection_hash="a" * 64,
+        )
+
     @app.get("/api/catalog/factor-sources/manifest")
     def factor_source_manifest():
         assert request.args.get("include_subordinates") == "0"
@@ -453,6 +472,12 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.list_registered_factor_sets(query="momentum")[
         "item_scopes"
     ]["mine"][0]["target_ref"] == "factor-set:momentum"
+    assert client.factor_library_sources()["sources"][0][
+        "owner_ref"
+    ] == "alice/team"
+    assert client.factor_library_source_projection("alice/team")[
+        "projection_hash"
+    ] == "a" * 64
     assert client.register_factor_set({
         "target_ref": "factor-set:momentum",
     })["factor_set"]["target_ref"] == "factor-set:momentum"

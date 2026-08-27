@@ -1,21 +1,18 @@
 """Routes for factor-library parameter configurations."""
 from __future__ import annotations
-from hashlib import sha256
-import json
 
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
-from server.services.api_response import api_ok, route_guard
+from server.modules.custom_factors.client_library import (
+    build_client_library_projection,
+)
 from server.modules.custom_factors.factor_library_service import (
     build_factor_library_overview,
     delete_factor_library_factor,
-    list_factor_library_product_groups,
     list_factor_library_config_users,
+    list_factor_library_product_groups,
     save_current_user_library_config,
-)
-from server.modules.custom_factors.client_library import (
-    build_client_library_projection,
 )
 from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
@@ -26,6 +23,17 @@ from server.modules.custom_factors.factor_library_store import (
     normalize_product_group,
     rename_scope,
 )
+from server.modules.custom_factors.factor_set_registry import (
+    author_factor_set,
+    factor_set_catalog,
+    factor_set_detail,
+    register_factor_set,
+    unregister_factor_set,
+)
+from server.services.api_response import api_ok, route_guard
+from server.services.factor_registry import get_factor_family_instance
+from server.services.http_auth import login_required
+from server.services.session_runtime import current_user, get_user_file_lock
 from tools.data.account_manage import (
     can_view_user_scope,
     delete_factor_research_run,
@@ -40,16 +48,6 @@ from tools.data.factor_research_registry import (
     research_stability_rows,
     resolve_research_rank_preset,
 )
-from server.services.factor_registry import get_factor_family_instance
-from server.modules.custom_factors.factor_set_registry import (
-    author_factor_set,
-    factor_set_catalog,
-    factor_set_detail,
-    register_factor_set,
-    unregister_factor_set,
-)
-from server.services.http_auth import login_required
-from server.services.session_runtime import current_user, get_user_file_lock
 
 
 def _username() -> str | None:
@@ -161,80 +159,6 @@ def api_client_factor_set_detail():
     if value is None:
         return jsonify({'success': False, 'error': 'Factor Set 不存在'}), 404
     return jsonify({'success': True, 'factor_set': value})
-
-
-@cf_bp.route(
-    '/api/client/factor-library-sources/<owner_username>/projection',
-    methods=['GET'],
-)
-@login_required
-def api_client_factor_library_projection(owner_username):
-    """Return a bounded, source-free initialization projection."""
-    username = _username()
-    if username is None:
-        return jsonify({'success': False, 'error': '未登录'}), 401
-    if not can_view_user_scope(username, owner_username):
-        return jsonify({'success': False, 'error': '无权查看该用户因子库'}), 403
-    payload = build_factor_library_overview(
-        username,
-        True,
-        product_group=request.args.get('product_group') or None,
-    )
-    allowed = {
-        'factor_alias', 'factor_family_alias', 'factor_family_name',
-        'category', 'params', 'owner_username', 'owner_alias',
-        'scope_key', 'product_group', 'updated_at',
-    }
-    factors = [
-        {key: item.get(key) for key in sorted(allowed) if key in item}
-        for item in payload.get('factors', [])
-        if item.get('owner_username') == owner_username
-    ]
-    projection = {
-        'schema_version': 1,
-        'principal': username,
-        'owner_ref': owner_username,
-        'factors': factors,
-    }
-    encoded = json.dumps(
-        projection, ensure_ascii=False, sort_keys=True,
-        separators=(',', ':'),
-    ).encode()
-    return jsonify({
-        'success': True,
-        'projection': projection,
-        'projection_hash': sha256(encoded).hexdigest(),
-    })
-
-
-@cf_bp.route('/api/client/factor-library-sources', methods=['GET'])
-@login_required
-def api_client_factor_library_sources():
-    """List server-authorized source owners without returning source code."""
-    username = _username()
-    if username is None:
-        return jsonify({'success': False, 'error': '未登录'}), 401
-    payload = build_factor_library_overview(username, True)
-    counts: dict[str, int] = {}
-    aliases: dict[str, str] = {}
-    for factor in payload.get('factors', []):
-        owner = str(factor.get('owner_username') or '').strip()
-        if not owner or not can_view_user_scope(username, owner):
-            continue
-        counts[owner] = counts.get(owner, 0) + 1
-        aliases[owner] = str(factor.get('owner_alias') or owner)
-    return jsonify({
-        'success': True,
-        'principal': username,
-        'sources': [
-            {
-                'owner_ref': owner,
-                'owner_alias': aliases[owner],
-                'factor_count': counts[owner],
-            }
-            for owner in sorted(counts)
-        ],
-    })
 
 
 @cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['GET'])
