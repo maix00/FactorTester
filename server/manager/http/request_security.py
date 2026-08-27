@@ -11,14 +11,17 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from server.manager.http.pages import (
     compliance_page as manager_compliance_page,
+)
+from server.manager.http.pages import (
     login_page as manager_login_page,
+)
+from server.manager.http.pages import (
     safe_login_next as manager_safe_login_next,
 )
 from server.manager.http.responses import json_response
 from server.manager.http.visitor_access import (
     CLIENT_ACCESS_COOKIE,
     VISITOR_COOKIE,
-    VISITOR_MODE,
     VisitorMode,
     client_access_cookie,
     normalize_visitor_id,
@@ -29,7 +32,6 @@ from server.manager.http.visitor_access import (
 )
 from server.manager.network_endpoints import client_endpoint_for_port
 from server.manager.services.network_info import local_internal_addresses
-
 
 MANAGER_ACTION_PATHS = frozenset({
     "/vibe/start",
@@ -735,6 +737,14 @@ class RequestSecurityMixin:
         # client has a session so an existing FTClient can update itself.
         if method == "GET" and path.startswith("/api/client/releases/"):
             return True
+
+        if method == "GET":
+            from server.manager.http.research_graph_catalog_routes import (
+                is_public_research_graph_catalog_read,
+            )
+
+            if is_public_research_graph_catalog_read(path):
+                return True
 
         machine_request = (
             path.startswith("/api/federation/")
