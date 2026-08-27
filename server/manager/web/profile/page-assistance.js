@@ -62,11 +62,14 @@
     const resolveProfile = async () => options.boundProfileID
         ? await window.FTPageAgentProfiles.bound(context, options.boundProfileID)
         : window.FTPageAgentProfiles.self(context);
-    if (context.isRouteCurrent?.() !== false) {
-      window.FTPageAgentDrawer.attach(
-        context, {...options, resolveProfile, assistance: controller},
-      );
-    }
+    // Registration is synchronous and every page adapter calls it from its
+    // owned render path.  Rechecking the outer route token here can observe a
+    // transient false value while a nested result tab becomes active and then
+    // permanently omit the trigger.  The page-state registration created by
+    // the drawer remains the authoritative disposal boundary.
+    window.FTPageAgentDrawer.attach(
+      context, {...options, resolveProfile, assistance: controller},
+    );
     return controller;
   }
 
