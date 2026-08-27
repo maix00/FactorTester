@@ -1,9 +1,5 @@
 (() => {
   function attach(context, options = {}) {
-    const profile = options.profile || {};
-    const profileID = String(profile.profile_id || "").trim();
-    if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
-
     const shell = document.createElement("aside");
     shell.className = "page-agent-drawer";
     shell.dataset.ftPageAgentTab = context.tabID;
@@ -36,6 +32,13 @@
     let mounted = false;
     let opening = null;
     let bridge = null;
+    let profileID = "";
+    const status = text => {
+      const value = document.createElement("p");
+      value.className = "page-agent-drawer-status";
+      value.textContent = context.t(text);
+      body.replaceChildren(value);
+    };
     const registration = context.pageState?.register?.("page-agent-drawer", {
       capture: () => ({open: !shell.hidden, profile_id: profileID}),
       restore: value => {
@@ -56,17 +59,24 @@
 
     async function open() {
       shell.hidden = false;
+      toggle.hidden = true;
       toggle.setAttribute("aria-expanded", "true");
       if (mounted) return;
       if (!opening) {
         opening = (async () => {
+          status("正在加载智能体助手…");
+          const [profile] = await Promise.all([
+            options.resolveProfile?.() || options.profile,
+            window.FTStaticLoader?.loadGroups?.(["profile"]),
+            options.assistance.prepare?.(),
+          ]);
+          profileID = String(profile?.profile_id || "").trim();
+          if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
           await context.pageAgentLifecycle.open(profileID, context.tabID);
-          await options.assistance.prepare?.();
           bridge = window.FTPageAgentContext.create(
             context, profileID, options.assistance, {isActive: () => !shell.hidden},
           );
           await bridge.start();
-          await window.FTStaticLoader?.loadGroups?.(["profile"]);
           const chat = await window.FTAgentChat.render(context, profile, {
             lifecycleManaged: true,
             profileKey: options.profileKey,
@@ -74,15 +84,21 @@
           });
           body.replaceChildren(chat);
           mounted = true;
-        })().finally(() => { opening = null; });
+        })().catch(error => {
+          bridge?.dispose();
+          bridge = null;
+          if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
+          status(`智能体助手加载失败：${String(error?.message || error)}`);
+        }).finally(() => { opening = null; });
       }
       return opening;
     }
 
     function hide() {
       shell.hidden = true;
+      toggle.hidden = false;
       toggle.setAttribute("aria-expanded", "false");
-      context.pageAgentLifecycle.hide(profileID, context.tabID);
+      if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
       context.checkpointTabSession?.();
     }
 

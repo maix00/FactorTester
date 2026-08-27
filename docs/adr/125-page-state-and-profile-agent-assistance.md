@@ -29,7 +29,9 @@ runtime directly.
    once and stops only after the last tab that opened that Profile is evicted.
 5. An assisted page registers one versioned Agent Assistance Document Adapter:
    schema, export, validation and atomic import. Registration automatically
-   mounts the right-edge trigger and drawer; pages never assemble that UI.
+   mounts only the lightweight right-edge trigger and drawer shell; pages never
+   assemble that UI. Profile resolution, Adapter preparation, Agent runtime
+   startup and chat modules are deferred until the person opens the drawer.
 6. While a drawer is open, the browser publishes the schema, complete document
    and optimistic-lock revision to a short-lived Manager memory channel. The
    FactorTester CLI inspects, validates or atomically applies one complete JSON

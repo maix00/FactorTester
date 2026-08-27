@@ -6,8 +6,12 @@ let imported = null;
 let attached = null;
 let current = {name: "old"};
 let ready = false;
+let profileReads = 0;
 global.window = {
-  FTPageAgentProfiles: {self: async () => ({profile_id: "self"})},
+  FTPageAgentProfiles: {self: async () => {
+    profileReads += 1;
+    return {profile_id: "self"};
+  }},
   FTPageAgentDrawer: {attach: (_context, options) => { attached = options; }},
 };
 global.structuredClone = value => JSON.parse(JSON.stringify(value));
@@ -30,9 +34,10 @@ vm.runInThisContext(
     },
     importDocument: document => { imported = document; current = document; },
   }, {pageKind: "factor-create"});
-  await new Promise(resolve => setImmediate(resolve));
-
-  assert.equal(attached.profile.profile_id, "self", "registration mounts the drawer itself");
+  assert.equal(profileReads, 0, "registration does not resolve a Profile eagerly");
+  assert.equal(typeof attached.resolveProfile, "function");
+  assert.equal((await attached.resolveProfile()).profile_id, "self");
+  assert.equal(profileReads, 1);
   await controller.prepare();
   assert.equal(controller.snapshot().revision, 0);
   current = {name: "person edit"};
