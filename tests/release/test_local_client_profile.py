@@ -848,10 +848,10 @@ def test_local_agent_identity_resumes_without_provider_or_model_fields(
 
     monkeypatch.setattr(FactorTesterClient, "resume_agent", fake_resume)
     first = runner.invoke(cli, [
-        "agent-flow", "resume-local", "agent-profile", "planner-a",
+        "agents", "flow", "resume-local", "agent-profile", "planner-a",
     ])
     second = runner.invoke(cli, [
-        "agent-flow", "resume-local", "agent-profile", "planner-a",
+        "agents", "flow", "resume-local", "agent-profile", "planner-a",
     ])
 
     assert first.exit_code == second.exit_code == 0
