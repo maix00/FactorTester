@@ -66,7 +66,7 @@
             context, profileID, options.assistance, {isActive: () => !shell.hidden},
           );
           await bridge.start();
-          await window.FTStaticLoader?.ensureGroup?.("profile");
+          await window.FTStaticLoader?.loadGroups?.(["profile"]);
           const chat = await window.FTAgentChat.render(context, profile, {
             lifecycleManaged: true,
             profileKey: options.profileKey,
