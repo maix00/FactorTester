@@ -4,6 +4,7 @@ from flask import Flask
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
+from server.modules.single_factor_test import research_evidence_routes as _legacy_routes  # noqa: F401
 from tests.server.data_contract_fixtures import initialize
 
 

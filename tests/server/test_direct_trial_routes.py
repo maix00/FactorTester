@@ -4,6 +4,7 @@ from flask import Flask, session
 import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
+from server.modules.single_factor_test import direct_trial_routes as _legacy_routes  # noqa: F401
 from server.services import research_runs
 from tests.server.trial_plan_fixtures import trial_plan
 

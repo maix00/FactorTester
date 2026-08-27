@@ -28,7 +28,6 @@ class FederationServiceProxyRoutesMixin:
             path == "/api/jobs"
             or path.startswith("/api/jobs/")
             or path == "/api/runs"
-            or path.startswith("/api/runs/")
             or re.fullmatch(
                 r"/api/agent-flow/agents/[A-Za-z0-9._-]{1,256}/resume",
                 path,
@@ -38,9 +37,7 @@ class FederationServiceProxyRoutesMixin:
                 path.startswith("/api/research-graphs/")
                 and not path.startswith("/api/research-graphs/user-library")
             )
-            or path.startswith("/api/research-evidence/")
             or path.startswith("/api/trial-plans/")
-            or path.startswith("/api/run-specs/")
             or path.startswith("/api/product-groups")
             or path == "/custom-factors/api/internal/public-source-applied"
         )
