@@ -44,13 +44,16 @@ def _input_options(function):
 @click.pass_context
 def assist(context: click.Context, profile_id: str) -> None:
     """Inspect or atomically fill the page currently assisted by this Agent."""
-    context.obj = _profile_id(profile_id)
+    # Resolve the capability only when a command executes so Click can render
+    # subcommand help in an ordinary shell without an Agent runtime.
+    context.obj = profile_id
 
 
 @assist.command("inspect")
 @click.pass_obj
 @friendly_errors
 def inspect(profile_id: str) -> None:
+    profile_id = _profile_id(profile_id)
     value = client_from_config().inspect_profile_agent_assistance(profile_id)
     click.echo(json.dumps(value.get("page"), ensure_ascii=False, indent=2))
 
@@ -60,6 +63,7 @@ def inspect(profile_id: str) -> None:
 @click.pass_obj
 @friendly_errors
 def validate(profile_id: str, file: Path | None, use_stdin: bool) -> None:
+    profile_id = _profile_id(profile_id)
     client_from_config().validate_profile_agent_assistance(
         profile_id, _document(file, use_stdin),
     )
@@ -76,6 +80,7 @@ def apply(
     profile_id: str, file: Path | None, use_stdin: bool,
     tab_id: str, expected_revision: int,
 ) -> None:
+    profile_id = _profile_id(profile_id)
     client_from_config().apply_profile_agent_assistance(
         profile_id, tab_id=tab_id, expected_revision=expected_revision,
         document=_document(file, use_stdin),

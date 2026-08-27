@@ -52,3 +52,10 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
         "tab_id": "factor-new", "expected_revision": 7,
         "document": {"source": "new"},
     })
+
+
+def test_assist_subcommand_help_does_not_require_agent_identity(monkeypatch) -> None:
+    monkeypatch.setattr(commands, "load_capability", lambda: None)
+    result = CliRunner().invoke(commands.assist, ["inspect", "--help"])
+    assert result.exit_code == 0
+    assert "--profile-id is required" not in result.output
