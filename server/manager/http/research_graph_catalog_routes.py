@@ -8,7 +8,6 @@ from urllib.parse import parse_qs, unquote
 from server.manager.http.responses import json_response
 from server.services.research_graph.protocol import GraphVersionConflict
 
-
 GRAPH_CATALOG_PREFIX = "/api/catalog/research-graphs"
 _VERSION_PATH = re.compile(
     rf"{re.escape(GRAPH_CATALOG_PREFIX)}/([^/]+)/versions$"
@@ -51,11 +50,13 @@ class ResearchGraphCatalogRoutesMixin:
             return None
         return session
 
-    def _catalog_read_principal(self) -> str | None:
+    def _catalog_read_principal(self, path: str) -> str | None:
         session = self._session()
         if session is not None:
             return str(session["username"])
         if self._visitor_mode() is not None:
+            return "__public_graph__"
+        if not path.startswith(f"{GRAPH_CATALOG_PREFIX}/user-library"):
             return "__public_graph__"
         json_response(self, {"success": False, "error": "login required"}, 401)
         return None
@@ -99,7 +100,7 @@ class ResearchGraphCatalogRoutesMixin:
     def _get_research_graph_catalog(self, parsed) -> bool:
         if not parsed.path.startswith(GRAPH_CATALOG_PREFIX):
             return False
-        principal = self._catalog_read_principal()
+        principal = self._catalog_read_principal(parsed.path)
         if principal is None:
             return True
         catalog = self._graph_catalog()

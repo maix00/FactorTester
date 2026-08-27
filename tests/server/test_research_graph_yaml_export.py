@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 
-from flask import Flask
 import pytest
 import yaml
+from flask import Flask
 
 import settings as Settings
-from server.manager.http.service_selection import _PUBLIC_GRAPH_READ_RE
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
 from server.services.research_graph.protocol import graph_content_hash
@@ -74,21 +73,6 @@ def test_yaml_download_is_validated_and_content_addressed(client) -> None:
     not_modified = client.get(path, headers={"If-None-Match": response.headers["ETag"]})
     assert not_modified.status_code == 304
     assert not_modified.data == b""
-
-
-def test_public_manager_route_allows_only_immutable_graph_reads() -> None:
-    assert _PUBLIC_GRAPH_READ_RE.fullmatch(
-        "/api/research-graphs/factor-research/versions/1/yaml"
-    )
-    assert _PUBLIC_GRAPH_READ_RE.fullmatch(
-        "/api/research-graphs/factor-research/versions"
-    )
-    assert _PUBLIC_GRAPH_READ_RE.fullmatch(
-        "/api/research-graphs/factor-research/active"
-    )
-    assert not _PUBLIC_GRAPH_READ_RE.fullmatch(
-        "/api/research-graphs/factor-research/versions/1/activation"
-    )
 
 
 def test_yaml_download_accepts_the_public_graph_gateway_session(client) -> None:

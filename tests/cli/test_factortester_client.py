@@ -390,6 +390,42 @@ def fake_server() -> Iterator[str]:
             success=True, server_id="public-main", principal="alice", items=[],
         )
 
+    @app.post("/api/catalog/research-graphs/versions")
+    def publish_research_graph():
+        graph = request.get_json()["graph"]
+        return jsonify(success=True, graph=graph), 201
+
+    @app.get("/api/catalog/research-graphs/<graph_id>/versions")
+    def research_graph_versions(graph_id):
+        return jsonify(success=True, versions=[{
+            "graph_id": graph_id, "version": 1,
+        }])
+
+    @app.get("/api/catalog/research-graphs/<graph_id>/active")
+    def active_research_graph(graph_id):
+        return jsonify(success=True, graph={
+            "graph_id": graph_id, "version": 1,
+        })
+
+    @app.get(
+        "/api/catalog/research-graphs/<graph_id>/versions/<int:version>/yaml"
+    )
+    def research_graph_yaml(graph_id, version):
+        assert request.args.get("locale") == "en"
+        return Response(
+            f"graph_id: {graph_id}\nversion: {version}\n",
+            content_type="application/yaml",
+        )
+
+    @app.post(
+        "/api/catalog/research-graphs/<graph_id>/versions/"
+        "<int:version>/activate"
+    )
+    def activate_research_graph(graph_id, version):
+        return jsonify(success=True, graph={
+            "graph_id": graph_id, "version": version,
+        }), 201
+
     @app.post("/api/catalog/factor-sets")
     def register_factor_set():
         descriptor = request.get_json()["descriptor"]
@@ -485,6 +521,20 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.factor_source_sync_manifest(
         include_subordinates=False,
     )["server_id"] == "public-main"
+    graph = {"graph_id": "factor-research", "version": 1}
+    assert client.publish_research_graph(graph)["graph_id"] == "factor-research"
+    assert client.list_research_graph_versions("factor-research")[0][
+        "version"
+    ] == 1
+    assert client.get_active_research_graph("factor-research")[
+        "graph_id"
+    ] == "factor-research"
+    assert b"graph_id: factor-research" in client.download_research_graph_yaml(
+        "factor-research", 1, locale="en",
+    )
+    assert client.activate_research_graph("factor-research", 1)[
+        "version"
+    ] == 1
     assert client.product_catalog()["products"][0]["name"] == "RB.SHF"
     assert client.product_source_catalog()["sources"][0]["source_id"] == (
         "LocalCNFutures"

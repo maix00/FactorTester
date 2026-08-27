@@ -23,14 +23,10 @@ from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 _SERVICE_GET_PREFIXES = (
     "/api/report-references/validate",
     "/api/profile-research",
-    "/api/research-graphs/",
     "/api/research-evidence/",
     "/api/trial-plans/direct/",
     "/api/run-specs/",
     "/api/runs/",
-)
-_PUBLIC_GRAPH_READ_RE = re.compile(
-    r"/api/research-graphs/[^/]+/(?:active|versions(?:/[0-9]+/(?:yaml|presentations))?)$"
 )
 _MAX_PREPARED_RUN_BODY_BYTES = 11 * 1024 * 1024
 
@@ -251,12 +247,7 @@ class ServiceSelectionRoutesMixin:
                 "code": "visitor_private_service_read_forbidden",
             }, 403)
             return True
-        public_graph = (
-            session is None
-            and visitor is None
-            and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
-        )
-        if session is None and visitor is None and not public_graph:
+        if session is None and visitor is None:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -270,7 +261,6 @@ class ServiceSelectionRoutesMixin:
                 path=self._forwarded_service_path(parsed),
                 principal=(
                     visitor.principal if visitor is not None
-                    else "__public_graph__" if public_graph
                     else str(session["username"])
                 ),
             )
