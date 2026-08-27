@@ -24,6 +24,49 @@ def _catalog_exchange(product: object, name: str) -> str:
 class ClientProductCatalogMixin:
     """Project product metadata without selecting an execution port."""
 
+    def product_group_summaries(self, principal: str) -> list[dict[str, Any]]:
+        """Return bounded list rows without expanding product memberships."""
+        from server.modules.products.product_group_store import (
+            load_authoritative_product_groups,
+        )
+
+        groups = load_authoritative_product_groups(
+            principal,
+            domain_rows=self._account_catalog_entities(
+                principal,
+                entity_type="product_group",
+                include_shared=False,
+                include_deleted=True,
+            ),
+        )
+        summaries = []
+        for group in groups:
+            group_id = str(group.get("id") or "").strip()
+            paths = group.get("paths") or []
+            products = group.get("product_names") or []
+            summaries.append({
+                "id": group_id,
+                "group_ref": f"product-group:{group_id}",
+                "name": str(group.get("name") or group_id),
+                "path_count": len(paths) if isinstance(paths, list) else 0,
+                "product_count": (
+                    len(products) if isinstance(products, list) else 0
+                ),
+                "owner_ref": str(
+                    group.get("owner_ref") or f"user:{principal}"
+                ),
+                "creator_kind": str(group.get("creator_kind") or "user"),
+                "creator_ref": str(group.get("creator_ref") or ""),
+                "catalog_origin": "server",
+            })
+        return sorted(
+            summaries,
+            key=lambda item: (
+                str(item.get("name") or "").casefold(),
+                str(item.get("group_ref") or ""),
+            ),
+        )
+
     def product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return account groups projected against the server catalog."""
         from server.manager.domain.product_groups import (

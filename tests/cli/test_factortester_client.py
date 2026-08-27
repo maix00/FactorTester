@@ -295,6 +295,7 @@ def fake_server() -> Iterator[str]:
 
     @app.get("/api/catalog/product-groups")
     def product_groups():
+        assert request.args.get("view") == "summary"
         return jsonify(success=True, groups=[{"id": "pg-1", "name": "中国期货日盘"}])
 
     @app.post("/api/data-availability")
