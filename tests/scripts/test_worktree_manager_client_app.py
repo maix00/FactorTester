@@ -3095,6 +3095,56 @@ def test_manager_factor_source_manifest_does_not_select_a_service_port(
     })]
 
 
+def test_manager_factor_library_provenance_does_not_select_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    catalog = {
+        "factors": [{
+            "factor_alias": "Momentum|N:3m",
+            "owner_username": "user@1",
+            "owner_alias": "User",
+            "product_group": "CNFutures",
+            "source_code": "must not cross the control plane",
+        }],
+    }
+    monkeypatch.setattr(
+        state.federated_public_data,
+        "factor_library",
+        lambda principal: catalog if principal == "user@1" else {},
+    )
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail("provenance must stay in Manager"),
+    )
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-library-sources",
+            headers=headers,
+        )) as response:
+            owners = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-library-sources/"
+            "user%401/projection?product_group=CNFutures",
+            headers=headers,
+        )) as response:
+            projection = json.loads(response.read())
+
+    assert owners["sources"][0]["owner_ref"] == "user@1"
+    assert projection["projection"]["factors"] == [{
+        "factor_alias": "Momentum|N:3m",
+        "owner_username": "user@1",
+        "owner_alias": "User",
+        "product_group": "CNFutures",
+    }]
+    assert "source_code" not in json.dumps(projection)
+    assert "/custom-factors/api/client/factor-library-sources" not in (
+        _SERVICE_GET_PREFIXES
+    )
+
+
 def test_manager_factor_set_writes_do_not_select_a_service_port(
     tmp_path, monkeypatch,
 ) -> None:

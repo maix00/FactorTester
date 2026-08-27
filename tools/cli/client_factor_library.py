@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from .client_base import ClientMixinBase
 
@@ -406,13 +407,13 @@ class FactorLibraryClientMixin(ClientMixinBase):
         owner_ref: str,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.get(
-            f"/custom-factors/api/client/factor-library-sources/"
-            f"{owner_ref}/projection",
+            f"/api/catalog/factor-library-sources/"
+            f"{quote(owner_ref, safe='')}/projection",
         ))
 
     def factor_library_sources(self) -> dict[str, Any]:
         return self._expect_success(self.session.get(
-            "/custom-factors/api/client/factor-library-sources"
+            "/api/catalog/factor-library-sources"
         ))
 
     def factor_library_configs(

@@ -462,6 +462,37 @@ class CatalogRoutesMixin:
                     ) == "1",
                 ))
                 return True
+            provenance_match = re.fullmatch(
+                r"/api/catalog/factor-library-sources"
+                r"(?:/([^/]+)/projection)?",
+                parsed.path,
+            )
+            if provenance_match is not None:
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户因子库来源"
+                    )
+                from server.services.factor_library_provenance import (
+                    FactorLibraryProvenance,
+                )
+
+                catalog = factor_service.factor_library(principal)
+                owner_ref = provenance_match.group(1)
+                provenance = FactorLibraryProvenance()
+                value = (
+                    provenance.projection(
+                        catalog,
+                        principal=principal,
+                        owner_ref=unquote(owner_ref),
+                        product_group=str(
+                            query.get("product_group", [""])[0] or ""
+                        ),
+                    )
+                    if owner_ref is not None
+                    else provenance.owners(catalog, principal=principal)
+                )
+                json_response(self, value)
+                return True
             if parsed.path == "/api/catalog/factors":
                 if visitor is not None:
                     from server.manager.services.factor_library_scopes import (
