@@ -40,10 +40,12 @@
       body.replaceChildren(value);
     };
     const registration = context.pageState?.register?.("page-agent-drawer", {
-      capture: () => ({open: !shell.hidden, profile_id: profileID}),
-      restore: value => {
-        if (value?.open) queueMicrotask(() => { void open(); });
-      },
+      // Drawer visibility is intentionally ephemeral. Restoring an open
+      // drawer would start Profile resolution, Agent startup and ChatKit while
+      // the page itself is still restoring, recreating the eager-load race
+      // this shared boundary exists to prevent.
+      capture: () => ({profile_id: profileID}),
+      restore: () => {},
       describe: () => ({
         page: options.pageKind || "",
         section: options.section || "",

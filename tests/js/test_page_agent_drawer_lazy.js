@@ -21,6 +21,7 @@ global.FTIcons = {node: () => new Element("svg")};
 let resolveProfile;
 const profilePromise = new Promise(resolve => { resolveProfile = resolve; });
 const events = [];
+let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
 global.FTPageAgentContext = {create: () => ({
   start: async () => events.push(["bridge"]), dispose: () => {},
@@ -36,7 +37,7 @@ vm.runInThisContext(
 (async () => {
   const context = {
     tabID: "tab", t: value => value,
-    pageState: {register: () => ({})},
+    pageState: {register: (_name, hooks) => { stateHooks = hooks; return {}; }},
     pageAgentLifecycle: {
       open: async profileID => events.push(["open", profileID]), hide: () => {},
     },
@@ -47,6 +48,10 @@ vm.runInThisContext(
   });
   assert.equal(body.children.length, 2, "registration only mounts shell and trigger");
   assert.equal(events.length, 0, "registration performs no deferred work");
+  stateHooks.restore({open: true, profile_id: "self"});
+  await Promise.resolve();
+  assert.equal(drawer.shell.hidden, true, "restoring a page never reopens the drawer");
+  assert.equal(events.length, 0, "page restoration performs no Agent work");
 
   const opening = drawer.open();
   await Promise.resolve();
