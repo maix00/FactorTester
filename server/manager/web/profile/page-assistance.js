@@ -59,13 +59,14 @@
         return revision;
       },
     });
-    void (async () => {
-      const profile = options.boundProfileID
+    const resolveProfile = async () => options.boundProfileID
         ? await window.FTPageAgentProfiles.bound(context, options.boundProfileID)
-        : await window.FTPageAgentProfiles.self(context);
-      if (context.isRouteCurrent?.() === false) return;
-      window.FTPageAgentDrawer.attach(context, {...options, profile, assistance: controller});
-    })().catch(error => context.showNotice?.(String(error?.message || error)));
+        : window.FTPageAgentProfiles.self(context);
+    if (context.isRouteCurrent?.() !== false) {
+      window.FTPageAgentDrawer.attach(
+        context, {...options, resolveProfile, assistance: controller},
+      );
+    }
     return controller;
   }
 
