@@ -47,6 +47,7 @@ from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMix
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.server_research_routes import ServerResearchRoutesMixin
+from server.manager.http.profile_research_routes import ProfileResearchRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.mihomo_routes import MihomoDashboardRoutesMixin
@@ -548,6 +549,7 @@ class Handler(
     AgentAppServerRoutesMixin,
     AgentRoutesMixin,
     ServerResearchRoutesMixin,
+    ProfileResearchRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,
     WriteRoutesMixin,

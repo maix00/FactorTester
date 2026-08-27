@@ -29,9 +29,9 @@ from tests.release.report_tree_fixtures import (
     publish_research_checkpoint,
 )
 from tests.server.test_current_report_checkpoint import _seed
-from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import research_result_report as result_commands
+from tools.cli.commands.research_graph import research_graph as legacy_research_graph
 from tools.cli.http import ClientConfig, HttpSession, save_config
 from tools.cli.release.research_reporting.audit_objects import (
     stage_run_spec_preview,
@@ -198,9 +198,8 @@ def test_result_route_cli_local_publish_and_server_append(
     with _server(app) as base_url:
         cli_config = tmp_path / "client-connection.json"
         save_config(ClientConfig(base_url), path=cli_config)
-        result = CliRunner().invoke(cli, [
-            "research-graph",
-            "result-report",
+        result = CliRunner().invoke(
+            legacy_research_graph.commands["result-report"], [
             "instance-1",
             "branch-1",
             "--action-id",
@@ -276,9 +275,8 @@ def test_audit_backfill_accepts_authoritative_command_wrapper(
     monkeypatch.setattr(
         result_commands, "client_from_config", lambda: client,
     )
-    result = CliRunner().invoke(cli, [
-        "research-graph",
-        "result-audit-backfill",
+    audit_command = legacy_research_graph.commands["result-audit-backfill"]
+    result = CliRunner().invoke(audit_command, [
         "instance-1",
         "branch-1",
         "--audited-checkpoint-file",
@@ -293,9 +291,7 @@ def test_audit_backfill_accepts_authoritative_command_wrapper(
     checkpoint_path.write_text(
         json.dumps(checkpoint), encoding="utf-8",
     )
-    replay = CliRunner().invoke(cli, [
-        "research-graph",
-        "result-audit-backfill",
+    replay = CliRunner().invoke(audit_command, [
         "instance-1",
         "branch-1",
         "--audited-checkpoint-file",
