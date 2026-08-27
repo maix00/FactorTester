@@ -325,7 +325,7 @@
       return;
     }
     context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
-    const payload = await context.api(context.servicePath(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`));
+    const payload = await context.api(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`);
     if (!current(context)) return;
     const reference = payload.reference || payload.data?.reference || {};
     context.setHeading(reference.label || context.t("产品详情"), context.t("产品库"));
