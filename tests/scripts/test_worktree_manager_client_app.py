@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pytest
@@ -2575,6 +2576,7 @@ def test_factor_source_reads_are_not_registered_business_port_routes() -> None:
         "/custom-factors/api/client/factor-sets",
         "/custom-factors/api/source-sync/",
         "/api/research-graphs/",
+        "/api/report-references/validate",
     )
 
     assert all(
@@ -3144,6 +3146,28 @@ def test_manager_factor_library_provenance_does_not_select_a_service_port(
     assert "/custom-factors/api/client/factor-library-sources" not in (
         _SERVICE_GET_PREFIXES
     )
+
+
+def test_manager_validates_report_references_without_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail("reference validation must stay in Manager"),
+    )
+    target = "Product/Futures/CNFutures/_products/SI.GFE"
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/report-references/validate"
+            f"?kind=product&target_ref={quote(target, safe='')}",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["reference"]["target_ref"] == target
+    assert "/api/report-references/validate" not in _SERVICE_GET_PREFIXES
 
 
 def test_manager_factor_set_writes_do_not_select_a_service_port(

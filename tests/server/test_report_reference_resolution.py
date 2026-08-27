@@ -1,9 +1,6 @@
 import pytest
-from flask import Flask
 
-from server.modules.shared import shared_bp
 from server.modules.shared.price_services import cached_contracts, cached_products
-from server.modules.shared import report_references as routes  # noqa: F401
 from server.services.report_reference_resolution import (
     validate_report_reference,
 )
@@ -44,31 +41,6 @@ def test_product_reference_rejects_a_noncanonical_path():
             products=cached_products(),
             contracts=(),
         )
-
-
-def test_authenticated_report_reference_endpoint_only_validates_exact_path():
-    app = Flask(__name__)
-    app.secret_key = "test-secret"
-    app.register_blueprint(shared_bp)
-    client = app.test_client()
-    target_ref = "Product/Futures/CNFutures/_products/SI.GFE"
-    unauthorized = client.get(
-        "/api/report-references/validate",
-        query_string={"kind": "product", "target_ref": target_ref},
-        headers={"Accept": "application/json"},
-    )
-    assert unauthorized.status_code == 401
-    with client.session_transaction() as session:
-        session["username"] = "alice"
-
-    response = client.get(
-        "/api/report-references/validate",
-        query_string={"kind": "product", "target_ref": target_ref},
-        headers={"Accept": "application/json"},
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["reference"]["target_ref"] == target_ref
 
 
 def test_exact_contract_reference_is_validated_without_rewriting():

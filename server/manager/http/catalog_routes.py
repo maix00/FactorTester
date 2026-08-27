@@ -75,6 +75,35 @@ def _catalog_page(
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
 
+    def _serve_report_reference(self, parsed) -> bool:
+        if parsed.path != "/api/report-references/validate":
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        from server.modules.shared.price_services import (
+            cached_contracts,
+            cached_products,
+        )
+        from server.services.report_reference_resolution import (
+            validate_report_reference,
+        )
+
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        try:
+            reference = validate_report_reference(
+                kind=str(query.get("kind", [""])[0] or ""),
+                target_ref=str(query.get("target_ref", [""])[0] or ""),
+                products=cached_products(),
+                contracts=cached_contracts(),
+            )
+        except (LookupError, TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        json_response(self, {"success": True, "reference": reference})
+        return True
+
     def _visible_factor_set_owner(
         self, principal: str, target_ref: str, requested_owner: str,
     ) -> str:
@@ -1022,6 +1051,8 @@ class CatalogRoutesMixin:
             if method == "GET":
                 return bool(
                     self._get_research_graph_catalog(parsed)
+                    or
+                    self._serve_report_reference(parsed)
                     or
                     self._serve_test_authoring(parsed, method=method)
                     or self._serve_product_catalog(parsed)
