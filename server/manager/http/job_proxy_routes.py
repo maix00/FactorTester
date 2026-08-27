@@ -24,7 +24,6 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/research-agent-executions",
         r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",
-        r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
         r"/custom-factors/api/workspace/push",
         r"/custom-factors/api/(?:create|create-public|validate)",

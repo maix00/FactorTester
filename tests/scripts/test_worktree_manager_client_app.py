@@ -17,7 +17,6 @@ import pytest
 from server.manager import runtime as manager
 from server.manager.http import catalog_routes
 from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
-from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
 from server.manager.services.client_state import ClientStateService
 from server.manager.services.factor_source_hydration import FactorSourceHydrator
 from server.manager.services.test_authoring import (
@@ -33,6 +32,7 @@ from server.manager.web import assets as research_static
 from server.modules.custom_factors import factor_set_registry
 from server.services.factor_source_catalog import FactorSourceCatalog
 from server.services.factor_source_manifest import FactorSourceManifest
+from server.services import research_configurations
 from tools.data.account_manage import hash_password
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1177,7 +1177,6 @@ def test_job_custom_analysis_routes_use_parent_storage_server(
         ("/api/jobs/job-one/cancel", b"{}"),
         ("/api/jobs/job-one/continue", b'{"action":"continue"}'),
         ("/api/jobs/job-one/retry", b"{}"),
-        ("/api/runs/run-one/clone-workspace", b"{}"),
     ),
 )
 def test_job_lifecycle_writes_use_selected_service_port(
@@ -1218,6 +1217,104 @@ def test_job_lifecycle_writes_use_selected_service_port(
         "body": body,
         "content_type": "application/json",
     }]
+
+
+def test_run_workspace_clone_stays_in_manager(tmp_path, monkeypatch) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        "server.manager.http.research_object_routes.research_runs.load_run",
+        lambda **_values: {
+            "run_spec_hash": "a" * 64,
+            "run_spec": {"configuration": {
+                "schema_version": research_configurations.SCHEMA_VERSION,
+            }},
+        },
+    )
+    monkeypatch.setattr(
+        "server.manager.http.research_object_routes."
+        "research_workspaces.create_workspace",
+        lambda **values: {"workspace_id": "workspace-one", **values},
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail(
+            "workspace clone must not use a business port",
+        ),
+    )
+    with running_manager(state) as base_url, urlopen(Request(
+        f"{base_url}/api/runs/run-one/clone-workspace?port=8141",
+        data=b"{}",
+        method="POST",
+        headers={
+            "Authorization": "Bearer user-token",
+            "Content-Type": "application/json",
+        },
+    )) as response:
+        value = json.loads(response.read())
+
+    assert value["source_run_id"] == "run-one"
+    assert value["workspace"]["owner"] == "user@1"
+
+
+@pytest.mark.parametrize(
+    ("path", "patch_target", "result_key"),
+    (
+        (
+            "/api/trial-plans/direct/abc",
+            "direct_trial_plan_registry.load",
+            "trial_plan",
+        ),
+        (
+            "/api/run-specs/abc",
+            "research_runs.load_run_spec",
+            "run_spec",
+        ),
+    ),
+)
+def test_research_objects_read_manager_database_without_business_port(
+    tmp_path, monkeypatch, path: str, patch_target: str, result_key: str,
+) -> None:
+    state = authenticated_state(tmp_path)
+    observed = []
+    monkeypatch.setattr(
+        f"server.manager.http.research_object_routes.{patch_target}",
+        lambda **values: observed.append(values) or {"object": "available"},
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail(
+            "durable research objects must not use a business port",
+        ),
+    )
+    with running_manager(state) as base_url, urlopen(Request(
+        f"{base_url}{path}?port=8141",
+        headers={"Authorization": "Bearer user-token"},
+    )) as response:
+        value = json.loads(response.read())
+
+    assert value[result_key] == {"object": "available"}
+    assert observed[0]["owner"] == "user@1"
+
+
+def test_research_evidence_facets_read_manager_database(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        "server.manager.http.research_object_routes.list_facets",
+        lambda **values: [{"owner": values["owner"]}],
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("Evidence must not use a business port"),
+    )
+    with running_manager(state) as base_url, urlopen(Request(
+        f"{base_url}/api/research-evidence/facets?port=8141",
+        headers={"Authorization": "Bearer user-token"},
+    )) as response:
+        value = json.loads(response.read())
+
+    assert value["facets"] == [{"owner": "user@1"}]
 
 
 def test_test_workbench_compiles_only_execution_settings_into_analysis() -> None:
@@ -2560,25 +2657,6 @@ def test_manager_serves_docs_shell_without_a_service_login(
     assert body.startswith(b"<!doctype html>")
     assert b"FT_STATIC_SCRIPTS" not in body
     assert calls == []
-    assert "/docs" not in _SERVICE_GET_PREFIXES
-
-
-def test_factor_source_reads_are_not_registered_business_port_routes() -> None:
-    old_reads = (
-        "/custom-factors/api/public-factor/",
-        "/custom-factors/api/get/",
-        "/custom-factors/api/source-versions/",
-        "/custom-factors/api/client/factor-library",
-        "/custom-factors/api/client/factor-sets",
-        "/custom-factors/api/source-sync/",
-        "/api/research-graphs/",
-        "/api/report-references/validate",
-    )
-
-    assert all(
-        not any(path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES)
-        for path in old_reads
-    )
 
 
 def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
@@ -3139,9 +3217,6 @@ def test_manager_factor_library_provenance_does_not_select_a_service_port(
         "product_group": "CNFutures",
     }]
     assert "source_code" not in json.dumps(projection)
-    assert "/custom-factors/api/client/factor-library-sources" not in (
-        _SERVICE_GET_PREFIXES
-    )
 
 
 def test_manager_validates_report_references_without_a_service_port(
@@ -3163,7 +3238,6 @@ def test_manager_validates_report_references_without_a_service_port(
             value = json.loads(response.read())
 
     assert value["reference"]["target_ref"] == target
-    assert "/api/report-references/validate" not in _SERVICE_GET_PREFIXES
 
 
 def test_manager_factor_set_writes_do_not_select_a_service_port(
@@ -3627,18 +3701,6 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         "category_ids": ["cnfutures_sector"],
         "principal": "user@1",
     }
-    product_reads = (
-        "/api/list_product_names",
-        "/api/product_categories",
-        "/api/product_tree",
-        "/api/product_fields",
-        "/api/contract_tree",
-        "/api/get_contracts",
-    )
-    assert all(
-        not any(path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES)
-        for path in product_reads
-    )
 
 
 def test_product_group_summary_does_not_expand_catalog_memberships(

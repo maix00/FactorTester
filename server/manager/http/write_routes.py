@@ -64,6 +64,8 @@ class WriteRoutesMixin:
             return
         if self._post_client_research_routes(parsed):
             return
+        if self._post_research_object_routes(parsed):
+            return
         if parsed.path == "/api/device/challenge":
             self._device_challenge()
             return
@@ -345,6 +347,8 @@ class WriteRoutesMixin:
             return
         if self._patch_profile_research_routes(parsed):
             return
+        if self._patch_research_object_routes(parsed):
+            return
         if self._proxy_job_request(parsed, method="PATCH"):
             return
         if self._proxy_service_write(parsed, method="PATCH"):
@@ -390,6 +394,8 @@ class WriteRoutesMixin:
         if self._proxy_job_request(parsed, method="DELETE"):
             return
         if self._serve_manager_application(parsed, method="DELETE"):
+            return
+        if self._delete_research_object_routes(parsed):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
             return
