@@ -75,6 +75,24 @@ def _catalog_page(
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
 
+    def _visible_factor_set_owner(
+        self, principal: str, target_ref: str, requested_owner: str,
+    ) -> str:
+        """Resolve own/direct-child Factor Set ownership once for all reads."""
+        owner = str(requested_owner or principal).strip()
+        if owner == principal:
+            return principal
+        subordinate = self.state.client_state.factor_set_scopes(
+            principal,
+        ).get("subordinates") or []
+        if any(
+            str(item.get("target_ref") or "") == target_ref
+            and str(item.get("owner_username") or "") == owner
+            for item in subordinate
+        ):
+            return owner
+        raise PermissionError("无权查看该用户因子集合")
+
     def _ensure_visitor_price_access(self, payload: dict) -> None:
         """Reject price requests whose product is internal-only.
 
@@ -510,9 +528,17 @@ class CatalogRoutesMixin:
                 limit = min(100, max(
                     1, int(query.get("limit", ["100"])[0] or 100),
                 ))
-                value = self.state.client_state.factor_set_detail(
+                target_ref = str(
+                    query.get("target_ref", [""])[0] or ""
+                )
+                owner = self._visible_factor_set_owner(
                     principal,
-                    str(query.get("target_ref", [""])[0] or ""),
+                    target_ref,
+                    str(query.get("owner_username", [principal])[0] or principal),
+                )
+                value = self.state.client_state.factor_set_detail(
+                    owner,
+                    target_ref,
                     offset=offset,
                     limit=limit,
                 )
@@ -530,9 +556,16 @@ class CatalogRoutesMixin:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
                     )
-                value = self.state.client_state.factor_set_descriptor(
+                target_ref = str(
+                    query.get("target_ref", [""])[0] or ""
+                )
+                owner = self._visible_factor_set_owner(
                     principal,
-                    str(query.get("target_ref", [""])[0] or ""),
+                    target_ref,
+                    str(query.get("owner_username", [principal])[0] or principal),
+                )
+                value = self.state.client_state.factor_set_descriptor(
+                    owner, target_ref,
                 )
                 if value is None:
                     json_response(self, {
@@ -565,6 +598,66 @@ class CatalogRoutesMixin:
             }, 503)
             return True
         return False
+
+    def _serve_factor_catalog_write(self, parsed, *, method: str) -> bool:
+        """Write principal-owned Factor Sets without selecting a service port."""
+        if parsed.path != "/api/catalog/factor-sets":
+            return False
+        session = self._session()
+        if session is None or self._visitor_mode() is not None:
+            json_response(self, {
+                "success": False, "error": "login required",
+            }, 401)
+            return True
+        principal = str(session["username"])
+        from server.modules.custom_factors.factor_set_registry import (
+            author_factor_set,
+            register_factor_set,
+            unregister_factor_set,
+        )
+
+        try:
+            if method == "DELETE":
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                target_ref = str(
+                    query.get("target_ref", [""])[0] or ""
+                ).strip()
+                if not target_ref:
+                    raise ValueError("target_ref 不能为空")
+                json_response(self, {
+                    "success": unregister_factor_set(principal, target_ref),
+                })
+                return True
+            if method != "POST":
+                return False
+            payload = self._json_body(2 * 1024 * 1024)
+            definition = payload.get("definition")
+            if isinstance(definition, dict):
+                value = author_factor_set(
+                    principal,
+                    definition,
+                    persist=payload.get("persist") is not False,
+                    replace_target_ref=str(
+                        payload.get("replace_target_ref") or ""
+                    ),
+                )
+            else:
+                descriptor = payload.get("descriptor")
+                if not isinstance(descriptor, dict):
+                    raise ValueError("descriptor 必须是对象")
+                value = register_factor_set(principal, descriptor)
+        except (KeyError, TypeError, ValueError) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 400)
+            return True
+        except (OSError, RuntimeError, ImportError) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 503)
+            return True
+        json_response(self, {"success": True, "factor_set": value})
+        return True
 
     def _serve_product_catalog_write(self, parsed) -> bool:
         """Serve Manager-owned catalog writes without a service port."""
@@ -890,15 +983,18 @@ class CatalogRoutesMixin:
                 return bool(
                     self._post_research_graph_catalog(parsed)
                     or self._serve_product_catalog_write(parsed)
+                    or self._serve_factor_catalog_write(parsed, method=method)
                     or self._serve_test_authoring(parsed, method=method)
                 )
             if method == "DELETE":
                 return bool(
                     self._delete_research_graph_catalog(parsed)
                     or self._serve_product_catalog_write(parsed)
+                    or self._serve_factor_catalog_write(parsed, method=method)
                     or self._serve_test_authoring(parsed, method=method)
                 )
             return bool(
                 self._serve_product_catalog_write(parsed)
+                or self._serve_factor_catalog_write(parsed, method=method)
                 or self._serve_test_authoring(parsed, method=method)
             )

@@ -495,9 +495,15 @@
     if (selected?.visibility === "local") {
       return nativeRequest("members", {target_ref: targetRef, offset, limit: 100});
     }
-    return context.api(
-      `/api/catalog/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}&offset=${offset}&limit=100`,
-    );
+    const query = new URLSearchParams({
+      target_ref: targetRef,
+      offset: String(offset),
+      limit: "100",
+    });
+    if (selected?.owner_username) {
+      query.set("owner_username", selected.owner_username);
+    }
+    return context.api(`/api/catalog/factor-sets/detail?${query}`);
   }
 
   function linkRows(view, items, path, context, onNavigate = null) {
