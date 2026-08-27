@@ -84,7 +84,7 @@
     let offset = 0;
     for (let page = 0; page < 11; page += 1) {
       const payload = await context.api(
-        `/custom-factors/api/client/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}`
+        `/api/catalog/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}`
         + `&offset=${offset}&limit=100`,
       );
       const value = payload.factor_set || payload;

@@ -29,6 +29,7 @@ from server.manager.storage.control_db import ControlDatabaseUnavailable
 from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.preferences import UserPreferenceStore
 from server.manager.web import assets as research_static
+from server.modules.custom_factors import factor_set_registry
 from server.services.factor_source_catalog import FactorSourceCatalog
 from tools.data.account_manage import hash_password
 
@@ -2569,9 +2570,14 @@ def test_factor_source_reads_are_not_registered_business_port_routes() -> None:
         "/custom-factors/api/public-factor/",
         "/custom-factors/api/get/",
         "/custom-factors/api/source-versions/",
+        "/custom-factors/api/client/factor-library",
+        "/custom-factors/api/client/factor-sets",
     )
 
-    assert all(path not in _SERVICE_GET_PREFIXES for path in old_reads)
+    assert all(
+        not any(path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES)
+        for path in old_reads
+    )
 
 
 def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
@@ -3049,6 +3055,101 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
     assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
+
+
+def test_manager_factor_set_writes_do_not_select_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        factor_set_registry,
+        "author_factor_set",
+        lambda principal, definition, **options: calls.append(
+            ("author", principal, definition, options)
+        ) or {"target_ref": "factor-set:new"},
+    )
+    monkeypatch.setattr(
+        factor_set_registry,
+        "unregister_factor_set",
+        lambda principal, target_ref: calls.append(
+            ("delete", principal, target_ref)
+        ) or True,
+    )
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("Factor Set writes must stay in Manager"),
+    )
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+    with running_manager(state) as base_url:
+        body = json.dumps({
+            "persist": True,
+            "definition": {
+                "set_id": "new", "alias": "New", "members": [{}],
+            },
+        }).encode()
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets",
+            data=body,
+            headers=headers,
+            method="POST",
+        )) as response:
+            created = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets?target_ref=factor-set%3Anew",
+            headers=headers,
+            method="DELETE",
+        )) as response:
+            deleted = json.loads(response.read())
+
+    assert created["factor_set"]["target_ref"] == "factor-set:new"
+    assert deleted["success"] is True
+    assert calls[0][0:2] == ("author", "user@1")
+    assert calls[1] == ("delete", "user@1", "factor-set:new")
+
+
+def test_manager_factor_set_detail_allows_only_a_direct_child(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.client_state,
+        "factor_set_scopes",
+        lambda principal, query="": {
+            "mine": [],
+            "subordinates": [{
+                "target_ref": "factor-set:child",
+                "owner_username": "child@1",
+            }],
+        },
+    )
+    monkeypatch.setattr(
+        state.client_state,
+        "factor_set_detail",
+        lambda principal, target_ref, **_values: {
+            "target_ref": target_ref, "owner_username": principal,
+        },
+    )
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets/detail"
+            "?target_ref=factor-set%3Achild&owner_username=child%401",
+            headers=headers,
+        )) as response:
+            child = json.loads(response.read())
+        with pytest.raises(HTTPError) as forbidden:
+            urlopen(Request(
+                f"{base_url}/api/catalog/factor-sets/detail"
+                "?target_ref=factor-set%3Ahidden&owner_username=peer%401",
+                headers=headers,
+            ))
+
+    assert child["factor_set"]["owner_username"] == "child@1"
+    assert forbidden.value.code == 403
 
 
 def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:

@@ -163,7 +163,7 @@
       if (!targetRef || !window.confirm(context.t("确认删除该因子集合？"))) return;
       try {
         await context.api(
-          `/custom-factors/api/client/factor-sets?target_ref=${encodeURIComponent(targetRef)}`,
+          `/api/catalog/factor-sets?target_ref=${encodeURIComponent(targetRef)}`,
           {method: "DELETE"},
         );
         context.showNotice?.(context.t("已删除"));

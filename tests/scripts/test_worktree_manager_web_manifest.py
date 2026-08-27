@@ -960,6 +960,8 @@ def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
     assert "square.and.pencil" in source
     assert "onEdit: item => editItem" in catalog
     assert "?mode=edit" in catalog
+    assert "/api/catalog/factor-sets?target_ref=" in catalog
+    assert "/custom-factors/api/client/factor-sets" not in catalog
 
 
 def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column() -> None:
@@ -2213,6 +2215,8 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert "FTUI.actionButton(" in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
+    assert 'context.api("/api/catalog/factor-sets"' in set_editor
+    assert "/custom-factors/api/client/factor-sets" not in set_editor
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:
