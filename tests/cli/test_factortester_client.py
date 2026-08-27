@@ -364,6 +364,13 @@ def fake_server() -> Iterator[str]:
             },
         )
 
+    @app.get("/api/catalog/factor-sources/manifest")
+    def factor_source_manifest():
+        assert request.args.get("include_subordinates") == "0"
+        return jsonify(
+            success=True, server_id="public-main", principal="alice", items=[],
+        )
+
     @app.post("/api/catalog/factor-sets")
     def register_factor_set():
         descriptor = request.get_json()["descriptor"]
@@ -450,6 +457,9 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "target_ref": "factor-set:momentum",
     })["factor_set"]["target_ref"] == "factor-set:momentum"
     assert client.unregister_factor_set("factor-set:momentum")["success"] is True
+    assert client.factor_source_sync_manifest(
+        include_subordinates=False,
+    )["server_id"] == "public-main"
     assert client.product_catalog()["products"][0]["name"] == "RB.SHF"
     assert client.product_source_catalog()["sources"][0]["source_id"] == (
         "LocalCNFutures"
