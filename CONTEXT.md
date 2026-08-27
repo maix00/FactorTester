@@ -40,6 +40,14 @@ Work Package 是一项研究，Branch 是其中一条决策路径。研究对象
 Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
 ADR-047。
 
+### Agent Assistance Document
+
+需要智能体协助填写的页面注册一个版本化结构文档及其 schema、导出、校验和原子导入
+Adapter。Profile Agent 通过短期页面通道一次读取或替换完整文档，不逐字段操作 DOM。
+测试页面文档中的 `configuration` 与随后 RunSpec 冻结的 `configuration` 使用同一结构；
+RunSpec 只额外增加不可变身份、解析结果和执行元数据。其他页面分别使用因子家族、因子或
+辅助分析草稿文档。导入必须携带页面 revision，冲突时不得覆盖用户的新修改。
+
 ### IC 核心测试与附加分析
 
 IC 的一个核心测试单元由产品范围、冻结因子、前瞻收益期、入场 Delay、IC

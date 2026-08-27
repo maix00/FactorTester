@@ -6,6 +6,7 @@ import click
 
 from tools.cli.commands.agent import doctor, factor_plan
 from tools.cli.commands.auth import configure, login, logout
+from tools.cli.commands.assist import assist
 from tools.cli.commands.client_release import client
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.protocol import protocol
@@ -77,6 +78,7 @@ def cli(ports: tuple[int, ...]) -> None:
 
 
 cli.add_command(configure)
+cli.add_command(assist)
 cli.add_command(client)
 cli.add_command(login)
 cli.add_command(logout)

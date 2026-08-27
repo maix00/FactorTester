@@ -27,8 +27,11 @@
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "page-agent-drawer-toggle";
-    toggle.textContent = options.buttonLabel || context.t("智能体助手");
-    (options.buttonHost || context.toolbar || context.content).append(toggle);
+    toggle.replaceChildren(FTIcons.node("person.crop.rectangle.stack"));
+    toggle.title = options.buttonLabel || context.t("智能体助手");
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.dataset.ftPageAgentTab = context.tabID;
+    document.body.append(toggle);
 
     let mounted = false;
     let opening = null;
@@ -47,6 +50,7 @@
       dispose: () => {
         bridge?.dispose();
         shell.remove();
+        toggle.remove();
       },
     });
 
@@ -57,7 +61,9 @@
       if (!opening) {
         opening = (async () => {
           await context.pageAgentLifecycle.open(profileID, context.tabID);
-          bridge = window.FTPageAgentContext.create(context, profileID);
+          bridge = window.FTPageAgentContext.create(
+            context, profileID, options.assistance, {isActive: () => !shell.hidden},
+          );
           await bridge.start();
           await window.FTStaticLoader?.ensureGroup?.("profile");
           const chat = await window.FTAgentChat.render(context, profile, {

@@ -203,24 +203,8 @@
           title.value = value?.title ?? title.value;
           source.value = value?.source ?? source.value;
         },
-        describe: () => ({
-          page: "job-custom-analysis",
-          section: tabID,
-          fields: [
-            {key: "title", value: title.value, editable: true},
-            {key: "source", value: source.value, editable: true, language: "python"},
-          ],
-        }),
-        apply: action => {
-          if (action?.field === "title") title.value = String(action.value || "");
-          else if (action?.field === "source") source.value = String(action.value || "");
-          else return false;
-          return true;
-        },
       });
-      void window.FTPageAgentProfiles.attachSelf(context, {
-        pageKind: "job-custom-analysis", section: tabID, buttonHost: toolbar,
-      }).catch(() => {});
+      FTCustomAnalysisAssistance.register(context, {tabID, title, source});
       editor.append(source);
       const output = document.createElement("div"); output.className = "custom-analysis-output";
       output.append(FTUI.empty(context.t("结构化输出"), context.t("运行后在这里显示结果")));

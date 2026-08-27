@@ -7,6 +7,22 @@ The CLI is a remote HTTP client. Research execution has one lifecycle:
 3. Submit an immutable `run`; each requested analysis becomes a `job` under that run.
 4. Observe, cancel, retry, continue, and query results by `job_id`.
 
+Inside a page-bound Profile Agent runtime, inspect and atomically fill the
+currently assisted page with one registered structured document:
+
+```bash
+factortester assist inspect
+factortester assist validate --file assistance.json
+factortester assist apply --file assistance.json \
+  --tab-id <tab-id> --expected-revision <revision>
+# --stdin is supported for validate/apply so an Agent need not create a file.
+```
+
+The page publishes the schema and current document. Test pages expose the same
+`configuration` shape later frozen as `RunSpec.configuration`; factor and
+custom-analysis pages expose their own registered draft schemas. Apply is
+all-or-nothing and fails if the person edited the page after inspection.
+
 ```bash
 factortester workspace create \
   --factor-family SgCCS \

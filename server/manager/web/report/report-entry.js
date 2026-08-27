@@ -70,14 +70,23 @@
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
     if (boundProfileID && context.session) {
-      void window.FTPageAgentProfiles.bound(context, boundProfileID).then(profile => (
-        isCurrent() ? window.FTPageAgentDrawer.attach(context, {
-          profile,
-          pageKind: "research-report",
-          section: reading.selectedChapterID || "",
-          profileKey: value.profile_key || "",
-        }) : null
-      )).catch(() => {});
+      FTPageAssistance.register(context, {
+        schema: () => ({type: "object", readOnly: true}),
+        exportDocument: () => ({
+          schema_version: 1, document_kind: "research_report_context",
+          publication_id: publicationID,
+          selected_chapter_id: reading.selectedChapterID || "",
+        }),
+        validate: () => {},
+        importDocument: () => {
+          throw new Error(context.t("研究报告正文通过研究工作流修改"));
+        },
+      }, {
+        boundProfileID,
+        pageKind: "research-report",
+        profileKey: value.profile_key || "",
+        view: () => ({selected_chapter_id: reading.selectedChapterID || ""}),
+      });
     }
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";

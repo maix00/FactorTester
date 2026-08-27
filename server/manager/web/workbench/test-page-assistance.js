@@ -1,72 +1,59 @@
 (() => {
-  function coerce(prior, value) {
-    if (typeof prior === "boolean") return [true, "true", "1", 1].includes(value);
-    if (typeof prior === "number") {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : prior;
-    }
-    if (Array.isArray(prior)) {
-      if (Array.isArray(value)) return value;
-      try { return JSON.parse(String(value)); } catch (_) { return prior; }
-    }
-    return value;
+  function documentFor(state) {
+    const payload = FTTestConfiguration.configurationPayload(
+      state, null, {allowIncomplete: true},
+    );
+    return {
+      schema_version: 1,
+      document_kind: "research_configuration",
+      analyses: [state.kind],
+      configuration: payload,
+    };
   }
 
-  function register(context, state, refresh, host) {
-    const key = `test-configuration:${state.kind}`;
-    const registeredFields = () => Object.entries(state.manifest?.defaults || {})
-      .filter(([, definition]) => (
-        !definition?.adapter_managed
-        && state.settingsMountedTabs.includes(definition?.tab_key)
-        && window.FTSettingRules.isVisible(definition, state.values)
-      ));
-    context.pageState?.register?.(key, {
-      capture: () => ({
-        settings_tab: state.settingsTabKey,
-        mounted_tabs: state.settingsMountedTabs,
-        values: state.values,
-      }),
-      restore: value => {
-        if (value?.settings_tab) state.settingsTabKey = value.settings_tab;
-        if (Array.isArray(value?.mounted_tabs)) state.settingsMountedTabs = value.mounted_tabs;
-        if (value?.values && typeof value.values === "object") {
-          Object.assign(state.values, value.values);
+  function schemaFor(state) {
+    return {
+      type: "object",
+      required: ["schema_version", "document_kind", "analyses", "configuration"],
+      properties: {
+        schema_version: {const: 1},
+        document_kind: {const: "research_configuration"},
+        analyses: {type: "array", items: {enum: [state.kind]}},
+        configuration: {type: "object", required: ["schema_version", "analyses"]},
+      },
+      additionalProperties: false,
+      "x-factor-tester-field-registry": structuredClone(state.manifest || {}),
+      "x-run-spec-shape": "RunSpec.configuration",
+    };
+  }
+
+  function register(context, state, refresh) {
+    return FTPageAssistance.register(context, {
+      schema: () => schemaFor(state),
+      exportDocument: () => documentFor(state),
+      validate: document => {
+        if (document?.document_kind !== "research_configuration"
+            || document?.configuration?.schema_version !== 2
+            || !document.configuration.analyses?.[state.kind]) {
+          throw new Error("测试配置文档与当前测试类型不兼容");
         }
       },
-      describe: () => ({
-        page: `${state.kind}-configuration`,
-        section: state.settingsTabKey || "",
-        fields: registeredFields().map(([field, definition]) => ({
-          key: field,
-          label: definition?.label || field,
-          tab: definition?.tab_key || "",
-          editable: window.FTSettingRules.isEditable(definition, state.values),
-          value: state.values[field],
-        })),
-      }),
-      apply: action => {
-        const field = String(action?.field || "");
-        const definition = state.manifest?.defaults?.[field];
-        if (
-          !definition || definition.adapter_managed
-          || !state.settingsMountedTabs.includes(definition.tab_key)
-          || !window.FTSettingRules.isVisible(definition, state.values)
-          || !window.FTSettingRules.isEditable(definition, state.values)
-        ) return false;
-        window.FTSettingRules.setValue(
-          state.manifest, state.values, field, definition,
-          coerce(state.values[field], action.value),
-        );
+      importDocument: document => {
+        state.workspace = state.workspace || {workspace_id: ""};
+        state.workspace.configuration = {
+          ...(state.workspace.configuration || {}),
+          payload: structuredClone(document.configuration),
+        };
+        FTTestState.applyWorkspaceConfiguration(state);
+        FTTestState.seedSavedCatalogs(state);
+        state.settingsInitialized = false;
         refresh();
-        return true;
       },
-    });
-    void window.FTPageAgentProfiles.attachSelf(context, {
+    }, {
       pageKind: `${state.kind}-configuration`,
-      section: state.settingsTabKey || "",
-      buttonHost: host,
-    }).catch(() => {});
+      view: () => ({selected_settings_tab: state.settingsTabKey || ""}),
+    });
   }
 
-  window.FTTestPageAssistance = Object.freeze({register});
+  window.FTTestPageAssistance = Object.freeze({documentFor, register, schemaFor});
 })();
