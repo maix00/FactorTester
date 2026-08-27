@@ -20,12 +20,6 @@ from server.manager.services.test_authoring import TestAuthoringError
 from server.manager.storage.sqlite import ManagerSQLiteResponse
 from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
-_SERVICE_GET_PREFIXES = (
-    "/api/research-evidence/",
-    "/api/trial-plans/direct/",
-    "/api/run-specs/",
-    "/api/runs/",
-)
 _MAX_PREPARED_RUN_BODY_BYTES = 11 * 1024 * 1024
 
 
@@ -228,46 +222,6 @@ class ServiceSelectionRoutesMixin:
             )
             return True
         self._send_sqlite_web_response(response)
-        return True
-
-    def _proxy_service_get(self, parsed) -> bool:
-        registered_route = any(
-            parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES
-        )
-        if not registered_route:
-            return False
-        session = self._session()
-        visitor = self._visitor_mode()
-        if visitor is not None and not self._visitor_service_get_allowed(parsed.path):
-            json_response(self, {
-                "success": False,
-                "error": "访客模式不能读取该服务端私有接口",
-                "code": "visitor_private_service_read_forbidden",
-            }, 403)
-            return True
-        if session is None and visitor is None:
-            json_response(
-                self, {"success": False, "error": "login required"}, 401,
-            )
-            return True
-        route = self._service_route(parsed)
-        if route is None:
-            return True
-        try:
-            response = self.state.route_request(
-                route,
-                path=self._forwarded_service_path(parsed),
-                principal=(
-                    visitor.principal if visitor is not None
-                    else str(session["username"])
-                ),
-            )
-        except (ConnectionError, ValueError):
-            json_response(
-                self, {"success": False, "error": "service port is unavailable"}, 502,
-            )
-            return True
-        self._send_gateway_response(response, route=route)
         return True
 
     @staticmethod
