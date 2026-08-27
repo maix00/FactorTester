@@ -8,6 +8,7 @@ from tools.cli.app import cli
 from tools.cli.modules import agents as agent_commands
 from tools.cli.modules import research as research_commands
 from tools.cli.modules.products import catalog as product_catalog_commands
+from tools.cli.modules.products import controller as product_controller_commands
 from tools.cli.modules.products import data_sources as product_source_commands
 
 
@@ -54,6 +55,24 @@ def test_products_sources_share_the_server_catalog(monkeypatch) -> None:
     value = json.loads(result.output)
     assert value["object_type"] == "data_source"
     assert value["items"][0]["name"] == "LocalCNFutures"
+
+
+def test_products_groups_share_the_web_manager_catalog(monkeypatch) -> None:
+    class Client:
+        def product_group_catalog(self):
+            return {"groups": [{
+                "group_ref": "product-group:group-1",
+                "name": "我的产品组",
+            }]}
+
+    monkeypatch.setattr(
+        product_controller_commands, "client_from_config", lambda: Client(),
+    )
+    result = CliRunner().invoke(cli, ["products", "groups", "list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    value = json.loads(result.output)
+    assert value["groups"][0]["group_ref"] == "product-group:group-1"
 
 
 def test_research_reports_use_web_scope_semantics(monkeypatch) -> None:

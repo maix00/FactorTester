@@ -26,19 +26,26 @@ class ClientProductCatalogMixin:
 
     def product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return account groups projected against the server catalog."""
-        self._refresh_account_domain_async(principal)
+        from server.manager.domain.product_groups import (
+            project_account_product_groups,
+        )
         from server.modules.products.product_group_store import (
             load_authoritative_product_groups,
             product_group_path_bindings,
         )
         from server.services.product_catalog_projection import catalog_product_records
-        from server.manager.domain.product_groups import (
-            project_account_product_groups,
-        )
 
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        groups = load_authoritative_product_groups(principal)
+        groups = load_authoritative_product_groups(
+            principal,
+            domain_rows=self._account_catalog_entities(
+                principal,
+                entity_type="product_group",
+                include_shared=False,
+                include_deleted=True,
+            ),
+        )
         for group in groups:
             if "path_bindings" not in group:
                 group["path_bindings"] = product_group_path_bindings(
@@ -107,17 +114,94 @@ class ClientProductCatalogMixin:
         name: str,
         paths: list[str],
         category_ids: list[str] | None = None,
+        *,
+        creator_kind: str = "user",
+        creator_ref: str = "",
+        research_refs: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Create an account product group and return its catalog projection."""
         from server.modules.products.product_group_store import create_product_group
 
         created = create_product_group(
-            principal, name, paths, category_ids=category_ids,
+            principal,
+            name,
+            paths,
+            category_ids=category_ids,
+            creator_kind=creator_kind,
+            creator_ref=creator_ref,
+            research_refs=research_refs,
         )
         if created is None:
             return None
         return self.product_group(
             principal, f"product-group:{created['id']}",
+        )
+
+    def product_group_subjects(
+        self,
+        principal: str,
+        group_ref: str,
+    ) -> dict[str, Any] | None:
+        """Read one group's factor bindings from Manager-owned state."""
+        from server.modules.products.product_group_store import (
+            product_group_subjects,
+        )
+
+        current = self.product_group(principal, group_ref)
+        if current is None:
+            return None
+        return product_group_subjects(
+            principal, str(current.get("group_ref") or group_ref),
+        )
+
+    def change_product_group_subjects(
+        self,
+        principal: str,
+        group_ref: str,
+        *,
+        action: str,
+        factor_refs: list[str],
+        factor_set_refs: list[str],
+    ) -> dict[str, Any] | None:
+        """Change bindings after validating against the visible Manager catalog."""
+        from server.modules.products.product_group_store import (
+            change_product_group_subjects,
+        )
+
+        current = self.product_group(principal, group_ref)
+        if current is None:
+            return None
+        if action == "add":
+            factor_scopes = self.factor_library_scopes(principal)
+            registered_factors = {
+                str(item.get("factor_ref") or "")
+                for scope in factor_scopes.values()
+                for item in scope.get("factors") or []
+                if isinstance(item, dict)
+            }
+            set_scopes = self.factor_set_scopes(principal)
+            registered_sets = {
+                str(item.get("set_ref") or item.get("target_ref") or "")
+                for scope in set_scopes.values()
+                for item in scope
+                if isinstance(item, dict)
+            }
+            missing_factors = sorted(set(factor_refs) - registered_factors)
+            missing_sets = sorted(set(factor_set_refs) - registered_sets)
+            if missing_factors:
+                raise ValueError(
+                    "绑定前必须先注册因子: " + ", ".join(missing_factors)
+                )
+            if missing_sets:
+                raise ValueError(
+                    "绑定前必须先同步因子集合: " + ", ".join(missing_sets)
+                )
+        return change_product_group_subjects(
+            principal,
+            str(current.get("group_ref") or group_ref),
+            action=action,
+            factor_refs=factor_refs,
+            factor_set_refs=factor_set_refs,
         )
 
     def update_product_group(
@@ -165,7 +249,6 @@ class ClientProductCatalogMixin:
 
     def product_categories(self, principal: str = "") -> list[dict[str, Any]]:
         """Return source and account-owned product category definitions."""
-        self._refresh_account_domain_async(principal)
         from server.modules.products.product_category_store import (
             list_product_categories,
         )
@@ -177,13 +260,11 @@ class ClientProductCatalogMixin:
         values = list_product_categories(principal) if principal else available_product_categories()
         if not principal or self.account_domain_sync is None:
             return values
-        try:
-            rows = self.account_domain_sync.entities(
-                principal, entity_type="product_category", include_shared=False,
-                sync=False,
-            )
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-            rows = []
+        rows = self._account_catalog_entities(
+            principal,
+            entity_type="product_category",
+            include_shared=False,
+        )
         known = {str(item.get("id") or "") for item in values}
         for row in rows:
             payload = row.get("payload") if isinstance(row, dict) else None
@@ -208,7 +289,9 @@ class ClientProductCatalogMixin:
     @staticmethod
     def product_sources() -> list[dict[str, Any]]:
         """Return data-source bundles registered on this server."""
-        from server.services.product_catalog_projection import product_source_descriptors
+        from server.services.product_catalog_projection import (
+            product_source_descriptors,
+        )
 
         return [dict(item) for item in product_source_descriptors()]
 
@@ -335,7 +418,7 @@ class ClientProductCatalogMixin:
         principal: str = "",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
-        return ClientStateService.contract_tree_page(
+        return ClientProductCatalogMixin.contract_tree_page(
             path, category_id, source_ids, principal, limit=None,
         )["nodes"]
 
@@ -362,15 +445,17 @@ class ClientProductCatalogMixin:
             tree_for_path,
         )
         from server.modules.shared.price_services import (
-            available_sources_for_product, cached_contracts, contract_has_data,
+            available_sources_for_product,
+            cached_contracts,
+            contract_has_data,
         )
         from server.services.product_catalog_projection import (
             catalog_product_description,
             source_family_ids_for_member_ids,
         )
         from server.services.product_tree import find_node_by_path
-        from tools.products.Futures import FuturesContract
         from tools.products.classifier_paths import classifier_object_path
+        from tools.products.Futures import FuturesContract
 
         requested_page = max(1, int(page or 1))
         requested_limit = (
@@ -449,4 +534,3 @@ class ClientProductCatalogMixin:
             "total_pages": total_pages,
             "has_more": requested_page < total_pages,
         }
-

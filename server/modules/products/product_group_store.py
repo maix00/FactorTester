@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from hashlib import sha1
-import re
 
-from server.modules.products.product_path_selection import resolve_selection_products
 from server.modules.products.product_category_paths import (
     canonicalize_product_paths,
     infer_category_ids,
@@ -18,10 +17,11 @@ from server.modules.products.product_category_store import (
     migrate_owned_category_id,
     migrate_owned_category_path,
 )
-from tools.products.product_path_selection import ProductPathSelection
+from server.modules.products.product_path_selection import resolve_selection_products
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
 from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
+from tools.products.product_path_selection import ProductPathSelection
 
 
 def _resolve_group_products(paths: list) -> list:
@@ -130,7 +130,11 @@ def load_account_domain_product_groups(username: str) -> list[dict]:
     ]
 
 
-def load_authoritative_product_groups(username: str) -> list[dict]:
+def load_authoritative_product_groups(
+    username: str,
+    *,
+    domain_rows: list[dict] | tuple[dict, ...] | None = None,
+) -> list[dict]:
     """Return one owner catalog, preferring domain-mirror rows by stable ID."""
     merged: dict[str, dict] = {}
     for group in load_product_groups(username):
@@ -139,16 +143,21 @@ def load_authoritative_product_groups(username: str) -> list[dict]:
         key = str(group.get("id") or group.get("name") or "").strip()
         if key:
             merged[key] = group
-    import settings as Settings
-    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    if domain_rows is None:
+        import settings as Settings
+        from server.manager.storage.account_domain.local import (
+            LocalAccountDomainStore,
+        )
 
-    rows = LocalAccountDomainStore(Settings.CACHE_DB_PATH).list_entities(
-        principal=username,
-        entity_type="product_group",
-        include_shared=False,
-        include_deleted=True,
-    )
-    for row in rows:
+        domain_rows = LocalAccountDomainStore(
+            Settings.CACHE_DB_PATH,
+        ).list_entities(
+            principal=username,
+            entity_type="product_group",
+            include_shared=False,
+            include_deleted=True,
+        )
+    for row in domain_rows:
         if not isinstance(row, dict):
             continue
         payload = row.get("payload")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,47 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         self._profile_refresh_inflight: set[str] = set()
         self._catalog_refresh_lock = threading.RLock()
         self._catalog_refresh_inflight: set[str] = set()
+        self._catalog_refresh_started: dict[str, float] = {}
+
+    def _account_catalog_entities(
+        self,
+        principal: str,
+        *,
+        entity_type: str,
+        include_shared: bool = False,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Read one account catalog through the shared local-mirror helper.
+
+        Reads always return SQLite rows immediately. Every catalog consumer
+        shares one principal-scoped, cooldown-bounded background refresh;
+        pages and CLI commands never implement their own federation query.
+        """
+        owner = str(principal or "").strip()
+        synchronizer = self.account_domain_sync
+        if not owner or synchronizer is None:
+            return []
+
+        self._refresh_account_domain_async(owner)
+        try:
+            arguments = {
+                "entity_type": entity_type,
+                "include_shared": include_shared,
+                "sync": False,
+            }
+            if include_deleted:
+                arguments["include_deleted"] = True
+            rows = synchronizer.entities(owner, **arguments)
+        except (
+            AttributeError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            rows = []
+        return [dict(row) for row in rows if isinstance(row, dict)]
 
     def _refresh_account_domain_async(self, principal: str) -> None:
         """Refresh the local account mirror without delaying a catalog read."""
@@ -63,10 +105,17 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         synchronizer = self.account_domain_sync
         if not owner or synchronizer is None:
             return
+        now = time.monotonic()
+        cooldown = max(
+            0.0, float(getattr(synchronizer, "access_cooldown", 5.0)),
+        )
         with self._catalog_refresh_lock:
             if owner in self._catalog_refresh_inflight:
                 return
+            if now - self._catalog_refresh_started.get(owner, 0.0) < cooldown:
+                return
             self._catalog_refresh_inflight.add(owner)
+            self._catalog_refresh_started[owner] = now
 
         def refresh() -> None:
             try:
@@ -176,15 +225,11 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         # dedicated control_profiles table below for compatibility with older
         # deployments and merge the two projections by stable profile_id.
         if self.account_domain_sync is not None:
-            try:
-                rows = self.account_domain_sync.entities(
-                    principal,
-                    entity_type="profile",
-                    include_shared=False,
-                    sync=False,
-                )
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                rows = []
+            rows = self._account_catalog_entities(
+                principal,
+                entity_type="profile",
+                include_shared=False,
+            )
             indexed = {
                 str(item.get("profile_id") or ""): item
                 for item in result
@@ -558,7 +603,9 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
     def local_research_report(self, principal: str, local_ref: str) -> dict[str, Any]:
         """Build the same source-free projection used by shared reports."""
         snapshot = self._local_report_snapshot(principal, local_ref)
-        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+        from tools.cli.release.research_reporting.public_research.projection import (
+            build_upload_projection,
+        )
 
         projection = build_upload_projection(
             snapshot,
@@ -573,8 +620,12 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
     def local_research_index(self, principal: str, local_ref: str) -> dict[str, Any]:
         """Return local report metadata without sending every component to Web."""
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
-        from tools.cli.release.research_reporting.authoring.tree_projection import load_report_index
-        from tools.cli.release.research_reporting.public_research.projection import build_upload_index
+        from tools.cli.release.research_reporting.authoring.tree_projection import (
+            load_report_index,
+        )
+        from tools.cli.release.research_reporting.public_research.projection import (
+            build_upload_index,
+        )
         snapshot = load_report_index(package_root=package_root, branch_id=branch_id)
         value = build_upload_index(snapshot)
         value.update(source="local", local_ref=local_ref,
@@ -587,9 +638,12 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
     ) -> dict[str, Any]:
         """Return one local report chapter for on-demand rendering."""
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
-        from tools.cli.release.research_reporting.authoring.tree_projection import load_chapter_snapshot
+        from tools.cli.release.research_reporting.authoring.tree_projection import (
+            load_chapter_snapshot,
+        )
         from tools.cli.release.research_reporting.public_research.projection import (
-            build_upload_projection, component_asset_references,
+            build_upload_projection,
+            component_asset_references,
         )
         snapshot = load_chapter_snapshot(
             package_root=package_root, branch_id=branch_id, chapter_id=chapter_id,
@@ -616,7 +670,8 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             load_component_snapshot,
         )
         from tools.cli.release.research_reporting.public_research.projection import (
-            build_upload_projection, component_asset_references,
+            build_upload_projection,
+            component_asset_references,
         )
         snapshot = load_component_snapshot(
             package_root=package_root, branch_id=branch_id,
@@ -691,7 +746,9 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
 
     def _local_report_snapshot(self, principal: str, local_ref: str) -> dict[str, Any]:
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
-        from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+        from tools.cli.release.research_reporting.authoring.tree_projection import (
+            load_snapshot,
+        )
         snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
         snapshot["_local_profile_id"] = profile_id
         return snapshot

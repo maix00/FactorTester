@@ -16,6 +16,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
         """Read the same server data-source catalog used by Web and Swift."""
         return self._expect_success(self.session.get("/api/catalog/sources"))
 
+    def product_group_catalog(self) -> dict[str, Any]:
+        """Read account product groups from the Manager-owned catalog mirror."""
+        return self._expect_success(
+            self.session.get("/api/catalog/product-groups")
+        )
+
     def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
         if parent is None:
             return self.home_modules()
@@ -124,19 +130,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
         kind: str,
         **params: Any,
     ) -> list[dict[str, Any]]:
-        if kind in {
-            "product_path_selection",
-            "product_path_candidates",
-            "product_path_selections",
-        }:
-            data = self._expect_success(
-                self.session.get("/api/product-groups", query=params)
-            )
-            for key in ("product_groups", "items", "selections", "groups"):
-                value = data.get(key)
-                if isinstance(value, list):
-                    return value
-            return []
         if kind in {"factor", "factor_candidates", "factor_selections"}:
             data = self._expect_success(
                 self.session.get("/api/factor-library-overview", query=params)
@@ -211,7 +204,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         profile = str(profile_id or "").strip()
         return self._expect_success(
             self.session.post(
-                "/api/product-groups",
+                "/api/catalog/product-groups",
                 {
                     "name": name,
                     "paths": paths,
@@ -274,7 +267,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         group_id = product_group_ref.removeprefix(prefix).strip()
         if not group_id:
             raise ValueError("product_group_ref is empty")
-        path = f"/api/product-groups/{group_id}/subjects"
+        path = f"/api/catalog/product-groups/{group_id}/subjects"
         if not action:
             return self._expect_success(self.session.get(path))
         return self._expect_success(self.session.post(path, {

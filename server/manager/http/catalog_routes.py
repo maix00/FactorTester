@@ -23,6 +23,8 @@ def catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
     """Resolve repeated or comma-separated source filters."""
     from server.services.product_catalog_projection import (
         catalog_source_ids as default_source_ids,
+    )
+    from server.services.product_catalog_projection import (
         normalize_source_ids,
     )
 
@@ -294,6 +296,25 @@ class CatalogRoutesMixin:
                     "groups": self.state.client_state.product_groups(principal),
                 }
             else:
+                subjects = re.fullmatch(
+                    r"/api/catalog/product-groups/([^/]+)/subjects", parsed.path,
+                )
+                if subjects is not None:
+                    bindings = self.state.client_state.product_group_subjects(
+                        principal, unquote(subjects.group(1)),
+                    )
+                    if bindings is None:
+                        json_response(self, {
+                            "success": False, "error": "产品组不存在",
+                        }, 404)
+                        return True
+                    value = {
+                        "success": True,
+                        "origin": "server",
+                        "subjects": bindings,
+                    }
+                    json_response(self, value)
+                    return True
                 match = re.fullmatch(
                     r"/api/catalog/product-groups/([^/]+)", parsed.path,
                 )
@@ -482,13 +503,16 @@ class CatalogRoutesMixin:
         group_mutation = re.fullmatch(
             r"/api/catalog/product-groups/([^/]+)", parsed.path,
         )
+        group_subjects = re.fullmatch(
+            r"/api/catalog/product-groups/([^/]+)/subjects", parsed.path,
+        )
         if parsed.path not in {
             "/api/catalog/prices",
             "/api/catalog/product-groups",
             "/api/catalog/categories",
             "/api/catalog/categories/composite",
         } and category_delete is None and category_refresh is None \
-                and group_mutation is None:
+                and group_mutation is None and group_subjects is None:
             return False
         session = self._session()
         visitor = self._visitor_mode()
@@ -618,10 +642,14 @@ class CatalogRoutesMixin:
                     for category_id in category_ids
                 ):
                     raise ValueError("category_ids 必须是字符串数组")
-                if not category_ids:
-                    raise ValueError("产品组至少需要绑定一个产品分类")
                 group = self.state.client_state.create_product_group(
-                    principal, name, paths, category_ids,
+                    principal,
+                    name,
+                    paths,
+                    category_ids,
+                    creator_kind=str(payload.get("creator_kind") or "user"),
+                    creator_ref=str(payload.get("creator_ref") or ""),
+                    research_refs=payload.get("research_refs"),
                 )
                 if group is None:
                     json_response(self, {
@@ -629,6 +657,35 @@ class CatalogRoutesMixin:
                     }, 409)
                     return True
                 value = {"success": True, "origin": "server", "group": group}
+            elif group_subjects is not None and method == "POST":
+                action = str(payload.get("action") or "")
+                factor_refs = payload.get("factor_refs") or []
+                factor_set_refs = payload.get("factor_set_refs") or []
+                if not isinstance(factor_refs, list) or not all(
+                    isinstance(item, str) for item in factor_refs
+                ):
+                    raise ValueError("factor_refs must be an array of references")
+                if not isinstance(factor_set_refs, list) or not all(
+                    isinstance(item, str) for item in factor_set_refs
+                ):
+                    raise ValueError("factor_set_refs must be an array of references")
+                subjects = self.state.client_state.change_product_group_subjects(
+                    principal,
+                    unquote(group_subjects.group(1)),
+                    action=action,
+                    factor_refs=factor_refs,
+                    factor_set_refs=factor_set_refs,
+                )
+                if subjects is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组不存在",
+                    }, 404)
+                    return True
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "subjects": subjects,
+                }
             elif group_mutation is not None and method in {"PUT", "PATCH"}:
                 name = str(payload.get("name") or "").strip()
                 paths = payload.get("paths")
@@ -708,7 +765,9 @@ class CatalogRoutesMixin:
         try:
             if method == "GET":
                 response = self.state.test_authoring.get(
-                    parsed.path, owner=principal,
+                    parsed.path,
+                    owner=principal,
+                    query=parse_qs(parsed.query, keep_blank_values=True),
                 )
             else:
                 payload = {} if method == "DELETE" else self._json_body(1024 * 1024)
