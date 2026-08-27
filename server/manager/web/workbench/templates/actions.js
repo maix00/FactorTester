@@ -30,7 +30,7 @@
       await FTTestLazyCode.loadGroup("workbench-factors");
       await FTTestLazyCode.loadGroup("workbench-products");
       const group = selectedExecutionGroup(context, state);
-      await FTTestConfiguration.save(context, state, group);
+      await window.FTTestConfiguration.save(context, state, group);
       const value = await context.api(
         `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
         {method: "POST", body: JSON.stringify({name: name.trim()})},
@@ -46,7 +46,7 @@
       await FTTestLazyCode.loadGroup("workbench-products");
       if (!state.workspace) {
         state.factorRef = template.payload?.shared?.factors?.[0]?.ref || state.factorRef;
-        await FTTestConfiguration.ensureWorkspace(context, state);
+        await window.FTTestConfiguration.ensureWorkspace(context, state);
       }
       const value = await context.api(
         `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`,
@@ -89,7 +89,7 @@
         await FTTestLazyCode.loadGroup("workbench-factors");
         await FTTestLazyCode.loadGroup("workbench-products");
         const group = selectedExecutionGroup(context, state);
-        await FTTestConfiguration.save(context, state, group);
+        await window.FTTestConfiguration.save(context, state, group);
         const value = await context.api(
           `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
           {
