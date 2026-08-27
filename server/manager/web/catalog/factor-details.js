@@ -291,13 +291,9 @@
       || model().familyName(value);
     if (!family) return value;
     try {
-      const owner = value.owner_username || "";
-      const endpoint = value.factor_kind === "public" || value.source === "public"
-        ? `/custom-factors/api/public-factor/${encodeURIComponent(family)}`
-        : `/custom-factors/api/get/${encodeURIComponent(family)}`
-          + (owner ? `?owner_username=${encodeURIComponent(owner)}` : "");
-      const payload = await context.api(endpoint);
-      const detail = payload.factor || {};
+      const detail = await window.FTFactorDetailShared.loadSourceVersion(
+        context, value, "current", {familyID: family},
+      );
       const valueParams = window.FTFactorDetailShared.parameterRows(value);
       const detailParams = window.FTFactorDetailShared.parameterRows(detail);
       // A registered factor carries its concrete parameter values; the

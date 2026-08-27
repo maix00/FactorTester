@@ -5,6 +5,12 @@ import json
 
 from flask import Flask
 
+from server.manager.services import public_catalog
+from server.manager.services.account_domain_projection import factor_rows_from_sync
+from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
+from server.manager.services.federated_factor_projection import (
+    merge_factor_library_projections,
+)
 from server.modules.custom_factors import (
     catalog_routes,
     cf_bp,
@@ -13,12 +19,6 @@ from server.modules.custom_factors import (
     factor_library_service,
 )
 from server.modules.custom_factors.client_library import build_client_library_projection
-from server.manager.services.account_domain_projection import factor_rows_from_sync
-from server.manager.services.client_factor_catalog import ClientFactorCatalogMixin
-from server.manager.services.federated_factor_projection import (
-    merge_factor_library_projections,
-)
-from server.manager.services import public_catalog
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
@@ -428,29 +428,20 @@ def test_federated_projection_keeps_source_family_and_merges_member_counts() -> 
 
 
 def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch) -> None:
-    source = "class Momentum(FactorFamily):\n    pass\n"
     fingerprint = "a" * 64
-    monkeypatch.setattr(catalog_routes, "can_view_user_scope", lambda *_: True)
     monkeypatch.setattr(
-        catalog_routes, "load_factor_source", lambda _owner, _family: source,
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "get_factor_source_metadata",
-        lambda *_args: {"chinese_name": "", "description": "", "category": ""},
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "_source_detail",
-        lambda *_args, **_kwargs: {"family_formula_fingerprint": fingerprint},
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "list_factor_formula_versions",
-        lambda *_args, **_kwargs: [{
-            "family_formula_fingerprint": fingerprint,
-            "is_current": True,
-        }],
+        catalog_routes._SOURCE_CATALOG,
+        "versions",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "factor_owner_ref": "alice",
+            "factor_family_alias": "Momentum",
+            "current_fingerprint": fingerprint,
+            "versions": [{
+                "family_formula_fingerprint": fingerprint,
+                "is_current": True,
+            }],
+        },
     )
     client = _app().test_client()
     _login(client, "alice")
@@ -474,27 +465,14 @@ def test_source_version_route_returns_persisted_snapshot_without_current_source(
     fingerprint = "b" * 64
     source = "class Momentum(FactorFamily):\n    pass\n"
     monkeypatch.setattr(
-        catalog_routes, "load_public_factor_source", lambda _factor_id: None,
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "load_factor_formula_version",
+        catalog_routes._SOURCE_CATALOG,
+        "version",
         lambda *_args, **_kwargs: {
+            "success": True,
             "family_formula_fingerprint": fingerprint,
             "source_code": source,
             "source_sha256": "hash",
-        },
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "get_factor_source_metadata",
-        lambda *_args: {"chinese_name": "动量", "description": "历史版本", "category": ""},
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "_source_detail",
-        lambda *_args, **_kwargs: {
-            "source_code": source,
+            "source_kind": "public",
             "math_expr": "P_t",
             "chinese_name": "动量",
             "description": "历史版本",
@@ -519,24 +497,14 @@ def test_source_version_current_returns_live_family_source(monkeypatch) -> None:
     source = "class Momentum(FactorFamily):\n    pass\n"
     fingerprint = "d" * 64
     monkeypatch.setattr(
-        catalog_routes, "load_public_factor_source", lambda _factor_id: source,
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "get_factor_source_metadata",
-        lambda *_args: {
-            "chinese_name": "动量",
-            "description": "当前源码",
-            "category": "动量",
-        },
-    )
-    monkeypatch.setattr(
-        catalog_routes,
-        "_source_detail",
+        catalog_routes._SOURCE_CATALOG,
+        "version",
         lambda *_args, **_kwargs: {
+            "success": True,
             "source_code": source,
             "math_expr": "P_t-P_{t-1}",
             "family_formula_fingerprint": fingerprint,
+            "factor_family_alias": "Momentum",
             "params": [],
         },
     )

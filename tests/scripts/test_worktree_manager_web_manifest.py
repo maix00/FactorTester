@@ -886,6 +886,12 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "sourceVersionHistory" in family_view
     assert "FTFactorDetailShared.versionPicker" in editor
     assert 'context.t("读取版本历史")' not in editor
+    assert "/api/catalog/factor-sources/" in shared
+    assert "/custom-factors/api/source-versions/" not in shared
+    assert "/custom-factors/api/public-factor/" not in details
+    assert "/custom-factors/api/get/" not in details
+    assert "/custom-factors/api/public-factor/" not in editor
+    assert "/custom-factors/api/get/" not in editor
 
 
 def test_factor_object_detail_tabs_share_kind_and_mode_contract() -> None:
