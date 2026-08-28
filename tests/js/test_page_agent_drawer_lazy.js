@@ -30,8 +30,6 @@ let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
 global.FTPageAgentContext = {create: () => ({
   start: async () => events.push(["bridge"]),
-  pause: () => events.push(["pause"]),
-  resume: async () => events.push(["resume"]),
   dispose: () => {},
 })};
 global.FTAgentChat = {render: async (_context, _profile, options) => {
@@ -103,18 +101,18 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   drawer.hide();
   assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
   assert(events.some(item => item[0] === "chat" && item[1] === true));
-  assert(events.some(item => item[0] === "pause"));
+  const bridgeStarts = events.filter(item => item[0] === "bridge").length;
   await drawer.open();
-  assert(events.some(item => item[0] === "resume"));
+  assert.equal(events.filter(item => item[0] === "bridge").length, bridgeStarts,
+    "reopening the drawer reuses its continuously active receiver");
   drawer.hide();
-  const resumeCount = events.filter(item => item[0] === "resume").length;
   stateHooks.restore({open: true, profile_id: "self"});
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(drawer.shell.hidden, false,
     "restoring an assisted tab reopens a drawer that the user left open");
   assert.equal(drawer.toggle.hidden, true);
-  assert(events.filter(item => item[0] === "resume").length > resumeCount,
-    "a restored drawer resumes the existing conversation bridge");
+  assert.equal(events.filter(item => item[0] === "bridge").length, bridgeStarts,
+    "restoring the drawer does not create a duplicate receiver");
   const savedDrawerState = stateHooks.capture();
   assert.equal(savedDrawerState.open, true);
   stateHooks.dispose();
