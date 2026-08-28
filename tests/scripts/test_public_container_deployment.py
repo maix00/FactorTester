@@ -12,7 +12,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOYMENT = ROOT / "deploy" / "docker" / "factortester-public"
 
@@ -144,10 +143,19 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert "Codex platform package integrity check failed" in dockerfile
     assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
     assert "COPY tools tools" in dockerfile
-    assert (
-        "COPY deploy/docker/factortester-public/factortester-cli \\\n    /usr/local/bin/factortester"
-    ) in dockerfile
-    assert "python -m pip install --no-cache-dir --no-deps" not in dockerfile
+    assert "AS factortester-cli-builder" in dockerfile
+    assert "ARG PYINSTALLER_VERSION=6.21.0" in dockerfile
+    assert "python -m PyInstaller" in dockerfile
+    assert "--onefile" in dockerfile
+    assert "--name factortester" in dockerfile
+    assert "COPY --from=factortester-cli-builder /dist/factortester" in dockerfile
+    assert dockerfile.index("AS factortester-cli-builder") < dockerfile.index(
+        "AS factortester-public"
+    )
+    runtime_stage = dockerfile.split("AS factortester-public", 1)[1]
+    assert "PyInstaller" not in runtime_stage
+    assert "pyinstaller==" not in runtime_stage
+    assert "binutils" not in runtime_stage
     assert "rm -f /usr/local/bin/factortester-manager" in dockerfile
     assert "test -x /usr/local/bin/factortester" in dockerfile
     assert args["CODEX_VERSION"] == "${FACTORTESTER_CODEX_VERSION:-0.147.0}"
