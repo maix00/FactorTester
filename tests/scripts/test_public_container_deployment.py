@@ -455,11 +455,14 @@ sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \\
 sudo mv "$next_env" "$production_env"
 switched=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
+  bash "$public_script" migrate-factor-control-identities
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
   bash "$public_script" restart-app"""
     assert release_sequence in activate
     assert activate.index("migrate-factor-control-identities") < activate.index(
         'bash "$public_script" verify'
     )
+    assert "run --rm --no-deps --entrypoint /bin/sh factortester-public" in script
     assert "restore-factor-identities" in activate
     assert "restore-factor-control-identities" in activate
     assert "finalize-factor-identities" in activate
