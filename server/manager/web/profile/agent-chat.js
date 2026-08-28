@@ -70,24 +70,43 @@
         runtimeControls.setConversation(conversation);
       },
       onRuntimeEvent: runtimeControls.observeEvent,
-      onTurnActivity: active => {
-        if (active) {
-          // A live ChatKit element owns the browser stream that carries the
-          // complete turn timeline.  Keep that element mounted while its tab
-          // is detached so leaving and returning does not discard events that
-          // were produced in between.
-          delete host.dataset.ftRerenderOnTabRestore;
-          host.dataset.ftAgentTurnActive = "true";
-          return;
-        }
-        delete host.dataset.ftAgentTurnActive;
-        host.dataset.ftRerenderOnTabRestore = "true";
-      },
     });
+    selectedConversationID = String(adapter.initialThread || "").trim();
     const chatStage = document.createElement("div");
     chatStage.className = "profile-chatkit-stage";
     const target = document.createElement("openai-chatkit");
     target.className = "profile-chatkit";
+    let updateTimer = null;
+    let disposed = false;
+    let observedProcessing = false;
+    let initialRuntimeStatus = options.runtimeStatus || null;
+    async function refreshProcessingTurn() {
+      if (disposed || !selectedConversationID
+          || typeof target.fetchUpdates !== "function") return;
+      try {
+        const runtimeStatus = initialRuntimeStatus || (await context.api(
+          `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
+        )).status || {};
+        initialRuntimeStatus = null;
+        const processing = String(
+          runtimeStatus.processing_conversation_id || "",
+        ).trim() === selectedConversationID;
+        if (!processing && !observedProcessing) return;
+        // ChatKit's supported remount path is an authoritative item refresh.
+        // It reconstructs every persisted workflow/process item produced
+        // while this iframe was absent, then keeps polling until the final
+        // assistant item is durable.
+        await target.fetchUpdates();
+        observedProcessing = processing;
+        if (processing && !disposed) {
+          updateTimer = setTimeout(refreshProcessingTurn, 1000);
+        }
+      } catch (_) {
+        if (observedProcessing && !disposed) {
+          updateTimer = setTimeout(refreshProcessingTurn, 1500);
+        }
+      }
+    }
     target.setOptions({
       api: {
         // ChatKit is the UI protocol only. The Manager adapter owns the
@@ -98,8 +117,8 @@
       },
       locale: adapter.locale || locale(context),
       history: {enabled: true},
-      ...(selectedConversationID
-        ? {initialThread: selectedConversationID}
+      ...(adapter.initialThread
+        ? {initialThread: adapter.initialThread}
         : (options.readOnly || options.historyOnly ? {initialThread: null} : {})),
       header: {
         enabled: true,
@@ -119,6 +138,7 @@
     });
     target.addEventListener("chatkit.ready", () => {
       status.textContent = context.t("Agent 对话已连接");
+      void refreshProcessingTurn();
       if ((options.readOnly || options.historyOnly)
           && typeof target.showHistory === "function") {
         // Read-only entry is a history-list entry point, not a new-thread
@@ -155,6 +175,10 @@
       adapter,
       runtimeControls,
       chat: target,
+      dispose() {
+        disposed = true;
+        if (updateTimer !== null) clearTimeout(updateTimer);
+      },
     };
   }
 
@@ -230,6 +254,7 @@
     let activationPromise = null;
 
     function disposeChat() {
+      mounted?.dispose?.();
       mounted?.adapter.dispose();
       mounted?.runtimeControls.dispose();
       mounted = null;
@@ -265,7 +290,9 @@
       if (!isCurrent() || leaving) return;
       status.textContent = context.t("正在加载 Agent 对话…");
       mounted = await mountChatKit(
-        context, profile, host, status, {...options, settingsHost},
+        context, profile, host, status, {
+          ...options, settingsHost, runtimeStatus: payload.status,
+        },
       );
       if (!isCurrent()) disposeChat();
     }

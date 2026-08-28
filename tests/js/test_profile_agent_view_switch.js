@@ -21,6 +21,7 @@ class Element {
   click() { this.onclick?.({target: this}); }
   setOptions(options) { this.options = options; }
   setThreadId(threadID) { this.threadID = threadID; return Promise.resolve(); }
+  fetchUpdates() { this.updateCount = (this.updateCount || 0) + 1; return Promise.resolve(); }
 }
 
 function findAll(root, predicate, values = []) {
@@ -44,15 +45,14 @@ global.document = {
 global.FTUI = {empty: (title, detail) => ({title, detail})};
 
 const adapters = [];
-const adapterOptions = [];
 window.FTProfileChatKit = {
   load: async () => {},
-  create: (_profile, _context, options) => {
-    adapterOptions.push(options);
+  create: () => {
     const adapter = {
       endpoint: "/chatkit",
       locale: "zh-CN",
       fetch: () => {},
+      initialThread: "conversation-live",
       dispose() {},
     };
     adapters.push(adapter);
@@ -84,7 +84,10 @@ vm.runInThisContext(
       this.calls.push({url, init});
       return url.includes("profile-skills")
         ? {skills: []}
-        : {status: {running: false}};
+        : {status: {
+          running: false,
+          processing_conversation_id: "conversation-live",
+        }};
     },
   };
   const root = await window.FTAgentChat.render(context, {
@@ -100,19 +103,17 @@ vm.runInThisContext(
   const initialChats = findAll(root, item => item.tagName === "openai-chatkit");
   assert.equal(initialChats.length, 1, "one timeline uses one ChatKit element");
   assert.equal(initialChats[0].options.api.fetch, adapters[0].fetch);
+  assert.equal(initialChats[0].options.initialThread, "conversation-live");
+  initialChats[0].dispatch("chatkit.ready");
+  await flush();
+  assert.equal(
+    initialChats[0].updateCount,
+    1,
+    "a remounted active conversation fetches process items produced while absent",
+  );
   const lifecycleHost = findAll(
     root, item => item.dataset?.ftRerenderOnTabRestore === "true",
   )[0];
-  adapterOptions[0].onTurnActivity(true);
-  assert.equal(
-    lifecycleHost.dataset.ftRerenderOnTabRestore,
-    undefined,
-    "an active response keeps the mounted ChatKit stream alive across tab switches",
-  );
-  assert.equal(lifecycleHost.dataset.ftAgentTurnActive, "true");
-  adapterOptions[0].onTurnActivity(false);
-  assert.equal(lifecycleHost.dataset.ftRerenderOnTabRestore, "true");
-  assert.equal(lifecycleHost.dataset.ftAgentTurnActive, undefined);
   assert.equal(context.calls.filter(
     call => call.url === "/api/client/profile-agent/start",
   ).length, 1, "entering the tab starts the Agent exactly once");
