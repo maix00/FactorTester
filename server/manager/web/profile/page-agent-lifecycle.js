@@ -19,13 +19,18 @@
       if (!item.startPromise) {
         item.startPromise = Promise.resolve(options.start?.(item.profileID));
       }
-      try { await item.startPromise; }
+      let runtime;
+      try { runtime = await item.startPromise; }
       catch (error) {
         item.owners.delete(owner);
         if (!item.owners.size) profiles.delete(item.profileID);
         throw error;
       }
-      return {profileID: item.profileID, tabID: owner};
+      return {
+        profileID: item.profileID,
+        tabID: owner,
+        runtimeStatus: runtime?.status || runtime || null,
+      };
     }
 
     function hide() {

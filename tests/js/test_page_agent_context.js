@@ -52,6 +52,38 @@ vm.runInThisContext(
   assert.equal(calls.filter(call => call.url.endsWith("/acknowledge")).length, 1);
   assert(calls.some(call => call.url.endsWith("/acknowledge")));
   assert(calls.some(call => call.url.includes("&wait=20")));
+
+  let releasePoll;
+  const poll = new Promise(resolve => { releasePoll = resolve; });
+  const startupCalls = [];
+  const startupBridge = window.FTPageAgentContext.create({
+    tabID: "fast-start",
+    api: async (url, options = {}) => {
+      startupCalls.push({url, options});
+      if (options.method === "POST") return {success: true};
+      return poll;
+    },
+  }, "self-profile", {
+    snapshot: () => ({schema_version: 1, revision: 0}),
+    apply: () => {},
+  }, {interval: 100});
+  await startupBridge.start();
+  assert.equal(startupCalls.length, 1, "startup waits only for page publication");
+  assert(startupCalls[0].url.endsWith("/publish"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(startupCalls.some(call => call.url.includes("/applications?")),
+    "the applications long-poll starts in the background");
+  startupBridge.pause();
+  const pausedCount = startupCalls.length;
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.equal(startupCalls.length, pausedCount,
+    "a hidden drawer does not keep polling in the background");
+  await startupBridge.resume();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(startupCalls.length > pausedCount,
+    "reopening the drawer resumes its page-assistance bridge");
+  startupBridge.dispose();
+  releasePoll({applications: []});
   console.log("PASS: CLI atomically replaces the registered page document");
 })().catch(error => {
   console.error(error);

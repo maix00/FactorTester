@@ -63,30 +63,39 @@
       shell.hidden = false;
       toggle.hidden = true;
       toggle.setAttribute("aria-expanded", "true");
-      if (mounted) return;
+      if (mounted) {
+        await bridge?.resume?.();
+        return;
+      }
       if (!opening) {
         opening = (async () => {
           status("正在加载智能体助手…");
           const [profile] = await Promise.all([
             options.resolveProfile?.() || options.profile,
-            window.FTStaticLoader?.loadGroups?.(["profile"]),
-            options.assistance.prepare?.(),
+            window.FTStaticLoader?.loadGroups?.(["profile-agent-chat"]),
           ]);
           profileID = String(profile?.profile_id || "").trim();
           if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
-          await context.pageAgentLifecycle.open(profileID, context.tabID);
-          bridge = window.FTPageAgentContext.create(
-            context, profileID, options.assistance, {isActive: () => !shell.hidden},
-          );
-          await bridge.start();
+          const lifecycle = await context.pageAgentLifecycle.open(profileID, context.tabID);
           body.classList.add("page-agent-drawer-body-conversation-only");
-          const chat = await window.FTAgentChat.render(context, profile, {
+          const assistanceReady = Promise.resolve(options.assistance.prepare?.()).then(
+            async () => {
+              bridge = window.FTPageAgentContext.create(
+                context, profileID, options.assistance,
+                {isActive: () => !shell.hidden},
+              );
+              await bridge.start();
+            },
+          );
+          const chatReady = window.FTAgentChat.render(context, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
+            runtimeStatus: lifecycle.runtimeStatus,
             profileKey: options.profileKey,
             profileScope: options.profileScope,
             mountHost: body,
           });
+          const [chat] = await Promise.all([chatReady, assistanceReady]);
           if (!body.contains?.(chat)) body.replaceChildren(chat);
           mounted = true;
         })().catch(error => {
@@ -103,6 +112,7 @@
       shell.hidden = true;
       toggle.hidden = false;
       toggle.setAttribute("aria-expanded", "false");
+      bridge?.pause?.();
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
       context.checkpointTabSession?.();
     }
