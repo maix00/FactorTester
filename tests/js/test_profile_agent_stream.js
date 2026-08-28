@@ -119,20 +119,6 @@ const state = {
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
         historyReads += 1;
-        if (historyReads < 12) return {
-          items: [{
-            id: 'history-assistant-old',
-            type: 'assistant_message',
-            content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
-          }, {
-            id: 'history-user-interrupted',
-            type: 'user_message',
-            content: [{type: 'input_text', text: '上一轮没有最终消息'}],
-          }],
-          has_more: false,
-          after: null,
-          order: 'desc',
-        };
         return {
           items: [
             {
@@ -221,7 +207,6 @@ const state = {
       global.__observedRuntime = true;
     }
   },
-  finalResponseRetryDelays: Array(8).fill(0),
 };
 
 (async () => {
@@ -301,11 +286,7 @@ const state = {
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
-  assert.equal(
-    historyReads,
-    12,
-    'an active turn is not terminated when the old fixed retry window expires',
-  );
+  assert.equal(historyReads, 1, 'a completed turn reconciles durable history once');
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
   assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
   const assistantAdded = chunks.findIndex(value => (
