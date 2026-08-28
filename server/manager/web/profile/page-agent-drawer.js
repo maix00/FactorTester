@@ -80,10 +80,12 @@
           );
           await bridge.start();
           const chat = await window.FTAgentChat.render(context, profile, {
+            conversationOnly: true,
             lifecycleManaged: true,
             profileKey: options.profileKey,
             profileScope: options.profileScope,
           });
+          body.classList.add("page-agent-drawer-body-conversation-only");
           body.replaceChildren(chat);
           mounted = true;
         })().catch(error => {
