@@ -2,6 +2,36 @@
   function register(context, options) {
     const {state, name, chineseName, description, category, tabs, redraw, markDirty} = options;
     return FTPageAssistance.register(context, {
+      navigation: () => ({
+        schema_version: 1,
+        root_id: "page",
+        nodes: {
+          page: {
+            id: "page", kind: "page",
+            label: state.familyMode ? "新建因子家族" : "新建因子",
+            children: ["section:metadata", "section:source", "section:parameters"],
+          },
+          "section:metadata": {
+            id: "section:metadata", kind: "section", label: "基本信息",
+            children: ["field:name", "field:chinese_name", "field:description", "field:category"],
+          },
+          "section:source": {
+            id: "section:source", kind: "section", label: "Python 源码",
+            children: ["field:source_mode", "field:source_code"],
+          },
+          "section:parameters": {
+            id: "section:parameters", kind: "section", label: "参数",
+            children: ["field:parameter_values"],
+          },
+          "field:name": {id: "field:name", kind: "field", label: "名称", value: name.value, children: []},
+          "field:chinese_name": {id: "field:chinese_name", kind: "field", label: "中文名", value: chineseName.value, children: []},
+          "field:description": {id: "field:description", kind: "field", label: "描述", value: description.value, children: []},
+          "field:category": {id: "field:category", kind: "field", label: "类别", value: category.value, children: []},
+          "field:source_mode": {id: "field:source_mode", kind: "field", label: "源码方式", value: state.sourceMode, children: []},
+          "field:source_code": {id: "field:source_code", kind: "field", label: "源码", value: state.sourceCode, children: []},
+          "field:parameter_values": {id: "field:parameter_values", kind: "field", label: "参数值", value: structuredClone(state.parameterValues || {}), children: []},
+        },
+      }),
       schema: () => ({
         type: "object",
         required: ["schema_version", "document_kind", "name", "source"],

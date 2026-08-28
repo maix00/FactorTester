@@ -73,11 +73,106 @@
     };
   }
 
+  function semanticKey(value) {
+    return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  }
+
+  function navigationFor(state) {
+    const document = documentFor(state);
+    const manifest = state.manifest || {};
+    const analysis = document.configuration?.analyses?.[state.kind] || {};
+    const ui = document.configuration?.ui?.[state.kind] || {};
+    const mounted = new Set((ui.mounted_tabs || []).map(semanticKey));
+    const values = {
+      ...(analysis.local_settings || {}),
+      ...(ui.settings || {}),
+      ...(document.run_fields || {}),
+    };
+    const contracts = manifest.field_contracts?.settings || manifest.defaults || {};
+    const chips = Array.isArray(manifest.chip_fields) ? manifest.chip_fields : [];
+    const modules = Array.isArray(manifest.modules) ? manifest.modules : [];
+    const nodes = {};
+    const tabIDs = [];
+    for (const module of modules) {
+      const key = String(module.key || "").trim();
+      if (!key) continue;
+      const tabID = `tab:${key}`;
+      tabIDs.push(tabID);
+      const fieldIDs = [];
+      for (const [fieldKey, contract] of Object.entries(contracts)) {
+        const owner = contract?.module || contract?.tab_key;
+        if (semanticKey(owner) !== semanticKey(key)) continue;
+        const fieldID = `field:${fieldKey}`;
+        fieldIDs.push(fieldID);
+        nodes[fieldID] = {
+          id: fieldID,
+          kind: "field",
+          label: contract.label || fieldKey,
+          field_key: fieldKey,
+          value: values[fieldKey] === undefined
+            ? null : structuredClone(values[fieldKey]),
+          value_descriptor: structuredClone(contract.value_descriptor || {}),
+          rules: structuredClone(contract.rules || []),
+          candidate_source: contract.value_descriptor?.candidate_source || null,
+          children: [],
+        };
+      }
+      nodes[tabID] = {
+        id: tabID,
+        kind: "tab",
+        label: module.label || key,
+        summary: mounted.has(semanticKey(key)) ? "mounted" : "available",
+        mounted: mounted.has(semanticKey(key)),
+        chips: chips.filter(chip => (
+          semanticKey(chip.module) === semanticKey(key)
+        )).map(chip => ({
+          key: chip.key,
+          label: chip.label || chip.key,
+          field_node: `field:${chip.key}`,
+        })),
+        children: fieldIDs,
+      };
+    }
+    const groups = state.kind === "backtest"
+      ? analysis.groups || [] : analysis.configuration_groups || [];
+    const groupIDs = groups.map((group, index) => {
+      const key = String(
+        group.id || group.config_group_id || group.name || index,
+      );
+      const id = `configuration:${key}`;
+      nodes[id] = {
+        id,
+        kind: state.kind === "backtest" ? "strategy" : "configuration-group",
+        label: group.name || group.label || key,
+        summary: `${Object.keys(group).length} registered values`,
+        configuration_ref: key,
+        children: [],
+      };
+      return id;
+    });
+    nodes.configurations = {
+      id: "configurations",
+      kind: "collection",
+      label: state.kind === "backtest" ? "策略" : "配置组",
+      summary: `${groupIDs.length}`,
+      children: groupIDs,
+    };
+    nodes.page = {
+      id: "page",
+      kind: "page",
+      label: state.kind === "backtest" ? "回测配置" : "IC 测试配置",
+      summary: `${mounted.size} mounted tabs`,
+      children: [...tabIDs, "configurations"],
+    };
+    return {schema_version: 1, root_id: "page", nodes};
+  }
+
   function register(context, state, refresh) {
     const existing = state.pageAssistanceRegistration;
     if (existing && existing.pageState === context.pageState) return existing.controller;
     const controller = FTPageAssistance.register(context, {
       prepare: () => FTTestLazyCode.loadGroup("workbench-run-submit"),
+      navigation: () => navigationFor(state),
       schema: () => schemaFor(state),
       exportDocument: () => documentFor(state),
       validate: document => {
@@ -123,5 +218,7 @@
     return controller;
   }
 
-  window.FTTestPageAssistance = Object.freeze({documentFor, register, schemaFor});
+  window.FTTestPageAssistance = Object.freeze({
+    documentFor, navigationFor, register, schemaFor,
+  });
 })();

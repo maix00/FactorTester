@@ -24,6 +24,10 @@ vm.runInThisContext(
   const context = {tabID: "tab-1", tabSession: {durable: {}}, t: value => value};
   const controller = window.FTPageAssistance.register(context, {
     prepare: async () => { ready = true; },
+    navigation: () => ({
+      schema_version: 1, root_id: "page",
+      nodes: {page: {id: "page", kind: "page", label: "Factor", children: []}},
+    }),
     schema: () => ({type: "object"}),
     exportDocument: () => {
       assert.equal(ready, true, "the document is not exported before preparation");
@@ -40,6 +44,7 @@ vm.runInThisContext(
   assert.equal(profileReads, 1);
   await controller.prepare();
   assert.equal(controller.snapshot().revision, 0);
+  assert.equal(controller.snapshot().navigation.root_id, "page");
   current = {name: "person edit"};
   assert.equal(controller.snapshot().revision, 1, "person edits advance the revision");
   await controller.apply({expected_revision: 1, document: {name: "new"}});

@@ -1,6 +1,22 @@
 (() => {
   function register(context, {tabID, title, source}) {
     return FTPageAssistance.register(context, {
+      navigation: () => ({
+        schema_version: 1, root_id: "page", nodes: {
+          page: {
+            id: "page", kind: "page", label: "自定义补充分析",
+            children: ["field:title", "field:source"],
+          },
+          "field:title": {
+            id: "field:title", kind: "field", label: "标题",
+            value: title.value, children: [],
+          },
+          "field:source": {
+            id: "field:source", kind: "field", label: "Python 源码",
+            value: source.value, children: [],
+          },
+        },
+      }),
       schema: () => ({
         type: "object", required: ["schema_version", "document_kind", "title", "source"],
         properties: {

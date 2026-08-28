@@ -49,6 +49,38 @@ def test_draft_listing_omits_document_but_reports_quota(tmp_path) -> None:
     assert listed["quota"]["warning"] is True
 
 
+def test_draft_merge_patch_updates_only_requested_document_fields(tmp_path) -> None:
+    store = AssistanceDraftStore(tmp_path)
+    created = store.create(
+        principal="owner",
+        profile_id="self",
+        tab_id="backtest-1",
+        page_kind="backtest",
+        page_revision=7,
+        schema_version=1,
+        document={
+            "configuration": {
+                "task_name": "old",
+                "settings": {"factor_mode": "native", "keep": True},
+            },
+        },
+    )
+
+    patched = store.patch(created["draft_id"], {
+        "configuration": {
+            "task_name": "new",
+            "settings": {"factor_mode": "rank"},
+        },
+    })
+
+    assert patched["document"] == {
+        "configuration": {
+            "task_name": "new",
+            "settings": {"factor_mode": "rank", "keep": True},
+        },
+    }
+
+
 def test_draft_quota_refuses_new_content_without_deleting_old_drafts(tmp_path) -> None:
     store = AssistanceDraftStore(tmp_path, quota_bytes=1800)
     first = _create(store, payload="x" * 600)

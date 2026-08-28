@@ -50,6 +50,27 @@ def validate_document(schema: dict, value: object, path: str = "$") -> None:
         research_configurations.validate_payload(value.get("configuration"))
 
 
+def validate_navigation(value: object) -> None:
+    if not isinstance(value, dict) or int(value.get("schema_version") or 0) != 1:
+        raise ValueError("page assistance navigation schema is required")
+    root_id = str(value.get("root_id") or "").strip()
+    nodes = value.get("nodes")
+    if not root_id or not isinstance(nodes, dict) or root_id not in nodes:
+        raise ValueError("page assistance navigation root is invalid")
+    if len(nodes) > 1000:
+        raise ValueError("page assistance navigation has too many nodes")
+    for node_id, node in nodes.items():
+        if not isinstance(node, dict) or str(node.get("id") or "") != node_id:
+            raise ValueError("page assistance navigation node is invalid")
+        if not str(node.get("kind") or "").strip():
+            raise ValueError("page assistance navigation node kind is required")
+        children = node.get("children") or []
+        if not isinstance(children, list) or any(
+            str(child) not in nodes for child in children
+        ):
+            raise ValueError("page assistance navigation child is invalid")
+
+
 class PageAssistanceStore:
     def __init__(self, *, ttl_seconds: float = 900.0) -> None:
         self.ttl_seconds = ttl_seconds
@@ -78,6 +99,7 @@ class PageAssistanceStore:
             raise ValueError("tab_id and assistance are required")
         if int(assistance.get("schema_version") or 0) != 1:
             raise ValueError("unsupported page assistance schema")
+        validate_navigation(assistance.get("navigation"))
         item = {
             "tab_id": tab_id,
             "assistance": deepcopy(assistance),
@@ -235,13 +257,16 @@ _STORE = PageAssistanceStore()
 _PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a
 structured assistance document. First run `factortester assist inspect`; its
 compact summary lists the current revision and queryable document sections.
-Read only the document and schema subtrees needed for this request with
-`factortester assist inspect --path <json-pointer>` (repeat `--path` in one
-command when useful), rather than printing the complete page contract.
-Container results are bounded and paginated; use a more specific pointer or
-`--offset` and `--limit` instead of requesting a complete subtree. Build one
-complete structured document. Retain it with
-`factortester assist drafts create --stdin`, validate it with
+Read only the page-registered semantic node needed for this request with
+`factortester assist inspect --node <node-id>`. Each page defines its own
+navigation hierarchy: for example tabs, chips and fields for test pages,
+sections for factor editors, or report chapters. Do not scan generic JSON
+subtrees or enumerate candidate collections. Use the candidate lookup command
+registered by a field when candidates are needed. Build one complete
+structured document patch. Start from the page's complete document without
+printing it by running `factortester assist drafts create --from-current`.
+Apply the structured change once with
+`factortester assist drafts patch <draft-id> --stdin`, validate it with
 `factortester assist drafts validate <draft-id>`, then apply it atomically with
 `factortester assist drafts apply <draft-id>`.
 Do not write candidate files into the Profile root or /tmp.
@@ -322,6 +347,7 @@ class PageAssistanceRoutesMixin:
             "/api/client/profile-agent/assistance/apply",
             "/api/client/profile-agent/assistance/acknowledge",
             "/api/client/profile-agent/assistance/drafts",
+            "/api/client/profile-agent/assistance/drafts/patch",
         }:
             return False
         try:
@@ -334,7 +360,11 @@ class PageAssistanceRoutesMixin:
                 if not page:
                     raise ValueError("no assisted page is currently open")
                 assistance = page["assistance"]
-                document = payload.get("document")
+                document = (
+                    assistance.get("document")
+                    if payload.get("from_current") is True
+                    else payload.get("document")
+                )
                 if not isinstance(document, dict):
                     raise ValueError("assistance document must be an object")
                 item = (
@@ -356,6 +386,16 @@ class PageAssistanceRoutesMixin:
                     )
                 )
                 json_response(self, {"success": True, "draft": item}, 201)
+            elif parsed.path.endswith("/drafts/patch"):
+                patch = payload.get("patch")
+                if not isinstance(patch, dict):
+                    raise ValueError("assistance draft patch must be an object")
+                item = (
+                    self._agent_service()
+                    .assistance_drafts(principal, profile_id)
+                    .patch(str(payload.get("draft_id") or ""), patch)
+                )
+                json_response(self, {"success": True, "draft": item})
             elif parsed.path.endswith("/publish"):
                 item = _STORE.publish(principal, profile_id, payload)
                 json_response(self, {"success": True, "page": item})

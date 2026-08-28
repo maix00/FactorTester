@@ -4,7 +4,9 @@
   }
 
   function register(context, adapter, options = {}) {
-    for (const name of ["schema", "exportDocument", "importDocument"]) {
+    for (const name of [
+      "schema", "exportDocument", "importDocument", "navigation",
+    ]) {
       if (typeof adapter?.[name] !== "function") {
         throw new Error(`page assistance adapter requires ${name}`);
       }
@@ -35,6 +37,7 @@
           schema_version: 1,
           page_kind: String(options.pageKind || ""),
           view: clone(options.view?.() || {}),
+          navigation: clone(adapter.navigation()),
           document_schema: clone(adapter.schema()),
           document,
           revision,
