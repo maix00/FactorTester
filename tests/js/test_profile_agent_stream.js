@@ -120,6 +120,10 @@ const state = {
             id: 'history-assistant-old',
             type: 'assistant_message',
             content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+          }, {
+            id: 'history-user-interrupted',
+            type: 'user_message',
+            content: [{type: 'input_text', text: '上一轮没有最终消息'}],
           }],
           has_more: false,
           after: null,
@@ -152,6 +156,11 @@ const state = {
               id: 'history-assistant-old',
               type: 'assistant_message',
               content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+            },
+            {
+              id: 'history-user-interrupted',
+              type: 'user_message',
+              content: [{type: 'input_text', text: '上一轮没有最终消息'}],
             },
           ],
           has_more: false,
@@ -258,7 +267,10 @@ const state = {
   assert.equal(global.__observedRuntime, true);
   assert.deepEqual(
     state.items.map(item => item.id),
-    ['history-assistant-old', 'command-1', 'file-history-only', 'history-assistant-1'],
+    [
+      'history-user-interrupted', 'history-assistant-old',
+      'command-1', 'file-history-only', 'history-assistant-1',
+    ],
     'authoritative history is stored oldest-first after reconciliation',
   );
   assert.ok(requestedURLs.some(url => (
