@@ -44,9 +44,11 @@ global.document = {
 global.FTUI = {empty: (title, detail) => ({title, detail})};
 
 const adapters = [];
+const adapterOptions = [];
 window.FTProfileChatKit = {
   load: async () => {},
-  create: () => {
+  create: (_profile, _context, options) => {
+    adapterOptions.push(options);
     const adapter = {
       endpoint: "/chatkit",
       locale: "zh-CN",
@@ -98,12 +100,22 @@ vm.runInThisContext(
   const initialChats = findAll(root, item => item.tagName === "openai-chatkit");
   assert.equal(initialChats.length, 1, "one timeline uses one ChatKit element");
   assert.equal(initialChats[0].options.api.fetch, adapters[0].fetch);
-  assert.equal(context.calls.filter(
-    call => call.url === "/api/client/profile-agent/start",
-  ).length, 1, "entering the tab starts the Agent exactly once");
   const lifecycleHost = findAll(
     root, item => item.dataset?.ftRerenderOnTabRestore === "true",
   )[0];
+  adapterOptions[0].onTurnActivity(true);
+  assert.equal(
+    lifecycleHost.dataset.ftRerenderOnTabRestore,
+    undefined,
+    "an active response keeps the mounted ChatKit stream alive across tab switches",
+  );
+  assert.equal(lifecycleHost.dataset.ftAgentTurnActive, "true");
+  adapterOptions[0].onTurnActivity(false);
+  assert.equal(lifecycleHost.dataset.ftRerenderOnTabRestore, "true");
+  assert.equal(lifecycleHost.dataset.ftAgentTurnActive, undefined);
+  assert.equal(context.calls.filter(
+    call => call.url === "/api/client/profile-agent/start",
+  ).length, 1, "entering the tab starts the Agent exactly once");
   lifecycleHost.__ftBeforeTabSave();
   await flush();
   assert.equal(context.calls.filter(

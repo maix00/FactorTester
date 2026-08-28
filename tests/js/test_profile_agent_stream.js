@@ -104,6 +104,7 @@ vm.runInThisContext(source, {filename: 'chatkit-stream.js'});
 const chunks = [];
 const requestedURLs = [];
 const rpcMethods = [];
+const turnActivity = [];
 let runtimeResumed = false;
 let historyReads = 0;
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
@@ -211,6 +212,7 @@ const state = {
       global.__observedRuntime = true;
     }
   },
+  turnActivityObserver: active => turnActivity.push(active),
 };
 
 (async () => {
@@ -237,6 +239,7 @@ const state = {
     ['history-assistant-old', 'command-1', 'file-history-only', 'history-assistant-1'],
     'authoritative history is stored oldest-first after reconciliation',
   );
+  assert.deepEqual(turnActivity, [true, false]);
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
