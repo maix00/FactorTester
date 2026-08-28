@@ -35,7 +35,7 @@ def active_turn_items(
         item = params.get("item")
         if isinstance(item, Mapping):
             value = provider_item(item, conversation_id)
-            if value is not None:
+            if value is not None and value.get("type") != "user_message":
                 identifier = _text(value.get("id"))
                 if identifier not in projected:
                     order.append(identifier)

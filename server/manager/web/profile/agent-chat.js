@@ -238,11 +238,10 @@
     status.setAttribute("aria-live", "polite");
     const host = document.createElement("div");
     host.className = "profile-chatkit-host";
-    // ChatKit keeps internal request state in the custom element.  The tab
-    // cache may detach and later reattach that element, which leaves its
-    // history sidebar in an unfinished loading state in some browsers.  Ask
-    // the tab cache to remount this host when the tab is activated again.
-    host.dataset.ftRerenderOnTabRestore = "true";
+    // An active ChatKit response belongs to the mounted custom element and
+    // its SSE request. Keep it connected while another left-rail tab is in
+    // front; a static history remount cannot reconstruct pending stream state.
+    host.dataset.ftKeepConnectedOnTabSave = "true";
     host.setAttribute("aria-live", "polite");
     const settingsHost = document.createElement("div");
     settingsHost.className = "profile-agent-settings-host";

@@ -112,7 +112,7 @@ vm.runInThisContext(
     "a remounted active conversation fetches process items produced while absent",
   );
   const lifecycleHost = findAll(
-    root, item => item.dataset?.ftRerenderOnTabRestore === "true",
+    root, item => item.dataset?.ftKeepConnectedOnTabSave === "true",
   )[0];
   assert.equal(context.calls.filter(
     call => call.url === "/api/client/profile-agent/start",
