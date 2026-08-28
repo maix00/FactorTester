@@ -402,15 +402,10 @@
         }
       }
       if (method === "app_server_exit" || payload?.type === "app_server_exit") {
-        if (state.assistant?.text) finish("done");
-        else {
-          writeEvent(controller, {
-            type: "error",
-            code: "agent_process_exited",
-            message: "Profile Agent exited before producing a response",
-          });
-          finish("error");
-        }
+        // The isolated app-server is a replaceable transport process.  Its
+        // exit does not define the Provider turn outcome; reconcile the
+        // durable thread once instead of manufacturing a turn failure.
+        finish("done");
         return;
       }
       if (payload?.error || /error/i.test(method) && !delta) {
