@@ -76,10 +76,11 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   });
   assert.equal(body.children.length, 2, "registration only mounts shell and trigger");
   assert.equal(events.length, 0, "registration performs no deferred work");
-  stateHooks.restore({open: true, profile_id: "self"});
+  stateHooks.restore({open: false, profile_id: "self"});
   await Promise.resolve();
-  assert.equal(drawer.shell.hidden, true, "restoring a page never reopens the drawer");
-  assert.equal(events.length, 0, "page restoration performs no Agent work");
+  assert.equal(drawer.shell.hidden, true, "a previously closed drawer stays closed");
+  assert.equal(drawer.toggle.hidden, false, "its floating trigger remains visible");
+  assert.equal(events.length, 0, "restoring a closed drawer performs no Agent work");
 
   const opening = drawer.open();
   await Promise.resolve();
@@ -105,5 +106,35 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   assert(events.some(item => item[0] === "pause"));
   await drawer.open();
   assert(events.some(item => item[0] === "resume"));
+  drawer.hide();
+  const resumeCount = events.filter(item => item[0] === "resume").length;
+  stateHooks.restore({open: true, profile_id: "self"});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(drawer.shell.hidden, false,
+    "restoring an assisted tab reopens a drawer that the user left open");
+  assert.equal(drawer.toggle.hidden, true);
+  assert(events.filter(item => item[0] === "resume").length > resumeCount,
+    "a restored drawer resumes the existing conversation bridge");
+  const savedDrawerState = stateHooks.capture();
+  assert.equal(savedDrawerState.open, true);
+  stateHooks.dispose();
+  let rebuiltHooks = null;
+  const rebuiltContext = {
+    ...context,
+    pageState: {register: (_name, hooks) => {
+      rebuiltHooks = hooks;
+      hooks.restore(savedDrawerState);
+      return {};
+    }},
+  };
+  const rebuilt = FTPageAgentDrawer.attach(rebuiltContext, {
+    resolveProfile: async () => ({profile_id: "self"}),
+    assistance: {prepare: async () => {}},
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(rebuiltHooks, "the rebuilt assisted page registers its drawer state");
+  assert.equal(rebuilt.shell.hidden, false,
+    "a performance-evicted assisted page reopens the drawer after rebuilding");
+  assert.equal(rebuilt.toggle.hidden, true);
   console.log("PASS: page Agent drawer defers all work until it opens");
 })().catch(error => { console.error(error); process.exitCode = 1; });

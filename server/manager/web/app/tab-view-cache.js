@@ -211,29 +211,23 @@
       ));
     }
 
-    function parkPageAgent(tabID, session) {
-      if (session.pageAgentParked) return;
-      const drawers = [...(document.querySelectorAll?.("[data-ft-page-agent-tab]") || [])]
+    function pageAgentNodes(tabID) {
+      return [...(document.querySelectorAll?.("[data-ft-page-agent-tab]") || [])]
         .filter(item => item.dataset.ftPageAgentTab === tabID);
-      if (!drawers.length) {
-        session.pageAgentDrawers = [];
-        return;
-      }
-      session.pageAgentDrawers = drawers.map(drawer => {
-        const open = !drawer.hidden;
-        drawer.hidden = true;
-        return {drawer, open};
-      });
-      session.pageAgentParked = true;
     }
 
-    function restorePageAgent(tabID, session) {
-      const records = Array.isArray(session.pageAgentDrawers)
-        ? session.pageAgentDrawers : [];
-      session.pageAgentDrawers = records.filter(item => item.drawer?.isConnected !== false);
-      session.pageAgentDrawers.forEach(item => { item.drawer.hidden = !item.open; });
-      session.pageAgentDrawers = [];
-      session.pageAgentParked = false;
+    function parkPageAgent(tabID) {
+      pageAgentNodes(tabID).forEach(item => { item.hidden = true; });
+    }
+
+    function restorePageAgent(tabID) {
+      const current = pageAgentNodes(tabID);
+      const drawer = current.find(item => item.dataset.ftPageAgentRole === "drawer");
+      const trigger = current.find(item => item.dataset.ftPageAgentRole === "toggle");
+      const desiredOpen = drawer?.dataset.ftPageAgentDesiredOpen === "true";
+      if (drawer) drawer.hidden = !desiredOpen;
+      if (trigger) trigger.hidden = desiredOpen;
+      drawer?.__ftRestorePageAgent?.();
     }
 
     function tabSession(tabID) {
@@ -409,7 +403,7 @@
         }
         restoreActiveNav(view.navRoute);
         restoreOverlays(tabID, session);
-        restorePageAgent(tabID, session);
+        restorePageAgent(tabID);
         state.pendingScrollCapture = null;
         window.requestAnimationFrame?.(() => window.scrollTo({
           top: Number.isFinite(session.scrollY) ? session.scrollY : 0,
@@ -441,7 +435,7 @@
       }
       restoreActiveNav(view.navRoute);
       restoreOverlays(tabID, session);
-      restorePageAgent(tabID, session);
+      restorePageAgent(tabID);
       state.pendingScrollCapture = null;
       window.requestAnimationFrame?.(() => window.scrollTo({
         top: Number.isFinite(session.scrollY) ? session.scrollY : 0,
@@ -481,7 +475,7 @@
       view.pendingRestore = false;
       view.lastUsedAt = Date.now();
       restoreOverlays(state.activeTabID, session);
-      restorePageAgent(state.activeTabID, session);
+      restorePageAgent(state.activeTabID);
       window.requestAnimationFrame?.(() => window.scrollTo({
         top: Number.isFinite(snapshot.scrollY) ? snapshot.scrollY : 0,
         behavior: "auto",
@@ -497,8 +491,6 @@
       session.view = null;
       session.viewReady = false;
       session.overlays = [];
-      session.pageAgentDrawers = [];
-      session.pageAgentParked = false;
       deleteColdView(tabID);
       Promise.resolve(onTabEvicted?.(tabID)).catch(() => {});
     }
@@ -560,7 +552,7 @@
       const session = tabSession(state.activeTabID);
       saveView(session);
       parkOverlays(state.activeTabID, session);
-      parkPageAgent(state.activeTabID, session);
+      parkPageAgent(state.activeTabID);
     }
 
     function captureScrollPosition() {
