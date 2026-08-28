@@ -1,6 +1,18 @@
 (() => {
   const cache = new Map();
+  const categoryCache = new Map();
+  const sourceCache = new Map();
   const treeCache = new Map();
+
+  function cachedRequest(store, key, load) {
+    if (store.has(key)) return store.get(key);
+    const pending = Promise.resolve().then(load).catch(error => {
+      store.delete(key);
+      throw error;
+    });
+    store.set(key, pending);
+    return pending;
+  }
 
   function isCurrent(context) {
     return context.isRouteCurrent?.() !== false;
@@ -128,50 +140,53 @@
     const includeProducts = options.includeProducts !== false;
     const includeGroups = options.includeGroups !== false;
     const key = `${origin}:products=${includeProducts}:groups=${includeGroups}`;
-    if (cache.has(key)) return cache.get(key);
-    const groupsRequest = includeGroups
-      ? (origin === "local"
-        ? request(context, "/api/client/product-groups")
-        : request(context, "/api/catalog/product-groups"))
-      : Promise.resolve({});
-    const productsRequest = includeProducts
-      ? (origin === "local"
-        ? request(context, "/api/client/product_names")
-        : request(context, "/api/catalog/products"))
-      : Promise.resolve({});
-    const [productsResult, groupsResult] = await Promise.allSettled([
-      productsRequest, groupsRequest,
-    ]);
-    const productPayload = productsResult.status === "fulfilled" ? productsResult.value : {};
-    const groupPayload = groupsResult.status === "fulfilled" ? groupsResult.value : {};
-    const value = {
-      products: Array.isArray(productPayload.products) ? productPayload.products : [],
-      groups: Array.isArray(groupPayload.groups) ? groupPayload.groups : [],
-      errors: {
-        products: productsResult.status === "rejected" ? productsResult.reason : null,
-        groups: groupsResult.status === "rejected" ? groupsResult.reason : null,
-      },
-      source: origin,
-    };
-    cache.set(key, value);
-    return value;
+    return cachedRequest(cache, key, async () => {
+      const groupsRequest = includeGroups
+        ? (origin === "local"
+          ? request(context, "/api/client/product-groups")
+          : request(context, "/api/catalog/product-groups"))
+        : Promise.resolve({});
+      const productsRequest = includeProducts
+        ? (origin === "local"
+          ? request(context, "/api/client/product_names")
+          : request(context, "/api/catalog/products"))
+        : Promise.resolve({});
+      const [productsResult, groupsResult] = await Promise.allSettled([
+        productsRequest, groupsRequest,
+      ]);
+      const productPayload = productsResult.status === "fulfilled" ? productsResult.value : {};
+      const groupPayload = groupsResult.status === "fulfilled" ? groupsResult.value : {};
+      return {
+        products: Array.isArray(productPayload.products) ? productPayload.products : [],
+        groups: Array.isArray(groupPayload.groups) ? groupPayload.groups : [],
+        errors: {
+          products: productsResult.status === "rejected" ? productsResult.reason : null,
+          groups: groupsResult.status === "rejected" ? groupsResult.reason : null,
+        },
+        source: origin,
+      };
+    });
   }
 
   async function loadCategories(context, source) {
     const endpoint = source === "local"
       ? "/api/client/product_categories"
       : "/api/catalog/categories";
-    const value = await request(context, endpoint);
-    return Array.isArray(value.categories) ? value : {
-      ...value, categories: [], default_category_id: null, sources: [],
-    };
+    return cachedRequest(categoryCache, source, async () => {
+      const value = await request(context, endpoint);
+      return Array.isArray(value.categories) ? value : {
+        ...value, categories: [], default_category_id: null, sources: [],
+      };
+    });
   }
 
   async function loadSources(context, source) {
     const endpoint = source === "local"
       ? "/api/client/product_sources" : "/api/catalog/sources";
-    const value = await request(context, endpoint);
-    return Array.isArray(value.sources) ? value.sources : [];
+    return cachedRequest(sourceCache, source, async () => {
+      const value = await request(context, endpoint);
+      return Array.isArray(value.sources) ? value.sources : [];
+    });
   }
 
   async function loadTree(context, source, categoryIDs, dataSourceIDs) {
@@ -179,16 +194,16 @@
     const sourceKey = (dataSourceIDs || []).join(",") || "all";
     const categoryKey = categories.join(",") || "all";
     const key = `${source}:${sourceKey}:${categoryKey}`;
-    if (treeCache.has(key)) return treeCache.get(key);
-    const query = new URLSearchParams({checkbox: "1"});
-    categories.forEach(value => query.append("category", value));
-    (dataSourceIDs || []).forEach(value => query.append("data_source", value));
-    const endpoint = source === "local"
-      ? `/api/client/product_tree?${query}`
-      : `/api/catalog/tree?${query}`;
-    const value = await request(context, endpoint);
-    treeCache.set(key, value.tree || value);
-    return treeCache.get(key);
+    return cachedRequest(treeCache, key, async () => {
+      const query = new URLSearchParams({checkbox: "1"});
+      categories.forEach(value => query.append("category", value));
+      (dataSourceIDs || []).forEach(value => query.append("data_source", value));
+      const endpoint = source === "local"
+        ? `/api/client/product_tree?${query}`
+        : `/api/catalog/tree?${query}`;
+      const value = await request(context, endpoint);
+      return value.tree || value;
+    });
   }
 
   async function loadProductTree(context, source = "server") {
@@ -263,6 +278,8 @@
     const refresh = context.button("↻", () => {
       [...cache.keys()].filter(key => key.startsWith(`${source}:`))
         .forEach(key => cache.delete(key));
+      categoryCache.delete(source);
+      sourceCache.delete(source);
       [...treeCache.keys()].filter(key => key.startsWith(`${source}:`)).forEach(key => treeCache.delete(key));
       list(context, page);
     }, context.t("刷新"));
@@ -368,6 +385,9 @@
             );
             localStorage.setItem(categoryStorageKey, selected);
             cache.clear();
+            categoryCache.clear();
+            sourceCache.clear();
+            treeCache.clear();
             await renderTree();
           },
         });
