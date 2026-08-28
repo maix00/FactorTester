@@ -287,7 +287,7 @@ def _project_item(
                 "type": "custom",
                 "title": "Agent progress",
                 "content": text,
-                "status_indicator": "complete",
+                "status_indicator": _status(item.get("status")),
             }])
         return ({
             **base,
