@@ -78,6 +78,12 @@ def test_profile_codex_runtime_projects_only_selected_skills(tmp_path):
     assert runtime.command("/usr/local/bin/codex") == [
         "/usr/local/bin/codex",
         "app-server",
+        "--disable",
+        "plugins",
+        "--disable",
+        "remote_plugin",
+        "--disable",
+        "recommended_plugins",
         "--listen",
         "stdio://",
     ]
@@ -562,8 +568,10 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "alignEventCursor" in stream_source
     assert "eventStream = openEventStream" in stream_source
     assert stream_source.index(
+        "const response = await rpc(state, request.method, request.params);"
+    ) < stream_source.index(
         "let eventStream = openEventStream(state, controller, signal);"
-    ) < stream_source.index('rpc(state, "turn/start"')
+    )
     assert "event.lastEventId" in stream_source
     assert "eventTurnID" in protocol_source
     chat_scripts = manifest["groups"]["profile-agent-chat"]

@@ -284,7 +284,22 @@ class AgentSkillRuntime:
         binary = str(codex_binary or "").strip()
         if not binary:
             raise AgentSkillRuntimeError("codex binary is required")
-        return [binary, "app-server", "--listen", "stdio://"]
+        return [
+            binary,
+            "app-server",
+            # Server Profiles use FactorTester's explicit, local Skill
+            # projection.  Codex's consumer plugin discovery performs remote
+            # catalog sync during initialize; a failed sync can outlive the
+            # Manager timeout and make the Agent appear to exit empty.
+            "--disable",
+            "plugins",
+            "--disable",
+            "remote_plugin",
+            "--disable",
+            "recommended_plugins",
+            "--listen",
+            "stdio://",
+        ]
 
     def projected_skill_path(self, skill_id: str) -> Path:
         identifier = self._text(skill_id, "skill_id")
