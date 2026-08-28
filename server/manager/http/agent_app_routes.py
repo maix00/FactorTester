@@ -202,7 +202,10 @@ class AgentAppServerRoutesMixin:
         after: int,
     ) -> None:
         status = supervisor.status(principal, profile_id)
-        if not status.get("running"):
+        if (
+            not status.get("running")
+            and int(status.get("event_sequence") or 0) <= max(0, int(after))
+        ):
             raise AgentAppServerError("start the Profile Agent before opening events")
         # BaseHTTPRequestHandler defaults to HTTP/1.0.  An SSE response has no
         # known Content-Length, so HTTP/1.0 keep-alive leaves browsers and
@@ -230,6 +233,8 @@ class AgentAppServerRoutesMixin:
                     timeout=5.0,
                 )
                 if not events:
+                    if not supervisor.status(principal, profile_id).get("running"):
+                        return
                     self._write_sse_chunk(b": heartbeat\n\n")
                     continue
                 for event in events:
