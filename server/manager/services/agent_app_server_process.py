@@ -124,9 +124,20 @@ class AgentAppServerProcess:
             else:
                 self._append_event(payload)
         returncode = process.poll() if process is not None else None
+        if process is not None and returncode is None:
+            try:
+                returncode = process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                returncode = None
+        stderr_reader = self._stderr_reader
+        if stderr_reader is not None and stderr_reader is not threading.current_thread():
+            stderr_reader.join(timeout=0.5)
+        with self._condition:
+            stderr_tail = list(self._stderr)[-10:]
         self._append_event({
             "type": "app_server_exit",
             "returncode": returncode,
+            "stderr_tail": stderr_tail,
         })
 
     def _read_stderr(self) -> None:
