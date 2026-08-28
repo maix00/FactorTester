@@ -225,6 +225,7 @@
       settings: FTTestConfigurationCompiler.authoringSettings(
         state.manifest, state.values,
       ),
+      run_values: structuredClone(state.runValues || {}),
       factor_ref: state.kind === "ic" ? group?.factor_ref : state.factorRef,
       output_requests: FTTestRunFields.selection(state),
       mounted_tabs: Array.isArray(state.settingsMountedTabs)

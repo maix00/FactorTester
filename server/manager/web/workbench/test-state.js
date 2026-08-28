@@ -60,6 +60,11 @@
     const payload = state.workspace?.configuration?.payload || {};
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
     const applicationUI = payload.ui?.[state.kind] || {};
+    state.runValues = {
+      ...defaultRunValues(state.manifest),
+      ...(applicationUI.run_values && typeof applicationUI.run_values === "object"
+        ? structuredClone(applicationUI.run_values) : {}),
+    };
     if (state.kind === "ic") {
       if (Array.isArray(applicationUI.selected_configuration_group_ids)) {
         state.selectedICConfigurationGroupIDs = [

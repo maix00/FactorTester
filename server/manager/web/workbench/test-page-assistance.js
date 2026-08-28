@@ -12,6 +12,12 @@
   }
 
   function schemaFor(state) {
+    const runProperties = Object.fromEntries(
+      (state.manifest?.run_fields || []).map(field => [field.key, {
+        ...(field.value_descriptor?.editor === "number" ? {type: "number"} : {}),
+        description: field.label || field.key,
+      }]),
+    );
     const analysisSchema = state.kind === "backtest" ? {
       type: "object",
       required: ["groups"],
@@ -52,6 +58,17 @@
               type: "object", required: [state.kind],
               properties: {[state.kind]: analysisSchema},
             },
+            ui: {
+              type: "object",
+              properties: {
+                [state.kind]: {
+                  type: "object",
+                  properties: {
+                    run_values: {type: "object", properties: runProperties},
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -77,6 +94,15 @@
         if (state.kind === "backtest"
             && !document.configuration.analyses.backtest.groups?.length) {
           throw new Error("回测配置至少需要一个策略");
+        }
+        const analysis = document.configuration.analyses[state.kind];
+        const misplaced = (state.manifest?.run_fields || [])
+          .map(field => field.key)
+          .filter(key => Object.prototype.hasOwnProperty.call(analysis, key));
+        if (misplaced.length) {
+          throw new Error(
+            `任务提交字段必须写入 configuration.ui.${state.kind}.run_values: ${misplaced.join(", ")}`,
+          );
         }
       },
       importDocument: document => {

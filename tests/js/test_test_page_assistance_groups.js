@@ -35,7 +35,9 @@ const group = {
   splitCount: 5, groupIndex: 1,
 };
 const state = {
-  kind: "backtest", manifest: {}, workspace: null,
+  kind: "backtest", manifest: {run_fields: [{
+    key: "task_name", label: "任务名称", value_descriptor: {editor: "text"},
+  }]}, workspace: null,
   payload: {schema_version: 2, analyses: {backtest: {groups: [group]}}},
 };
 const pageState = {};
@@ -52,10 +54,23 @@ assert.equal(
   1,
   "the Agent receives the strategy-group requirement in the document schema",
 );
+assert.equal(
+  schema.properties.configuration.properties.ui.properties.backtest
+    .properties.run_values.properties.task_name.description,
+  "任务名称",
+  "the Agent schema exposes the registered run field at its restorable location",
+);
 assert.throws(() => registration.validate({
   document_kind: "research_configuration",
   configuration: {schema_version: 2, analyses: {backtest: {groups: []}}},
 }), /至少需要一个策略/);
+assert.throws(() => registration.validate({
+  document_kind: "research_configuration",
+  configuration: {
+    schema_version: 2,
+    analyses: {backtest: {groups: [group], task_name: "wrong"}},
+  },
+}), /configuration\.ui\.backtest\.run_values/);
 registration.importDocument({configuration: state.payload});
 assert.deepEqual(state.analysis.groups, [group]);
 assert.equal(initialized, 1, "imported strategy groups enter the normal UI model");
