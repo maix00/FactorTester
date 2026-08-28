@@ -2765,12 +2765,13 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert 'add("运行到底", "continue"' in actions
     assert "cancelButton" in actions
     assert 'actionPath(jobID, "cancel", portQuery)' in actions
-    run_results = (
-        ROOT / "server" / "manager" / "web" / "workbench" / "test-run-results.js"
+    run_batch = (
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-run-batch.js"
     ).read_text(
         encoding="utf-8",
     )
-    assert "FTJobActions?.cancelButton" in run_results
+    assert "FTJobActions?.cancelButton" in run_batch
+    assert 'context.button(context.t("查看测试任务")' in run_batch
     assert 'add("按冻结配置重试", "retry"' not in actions
     assert "恢复为可编辑配置" not in actions
     assert 'method: "DELETE"' in artifacts

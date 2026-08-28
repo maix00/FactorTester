@@ -177,7 +177,7 @@
         return existing;
       }
       return {
-        phase: "idle", runSpecHash: "", runSpecRecord: null,
+        phase: "idle", lifecycleStatus: "idle", runSpecHash: "", runSpecRecord: null,
         previewRunSpecHash: "", previewRequest: null, previewFingerprint: "",
         runID: "", jobID: "", port: 0,
         serverID: "",
@@ -196,6 +196,7 @@
       if (target) {
         Object.assign(target, {
           phase: String(restored.phase || "succeeded"),
+          lifecycleStatus: String(restored.phase || "succeeded"),
           runSpecHash: String(restored.runSpecHash || ""),
           runID: String(restored.runID || ""),
           jobID: String(restored.jobID),
@@ -321,6 +322,7 @@
     if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
     const submittedHash = assertPreviewMatch(item, value);
     item.phase = "submitted";
+    item.lifecycleStatus = "submitted";
     item.progressStreamClosed = false;
     item.jobID = String(job.job_id);
     item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
@@ -352,6 +354,7 @@
     if (!runID) throw new Error("本地运行响应缺少运行 ID");
     const submittedHash = assertPreviewMatch(item, value);
     item.phase = String(value.phase || "submitted");
+    item.lifecycleStatus = String(value.phase || "submitted");
     item.runID = runID;
     item.jobID = "";
     item.port = 0;

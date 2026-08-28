@@ -10,6 +10,7 @@
     item.portQuery = loaded.portQuery || (item.port ? `?port=${item.port}` : "");
     item.artifactQuery = loaded.artifactQuery || item.artifactQuery || "";
     item.phase = String(loaded.job?.status || item.phase || "submitted");
+    item.lifecycleStatus = String(loaded.job?.status || item.lifecycleStatus || "submitted");
     item.resultError = "";
     return item;
   }
@@ -194,20 +195,6 @@
     }, context.t("刷新任务结果"));
     reload.disabled = Boolean(item.resultLoading);
     toolbar.append(reload);
-    const cancel = window.FTJobActions?.cancelButton?.(context, {
-      job: {
-        ...(item.job || {}), status: item.phase,
-        cancel_requested: item.cancelRequested || item.job?.cancel_requested,
-      },
-      jobID: item.jobID,
-      portQuery: item.portQuery || "",
-      onAccepted: () => {
-        item.cancelRequested = true;
-        rerender?.();
-      },
-      onRefresh: () => refresh(context, state, item, rerender),
-    });
-    if (cancel) toolbar.append(cancel);
     root.append(toolbar);
     if (item.resultLoading) {
       root.append(window.FTUI.loading(context.t("正在读取任务结果…")));
