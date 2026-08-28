@@ -112,7 +112,7 @@ class ProfileAgentSandbox:
             str(self.workspace_root),
             "/workspace",
         ]
-        for path in ("/usr", "/opt/factortester/app"):
+        for path in ("/usr",):
             if Path(path).exists():
                 command.extend(["--ro-bind", path, path])
         for target, source in (
@@ -141,7 +141,7 @@ class ProfileAgentSandbox:
             if Path(path).exists():
                 command.extend(["--ro-bind", path, path])
         created: set[Path] = set()
-        mounted_roots = (Path("/usr"), Path("/opt/factortester/app"))
+        mounted_roots = (Path("/usr"),)
         for source in self.skill_sources:
             if not source.is_dir():
                 raise ProfileAgentSandboxError(
