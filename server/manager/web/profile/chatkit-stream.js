@@ -195,40 +195,11 @@
     };
   }
 
-  function orderedLatestExchange(items) {
-    let latestUser = -1;
-    let latestAssistant = -1;
-    (items || []).forEach((item, index) => {
-      const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
-      if (type === "usermessage") latestUser = index;
-      if (isAssistantMessage(item)) latestAssistant = index;
-    });
-    return latestUser < 0 || latestAssistant < 0 || latestAssistant > latestUser;
-  }
-
-  function pageFingerprint(page) {
-    return JSON.stringify((page?.items || []).map(item => [
-      String(item?.id || ""), String(item?.type || ""), itemText(item),
-    ]));
-  }
-
   async function stableAuthoritativePage(state) {
-    // A read-only app-server can briefly expose a partially rebuilt latest
-    // turn immediately after a live session stops.  Require two identical,
-    // correctly ordered thread/read snapshots before restoring the UI.
-    const delays = [0, 100, 200, 400, 800, 1200, 1800];
-    let previous = "";
-    let page = null;
-    for (const delay of delays) {
-      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-      page = await authoritativePage(state);
-      const fingerprint = pageFingerprint(page);
-      if (orderedLatestExchange(page.items) && fingerprint === previous) {
-        return page;
-      }
-      previous = orderedLatestExchange(page.items) ? fingerprint : "";
-    }
-    return page || authoritativePage(state);
+    // The Manager timeline endpoint is the ordering authority.  Re-reading it
+    // until two snapshots match made every conversation open perform several
+    // serial thread/read calls and delayed long conversations by seconds.
+    return authoritativePage(state);
   }
 
   async function reconcileThreadHistory(
