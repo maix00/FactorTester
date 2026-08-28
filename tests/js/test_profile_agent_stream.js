@@ -162,7 +162,10 @@ const state = {
         if (!runtimeResumed) {
           throw new Error('thread must be resumed before turn/start');
         }
-        return {success: true, response: {turn: {id: 'turn-1'}}};
+        return {success: true, response: {
+          thread: {id: 'provider-thread-1'},
+          turn: {id: 'turn-1'},
+        }};
       }
       if (body.method === 'thread/resume') {
         runtimeResumed = true;

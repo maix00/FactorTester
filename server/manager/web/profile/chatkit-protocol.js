@@ -214,6 +214,14 @@
     ).trim();
   }
 
+  function turnIDFrom(payload) {
+    const value = responseValue(payload) || {};
+    return String(
+      value.turn?.id || value.turnId || value.turn_id
+      || ((!value.thread && value.id) ? value.id : "")
+    ).trim();
+  }
+
   function historyTimestamp(value, fallback) {
     if (typeof value === "number" && Number.isFinite(value)) {
       return new Date(value < 100000000000 ? value * 1000 : value).toISOString();
@@ -278,6 +286,7 @@
     responseValue,
     terminalMethod,
     turnCompletion,
+    turnIDFrom,
     threadIDFrom,
     threadObject,
     userItem,
