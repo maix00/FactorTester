@@ -383,10 +383,38 @@
       );
       const sequence = Number(payload?.status?.event_sequence);
       if (Number.isFinite(sequence) && sequence >= 0) state.cursor = sequence;
+      return payload?.status || {};
     } catch (_) {
       // Keep the last known cursor.  The SSE connection still provides a
       // durable replay path when the status request is temporarily unavailable.
+      return {};
     }
+  }
+
+  function turnRequest(state, status, text) {
+    const conversationID = String(state.conversationID || "").trim();
+    const processingConversationID = String(
+      status?.processing_conversation_id || "",
+    ).trim();
+    const processingTurnID = String(status?.processing_turn_id || "").trim();
+    const params = {
+      threadId: state.threadID,
+      input: [{type: "text", text}],
+    };
+    if (!processingConversationID) {
+      return {method: "turn/start", params: {...params, skill_ids: state.skills}};
+    }
+    if (processingConversationID !== conversationID) {
+      throw new Error("Profile Agent is processing another conversation");
+    }
+    if (!processingTurnID) {
+      throw new Error("Profile Agent active turn is not ready for steering");
+    }
+    return {
+      method: "turn/steer",
+      params: {...params, turnId: processingTurnID},
+      turnID: processingTurnID,
+    };
   }
 
   function eventBelongsToCurrentTurn(state, payload) {
@@ -573,13 +601,10 @@
       writeEvent(controller, {
         type: "stream_options", stream_options: {allow_cancel: true},
       });
-      await alignEventCursor(state);
-      const response = await rpc(state, "turn/start", {
-        threadId: state.threadID,
-        input: [{type: "text", text}],
-        skill_ids: state.skills,
-      });
-      state.turnID = P.threadIDFrom(response) || state.turnID;
+      const runtimeStatus = await alignEventCursor(state);
+      const request = turnRequest(state, runtimeStatus, text);
+      const response = await rpc(state, request.method, request.params);
+      state.turnID = request.turnID || P.threadIDFrom(response) || state.turnID;
       // The app-server event buffer is replayable from the cursor captured
       // immediately before turn/start.  Opening SSE after the turn exists
       // avoids racing the lifecycle process startup without losing early
@@ -638,6 +663,7 @@
     restoreThread,
     resumeThread,
     rpc,
+    turnRequest,
     streamTurn,
     writeError,
   });

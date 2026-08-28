@@ -100,6 +100,7 @@ const requestedURLs = [];
 const rpcMethods = [];
 let runtimeResumed = false;
 let historyReads = 0;
+let statusReads = 0;
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
 const state = {
   profileID: 'profile-main',
@@ -108,9 +109,10 @@ const state = {
     api: async (url, init = {}) => {
       requestedURLs.push(url);
       if (url.includes('/api/client/profile-agent?')) {
+        statusReads += 1;
         return {status: {
           event_sequence: 0,
-          processing_conversation_id: 'conversation-1',
+          processing_conversation_id: statusReads > 1 ? 'conversation-1' : '',
         }};
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
@@ -272,6 +274,22 @@ const state = {
       'command-1', 'file-history-only', 'history-assistant-1',
     ],
     'authoritative history is stored oldest-first after reconciliation',
+  );
+  assert.deepEqual(
+    window.FTProfileChatKitStream.turnRequest(state, {
+      processing_conversation_id: 'conversation-1',
+      processing_turn_id: 'turn-active',
+    }, '补充要求'),
+    {
+      method: 'turn/steer',
+      params: {
+        threadId: 'provider-thread-1',
+        turnId: 'turn-active',
+        input: [{type: 'text', text: '补充要求'}],
+      },
+      turnID: 'turn-active',
+    },
+    'a new message steers the authoritative active turn after a remount',
   );
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
