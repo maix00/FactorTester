@@ -212,13 +212,19 @@
     }
 
     function parkPageAgent(tabID, session) {
+      if (session.pageAgentParked) return;
       const drawers = [...(document.querySelectorAll?.("[data-ft-page-agent-tab]") || [])]
         .filter(item => item.dataset.ftPageAgentTab === tabID);
+      if (!drawers.length) {
+        session.pageAgentDrawers = [];
+        return;
+      }
       session.pageAgentDrawers = drawers.map(drawer => {
         const open = !drawer.hidden;
         drawer.hidden = true;
         return {drawer, open};
       });
+      session.pageAgentParked = true;
     }
 
     function restorePageAgent(tabID, session) {
@@ -226,6 +232,8 @@
         ? session.pageAgentDrawers : [];
       session.pageAgentDrawers = records.filter(item => item.drawer?.isConnected !== false);
       session.pageAgentDrawers.forEach(item => { item.drawer.hidden = !item.open; });
+      session.pageAgentDrawers = [];
+      session.pageAgentParked = false;
     }
 
     function tabSession(tabID) {
@@ -489,6 +497,8 @@
       session.view = null;
       session.viewReady = false;
       session.overlays = [];
+      session.pageAgentDrawers = [];
+      session.pageAgentParked = false;
       deleteColdView(tabID);
       Promise.resolve(onTabEvicted?.(tabID)).catch(() => {});
     }

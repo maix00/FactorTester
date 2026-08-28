@@ -36,6 +36,7 @@ class FakeElement {
     this.append(...values);
   }
   querySelector(selector) {
+    if (selector === "[data-ft-keep-connected-on-tab-save]") return null;
     if (selector === "[data-ft-rerender-on-tab-restore]") {
       const queue = [...this.children];
       while (queue.length) {
@@ -81,6 +82,7 @@ const eyebrow = new FakeElement("small");
 const toolbar = new FakeElement("header");
 const notice = new FakeElement("p");
 const dialogs = [];
+const pageAgentNodes = [];
 const storage = new Map();
 const durableStorage = new Map();
 
@@ -92,7 +94,11 @@ global.document = {
     "#opened-tabs": opened,
     "#opened-caption": caption,
   }[selector] || null),
-  querySelectorAll: selector => selector === "dialog" ? dialogs : [],
+  querySelectorAll: selector => {
+    if (selector === "dialog") return dialogs;
+    if (selector === "[data-ft-page-agent-tab]") return pageAgentNodes;
+    return [];
+  },
 };
 global.location = {pathname: "/", search: ""};
 global.history = {
@@ -184,6 +190,35 @@ assert.strictEqual(dialog.hidden, false);
 assert.strictEqual(dialog.open, true);
 assert.strictEqual(window.scrollY, 17);
 assert.strictEqual(renderCount, 1);
+
+// Pointer capture and route navigation may save the same tab more than once.
+// The first save parks both Agent drawer nodes; later saves must not overwrite
+// their real visibility with the temporary all-hidden parking state.
+const agentShell = new FakeElement("aside");
+agentShell.dataset.ftPageAgentTab = "home";
+agentShell.hidden = true;
+const agentToggle = new FakeElement("button");
+agentToggle.dataset.ftPageAgentTab = "home";
+agentToggle.hidden = false;
+pageAgentNodes.push(agentShell, agentToggle);
+tabs.saveActiveTabSession();
+tabs.saveActiveTabSession();
+tabs.navigate("/products/product/AGENT-RETURN.DCE");
+tabs.navigate("/");
+assert.strictEqual(agentShell.hidden, true);
+assert.strictEqual(agentToggle.hidden, false,
+  "returning to an assisted tab restores its floating Agent trigger");
+agentShell.hidden = false;
+agentToggle.hidden = true;
+tabs.saveActiveTabSession();
+tabs.saveActiveTabSession();
+tabs.navigate("/products/product/AGENT-OPEN-RETURN.DCE");
+tabs.navigate("/");
+assert.strictEqual(agentShell.hidden, false,
+  "a later switch captures the current drawer state after the previous restore");
+assert.strictEqual(agentToggle.hidden, true);
+agentShell.hidden = true;
+agentToggle.hidden = false;
 
 // A language change invalidates the cached home DOM.  Returning to home must
 // render it again instead of restoring labels from the previous locale.
