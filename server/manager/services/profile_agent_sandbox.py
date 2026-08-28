@@ -86,7 +86,12 @@ class ProfileAgentSandbox:
             )
         command = [
             self.executable(),
-            "--die-with-parent",
+            # Do not use Bubblewrap's --die-with-parent here.  The app-server
+            # is spawned by a short-lived ThreadingHTTPServer request thread;
+            # Linux delivers the parent-death signal when that creating
+            # thread exits, even though the Manager process is still alive.
+            # The supervisor owns explicit stop/shutdown cleanup, and a
+            # container stop tears down the complete PID namespace.
             "--new-session",
             "--unshare-all",
             "--share-net",

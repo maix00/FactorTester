@@ -28,6 +28,7 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> 
         command.index("--tmpfs") : command.index("--tmpfs") + 2
     ]
     assert "--proc" not in command
+    assert "--die-with-parent" not in command
     proc_exe = command.index("/proc/self/exe")
     assert command[proc_exe - 2 : proc_exe + 1] == [
         "--symlink",
