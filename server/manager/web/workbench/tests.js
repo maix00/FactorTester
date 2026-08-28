@@ -279,11 +279,15 @@
       if (state.settingsInitialized || record.error) return;
       try {
         initialize();
-        refresh?.();
+        // A ready code group can initialize synchronously from inside the
+        // loading render. Re-entering render here lets the older loading pass
+        // overwrite the completed page after the nested render returns.
+        // Repaint only after the current DOM commit has finished.
+        if (refresh) queueMicrotask(refresh);
       } catch (error) {
         record.status = "error";
         record.error = error.message || String(error);
-        refresh?.();
+        if (refresh) queueMicrotask(refresh);
       }
     };
     if (record.status === "ready") {
