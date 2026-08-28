@@ -38,6 +38,7 @@ vm.runInThisContext(
   assert.equal(document.source, "new");
   assert.equal(calls.filter(call => call.options.method === "POST").length, 3);
   assert(calls.some(call => call.url.endsWith("/acknowledge")));
+  assert(calls.some(call => call.url.includes("&wait=20")));
   console.log("PASS: CLI atomically replaces the registered page document");
 })().catch(error => {
   console.error(error);
