@@ -25,6 +25,7 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> 
     assert ["--tmpfs", "/tmp"] == command[
         command.index("--tmpfs") : command.index("--tmpfs") + 2
     ]
+    assert "--proc" not in command
     assert str(workspace.parent) not in command
     assert command[-5:] == ["--chdir", "/workspace", "--", "codex", "app-server"]
 
