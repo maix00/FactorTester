@@ -4,7 +4,11 @@
     let timer = null;
     let disposed = false;
     let lastPublished = "";
-    const interval = Math.max(500, Number(options.interval) || 1000);
+    let requestController = null;
+    const interval = Math.max(100, Number(options.interval) || 250);
+    const waitSeconds = Math.max(1, Math.min(
+      25, Number(options.waitSeconds) || 20,
+    ));
 
     async function publish() {
       const value = assistance.snapshot();
@@ -23,10 +27,16 @@
       if (disposed) return;
       if (options.isActive?.() === false) return;
       await publish();
+      const controller = new AbortController();
+      requestController = controller;
       const payload = await context.api(
         `/api/client/profile-agent/assistance/applications?profile_id=${encodeURIComponent(profileID)}`
-        + `&tab_id=${encodeURIComponent(context.tabID)}&after=${sequence}`,
-      );
+        + `&tab_id=${encodeURIComponent(context.tabID)}&after=${sequence}`
+        + `&wait=${waitSeconds}`,
+        {signal: controller.signal},
+      ).finally(() => {
+        if (requestController === controller) requestController = null;
+      });
       for (const item of payload.applications || []) {
         sequence = Math.max(sequence, Number(item.sequence || 0));
         let result;
@@ -68,11 +78,18 @@
 
     function dispose() {
       disposed = true;
+      requestController?.abort();
+      requestController = null;
       if (timer) clearTimeout(timer);
       timer = null;
     }
 
-    return Object.freeze({dispose, start, syncOnce});
+    function pause() {
+      requestController?.abort();
+      requestController = null;
+    }
+
+    return Object.freeze({dispose, pause, start, syncOnce});
   }
 
   window.FTPageAgentContext = Object.freeze({create});

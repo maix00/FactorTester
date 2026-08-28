@@ -58,6 +58,30 @@ def test_expired_application_is_not_returned_to_a_page() -> None:
     assert queued["sequence"] > 0
 
 
+def test_application_long_poll_wakes_when_document_is_enqueued() -> None:
+    store = PageAssistanceStore()
+    store.publish("owner", "profile", {
+        "tab_id": "tab",
+        "assistance": {
+            "schema_version": 1, "page_kind": "test", "revision": 1,
+            "document_schema": {"type": "object"}, "document": {},
+        },
+    })
+    received: list[list[dict]] = []
+    thread = Thread(target=lambda: received.append(store.applications(
+        "owner", "profile", "tab", 0, wait_seconds=1.0,
+    )))
+    thread.start()
+    time.sleep(0.02)
+    queued = store.enqueue("owner", "profile", {
+        "tab_id": "tab", "expected_revision": 1, "document": {},
+    })
+    thread.join(timeout=0.5)
+
+    assert not thread.is_alive()
+    assert received == [[queued]]
+
+
 def test_structured_document_rejects_stale_revision() -> None:
     store = PageAssistanceStore()
     store.publish("owner", "profile", {
