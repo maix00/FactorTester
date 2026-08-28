@@ -12,6 +12,10 @@ from server.manager.services.agent_app_server_session import AgentAppServerSessi
 from server.manager.services.agent_conversation_runtime import (
     AgentConversationRuntimeObserver,
 )
+from server.manager.services.agent_live_turn_chatkit import (
+    active_turn_items,
+    merge_active_turn,
+)
 from server.manager.services.agent_model_catalog import (
     build_model_catalog,
     validate_model_settings,
@@ -50,7 +54,7 @@ class AgentAppServerSupervisor:
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
         self._model_catalog_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
-        self._processing_turns: dict[tuple[str, str], dict[str, str]] = {}
+        self._processing_turns: dict[tuple[str, str], dict[str, Any]] = {}
         self._lock = threading.RLock()
         self.thread_reader = AgentProviderThreadReader(
             profile_service,
@@ -327,9 +331,25 @@ class AgentAppServerSupervisor:
             )
         if not isinstance(thread, Mapping):
             raise AgentAppServerError("Provider did not return the conversation thread")
-        return provider_thread_page(
+        page = provider_thread_page(
             thread, identifier, limit=limit, after=after, view=view, order=order,
         )
+        processing = self._processing_turns.get(key) or {}
+        if (
+            running
+            and not after
+            and str(processing.get("conversation_id") or "") == identifier
+            and session is not None
+        ):
+            page = merge_active_turn(
+                page,
+                active_turn_items(
+                    session.events(int(processing.get("event_after") or 0)),
+                    identifier,
+                    thread_id,
+                ),
+            )
+        return page
 
     def request(
         self,
@@ -392,9 +412,11 @@ class AgentAppServerSupervisor:
                 if str(value or "").strip()
             })
         if method == "turn/start" and conversation is not None:
+            event_after = int(session.status().get("event_sequence") or 0)
             with self._lock:
                 self._processing_turns[key] = {
                     "conversation_id": str(conversation["conversation_id"]),
+                    "event_after": event_after,
                 }
         try:
             response = session.request(method, request_params)
