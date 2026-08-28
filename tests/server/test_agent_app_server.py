@@ -124,6 +124,8 @@ for raw in sys.stdin:
         result = {"deleted": True}
     else:
         result = {"accepted": method, "params": request.get("params", {})}
+        if method == "turn/start":
+            result["turn"] = {"id": "turn-active"}
     if "id" in request:
         sys.stdout.write(json.dumps({"id": request["id"], "result": result}) + "\\n")
         sys.stdout.flush()
@@ -542,6 +544,29 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert response["result"]["params"]["model"] == "research-model-fast"
     assert response["result"]["params"]["effort"] == "high"
     assert response["result"]["params"]["serviceTier"] == "fast"
+    assert supervisor.status(PRINCIPAL, PROFILE_ID)["processing_turn_id"] == (
+        "turn-active"
+    )
+    steered = supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "turn/steer",
+        {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-active",
+            "input": [{"type": "text", "text": "steer this turn"}],
+        },
+        conversation_id=conversation["conversation_id"],
+    )
+    assert steered["result"]["accepted"] == "turn/steer"
+    with pytest.raises(AgentAppServerError, match="use turn/steer"):
+        supervisor.request(
+            PRINCIPAL,
+            PROFILE_ID,
+            "turn/start",
+            {"prompt": "must not overlap", "threadId": "provider-thread-1"},
+            conversation_id=conversation["conversation_id"],
+        )
     config_path = (
         tmp_path
         / "data"
@@ -557,6 +582,14 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert "sandbox_workspace_write.network_access = true" in config
     assert "ignore_default_excludes = false" in config
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["pid"] is not None
+    supervisor._observe_runtime_event(
+        (PRINCIPAL, PROFILE_ID),
+        SimpleNamespace(observe=lambda _payload: None),
+        {
+            "method": "item/completed",
+            "params": {"item": {"id": "final", "type": "agentMessage"}},
+        },
+    )
 
     with pytest.raises(AgentAppServerError, match="policy override"):
         supervisor.request(

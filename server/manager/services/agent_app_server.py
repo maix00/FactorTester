@@ -87,6 +87,7 @@ class AgentAppServerSupervisor:
                 return existing.status()
             if existing is not None:
                 self._sessions.pop(key, None)
+                self._processing_turns.pop(key, None)
                 self._stop_heartbeat(key)
                 existing.stop()
                 self.profile_service.revoke_agent_session(
@@ -173,6 +174,7 @@ class AgentAppServerSupervisor:
         status["processing_conversation_id"] = str(
             processing.get("conversation_id") or ""
         )
+        status["processing_turn_id"] = str(processing.get("turn_id") or "")
         return status
 
     def _observe_runtime_event(
@@ -400,6 +402,27 @@ class AgentAppServerSupervisor:
         if session is None:
             raise AgentAppServerError("Profile Agent could not be started")
         request_params = dict(params or {})
+        with self._lock:
+            processing = dict(self._processing_turns.get(key) or {})
+        if method == "turn/start" and processing:
+            raise AgentAppServerError(
+                "Profile Agent is already processing a turn; use turn/steer"
+            )
+        if method == "turn/steer":
+            expected_conversation = str(processing.get("conversation_id") or "")
+            expected_turn = str(processing.get("turn_id") or "")
+            requested_turn = str(
+                request_params.get("turnId")
+                or request_params.get("turn_id")
+                or ""
+            )
+            if (
+                not expected_conversation
+                or expected_conversation != identifier
+                or not expected_turn
+                or requested_turn != expected_turn
+            ):
+                raise AgentAppServerError("active Profile Agent turn binding is invalid")
         if method == "turn/start" and conversation is not None:
             # The Manager-owned conversation is the settings authority.  A
             # browser cannot mutate a Provider default or smuggle a different
@@ -453,6 +476,22 @@ class AgentAppServerSupervisor:
             response,
             conversation,
         )
+        if method == "turn/start" and conversation is not None:
+            result = self._response_result(response)
+            turn = result.get("turn")
+            turn = turn if isinstance(turn, Mapping) else result
+            turn_id = str(
+                turn.get("id") or turn.get("turnId") or turn.get("turn_id") or ""
+            ).strip()
+            if turn_id:
+                with self._lock:
+                    active = self._processing_turns.get(key)
+                    if (
+                        active is not None
+                        and active.get("conversation_id")
+                        == str(conversation["conversation_id"])
+                    ):
+                        active["turn_id"] = turn_id
         return response
 
     @staticmethod
