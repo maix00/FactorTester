@@ -121,7 +121,7 @@ vm.runInThisContext(
   await flush();
   assert.equal(context.calls.filter(
     call => call.url === "/api/client/profile-agent/stop",
-  ).length, 1, "leaving the tab stops the Agent exactly once");
+  ).length, 0, "leaving the UI never stops an active Agent turn");
   console.log("PASS: Profile Agent uses one timeline and tab-scoped lifecycle");
 })().catch(error => {
   console.error(error);
