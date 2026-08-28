@@ -171,6 +171,16 @@ def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     assert "profile/profile-directory.js" not in manifest["groups"]["profile-agent-chat"]
     assert "FTStaticLoader?.ensureGroup" not in source
 
+
+def test_tab_view_restore_keeps_the_page_agent_trigger_visible() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_view_state.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
 def test_federation_settings_separate_client_and_wireguard_surfaces() -> None:
     source = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
 
