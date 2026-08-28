@@ -163,7 +163,7 @@ def test_directory_uses_composite_identity_and_direct_subordinates(monkeypatch):
     assert mine["items"][0]["profile_key"] == "local-1::GTHT@parent@100000000001::same"
 
 
-def test_reserved_self_profile_uses_viewer_relative_display_name(monkeypatch):
+def test_reserved_self_profile_keeps_its_name_and_projects_self_marker(monkeypatch):
     parent = "GTHT@parent@100000000001"
     child = "GTHT@child@100000000002"
     client = FakeClientState({
@@ -175,14 +175,39 @@ def test_reserved_self_profile_uses_viewer_relative_display_name(monkeypatch):
     mine = service.directory(parent, scope="mine")["items"][0]
     subordinate = service.directory(parent, scope="subordinates")["items"][0]
 
-    assert mine["display_name"] == "本人"
+    assert mine["display_name"] == "SELF"
     assert mine["profile_kind"] == "self"
     assert mine["is_self_profile"] is True
     assert mine["capabilities"]["edit"] is True
-    assert subordinate["display_name"] == "child"
+    assert subordinate["display_name"] == "SELF"
     assert subordinate["profile_kind"] == "self"
     assert subordinate["is_self_profile"] is True
     assert subordinate["capabilities"]["edit"] is False
+
+
+def test_local_profile_detail_does_not_query_federated_directory(monkeypatch):
+    owner = "GTHT@parent@100000000001"
+
+    class FailingFederatedProfiles(FakeFederatedProfiles):
+        def profile_directory(self, owners):
+            raise AssertionError("local detail queried the federated directory")
+
+    client = FakeClientState({owner: [_profile(owner, "local-profile")]})
+    service = _service(
+        monkeypatch,
+        client,
+        FakeAgentProfiles(),
+        federated=FailingFederatedProfiles([]),
+    )
+
+    payload = service.detail(
+        owner,
+        f"local-1::{owner}::local-profile",
+        scope="mine",
+    )
+
+    assert payload["profile"]["profile_id"] == "local-profile"
+    assert payload["owner_profile"]["runtime"]["configured"] is True
 
 
 def test_mine_directory_lazily_ensures_reserved_self_profile(monkeypatch):

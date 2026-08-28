@@ -350,13 +350,7 @@ class ProfileDirectoryService:
             if is_self_profile
             else str(profile.get("profile_kind") or "profile").strip()
         )
-        display_name = (
-            "本人"
-            if is_self_profile and owner == current
-            else self._account_label(owner)
-            if is_self_profile
-            else str(profile.get("display_name") or profile_id)
-        )
+        display_name = str(profile.get("display_name") or profile_id)
         conversation_count = profile.get("conversation_count")
         if conversation_count is None and source == self.server_id:
             try:
@@ -522,8 +516,37 @@ class ProfileDirectoryService:
         }
 
     def detail(self, current: str, profile_key: str, *, scope: str = "servers") -> dict[str, Any]:
-        item, _, _ = self._source_profile(current, profile_key, scope=scope)
-        return {"success": True, "profile": item, "read_only": bool(item.get("read_only"))}
+        item, owner, profile_id = self._source_profile(
+            current, profile_key, scope=scope,
+        )
+        value = {
+            "success": True,
+            "profile": item,
+            "read_only": bool(item.get("read_only")),
+        }
+        if not value["read_only"] and owner == current:
+            owner_profile = self._local_owner_profile(owner, profile_id)
+            if owner_profile is not None:
+                value["owner_profile"] = owner_profile
+        return value
+
+    def _local_owner_profile(
+        self,
+        owner: str,
+        profile_id: str,
+    ) -> dict[str, Any] | None:
+        values = self._local_profiles([owner])
+        raw = next(
+            (
+                item for item in values
+                if self._profile_owner(item, owner) == owner
+                and self._profile_id(item.get("profile_id")) == profile_id
+            ),
+            None,
+        )
+        if raw is None:
+            return None
+        return self._enrich_local(dict(raw), owner, self.server_id)
 
     def can_view_conversations(
         self,
@@ -568,6 +591,11 @@ class ProfileDirectoryService:
         if len(parts) != 3:
             raise ProfileDirectoryError("profile_key is invalid")
         source, owner, profile_id = parts
+        local = self._direct_local_profile(
+            viewer, source, owner, profile_id, scope=scope,
+        )
+        if local is not None:
+            return local, owner, profile_id
         directory = self.directory(
             viewer,
             scope=scope,
@@ -592,6 +620,46 @@ class ProfileDirectoryService:
                 resolved["profile_key"] = value
                 return resolved, owner, profile_id
         raise ProfileDirectoryError("Profile is not visible to current account")
+
+    def _direct_local_profile(
+        self,
+        viewer: str,
+        source: str,
+        owner: str,
+        profile_id: str,
+        *,
+        scope: str,
+    ) -> dict[str, Any] | None:
+        """Resolve a local detail without querying every federated peer."""
+        # Only the viewer's own local Profile is authoritative here. A
+        # subordinate Profile may be mirrored locally while its active Agent
+        # and conversations live on another Manager, so that path must still
+        # use federation to resolve the executing source.
+        if source != self.server_id or owner != viewer:
+            return None
+        owners, _ = self._owners_for_scope(viewer, scope)
+        if owner not in set(owners):
+            return None
+        raw = self._local_owner_profile(owner, profile_id)
+        if raw is None:
+            return None
+        if scope == "servers":
+            try:
+                account = get_account(viewer)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                account = None
+            if not is_super_admin_account(account) and not self.visible_to(raw, viewer):
+                return None
+        value = self._project(
+            raw,
+            current=viewer,
+            scope=scope,
+            requested_owner=owner,
+        )
+        if value is None:
+            return None
+        value["source_server_ids"] = [self.server_id]
+        return value
 
     def _source_conversations(
         self,
