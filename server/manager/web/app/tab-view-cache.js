@@ -20,6 +20,35 @@
       element.replaceChildren(...fragment.childNodes);
     }
 
+    function connectedParking(tabID) {
+      const parking = document.createElement("div");
+      parking.hidden = true;
+      parking.inert = true;
+      parking.setAttribute("aria-hidden", "true");
+      parking.dataset.ftConnectedTabView = String(tabID || "");
+      document.body.append(parking);
+      return parking;
+    }
+
+    function moveConnectedChildren(destination, source) {
+      while (source.firstChild) {
+        if (typeof destination.moveBefore === "function") {
+          destination.moveBefore(source.firstChild, null);
+        } else {
+          destination.append(source.firstChild);
+        }
+      }
+    }
+
+    function disposeConnectedView(view) {
+      const parking = view?.connectedContent;
+      if (!parking) return;
+      parking.querySelector?.("[data-ft-keep-connected-on-tab-save]")
+        ?.__ftBeforeTabSave?.();
+      parking.remove?.();
+      view.connectedContent = null;
+    }
+
     function controlList(root) {
       return [...(root?.querySelectorAll?.(
         "input, textarea, select, details, [data-ft-scroll-state]",
@@ -265,7 +294,7 @@
 
     function coldifySession(tabID, session) {
       const view = session.view;
-      if (!view?.content || tabID === state.activeTabID) return;
+      if (view?.connectedContent || !view?.content || tabID === state.activeTabID) return;
       pageState(tabID)?.capture();
       session.pageState?.dispose?.();
       session.pageState = null;
@@ -291,6 +320,25 @@
       if (session.view?.coldKey && session.view.pendingRestore
           && session.viewReady === false) return;
       const view = session.view || {};
+      const keepConnectedNode = content.querySelector?.(
+        "[data-ft-keep-connected-on-tab-save]",
+      );
+      if (keepConnectedNode) {
+        const parking = connectedParking(state.activeTabID);
+        moveConnectedChildren(parking, content);
+        view.connectedContent = parking;
+        view.toolbar = moveChildren(toolbar);
+        view.title = title?.textContent || "";
+        view.eyebrow = eyebrow?.textContent || "";
+        view.notice = notice ? {
+          text: notice.textContent || "", color: notice.style?.color || "",
+        } : null;
+        view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
+        view.ready = session.viewReady !== false;
+        view.lastUsedAt = Date.now();
+        session.view = view;
+        return;
+      }
       if (view.rerenderOnRestore) {
         view.lastUsedAt = Date.now();
         session.view = view;
@@ -339,6 +387,28 @@
       const session = tabSession(tabID);
       if (invalidateLegacyReportView(tabID, session)) return false;
       const view = session.view;
+      if (view?.connectedContent) {
+        const parking = view.connectedContent;
+        moveConnectedChildren(content, parking);
+        parking.remove?.();
+        view.connectedContent = null;
+        restoreChildren(toolbar, view.toolbar);
+        if (title) title.textContent = view.title || "";
+        if (eyebrow) eyebrow.textContent = view.eyebrow || "";
+        if (notice && view.notice) {
+          notice.textContent = view.notice.text;
+          notice.style.color = view.notice.color;
+        }
+        restoreActiveNav(view.navRoute);
+        restoreOverlays(tabID, session);
+        restorePageAgent(tabID, session);
+        state.pendingScrollCapture = null;
+        window.requestAnimationFrame?.(() => window.scrollTo({
+          top: Number.isFinite(session.scrollY) ? session.scrollY : 0,
+          behavior: "auto",
+        }));
+        return "live";
+      }
       if (view?.rerenderOnRestore) {
         // This flag is a one-shot invalidation, not a permanent session mode.
         // The route about to render becomes the next live view and must be
@@ -413,6 +483,7 @@
 
     function discardView(tabID) {
       const session = tabSession(tabID);
+      disposeConnectedView(session.view);
       session.pageState?.dispose?.();
       session.pageState = null;
       session.view = null;
