@@ -3,6 +3,7 @@
     const shell = document.createElement("aside");
     shell.className = "page-agent-drawer";
     shell.dataset.ftPageAgentTab = context.tabID;
+    shell.dataset.ftPageAgentRole = "drawer";
     shell.hidden = true;
     shell.setAttribute("role", "dialog");
     shell.setAttribute("aria-label", context.t("页面智能体助手"));
@@ -27,12 +28,21 @@
     toggle.title = options.buttonLabel || context.t("智能体助手");
     toggle.setAttribute("aria-label", toggle.title);
     toggle.dataset.ftPageAgentTab = context.tabID;
+    toggle.dataset.ftPageAgentRole = "toggle";
     document.body.append(toggle);
 
     let mounted = false;
     let opening = null;
     let bridge = null;
     let profileID = "";
+    let desiredOpen = false;
+    const setDesiredOpen = value => {
+      desiredOpen = value === true;
+      const serialized = desiredOpen ? "true" : "false";
+      shell.dataset.ftPageAgentDesiredOpen = serialized;
+      toggle.dataset.ftPageAgentDesiredOpen = serialized;
+    };
+    setDesiredOpen(false);
     const status = text => {
       const value = document.createElement("p");
       value.className = "page-agent-drawer-status";
@@ -40,12 +50,14 @@
       body.replaceChildren(value);
     };
     const registration = context.pageState?.register?.("page-agent-drawer", {
-      // Drawer visibility is intentionally ephemeral. Restoring an open
-      // drawer would start Profile resolution, Agent startup and ChatKit while
-      // the page itself is still restoring, recreating the eager-load race
-      // this shared boundary exists to prevent.
-      capture: () => ({profile_id: profileID}),
-      restore: () => {},
+      // Preserve user intent rather than reading DOM visibility. The tab cache
+      // temporarily hides both nodes while parking a view; that hidden state
+      // must never overwrite an open drawer preference.
+      capture: () => ({profile_id: profileID, open: desiredOpen}),
+      restore: value => {
+        setDesiredOpen(value?.open === true);
+        queueMicrotask(() => desiredOpen ? void open() : restoreClosed());
+      },
       describe: () => ({
         page: options.pageKind || "",
         section: options.section || "",
@@ -60,6 +72,7 @@
     });
 
     async function open() {
+      setDesiredOpen(true);
       shell.hidden = false;
       toggle.hidden = true;
       toggle.setAttribute("aria-expanded", "true");
@@ -108,14 +121,23 @@
       return opening;
     }
 
-    function hide() {
+    function restoreClosed() {
       shell.hidden = true;
       toggle.hidden = false;
       toggle.setAttribute("aria-expanded", "false");
       bridge?.pause?.();
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
+    }
+
+    function hide() {
+      setDesiredOpen(false);
+      restoreClosed();
       context.checkpointTabSession?.();
     }
+
+    shell.__ftRestorePageAgent = () => (
+      desiredOpen ? void open() : restoreClosed()
+    );
 
     toggle.addEventListener("click", () => shell.hidden ? void open() : hide());
     close.addEventListener("click", hide);
