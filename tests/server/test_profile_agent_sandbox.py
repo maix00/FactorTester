@@ -11,12 +11,21 @@ from server.manager.services.profile_agent_sandbox import (
 )
 
 
-def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> None:
+def test_sandbox_maps_only_profile_workspace_and_private_tmp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workspace = tmp_path / "data" / "users" / "owner" / "profiles" / "self"
     workspace.mkdir(parents=True)
     sandbox = ProfileAgentSandbox(workspace_root=workspace, binary="true")
     executable = shutil.which("true")
     assert executable is not None
+    original_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda path: True if str(path) == "/opt/factortester/app" else original_exists(path),
+    )
 
     command = sandbox.command([executable, "app-server"])
 
@@ -36,6 +45,7 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> 
         "/proc/self/exe",
     ]
     assert str(workspace.parent) not in command
+    assert "/opt/factortester/app" not in command
     assert command[-5:] == [
         "--chdir",
         "/workspace",
@@ -102,6 +112,7 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
                 "test -f /workspace/owned.txt && "
                 "test ! -e /tmp/factortester-profile-agent-host-marker && "
                 "test ! -e /data/users && "
+                "test ! -e /opt/factortester/app && "
                 f'test "$(readlink /proc/self/exe)" = "{shell}" && '
                 "test ! -e /proc/1"
             ),
