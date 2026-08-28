@@ -10,9 +10,7 @@
   }
 
   function profileName(context, profile) {
-    return isSelfProfile(profile)
-      ? context.t("本人")
-      : (profile.display_name || profile.profile_id);
+    return profile.display_name || profile.profile_id;
   }
 
   function selfBadge(context) {
@@ -104,9 +102,6 @@
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
     const root = document.createElement("div"); root.className = "detail-stack";
-    if (isSelfProfile(profile)) {
-      root.classList.add("profile-directory-detail-self");
-    }
     if (!embedded) {
       context.setHeading(profileName(context, profile), `${context.t("研究身份")} · ${profile.profile_id}`);
       context.updateActiveTab?.({
@@ -128,7 +123,6 @@
     const runtime = profile.runtime || {};
     const claim = profile.active_claim || null;
     const selectedTab = selectedProfileTab();
-    if (isSelfProfile(profile)) root.append(selfBadge(context));
     root.append(profileTabBar(context, profileID, embedded, selectedTab));
     const refresh = async () => {
       const payload = await context.api("/api/client/profiles");
@@ -147,10 +141,11 @@
         claim: claimLabel(context, claim),
         agent_id: claim?.agent_id || context.t("无"),
       })).shell);
+      root.append(agentActions(context, profile, refresh));
       const projectionNote = document.createElement("p");
       projectionNote.className = "settings-muted profile-projection-note";
       projectionNote.textContent = context.t(
-        "详情只显示已同步的 Profile 元数据；运行绑定、Agent 会话和工作区状态请查看对应选项卡。",
+        "详情显示 Profile 元数据与运行绑定；技能、Agent 会话和工作区按选项卡读取。",
       );
       root.append(projectionNote);
       const agents = (profile.agents || []).map(item => [
@@ -193,8 +188,7 @@
       [agentSection, workspaceSection, researchSection]
         .filter(Boolean)
         .forEach(item => root.append(item));
-    } else if (selectedTab === "binding") {
-      root.append(agentActions(context, profile, refresh));
+    } else if (selectedTab === "skills") {
       if (window.FTAgentSkills?.render) {
         root.append(await window.FTAgentSkills.render(context, profile, refresh));
       }
@@ -364,7 +358,7 @@
 
   const PROFILE_TABS = [
     ["overview", "详情"],
-    ["binding", "运行绑定"],
+    ["skills", "技能管理"],
     ["session", "Agent 会话"],
     ["workspace", "工作区"],
   ];

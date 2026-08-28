@@ -1,6 +1,10 @@
-from server.manager.http.page_assistance_routes import PageAssistanceStore
-from threading import Thread
 import time
+from threading import Thread
+
+from server.manager.http.page_assistance_routes import (
+    PageAssistanceStore,
+    page_assistance_turn_params,
+)
 
 
 def test_structured_document_is_validated_and_replaced_atomically() -> None:
@@ -70,3 +74,41 @@ def test_structured_document_rejects_stale_revision() -> None:
         assert "expected 4" in str(exc)
     else:
         raise AssertionError("stale update was accepted")
+
+
+def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() -> None:
+    store = PageAssistanceStore()
+    original = {
+        "threadId": "thread-1",
+        "input": [{"type": "text", "text": "fill this test configuration"}],
+    }
+    store.publish("owner", "self", {
+        "tab_id": "backtest-1",
+        "assistance": {
+            "schema_version": 1,
+            "page_kind": "test-configuration",
+            "revision": 4,
+            "document_schema": {"type": "object"},
+            "document": {},
+        },
+    })
+
+    prepared = page_assistance_turn_params(
+        "owner", "self", original, store=store,
+    )
+
+    assert prepared is not original
+    assert prepared["input"][0] == original["input"][0]
+    instruction = prepared["input"][1]["text"]
+    assert "factortester assist inspect" in instruction
+    assert "factortester assist validate --stdin" in instruction
+    assert "factortester assist apply --stdin" in instruction
+    assert "do not inspect frontend source" in instruction.lower()
+
+
+def test_unassisted_turn_is_not_modified() -> None:
+    store = PageAssistanceStore()
+    original = {"input": [{"type": "text", "text": "ordinary research"}]}
+    assert page_assistance_turn_params(
+        "owner", "self", original, store=store,
+    ) == original

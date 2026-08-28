@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from copy import deepcopy
 from threading import Condition, RLock
-import time
 from urllib.parse import parse_qs
 
 from server.manager.http.responses import json_response
@@ -159,6 +159,30 @@ class PageAssistanceStore:
 
 
 _STORE = PageAssistanceStore()
+
+_PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a structured assistance document. First run `factortester assist inspect`. Build the complete document described by that command, validate it once with `factortester assist validate --stdin`, then apply it atomically with `factortester assist apply --stdin --tab-id <tab-id> --expected-revision <revision>`. Do not inspect frontend source, tokens, or private HTTP APIs; do not manipulate the DOM or fill fields one at a time. If the revision changed, inspect again."""
+
+
+def page_assistance_turn_params(
+    principal: str,
+    profile_id: str,
+    params: dict,
+    *,
+    store: PageAssistanceStore | None = None,
+) -> dict:
+    """Inject the built-in page protocol without requiring an optional Skill."""
+    assistance_store = store or _STORE
+    if assistance_store.current(principal, profile_id) is None:
+        return dict(params)
+    result = deepcopy(params)
+    inputs = result.get("input")
+    if not isinstance(inputs, list):
+        return result
+    result["input"] = [*inputs, {
+        "type": "text",
+        "text": _PAGE_ASSISTANCE_INSTRUCTION,
+    }]
+    return result
 
 
 class PageAssistanceRoutesMixin:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 from urllib.parse import parse_qs
 
+from server.manager.http.page_assistance_routes import (
+    page_assistance_turn_params,
+)
 from server.manager.http.responses import json_response
 from server.manager.services.agent_app_server import (
     AgentAppServerError,
@@ -13,7 +15,6 @@ from server.manager.services.agent_app_server import (
 )
 from server.manager.services.provider_thread_chatkit import provider_item
 from server.manager.storage.profile_runtime_store import ProfileRuntimeError
-
 
 _SENSITIVE_EVENT_KEYS = frozenset({
     "api_key",
@@ -346,6 +347,10 @@ class AgentAppServerRoutesMixin:
             params = payload.get("params") or {}
             if not isinstance(params, dict):
                 raise AgentAppServerError("params must be an object")
+            if method == "turn/start":
+                params = page_assistance_turn_params(
+                    principal, identifier, params,
+                )
             response = supervisor.request(
                 principal,
                 identifier,

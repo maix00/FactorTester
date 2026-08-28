@@ -3045,7 +3045,7 @@ def test_backtest_configuration_freezes_groups_products_and_all_factors() -> Non
     assert "ls_configs: prior.ls_configs || []" in source
 
 
-def test_reserved_self_profile_has_distinct_web_presentation() -> None:
+def test_reserved_self_profile_is_marked_only_in_the_outer_directory() -> None:
     profile_root = ROOT / "server" / "manager" / "web" / "profile"
     profiles = (profile_root / "profiles.js").read_text(encoding="utf-8")
     directory = (profile_root / "profile-directory.js").read_text(
@@ -3062,9 +3062,24 @@ def test_reserved_self_profile_has_distinct_web_presentation() -> None:
     assert "profile-self-badge" in profiles
     assert "profile-directory-row-self" in directory
     assert "profile-self-badge" in directory
-    assert "profile-directory-detail-self" in detail
+    assert "profile-directory-detail-self" not in detail
+    assert "profile-self-badge" not in detail
     assert ".profile-directory-row-self" in styles
-    assert ".profile-directory-detail-self" in styles
+
+
+def test_profile_detail_exposes_skills_and_embeds_runtime_binding_in_overview() -> None:
+    profile_root = ROOT / "server" / "manager" / "web" / "profile"
+    profiles = (profile_root / "profiles.js").read_text(encoding="utf-8")
+    detail = (profile_root / "profile-directory-detail.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert '["skills", "技能管理"]' in profiles
+    assert '["skills", "技能管理"]' in detail
+    assert '["binding", "运行绑定"]' not in profiles
+    assert '["binding", "运行绑定"]' not in detail
+    assert "root.append(binding(context, profile))" in detail
+    assert "FTAgentSkills.render" in detail
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(
