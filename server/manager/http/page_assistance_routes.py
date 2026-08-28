@@ -73,13 +73,13 @@ class PageAssistanceStore:
             raise ValueError("unsupported page assistance schema")
         item = {"tab_id": tab_id, "assistance": deepcopy(assistance),
                 "updated_at": time.time()}
-        with self._lock:
+        with self._condition:
             self._prune()
             self._contexts[(principal, profile_id, tab_id)] = item
         return deepcopy(item)
 
     def current(self, principal: str, profile_id: str) -> dict | None:
-        with self._lock:
+        with self._condition:
             self._prune()
             values = [value for key, value in self._contexts.items()
                       if key[:2] == (principal, profile_id)]
@@ -100,7 +100,7 @@ class PageAssistanceStore:
         expected_revision = value.get("expected_revision")
         document = value.get("document")
         key = (principal, profile_id, tab_id)
-        with self._lock:
+        with self._condition:
             self._prune()
             page = self._contexts.get(key)
             if not page:
@@ -114,16 +114,27 @@ class PageAssistanceStore:
                     "expected_revision": revision, "document": deepcopy(document),
                     "expires_at": time.time() + 15.0}
             self._applications.setdefault(key, []).append(item)
+            self._condition.notify_all()
             return deepcopy(item)
 
     def applications(self, principal: str, profile_id: str,
-                     tab_id: str, after: int) -> list[dict]:
-        with self._lock:
-            self._prune()
-            now = time.time()
-            return deepcopy([item for item in self._applications.get(
-                (principal, profile_id, tab_id), [])
-                if item["sequence"] > after and float(item.get("expires_at") or now) >= now])
+                     tab_id: str, after: int,
+                     wait_seconds: float = 0.0) -> list[dict]:
+        deadline = time.monotonic() + max(0.0, min(wait_seconds, 25.0))
+        with self._condition:
+            while True:
+                self._prune()
+                now = time.time()
+                values = [item for item in self._applications.get(
+                    (principal, profile_id, tab_id), [])
+                    if item["sequence"] > after
+                    and float(item.get("expires_at") or now) >= now]
+                if values:
+                    return deepcopy(values)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return []
+                self._condition.wait(remaining)
 
     def acknowledge(self, principal: str, profile_id: str, value: dict) -> dict:
         sequence = int(value.get("sequence") or 0)
@@ -199,6 +210,7 @@ class PageAssistanceRoutesMixin:
                 values = _STORE.applications(
                     principal, profile_id, query.get("tab_id", [""])[0],
                     int(query.get("after", ["0"])[0] or 0),
+                    float(query.get("wait", ["0"])[0] or 0),
                 )
                 json_response(self, {"success": True, "applications": values})
             else:

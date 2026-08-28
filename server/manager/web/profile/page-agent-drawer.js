@@ -102,6 +102,7 @@
       shell.hidden = true;
       toggle.hidden = false;
       toggle.setAttribute("aria-expanded", "false");
+      bridge?.pause();
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
       context.checkpointTabSession?.();
     }
