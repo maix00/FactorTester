@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping
 import logging
 import threading
 import time
+import traceback
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_launch import AgentAppServerLaunch
@@ -243,6 +244,15 @@ class AgentAppServerSession:
     def stop(self) -> None:
         with self._lock:
             if self.process is not None:
+                LOGGER.warning(
+                    "Profile Agent session stop requested profile_workspace=%s "
+                    "caller=%s",
+                    self.runtime.workspace_root.name,
+                    " | ".join(
+                        line.strip()
+                        for line in traceback.format_stack(limit=7)[:-1]
+                    ),
+                )
                 self.process.stop()
             if self.cc_switch is not None:
                 self.cc_switch.stop()
