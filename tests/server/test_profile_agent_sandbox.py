@@ -15,8 +15,10 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> 
     workspace = tmp_path / "data" / "users" / "owner" / "profiles" / "self"
     workspace.mkdir(parents=True)
     sandbox = ProfileAgentSandbox(workspace_root=workspace, binary="true")
+    executable = shutil.which("true")
+    assert executable is not None
 
-    command = sandbox.command(["codex", "app-server"])
+    command = sandbox.command([executable, "app-server"])
 
     assert command[0].endswith("true")
     assert ["--bind", str(workspace), "/workspace"] == command[
@@ -26,8 +28,20 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(tmp_path: Path) -> 
         command.index("--tmpfs") : command.index("--tmpfs") + 2
     ]
     assert "--proc" not in command
+    proc_exe = command.index("/proc/self/exe")
+    assert command[proc_exe - 2 : proc_exe + 1] == [
+        "--symlink",
+        executable,
+        "/proc/self/exe",
+    ]
     assert str(workspace.parent) not in command
-    assert command[-5:] == ["--chdir", "/workspace", "--", "codex", "app-server"]
+    assert command[-5:] == [
+        "--chdir",
+        "/workspace",
+        "--",
+        executable,
+        "app-server",
+    ]
 
 
 def test_sandbox_rewrites_profile_environment_paths(tmp_path: Path) -> None:
@@ -60,6 +74,14 @@ def test_sandbox_fails_closed_without_bubblewrap(tmp_path: Path) -> None:
         sandbox.command(["codex"])
 
 
+def test_sandbox_fails_closed_without_child_executable(tmp_path: Path) -> None:
+    workspace = tmp_path / "profile"
+    workspace.mkdir()
+    sandbox = ProfileAgentSandbox(workspace_root=workspace, binary="true")
+    with pytest.raises(ProfileAgentSandboxError, match="executable is unavailable"):
+        sandbox.command(["definitely-missing-profile-agent"])
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux") or not shutil.which("bwrap"),
     reason="Bubblewrap integration requires Linux",
@@ -71,12 +93,16 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
     host_tmp_marker = Path("/tmp/factortester-profile-agent-host-marker")
     host_tmp_marker.write_text("hidden", encoding="utf-8")
     try:
+        shell = shutil.which("sh")
+        assert shell is not None
         command = ProfileAgentSandbox(workspace_root=workspace).command([
-            "/bin/sh", "-c",
+            shell, "-c",
             (
                 "test -f /workspace/owned.txt && "
                 "test ! -e /tmp/factortester-profile-agent-host-marker && "
-                "test ! -e /data/users"
+                "test ! -e /data/users && "
+                f'test "$(readlink /proc/self/exe)" = "{shell}" && '
+                "test ! -e /proc/1"
             ),
         ])
         completed = subprocess.run(command, check=False, capture_output=True, text=True)

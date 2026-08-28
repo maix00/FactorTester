@@ -76,6 +76,14 @@ class ProfileAgentSandbox:
     def command(self, child: list[str]) -> list[str]:
         if not self.workspace_root.is_dir():
             raise ProfileAgentSandboxError("Profile workspace is unavailable")
+        if not child:
+            raise ProfileAgentSandboxError("Profile Agent command is unavailable")
+        executable = shutil.which(child[0]) or child[0]
+        executable_path = Path(executable)
+        if not executable_path.is_absolute() or not executable_path.is_file():
+            raise ProfileAgentSandboxError(
+                f"Profile Agent executable is unavailable: {child[0]}"
+            )
         command = [
             self.executable(),
             "--die-with-parent",
@@ -86,6 +94,13 @@ class ProfileAgentSandbox:
             "/dev",
             "--tmpfs",
             "/tmp",
+            "--dir",
+            "/proc",
+            "--dir",
+            "/proc/self",
+            "--symlink",
+            str(executable_path),
+            "/proc/self/exe",
             "--dir",
             "/workspace",
             "--bind",
