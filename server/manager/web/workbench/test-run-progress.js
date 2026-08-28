@@ -16,6 +16,7 @@
     activeKey = key;
     item.progressWatchKey = key;
     item.progressStreamClosed = false;
+    item.progressSuspended = false;
     queueMicrotask(async () => {
       await window.FTJobProgress.watchProgress(
         context, item.jobID, item.portQuery || "", item.progressView,
@@ -50,6 +51,13 @@
   function render(context, _state, item, rerender) {
     if (!item?.jobID || !window.FTJobProgress) return null;
     const key = [item.jobID, item.portQuery || "", item.serverID || ""].join("|");
+    if (!terminal.has(item.phase) && item.progressSuspended) {
+      // Parking a left-rail tab intentionally aborts its browser stream.  It
+      // is not an upstream failure: resume from the progress cursor at once
+      // instead of blocking the live view on a cross-server detail lookup.
+      item.progressSuspended = false;
+      item.progressStreamClosed = false;
+    }
     if (!terminal.has(item.phase) && item.progressStreamClosed && item.progressView) {
       if (!item.progressResumePending) {
         item.progressResumePending = true;
@@ -92,7 +100,10 @@
     (Array.isArray(items) ? items : []).forEach(item => {
       item.progressWatchKey = "";
       item.progressResumePending = false;
-      if (!terminal.has(item.phase)) item.progressStreamClosed = true;
+      if (!terminal.has(item.phase)) {
+        item.progressSuspended = true;
+        item.progressStreamClosed = false;
+      }
     });
   }
 

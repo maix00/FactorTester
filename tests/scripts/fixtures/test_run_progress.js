@@ -51,16 +51,23 @@ let rerenders = 0;
   const resumed = {
     jobID: "job-2", portQuery: "?port=8000", serverID: "public-1",
     phase: "running", progressStreamClosed: true,
+    progressSuspended: true,
     progressView: {root: {status: "running"}},
   };
+  const watchCallsBeforeResume = watchCalls;
+  const refreshesBeforeResume = refreshes;
   window.FTTestRunProgress.render({}, {}, resumed, () => { rerenders += 1; });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(resumed.phase, "succeeded", "returning to a tab must reconcile terminal state");
-  assert.equal(refreshes, 2);
+  assert.equal(watchCalls, watchCallsBeforeResume + 1,
+    "returning to a tab must resume the event stream immediately");
+  assert.equal(refreshes, refreshesBeforeResume + 1,
+    "the resumed stream may reconcile detail only after its terminal event");
   const suspended = {phase: "running", progressWatchKey: "job-3", progressStreamClosed: false};
   window.FTTestRunProgress.suspend([suspended]);
   assert.equal(suspended.progressWatchKey, "");
-  assert.equal(suspended.progressStreamClosed, true);
+  assert.equal(suspended.progressStreamClosed, false,
+    "intentional tab parking must not be treated as an upstream stream failure");
+  assert.equal(suspended.progressSuspended, true);
   console.log("ok");
 })().catch(error => {
   console.error(error);

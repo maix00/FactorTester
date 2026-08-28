@@ -29,6 +29,36 @@
     return String(job.run_id || job.run?.run_id || "").trim();
   }
 
+  function isCancellable(job = {}) {
+    return cancellableStatuses.has(String(job.status || "")) && !job.cancel_requested;
+  }
+
+  function cancelButton(context, options = {}) {
+    const {
+      job = {}, jobID = "", portQuery = "", onAccepted = null, onRefresh = null,
+    } = options;
+    if (!context.session || !jobID || !isCancellable(job)) return null;
+    const control = context.button(context.t("取消任务"), async () => {
+      if (!confirmed(context, "取消任务")) return;
+      control.disabled = true;
+      context.showNotice("");
+      try {
+        const result = await context.api(actionPath(jobID, "cancel", portQuery), {
+          method: "POST", body: JSON.stringify({}),
+        });
+        onAccepted?.(result);
+        await onRefresh?.(result);
+      } catch (error) {
+        context.showNotice(
+          `${context.t("任务操作失败")}: ${error.message}`, true,
+        );
+        control.disabled = false;
+      }
+    }, context.t("取消任务"));
+    control.classList.add("danger-action");
+    return control;
+  }
+
   async function cloneRunWorkspace(context, options) {
     const {
       job, jobID = "", portQuery = "", title = "", derivedPrefill = null,
@@ -114,10 +144,11 @@
       add("下一步", "continue", {body: {action: "continue"}});
       add("运行到底", "continue", {body: {action: "end"}, confirm: true});
     }
-    if (cancellableStatuses.has(job.status) && !job.cancel_requested) {
-      add("取消任务", "cancel", {confirm: true, danger: true});
-    }
+    const cancel = cancelButton(context, {job, jobID, portQuery, onRefresh});
+    if (cancel) context.toolbar.append(cancel);
   }
 
-  window.FTJobActions = Object.freeze({cloneRunWorkspace, install, runID, workbenchKind});
+  window.FTJobActions = Object.freeze({
+    cancelButton, cloneRunWorkspace, install, isCancellable, runID, workbenchKind,
+  });
 })();
