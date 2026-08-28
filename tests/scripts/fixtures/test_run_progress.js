@@ -39,6 +39,7 @@ let rerenders = 0;
   assert.equal(root.status, "submitted");
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(item.phase, "succeeded");
+  assert.equal(item.lifecycleStatus, "succeeded");
   assert.equal(item.progressStreamClosed, true);
   assert.ok(watched);
   assert.equal(stopped, 2, "a terminal payload must close the live progress stream");

@@ -9,6 +9,13 @@
     return String(source.status || payload?.status || eventStatus || source.phase || "").trim();
   }
 
+  function lifecycleStatusOf(payload) {
+    const source = payload?.latest_progress?.data || payload?.data || payload || {};
+    const eventStatus = payload?.event === "result" ? "succeeded"
+      : payload?.event === "error" ? "failed" : "";
+    return String(source.status || payload?.status || eventStatus || "").trim();
+  }
+
   function watch(context, state, item, rerender) {
     const key = [item.jobID, item.portQuery || "", item.serverID || ""].join("|");
     if (activeKey === key && item.progressWatchKey === key) return;
@@ -23,7 +30,9 @@
         {
           onPayload: payload => {
             const status = statusOf(payload);
+            const lifecycleStatus = lifecycleStatusOf(payload);
             if (status) item.phase = status;
+            if (lifecycleStatus) item.lifecycleStatus = lifecycleStatus;
             // Do not wait for every proxy/browser combination to observe the
             // upstream EOF. A terminal event is authoritative and should
             // immediately finish the live watcher so detail/results can load.
