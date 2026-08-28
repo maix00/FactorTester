@@ -223,12 +223,31 @@ class AgentProfileClientMixin(ClientMixinBase):
     def create_profile_agent_assistance_draft(
         self,
         profile_id: str,
-        document: dict[str, Any],
+        document: dict[str, Any] | None = None,
+        *,
+        from_current: bool = False,
     ) -> dict[str, Any]:
         return self._expect_success(
             self.session.post(
                 "/api/client/profile-agent/assistance/drafts",
-                {"profile_id": profile_id, "document": document},
+                {
+                    "profile_id": profile_id,
+                    "document": document,
+                    "from_current": from_current,
+                },
+            )
+        )
+
+    def patch_profile_agent_assistance_draft(
+        self,
+        profile_id: str,
+        draft_id: str,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/assistance/drafts/patch",
+                {"profile_id": profile_id, "draft_id": draft_id, "patch": patch},
             )
         )
 

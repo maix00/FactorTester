@@ -7,6 +7,16 @@ from server.manager.http.page_assistance_routes import (
 )
 
 
+def _navigation() -> dict:
+    return {
+        "schema_version": 1,
+        "root_id": "page",
+        "nodes": {
+            "page": {"id": "page", "kind": "page", "children": []},
+        },
+    }
+
+
 def test_structured_document_is_validated_and_replaced_atomically() -> None:
     store = PageAssistanceStore()
     store.publish(
@@ -16,6 +26,7 @@ def test_structured_document_is_validated_and_replaced_atomically() -> None:
             "tab_id": "factor-new",
             "assistance": {
                 "schema_version": 1,
+                "navigation": _navigation(),
                 "page_kind": "factor-create",
                 "revision": 3,
                 "document_schema": {
@@ -70,6 +81,7 @@ def test_expired_application_is_not_returned_to_a_page() -> None:
             "tab_id": "tab",
             "assistance": {
                 "schema_version": 1,
+                "navigation": _navigation(),
                 "page_kind": "test",
                 "revision": 1,
                 "document_schema": {"type": "object"},
@@ -100,6 +112,7 @@ def test_application_long_poll_wakes_when_document_is_enqueued() -> None:
             "tab_id": "tab",
             "assistance": {
                 "schema_version": 1,
+                "navigation": _navigation(),
                 "page_kind": "test",
                 "revision": 1,
                 "document_schema": {"type": "object"},
@@ -145,6 +158,7 @@ def test_structured_document_rejects_stale_revision() -> None:
             "tab_id": "tab",
             "assistance": {
                 "schema_version": 1,
+                "navigation": _navigation(),
                 "page_kind": "test",
                 "revision": 4,
                 "document_schema": {"type": "object"},
@@ -181,6 +195,7 @@ def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() ->
             "tab_id": "backtest-1",
             "assistance": {
                 "schema_version": 1,
+                "navigation": _navigation(),
                 "page_kind": "test-configuration",
                 "revision": 4,
                 "document_schema": {"type": "object"},
@@ -200,9 +215,10 @@ def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() ->
     assert prepared["input"][0] == original["input"][0]
     instruction = prepared["input"][1]["text"]
     assert "factortester assist inspect" in instruction
-    assert "inspect --path <json-pointer>" in instruction
-    assert "rather than printing the complete page contract" in instruction
-    assert "factortester assist drafts create --stdin" in instruction
+    assert "inspect --node <node-id>" in instruction
+    assert "page-registered semantic node" in instruction
+    assert "factortester assist drafts create --from-current" in instruction
+    assert "factortester assist drafts patch <draft-id> --stdin" in instruction
     assert "factortester assist drafts validate <draft-id>" in instruction
     assert "factortester assist drafts apply <draft-id>" in instruction
     assert "do not inspect frontend source" in instruction.lower()
