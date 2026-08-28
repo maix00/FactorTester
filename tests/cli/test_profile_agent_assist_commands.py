@@ -18,7 +18,13 @@ class _Client:
                 "assistance": {
                     "page_kind": "factor-create",
                     "revision": 7,
-                    "document": {"source": "old"},
+                    "document": {
+                        "source": "old",
+                        "candidates": [
+                            {"id": index, "details": {"large": "x" * 1000}}
+                            for index in range(100)
+                        ],
+                    },
                     "document_schema": {"type": "object"},
                 },
             }
@@ -56,6 +62,47 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     )
     assert shown.exit_code == 0
     assert json.loads(shown.output)["assistance"]["revision"] == 7
+    assert "old" not in shown.output
+    assert len(shown.output) < 1500
+
+    selected = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "inspect",
+            "--path", "/assistance/document/source",
+        ],
+    )
+    assert selected.exit_code == 0
+    assert json.loads(selected.output) == "old"
+
+    paged = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "inspect",
+            "--path", "/assistance/document/candidates",
+            "--offset", "20", "--limit", "2", "--depth", "0",
+        ],
+    )
+    assert paged.exit_code == 0
+    page = json.loads(paged.output)
+    assert page["count"] == 100
+    assert page["offset"] == 20
+    assert page["has_more"] is True
+    assert [item["path"] for item in page["items"]] == [
+        "/assistance/document/candidates/20",
+        "/assistance/document/candidates/21",
+    ]
+    assert "x" * 100 not in paged.output
+
+    missing = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "inspect",
+            "--path", "/assistance/document/missing",
+        ],
+    )
+    assert missing.exit_code != 0
+    assert "path does not exist" in missing.output
 
     created = runner.invoke(
         commands.assist,

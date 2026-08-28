@@ -200,6 +200,8 @@ def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() ->
     assert prepared["input"][0] == original["input"][0]
     instruction = prepared["input"][1]["text"]
     assert "factortester assist inspect" in instruction
+    assert "inspect --path <json-pointer>" in instruction
+    assert "rather than printing the complete page contract" in instruction
     assert "factortester assist drafts create --stdin" in instruction
     assert "factortester assist drafts validate <draft-id>" in instruction
     assert "factortester assist drafts apply <draft-id>" in instruction

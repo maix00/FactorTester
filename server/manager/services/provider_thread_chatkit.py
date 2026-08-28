@@ -263,6 +263,40 @@ def _error_item(item: Mapping[str, object], base: Mapping[str, object]) -> dict[
     }])
 
 
+def _turn_outcome_item(
+    turn: Mapping[str, object],
+    *,
+    conversation_id: str,
+    turn_index: int,
+    created_at: str,
+) -> dict[str, Any] | None:
+    status = _kind(turn.get("status"))
+    if status not in {"interrupted", "failed"}:
+        return None
+    interrupted = status == "interrupted"
+    title = "Agent turn interrupted" if interrupted else "Agent turn failed"
+    content = (
+        "The Agent stopped before producing a final response. You can continue "
+        "the conversation with a new message."
+        if interrupted else
+        _text(turn.get("error")).strip() or "The Agent turn failed."
+    )
+    return _workflow(
+        _base(
+            turn,
+            conversation_id=conversation_id,
+            item_id=f"{_turn_id(turn, turn_index)}-outcome",
+            created_at=created_at,
+        ),
+        tasks=[{
+            "type": "custom",
+            "title": title,
+            "content": content,
+            "status_indicator": "complete",
+        }],
+    )
+
+
 def _project_item(
     item: Mapping[str, object],
     base: Mapping[str, object],
@@ -408,6 +442,17 @@ def provider_thread_items(
             )
             if projected is not None:
                 result.append(projected)
+        outcome = _turn_outcome_item(
+            turn,
+            conversation_id=identifier,
+            turn_index=turn_index,
+            created_at=_iso_timestamp(
+                turn.get("completedAt") or turn.get("completed_at"),
+                datetime.fromisoformat(turn_time),
+            ),
+        )
+        if outcome is not None:
+            result.append(outcome)
     return result
 
 
