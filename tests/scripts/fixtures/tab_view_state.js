@@ -16,6 +16,11 @@ class FakeElement {
     this.value = "";
     this.parentNode = null;
     this.controls = [];
+    this.classes = new Set();
+    this.classList = {
+      add: value => this.classes.add(value),
+      contains: value => this.classes.has(value),
+    };
   }
 
   get firstChild() { return this.children[0] || null; }
@@ -196,9 +201,14 @@ assert.strictEqual(renderCount, 1);
 // their real visibility with the temporary all-hidden parking state.
 const agentShell = new FakeElement("aside");
 agentShell.dataset.ftPageAgentTab = "home";
+agentShell.dataset.ftPageAgentRole = "drawer";
+agentShell.dataset.ftPageAgentDesiredOpen = "false";
 agentShell.hidden = true;
 const agentToggle = new FakeElement("button");
 agentToggle.dataset.ftPageAgentTab = "home";
+agentToggle.dataset.ftPageAgentRole = "toggle";
+agentToggle.dataset.ftPageAgentDesiredOpen = "false";
+agentToggle.classList.add("page-agent-drawer-toggle");
 agentToggle.hidden = false;
 pageAgentNodes.push(agentShell, agentToggle);
 tabs.saveActiveTabSession();
@@ -210,6 +220,8 @@ assert.strictEqual(agentToggle.hidden, false,
   "returning to an assisted tab restores its floating Agent trigger");
 agentShell.hidden = false;
 agentToggle.hidden = true;
+agentShell.dataset.ftPageAgentDesiredOpen = "true";
+agentToggle.dataset.ftPageAgentDesiredOpen = "true";
 tabs.saveActiveTabSession();
 tabs.saveActiveTabSession();
 tabs.navigate("/products/product/AGENT-OPEN-RETURN.DCE");
@@ -219,6 +231,8 @@ assert.strictEqual(agentShell.hidden, false,
 assert.strictEqual(agentToggle.hidden, true);
 agentShell.hidden = true;
 agentToggle.hidden = false;
+agentShell.dataset.ftPageAgentDesiredOpen = "false";
+agentToggle.dataset.ftPageAgentDesiredOpen = "false";
 
 // A language change invalidates the cached home DOM.  Returning to home must
 // render it again instead of restoring labels from the previous locale.
