@@ -37,8 +37,17 @@ global.EventSource = class {
           params: {turnId: 'turn-1', delta: 'PRIVATE_REASONING'},
         },
         {
+          method: 'item/reasoning/summaryTextDelta',
+          params: {
+            turnId: 'turn-1', itemId: 'reasoning-1', summaryIndex: 0,
+            delta: '正在核对可展示的过程信息',
+          },
+        },
+        {
           method: 'item/commandExecution/outputDelta',
-          params: {turnId: 'turn-1', delta: 'TOOL_STDOUT'},
+          params: {
+            turnId: 'turn-1', itemId: 'command-1', delta: 'TOOL_STDOUT',
+          },
           chatkit_item: {
             id: 'command-1',
             type: 'workflow',
@@ -251,7 +260,8 @@ const state = {
   assert.doesNotMatch(output, /agent_process_exited|exited before producing/);
   assert.doesNotMatch(output, /旧回答不应覆盖/);
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
-  assert.doesNotMatch(output, /TOOL_STDOUT/);
+  assert.match(output, /正在核对可展示的过程信息/);
+  assert.match(output, /TOOL_STDOUT/);
   assert.match(output, /98 products/);
   assert.match(output, /assistant_message\.content_part\.done/);
   assert.match(
