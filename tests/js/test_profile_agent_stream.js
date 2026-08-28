@@ -108,11 +108,14 @@ const state = {
     api: async (url, init = {}) => {
       requestedURLs.push(url);
       if (url.includes('/api/client/profile-agent?')) {
-        return {status: {event_sequence: 0}};
+        return {status: {
+          event_sequence: 0,
+          processing_conversation_id: 'conversation-1',
+        }};
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
         historyReads += 1;
-        if (historyReads < 8) return {
+        if (historyReads < 12) return {
           items: [{
             id: 'history-assistant-old',
             type: 'assistant_message',
@@ -261,7 +264,11 @@ const state = {
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
-  assert.equal(historyReads, 8, 'final history is retried beyond the old cutoff');
+  assert.equal(
+    historyReads,
+    12,
+    'an active turn is not terminated when the old fixed retry window expires',
+  );
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
   assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
   const assistantAdded = chunks.findIndex(value => (
