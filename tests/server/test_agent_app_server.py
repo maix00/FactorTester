@@ -983,6 +983,33 @@ class _SSESupervisor:
         raise ConnectionResetError
 
 
+class _StoppedSSESupervisor(_SSESupervisor):
+    def status(self, _principal, _profile_id):
+        return {
+            "running": False,
+            "event_sequence": 8,
+            "active_conversation_id": "conversation-live",
+        }
+
+    def events(self, _principal, _profile_id, *, after, timeout):
+        self.calls.append((after, timeout))
+        if len(self.calls) == 1:
+            return [{
+                "sequence": 8,
+                "payload": {
+                    "method": "item/completed",
+                    "params": {
+                        "item": {
+                            "id": "final-1",
+                            "type": "agentMessage",
+                            "text": "finished before SSE reconnected",
+                        },
+                    },
+                },
+            }]
+        return []
+
+
 def _response(handler):
     raw = handler.wfile.getvalue()
     content_length = int(handler.response_headers.get("Content-Length", len(raw)))
@@ -1017,6 +1044,24 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     assert b'"summary": {"title": "factortester products list"}' in raw
     assert b'"cwd": "/research/maxc"' in raw
     assert supervisor.calls[0][0] == 0
+
+
+def test_profile_agent_sse_replays_final_event_after_agent_stops():
+    supervisor = _StoppedSSESupervisor()
+    handler = _AppHandler(None, supervisor)
+
+    handler._stream_agent_events(
+        supervisor,
+        PRINCIPAL,
+        PROFILE_ID,
+        after=5,
+    )
+
+    raw = handler.wfile.getvalue()
+    assert handler.response_status == 200
+    assert b'id: 8\ndata: {"method": "item/completed"' in raw
+    assert b'finished before SSE reconnected' in raw
+    assert supervisor.calls == [(5, 5.0), (8, 5.0)]
 
 
 def test_profile_agent_final_item_clears_processing_conversation():

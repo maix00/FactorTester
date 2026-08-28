@@ -574,14 +574,18 @@
         type: "stream_options", stream_options: {allow_cancel: true},
       });
       await alignEventCursor(state);
-      let eventStream = openEventStream(state, controller, signal);
-      await eventStream.ready.catch(() => {});
       const response = await rpc(state, "turn/start", {
         threadId: state.threadID,
         input: [{type: "text", text}],
         skill_ids: state.skills,
       });
       state.turnID = P.threadIDFrom(response) || state.turnID;
+      // The app-server event buffer is replayable from the cursor captured
+      // immediately before turn/start.  Opening SSE after the turn exists
+      // avoids racing the lifecycle process startup without losing early
+      // deltas from a fast response.
+      let eventStream = openEventStream(state, controller, signal);
+      await eventStream.ready.catch(() => {});
       eventStream.activate();
       let result = "retry";
       let retries = 0;
