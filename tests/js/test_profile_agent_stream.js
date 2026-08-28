@@ -37,12 +37,6 @@ global.EventSource = class {
           params: {turnId: 'turn-1', delta: 'PRIVATE_REASONING'},
         },
         {
-          // Provider text may begin before later workflow records.  The
-          // completed assistant message still belongs after those records.
-          method: 'item/agentMessage/delta',
-          params: {turnId: 'turn-1', delta: '第一句'},
-        },
-        {
           method: 'item/commandExecution/outputDelta',
           params: {turnId: 'turn-1', delta: 'TOOL_STDOUT'},
           chatkit_item: {
@@ -70,6 +64,10 @@ global.EventSource = class {
         {
           method: 'turn/completed',
           params: {turn: {id: 'turn-1', status: 'completed', error: null}},
+        },
+        {
+          type: 'app_server_exit',
+          returncode: 0,
         },
       ];
       events.forEach((payload, index) => this.onmessage?.({
@@ -247,6 +245,7 @@ const state = {
   const output = chunks.join('');
   assert.match(output, /第一句/);
   assert.match(output, /第二句/);
+  assert.doesNotMatch(output, /agent_process_exited|exited before producing/);
   assert.doesNotMatch(output, /旧回答不应覆盖/);
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
   assert.doesNotMatch(output, /TOOL_STDOUT/);
