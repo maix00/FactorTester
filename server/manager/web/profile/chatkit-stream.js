@@ -489,7 +489,6 @@
     if (!text) throw new Error("A non-empty text message is required");
     if (state.active) throw new Error("The Profile Agent is already processing a message");
     state.active = true;
-    state.turnActivityObserver?.(true);
     const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
     state.assistant = null;
     state.turnID = "";
@@ -557,7 +556,6 @@
       closeSource(state);
       state.active = false;
       state.assistant = null;
-      state.turnActivityObserver?.(false);
     }
   }
 

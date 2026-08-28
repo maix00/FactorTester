@@ -89,7 +89,6 @@
       state.context = profileState.context;
       state.skills = [...profileState.skills];
       state.runtimeObserver = profileState.runtimeObserver;
-      state.turnActivityObserver = profileState.turnActivityObserver;
       return state;
     }
     state = {
@@ -112,7 +111,6 @@
       runtimeAttached: false,
       restored: false,
       runtimeObserver: profileState.runtimeObserver,
-      turnActivityObserver: profileState.turnActivityObserver,
     };
     profileState.conversations.set(identifier, state);
     return state;

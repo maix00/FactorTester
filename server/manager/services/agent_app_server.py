@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_session import AgentAppServerSession
@@ -15,13 +16,13 @@ from server.manager.services.agent_model_catalog import (
     build_model_catalog,
     validate_model_settings,
 )
-from server.manager.services.agent_provider_thread_reader import (
-    AgentProviderThreadReader,
-)
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_provider_network import (
     AgentProviderProxyUnavailable,
     resolve_provider_proxy,
+)
+from server.manager.services.agent_provider_thread_reader import (
+    AgentProviderThreadReader,
 )
 from server.manager.services.provider_thread_chatkit import provider_thread_page
 
@@ -49,6 +50,7 @@ class AgentAppServerSupervisor:
         self._agent_session_tokens: dict[tuple[str, str], str] = {}
         self._heartbeat_controls: dict[tuple[str, str], threading.Event] = {}
         self._model_catalog_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+        self._processing_turns: dict[tuple[str, str], dict[str, str]] = {}
         self._lock = threading.RLock()
         self.thread_reader = AgentProviderThreadReader(
             profile_service,
@@ -101,6 +103,11 @@ class AgentAppServerSupervisor:
                 )
             except AgentProviderProxyUnavailable as exc:
                 raise AgentAppServerError(str(exc), code=exc.code) from exc
+            runtime_observer = AgentConversationRuntimeObserver(
+                self.profile_service.conversation_store,
+                key[0],
+                key[1],
+            )
             session = AgentAppServerSession(
                 runtime=context["skill_runtime"],
                 provider=context["provider"],
@@ -108,11 +115,9 @@ class AgentAppServerSupervisor:
                 codex_binary=self.codex_binary,
                 cc_switch_binary=self.cc_switch_binary,
                 proxy_url=proxy_url,
-                event_observer=AgentConversationRuntimeObserver(
-                    self.profile_service.conversation_store,
-                    key[0],
-                    key[1],
-                ).observe,
+                event_observer=lambda payload: self._observe_runtime_event(
+                    key, runtime_observer, payload,
+                ),
             )
             try:
                 session.start()
@@ -134,6 +139,7 @@ class AgentAppServerSupervisor:
         self._model_catalog_cache.pop(key, None)
         with self._lock:
             session = self._sessions.pop(key, None)
+            self._processing_turns.pop(key, None)
             self._stop_heartbeat(key)
         if session is not None:
             session.stop()
@@ -159,7 +165,29 @@ class AgentAppServerSupervisor:
         status["active_conversation_id"] = (
             active.get("conversation_id") if active else ""
         )
+        processing = self._processing_turns.get(key) or {}
+        status["processing_conversation_id"] = str(
+            processing.get("conversation_id") or ""
+        )
         return status
+
+    def _observe_runtime_event(
+        self,
+        key: tuple[str, str],
+        observer: AgentConversationRuntimeObserver,
+        payload: Mapping[str, Any],
+    ) -> None:
+        observer.observe(payload)
+        method = str(payload.get("method") or payload.get("type") or "")
+        if method == "app_server_exit" or (
+            method.startswith("turn/")
+            and method.rsplit("/", 1)[-1] in {
+                "completed", "complete", "failed", "error", "aborted",
+                "interrupted",
+            }
+        ):
+            with self._lock:
+                self._processing_turns.pop(key, None)
 
     def refresh_conversation_history(
         self,
@@ -355,7 +383,18 @@ class AgentAppServerSupervisor:
                 for name, value in settings.items()
                 if str(value or "").strip()
             })
-        response = session.request(method, request_params)
+        if method == "turn/start" and conversation is not None:
+            with self._lock:
+                self._processing_turns[key] = {
+                    "conversation_id": str(conversation["conversation_id"]),
+                }
+        try:
+            response = session.request(method, request_params)
+        except Exception:
+            if method == "turn/start":
+                with self._lock:
+                    self._processing_turns.pop(key, None)
+            raise
         self._save_conversation_state(
             key,
             method,
