@@ -56,6 +56,7 @@ def active_turn_items(
             "type": "agentMessage",
             "text": assistant_text[identifier],
             "phase": _text(params.get("phase") or "commentary"),
+            "status": "running",
         }, conversation_id)
         if synthetic is not None:
             if identifier not in projected:

@@ -44,6 +44,9 @@ def test_active_turn_is_visible_before_provider_thread_finishes():
     assert page["items"][0]["workflow"]["tasks"][0]["content"] == (
         "当前检查到以下内容"
     )
+    assert page["items"][0]["workflow"]["tasks"][0]["status_indicator"] == (
+        "loading"
+    )
 
 
 def test_active_turn_ignores_events_from_another_thread():
