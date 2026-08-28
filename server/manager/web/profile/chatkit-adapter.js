@@ -355,8 +355,10 @@
     profileState.historyOnly = Boolean(options.historyOnly);
     profileState.onConversationChange = options.onConversationChange;
     profileState.runtimeObserver = options.onRuntimeEvent;
+    profileState.turnActivityObserver = options.onTurnActivity;
     for (const state of profileState.conversations.values()) {
       state.runtimeObserver = profileState.runtimeObserver;
+      state.turnActivityObserver = profileState.turnActivityObserver;
     }
     return {
       fetch: (input, init) => fetchAdapter(profileState, input, init),

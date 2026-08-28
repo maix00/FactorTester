@@ -266,6 +266,7 @@
     function coldifySession(tabID, session) {
       const view = session.view;
       if (!view?.content || tabID === state.activeTabID) return;
+      if (view.content.querySelector?.("[data-ft-agent-turn-active]")) return;
       pageState(tabID)?.capture();
       session.pageState?.dispose?.();
       session.pageState = null;

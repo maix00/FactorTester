@@ -70,6 +70,19 @@
         runtimeControls.setConversation(conversation);
       },
       onRuntimeEvent: runtimeControls.observeEvent,
+      onTurnActivity: active => {
+        if (active) {
+          // A live ChatKit element owns the browser stream that carries the
+          // complete turn timeline.  Keep that element mounted while its tab
+          // is detached so leaving and returning does not discard events that
+          // were produced in between.
+          delete host.dataset.ftRerenderOnTabRestore;
+          host.dataset.ftAgentTurnActive = "true";
+          return;
+        }
+        delete host.dataset.ftAgentTurnActive;
+        host.dataset.ftRerenderOnTabRestore = "true";
+      },
     });
     const chatStage = document.createElement("div");
     chatStage.className = "profile-chatkit-stage";
