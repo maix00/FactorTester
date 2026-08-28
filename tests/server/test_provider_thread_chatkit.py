@@ -61,6 +61,25 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
     assert all(item["thread_id"] == "conversation-1" for item in items)
 
 
+def test_interrupted_provider_turn_has_a_durable_visible_outcome():
+    page = provider_thread_page({
+        "turns": [{
+            "id": "turn-interrupted",
+            "status": "interrupted",
+            "items": [{
+                "id": "user-1", "type": "userMessage", "content": "继续",
+            }],
+        }],
+    }, "conversation-1")
+
+    assert [item["id"] for item in page["items"]] == [
+        "turn-interrupted-outcome", "user-1",
+    ]
+    task = page["items"][0]["workflow"]["tasks"][0]
+    assert task["title"] == "Agent turn interrupted"
+    assert "new message" in task["content"]
+
+
 def test_provider_thread_does_not_truncate_long_messages_or_item_count():
     text = "x" * 20_000
     thread = {"turns": [{"items": [

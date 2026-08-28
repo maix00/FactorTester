@@ -190,6 +190,23 @@
     emitProcessReplacement(state, controller, item);
   }
 
+  function emitTurnOutcome(state, controller, status, payload) {
+    const interrupted = /aborted|interrupted/i.test(status);
+    const itemID = `${state.turnID || P.randomID("turn")}-outcome`;
+    const item = liveProcessItem(
+      state,
+      itemID,
+      interrupted ? "Agent turn interrupted" : "Agent turn failed",
+    );
+    const task = item.workflow.tasks[0];
+    task.content = interrupted
+      ? "The Agent stopped before producing a final response. You can continue the conversation with a new message."
+      : P.errorMessage(payload);
+    task.status_indicator = "complete";
+    emitProcessReplacement(state, controller, item);
+    writeEvent(controller, {type: "thread.item.done", item});
+  }
+
   function isAssistantMessage(item) {
     const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
     return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type);
@@ -517,6 +534,7 @@
       if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
         const completion = P.turnCompletion(payload);
         if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
+          emitTurnOutcome(state, controller, completion.status, payload);
           writeEvent(controller, {
             type: "error",
             code: "agent_turn_failed",

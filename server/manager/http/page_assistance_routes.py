@@ -232,7 +232,22 @@ class PageAssistanceStore:
 
 _STORE = PageAssistanceStore()
 
-_PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a structured assistance document. First run `factortester assist inspect`. Build the complete document described by that command, retain it with `factortester assist drafts create --stdin`, validate it with `factortester assist drafts validate <draft-id>`, then apply it atomically with `factortester assist drafts apply <draft-id>`. Do not write candidate files into the Profile root or /tmp; do not inspect frontend source, tokens, or private HTTP APIs; do not manipulate the DOM or fill fields one at a time. If the revision changed, inspect again and create a new draft."""
+_PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a
+structured assistance document. First run `factortester assist inspect`; its
+compact summary lists the current revision and queryable document sections.
+Read only the document and schema subtrees needed for this request with
+`factortester assist inspect --path <json-pointer>` (repeat `--path` in one
+command when useful), rather than printing the complete page contract.
+Container results are bounded and paginated; use a more specific pointer or
+`--offset` and `--limit` instead of requesting a complete subtree. Build one
+complete structured document. Retain it with
+`factortester assist drafts create --stdin`, validate it with
+`factortester assist drafts validate <draft-id>`, then apply it atomically with
+`factortester assist drafts apply <draft-id>`.
+Do not write candidate files into the Profile root or /tmp.
+Do not inspect frontend source, tokens, or private HTTP APIs.
+Do not manipulate the DOM or fill fields one at a time. If the revision
+changed, inspect again and create a new draft."""
 
 
 def page_assistance_turn_params(
