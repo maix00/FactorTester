@@ -8,6 +8,14 @@
     return root;
   }
 
+  function passiveRuntimeControls() {
+    return {
+      dispose() {},
+      observeEvent() {},
+      setConversation() {},
+    };
+  }
+
   function message(context, title, detail = "") {
     return FTUI.empty(context.t(title), detail ? context.t(detail) : "");
   }
@@ -35,13 +43,17 @@
     const skills = options.readOnly || options.historyOnly
       ? [] : await loadSkills(context, profile);
     await window.FTProfileChatKit.load();
-    if (!window.FTProfileAgentRuntimeControls) {
+    if (!options.conversationOnly && !window.FTProfileAgentRuntimeControls) {
       throw new Error(context.t("Agent 运行设置组件尚未加载"));
     }
-    const runtimeControls = window.FTProfileAgentRuntimeControls.create(
-      profile, context, {readOnly: Boolean(options.readOnly)},
-    );
-    options.settingsHost?.replaceChildren(runtimeControls.element);
+    const runtimeControls = options.conversationOnly
+      ? passiveRuntimeControls()
+      : window.FTProfileAgentRuntimeControls.create(
+        profile, context, {readOnly: Boolean(options.readOnly)},
+      );
+    if (!options.conversationOnly) {
+      options.settingsHost?.replaceChildren(runtimeControls.element);
+    }
     let selectedConversationID = "";
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
@@ -135,6 +147,11 @@
 
   async function render(context, profile, options = {}) {
     const root = section(context);
+    const conversationOnly = Boolean(options.conversationOnly);
+    if (conversationOnly) {
+      root.classList.add("profile-agent-chat-conversation-only");
+      root.replaceChildren();
+    }
     const runtime = profile.runtime || {};
     const readOnly = Boolean(options.readOnly);
     if (readOnly) {
@@ -192,7 +209,8 @@
     host.setAttribute("aria-live", "polite");
     const settingsHost = document.createElement("div");
     settingsHost.className = "profile-agent-settings-host";
-    root.append(note, status, settingsHost, host);
+    if (conversationOnly) root.append(host);
+    else root.append(note, status, settingsHost, host);
 
     let mounted = null;
     let leaving = false;
@@ -263,6 +281,13 @@
     activationPromise.catch(error => {
       if (leaving) return;
       status.textContent = error.message || context.t("读取 Agent 状态失败");
+      if (conversationOnly) {
+        host.replaceChildren(message(
+          context,
+          "Agent 对话读取失败",
+          error.message || "",
+        ));
+      }
     });
     return root;
   }
