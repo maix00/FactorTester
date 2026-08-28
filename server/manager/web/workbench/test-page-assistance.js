@@ -62,7 +62,9 @@
   }
 
   function register(context, state, refresh) {
-    return FTPageAssistance.register(context, {
+    const existing = state.pageAssistanceRegistration;
+    if (existing && existing.pageState === context.pageState) return existing.controller;
+    const controller = FTPageAssistance.register(context, {
       prepare: () => FTTestLazyCode.loadGroup("workbench-run-submit"),
       schema: () => schemaFor(state),
       exportDocument: () => documentFor(state),
@@ -95,6 +97,8 @@
       pageKind: `${state.kind}-configuration`,
       view: () => ({selected_settings_tab: state.settingsTabKey || ""}),
     });
+    state.pageAssistanceRegistration = {pageState: context.pageState, controller};
+    return controller;
   }
 
   window.FTTestPageAssistance = Object.freeze({documentFor, register, schemaFor});

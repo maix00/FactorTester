@@ -4,8 +4,13 @@ const vm = require("node:vm");
 
 global.window = globalThis;
 let registration = null;
+let registrationCount = 0;
 global.FTPageAssistance = {
-  register: (_context, assistance) => { registration = assistance; return {}; },
+  register: (_context, assistance) => {
+    registrationCount += 1;
+    registration = assistance;
+    return {id: registrationCount};
+  },
 };
 global.FTTestLazyCode = {loadGroup: async () => {}};
 global.FTTestConfiguration = {configurationPayload: state => state.payload};
@@ -33,7 +38,13 @@ const state = {
   kind: "backtest", manifest: {}, workspace: null,
   payload: {schema_version: 2, analyses: {backtest: {groups: [group]}}},
 };
-FTTestPageAssistance.register({t: value => value}, state, () => {});
+const pageState = {};
+const context = {t: value => value, pageState};
+const firstController = FTTestPageAssistance.register(context, state, () => {});
+const rerenderController = FTTestPageAssistance.register(context, state, () => {});
+assert.equal(registrationCount, 1,
+  "rerendering one test tab keeps its existing drawer and ChatKit stream");
+assert.equal(rerenderController, firstController);
 const schema = registration.schema();
 assert.equal(
   schema.properties.configuration.properties.analyses
@@ -48,4 +59,11 @@ assert.throws(() => registration.validate({
 registration.importDocument({configuration: state.payload});
 assert.deepEqual(state.analysis.groups, [group]);
 assert.equal(initialized, 1, "imported strategy groups enter the normal UI model");
+
+const nextController = FTTestPageAssistance.register(
+  {...context, pageState: {}}, state, () => {},
+);
+assert.equal(registrationCount, 2,
+  "a newly restored PageState receives a fresh assistance lifecycle");
+assert.notEqual(nextController, firstController);
 console.log("PASS: assisted backtest documents preserve required strategy groups");
