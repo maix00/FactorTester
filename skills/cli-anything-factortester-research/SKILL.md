@@ -23,9 +23,10 @@ terminal still follows the explicit configure/login setup below.
 When the Web page opens this Profile as its assistance Agent, use
 `factortester assist inspect` to read the page-registered schema, complete
 structured document and optimistic revision. Prepare the entire document,
-validate it once with `factortester assist validate --stdin`, then atomically
-apply it with `factortester assist apply --stdin --tab-id ...
---expected-revision ...`. Never fill the page one field at a time, manipulate
+retain it with `factortester assist drafts create --stdin`, validate the returned
+ID with `factortester assist drafts validate <draft-id>`, then atomically apply
+it with `factortester assist drafts apply <draft-id>`. Do not write candidate
+files directly into the Profile root or `/tmp`. Never fill the page one field at a time, manipulate
 DOM, or invent fields outside the published schema. A revision conflict means
 the person edited the page; inspect again instead of overwriting them.
 

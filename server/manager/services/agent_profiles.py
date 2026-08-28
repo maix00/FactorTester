@@ -6,18 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from server.manager.services.agent_workspace import (
-    ensure_server_profile_workspace,
-    profile_workspace_relative_path,
-)
-from server.manager.services.agent_skill_catalog import (
-    AgentSkillCatalog,
-    AgentSkillCatalogError,
-)
-from server.manager.services.agent_skill_runtime import AgentSkillRuntime
-from server.manager.services.profile_workspace_browser import (
-    ProfileWorkspaceBrowser,
-)
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
 )
@@ -25,11 +13,24 @@ from server.manager.services.agent_provider_network import (
     AgentProviderProxyUnavailable,
     resolve_provider_proxy,
 )
+from server.manager.services.agent_skill_catalog import (
+    AgentSkillCatalog,
+    AgentSkillCatalogError,
+)
+from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.agent_workspace import (
+    ensure_server_profile_workspace,
+    profile_workspace_relative_path,
+)
+from server.manager.services.assistance_drafts import AssistanceDraftStore
+from server.manager.services.profile_workspace_browser import (
+    ProfileWorkspaceBrowser,
+)
+from server.manager.storage.agent_conversation_store import AgentConversationStore
 from server.manager.storage.agent_provider_store import (
     AgentProviderStore,
     ProviderStoreError,
 )
-from server.manager.storage.agent_conversation_store import AgentConversationStore
 from server.manager.storage.agent_skill_store import AgentSkillStore
 from server.manager.storage.profile_runtime_store import (
     ProfileRuntimeError,
@@ -50,12 +51,14 @@ class AgentProfileService:
         skill_source_root=None,
         skill_manifest_path=None,
         proxy_url_provider: Callable[[], str] | None = None,
-        agent_session_issuer: Callable[[str, str, str], dict[str, object]] | None = None,
+        agent_session_issuer: Callable[[str, str, str], dict[str, object]]
+        | None = None,
         agent_session_revoker: Callable[[str], None] | None = None,
         manager_endpoint_provider: Callable[[], str] | None = None,
         profile_factor_worktree_preparer: Callable[
             [str, str, Path, Path], dict[str, Any]
-        ] | None = None,
+        ]
+        | None = None,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
@@ -65,9 +68,7 @@ class AgentProfileService:
         self.agent_session_issuer = agent_session_issuer
         self.agent_session_revoker = agent_session_revoker
         self.manager_endpoint_provider = manager_endpoint_provider
-        self.profile_factor_worktree_preparer = (
-            profile_factor_worktree_preparer
-        )
+        self.profile_factor_worktree_preparer = profile_factor_worktree_preparer
         self.runtime_store = ProfileRuntimeStore(db_path)
         self.conversation_store = AgentConversationStore(db_path)
         self.provider_store = AgentProviderStore(db_path, provider_key_path)
@@ -76,7 +77,9 @@ class AgentProfileService:
             source_root = Path(__file__).resolve().parents[3]
         manifest = skill_manifest_path
         if manifest is None:
-            manifest = Path(source_root) / "server" / "manager" / "skills" / "catalog.json"
+            manifest = (
+                Path(source_root) / "server" / "manager" / "skills" / "catalog.json"
+            )
         elif not Path(manifest).is_absolute():
             manifest = Path(source_root) / manifest
         self.skill_catalog = AgentSkillCatalog(source_root, manifest)
@@ -105,11 +108,17 @@ class AgentProfileService:
             execution_server_id = str(server_metadata.get("server_id") or "").strip()
         if runtime_kind not in {"client", "server"}:
             server = profile.get("server")
-            if execution_server_id or isinstance(server, dict) and server.get("server_id"):
+            if (
+                execution_server_id
+                or isinstance(server, dict)
+                and server.get("server_id")
+            ):
                 runtime_kind = "server"
             else:
                 runtime_kind = "client"
-        executor_id = execution_server_id if runtime_kind == "server" else execution_device_id
+        executor_id = (
+            execution_server_id if runtime_kind == "server" else execution_device_id
+        )
         profile_id = self._profile_id(profile)
         return {
             "profile_id": profile_id,
@@ -118,7 +127,9 @@ class AgentProfileService:
             "workspace_relpath": profile_workspace_relative_path(
                 principal,
                 profile_id,
-            ) if profile_id else "",
+            )
+            if profile_id
+            else "",
             "configured": bool(executor_id),
             "source": "profile",
         }
@@ -146,7 +157,9 @@ class AgentProfileService:
                 "executor_id": runtime.get("executor_id", ""),
                 "workspace_relpath": runtime.get("workspace_relpath", ""),
                 "configured": bool(runtime.get("executor_id")),
-                "server_id": self.server_id if runtime.get("runtime_kind") == "server" else "",
+                "server_id": self.server_id
+                if runtime.get("runtime_kind") == "server"
+                else "",
             }
             profile["active_claim"] = self._public_claim(claim)
             result.append(profile)
@@ -163,13 +176,9 @@ class AgentProfileService:
             "agent_id": claim.get("agent_id", ""),
             "provider_id": claim.get("provider_id", ""),
             "agent_runtime": claim.get("agent_runtime", "codex"),
-            "provider_protocol": claim.get(
-                "provider_protocol", "openai_responses"
-            ),
+            "provider_protocol": claim.get("provider_protocol", "openai_responses"),
             "provider_model": claim.get("provider_model", ""),
-            "provider_config_version": claim.get(
-                "provider_config_version", 0
-            ),
+            "provider_config_version": claim.get("provider_config_version", 0),
             "claimed_at": claim.get("claimed_at", 0),
             "last_heartbeat_at": claim.get("last_heartbeat_at", 0),
             "status": claim.get("status", ""),
@@ -198,7 +207,9 @@ class AgentProfileService:
             # server workspace from being created or the runtime binding from
             # being saved.
             ensure_server_profile_workspace(
-                self.data_root, principal, profile_id,
+                self.data_root,
+                principal,
+                profile_id,
             )
         return self.runtime_store.bind(
             principal,
@@ -251,8 +262,27 @@ class AgentProfileService:
         relative_path: str,
     ) -> dict[str, Any]:
         return self.workspace_browser.file_metadata(
-            principal, profile_id, relative_path,
+            principal,
+            profile_id,
+            relative_path,
         )
+
+    def delete_profile_workspace_file(
+        self,
+        principal: str,
+        profile_id: str,
+        relative_path: str,
+    ) -> dict[str, Any]:
+        return self.workspace_browser.delete_file(principal, profile_id, relative_path)
+
+    def assistance_drafts(
+        self, principal: str, profile_id: str
+    ) -> AssistanceDraftStore:
+        self.require_local_server_runtime(principal, profile_id)
+        workspace = ensure_server_profile_workspace(
+            self.data_root, principal, profile_id
+        )
+        return AssistanceDraftStore(workspace)
 
     def conversations(
         self,
@@ -268,7 +298,9 @@ class AgentProfileService:
         enabled: bool,
     ) -> bool:
         return self.conversation_store.set_parent_sharing(
-            principal, profile_id, enabled,
+            principal,
+            profile_id,
+            enabled,
         )
 
     def conversation_sharing(self, principal: str, profile_id: str) -> bool:
@@ -376,7 +408,9 @@ class AgentProfileService:
     ) -> dict[str, Any]:
         runtime = self.runtime_store.runtime(principal, profile_id)
         if runtime is None:
-            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+            raise ProfileRuntimeError(
+                "configure the Profile runtime before selecting Skills"
+            )
         runtime_kind = str(runtime.get("runtime_kind") or "")
         definitions = self.skill_catalog.definitions(runtime_kind)
         selected = set(self.skill_store.selected(principal, profile_id))
@@ -434,12 +468,15 @@ class AgentProfileService:
         if str(runtime.get("executor_id") or "") != self.server_id:
             raise ProfileRuntimeError("Profile belongs to another server")
         workspace = ensure_server_profile_workspace(
-            self.data_root, principal, profile_id,
+            self.data_root,
+            principal,
+            profile_id,
         )
         runtime_state = AgentSkillRuntime(workspace)
         runtime_state.sync(
             self.selected_skill_bindings(principal, profile_id)
-            if bindings is None else bindings,
+            if bindings is None
+            else bindings,
         )
         return runtime_state
 
@@ -474,9 +511,7 @@ class AgentProfileService:
                 str(claim.get("claim_id") or ""),
                 provider_id=str(provider.get("provider_id") or ""),
                 agent_runtime=str(provider.get("agent_runtime") or "codex"),
-                provider_protocol=str(
-                    provider.get("protocol") or "openai_responses"
-                ),
+                provider_protocol=str(provider.get("protocol") or "openai_responses"),
                 provider_model=str(provider.get("default_model") or ""),
                 provider_config_version=float(provider.get("updated_at") or 0),
             )
@@ -501,7 +536,9 @@ class AgentProfileService:
         if self.agent_session_issuer is not None:
             endpoint = ""
             if self.manager_endpoint_provider is not None:
-                endpoint = str(self.manager_endpoint_provider() or "").strip().rstrip("/")
+                endpoint = (
+                    str(self.manager_endpoint_provider() or "").strip().rstrip("/")
+                )
             if not endpoint:
                 raise ProfileRuntimeError(
                     "local Manager endpoint is unavailable for the Profile Agent"
@@ -549,9 +586,15 @@ class AgentProfileService:
         if str(runtime.get("executor_id") or "") != self.server_id:
             raise ProfileRuntimeError("Profile belongs to another server")
         identifier = str(provider_id or "").strip()
-        provider = self.provider_store.get(
-            principal, identifier, include_secret=True,
-        ) if identifier else None
+        provider = (
+            self.provider_store.get(
+                principal,
+                identifier,
+                include_secret=True,
+            )
+            if identifier
+            else None
+        )
         if provider is None:
             # Codex requires a syntactically complete provider configuration
             # at process startup even though thread/read performs no network
@@ -570,7 +613,8 @@ class AgentProfileService:
             "runtime": runtime,
             "provider": provider,
             "skill_runtime": self.prepare_server_skill_runtime(
-                principal, profile_id,
+                principal,
+                profile_id,
             ),
         }
 
@@ -590,7 +634,9 @@ class AgentProfileService:
     ) -> dict[str, Any]:
         runtime = self.runtime_store.runtime(principal, profile_id)
         if runtime is None:
-            raise ProfileRuntimeError("configure the Profile runtime before selecting Skills")
+            raise ProfileRuntimeError(
+                "configure the Profile runtime before selecting Skills"
+            )
         if self.runtime_store.active_claim(principal, profile_id) is not None:
             raise ProfileRuntimeError(
                 "release the active Agent before changing Profile Skills"
@@ -600,7 +646,13 @@ class AgentProfileService:
             item["skill_id"]: item
             for item in self.skill_catalog.definitions(runtime_kind)
         }
-        requested = sorted({str(value or "").strip() for value in skill_ids if str(value or "").strip()})
+        requested = sorted(
+            {
+                str(value or "").strip()
+                for value in skill_ids
+                if str(value or "").strip()
+            }
+        )
         unknown = [skill_id for skill_id in requested if skill_id not in definitions]
         if unknown:
             raise AgentSkillCatalogError(
@@ -615,7 +667,9 @@ class AgentProfileService:
                 bindings=selected_bindings,
             )
         selected = self.skill_store.replace(principal, profile_id, requested)
-        return self.profile_skills(principal, profile_id) | {"selected_skill_ids": selected}
+        return self.profile_skills(principal, profile_id) | {
+            "selected_skill_ids": selected
+        }
 
     def save_provider(
         self,
@@ -673,9 +727,15 @@ class AgentProfileService:
     ) -> dict[str, Any]:
         """Explicitly inspect the Provider bound to one Profile."""
         provider_id = self.provider_id_for_profile(principal, profile_id)
-        provider = self.provider_store.get(
-            principal, provider_id, include_secret=True,
-        ) if provider_id else None
+        provider = (
+            self.provider_store.get(
+                principal,
+                provider_id,
+                include_secret=True,
+            )
+            if provider_id
+            else None
+        )
         if provider is None:
             raise ProviderStoreError("Profile Agent provider is unavailable")
         try:
@@ -689,7 +749,9 @@ class AgentProfileService:
     def delete_provider(self, principal: str, provider_id: str) -> bool:
         for claim in self.runtime_store.claims(principal):
             if claim.get("provider_id") == provider_id:
-                raise ProviderStoreError("release the active Agent before deleting its provider")
+                raise ProviderStoreError(
+                    "release the active Agent before deleting its provider"
+                )
         return self.provider_store.delete(principal, provider_id)
 
     def duplicate_provider(
@@ -721,7 +783,9 @@ class AgentProfileService:
             if provider is None or not provider.get("enabled"):
                 raise ProviderStoreError("provider is unavailable")
             if provider.get("runtime_kind") != runtime_kind:
-                raise ProviderStoreError("provider runtime does not match Profile runtime")
+                raise ProviderStoreError(
+                    "provider runtime does not match Profile runtime"
+                )
             if runtime_kind == "server" and provider.get("server_id") != self.server_id:
                 raise ProviderStoreError("provider belongs to another server")
         if runtime_kind == "server":
@@ -733,9 +797,7 @@ class AgentProfileService:
             executor_id=executor_id,
             provider_id=provider_id,
             agent_runtime=str(provider.get("agent_runtime") or "codex"),
-            provider_protocol=str(
-                provider.get("protocol") or "openai_responses"
-            ),
+            provider_protocol=str(provider.get("protocol") or "openai_responses"),
             provider_model=str(provider.get("default_model") or ""),
             provider_config_version=float(provider.get("updated_at") or 0),
             agent_id=agent_id,
@@ -750,9 +812,11 @@ class AgentProfileService:
         }
 
     def heartbeat(self, principal: str, claim_id: str, agent_id: str) -> dict[str, Any]:
-        return {"claim": self._public_claim(
-            self.runtime_store.heartbeat(principal, claim_id, agent_id=agent_id),
-        )}
+        return {
+            "claim": self._public_claim(
+                self.runtime_store.heartbeat(principal, claim_id, agent_id=agent_id),
+            )
+        }
 
     def release(
         self,
@@ -802,4 +866,7 @@ class AgentProfileService:
         )
 
     def claims(self, principal: str) -> list[dict[str, Any]]:
-        return [self._public_claim(item) or {} for item in self.runtime_store.claims(principal)]
+        return [
+            self._public_claim(item) or {}
+            for item in self.runtime_store.claims(principal)
+        ]

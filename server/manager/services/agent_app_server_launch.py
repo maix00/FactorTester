@@ -17,6 +17,7 @@ from server.manager.services.agent_provider_health import (
     AgentProviderHealthError,
 )
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.profile_agent_sandbox import ProfileAgentSandbox
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
@@ -76,7 +77,8 @@ class AgentAppServerLaunch:
         codex = self._executable(self.codex_binary, "Codex")
         factor_tester = (
             self._executable(self.factor_tester_cli, "FactorTester CLI")
-            if require_factor_tester else None
+            if require_factor_tester
+            else None
         )
         if not check_provider:
             return {
@@ -109,29 +111,33 @@ class AgentAppServerLaunch:
         base_url = str(self.provider.get("base_url") or "").strip()
         if not model or not base_url:
             raise AgentAppServerError("Agent provider is incomplete")
-        config = "\n".join([
-            f"model = {_toml_string(model)}",
-            'model_provider = "factortester"',
-            'approval_policy = "never"',
-            'sandbox_mode = "workspace-write"',
-            "sandbox_workspace_write.network_access = true",
-            "sandbox_workspace_write.writable_roots = "
-            f"{_toml_array([self.runtime.workspace_root])}",
-            "",
-            "[model_providers.factortester]",
-            'name = "FactorTester provider"',
-            f"base_url = {_toml_string(base_url)}",
-            'env_key = "FACTORTESTER_AGENT_TOKEN"',
-            'wire_api = "responses"',
-            "",
-            "[shell_environment_policy]",
-            (
-                "# Keep the provider token in app-server only; "
-                "do not pass it to shell tools."
-            ),
-            "ignore_default_excludes = false",
-            "",
-        ])
+        config = "\n".join(
+            [
+                f"model = {_toml_string(model)}",
+                'model_provider = "factortester"',
+                'approval_policy = "never"',
+                'sandbox_mode = "workspace-write"',
+                "sandbox_workspace_write.network_access = true",
+                (
+                    "sandbox_workspace_write.writable_roots = "
+                    f"{_toml_array(['/workspace'])}"
+                ),
+                "",
+                "[model_providers.factortester]",
+                'name = "FactorTester provider"',
+                f"base_url = {_toml_string(base_url)}",
+                'env_key = "FACTORTESTER_AGENT_TOKEN"',
+                'wire_api = "responses"',
+                "",
+                "[shell_environment_policy]",
+                (
+                    "# Keep the provider token in app-server only; "
+                    "do not pass it to shell tools."
+                ),
+                "ignore_default_excludes = false",
+                "",
+            ]
+        )
         path = self.runtime.codex_home / "config.toml"
         fd, temporary = tempfile.mkstemp(
             prefix="factortester-agent-config-",
@@ -150,15 +156,22 @@ class AgentAppServerLaunch:
                 os.unlink(temporary)
 
     def command(self) -> list[str]:
-        return self.runtime.command(self.codex_binary)
+        sandbox = ProfileAgentSandbox(
+            workspace_root=self.runtime.workspace_root,
+            skill_sources=[
+                value["source_path"]
+                for value in self.runtime.selected_bindings().values()
+            ],
+        )
+        return sandbox.command(self.runtime.command(self.codex_binary))
 
     def write_factor_tester_config(self) -> None:
         """Materialize a private local CLI config and Agent capability."""
         if not self.factor_tester_auth:
             return
-        base_url = str(
-            self.factor_tester_auth.get("base_url") or ""
-        ).strip().rstrip("/")
+        base_url = (
+            str(self.factor_tester_auth.get("base_url") or "").strip().rstrip("/")
+        )
         token = str(self.factor_tester_auth.get("token") or "").strip()
         profile_id = str(self.factor_tester_auth.get("profile_id") or "").strip()
         claim_id = str(self.factor_tester_auth.get("claim_id") or "").strip()
@@ -190,8 +203,7 @@ class AgentAppServerLaunch:
         root.mkdir(parents=True, exist_ok=True)
         store = LocalProfileStore(root)
         existing = {
-            str(item.get("profile_id") or ""): item
-            for item in store.list()
+            str(item.get("profile_id") or ""): item for item in store.list()
         }.get(profile_id)
         if existing is not None:
             binding = existing.get("session_binding") or {}
@@ -200,18 +212,22 @@ class AgentAppServerLaunch:
                     "Profile Agent local projection principal does not match"
                 )
             return
-        store.save(new_local_profile(
-            profile_id=profile_id,
-            display_name=profile_id,
-            workspace_root=self.runtime.workspace_root,
-            principal_ref=principal,
-        ))
+        store.save(
+            new_local_profile(
+                profile_id=profile_id,
+                display_name=profile_id,
+                workspace_root=Path("/workspace"),
+                principal_ref=principal,
+            )
+        )
 
     @staticmethod
     def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(
-            prefix=f"{path.name}.", suffix=".tmp", dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -253,10 +269,12 @@ class AgentAppServerLaunch:
         if cli:
             cli_path = Path(cli).expanduser()
             if cli_path.parent != Path("."):
-                environment["PATH"] = os.pathsep.join([
-                    str(cli_path.parent),
-                    environment.get("PATH", ""),
-                ]).rstrip(os.pathsep)
+                environment["PATH"] = os.pathsep.join(
+                    [
+                        str(cli_path.parent),
+                        environment.get("PATH", ""),
+                    ]
+                ).rstrip(os.pathsep)
             environment["FACTORTESTER_CLI"] = cli
         if self.factor_tester_auth:
             environment["FACTORTESTER_CONFIG"] = str(self.factor_tester_config_path)
@@ -272,18 +290,29 @@ class AgentAppServerLaunch:
             environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] = str(
                 self.factor_tester_capability_path
             )
-        return environment
+        workspace_root = getattr(self.runtime, "workspace_root", None)
+        if workspace_root is None:
+            return environment
+        return ProfileAgentSandbox(workspace_root=workspace_root).environment(environment)
 
     def _set_proxy_environment(self, environment: dict[str, str]) -> None:
         """Scope the optional proxy to the Profile app-server child."""
         for key in (
-            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-            "http_proxy", "https_proxy", "all_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
         ):
             environment[key] = self.proxy_url
         bypass = {
-            "127.0.0.1", "localhost", "::1",
-            "10.77.0.0/16", "10.79.0.0/16", "172.30.0.0/16",
+            "127.0.0.1",
+            "localhost",
+            "::1",
+            "10.77.0.0/16",
+            "10.79.0.0/16",
+            "172.30.0.0/16",
         }
         for key in (
             "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",

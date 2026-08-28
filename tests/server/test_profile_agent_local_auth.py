@@ -34,14 +34,20 @@ def test_agent_session_is_bound_to_profile_and_revoked(tmp_path: Path) -> None:
     )
 
     assert state.agent_session_matches(
-        issued["token"], "profile-main", "claim-1",
+        issued["token"],
+        "profile-main",
+        "claim-1",
     )
     assert not state.agent_session_matches(
-        issued["token"], "profile-other", "claim-1",
+        issued["token"],
+        "profile-other",
+        "claim-1",
     )
     state.revoke_agent_session(issued["token"])
     assert not state.agent_session_matches(
-        issued["token"], "profile-main", "claim-1",
+        issued["token"],
+        "profile-main",
+        "claim-1",
     )
 
 
@@ -76,27 +82,23 @@ def test_agent_cli_files_are_private_and_cleaned(tmp_path: Path) -> None:
     assert capability["profile_id"] == "profile-main"
     assert launch.factor_tester_capability_path.stat().st_mode & 0o077 == 0
     assert "manager" in environment["NO_PROXY"]
-    assert environment["FACTORTESTER_CONFIG"] == str(
-        launch.factor_tester_config_path,
+    assert (
+        environment["FACTORTESTER_CONFIG"] == "/workspace/.codex/factor-tester-cli.json"
     )
-    assert environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] == str(
-        launch.factor_tester_capability_path,
+    assert environment["FACTORTESTER_AGENT_CAPABILITY_FILE"] == (
+        "/workspace/.codex/factor-tester-agent.json"
     )
-    assert environment["FACTORTESTER_CLIENT_ROOT"] == str(
-        runtime.factor_tester_client_root,
-    )
+    assert environment["FACTORTESTER_CLIENT_ROOT"] == "/workspace/.factortester-client"
     assert environment["FACTORTESTER_PROFILE"] == "profile-main"
     assert environment["FACTORTESTER_AGENT_TOKEN"] == "provider-secret"
     profile = json.loads(
         (
-            runtime.factor_tester_client_root
-            / "profiles"
-            / "profile-main.json"
+            runtime.factor_tester_client_root / "profiles" / "profile-main.json"
         ).read_text(encoding="utf-8")
     )
     assert profile["profile_id"] == "profile-main"
     assert profile["session_binding"]["principal_ref"] == "GTHT@MaxJJW@1"
-    assert profile["workspace_root"] == str(runtime.workspace_root)
+    assert profile["workspace_root"] == "/workspace"
     catalog = LocalCatalogStore(runtime.factor_tester_client_root).initialize()
     assert catalog["schema_version"] > 0
 

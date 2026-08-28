@@ -8,16 +8,15 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from server.manager.http.responses import json_response
-from server.manager.services.agent_skill_catalog import AgentSkillCatalogError
 from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_runtime_capabilities import public_capabilities
+from server.manager.services.agent_skill_catalog import AgentSkillCatalogError
 from server.manager.services.profile_workspace_browser import ProfileWorkspaceError
 from server.manager.storage.agent_provider_store import ProviderStoreError
 from server.manager.storage.profile_runtime_store import (
     ProfileClaimConflict,
     ProfileRuntimeError,
 )
-
 
 PROFILE_ID_PATTERN = r"[^/]+"
 PROVIDER_ID_PATTERN = r"[^/]+"
@@ -66,7 +65,8 @@ class AgentRoutesMixin:
     def _profile(self, principal: str, profile_id: str) -> dict[str, Any] | None:
         return next(
             (
-                item for item in self._local_profiles(principal)
+                item
+                for item in self._local_profiles(principal)
                 if str(item.get("profile_id") or "") == profile_id
             ),
             None,
@@ -78,16 +78,31 @@ class AgentRoutesMixin:
             if session is None:
                 return True
             try:
-                runtime_kind = parse_qs(
-                    parsed.query, keep_blank_values=True,
-                ).get("runtime_kind", ["server"])[0].strip() or "server"
+                runtime_kind = (
+                    parse_qs(
+                        parsed.query,
+                        keep_blank_values=True,
+                    )
+                    .get("runtime_kind", ["server"])[0]
+                    .strip()
+                    or "server"
+                )
                 skills = self._agent_service().available_skills(
                     runtime_kind=runtime_kind,
                 )
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
-            except (AgentSkillCatalogError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+            except (
+                AgentSkillCatalogError,
+                ProfileRuntimeError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
             json_response(
@@ -102,16 +117,32 @@ class AgentRoutesMixin:
                 return True
             try:
                 principal = self._agent_principal(session)
-                profile_id = parse_qs(
-                    parsed.query, keep_blank_values=True,
-                ).get("profile_id", [""])[0].strip()
+                profile_id = (
+                    parse_qs(
+                        parsed.query,
+                        keep_blank_values=True,
+                    )
+                    .get("profile_id", [""])[0]
+                    .strip()
+                )
                 if not self._profile_exists(principal, profile_id):
-                    raise ProfileRuntimeError("Profile does not belong to current account")
+                    raise ProfileRuntimeError(
+                        "Profile does not belong to current account"
+                    )
                 value = self._agent_service().profile_skills(principal, profile_id)
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
-            except (AgentSkillCatalogError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+            except (
+                AgentSkillCatalogError,
+                ProfileRuntimeError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
             json_response(self, {"success": True, **value})
@@ -131,10 +162,16 @@ class AgentRoutesMixin:
                     )
                 relative_path = query.get("path", [""])[0]
                 value = self._agent_service().profile_workspace(
-                    principal, profile_id, relative_path,
+                    principal,
+                    profile_id,
+                    relative_path,
                 )
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
             except (ProfileWorkspaceError, RuntimeError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
@@ -148,17 +185,32 @@ class AgentRoutesMixin:
                 return True
             try:
                 principal = self._agent_principal(session)
-                runtime_kind = parse_qs(
-                    parsed.query, keep_blank_values=True,
-                ).get("runtime_kind", [""])[0].strip() or None
+                runtime_kind = (
+                    parse_qs(
+                        parsed.query,
+                        keep_blank_values=True,
+                    )
+                    .get("runtime_kind", [""])[0]
+                    .strip()
+                    or None
+                )
                 providers = self._agent_service().providers(
                     principal,
                     runtime_kind=runtime_kind,
                 )
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
-            except (ProviderStoreError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+            except (
+                ProviderStoreError,
+                ProfileRuntimeError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
             json_response(
@@ -180,9 +232,18 @@ class AgentRoutesMixin:
                 profiles = self._local_profiles(principal)
                 enriched = self._agent_service().enrich(principal, profiles)
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
-            except (ProviderStoreError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+            except (
+                ProviderStoreError,
+                ProfileRuntimeError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
             json_response(
@@ -203,9 +264,18 @@ class AgentRoutesMixin:
                 principal = self._agent_principal(session)
                 claims = self._agent_service().claims(principal)
             except sqlite3.Error:
-                json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+                json_response(
+                    self,
+                    {"success": False, "error": "local Agent state is unavailable"},
+                    503,
+                )
                 return True
-            except (ProviderStoreError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+            except (
+                ProviderStoreError,
+                ProfileRuntimeError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return True
             json_response(self, {"success": True, "claims": claims})
@@ -218,15 +288,19 @@ class AgentRoutesMixin:
             rf"/api/client/agent-models/({PROVIDER_ID_PATTERN})/duplicate",
             parsed.path,
         )
-        if parsed.path not in {
-            "/api/client/agent-models",
-            "/api/client/agent-models/test",
-            "/api/client/profile-skills",
-            "/api/client/profile-runtime",
-            "/api/client/profile-claims",
-            "/api/client/profile-claims/heartbeat",
-            "/api/client/profile-claims/release",
-        } and duplicate_match is None:
+        if (
+            parsed.path
+            not in {
+                "/api/client/agent-models",
+                "/api/client/agent-models/test",
+                "/api/client/profile-skills",
+                "/api/client/profile-runtime",
+                "/api/client/profile-claims",
+                "/api/client/profile-claims/heartbeat",
+                "/api/client/profile-claims/release",
+            }
+            and duplicate_match is None
+        ):
             return False
         session = self._agent_session()
         if session is None:
@@ -255,7 +329,9 @@ class AgentRoutesMixin:
             if parsed.path == "/api/client/profile-skills":
                 profile_id = str(payload.get("profile_id") or "").strip()
                 if not self._profile_exists(principal, profile_id):
-                    raise ProfileRuntimeError("Profile does not belong to current account")
+                    raise ProfileRuntimeError(
+                        "Profile does not belong to current account"
+                    )
                 skill_ids = payload.get("skill_ids")
                 if not isinstance(skill_ids, list):
                     raise AgentSkillCatalogError("skill_ids must be a list")
@@ -272,13 +348,16 @@ class AgentRoutesMixin:
                 runtime_kind = str(payload.get("runtime_kind") or "").strip()
                 profile = self._profile(principal, profile_id)
                 if profile is None:
-                    raise ProfileRuntimeError("Profile does not belong to current account")
+                    raise ProfileRuntimeError(
+                        "Profile does not belong to current account"
+                    )
                 server_metadata = profile.get("server")
                 existing_server_id = str(
                     profile.get("source_server_id")
                     or (
                         server_metadata.get("server_id")
-                        if isinstance(server_metadata, dict) else ""
+                        if isinstance(server_metadata, dict)
+                        else ""
                     )
                 ).strip()
                 if (
@@ -306,7 +385,9 @@ class AgentRoutesMixin:
             if parsed.path == "/api/client/profile-claims":
                 profile_id = str(payload.get("profile_id") or "").strip()
                 if not self._profile_exists(principal, profile_id):
-                    raise ProfileRuntimeError("Profile does not belong to current account")
+                    raise ProfileRuntimeError(
+                        "Profile does not belong to current account"
+                    )
                 result = service.claim(
                     principal,
                     profile_id,
@@ -325,9 +406,13 @@ class AgentRoutesMixin:
                 json_response(self, {"success": True, **result})
                 return True
 
-            force = bool(payload.get("force")) and str(
-                session.get("role") or "",
-            ) == "super_admin"
+            force = (
+                bool(payload.get("force"))
+                and str(
+                    session.get("role") or "",
+                )
+                == "super_admin"
+            )
             result = service.release(
                 principal,
                 str(payload.get("claim_id") or "").strip(),
@@ -337,7 +422,11 @@ class AgentRoutesMixin:
             json_response(self, {"success": True, **result})
             return True
         except sqlite3.Error:
-            json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+            json_response(
+                self,
+                {"success": False, "error": "local Agent state is unavailable"},
+                503,
+            )
             return True
         except ProfileClaimConflict as exc:
             json_response(
@@ -353,7 +442,14 @@ class AgentRoutesMixin:
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return True
-        except (AgentSkillCatalogError, ProviderStoreError, ProfileRuntimeError, RuntimeError, TypeError, ValueError) as exc:
+        except (
+            AgentSkillCatalogError,
+            ProviderStoreError,
+            ProfileRuntimeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             json_response(
                 self,
                 {
@@ -369,6 +465,27 @@ class AgentRoutesMixin:
             return True
 
     def _delete_agent_routes(self, parsed) -> bool:
+        if parsed.path == "/api/client/profile-workspace":
+            session = self._agent_session()
+            if session is None:
+                return True
+            try:
+                payload = self._json_body(64 * 1024)
+                principal = self._agent_principal(session)
+                profile_id = str(payload.get("profile_id") or "").strip()
+                if not self._profile_exists(principal, profile_id):
+                    raise ProfileWorkspaceError(
+                        "Profile does not belong to current account"
+                    )
+                result = self._agent_service().delete_profile_workspace_file(
+                    principal,
+                    profile_id,
+                    str(payload.get("path") or ""),
+                )
+                json_response(self, {"success": True, **result})
+            except (ProfileWorkspaceError, RuntimeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
         match = re.fullmatch(
             rf"/api/client/agent-models/({PROVIDER_ID_PATTERN})",
             parsed.path,
@@ -385,9 +502,18 @@ class AgentRoutesMixin:
                 match.group(1),
             )
         except sqlite3.Error:
-            json_response(self, {"success": False, "error": "local Agent state is unavailable"}, 503)
+            json_response(
+                self,
+                {"success": False, "error": "local Agent state is unavailable"},
+                503,
+            )
             return True
-        except (ProviderStoreError, ProfileRuntimeError, RuntimeError, ValueError) as exc:
+        except (
+            ProviderStoreError,
+            ProfileRuntimeError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return True
         json_response(self, {"success": True, "deleted": deleted})
