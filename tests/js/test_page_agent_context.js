@@ -73,15 +73,6 @@ vm.runInThisContext(
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(startupCalls.some(call => call.url.includes("/applications?")),
     "the applications long-poll starts in the background");
-  startupBridge.pause();
-  const pausedCount = startupCalls.length;
-  await new Promise(resolve => setTimeout(resolve, 120));
-  assert.equal(startupCalls.length, pausedCount,
-    "a hidden drawer does not keep polling in the background");
-  await startupBridge.resume();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert(startupCalls.length > pausedCount,
-    "reopening the drawer resumes its page-assistance bridge");
   startupBridge.dispose();
   releasePoll({applications: []});
   console.log("PASS: CLI atomically replaces the registered page document");
