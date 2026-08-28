@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Mapping
+import logging
 import threading
+import time
 
 from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_app_server_launch import AgentAppServerLaunch
@@ -15,6 +17,9 @@ from server.manager.services.agent_app_server_process import (
 from server.manager.services.agent_skill_protocol import AgentSkillProtocol
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
 from server.manager.services.cc_switch_gateway import CCSwitchGateway
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentAppServerSession:
@@ -93,6 +98,8 @@ class AgentAppServerSession:
             )
             process.start()
             self.process = process
+            stage = "initialize"
+            started_at = time.monotonic()
             try:
                 response = process.request(
                     "initialize",
@@ -104,13 +111,18 @@ class AgentAppServerSession:
                         },
                         "capabilities": {},
                     },
-                    timeout=20,
+                    # A newly isolated CODEX_HOME may need to materialize
+                    # Codex-managed system Skills on its first launch.  This
+                    # is local work, but it can exceed the ordinary RPC
+                    # timeout on a busy Manager host.
+                    timeout=60,
                 )
                 self._error(response, "initialize")
                 process.notify("initialized")
                 if self.read_only:
                     self.ready = True
                     return
+                stage = "skills/list initial"
                 skills_response = process.request(
                     "skills/list",
                     self.protocol.skills_list_params(),
@@ -122,6 +134,7 @@ class AgentAppServerSession:
                     discovered,
                     first_request_id=1000,
                 ):
+                    stage = str(request["method"])
                     policy_response = process.request_with_id(
                         int(request["id"]),
                         str(request["method"]),
@@ -129,6 +142,7 @@ class AgentAppServerSession:
                         timeout=20,
                     )
                     self._error(policy_response, str(request["method"]))
+                stage = "skills/list refreshed"
                 refreshed = process.request(
                     "skills/list",
                     self.protocol.skills_list_params(),
@@ -142,6 +156,16 @@ class AgentAppServerSession:
                 OSError,
                 ValueError,
             ) as exc:
+                status = process.status()
+                LOGGER.error(
+                    "Profile Agent startup failed stage=%s elapsed=%.3fs "
+                    "error=%s returncode=%r stderr=%r",
+                    stage,
+                    time.monotonic() - started_at,
+                    exc,
+                    status.get("returncode"),
+                    list(status.get("stderr_tail") or [])[-10:],
+                )
                 process.stop()
                 if self.cc_switch is not None:
                     self.cc_switch.stop()
