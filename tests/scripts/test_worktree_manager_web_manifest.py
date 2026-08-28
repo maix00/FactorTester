@@ -92,7 +92,10 @@ def test_manifest_matches_html_script_order_and_files() -> None:
 
 def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     source = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(encoding="utf-8")
-    assert 'FTStaticLoader?.loadGroups?.(["profile"])' in source
+    assert 'FTStaticLoader?.loadGroups?.(["profile-agent-chat"])' in source
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["group_dependencies"]["profile"] == ["profile-agent-chat"]
+    assert "profile/profile-directory.js" not in manifest["groups"]["profile-agent-chat"]
     assert "FTStaticLoader?.ensureGroup" not in source
 
 def test_federation_settings_separate_client_and_wireguard_surfaces() -> None:

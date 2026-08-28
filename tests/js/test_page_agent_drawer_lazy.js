@@ -23,15 +23,22 @@ global.window = globalThis;
 global.FTIcons = {node: () => new Element("svg")};
 let resolveProfile;
 const profilePromise = new Promise(resolve => { resolveProfile = resolve; });
+let resolveAssistance;
+const assistancePromise = new Promise(resolve => { resolveAssistance = resolve; });
 const events = [];
 let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
 global.FTPageAgentContext = {create: () => ({
-  start: async () => events.push(["bridge"]), dispose: () => {},
+  start: async () => events.push(["bridge"]),
+  pause: () => events.push(["pause"]),
+  resume: async () => events.push(["resume"]),
+  dispose: () => {},
 })};
 global.FTAgentChat = {render: async (_context, _profile, options) => {
   const chat = new Element("chat");
   assert(options.mountHost.classes.has("page-agent-drawer-body-conversation-only"));
+  assert.deepEqual(options.runtimeStatus, {running: true},
+    "the drawer reuses the lifecycle response instead of fetching Agent status again");
   options.mountHost.replaceChildren(chat);
   events.push(["chat", options.mountHost.contains(chat)]); return chat;
 }};
@@ -53,12 +60,19 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
     tabID: "tab", t: value => value,
     pageState: {register: (_name, hooks) => { stateHooks = hooks; return {}; }},
     pageAgentLifecycle: {
-      open: async profileID => events.push(["open", profileID]), hide: () => {},
+      open: async profileID => {
+        events.push(["open", profileID]);
+        return {runtimeStatus: {running: true}};
+      },
+      hide: () => {},
     },
   };
   const drawer = FTPageAgentDrawer.attach(context, {
     resolveProfile: () => profilePromise,
-    assistance: {prepare: async () => events.push(["prepare"])},
+    assistance: {prepare: async () => {
+      events.push(["prepare"]);
+      await assistancePromise;
+    }},
   });
   assert.equal(body.children.length, 2, "registration only mounts shell and trigger");
   assert.equal(events.length, 0, "registration performs no deferred work");
@@ -71,17 +85,25 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   await Promise.resolve();
   assert.equal(drawer.toggle.hidden, true, "the trigger disappears while the drawer is open");
   assert.match(drawer.shell.children[1].children[0].textContent, /正在加载/);
-  assert.deepEqual(events, [
-    ["groups", ["profile"]], ["prepare"],
-  ], "expensive work starts only after the user opens the drawer");
+  assert(events.some(item => item[0] === "groups"
+    && item[1][0] === "profile-agent-chat"),
+    "profile code starts loading only after the user opens the drawer");
 
   resolveProfile({profile_id: "self"});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(events.some(item => item[0] === "chat"),
+    "ChatKit mounts without waiting for page-assistance code");
+  resolveAssistance();
   await opening;
-  assert.deepEqual(events, [
-    ["groups", ["profile"]], ["prepare"], ["open", "self"], ["bridge"], ["chat", true],
-  ]);
+  assert(events.some(item => item[0] === "prepare"));
+  assert(events.some(item => item[0] === "open"));
+  assert(events.some(item => item[0] === "bridge"));
+  assert(events.some(item => item[0] === "chat"));
   drawer.hide();
   assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
-  assert.deepEqual(events.at(-1), ["chat", true]);
+  assert(events.some(item => item[0] === "chat" && item[1] === true));
+  assert(events.some(item => item[0] === "pause"));
+  await drawer.open();
+  assert(events.some(item => item[0] === "resume"));
   console.log("PASS: page Agent drawer defers all work until it opens");
 })().catch(error => { console.error(error); process.exitCode = 1; });

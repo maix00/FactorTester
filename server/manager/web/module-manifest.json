@@ -48,6 +48,8 @@
     "factor-catalog-detail": ["factor-catalog-core"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
     "factor-catalog-editor": ["factor-catalog-core"],
+    "profile-agent-chat": ["core"],
+    "profile": ["profile-agent-chat"],
     "workbench-core": [],
     "workbench-settings": ["workbench-core", "catalog-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
@@ -396,14 +398,16 @@
     "workbench-templates": [
       "workbench/test-templates.js"
     ],
-    "profile": [
-      "profile/agent-skills.js",
+    "profile-agent-chat": [
       "profile/chatkit-protocol.js",
       "profile/chatkit-conversations.js",
-      "profile/agent-runtime-controls.js",
       "profile/chatkit-stream.js",
       "profile/chatkit-adapter.js",
-      "profile/agent-chat.js",
+      "profile/agent-chat.js"
+    ],
+    "profile": [
+      "profile/agent-skills.js",
+      "profile/agent-runtime-controls.js",
       "profile/profile-directory.js",
       "profile/profile-directory-detail.js",
       "profile/workspace-browser.js",

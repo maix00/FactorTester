@@ -40,9 +40,11 @@
     if (!window.FTProfileChatKit) {
       throw new Error(context.t("Agent 对话组件尚未加载"));
     }
-    const skills = options.readOnly || options.historyOnly
-      ? [] : await loadSkills(context, profile);
-    await window.FTProfileChatKit.load();
+    const [skills] = await Promise.all([
+      options.readOnly || options.historyOnly
+        ? Promise.resolve([]) : loadSkills(context, profile),
+      window.FTProfileChatKit.load(),
+    ]);
     if (!options.conversationOnly && !window.FTProfileAgentRuntimeControls) {
       throw new Error(context.t("Agent 运行设置组件尚未加载"));
     }
@@ -270,9 +272,11 @@
 
     async function activateAgent() {
       if (!isCurrent() || leaving) return;
-      const payload = await context.api(
-        `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
-      );
+      const payload = options.runtimeStatus
+        ? {status: options.runtimeStatus}
+        : await context.api(
+          `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
+        );
       if (!isCurrent() || leaving) return;
       if (!profile.active_claim) {
         status.textContent = context.t(
