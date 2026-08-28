@@ -179,13 +179,21 @@ class AgentAppServerSupervisor:
     ) -> None:
         observer.observe(payload)
         method = str(payload.get("method") or payload.get("type") or "")
-        if method == "app_server_exit" or (
+        params = payload.get("params")
+        params = params if isinstance(params, Mapping) else {}
+        item = params.get("item")
+        item = item if isinstance(item, Mapping) else {}
+        item_type = str(item.get("type") or "").replace("_", "").casefold()
+        final_assistant = method == "item/completed" and item_type in {
+            "agentmessage", "assistantmessage",
+        }
+        failed_turn = (
             method.startswith("turn/")
             and method.rsplit("/", 1)[-1] in {
-                "completed", "complete", "failed", "error", "aborted",
-                "interrupted",
+                "failed", "error", "aborted", "interrupted",
             }
-        ):
+        )
+        if method == "app_server_exit" or failed_turn or final_assistant:
             with self._lock:
                 self._processing_turns.pop(key, None)
 
