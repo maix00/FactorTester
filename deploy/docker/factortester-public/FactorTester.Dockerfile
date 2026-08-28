@@ -1,30 +1,4 @@
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS factortester-cli-builder
-
-ARG PIP_INDEX_URL=https://pypi.org/simple
-ARG PYINSTALLER_VERSION=6.21.0
-
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends binutils \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY tools/cli /build/tools/cli
-COPY deploy/docker/factortester-public/factortester-cli /build/factortester-cli
-RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-        "pyinstaller==${PYINSTALLER_VERSION}" /build/tools/cli \
-    && python -m PyInstaller \
-        --clean \
-        --noconfirm \
-        --onefile \
-        --name factortester \
-        --collect-data tools.cli.release \
-        --distpath /dist \
-        --workpath /tmp/factortester-build \
-        --specpath /tmp/factortester-spec \
-        /build/factortester-cli \
-    && /dist/factortester --help >/tmp/factortester-help \
-    && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
-
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS factortester-public
+FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS factortester-public-deps
 
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
@@ -64,6 +38,35 @@ COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
 RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
     && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         -r /tmp/requirements-public-linux.txt
+
+FROM factortester-public-deps AS factortester-cli-builder
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PYINSTALLER_VERSION=6.21.0
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY tools/cli /build/tools/cli
+COPY deploy/docker/factortester-public/factortester-cli /build/factortester-cli
+RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+        "pyinstaller==${PYINSTALLER_VERSION}" \
+    && python -m pip install --no-cache-dir --no-deps /build/tools/cli \
+    && python -m PyInstaller \
+        --clean \
+        --noconfirm \
+        --onefile \
+        --name factortester \
+        --collect-data tools.cli.release \
+        --distpath /dist \
+        --workpath /tmp/factortester-build \
+        --specpath /tmp/factortester-spec \
+        /build/factortester-cli \
+    && /dist/factortester --help >/tmp/factortester-help \
+    && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
+
+FROM factortester-public-deps AS factortester-public
 
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a

@@ -149,10 +149,13 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert "--onefile" in dockerfile
     assert "--name factortester" in dockerfile
     assert "COPY --from=factortester-cli-builder /dist/factortester" in dockerfile
-    assert dockerfile.index("AS factortester-cli-builder") < dockerfile.index(
-        "AS factortester-public"
-    )
-    runtime_stage = dockerfile.split("AS factortester-public", 1)[1]
+    assert "AS factortester-public-deps" in dockerfile
+    assert "FROM factortester-public-deps AS factortester-cli-builder" in dockerfile
+    assert "FROM factortester-public-deps AS factortester-public" in dockerfile
+    assert "--no-deps /build/tools/cli" in dockerfile
+    runtime_stage = dockerfile.split(
+        "FROM factortester-public-deps AS factortester-public", 1
+    )[1]
     assert "PyInstaller" not in runtime_stage
     assert "pyinstaller==" not in runtime_stage
     assert "binutils" not in runtime_stage
