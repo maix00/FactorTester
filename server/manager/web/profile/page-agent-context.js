@@ -4,8 +4,11 @@
     let timer = null;
     let disposed = false;
     let lastPublished = "";
+    let lastPublishedAt = 0;
     let requestController = null;
     const interval = Math.max(100, Number(options.interval) || 250);
+    const heartbeatMs = Math.max(1000, Number(options.heartbeatMs) || 60000);
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
     const waitSeconds = Math.max(1, Math.min(
       25, Number(options.waitSeconds) || 20,
     ));
@@ -13,7 +16,7 @@
     async function publish() {
       const value = assistance.snapshot();
       const serialized = JSON.stringify(value);
-      if (serialized === lastPublished) return;
+      if (serialized === lastPublished && now() - lastPublishedAt < heartbeatMs) return;
       await context.api("/api/client/profile-agent/assistance/publish", {
         method: "POST",
         body: JSON.stringify({
@@ -21,6 +24,7 @@
         }),
       });
       lastPublished = serialized;
+      lastPublishedAt = now();
     }
 
     async function syncOnce() {

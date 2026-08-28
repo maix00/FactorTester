@@ -31,12 +31,25 @@ vm.runInThisContext(
   };
   const bridge = window.FTPageAgentContext.create(
     context, "self-profile", context.assistance,
+    {now: () => clock, heartbeatMs: 1000},
   );
+  let clock = 0;
   await bridge.syncOnce();
+  const initialPublishes = calls.filter(call => (
+    call.url.endsWith("/publish")
+  )).length;
+  clock = 999;
+  await bridge.syncOnce();
+  assert.equal(calls.filter(call => call.url.endsWith("/publish")).length,
+    initialPublishes, "unchanged context is not republished before the heartbeat");
+  clock = 1000;
+  await bridge.syncOnce();
+  assert.equal(calls.filter(call => call.url.endsWith("/publish")).length,
+    initialPublishes + 1, "unchanged active context renews its server TTL");
   bridge.dispose();
 
   assert.equal(document.source, "new");
-  assert.equal(calls.filter(call => call.options.method === "POST").length, 3);
+  assert.equal(calls.filter(call => call.url.endsWith("/acknowledge")).length, 1);
   assert(calls.some(call => call.url.endsWith("/acknowledge")));
   assert(calls.some(call => call.url.includes("&wait=20")));
   console.log("PASS: CLI atomically replaces the registered page document");

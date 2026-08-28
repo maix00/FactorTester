@@ -248,6 +248,11 @@
     if (conversationOnly) root.append(host);
     else root.append(note, status, settingsHost, host);
 
+    // ChatKit measures its available block size while mounting. Page drawers
+    // must connect this shell before Agent activation; mounting it detached
+    // leaves the composer at the stale initial height until a full reload.
+    options.mountHost?.replaceChildren(root);
+
     let mounted = null;
     let leaving = false;
     let activationPromise = null;
