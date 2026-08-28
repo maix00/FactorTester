@@ -115,6 +115,7 @@
   }
 
   async function skills(context, profile) {
+    await window.FTStaticLoader?.loadGroups?.(["profile-skills"]);
     if (!profile.read_only && window.FTAgentSkills?.render) {
       return window.FTAgentSkills.render(context, profile, () => (
         window.FTProfileDirectoryDetail.detail(context, profile.profile_id)
@@ -147,6 +148,7 @@
       ));
       return root;
     }
+    await window.FTStaticLoader?.loadGroups?.(["profile-agent-session"]);
     if (window.FTAgentChat?.render) {
       root.append(await window.FTAgentChat.render(context, profile, {
         readOnly: Boolean(profile.read_only),
@@ -157,7 +159,8 @@
     return root;
   }
 
-  function workspace(context, profile) {
+  async function workspace(context, profile) {
+    await window.FTStaticLoader?.loadGroups?.(["profile-workspace"]);
     if (!profile.read_only && window.FTProfileWorkspace?.render) {
       return window.FTProfileWorkspace.render(context, profile);
     }
@@ -228,7 +231,7 @@
     if (tab === "overview") root.append(overview(context, profile));
     else if (tab === "skills") root.append(await skills(context, profile));
     else if (tab === "session") root.append(await session(context, profile, scope));
-    else root.append(workspace(context, profile));
+    else root.append(await workspace(context, profile));
     context.content.replaceChildren(root);
   }
 

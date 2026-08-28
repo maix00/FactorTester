@@ -90,11 +90,84 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert not list(WEB_ROOT.glob("*.css"))
 
 
+def test_route_script_groups_obey_the_initial_load_contract() -> None:
+    manifest = json.loads(
+        (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
+    )
+    groups = manifest["groups"]
+    dependencies = manifest["group_dependencies"]
+    policy = manifest["architecture"]["route_load_policy"]
+    default_budget = policy["default_max_first_party_script_bytes"]
+    overrides = policy["first_party_script_overrides"]
+    default_external_budget = policy["default_max_initial_external_scripts"]
+    external_overrides = policy["external_script_overrides"]
+    forbidden = set(policy["forbidden_route_groups"])
+
+    referenced_groups = {
+        group
+        for values in dependencies.values()
+        for group in values
+    } | {
+        group
+        for values in manifest["route_groups"].values()
+        for group in values
+    }
+    assert referenced_groups <= groups.keys(), (
+        "every dependency and route group must resolve to a declared group"
+    )
+    assert overrides.keys() <= manifest["route_groups"].keys()
+    assert external_overrides.keys() <= manifest["route_groups"].keys()
+
+    def closure(requested: list[str]) -> set[str]:
+        resolved: set[str] = set()
+
+        def visit(group: str) -> None:
+            if group in resolved:
+                return
+            resolved.add(group)
+            for dependency in dependencies.get(group, []):
+                visit(dependency)
+
+        for group in requested:
+            visit(group)
+        return resolved
+
+    for route, requested in manifest["route_groups"].items():
+        loaded_groups = closure(requested)
+        assert loaded_groups.isdisjoint(forbidden), (
+            f"{route} must use focused lazy groups, not umbrella groups: "
+            f"{sorted(loaded_groups & forbidden)}"
+        )
+        scripts = {
+            script
+            for group in loaded_groups
+            for script in groups[group]
+        }
+        loaded_bytes = sum((WEB_ROOT / script).stat().st_size for script in scripts)
+        budget = overrides.get(route, default_budget)
+        assert loaded_bytes <= budget, (
+            f"{route} initially loads {loaded_bytes} first-party script bytes; "
+            f"budget is {budget}. "
+            "Move non-visible tabs and heavy viewers into a lazy group."
+        )
+        external_scripts = {
+            script
+            for group in loaded_groups
+            for script in manifest["group_external_scripts"].get(group, [])
+        }
+        external_budget = external_overrides.get(route, default_external_budget)
+        assert len(external_scripts) <= external_budget, (
+            f"{route} initially loads {len(external_scripts)} external runtimes; "
+            f"budget is {external_budget}. Move optional viewers into a lazy group."
+        )
+
+
 def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     source = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(encoding="utf-8")
     assert 'FTStaticLoader?.loadGroups?.(["profile-agent-chat"])' in source
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["group_dependencies"]["profile"] == ["profile-agent-chat"]
+    assert "profile-agent-chat" not in manifest["route_groups"]["profile"]
+    assert "profile-agent-chat" in manifest["group_dependencies"]["profile-agent-session"]
     assert "profile/profile-directory.js" not in manifest["groups"]["profile-agent-chat"]
     assert "FTStaticLoader?.ensureGroup" not in source
 
@@ -561,12 +634,17 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     ]
     assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
-    assert manifest["route_groups"]["product-categories"] == ["catalog"]
+    assert manifest["route_groups"]["product-categories"] == [
+        "catalog-product-categories"
+    ]
     assert manifest["route_groups"]["report"] == ["report"]
-    assert manifest["group_dependencies"]["research"] == ["catalog-core"]
+    assert manifest["group_dependencies"]["research"] == ["research-graph"]
+    assert manifest["group_dependencies"]["research-graph"] == [
+        "research-core", "catalog-core"
+    ]
     assert "report" not in manifest["group_dependencies"]["research"]
     workspaces = (WEB_ROOT / "research" / "workspaces.js").read_text(encoding="utf-8")
-    assert 'loadGroups?.(["profile"])' in workspaces
+    assert 'loadGroups?.(["profile-directory"])' in workspaces
     assert set(manifest["groups"]["jobs"]) == {
         "jobs/list-format.js", "jobs/progress.js", "jobs/page-tabs.js",
         "jobs/test-types.js", "jobs/jobs.js",
@@ -753,7 +831,8 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
         "job-detail-previews", "catalog-core",
     ]
     assert "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
-    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["factor-catalog-core"]
+    assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
+    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["catalog-selection-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
     ) < len(manifest["groups"]["job-detail-previews"])
@@ -1216,10 +1295,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     ]
     assert manifest["group_dependencies"]["workbench-test-ui"] == [
         "workbench-settings", "workbench-settings-fields",
-        "workbench-settings-chips", "workbench-ic-controls",
-        "workbench-factor-controls", "workbench-product-controls",
-        "workbench-factors", "workbench-products", "workbench-templates",
-        "workbench-run",
+        "workbench-settings-chips", "workbench-run",
     ]
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",
@@ -1583,9 +1659,10 @@ def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
     assert (
         "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
     )
+    assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
     assert (
         "catalog/shared/multi-select-filter.js"
-        in manifest["groups"]["factor-catalog-core"]
+        in manifest["groups"]["catalog-selection-core"]
     )
 
 
@@ -1788,7 +1865,8 @@ def test_highlight_js_is_pinned_and_loaded_with_the_shared_code_viewer() -> None
     assert script not in manifest["initial_external_scripts"]
     assert script in manifest["external_scripts"]
     assert manifest["group_external_scripts"]["code-viewer"] == [script]
-    assert "code-viewer" in manifest["group_dependencies"]["catalog-core"]
+    assert "code-viewer" not in manifest["group_dependencies"]["product-catalog-core"]
+    assert "code-viewer" in manifest["group_dependencies"]["report"]
     assert style in manifest["external_styles"]
     assert checksums["version"] == "11.11.1"
     for filename, expected in checksums["sha256"].items():

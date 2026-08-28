@@ -132,8 +132,10 @@
     context.toolbar.append(context.button("↻", () => show(context, selected), context.t("刷新")));
     context.content.replaceChildren(wrapper);
     if (selected === "allowlist" || selected === "devices") {
+      await window.FTStaticLoader?.loadGroups?.(["manager-access"]);
       await FTManagerAccessControl.show(context, body, selected);
     } else if (selected === "accounts") {
+      await window.FTStaticLoader?.loadGroups?.(["manager-accounts"]);
       await FTManagerAccounts.show(context, body);
     } else {
       await serviceView(context, body);

@@ -2,7 +2,23 @@
   "schema_version": 1,
   "entry": "research.html",
   "architecture": {
-    "module_boundary_policy": "semantic"
+    "module_boundary_policy": "semantic",
+    "route_load_policy": {
+      "default_max_first_party_script_bytes": 204800,
+      "first_party_script_overrides": {
+        "backtest": 512000,
+        "factor-evaluation": 220000,
+        "ic-test": 480000
+      },
+      "default_max_initial_external_scripts": 1,
+      "external_script_overrides": {
+        "factor": 2,
+        "factor-family": 2,
+        "job-input": 2,
+        "report": 2
+      },
+      "forbidden_route_groups": ["catalog", "profile", "research"]
+    }
   },
   "initial_groups": ["core", "app"],
   "initial_external_scripts": [],
@@ -21,13 +37,16 @@
       "vendor/highlight/highlight.min.js", "katex/katex.min.js"
     ],
     "catalog": ["vendor/highcharts/highstock.min.js", "katex/katex.min.js"],
+    "catalog-product-detail": ["vendor/highcharts/highstock.min.js"],
     "research": ["vendor/cytoscape/cytoscape.min.js"],
+    "research-graph": ["vendor/cytoscape/cytoscape.min.js"],
     "profile": []
   },
   "group_dependencies": {
     "code-viewer": ["core"],
     "charts": ["core"],
-    "catalog-core": ["core", "code-viewer", "factor-catalog-core"],
+    "catalog-selection-core": ["core"],
+    "catalog-core": ["product-catalog-core", "factor-catalog-core"],
     "output-choice": ["core"],
     "workbench-compiler": ["core"],
     "workbench-input-state": ["workbench-core"],
@@ -35,23 +54,51 @@
     "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core", "code-viewer"],
     "report": ["code-viewer"],
-    "research": ["catalog-core"],
+    "research-core": ["core"],
+    "research-graph": ["research-core", "catalog-core"],
+    "research": ["research-graph"],
     "job-detail-core": ["jobs", "research-reference", "output-choice"],
     "job-detail-input": ["job-detail-core"],
     "job-detail-previews": ["job-detail-core", "report", "charts"],
     "job-detail-factor-series": ["job-detail-core", "charts"],
     "job-detail-ic": ["job-detail-previews", "catalog-core"],
     "job-detail-backtest": ["job-detail-previews", "catalog-core"],
-    "catalog": ["catalog-core", "charts"],
-    "factor-catalog-core": ["core"],
+    "product-catalog-core": ["core", "catalog-selection-core"],
+    "catalog-products-base": ["product-catalog-core"],
+    "catalog-product-sources": ["catalog-products-base"],
+    "catalog-product-source-family": ["catalog-products-base"],
+    "catalog-product-groups": ["catalog-products-base"],
+    "catalog-product-editing-shared": ["catalog-products-base"],
+    "catalog-product-group": [
+      "catalog-product-groups", "catalog-product-editing-shared"
+    ],
+    "catalog-product-categories": [
+      "catalog-product-editing-shared"
+    ],
+    "catalog-product-category": ["catalog-product-categories"],
+    "catalog-product-detail": ["catalog-products-base", "charts"],
+    "catalog": [
+      "catalog-product-sources", "catalog-product-source-family",
+      "catalog-product-group", "catalog-product-category",
+      "catalog-product-detail", "factor-catalog-core"
+    ],
+    "factor-catalog-core": ["core", "catalog-selection-core"],
     "factor-catalog-list": ["factor-catalog-core"],
     "factor-catalog-detail": ["factor-catalog-core"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
     "factor-catalog-editor": ["factor-catalog-core"],
     "profile-agent-chat": ["core"],
-    "profile": ["profile-agent-chat"],
+    "profile-directory": ["research-core"],
+    "profile-skills": ["profile-directory"],
+    "profile-workspace": ["profile-directory"],
+    "profile-agent-session": ["profile-directory", "profile-agent-chat"],
+    "profile-agent-models": ["profile-directory"],
+    "profile": [
+      "profile-skills", "profile-workspace", "profile-agent-session",
+      "profile-agent-models"
+    ],
     "workbench-core": [],
-    "workbench-settings": ["workbench-core", "catalog-core"],
+    "workbench-settings": ["workbench-core", "catalog-selection-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
     "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
     "workbench-factor-controls": ["workbench-core"],
@@ -70,10 +117,7 @@
     "workbench-products": ["workbench-core", "catalog-core"],
     "workbench-test-ui": [
       "workbench-settings", "workbench-settings-fields",
-      "workbench-settings-chips", "workbench-ic-controls",
-      "workbench-factor-controls", "workbench-product-controls",
-      "workbench-factors", "workbench-products", "workbench-templates",
-      "workbench-run"
+      "workbench-settings-chips", "workbench-run"
     ],
     "workbench-configuration-groups": [
       "workbench-settings", "workbench-settings-controls",
@@ -85,7 +129,12 @@
     "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core", "code-viewer"],
     "settings": ["core"],
+    "settings-devices": ["settings"],
+    "settings-control-database": ["settings"],
     "manager": ["core"],
+    "manager-access": ["manager"],
+    "manager-accounts": ["manager"],
+    "manager-mihomo": ["manager"],
     "docs": ["core"]
   },
   "control_groups": {
@@ -99,8 +148,8 @@
     "report": ["report"],
     "public-reference": ["research-reference"],
     "reference": ["research-reference"],
-    "research": ["research"],
-    "research-graph": ["research"],
+    "research": ["research-core"],
+    "research-graph": ["research-graph"],
     "jobs": ["jobs"],
     "job": ["job-detail-core"],
     "job-configuration": ["job-detail-core"],
@@ -116,20 +165,20 @@
     "factor": ["factor-catalog-detail-rendering"],
     "factor-set": ["factor-catalog-detail"],
     "factors": ["factor-catalog-list"],
-    "product-group": ["catalog"],
-    "product": ["catalog"],
-    "product-reference": ["catalog"],
-    "product-sources": ["catalog"],
-    "product-source-family": ["catalog"],
-    "product-groups": ["catalog"],
-    "product-categories": ["catalog"],
-    "product-category": ["catalog"],
-    "products": ["catalog"],
-    "profile": ["profile"],
-    "profiles": ["profile"],
+    "product-group": ["catalog-product-group"],
+    "product": ["catalog-product-detail"],
+    "product-reference": ["catalog-product-detail"],
+    "product-sources": ["catalog-product-sources"],
+    "product-source-family": ["catalog-product-source-family"],
+    "product-groups": ["catalog-product-groups"],
+    "product-categories": ["catalog-product-categories"],
+    "product-category": ["catalog-product-category"],
+    "products": ["catalog-products-base"],
+    "profile": ["profile-directory"],
+    "profiles": ["profile-directory"],
     "settings": ["settings"],
     "manager": ["manager"],
-    "mihomo": ["manager"],
+    "mihomo": ["manager-mihomo"],
     "docs": ["docs"]
   },
   "external_styles": [
@@ -165,17 +214,20 @@
       "docs/source.js",
       "docs/reader.js"
     ],
-    "catalog-core": [
+    "catalog-selection-core": [
+      "catalog/shared/multi-select-filter.js"
+    ],
+    "product-catalog-core": [
       "catalog/product-category-model.js",
       "catalog/product-list-table.js",
       "catalog/product-tree.js"
     ],
+    "catalog-core": [],
     "factor-catalog-core": [
       "catalog/factor-model.js",
       "catalog/factor-detail-shared.js",
       "catalog/shared/object-detail-tabs.js",
       "catalog/shared/object-job-table.js",
-      "catalog/shared/multi-select-filter.js",
       "catalog/factor-catalog-runtime.js",
       "catalog/factors.js"
     ],
@@ -187,6 +239,7 @@
     "factor-catalog-detail": [
       "catalog/factor-details.js"
     ],
+    "factor-catalog-detail-rendering": [],
     "factor-catalog-editor": [
       "catalog/factor-assistance.js",
       "catalog/factor-editor.js",
@@ -210,14 +263,17 @@
       "report/source.js",
       "report/report-entry.js"
     ],
-    "research": [
-      "research/graph.js",
-      "research/graph-list.js",
+    "research-core": [
       "research/local.js",
       "research/reports.js",
       "research/shared.js",
       "research/workspaces.js"
     ],
+    "research-graph": [
+      "research/graph.js",
+      "research/graph-list.js"
+    ],
+    "research": [],
     "research-reference": [
       "research/run-spec-view.js",
       "research/reference.js"
@@ -278,23 +334,39 @@
       "test-modules/backtest/results/surfaces.js",
       "test-modules/backtest/results/view.js"
     ],
-    "catalog": [
+    "catalog-products-base": [
+      "catalog/products.js"
+    ],
+    "catalog-product-sources": [
+      "catalog/source-list.js"
+    ],
+    "catalog-product-source-family": [
+      "catalog/source-family-detail.js"
+    ],
+    "catalog-product-groups": [],
+    "catalog-product-editing-shared": [
+      "catalog/shared/detail-ui.js",
+      "catalog/shared/selection-tree.js"
+    ],
+    "catalog-product-group": [
+      "catalog/product-group-path-editor.js",
+      "catalog/product-group-detail.js"
+    ],
+    "catalog-product-categories": [
       "catalog/product-category-overlay.js",
       "catalog/product-category-create.js",
       "catalog/product-category-label-editor.js",
-      "catalog/shared/detail-ui.js",
-      "catalog/shared/selection-tree.js",
+      "catalog/product-categories.js"
+    ],
+    "catalog-product-category": [
       "catalog/product-category-detail-layout.js",
-      "catalog/product-category-detail.js",
-      "catalog/product-categories.js",
-      "catalog/source-list.js",
-      "catalog/source-family-detail.js",
-      "catalog/products.js",
-      "catalog/product-group-path-editor.js",
-      "catalog/product-group-detail.js",
+      "catalog/product-category-detail.js"
+    ],
+    "catalog-product-detail": [
       "catalog/product-price-panel.js",
       "catalog/details.js"
     ],
+    "catalog": [],
     "workbench-core": [
       "workbench/test-page-assistance.js",
       "workbench/setting-rules.js",
@@ -372,6 +444,7 @@
       "workbench/test-products.js",
       "workbench/test-categories.js"
     ],
+    "workbench-test-ui": [],
     "workbench-configuration-groups": [
       "workbench/tab-list-chip.js",
       "workbench/configuration-groups/common/surface.js",
@@ -405,26 +478,45 @@
       "profile/chatkit-adapter.js",
       "profile/agent-chat.js"
     ],
-    "profile": [
-      "profile/agent-skills.js",
-      "profile/agent-runtime-controls.js",
+    "profile-directory": [
       "profile/profile-directory.js",
       "profile/profile-directory-detail.js",
-      "profile/workspace-browser.js",
-      "profile/profiles.js",
+      "profile/profiles.js"
+    ],
+    "profile-skills": [
+      "profile/agent-skills.js"
+    ],
+    "profile-workspace": [
+      "profile/workspace-browser.js"
+    ],
+    "profile-agent-session": [
+      "profile/agent-runtime-controls.js"
+    ],
+    "profile-agent-models": [
       "profile/agent-model-editor.js",
       "profile/agent-models.js"
     ],
+    "profile": [],
     "settings": [
-      "settings/settings.js",
-      "settings/devices.js",
+      "settings/settings.js"
+    ],
+    "settings-devices": [
+      "settings/devices.js"
+    ],
+    "settings-control-database": [
       "settings/control-database.js"
     ],
     "manager": [
+      "settings/manager.js"
+    ],
+    "manager-access": [
       "manager/access-control-table.js",
-      "manager/access-control.js",
-      "manager/accounts.js",
-      "settings/manager.js",
+      "manager/access-control.js"
+    ],
+    "manager-accounts": [
+      "manager/accounts.js"
+    ],
+    "manager-mihomo": [
       "manager/mihomo.js"
     ],
     "app": [
