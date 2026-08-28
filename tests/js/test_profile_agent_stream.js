@@ -75,18 +75,6 @@ global.EventSource = class {
         lastEventId: String(index + 1),
         data: JSON.stringify(payload),
       }));
-      // Codex may persist and emit the final item after turn/completed.  The
-      // browser stream must remain attached during authoritative reconciliation.
-      setTimeout(() => this.onmessage?.({
-        lastEventId: String(events.length + 1),
-        data: JSON.stringify({
-          method: 'item/completed',
-          params: {
-            turnId: 'turn-1',
-            item: {id: 'late-final', type: 'agentMessage', text: '第一句\n第二句'},
-          },
-        }),
-      }), 5);
     });
   }
 
@@ -96,10 +84,16 @@ global.EventSource = class {
 };
 
 const source = fs.readFileSync(
+  path.resolve(__dirname, '../../server/manager/web/profile/chatkit-event-source.js'),
+  'utf8',
+);
+vm.runInThisContext(source, {filename: 'chatkit-event-source.js'});
+
+const streamSource = fs.readFileSync(
   path.resolve(__dirname, '../../server/manager/web/profile/chatkit-stream.js'),
   'utf8',
 );
-vm.runInThisContext(source, {filename: 'chatkit-stream.js'});
+vm.runInThisContext(streamSource, {filename: 'chatkit-stream.js'});
 
 const chunks = [];
 const requestedURLs = [];
@@ -118,7 +112,7 @@ const state = {
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
         historyReads += 1;
-        if (historyReads < 3) return {
+        if (historyReads < 8) return {
           items: [{
             id: 'history-assistant-old',
             type: 'assistant_message',
@@ -211,9 +205,36 @@ const state = {
       global.__observedRuntime = true;
     }
   },
+  finalResponseRetryDelays: Array(8).fill(0),
 };
 
 (async () => {
+  let authenticatedReads = 0;
+  await new Promise((resolve, reject) => {
+    const eventState = {context: {raw: async (_url, options) => {
+      authenticatedReads += 1;
+      assert.equal(options.headers.Accept, 'text/event-stream');
+      return new Response(new ReadableStream({start(stream) {
+        stream.enqueue(new TextEncoder().encode(
+          'id: 9\ndata: {"method":"turn/completed"}\n\n',
+        ));
+      }}));
+    }}};
+    const source = window.FTProfileAgentEventSource.open(
+      eventState,
+      '/api/client/profile-agent/events?profile_id=profile-main&after=8',
+    );
+    source.onmessage = event => {
+      try {
+        assert.equal(event.lastEventId, '9');
+        assert.equal(JSON.parse(event.data).method, 'turn/completed');
+        source.close();
+        resolve();
+      } catch (error) { reject(error); }
+    };
+    source.onerror = reject;
+  });
+  assert.equal(authenticatedReads, 1, 'SSE uses the authenticated raw helper');
   await window.FTProfileChatKitStream.streamTurn(
     controller,
     state,
@@ -240,7 +261,7 @@ const state = {
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
-  assert.equal(historyReads, 3, 'final history is retried until this turn is durable');
+  assert.equal(historyReads, 8, 'final history is retried beyond the old cutoff');
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
   assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
   const assistantAdded = chunks.findIndex(value => (

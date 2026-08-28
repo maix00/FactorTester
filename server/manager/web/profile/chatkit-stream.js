@@ -1,5 +1,8 @@
 (() => {
   const P = window.FTProfileChatKitProtocol;
+  const FINAL_RESPONSE_RETRY_DELAYS = [
+    0, 100, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000, 16000,
+  ];
 
   function closeSource(state) {
     state.source?.close();
@@ -39,7 +42,34 @@
       assistant.text = text;
       return;
     }
-    if (text.length >= current.length) assistant.text = text;
+    if (text.length >= current.length) {
+      assistant.text = text;
+    }
+  }
+
+  function markFinalResponse(state) {
+    state.finalResponseComplete = true;
+    notifyFinalResponse(state);
+  }
+
+  function notifyFinalResponse(state) {
+    for (const resolve of state.finalResponseWaiters || []) resolve();
+    state.finalResponseWaiters?.clear();
+  }
+
+  function waitForFinalResponse(state, delay) {
+    if (!delay || state.finalResponseComplete) return Promise.resolve();
+    if (!state.finalResponseWaiters) state.finalResponseWaiters = new Set();
+    return new Promise(resolve => {
+      let timer = null;
+      const done = () => {
+        if (timer !== null) clearTimeout(timer);
+        state.finalResponseWaiters.delete(done);
+        resolve();
+      };
+      state.finalResponseWaiters.add(done);
+      timer = setTimeout(done, delay);
+    });
   }
 
   function emitAssistant(state, controller) {
@@ -194,11 +224,13 @@
     // A completed turn can precede the Provider's durable thread update by a
     // short interval, so retry this local latest-page read instead of closing
     // ChatKit before the final answer exists.
-    const retryDelays = [0, 100, 200, 400, 800, 1200, 1800];
+    const retryDelays = Array.isArray(state.finalResponseRetryDelays)
+      ? state.finalResponseRetryDelays
+      : FINAL_RESPONSE_RETRY_DELAYS;
     let page = null;
     let assistant = null;
     for (const delay of retryDelays) {
-      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      await waitForFinalResponse(state, delay);
       page = await authoritativePage(state);
       const assistantIndex = page.items.findLastIndex(item => (
         isAssistantMessage(item)
@@ -212,7 +244,7 @@
       assistant = assistantIndex > latestUserIndex
         ? page.items[assistantIndex]
         : null;
-      if (assistant) break;
+      if (assistant || state.finalResponseComplete) break;
     }
     const history = page?.items || [];
     // SSE is the fast path.  If it missed a delta or the provider emits a
@@ -223,11 +255,13 @@
     // a delayed history reconciliation briefly places the answer above the
     // commands that produced it until the next full refresh.
     if (assistant) appendAssistantText(state, itemText(assistant));
-    if (!assistant && state.assistant?.text) return state.items;
+    if (!assistant && state.finalResponseComplete && state.assistant?.text) {
+      return state.items;
+    }
     state.items = history;
     state.itemPage = page;
     state.restored = true;
-    if (!assistant && !state.assistant?.text) {
+    if (!assistant && !state.finalResponseComplete) {
       throw new Error("Profile Agent final response is not yet available");
     }
     return history;
@@ -350,7 +384,7 @@
     }
     const url = `/api/client/profile-agent/events?profile_id=${
       encodeURIComponent(state.profileID)}&after=${state.cursor}`;
-    const source = new EventSource(url);
+    const source = window.FTProfileAgentEventSource.open(state, url);
     state.source = source;
     const pending = [];
     let settled = false;
@@ -424,7 +458,10 @@
         return;
       }
       const completed = P.completedText(payload);
-      if (completed) appendAssistantText(state, completed);
+      if (completed) {
+        appendAssistantText(state, completed);
+        markFinalResponse(state);
+      }
       if (delta) {
         appendAssistantText(
           state,
@@ -491,6 +528,8 @@
     state.active = true;
     const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
     state.assistant = null;
+    state.finalResponseComplete = false;
+    state.finalResponseWaiters?.clear();
     state.turnID = "";
     const priorAssistantIDs = new Set(state.items
       .filter(isAssistantMessage)
