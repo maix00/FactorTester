@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -29,6 +30,9 @@ from server.manager.services.agent_provider_thread_reader import (
     AgentProviderThreadReader,
 )
 from server.manager.services.provider_thread_chatkit import provider_thread_page
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentAppServerSupervisor:
@@ -205,6 +209,13 @@ class AgentAppServerSupervisor:
         if method == "app_server_exit" or failed_turn or final_assistant:
             with self._lock:
                 self._processing_turns.pop(key, None)
+        if method == "app_server_exit":
+            LOGGER.warning(
+                "Profile Agent app-server exited profile=%s returncode=%r stderr=%r",
+                key[1],
+                payload.get("returncode"),
+                list(payload.get("stderr_tail") or [])[-5:],
+            )
 
     def refresh_conversation_history(
         self,
