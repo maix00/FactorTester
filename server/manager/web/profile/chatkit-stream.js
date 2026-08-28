@@ -57,19 +57,32 @@
     state.finalResponseWaiters?.clear();
   }
 
-  function waitForFinalResponse(state, delay) {
-    if (!delay || state.finalResponseComplete) return Promise.resolve();
+  function waitForFinalResponse(state, delay, signal) {
+    if (!delay || state.finalResponseComplete || signal?.aborted) {
+      return Promise.resolve();
+    }
     if (!state.finalResponseWaiters) state.finalResponseWaiters = new Set();
     return new Promise(resolve => {
       let timer = null;
       const done = () => {
         if (timer !== null) clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
         state.finalResponseWaiters.delete(done);
         resolve();
       };
       state.finalResponseWaiters.add(done);
+      signal?.addEventListener("abort", done, {once: true});
       timer = setTimeout(done, delay);
     });
+  }
+
+  async function currentConversationIsProcessing(state) {
+    const payload = await state.context.api(
+      `/api/client/profile-agent?profile_id=${encodeURIComponent(state.profileID)}`,
+    );
+    return String(
+      payload?.status?.processing_conversation_id || "",
+    ).trim() === String(state.conversationID || "").trim();
   }
 
   function emitAssistant(state, controller) {
@@ -218,7 +231,9 @@
     return page || authoritativePage(state);
   }
 
-  async function reconcileThreadHistory(state, controller, priorAssistantIDs) {
+  async function reconcileThreadHistory(
+    state, controller, priorAssistantIDs, signal,
+  ) {
     // Reconcile the complete durable timeline so final answers never replace
     // the public progress, workflow, and tool records emitted during a turn.
     // A completed turn can precede the Provider's durable thread update by a
@@ -229,8 +244,12 @@
       : FINAL_RESPONSE_RETRY_DELAYS;
     let page = null;
     let assistant = null;
-    for (const delay of retryDelays) {
-      await waitForFinalResponse(state, delay);
+    let attempt = 0;
+    let inactiveReads = 0;
+    while (!signal?.aborted) {
+      const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)] || 0;
+      await waitForFinalResponse(state, delay, signal);
+      if (signal?.aborted) break;
       page = await authoritativePage(state);
       const assistantIndex = page.items.findLastIndex(item => (
         isAssistantMessage(item)
@@ -245,6 +264,14 @@
         ? page.items[assistantIndex]
         : null;
       if (assistant || state.finalResponseComplete) break;
+      const processing = await currentConversationIsProcessing(state)
+        .catch(() => true);
+      inactiveReads = processing ? 0 : inactiveReads + 1;
+      // Provider history can trail the server's final-item event briefly.
+      // Once the Manager no longer owns an active turn, allow a few final
+      // authoritative reads before classifying the turn as incomplete.
+      if (inactiveReads >= 3) break;
+      attempt += 1;
     }
     const history = page?.items || [];
     // SSE is the fast path.  If it missed a delta or the provider emits a
@@ -574,7 +601,9 @@
       }
       if (!signal.aborted) {
         try {
-          await reconcileThreadHistory(state, controller, priorAssistantIDs);
+          await reconcileThreadHistory(
+            state, controller, priorAssistantIDs, signal,
+          );
         } catch (error) {
           // Keep a successfully streamed response visible even if the
           // post-turn history reconciliation is temporarily unavailable.
