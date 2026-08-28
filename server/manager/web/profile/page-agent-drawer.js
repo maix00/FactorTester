@@ -79,14 +79,15 @@
             context, profileID, options.assistance, {isActive: () => !shell.hidden},
           );
           await bridge.start();
+          body.classList.add("page-agent-drawer-body-conversation-only");
           const chat = await window.FTAgentChat.render(context, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
             profileKey: options.profileKey,
             profileScope: options.profileScope,
+            mountHost: body,
           });
-          body.classList.add("page-agent-drawer-body-conversation-only");
-          body.replaceChildren(chat);
+          if (!body.contains?.(chat)) body.replaceChildren(chat);
           mounted = true;
         })().catch(error => {
           bridge?.dispose();

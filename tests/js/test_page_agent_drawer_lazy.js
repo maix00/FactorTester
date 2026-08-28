@@ -6,10 +6,12 @@ class Element {
   constructor(tag) {
     this.tag = tag; this.children = []; this.dataset = {}; this.hidden = false;
     this.attributes = {}; this.listeners = {}; this.textContent = ""; this.className = "";
-    this.classList = {add: () => {}};
+    this.classes = new Set();
+    this.classList = {add: value => this.classes.add(value)};
   }
   append(...values) { this.children.push(...values); }
   replaceChildren(...values) { this.children = values; }
+  contains(value) { return this.children.includes(value); }
   remove() { this.removed = true; }
   setAttribute(key, value) { this.attributes[key] = String(value); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
@@ -27,8 +29,11 @@ global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names
 global.FTPageAgentContext = {create: () => ({
   start: async () => events.push(["bridge"]), dispose: () => {},
 })};
-global.FTAgentChat = {render: async () => {
-  events.push(["chat"]); return new Element("chat");
+global.FTAgentChat = {render: async (_context, _profile, options) => {
+  const chat = new Element("chat");
+  assert(options.mountHost.classes.has("page-agent-drawer-body-conversation-only"));
+  options.mountHost.replaceChildren(chat);
+  events.push(["chat", options.mountHost.contains(chat)]); return chat;
 }};
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/profile/page-agent-drawer.js", "utf8"),
@@ -65,10 +70,10 @@ vm.runInThisContext(
   resolveProfile({profile_id: "self"});
   await opening;
   assert.deepEqual(events, [
-    ["groups", ["profile"]], ["prepare"], ["open", "self"], ["bridge"], ["chat"],
+    ["groups", ["profile"]], ["prepare"], ["open", "self"], ["bridge"], ["chat", true],
   ]);
   drawer.hide();
   assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
-  assert.deepEqual(events.at(-1), ["chat"]);
+  assert.deepEqual(events.at(-1), ["chat", true]);
   console.log("PASS: page Agent drawer defers all work until it opens");
 })().catch(error => { console.error(error); process.exitCode = 1; });
