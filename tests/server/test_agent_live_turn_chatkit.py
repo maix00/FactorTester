@@ -61,3 +61,20 @@ def test_active_turn_ignores_events_from_another_thread():
     assert active_turn_items(
         events, "conversation-live", "thread-live",
     ) == []
+
+
+def test_active_turn_does_not_duplicate_provider_user_message():
+    events = [{"sequence": 1, "payload": {
+        "method": "item/completed",
+        "params": {
+            "threadId": "thread-live",
+            "item": {
+                "id": "live-user", "type": "userMessage",
+                "content": "同一个问题",
+            },
+        },
+    }}]
+
+    assert active_turn_items(
+        events, "conversation-live", "thread-live",
+    ) == []
