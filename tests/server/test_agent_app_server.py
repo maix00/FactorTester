@@ -500,6 +500,17 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         {},
         conversation_id=conversation["conversation_id"],
     )
+    stale_session = supervisor._sessions[(PRINCIPAL, PROFILE_ID)]
+    assert stale_session.process is not None
+    stale_session.process.stop()
+    recovered = supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "model/list",
+        {"includeHidden": False},
+    )
+    assert recovered["result"]["data"][0]["id"] == "research-model-fast"
+    assert supervisor._sessions[(PRINCIPAL, PROFILE_ID)] is not stale_session
     service.update_conversation_runtime_settings(
         PRINCIPAL,
         PROFILE_ID,
