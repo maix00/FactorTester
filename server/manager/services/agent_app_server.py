@@ -175,6 +175,9 @@ class AgentAppServerSupervisor:
             processing.get("conversation_id") or ""
         )
         status["processing_turn_id"] = str(processing.get("turn_id") or "")
+        status["processing_event_after"] = int(
+            processing.get("event_after") or 0
+        )
         return status
 
     def _observe_runtime_event(
@@ -439,13 +442,16 @@ class AgentAppServerSupervisor:
                 for name, value in settings.items()
                 if str(value or "").strip()
             })
-        if method == "turn/start" and conversation is not None:
+        def bind_start_to_session() -> None:
+            if method != "turn/start" or conversation is None:
+                return
             event_after = int(session.status().get("event_sequence") or 0)
             with self._lock:
                 self._processing_turns[key] = {
                     "conversation_id": str(conversation["conversation_id"]),
                     "event_after": event_after,
                 }
+        bind_start_to_session()
         try:
             try:
                 response = session.request(method, request_params)
@@ -463,6 +469,10 @@ class AgentAppServerSupervisor:
                     raise AgentAppServerError(
                         "Profile Agent could not be started"
                     ) from exc
+                # A replacement process owns a fresh event sequence.  Rebind
+                # the turn to that process before sending the request so a
+                # browser never resumes from the retired process cursor.
+                bind_start_to_session()
                 response = session.request(method, request_params)
         except Exception:
             if method == "turn/start":

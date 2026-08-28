@@ -547,6 +547,7 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["processing_turn_id"] == (
         "turn-active"
     )
+    assert supervisor.status(PRINCIPAL, PROFILE_ID)["processing_event_after"] >= 0
     steered = supervisor.request(
         PRINCIPAL,
         PROFILE_ID,

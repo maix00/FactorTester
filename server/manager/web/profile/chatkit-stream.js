@@ -605,6 +605,16 @@
       const request = turnRequest(state, runtimeStatus, text);
       const response = await rpc(state, request.method, request.params);
       state.turnID = request.turnID || P.threadIDFrom(response) || state.turnID;
+      if (request.method === "turn/start") {
+        // The request may have replaced a stopped app-server process.  Event
+        // sequences are process-local, so use the Manager-owned cursor for
+        // this exact turn instead of carrying a cursor from the old process.
+        const startedStatus = await alignEventCursor(state);
+        const eventAfter = Number(startedStatus?.processing_event_after);
+        if (Number.isFinite(eventAfter) && eventAfter >= 0) {
+          state.cursor = eventAfter;
+        }
+      }
       // The app-server event buffer is replayable from the cursor captured
       // immediately before turn/start.  Opening SSE after the turn exists
       // avoids racing the lifecycle process startup without losing early
