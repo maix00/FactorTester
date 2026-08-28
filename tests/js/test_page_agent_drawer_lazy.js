@@ -26,7 +26,6 @@ let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
 global.FTPageAgentContext = {create: () => ({
   start: async () => events.push(["bridge"]), dispose: () => {},
-  pause: () => events.push(["pause"]),
 })};
 global.FTAgentChat = {render: async () => {
   events.push(["chat"]); return new Element("chat");
@@ -70,6 +69,6 @@ vm.runInThisContext(
   ]);
   drawer.hide();
   assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
-  assert.deepEqual(events.at(-1), ["pause"]);
+  assert.deepEqual(events.at(-1), ["chat"]);
   console.log("PASS: page Agent drawer defers all work until it opens");
 })().catch(error => { console.error(error); process.exitCode = 1; });

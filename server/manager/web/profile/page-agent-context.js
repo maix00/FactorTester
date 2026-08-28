@@ -84,12 +84,7 @@
       timer = null;
     }
 
-    function pause() {
-      requestController?.abort();
-      requestController = null;
-    }
-
-    return Object.freeze({dispose, pause, start, syncOnce});
+    return Object.freeze({dispose, start, syncOnce});
   }
 
   window.FTPageAgentContext = Object.freeze({create});
