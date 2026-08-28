@@ -1,7 +1,7 @@
 (() => {
   const TABS = [
     ["overview", "详情"],
-    ["binding", "运行绑定"],
+    ["skills", "技能管理"],
     ["session", "Agent 会话"],
     ["workspace", "工作区"],
   ];
@@ -94,6 +94,7 @@
       conversation_count: profile.conversation_count,
       read_only: profile.read_only ? context.t("是") : context.t("否"),
     }));
+    root.append(binding(context, profile));
     root.append(conversationAccessNote(context, profile));
     return root;
   }
@@ -110,6 +111,18 @@
       binding_status: profile.binding_status,
       agent_status: profile.agent_status,
       agent_id: profile.agent_id || context.t("无"),
+    });
+  }
+
+  async function skills(context, profile) {
+    if (!profile.read_only && window.FTAgentSkills?.render) {
+      return window.FTAgentSkills.render(context, profile, () => (
+        window.FTProfileDirectoryDetail.detail(context, profile.profile_id)
+      ));
+    }
+    return fields(context, {
+      access_mode: context.t("只读"),
+      skills: context.t("技能绑定仅由研究身份所有者管理"),
     });
   }
 
@@ -168,30 +181,17 @@
     const payload = await context.api(
       `/api/client/profile-directory/profile?profile_key=${encodeURIComponent(key)}&scope=${encodeURIComponent(scope)}`,
     );
-    const profile = {...payload.profile, profile_key: key};
+    const profile = {
+      ...payload.profile,
+      ...(payload.owner_profile || {}),
+      profile_key: key,
+      owner_ref: payload.profile.owner_ref,
+      capabilities: payload.profile.capabilities,
+      read_only: payload.read_only,
+    };
     // Keep the existing owner controls for the current user's local Profile.
     // Remote and subordinate projections intentionally never receive these
     // extra fields, so they cannot accidentally become writable.
-    if (!payload.read_only && profile.capabilities?.edit === true) {
-      try {
-        const local = await context.api("/api/client/profiles");
-        const original = (local.profiles || []).find(
-          item => item.profile_id === profile.profile_id,
-        );
-        if (original) Object.assign(profile, original, {
-          profile_key: key,
-          owner_ref: profile.owner_ref,
-          capabilities: payload.profile.capabilities,
-          read_only: payload.read_only,
-        });
-        if (profile.is_self_profile || profile.profile_kind === "self") {
-          profile.display_name = context.t("本人");
-        }
-      } catch (_) {
-        // The safe directory projection remains usable if the compatibility
-        // owner endpoint is temporarily unavailable.
-      }
-    }
     return {profile, readOnly: Boolean(payload.read_only), key};
   }
 
@@ -224,16 +224,9 @@
     ));
     const root = document.createElement("div");
     root.className = "detail-stack profile-directory-detail";
-    if (profile.is_self_profile || profile.profile_kind === "self") {
-      root.classList.add("profile-directory-detail-self");
-      const badge = document.createElement("span");
-      badge.className = "profile-self-badge";
-      badge.textContent = context.t("本人身份");
-      root.append(badge);
-    }
     root.append(tabBar(context, profile, scope, tab));
     if (tab === "overview") root.append(overview(context, profile));
-    else if (tab === "binding") root.append(binding(context, profile));
+    else if (tab === "skills") root.append(await skills(context, profile));
     else if (tab === "session") root.append(await session(context, profile, scope));
     else root.append(workspace(context, profile));
     context.content.replaceChildren(root);
