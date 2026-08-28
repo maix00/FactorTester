@@ -3,6 +3,7 @@
     let sequence = 0;
     let timer = null;
     let disposed = false;
+    let paused = false;
     let lastPublished = "";
     let lastPublishedAt = 0;
     let requestController = null;
@@ -28,7 +29,7 @@
     }
 
     async function syncOnce() {
-      if (disposed) return;
+      if (disposed || paused) return;
       if (options.isActive?.() === false) return;
       await publish();
       const controller = new AbortController();
@@ -67,17 +68,38 @@
       }
     }
 
-    function schedule() {
-      if (disposed) return;
+    function schedule(delay = interval) {
+      if (disposed || paused || timer !== null) return;
       timer = setTimeout(async () => {
+        timer = null;
         try { await syncOnce(); } catch (_) { /* retry on the next tick */ }
         schedule();
-      }, interval);
+      }, delay);
     }
 
     async function start() {
-      await syncOnce();
-      schedule();
+      // Publishing the current page is required before the Agent can inspect
+      // it, but waiting for the applications long-poll can block drawer mount
+      // for the complete server wait window (normally 20 seconds). Keep that
+      // receive loop entirely off the interactive drawer-open path.
+      await publish();
+      schedule(0);
+    }
+
+    function pause() {
+      if (disposed) return;
+      paused = true;
+      requestController?.abort();
+      requestController = null;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    }
+
+    async function resume() {
+      if (disposed || !paused) return;
+      paused = false;
+      await publish();
+      schedule(0);
     }
 
     function dispose() {
@@ -88,7 +110,7 @@
       timer = null;
     }
 
-    return Object.freeze({dispose, start, syncOnce});
+    return Object.freeze({dispose, pause, resume, start, syncOnce});
   }
 
   window.FTPageAgentContext = Object.freeze({create});
