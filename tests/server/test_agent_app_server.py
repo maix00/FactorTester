@@ -927,7 +927,7 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     assert supervisor.calls[0][0] == 0
 
 
-def test_profile_agent_terminal_event_clears_processing_conversation():
+def test_profile_agent_final_item_clears_processing_conversation():
     supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
     supervisor._lock = threading.RLock()
     key = (PRINCIPAL, PROFILE_ID)
@@ -938,13 +938,32 @@ def test_profile_agent_terminal_event_clears_processing_conversation():
     observer = SimpleNamespace(observe=observed.append)
 
     payload = {
-        "method": "turn/completed",
-        "params": {"turn": {"id": "turn-live", "status": "completed"}},
+        "method": "item/completed",
+        "params": {"item": {"id": "final", "type": "agentMessage"}},
     }
     supervisor._observe_runtime_event(key, observer, payload)
 
     assert observed == [payload]
     assert key not in supervisor._processing_turns
+
+
+def test_profile_agent_turn_completed_waits_for_final_item():
+    supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
+    supervisor._lock = threading.RLock()
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor._processing_turns = {
+        key: {"conversation_id": "conversation-live"},
+    }
+    observer = SimpleNamespace(observe=lambda _payload: None)
+
+    supervisor._observe_runtime_event(key, observer, {
+        "method": "turn/completed",
+        "params": {"turn": {"id": "turn-live", "status": "completed"}},
+    })
+
+    assert supervisor._processing_turns[key]["conversation_id"] == (
+        "conversation-live"
+    )
 
 
 def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_path, monkeypatch):
