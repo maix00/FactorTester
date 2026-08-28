@@ -243,24 +243,6 @@
     return root;
   }
 
-  function link(context, label, path) {
-    if (!path) {
-      const missing = document.createElement("span");
-      missing.className = "test-run-missing-link";
-      missing.textContent = context.t(label);
-      missing.title = context.t("测试任务尚未生成 Job ID");
-      return missing;
-    }
-    const anchor = document.createElement("a");
-    anchor.href = path;
-    anchor.textContent = context.t(label);
-    anchor.addEventListener("click", event => {
-      event.preventDefault();
-      context.navigate(path);
-    });
-    return anchor;
-  }
-
   function submittedItems(state) {
     return model().synchronize(state).filter(item => item.jobID);
   }
@@ -278,8 +260,34 @@
     heading.className = "test-run-observer-heading";
     const title = document.createElement("strong");
     title.textContent = context.t("测试任务");
-    const jobLink = link(context, "查看测试任务", jobPath(active));
-    heading.append(title, jobLink);
+    const actions = document.createElement("div");
+    actions.className = "test-run-observer-actions";
+    const path = jobPath(active);
+    const viewJob = context.button(context.t("查看测试任务"), () => {
+      if (path) context.navigate(path);
+    }, context.t(path ? "查看测试任务" : "测试任务尚未生成 Job ID"));
+    viewJob.disabled = !path;
+    actions.append(viewJob);
+    const cancel = window.FTJobActions?.cancelButton?.(context, {
+      job: {
+        ...(active.job || {}),
+        status: ["succeeded", "failed", "cancelled"].includes(active.phase)
+          ? active.phase
+          : active.lifecycleStatus || active.job?.status || active.phase,
+        cancel_requested: active.cancelRequested || active.job?.cancel_requested,
+      },
+      jobID: active.jobID,
+      portQuery: active.portQuery || "",
+      onAccepted: () => {
+        active.cancelRequested = true;
+        refresh?.();
+      },
+      onRefresh: () => window.FTTestRunResults?.refresh(
+        context, state, active, refresh,
+      ),
+    });
+    if (cancel) actions.append(cancel);
+    heading.append(title, actions);
     root.append(heading);
     if (items.length > 1) {
       const tabs = document.createElement("div");
