@@ -392,8 +392,13 @@ class AgentAppServerSupervisor:
             )
         with self._lock:
             session = self._sessions.get(key)
-            if session is None:
-                raise AgentAppServerError("start the Profile Agent first")
+            running = session is not None and session.status().get("running")
+        if not running:
+            self.start(*key)
+            with self._lock:
+                session = self._sessions.get(key)
+        if session is None:
+            raise AgentAppServerError("Profile Agent could not be started")
         request_params = dict(params or {})
         if method == "turn/start" and conversation is not None:
             # The Manager-owned conversation is the settings authority.  A
@@ -419,7 +424,23 @@ class AgentAppServerSupervisor:
                     "event_after": event_after,
                 }
         try:
-            response = session.request(method, request_params)
+            try:
+                response = session.request(method, request_params)
+            except AgentAppServerError as exc:
+                # A process may exit between the running-state probe above and
+                # AgentAppServerSession's pre-send readiness check. No request
+                # was written in this exact failure mode, so one retry cannot
+                # duplicate a turn.
+                if str(exc) != "Profile Agent is not running":
+                    raise
+                self.start(*key)
+                with self._lock:
+                    session = self._sessions.get(key)
+                if session is None:
+                    raise AgentAppServerError(
+                        "Profile Agent could not be started"
+                    ) from exc
+                response = session.request(method, request_params)
         except Exception:
             if method == "turn/start":
                 with self._lock:
