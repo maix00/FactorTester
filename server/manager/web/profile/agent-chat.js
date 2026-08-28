@@ -297,25 +297,9 @@
       if (!isCurrent()) disposeChat();
     }
 
-    async function deactivateAgent() {
-      if (leaving) return;
+    host.__ftBeforeTabSave = () => {
       leaving = true;
       disposeChat();
-      try {
-        await activationPromise;
-      } catch (_) {
-        // A failed activation has no live Agent to stop.
-      }
-      if (!profile.active_claim) return;
-      await context.api("/api/client/profile-agent/stop", {
-        method: "POST",
-        body: JSON.stringify({profile_id: profile.profile_id}),
-      }).catch(() => {});
-    }
-
-    host.__ftBeforeTabSave = () => {
-      if (options.lifecycleManaged) disposeChat();
-      else void deactivateAgent();
     };
     activationPromise = activateAgent();
     activationPromise.catch(error => {
