@@ -40,6 +40,14 @@ vm.runInThisContext(
   {filename: "page-agent-drawer.js"},
 );
 
+const css = fs.readFileSync("server/manager/web/styles/app.css", "utf8");
+const fixedHeight = css.indexOf(".profile-chatkit-host openai-chatkit { height: 600px; }");
+const drawerHeight = css.indexOf(
+  ".page-agent-drawer .profile-agent-chat-conversation-only openai-chatkit",
+);
+assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
+  "the drawer-specific fluid ChatKit height overrides fixed profile-page heights");
+
 (async () => {
   const context = {
     tabID: "tab", t: value => value,
