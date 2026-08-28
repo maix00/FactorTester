@@ -37,9 +37,13 @@
     if (selected === "server") return server(context, body);
     if (selected === "federation") return federation(context, body);
     if (selected === "control-database") {
+      await window.FTStaticLoader?.loadGroups?.(["settings-control-database"]);
       return window.FTSettingsControlDatabase.show(context, body);
     }
-    if (selected === "devices") return window.FTSettingsDevices.show(context, body);
+    if (selected === "devices") {
+      await window.FTStaticLoader?.loadGroups?.(["settings-devices"]);
+      return window.FTSettingsDevices.show(context, body);
+    }
     if (selected === "workspace") return workspace(context, body);
     if (selected === "language") return language(context, body);
     return updates(context, body);
