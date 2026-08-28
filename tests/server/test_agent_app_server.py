@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 import io
 import json
+import os
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,15 +19,14 @@ from server.manager.services.agent_app_server_errors import AgentAppServerError
 from server.manager.services.agent_conversation_runtime import (
     AgentConversationRuntimeObserver,
 )
+from server.manager.services.agent_profiles import AgentProfileService
 from server.manager.services.agent_provider_health import (
     AgentProviderHealth,
     AgentProviderHealthError,
 )
-from server.manager.services.agent_profiles import AgentProfileService
-from server.manager.services.cc_switch_gateway import CCSwitchGateway
 from server.manager.services.agent_workspace import profile_workspace_relative_path
+from server.manager.services.cc_switch_gateway import CCSwitchGateway
 from server.manager.storage.agent_provider_store import ProviderStoreError
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRINCIPAL = "GTHT@MaxJJW@1234"
@@ -925,6 +925,26 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     assert b'"summary": {"title": "factortester products list"}' in raw
     assert b'"cwd": "/research/maxc"' in raw
     assert supervisor.calls[0][0] == 0
+
+
+def test_profile_agent_terminal_event_clears_processing_conversation():
+    supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
+    supervisor._lock = threading.RLock()
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor._processing_turns = {
+        key: {"conversation_id": "conversation-live"},
+    }
+    observed = []
+    observer = SimpleNamespace(observe=observed.append)
+
+    payload = {
+        "method": "turn/completed",
+        "params": {"turn": {"id": "turn-live", "status": "completed"}},
+    }
+    supervisor._observe_runtime_event(key, observer, payload)
+
+    assert observed == [payload]
+    assert key not in supervisor._processing_turns
 
 
 def test_profile_agent_http_routes_start_and_proxy_authenticated_session(tmp_path, monkeypatch):
