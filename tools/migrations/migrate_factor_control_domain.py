@@ -58,6 +58,17 @@ def apply_plan(
                 ),
             )
             if cursor.rowcount != 1:
+                current = connection.execute(
+                    "SELECT payload, deleted FROM control_account_domain_entities "
+                    "WHERE principal=%s AND entity_type=%s AND entity_id=%s",
+                    (item["principal"], item["entity_type"], item["entity_id"]),
+                ).fetchone()
+                if current and current[0] == payload and bool(current[1]) == deleted:
+                    # The exact plan may be replayed by a later release after a
+                    # successful one-time migration.  Matching target content
+                    # is already complete even if another writer advanced the
+                    # monotonic revision meanwhile.
+                    continue
                 action = "restore" if restore else "migration"
                 raise RuntimeError(
                     f"control-domain {action} revision changed for "
