@@ -8,6 +8,7 @@
       document_kind: "research_configuration",
       analyses: [state.kind],
       configuration: payload,
+      run_fields: FTTestState.registeredRunValues(state),
     };
   }
 
@@ -46,11 +47,16 @@
     } : {type: "object"};
     return {
       type: "object",
-      required: ["schema_version", "document_kind", "analyses", "configuration"],
+      required: [
+        "schema_version", "document_kind", "analyses", "configuration", "run_fields",
+      ],
       properties: {
         schema_version: {const: 1},
         document_kind: {const: "research_configuration"},
         analyses: {type: "array", items: {enum: [state.kind]}},
+        run_fields: {
+          type: "object", properties: runProperties, additionalProperties: false,
+        },
         configuration: {
           type: "object", required: ["schema_version", "analyses"],
           properties: {
@@ -58,23 +64,12 @@
               type: "object", required: [state.kind],
               properties: {[state.kind]: analysisSchema},
             },
-            ui: {
-              type: "object",
-              properties: {
-                [state.kind]: {
-                  type: "object",
-                  properties: {
-                    run_values: {type: "object", properties: runProperties},
-                  },
-                },
-              },
-            },
           },
         },
       },
       additionalProperties: false,
       "x-factor-tester-field-registry": structuredClone(state.manifest || {}),
-      "x-run-spec-shape": "RunSpec.configuration",
+      "x-run-spec-shape": "RunRequest(configuration + registered run_fields)",
     };
   }
 
@@ -101,7 +96,7 @@
           .filter(key => Object.prototype.hasOwnProperty.call(analysis, key));
         if (misplaced.length) {
           throw new Error(
-            `任务提交字段必须写入 configuration.ui.${state.kind}.run_values: ${misplaced.join(", ")}`,
+            `任务提交字段必须写入文档顶层 run_fields: ${misplaced.join(", ")}`,
           );
         }
       },
@@ -113,6 +108,7 @@
         };
         FTTestState.applyWorkspaceConfiguration(state);
         FTTestState.seedSavedCatalogs(state);
+        FTTestState.applyRegisteredRunValues(state, document.run_fields || {});
         if (state.kind === "backtest") {
           window.FTBacktestGroupModel?.initialize?.(state);
         }

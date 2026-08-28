@@ -60,11 +60,9 @@
     const payload = state.workspace?.configuration?.payload || {};
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
     const applicationUI = payload.ui?.[state.kind] || {};
-    state.runValues = {
-      ...defaultRunValues(state.manifest),
-      ...(applicationUI.run_values && typeof applicationUI.run_values === "object"
-        ? structuredClone(applicationUI.run_values) : {}),
-    };
+    const reusableRunFields = payload.run_fields
+      && typeof payload.run_fields === "object" ? payload.run_fields : {};
+    applyRegisteredRunValues(state, reusableRunFields, {templateOnly: true});
     if (state.kind === "ic") {
       if (Array.isArray(applicationUI.selected_configuration_group_ids)) {
         state.selectedICConfigurationGroupIDs = [
@@ -90,9 +88,6 @@
       ? FTTestProducts.restoreReferences(state.analysis, applicationUI)
       : FTTestLazyCode.fallbackGroupReferences(state.analysis, applicationUI);
     state.groupRef = state.groupRefs[0] || "";
-    const savedOutputs = payload.ui?.[state.kind]?.output_requests;
-    state.outputRequestsExplicit = Array.isArray(savedOutputs);
-    state.outputRequests = Array.isArray(savedOutputs) ? [...savedOutputs] : [];
     restoreTemporaryObjects(state);
   }
 
@@ -133,6 +128,30 @@
       if (item.placement !== "outputs") values[item.key] = structuredClone(item.default);
     }
     return values;
+  }
+
+  function registeredRunValues(state, options = {}) {
+    return Object.fromEntries((state.manifest?.run_fields || [])
+      .filter(field => !options.templateOnly || field.template_policy === "include")
+      .map(field => [field.key, structuredClone(field.placement === "outputs"
+        ? (state.outputRequests || [])
+        : (state.runValues?.[field.key] ?? field.default))]));
+  }
+
+  function applyRegisteredRunValues(state, values = {}, options = {}) {
+    const fields = (state.manifest?.run_fields || [])
+      .filter(field => !options.templateOnly || field.template_policy === "include");
+    state.runValues = {
+      ...defaultRunValues(state.manifest),
+      ...Object.fromEntries(fields
+        .filter(field => field.placement !== "outputs"
+          && Object.prototype.hasOwnProperty.call(values, field.key))
+        .map(field => [field.key, structuredClone(values[field.key])])),
+    };
+    const outputField = fields.find(field => field.placement === "outputs");
+    const outputs = outputField ? values[outputField.key] : undefined;
+    state.outputRequestsExplicit = Array.isArray(outputs);
+    state.outputRequests = Array.isArray(outputs) ? [...outputs] : [];
   }
 
   function clearDraft(state) {
@@ -252,10 +271,10 @@
   }
 
   window.FTTestState = Object.freeze({
-    applyWorkspaceConfiguration, clearDraft, defaultRunValues,
+    applyRegisteredRunValues, applyWorkspaceConfiguration, clearDraft, defaultRunValues,
     draftSnapshot, restoreDraft,
     initializeInputState, lazyState,
-    mergeByID, restoreWorkspace, savedMountedTabs, savedSettings,
+    mergeByID, registeredRunValues, restoreWorkspace, savedMountedTabs, savedSettings,
     restoreTemporaryObjects, seedSavedCatalogs,
   });
 })();

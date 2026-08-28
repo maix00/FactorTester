@@ -210,6 +210,9 @@
       factorRecord(item, selectedFamily(state, item))
     ));
     payload.shared.temporary_objects = temporaryObjects(state);
+    payload.run_fields = FTTestState.registeredRunValues(
+      state, {templateOnly: true},
+    );
     payload.analyses = payload.analyses || {};
     const analysis = factor
       ? buildAnalysis(state, factors, selectedFamily(state, factor), group)
@@ -225,9 +228,7 @@
       settings: FTTestConfigurationCompiler.authoringSettings(
         state.manifest, state.values,
       ),
-      run_values: structuredClone(state.runValues || {}),
       factor_ref: state.kind === "ic" ? group?.factor_ref : state.factorRef,
-      output_requests: FTTestRunFields.selection(state),
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
     };

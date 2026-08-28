@@ -21,6 +21,19 @@ global.FTTestState = {
     );
   },
   seedSavedCatalogs: () => {},
+  defaultRunValues: manifest => Object.fromEntries(
+    (manifest.run_fields || []).filter(field => field.placement !== "outputs")
+      .map(field => [field.key, structuredClone(field.default)]),
+  ),
+  registeredRunValues: state => Object.fromEntries(
+    (state.manifest.run_fields || []).map(field => [field.key,
+      field.placement === "outputs" ? state.outputRequests : state.runValues[field.key]]),
+  ),
+  applyRegisteredRunValues: (state, values) => {
+    state.runValues = {task_name: values.task_name || ""};
+    state.outputRequests = [...(values.output_requests || [])];
+    state.outputRequestsExplicit = Array.isArray(values.output_requests);
+  },
 };
 let initialized = 0;
 global.FTBacktestGroupModel = {initialize: () => { initialized += 1; }};
@@ -35,9 +48,12 @@ const group = {
   splitCount: 5, groupIndex: 1,
 };
 const state = {
-  kind: "backtest", manifest: {run_fields: [{
-    key: "task_name", label: "任务名称", value_descriptor: {editor: "text"},
-  }]}, workspace: null,
+  kind: "backtest", manifest: {run_fields: [
+    {key: "task_name", label: "任务名称", placement: "run_identity", default: "",
+      value_descriptor: {editor: "text"}},
+    {key: "output_requests", label: "结果与生成物", placement: "outputs", default: [],
+      value_descriptor: {editor: "output_picker"}},
+  ]}, workspace: null, runValues: {task_name: "原名称"}, outputRequests: ["equity_curve"],
   payload: {schema_version: 2, analyses: {backtest: {groups: [group]}}},
 };
 const pageState = {};
@@ -55,10 +71,9 @@ assert.equal(
   "the Agent receives the strategy-group requirement in the document schema",
 );
 assert.equal(
-  schema.properties.configuration.properties.ui.properties.backtest
-    .properties.run_values.properties.task_name.description,
+  schema.properties.run_fields.properties.task_name.description,
   "任务名称",
-  "the Agent schema exposes the registered run field at its restorable location",
+  "the Agent schema exposes registered per-run fields outside configuration",
 );
 assert.throws(() => registration.validate({
   document_kind: "research_configuration",
@@ -70,9 +85,15 @@ assert.throws(() => registration.validate({
     schema_version: 2,
     analyses: {backtest: {groups: [group], task_name: "wrong"}},
   },
-}), /configuration\.ui\.backtest\.run_values/);
-registration.importDocument({configuration: state.payload});
+  run_fields: {},
+}), /文档顶层 run_fields/);
+registration.importDocument({
+  configuration: state.payload,
+  run_fields: {task_name: "Self 写入名称", output_requests: ["period_returns"]},
+});
 assert.deepEqual(state.analysis.groups, [group]);
+assert.equal(state.runValues.task_name, "Self 写入名称");
+assert.deepEqual(state.outputRequests, ["period_returns"]);
 assert.equal(initialized, 1, "imported strategy groups enter the normal UI model");
 
 const nextController = FTTestPageAssistance.register(
