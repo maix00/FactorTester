@@ -26,17 +26,6 @@ const state = {
     api: async url => {
       requestedURLs.push(url);
       historyReads += 1;
-      if (historyReads === 1) return {
-        // A transient thread/read snapshot can expose the newest user item
-        // ahead of the final answer while the rollout index is settling.
-        items: [
-          {id: "user-old", type: "user_message"},
-          {id: "assistant-new", type: "assistant_message"},
-        ],
-        has_more: true,
-        after: "opaque-older-cursor",
-        order: "desc",
-      };
       return {
         items: [
           {id: "assistant-new", type: "assistant_message"},
@@ -95,7 +84,7 @@ const adapter = window.FTProfileChatKit.create(
     ["user-old", "assistant-new"],
     "live history is rendered oldest-first",
   );
-  assert.ok(historyReads >= 3, "refresh waits for two stable ordered snapshots");
+  assert.equal(historyReads, 1, "opening a conversation reads its latest page once");
 
   const page = await (await request({
     type: "items.list",
