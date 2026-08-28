@@ -25,10 +25,6 @@ def _toml_string(value: object) -> str:
     return json.dumps(str(value or ""), ensure_ascii=False)
 
 
-def _toml_array(values: list[object]) -> str:
-    return json.dumps([str(value) for value in values], ensure_ascii=False)
-
-
 class AgentAppServerLaunch:
     """Build a launch without persisting a provider token."""
 
@@ -116,12 +112,13 @@ class AgentAppServerLaunch:
                 f"model = {_toml_string(model)}",
                 'model_provider = "factortester"',
                 'approval_policy = "never"',
-                'sandbox_mode = "workspace-write"',
-                "sandbox_workspace_write.network_access = true",
-                (
-                    "sandbox_workspace_write.writable_roots = "
-                    f"{_toml_array(['/workspace'])}"
-                ),
+                # FactorTester already launches Codex inside a Profile-only
+                # Bubblewrap mount namespace with a private /tmp.  Asking
+                # Codex for workspace-write here would require a second,
+                # nested Bubblewrap user namespace and makes every shell tool
+                # fail.  "danger-full-access" is scoped to that outer
+                # namespace, not to the Manager host/container filesystem.
+                'sandbox_mode = "danger-full-access"',
                 "",
                 "[model_providers.factortester]",
                 'name = "FactorTester provider"',

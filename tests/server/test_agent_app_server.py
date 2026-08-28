@@ -579,8 +579,8 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     assert "research-model" in config
     assert "server-secret-token" not in config
     assert 'approval_policy = "never"' in config
-    assert 'sandbox_mode = "workspace-write"' in config
-    assert "sandbox_workspace_write.network_access = true" in config
+    assert 'sandbox_mode = "danger-full-access"' in config
+    assert "sandbox_workspace_write" not in config
     assert "ignore_default_excludes = false" in config
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["pid"] is not None
     supervisor._observe_runtime_event(
