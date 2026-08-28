@@ -506,7 +506,7 @@
       const runtimeStatus = await alignEventCursor(state);
       const request = turnRequest(state, runtimeStatus, text);
       const response = await rpc(state, request.method, request.params);
-      state.turnID = request.turnID || P.threadIDFrom(response) || state.turnID;
+      state.turnID = request.turnID || P.turnIDFrom(response) || state.turnID;
       if (request.method === "turn/start") {
         // The request may have replaced a stopped app-server process.  Event
         // sequences are process-local, so use the Manager-owned cursor for
