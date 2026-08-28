@@ -180,7 +180,7 @@ migrate_factor_control_identities() {
   marker="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-control-applied"
   plan="${FACTORTESTER_STATE_ROOT}/factor-v2-control-plan.json"
   [[ -f "$plan" ]] || { echo "factor control-domain plan is unavailable" >&2; exit 1; }
-  "${compose[@]}" exec -T factortester-public sh -lc '
+  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc '
 set -eu
 export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
 cd /opt/factortester/app
@@ -194,7 +194,7 @@ python -m tools.migrations.migrate_factor_control_domain \
 restore_factor_control_identities() {
   marker="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}/factor-v2-control-applied"
   [[ -f "$marker" ]] || return 0
-  "${compose[@]}" exec -T factortester-public sh -lc '
+  "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc '
 set -eu
 export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
 cd /opt/factortester/app
