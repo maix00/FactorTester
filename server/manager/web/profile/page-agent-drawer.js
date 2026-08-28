@@ -76,10 +76,7 @@
       shell.hidden = false;
       toggle.hidden = true;
       toggle.setAttribute("aria-expanded", "true");
-      if (mounted) {
-        await bridge?.resume?.();
-        return;
-      }
+      if (mounted) return;
       if (!opening) {
         opening = (async () => {
           status("正在加载智能体助手…");
@@ -95,7 +92,6 @@
             async () => {
               bridge = window.FTPageAgentContext.create(
                 context, profileID, options.assistance,
-                {isActive: () => !shell.hidden},
               );
               await bridge.start();
             },
@@ -125,7 +121,6 @@
       shell.hidden = true;
       toggle.hidden = false;
       toggle.setAttribute("aria-expanded", "false");
-      bridge?.pause?.();
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
     }
 
