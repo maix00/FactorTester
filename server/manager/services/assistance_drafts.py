@@ -36,6 +36,18 @@ def _slug(value: object, fallback: str) -> str:
     return (result or fallback)[:48]
 
 
+def _merge_patch(target: object, patch: object) -> object:
+    if not isinstance(patch, dict):
+        return patch
+    result = dict(target) if isinstance(target, dict) else {}
+    for key, value in patch.items():
+        if value is None:
+            result.pop(key, None)
+        else:
+            result[key] = _merge_patch(result.get(key), value)
+    return result
+
+
 class AssistanceDraftStore:
     def __init__(
         self,
@@ -184,6 +196,26 @@ class AssistanceDraftStore:
                 )
                 items.append(value)
             return {"drafts": items, "quota": self.usage()}
+
+    def patch(self, draft_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            path = self._path(draft_id)
+            value = self._read(path)
+            document = _merge_patch(value.get("document"), patch)
+            if not isinstance(document, dict):
+                raise AssistanceDraftError("assistance document must remain an object")
+            encoded = _canonical(document)
+            value["document"] = document
+            value["status"] = "draft"
+            value["updated_at"] = datetime.now().astimezone().isoformat()
+            value["content_sha256"] = hashlib.sha256(encoded).hexdigest()
+            value["content_summary"] = {
+                "keys": sorted(document)[:32],
+                "size_bytes": len(encoded),
+            }
+            self._write(path, value)
+            value["workspace_path"] = str(ASSISTANCE_DRAFT_RELATIVE_ROOT / path.name)
+            return value
 
     def get(self, draft_id: str) -> dict[str, Any]:
         with self._lock:

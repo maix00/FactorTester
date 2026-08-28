@@ -26,15 +26,51 @@ class _Client:
                         ],
                     },
                     "document_schema": {"type": "object"},
+                    "navigation": {
+                        "schema_version": 1,
+                        "root_id": "page",
+                        "nodes": {
+                            "page": {
+                                "id": "page",
+                                "kind": "page",
+                                "label": "Factor",
+                                "children": ["section:source"],
+                            },
+                            "section:source": {
+                                "id": "section:source",
+                                "kind": "section",
+                                "label": "Source",
+                                "summary": "2 fields",
+                                "children": ["field:source"],
+                            },
+                            "field:source": {
+                                "id": "field:source",
+                                "kind": "field",
+                                "label": "Source code",
+                                "value": "old",
+                                "children": [],
+                            },
+                        },
+                    },
                 },
             }
         }
 
-    def create_profile_agent_assistance_draft(self, profile_id: str, document: dict):
+    def create_profile_agent_assistance_draft(
+        self, profile_id: str, document: dict | None, *, from_current: bool = False,
+    ):
         assert profile_id == "self-profile"
-        assert document == {"source": "new"}
+        assert document == {"source": "new"} or (document is None and from_current)
         self.document = document
         return {"draft": {"draft_id": "a" * 32, "status": "draft"}}
+
+    def patch_profile_agent_assistance_draft(
+        self, profile_id: str, draft_id: str, patch: dict,
+    ):
+        assert profile_id == "self-profile"
+        assert draft_id == "a" * 32
+        assert patch == {"source": "patched"}
+        return {"draft": {"draft_id": draft_id, "status": "draft"}}
 
     def validate_profile_agent_assistance(self, profile_id: str, draft_id: str):
         assert profile_id == "self-profile"
@@ -62,47 +98,34 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     )
     assert shown.exit_code == 0
     assert json.loads(shown.output)["assistance"]["revision"] == 7
-    assert "old" not in shown.output
+    assert json.loads(shown.output)["navigation"]["children"] == [{
+        "id": "section:source",
+        "kind": "section",
+        "label": "Source",
+        "summary": "2 fields",
+    }]
+    assert "candidates" not in shown.output
     assert len(shown.output) < 1500
 
     selected = runner.invoke(
         commands.assist,
         [
             "--profile-id", "self-profile", "inspect",
-            "--path", "/assistance/document/source",
+            "--node", "field:source",
         ],
     )
     assert selected.exit_code == 0
-    assert json.loads(selected.output) == "old"
-
-    paged = runner.invoke(
-        commands.assist,
-        [
-            "--profile-id", "self-profile", "inspect",
-            "--path", "/assistance/document/candidates",
-            "--offset", "20", "--limit", "2", "--depth", "0",
-        ],
-    )
-    assert paged.exit_code == 0
-    page = json.loads(paged.output)
-    assert page["count"] == 100
-    assert page["offset"] == 20
-    assert page["has_more"] is True
-    assert [item["path"] for item in page["items"]] == [
-        "/assistance/document/candidates/20",
-        "/assistance/document/candidates/21",
-    ]
-    assert "x" * 100 not in paged.output
+    assert json.loads(selected.output)["value"] == "old"
 
     missing = runner.invoke(
         commands.assist,
         [
             "--profile-id", "self-profile", "inspect",
-            "--path", "/assistance/document/missing",
+            "--node", "field:missing",
         ],
     )
     assert missing.exit_code != 0
-    assert "path does not exist" in missing.output
+    assert "node was not found" in missing.output
 
     created = runner.invoke(
         commands.assist,
@@ -117,6 +140,22 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     )
     assert created.exit_code == 0
     assert json.loads(created.output)["draft_id"] == "a" * 32
+
+    based = runner.invoke(
+        commands.assist,
+        ["--profile-id", "self-profile", "drafts", "create", "--from-current"],
+    )
+    assert based.exit_code == 0
+
+    patched = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "drafts", "patch", "a" * 32,
+            "--stdin",
+        ],
+        input='{"source":"patched"}',
+    )
+    assert patched.exit_code == 0
 
     validated = runner.invoke(
         commands.assist,

@@ -71,6 +71,19 @@
     ).trim();
     if (boundProfileID && context.session) {
       FTPageAssistance.register(context, {
+        navigation: () => ({
+          schema_version: 1, root_id: "page", nodes: {
+            page: {
+              id: "page", kind: "report", label: value.title || "研究报告",
+              summary: "研究报告正文通过研究工作流修改",
+              children: ["field:selected_chapter"],
+            },
+            "field:selected_chapter": {
+              id: "field:selected_chapter", kind: "field", label: "当前章节",
+              value: reading.selectedChapterID || "", children: [],
+            },
+          },
+        }),
         schema: () => ({type: "object", readOnly: true}),
         exportDocument: () => ({
           schema_version: 1, document_kind: "research_report_context",
