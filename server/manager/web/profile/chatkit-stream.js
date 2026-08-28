@@ -103,6 +103,93 @@
     return `${String(item?.type || "").toLowerCase()}:${itemText(item)}`;
   }
 
+  function processItem(state, itemID) {
+    return state.items.find(item => String(item?.id || "") === itemID);
+  }
+
+  function liveProcessItem(state, itemID, title, workflowType = "custom") {
+    const existing = processItem(state, itemID);
+    if (existing?.type === "workflow") return structuredClone(existing);
+    return {
+      id: itemID,
+      thread_id: state.conversationID,
+      created_at: new Date().toISOString(),
+      type: "workflow",
+      workflow: {
+        type: workflowType,
+        tasks: [{
+          type: workflowType === "reasoning" ? "thought" : "custom",
+          title,
+          content: null,
+          status_indicator: "loading",
+        }],
+        summary: {title},
+        expanded: false,
+      },
+    };
+  }
+
+  function emitProcessReplacement(state, controller, item) {
+    const index = state.items.findIndex(existing => existing.id === item.id);
+    if (index < 0) {
+      state.items.push(item);
+      writeEvent(controller, {type: "thread.item.added", item});
+      return;
+    }
+    state.items[index] = item;
+    writeEvent(controller, {type: "thread.item.replaced", item});
+  }
+
+  function appendDisplayableProcessDelta(state, controller, payload) {
+    const method = P.rawMethod(payload);
+    const params = payload?.params || {};
+    const delta = typeof params.delta === "string" ? params.delta : "";
+    const providerItemID = String(params.itemId || params.item_id || "").trim();
+    if (!delta || !providerItemID) return;
+
+    let itemID;
+    let title;
+    let workflowType = "custom";
+    let fence = "";
+    if (method === "item/reasoning/summaryTextDelta") {
+      itemID = providerItemID;
+      title = "Reasoning summary";
+      workflowType = "reasoning";
+    } else if (method === "item/commandExecution/outputDelta") {
+      itemID = providerItemID;
+      title = "Command output";
+      fence = "text";
+    } else if (method === "item/fileChange/outputDelta") {
+      itemID = providerItemID;
+      title = "File changes";
+      fence = "diff";
+    } else if (method === "item/plan/delta") {
+      itemID = providerItemID;
+      title = "Plan";
+    } else {
+      return;
+    }
+
+    state.processDeltaText ||= new Map();
+    const key = `${method}:${providerItemID}:${params.summaryIndex ?? ""}`;
+    const text = `${state.processDeltaText.get(key) || ""}${delta}`;
+    state.processDeltaText.set(key, text);
+    const item = liveProcessItem(state, itemID, title, workflowType);
+    const taskIndex = workflowType === "reasoning"
+      ? Math.max(0, Number(params.summaryIndex) || 0) : 0;
+    while (item.workflow.tasks.length <= taskIndex) {
+      item.workflow.tasks.push({
+        type: "thought",
+        title: `Reasoning summary ${item.workflow.tasks.length + 1}`,
+        content: null,
+        status_indicator: "loading",
+      });
+    }
+    const task = item.workflow.tasks[taskIndex];
+    task.content = fence ? `\`\`\`${fence}\n${text}\n\`\`\`` : text;
+    emitProcessReplacement(state, controller, item);
+  }
+
   function isAssistantMessage(item) {
     const type = String(item?.type || "").replace(/[-_]/g, "").toLowerCase();
     return /^(agentmessage|assistantmessage|assistant|outputtext)$/.test(type);
@@ -401,6 +488,7 @@
           });
         }
       }
+      appendDisplayableProcessDelta(state, controller, payload);
       if (method === "app_server_exit" || payload?.type === "app_server_exit") {
         // The isolated app-server is a replaceable transport process.  Its
         // exit does not define the Provider turn outcome; reconcile the
@@ -488,6 +576,7 @@
     state.assistant = null;
     state.finalResponseComplete = false;
     state.turnID = "";
+    state.processDeltaText = new Map();
     const priorAssistantIDs = new Set(state.items
       .filter(isAssistantMessage)
       .map(item => String(item.id || "")));
