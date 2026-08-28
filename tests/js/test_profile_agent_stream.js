@@ -108,15 +108,22 @@ const state = {
     api: async (url, init = {}) => {
       requestedURLs.push(url);
       if (url.includes('/api/client/profile-agent?')) {
-        return {status: {event_sequence: 0}};
+        return {status: {
+          event_sequence: 0,
+          processing_conversation_id: 'conversation-1',
+        }};
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
         historyReads += 1;
-        if (historyReads < 8) return {
+        if (historyReads < 12) return {
           items: [{
             id: 'history-assistant-old',
             type: 'assistant_message',
             content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+          }, {
+            id: 'history-user-interrupted',
+            type: 'user_message',
+            content: [{type: 'input_text', text: '上一轮没有最终消息'}],
           }],
           has_more: false,
           after: null,
@@ -149,6 +156,11 @@ const state = {
               id: 'history-assistant-old',
               type: 'assistant_message',
               content: [{type: 'output_text', text: '旧回答不应覆盖', annotations: []}],
+            },
+            {
+              id: 'history-user-interrupted',
+              type: 'user_message',
+              content: [{type: 'input_text', text: '上一轮没有最终消息'}],
             },
           ],
           has_more: false,
@@ -255,13 +267,20 @@ const state = {
   assert.equal(global.__observedRuntime, true);
   assert.deepEqual(
     state.items.map(item => item.id),
-    ['history-assistant-old', 'command-1', 'file-history-only', 'history-assistant-1'],
+    [
+      'history-user-interrupted', 'history-assistant-old',
+      'command-1', 'file-history-only', 'history-assistant-1',
+    ],
     'authoritative history is stored oldest-first after reconciliation',
   );
   assert.ok(requestedURLs.some(url => (
     url.includes('conversation-items') && url.includes('view=timeline')
   )));
-  assert.equal(historyReads, 8, 'final history is retried beyond the old cutoff');
+  assert.equal(
+    historyReads,
+    12,
+    'an active turn is not terminated when the old fixed retry window expires',
+  );
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);
   assert.match(output, /"thread.item.done","item":\{"id":"file-history-only"/);
   const assistantAdded = chunks.findIndex(value => (
