@@ -12,10 +12,10 @@ currently assisted page with one registered structured document:
 
 ```bash
 factortester assist inspect
-factortester assist validate --file assistance.json
-factortester assist apply --file assistance.json \
-  --tab-id <tab-id> --expected-revision <revision>
-# --stdin is supported for validate/apply so an Agent need not create a file.
+factortester assist drafts create --file assistance.json
+factortester assist drafts validate <draft-id>
+factortester assist drafts apply <draft-id>
+# create also accepts --stdin; the Manager retains the resulting draft.
 ```
 
 The page publishes the schema and current document. Test pages expose the same

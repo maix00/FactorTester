@@ -391,6 +391,8 @@ class WriteRoutesMixin:
             return
         if self._mihomo_write(parsed, "DELETE"):
             return
+        if self._delete_page_assistance_routes(parsed):
+            return
         if self._delete_agent_routes(parsed):
             return
         if self._proxy_job_request(parsed, method="DELETE"):

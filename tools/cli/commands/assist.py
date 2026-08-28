@@ -17,17 +17,23 @@ def _profile_id(requested: str) -> str:
     value = str(requested or "").strip()
     if capability is not None:
         if value and value != capability.profile_id:
-            raise click.ClickException("the active capability is signed for another Profile")
+            raise click.ClickException(
+                "the active capability is signed for another Profile"
+            )
         return capability.profile_id
     if not value:
-        raise click.ClickException("--profile-id is required outside a Profile Agent runtime")
+        raise click.ClickException(
+            "--profile-id is required outside a Profile Agent runtime"
+        )
     return value
 
 
 def _document(file: Path | None, use_stdin: bool) -> dict:
     if bool(file) == bool(use_stdin):
         raise click.ClickException("choose exactly one of --file or --stdin")
-    raw = click.get_text_stream("stdin").read() if use_stdin else file.read_text("utf-8")
+    raw = (
+        click.get_text_stream("stdin").read() if use_stdin else file.read_text("utf-8")
+    )
     value = json.loads(raw)
     if not isinstance(value, dict):
         raise click.ClickException("assistance document must be a JSON object")
@@ -36,7 +42,9 @@ def _document(file: Path | None, use_stdin: bool) -> dict:
 
 def _input_options(function):
     function = click.option("--stdin", "use_stdin", is_flag=True)(function)
-    return click.option("--file", type=click.Path(path_type=Path, exists=True))(function)
+    return click.option("--file", type=click.Path(path_type=Path, exists=True))(
+        function
+    )
 
 
 @click.group("assist")
@@ -58,31 +66,76 @@ def inspect(profile_id: str) -> None:
     click.echo(json.dumps(value.get("page"), ensure_ascii=False, indent=2))
 
 
-@assist.command("validate")
+@assist.group("drafts")
+def drafts() -> None:
+    """Retain and apply structured page-assistance drafts."""
+
+
+@drafts.command("create")
 @_input_options
 @click.pass_obj
 @friendly_errors
-def validate(profile_id: str, file: Path | None, use_stdin: bool) -> None:
-    profile_id = _profile_id(profile_id)
+def create_draft(profile_id: str, file: Path | None, use_stdin: bool) -> None:
+    value = client_from_config().create_profile_agent_assistance_draft(
+        _profile_id(profile_id),
+        _document(file, use_stdin),
+    )
+    click.echo(json.dumps(value.get("draft"), ensure_ascii=False, indent=2))
+
+
+@drafts.command("list")
+@click.pass_obj
+@friendly_errors
+def list_drafts(profile_id: str) -> None:
+    value = client_from_config().list_profile_agent_assistance_drafts(
+        _profile_id(profile_id),
+    )
+    click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+@drafts.command("show")
+@click.argument("draft_id")
+@click.pass_obj
+@friendly_errors
+def show_draft(profile_id: str, draft_id: str) -> None:
+    value = client_from_config().get_profile_agent_assistance_draft(
+        _profile_id(profile_id),
+        draft_id,
+    )
+    click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+@drafts.command("validate")
+@click.argument("draft_id")
+@click.pass_obj
+@friendly_errors
+def validate_draft(profile_id: str, draft_id: str) -> None:
     client_from_config().validate_profile_agent_assistance(
-        profile_id, _document(file, use_stdin),
+        _profile_id(profile_id),
+        draft_id,
     )
-    click.echo("Assistance document is valid")
+    click.echo("Assistance draft is valid")
 
 
-@assist.command("apply")
-@_input_options
-@click.option("--tab-id", required=True)
-@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+@drafts.command("apply")
+@click.argument("draft_id")
 @click.pass_obj
 @friendly_errors
-def apply(
-    profile_id: str, file: Path | None, use_stdin: bool,
-    tab_id: str, expected_revision: int,
-) -> None:
-    profile_id = _profile_id(profile_id)
+def apply_draft(profile_id: str, draft_id: str) -> None:
     client_from_config().apply_profile_agent_assistance(
-        profile_id, tab_id=tab_id, expected_revision=expected_revision,
-        document=_document(file, use_stdin),
+        _profile_id(profile_id),
+        draft_id=draft_id,
     )
-    click.echo("Assistance document applied")
+    click.echo("Assistance draft applied")
+
+
+@drafts.command("delete")
+@click.argument("draft_id")
+@click.pass_obj
+@friendly_errors
+def delete_draft(profile_id: str, draft_id: str) -> None:
+    client_from_config().delete_profile_agent_assistance_draft(
+        _profile_id(profile_id),
+        draft_id,
+    )
+    click.echo("Assistance draft deleted")
