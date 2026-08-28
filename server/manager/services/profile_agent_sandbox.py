@@ -82,8 +82,6 @@ class ProfileAgentSandbox:
             "--new-session",
             "--unshare-all",
             "--share-net",
-            "--proc",
-            "/proc",
             "--dev",
             "/dev",
             "--tmpfs",
