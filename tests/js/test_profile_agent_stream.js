@@ -13,8 +13,9 @@ const protocolSource = fs.readFileSync(
 );
 vm.runInThisContext(protocolSource, {filename: 'chatkit-protocol.js'});
 global.EventSource = class {
-  constructor() {
+  constructor(url) {
     this.closed = false;
+    global.__lastEventSourceURL = url;
     global.__lastEventSource = this;
     queueMicrotask(() => {
       if (this.closed) return;
@@ -111,8 +112,9 @@ const state = {
       if (url.includes('/api/client/profile-agent?')) {
         statusReads += 1;
         return {status: {
-          event_sequence: 0,
+          event_sequence: statusReads === 1 ? 5 : 3,
           processing_conversation_id: statusReads > 1 ? 'conversation-1' : '',
+          processing_event_after: statusReads > 1 ? 0 : undefined,
         }};
       }
       if (url.includes('/api/client/profile-agent/conversation-items?')) {
@@ -202,7 +204,7 @@ const state = {
   threadID: 'provider-thread-1',
   threadTitle: '',
   createdAt: new Date(0).toISOString(),
-  cursor: 0,
+  cursor: 5,
   items: [{
     id: 'history-assistant-old',
     type: 'assistant_message',
@@ -265,6 +267,11 @@ const state = {
   assert.doesNotMatch(output, /TOOL_STDOUT/);
   assert.match(output, /98 products/);
   assert.match(output, /assistant_message\.content_part\.done/);
+  assert.match(
+    global.__lastEventSourceURL,
+    /after=0$/,
+    'a restarted app-server turn uses its own authoritative event cursor',
+  );
   assert.match(output, /thread\.item\.replaced/);
   assert.equal(global.__observedRuntime, true);
   assert.deepEqual(
