@@ -553,7 +553,11 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     stream_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-stream.js"
     ).read_text(encoding="utf-8")
+    event_source = (
+        REPO_ROOT / "server/manager/web/profile/chatkit-event-source.js"
+    ).read_text(encoding="utf-8")
     assert "/api/client/profile-agent/events" in stream_source
+    assert "context.raw" in event_source
     assert "FTProfileChatKitProtocol" in stream_source
     assert "alignEventCursor" in stream_source
     assert "eventStream = openEventStream" in stream_source
@@ -567,6 +571,9 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         "profile/chatkit-conversations.js"
     )
     assert chat_scripts.index("profile/chatkit-conversations.js") < chat_scripts.index(
+        "profile/chatkit-event-source.js"
+    )
+    assert chat_scripts.index("profile/chatkit-event-source.js") < chat_scripts.index(
         "profile/chatkit-stream.js"
     )
     assert chat_scripts.index("profile/chatkit-stream.js") < chat_scripts.index(
