@@ -197,10 +197,10 @@ sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
 sudo mv "$next_env" "$production_env"
 switched=1
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+  bash "$public_script" migrate-factor-control-identities
+sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" restart-app
 app_stopped=0
-sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
-  bash "$public_script" migrate-factor-control-identities
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" verify
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
