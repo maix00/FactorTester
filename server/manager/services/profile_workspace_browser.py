@@ -12,12 +12,19 @@ from server.manager.services.agent_workspace import (
 )
 from server.manager.storage.profile_runtime_store import ProfileRuntimeStore
 
-
 PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HIDDEN_NAMES = frozenset({".codex", ".git", ".env"})
-SECRET_SUFFIXES = frozenset({
-    ".db", ".sqlite", ".sqlite3", ".key", ".pem", ".token", ".secret",
-})
+SECRET_SUFFIXES = frozenset(
+    {
+        ".db",
+        ".sqlite",
+        ".sqlite3",
+        ".key",
+        ".pem",
+        ".token",
+        ".secret",
+    }
+)
 
 
 class ProfileWorkspaceError(ValueError):
@@ -84,36 +91,49 @@ class ProfileWorkspaceBrowser:
                 raise ProfileWorkspaceError("workspace symlinks are not downloadable")
         return resolved
 
-    def list(self, principal: str, profile_id: str, relative_path: str = "") -> dict[str, Any]:
+    def list(
+        self, principal: str, profile_id: str, relative_path: str = ""
+    ) -> dict[str, Any]:
         root = self._root(principal, profile_id)
         directory = self._safe_path(root, relative_path)
         if not directory.is_dir():
             raise ProfileWorkspaceError("workspace path is not a directory")
         current = "/".join(_relative_parts(relative_path))
         entries = []
-        for child in sorted(directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold())):
+        for child in sorted(
+            directory.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.casefold()),
+        ):
             if _is_hidden_or_sensitive(child.name):
                 continue
             if child.is_symlink() or not (child.is_dir() or child.is_file()):
                 continue
             child_path = f"{current}/{child.name}" if current else child.name
-            entries.append({
-                "name": child.name,
-                "path": child_path,
-                "kind": "directory" if child.is_dir() else "file",
-                "size_bytes": child.stat().st_size if child.is_file() else 0,
-                "downloadable": child.is_file(),
-            })
+            entries.append(
+                {
+                    "name": child.name,
+                    "path": child_path,
+                    "kind": "directory" if child.is_dir() else "file",
+                    "size_bytes": child.stat().st_size if child.is_file() else 0,
+                    "downloadable": child.is_file(),
+                }
+            )
         return {
             "profile_id": _profile_id(profile_id),
             "path": current,
             "entries": entries,
         }
 
-    def file_metadata(self, principal: str, profile_id: str, relative_path: str) -> dict[str, Any]:
+    def file_metadata(
+        self, principal: str, profile_id: str, relative_path: str
+    ) -> dict[str, Any]:
         root = self._root(principal, profile_id)
         path = self._safe_path(root, relative_path, allow_root=False)
-        if not path.is_file() or path.is_symlink() or _is_hidden_or_sensitive(path.name):
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or _is_hidden_or_sensitive(path.name)
+        ):
             raise ProfileWorkspaceError("workspace file is unavailable")
         digest = hashlib.sha256()
         with path.open("rb") as handle:
@@ -128,6 +148,25 @@ class ProfileWorkspaceBrowser:
             "sha256": digest.hexdigest(),
             "path": relative,
             "storage_server_id": self.server_id,
+        }
+
+    def delete_file(
+        self, principal: str, profile_id: str, relative_path: str
+    ) -> dict[str, Any]:
+        root = self._root(principal, profile_id)
+        path = self._safe_path(root, relative_path, allow_root=False)
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or _is_hidden_or_sensitive(path.name)
+        ):
+            raise ProfileWorkspaceError("workspace file is unavailable")
+        relative = "/".join(_relative_parts(relative_path))
+        path.unlink()
+        return {
+            "profile_id": _profile_id(profile_id),
+            "path": relative,
+            "deleted": True,
         }
 
 

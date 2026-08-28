@@ -8,17 +8,31 @@ from tools.cli.commands import assist as commands
 class _Client:
     def __init__(self) -> None:
         self.applied = None
+        self.document = None
 
     def inspect_profile_agent_assistance(self, profile_id: str):
         assert profile_id == "self-profile"
-        return {"page": {"tab_id": "factor-new", "assistance": {
-            "page_kind": "factor-create", "revision": 7,
-            "document": {"source": "old"}, "document_schema": {"type": "object"},
-        }}}
+        return {
+            "page": {
+                "tab_id": "factor-new",
+                "assistance": {
+                    "page_kind": "factor-create",
+                    "revision": 7,
+                    "document": {"source": "old"},
+                    "document_schema": {"type": "object"},
+                },
+            }
+        }
 
-    def validate_profile_agent_assistance(self, profile_id: str, document: dict):
+    def create_profile_agent_assistance_draft(self, profile_id: str, document: dict):
         assert profile_id == "self-profile"
         assert document == {"source": "new"}
+        self.document = document
+        return {"draft": {"draft_id": "a" * 32, "status": "draft"}}
+
+    def validate_profile_agent_assistance(self, profile_id: str, draft_id: str):
+        assert profile_id == "self-profile"
+        assert draft_id == "a" * 32
         return {"success": True, "valid": True}
 
     def apply_profile_agent_assistance(self, profile_id: str, **value):
@@ -32,26 +46,55 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     monkeypatch.setattr(commands, "load_capability", lambda: None)
     runner = CliRunner()
 
-    shown = runner.invoke(commands.assist, [
-        "--profile-id", "self-profile", "inspect",
-    ])
+    shown = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id",
+            "self-profile",
+            "inspect",
+        ],
+    )
     assert shown.exit_code == 0
     assert json.loads(shown.output)["assistance"]["revision"] == 7
 
-    validated = runner.invoke(commands.assist, [
-        "--profile-id", "self-profile", "validate", "--stdin",
-    ], input='{"source":"new"}')
+    created = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id",
+            "self-profile",
+            "drafts",
+            "create",
+            "--stdin",
+        ],
+        input='{"source":"new"}',
+    )
+    assert created.exit_code == 0
+    assert json.loads(created.output)["draft_id"] == "a" * 32
+
+    validated = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id",
+            "self-profile",
+            "drafts",
+            "validate",
+            "a" * 32,
+        ],
+    )
     assert validated.exit_code == 0
 
-    applied = runner.invoke(commands.assist, [
-        "--profile-id", "self-profile", "apply", "--stdin",
-        "--tab-id", "factor-new", "--expected-revision", "7",
-    ], input='{"source":"new"}')
+    applied = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id",
+            "self-profile",
+            "drafts",
+            "apply",
+            "a" * 32,
+        ],
+    )
     assert applied.exit_code == 0
-    assert client.applied == ("self-profile", {
-        "tab_id": "factor-new", "expected_revision": 7,
-        "document": {"source": "new"},
-    })
+    assert client.applied == ("self-profile", {"draft_id": "a" * 32})
 
 
 def test_assist_subcommand_help_does_not_require_agent_identity(monkeypatch) -> None:

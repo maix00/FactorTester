@@ -21,7 +21,6 @@ from server.manager.services.profile_workspace_browser import (
     ProfileWorkspaceBrowser,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRINCIPAL = "GTHT@MaxJJW@1234"
 PROFILE_ID = "profile-main"
@@ -77,7 +76,10 @@ def test_profile_codex_runtime_projects_only_selected_skills(tmp_path):
         "factortester-research",
     ]
     assert runtime.command("/usr/local/bin/codex") == [
-        "/usr/local/bin/codex", "app-server", "--listen", "stdio://",
+        "/usr/local/bin/codex",
+        "app-server",
+        "--listen",
+        "stdio://",
     ]
 
     environment = runtime.environment({"HOME": "/host/home"})
@@ -86,7 +88,9 @@ def test_profile_codex_runtime_projects_only_selected_skills(tmp_path):
     assert environment["XDG_CONFIG_HOME"] == str(runtime.config_root)
 
 
-def test_profile_codex_runtime_updates_owned_links_without_touching_unknown_files(tmp_path):
+def test_profile_codex_runtime_updates_owned_links_without_touching_unknown_files(
+    tmp_path,
+):
     catalog = AgentSkillCatalog(
         REPO_ROOT,
         REPO_ROOT / "server/manager/skills/catalog.json",
@@ -143,7 +147,8 @@ def test_profile_codex_runtime_keeps_codex_system_skills_directory(tmp_path):
     system_skills = runtime.skills_root / ".system"
     system_skills.mkdir()
     (system_skills / ".codex-system-skills.marker").write_text(
-        "codex-system-skills", encoding="utf-8",
+        "codex-system-skills",
+        encoding="utf-8",
     )
 
     runtime.sync([definition])
@@ -166,7 +171,9 @@ def test_profile_codex_runtime_rejects_unmarked_system_directory(tmp_path):
         runtime.sync([definition])
 
 
-def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(tmp_path):
+def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(
+    tmp_path,
+):
     catalog = AgentSkillCatalog(
         REPO_ROOT,
         REPO_ROOT / "server/manager/skills/catalog.json",
@@ -177,32 +184,46 @@ def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(
     protocol = AgentSkillProtocol(runtime)
     selected_path = runtime.skills_root / definitions[0]["skill_id"] / "SKILL.md"
 
-    requests = protocol.disable_unselected_requests([
-        {"name": definitions[0]["name"], "path": str(selected_path)},
-        {"name": "skill-installer", "path": str(tmp_path / "builtin/SKILL.md")},
-        {"name": "other", "path": str(tmp_path / "builtin/SKILL.md")},
-    ], first_request_id=20)
-    assert requests == [{
-        "jsonrpc": "2.0",
-        "id": 20,
-        "method": "skills/config/write",
-        "params": {"path": str((tmp_path / "builtin/SKILL.md").resolve()), "enabled": False},
-    }]
-    assert protocol.enable_selected_requests([
-        {"path": str(selected_path), "enabled": False},
-    ]) == [{
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "skills/config/write",
-        "params": {"path": str(selected_path.resolve()), "enabled": True},
-    }]
+    requests = protocol.disable_unselected_requests(
+        [
+            {"name": definitions[0]["name"], "path": str(selected_path)},
+            {"name": "skill-installer", "path": str(tmp_path / "builtin/SKILL.md")},
+            {"name": "other", "path": str(tmp_path / "builtin/SKILL.md")},
+        ],
+        first_request_id=20,
+    )
+    assert requests == [
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "skills/config/write",
+            "params": {
+                "path": str((tmp_path / "builtin/SKILL.md").resolve()),
+                "enabled": False,
+            },
+        }
+    ]
+    assert protocol.enable_selected_requests(
+        [
+            {"path": str(selected_path), "enabled": False},
+        ]
+    ) == [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "skills/config/write",
+            "params": {"path": str(selected_path.resolve()), "enabled": True},
+        }
+    ]
     assert protocol.skills_list_params() == {
         "cwds": [str(runtime.workspace_root)],
         "forceReload": True,
     }
-    assert AgentSkillProtocol.skills_from_response({
-        "result": {"data": [{"cwd": "/tmp", "skills": [{"name": "one"}]}]},
-    }) == [{"name": "one"}]
+    assert AgentSkillProtocol.skills_from_response(
+        {
+            "result": {"data": [{"cwd": "/tmp", "skills": [{"name": "one"}]}]},
+        }
+    ) == [{"name": "one"}]
     turn_input = protocol.turn_skill_input("factortester-research")
     assert turn_input["type"] == "skill"
     assert turn_input["name"] == "factortester-research-skill"
@@ -244,7 +265,9 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
     bindings = service.selected_skill_bindings(PRINCIPAL, PROFILE_ID)
     assert [item["skill_id"] for item in bindings] == saved["selected_skill_ids"]
     assert all((Path(item["path"]) / "SKILL.md").is_file() for item in bindings)
-    workspace = tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
+    workspace = (
+        tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
+    )
     assert (workspace / ".codex/skills/factortester-research").is_symlink()
     assert (workspace / ".codex/skills/research-obligation-cycle").is_symlink()
 
@@ -336,7 +359,11 @@ def test_profile_workspace_browser_hides_sensitive_paths_and_hashes_files(tmp_pa
     )
     root = browser.list(PRINCIPAL, PROFILE_ID)
     assert {item["name"] for item in root["entries"]} == {
-        "factor-worktree", "strategy-worktree", "research", "reports", "manifests",
+        "factor-worktree",
+        "strategy-worktree",
+        "research",
+        "reports",
+        "manifests",
     }
     research = browser.list(PRINCIPAL, PROFILE_ID, "research")
     assert [item["name"] for item in research["entries"]] == ["notes.txt"]
@@ -345,6 +372,8 @@ def test_profile_workspace_browser_hides_sensitive_paths_and_hashes_files(tmp_pa
     assert metadata["sha256"] == (
         "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
     )
+    assert browser.delete_file(PRINCIPAL, PROFILE_ID, "research/notes.txt")["deleted"]
+    assert not (workspace / "research" / "notes.txt").exists()
 
 
 class _Handler(AgentRoutesMixin):
@@ -352,10 +381,14 @@ class _Handler(AgentRoutesMixin):
         self.state = SimpleNamespace(
             agent_profiles=service,
             server_id="public-1",
-            client_state=SimpleNamespace(profiles=lambda _principal: [{
-                "profile_id": PROFILE_ID,
-                "server": {"server_id": "public-1"},
-            }]),
+            client_state=SimpleNamespace(
+                profiles=lambda _principal: [
+                    {
+                        "profile_id": PROFILE_ID,
+                        "server": {"server_id": "public-1"},
+                    }
+                ]
+            ),
         )
         self._payload = payload or {}
         self.response_status = None
@@ -400,15 +433,21 @@ def test_profile_skill_routes_read_and_replace_selection(tmp_path):
         executor_id="public-1",
     )
     handler = _Handler(service)
-    assert handler._get_agent_routes(
-        urlparse(f"/api/client/profile-skills?profile_id={PROFILE_ID}"),
-    ) is True
+    assert (
+        handler._get_agent_routes(
+            urlparse(f"/api/client/profile-skills?profile_id={PROFILE_ID}"),
+        )
+        is True
+    )
     assert _body(handler)["skills"][0]["selected"] is False
 
-    handler = _Handler(service, payload={
-        "profile_id": PROFILE_ID,
-        "skill_ids": ["factortester-research"],
-    })
+    handler = _Handler(
+        service,
+        payload={
+            "profile_id": PROFILE_ID,
+            "skill_ids": ["factortester-research"],
+        },
+    )
     assert handler._post_agent_routes(urlparse("/api/client/profile-skills")) is True
     assert handler.response_status == 200
     assert _body(handler)["selected_skill_ids"] == ["factortester-research"]
@@ -431,18 +470,25 @@ def test_profile_workspace_route_lists_only_safe_entries(tmp_path):
     (workspace / "research" / "notes.txt").write_text("hello", encoding="utf-8")
 
     handler = _Handler(service)
-    assert handler._get_agent_routes(urlparse(
-        f"/api/client/profile-workspace?profile_id={PROFILE_ID}&path=research",
-    )) is True
+    assert (
+        handler._get_agent_routes(
+            urlparse(
+                f"/api/client/profile-workspace?profile_id={PROFILE_ID}&path=research",
+            )
+        )
+        is True
+    )
     payload = _body(handler)
     assert payload["path"] == "research"
-    assert payload["entries"] == [{
-        "name": "notes.txt",
-        "path": "research/notes.txt",
-        "kind": "file",
-        "size_bytes": 5,
-        "downloadable": True,
-    }]
+    assert payload["entries"] == [
+        {
+            "name": "notes.txt",
+            "path": "research/notes.txt",
+            "kind": "file",
+            "size_bytes": 5,
+            "downloadable": True,
+        }
+    ]
 
 
 def test_profile_module_loads_skill_selector_after_manifest_entry():
@@ -451,31 +497,31 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
             encoding="utf-8",
         )
     )
-    profile_scripts = manifest["groups"]["profile"]
+    profile_dependencies = manifest["group_dependencies"]["profile"]
     assert "profile/workspace-browser.js" in manifest["scripts"]
-    assert "profile/workspace-browser.js" in profile_scripts
-    assert profile_scripts.index("profile/agent-skills.js") < profile_scripts.index(
-        "profile/profiles.js"
+    assert "profile-workspace" in profile_dependencies
+    assert "profile/workspace-browser.js" in manifest["groups"]["profile-workspace"]
+    assert "profile/agent-skills.js" in manifest["groups"]["profile-skills"]
+    assert "profile/agent-chat.js" in manifest["groups"]["profile-agent-chat"]
+    assert "profile/profiles.js" in manifest["groups"]["profile-directory"]
+    source = (REPO_ROOT / "server/manager/web/profile/agent-skills.js").read_text(
+        encoding="utf-8"
     )
-    assert profile_scripts.index("profile/agent-chat.js") < profile_scripts.index(
-        "profile/profiles.js"
-    )
-    source = (
-        REPO_ROOT / "server/manager/web/profile/agent-skills.js"
-    ).read_text(encoding="utf-8")
     assert "/api/client/profile-skills" in source
-    assert "method: \"POST\"" in source
+    assert 'method: "POST"' in source
     assert "安装任意" not in source
-    chat_source = (
-        REPO_ROOT / "server/manager/web/profile/agent-chat.js"
-    ).read_text(encoding="utf-8")
+    chat_source = (REPO_ROOT / "server/manager/web/profile/agent-chat.js").read_text(
+        encoding="utf-8"
+    )
     assert "/api/client/profile-agent/start" in chat_source
     assert "openai-chatkit" in chat_source
     assert "FTProfileChatKit" in chat_source
     assert "disabled: Boolean(options.readOnly)" not in chat_source
     assert "profile-chatkit-readonly-composer" in chat_source
     assert "不能发送问题" in chat_source
-    assert "options.settingsHost?.replaceChildren(runtimeControls.element)" in chat_source
+    assert (
+        "options.settingsHost?.replaceChildren(runtimeControls.element)" in chat_source
+    )
     assert "options.conversationOnly" in chat_source
     assert "passiveRuntimeControls" in chat_source
     assert "host.replaceChildren(chatStage)" in chat_source
@@ -496,7 +542,10 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     adapter_source = (
         REPO_ROOT / "server/manager/web/profile/chatkit-adapter.js"
     ).read_text(encoding="utf-8")
-    assert "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" in adapter_source
+    assert (
+        "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
+        in adapter_source
+    )
     assert "FTProfileChatKitProtocol" in adapter_source
     assert "params?.conversation_id" in adapter_source
     assert "params?.thread?.conversation_id" in adapter_source
@@ -510,26 +559,23 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "eventStream = openEventStream" in stream_source
     assert stream_source.index(
         "let eventStream = openEventStream(state, controller, signal);"
-    ) < stream_source.index(
-        'rpc(state, "turn/start"'
-    )
+    ) < stream_source.index('rpc(state, "turn/start"')
     assert "event.lastEventId" in stream_source
     assert "eventTurnID" in protocol_source
-    assert profile_scripts.index("profile/chatkit-protocol.js") < profile_scripts.index(
+    chat_scripts = manifest["groups"]["profile-agent-chat"]
+    assert chat_scripts.index("profile/chatkit-protocol.js") < chat_scripts.index(
         "profile/chatkit-conversations.js"
     )
-    assert profile_scripts.index("profile/chatkit-conversations.js") < profile_scripts.index(
-        "profile/agent-runtime-controls.js"
-    )
-    assert profile_scripts.index("profile/agent-runtime-controls.js") < profile_scripts.index(
+    assert chat_scripts.index("profile/chatkit-conversations.js") < chat_scripts.index(
         "profile/chatkit-stream.js"
     )
-    assert profile_scripts.index("profile/chatkit-stream.js") < profile_scripts.index(
+    assert chat_scripts.index("profile/chatkit-stream.js") < chat_scripts.index(
         "profile/chatkit-adapter.js"
     )
-    assert "profile/chatkit-conversations.js" in profile_scripts
-    assert "profile/chatkit-stream.js" in profile_scripts
-    assert "profile/chatkit-adapter.js" in profile_scripts
-    assert profile_scripts.index("profile/chatkit-adapter.js") < profile_scripts.index(
+    assert chat_scripts.index("profile/chatkit-adapter.js") < chat_scripts.index(
         "profile/agent-chat.js"
+    )
+    assert (
+        "profile/agent-runtime-controls.js"
+        in manifest["groups"]["profile-agent-session"]
     )

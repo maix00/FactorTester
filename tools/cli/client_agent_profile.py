@@ -48,11 +48,14 @@ class AgentProfileClientMixin(ClientMixinBase):
         executor_id: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(
-            self.session.post("/api/client/profile-runtime", {
-                "profile_id": profile_id,
-                "runtime_kind": runtime_kind,
-                "executor_id": executor_id,
-            }),
+            self.session.post(
+                "/api/client/profile-runtime",
+                {
+                    "profile_id": profile_id,
+                    "runtime_kind": runtime_kind,
+                    "executor_id": executor_id,
+                },
+            ),
         )
         return dict(data.get("runtime") or {})
 
@@ -64,11 +67,14 @@ class AgentProfileClientMixin(ClientMixinBase):
         agent_id: str = "",
     ) -> dict[str, Any]:
         return self._expect_success(
-            self.session.post("/api/client/profile-claims", {
-                "profile_id": profile_id,
-                "provider_id": provider_id,
-                "agent_id": agent_id,
-            }),
+            self.session.post(
+                "/api/client/profile-claims",
+                {
+                    "profile_id": profile_id,
+                    "provider_id": provider_id,
+                    "agent_id": agent_id,
+                },
+            ),
         )
 
     def heartbeat_profile_agent(
@@ -77,10 +83,13 @@ class AgentProfileClientMixin(ClientMixinBase):
         agent_id: str,
     ) -> dict[str, Any]:
         return self._expect_success(
-            self.session.post("/api/client/profile-claims/heartbeat", {
-                "claim_id": claim_id,
-                "agent_id": agent_id,
-            }),
+            self.session.post(
+                "/api/client/profile-claims/heartbeat",
+                {
+                    "claim_id": claim_id,
+                    "agent_id": agent_id,
+                },
+            ),
         )
 
     def release_profile_agent(
@@ -91,19 +100,24 @@ class AgentProfileClientMixin(ClientMixinBase):
         force: bool = False,
     ) -> bool:
         data = self._expect_success(
-            self.session.post("/api/client/profile-claims/release", {
-                "claim_id": claim_id,
-                "agent_id": agent_id,
-                "force": bool(force),
-            }),
+            self.session.post(
+                "/api/client/profile-claims/release",
+                {
+                    "claim_id": claim_id,
+                    "agent_id": agent_id,
+                    "force": bool(force),
+                },
+            ),
         )
         return bool(data.get("released"))
 
     def profile_agent_status(self, profile_id: str) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            "/api/client/profile-agent",
-            query={"profile_id": profile_id},
-        ))
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent",
+                query={"profile_id": profile_id},
+            )
+        )
 
     def list_profile_agent_models(
         self,
@@ -111,22 +125,26 @@ class AgentProfileClientMixin(ClientMixinBase):
         *,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            "/api/client/profile-agent/models",
-            query={
-                "profile_id": profile_id,
-                "refresh": "1" if refresh else "0",
-            },
-        ))
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent/models",
+                query={
+                    "profile_id": profile_id,
+                    "refresh": "1" if refresh else "0",
+                },
+            )
+        )
 
     def list_profile_agent_conversations(
         self,
         profile_id: str,
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            "/api/client/profile-agent/conversations",
-            query={"profile_id": profile_id},
-        ))
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent/conversations",
+                query={"profile_id": profile_id},
+            )
+        )
 
     def update_profile_agent_conversation_settings(
         self,
@@ -137,57 +155,111 @@ class AgentProfileClientMixin(ClientMixinBase):
         reasoning_effort: str = "",
         service_tier: str = "",
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/client/profile-agent/conversations/settings",
-            {
-                "profile_id": profile_id,
-                "conversation_id": conversation_id,
-                "model_id": model_id,
-                "reasoning_effort": reasoning_effort,
-                "service_tier": service_tier,
-            },
-        ))
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/conversations/settings",
+                {
+                    "profile_id": profile_id,
+                    "conversation_id": conversation_id,
+                    "model_id": model_id,
+                    "reasoning_effort": reasoning_effort,
+                    "service_tier": service_tier,
+                },
+            )
+        )
 
     def start_profile_agent(self, profile_id: str) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/client/profile-agent/start",
-            {"profile_id": profile_id},
-        ))
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/start",
+                {"profile_id": profile_id},
+            )
+        )
 
     def stop_profile_agent(self, profile_id: str) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/client/profile-agent/stop",
-            {"profile_id": profile_id},
-        ))
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/stop",
+                {"profile_id": profile_id},
+            )
+        )
 
     def inspect_profile_agent_assistance(self, profile_id: str) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            "/api/client/profile-agent/assistance",
-            query={"profile_id": profile_id},
-        ))
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent/assistance",
+                query={"profile_id": profile_id},
+            )
+        )
 
     def validate_profile_agent_assistance(
-        self, profile_id: str, document: dict[str, Any],
+        self,
+        profile_id: str,
+        draft_id: str,
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/client/profile-agent/assistance/validate",
-            {"profile_id": profile_id, "document": document},
-        ))
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/assistance/validate",
+                {"profile_id": profile_id, "draft_id": draft_id},
+            )
+        )
 
     def apply_profile_agent_assistance(
         self,
         profile_id: str,
         *,
-        tab_id: str,
-        expected_revision: int,
+        draft_id: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/assistance/apply",
+                {
+                    "profile_id": profile_id,
+                    "draft_id": draft_id,
+                },
+            )
+        )
+
+    def create_profile_agent_assistance_draft(
+        self,
+        profile_id: str,
         document: dict[str, Any],
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/client/profile-agent/assistance/apply",
-            {
-                "profile_id": profile_id,
-                "tab_id": tab_id,
-                "expected_revision": expected_revision,
-                "document": document,
-            },
-        ))
+        return self._expect_success(
+            self.session.post(
+                "/api/client/profile-agent/assistance/drafts",
+                {"profile_id": profile_id, "document": document},
+            )
+        )
+
+    def list_profile_agent_assistance_drafts(self, profile_id: str) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent/assistance/drafts",
+                query={"profile_id": profile_id},
+            )
+        )
+
+    def get_profile_agent_assistance_draft(
+        self,
+        profile_id: str,
+        draft_id: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.get(
+                "/api/client/profile-agent/assistance/drafts",
+                query={"profile_id": profile_id, "draft_id": draft_id},
+            )
+        )
+
+    def delete_profile_agent_assistance_draft(
+        self,
+        profile_id: str,
+        draft_id: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.delete(
+                "/api/client/profile-agent/assistance/drafts",
+                query={"profile_id": profile_id, "draft_id": draft_id},
+            )
+        )

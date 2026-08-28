@@ -53,7 +53,7 @@
     const note = document.createElement("p");
     note.className = "settings-muted";
     note.textContent = context.t(
-      "工作区只读浏览；敏感文件不会显示，文件通过 7997 数据通道下载。",
+      "敏感文件不会显示；文件通过 7997 数据通道下载，可由用户显式删除。",
     );
     const body = document.createElement("div");
     root.append(heading, note, body);
@@ -123,6 +123,25 @@
             actionButton.textContent = context.t("下载");
             actionButton.onclick = () => link.click();
             action.append(actionButton);
+            const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
+            deleteButton.className = "danger";
+            deleteButton.textContent = context.t("删除");
+            deleteButton.onclick = async () => {
+              if (!window.confirm(context.t(`确定删除 ${item.name}？此操作无法恢复。`))) return;
+              deleteButton.disabled = true;
+              try {
+                await context.api("/api/client/profile-workspace", {
+                  method: "DELETE",
+                  body: JSON.stringify({profile_id: profile.profile_id, path: item.path}),
+                });
+                await load();
+              } catch (error) {
+                context.showNotice(error.message || String(error), true);
+                deleteButton.disabled = false;
+              }
+            };
+            action.append(deleteButton);
           } else {
             action.textContent = context.t("打开");
           }
