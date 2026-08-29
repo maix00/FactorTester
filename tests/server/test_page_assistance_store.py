@@ -20,6 +20,16 @@ def _navigation() -> dict:
     }
 
 
+def test_schema_rejects_derived_test_settings_as_agent_writable_fields() -> None:
+    schema = {
+        "type": "object",
+        "x-forbidden-properties": ["local_settings", "settings"],
+    }
+
+    with pytest.raises(ValueError, match="read-only fields.*local_settings"):
+        validate_document(schema, {"local_settings": {"start_date": "2024-01-01"}})
+
+
 def test_json_schema_constraints_reject_incomplete_registered_values() -> None:
     schema = {
         "type": "object",
