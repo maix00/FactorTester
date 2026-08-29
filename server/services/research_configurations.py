@@ -16,7 +16,7 @@ import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 from tools.data.types.object_identity import unique_frozen_identities
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 ROLES = {"workspace", "template"}
 
 
@@ -58,6 +58,20 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     ui = payload.get("ui")
     if not isinstance(shared, dict) or not isinstance(analyses, dict) or not isinstance(ui, dict):
         raise ValueError("configuration requires object shared, analyses, and ui sections")
+    for kind, analysis in analyses.items():
+        if not isinstance(analysis, dict):
+            raise ValueError(f"analysis {kind!r} must be an object")
+        legacy = sorted({"local_settings", "settings"}.intersection(analysis))
+        if legacy:
+            raise ValueError(
+                f"analysis {kind!r} contains legacy settings fields: {legacy}"
+            )
+        execution = analysis.get("execution")
+        if execution is not None and (
+            not isinstance(execution, dict)
+            or not isinstance(execution.get("settings"), dict)
+        ):
+            raise ValueError(f"analysis {kind!r} execution.settings must be an object")
     shared = deepcopy(shared)
     # Family catalogs belong to the factor-create overlay, not to a reusable
     # test configuration.  Loading an existing workspace opportunistically
@@ -395,12 +409,14 @@ def legacy_snapshot_to_payload(
     from tools.testers.settings import backtest_setting_registry
 
     setting_keys = set(backtest_setting_registry.get("group_test").settings)
-    local_settings = deepcopy(source.get("local_settings") or {})
+    execution_settings = deepcopy(source.get("local_settings") or source.get("settings") or {})
     for key in setting_keys:
-        if key in source and key not in local_settings:
-            local_settings[key] = deepcopy(source[key])
+        if key in source and key not in execution_settings:
+            execution_settings[key] = deepcopy(source[key])
         backtest.pop(key, None)
-    backtest["local_settings"] = local_settings
+    backtest.pop("local_settings", None)
+    backtest.pop("settings", None)
+    backtest["execution"] = {"settings": execution_settings}
     group_settings = source.get("group_settings")
     if isinstance(group_settings, dict):
         groups = group_settings.get("groups")
@@ -499,9 +515,9 @@ def legacy_snapshot_to_payload(
     backtest.pop("factor", None)
     backtest.pop("factor_alias", None)
     backtest.pop("factorAlias", None)
-    local_settings.pop("factor", None)
-    local_settings.pop("factor_candidates", None)
-    backtest["local_settings"] = local_settings
+    execution_settings.pop("factor", None)
+    execution_settings.pop("factor_candidates", None)
+    backtest["execution"] = {"settings": execution_settings}
     return {
         "schema_version": SCHEMA_VERSION,
         "shared": {
@@ -520,19 +536,47 @@ def _repair_registered_backtest_settings(payload: dict[str, Any]) -> tuple[dict[
     backtest = (value.get("analyses") or {}).get("backtest")
     if not isinstance(backtest, dict):
         return value, False
-    local_settings = deepcopy(backtest.get("local_settings") or {})
-    changed = False
+    execution = deepcopy(backtest.get("execution") or {})
+    execution_settings = deepcopy(
+        execution.get("settings") or backtest.get("local_settings") or backtest.get("settings") or {}
+    )
+    changed = "local_settings" in backtest or "settings" in backtest
     for key in set(backtest_setting_registry.get("group_test").settings):
         if key not in backtest:
             continue
-        if key not in local_settings:
-            local_settings[key] = deepcopy(backtest[key])
+        if key not in execution_settings:
+            execution_settings[key] = deepcopy(backtest[key])
         backtest.pop(key, None)
         changed = True
     if changed:
-        backtest["local_settings"] = local_settings
+        backtest.pop("local_settings", None)
+        backtest.pop("settings", None)
+        backtest["execution"] = {"settings": execution_settings}
         validate_payload(value)
     return value, changed
+
+
+def migrate_execution_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Convert one editable schema-v2 payload to the schema-v3 execution shape."""
+    value = deepcopy(payload)
+    analyses = value.get("analyses")
+    if not isinstance(analyses, dict):
+        analyses = {}
+        value["analyses"] = analyses
+    for analysis in analyses.values():
+        if not isinstance(analysis, dict):
+            continue
+        execution = deepcopy(analysis.get("execution") or {})
+        settings = deepcopy(execution.get("settings") or {})
+        for legacy_key in ("local_settings", "settings"):
+            legacy = analysis.pop(legacy_key, None)
+            if isinstance(legacy, dict):
+                for key, item in legacy.items():
+                    settings.setdefault(key, deepcopy(item))
+        execution["settings"] = settings
+        analysis["execution"] = execution
+    value["schema_version"] = SCHEMA_VERSION
+    return validate_payload(value)
 
 
 def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
@@ -690,6 +734,7 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
         "legacy_workspace_schema": False,
         "workspaces_scanned": 0,
         "workspace_configurations_created": 0,
+        "configuration_schema_upgrades": 0,
         "legacy_run_schema": False,
         "runs_scanned": 0,
         "errors": [],
@@ -701,6 +746,36 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
         canonical_exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_configurations'"
         ).fetchone() is not None
+        if canonical_exists:
+            configuration_rows = conn.execute(
+                "SELECT configuration_id, schema_version, payload_json "
+                "FROM research_configurations WHERE deleted_at IS NULL"
+            ).fetchall()
+            for configuration_row in configuration_rows:
+                if int(configuration_row["schema_version"] or 0) >= SCHEMA_VERSION:
+                    continue
+                try:
+                    migrated_payload = migrate_execution_settings_payload(
+                        _loads(configuration_row["payload_json"]) or {}
+                    )
+                    report["configuration_schema_upgrades"] += 1
+                    if apply:
+                        conn.execute(
+                            "UPDATE research_configurations SET schema_version=?, "
+                            "payload_json=?, revision=revision+1, updated_at=? "
+                            "WHERE configuration_id=?",
+                            (
+                                SCHEMA_VERSION,
+                                _dumps(migrated_payload),
+                                time.time(),
+                                configuration_row["configuration_id"],
+                            ),
+                        )
+                except Exception as exc:
+                    report["errors"].append({
+                        "configuration_id": str(configuration_row["configuration_id"]),
+                        "error": str(exc),
+                    })
         workspace_exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_workspaces'"
         ).fetchone()

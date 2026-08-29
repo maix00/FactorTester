@@ -69,10 +69,10 @@ def resolve_flat_backtest_settings(
 ) -> dict[str, dict[str, Any]]:
     app = backtest_setting_registry.get("group_test")
     setting_keys = set(app.settings)
-    raw_local_settings = payload.get("local_settings")
+    raw_execution_settings = payload_execution_settings(payload)
     top_level_setting_keys = setting_keys.intersection(payload)
     # The immutable RunSpec stores registered settings only under
-    # ``local_settings``.  The job runner, however, receives an explicit
+    # ``execution.settings``. The job runner also receives an explicit
     # execution projection that mirrors those values at the top level for the
     # legacy runtime call contract.  That projection carries the complete
     # nested RunSpec as proof of its source; accept it only when every mirror
@@ -88,35 +88,36 @@ def resolve_flat_backtest_settings(
         and isinstance(run_spec_configuration.get("analyses"), dict)
         else None
     )
-    run_spec_local_settings = (
-        run_spec_analysis.get("local_settings")
-        if isinstance(run_spec_analysis, dict)
-        else None
+    run_spec_execution = (
+        run_spec_analysis.get("execution") if isinstance(run_spec_analysis, dict) else None
+    )
+    run_spec_execution_settings = (
+        run_spec_execution.get("settings") if isinstance(run_spec_execution, dict) else None
     )
     nested_run_spec = (
-        isinstance(raw_local_settings, dict)
-        and isinstance(run_spec_local_settings, dict)
+        isinstance(raw_execution_settings, dict)
+        and isinstance(run_spec_execution_settings, dict)
     )
     mirrored_runtime_settings = (
         nested_run_spec
-        and raw_local_settings == run_spec_local_settings
+        and raw_execution_settings == run_spec_execution_settings
         and all(
-            raw_local_settings.get(key) == payload.get(key)
+            raw_execution_settings.get(key) == payload.get(key)
             for key in top_level_setting_keys
         )
     )
     if top_level_setting_keys and not mirrored_runtime_settings:
         raise ValueError(
-            "registered settings must be nested under local_settings, "
+            "registered settings must be nested under execution.settings, "
             f"not top-level: {sorted(top_level_setting_keys)}"
         )
     local_values = (
         {
-            key: raw_local_settings[key]
+            key: raw_execution_settings[key]
             for key in setting_keys
-            if key in raw_local_settings
+            if key in raw_execution_settings
         }
-        if isinstance(raw_local_settings, dict)
+        if isinstance(raw_execution_settings, dict)
         else {}
     )
     group_ids: list[str] = []
@@ -139,9 +140,10 @@ def resolve_flat_backtest_settings(
     )
 
 
-def payload_local_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    local_settings = payload.get("local_settings")
-    return local_settings if isinstance(local_settings, dict) else {}
+def payload_execution_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    execution = payload.get("execution")
+    settings = execution.get("settings") if isinstance(execution, dict) else None
+    return settings if isinstance(settings, dict) else {}
 
 
 def _setting_value_label(definition: Any, value: Any) -> str:
@@ -161,8 +163,8 @@ def silent_default_settings_for_run(
     """Summarize strategy defaults applied to a sparse request."""
     app = backtest_setting_registry.get("group_test")
     silent_keys = ("allocation_policy", "rebalance_trigger", "position_policy")
-    local_settings = payload_local_settings(payload)
-    explicit_local = set(local_settings) if local_settings else set(payload)
+    execution_settings = payload_execution_settings(payload)
+    explicit_local = set(execution_settings) if execution_settings else set(payload)
     explicit_by_group: dict[str, set[str]] = {}
     for index, item in enumerate(list(groups) + list(ls_configs or [])):
         if not isinstance(item, dict):
@@ -207,12 +209,12 @@ def silent_default_settings_for_run(
 def runtime_datetimes(payload: dict[str, Any]):
     from tools.data.types import DataTime
 
-    local_settings = payload_local_settings(payload)
+    execution_settings = payload_execution_settings(payload)
 
     def value(key: str, default: Any = None) -> Any:
         return (
-            local_settings[key]
-            if local_settings.get(key) not in (None, "")
+            execution_settings[key]
+            if execution_settings.get(key) not in (None, "")
             else default
         )
 
@@ -239,11 +241,11 @@ def runtime_datetimes(payload: dict[str, Any]):
 
 
 def resolve_run_datetimes(
-    local_settings: dict[str, Any],
+    execution_settings: dict[str, Any],
     resolved_settings: dict[str, dict[str, Any]],
 ):
     del resolved_settings
-    return runtime_datetimes({"local_settings": local_settings})
+    return runtime_datetimes({"execution": {"settings": execution_settings}})
 
 
 def group_product_path_selection_id(group: dict[str, Any]) -> str:
@@ -276,14 +278,14 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
 def _strip_implicit_auto_ledger_defaults(
     settings: dict[str, Any],
     *,
-    local_settings: dict[str, Any],
+    execution_settings: dict[str, Any],
     group_payload: dict[str, Any],
 ) -> None:
     engine_mode = str(settings.get("engine_mode") or "auto").lower()
     if engine_mode not in {"auto", "exact"}:
         return
     for key, default in _AUTO_INFERRED_LEDGER_DEFAULTS.items():
-        if key in local_settings or key in group_payload:
+        if key in execution_settings or key in group_payload:
             continue
         if settings.get(key) == default:
             settings.pop(key, None)
@@ -326,10 +328,10 @@ def resolve_group_strategy_settings(
     group_settings = dict(
         resolved_backtest_settings.get(group_id) or fallback_group_settings
     )
-    local_settings = payload_local_settings(data)
+    execution_settings = payload_execution_settings(data)
     _strip_implicit_auto_ledger_defaults(
         group_settings,
-        local_settings=local_settings,
+        execution_settings=execution_settings,
         group_payload=group,
     )
 
@@ -436,7 +438,7 @@ def resolve_long_short_strategy_settings(
     resolved_backtest_settings: dict[str, dict[str, Any]],
     source_settings_by_alias: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
-    local_settings: dict[str, Any] | None = None,
+    execution_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a peer long-short strategy from source strategy ids."""
     del resolved_backtest_settings
@@ -486,7 +488,7 @@ def resolve_long_short_strategy_settings(
         settings["product_mask_names"] = tuple(product_list)
     _strip_implicit_auto_ledger_defaults(
         settings,
-        local_settings=local_settings or {},
+        execution_settings=execution_settings or {},
         group_payload=config,
     )
     return settings

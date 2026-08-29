@@ -240,9 +240,9 @@
       ? buildAnalysis(state, factors, selectedFamily(state, factor), group)
       : {
         ...(state.analysis || {}),
-        local_settings: FTTestConfigurationCompiler.executionSettings(
+        execution: {settings: FTTestConfigurationCompiler.executionSettings(
           state.manifest, state.values || {},
-        ),
+        )},
       };
     payload.analyses[state.kind] = analysis;
     payload.ui = payload.ui || {};
@@ -309,8 +309,7 @@
         factor_family_alias: family,
         factor_alias: alias,
         factor_ref: factor.ref,
-        settings,
-        local_settings: settings,
+        execution: {settings},
       }, state.values, {stripRootRegistered: true});
     }
     let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
@@ -348,7 +347,7 @@
       if (id && selection) productSelections[id] = structuredClone(selection);
     }
     return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
-      ...prior, ...settings, local_settings: settings, groups,
+      ...prior, ...settings, execution: {settings}, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
     }, state.values, {stripRootRegistered: true});
   }

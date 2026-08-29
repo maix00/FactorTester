@@ -908,19 +908,19 @@ def test_setting_manifest_does_not_read_page_runtime_time() -> None:
     }
 
 
-def test_local_settings_supplies_run_defaults_without_flat_frontend_values() -> None:
+def test_execution_settings_supplies_run_defaults_without_flat_frontend_values() -> None:
     from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
 
     resolved = _resolve_flat_backtest_settings(
         {
-            "local_settings": {
+            "execution": {"settings": {
                 "start_date": "2026-01-01",
                 "end_date": "2026-01-31",
                 "start_time": "09:00",
                 "end_time": "15:00",
                 "time_precision": "exact",
                 "timezone": "Asia/Shanghai",
-            },
+            }},
         },
         [{"id": "group-1"}],
         [],
@@ -942,10 +942,10 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
     )
 
     payload = {
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
-        },
+        }},
     }
     groups = [{"id": "group-1"}]
     resolved = _resolve_flat_backtest_settings(payload, groups, [])
@@ -966,10 +966,10 @@ def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
     )
 
     payload = {
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
-        },
+        }},
     }
     groups = [{"id": "group-1", "allocation_policy": "equal_notional"}]
     resolved = _resolve_flat_backtest_settings(payload, groups, [])
@@ -979,17 +979,17 @@ def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
     assert "allocation_policy" not in {item["setting_key"] for item in defaults}
 
 
-def test_local_settings_dict_is_the_only_run_local_settings_source() -> None:
+def test_execution_settings_dict_is_the_only_run_settings_source() -> None:
     from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
 
     resolved = _resolve_flat_backtest_settings(
         {
-            "local_settings": {
+            "execution": {"settings": {
                 "allocation_policy": "equal_notional",
                 "initial_capital_major": 12_345_678,
                 "start_date": "2025-01-01",
                 "end_date": "2025-01-31",
-            },
+            }},
         },
         [{"id": "group-1"}],
         [],
@@ -1006,11 +1006,11 @@ def test_new_run_payload_rejects_top_level_registered_settings() -> None:
     with pytest.raises(ValueError, match="registered settings must be nested"):
         _resolve_flat_backtest_settings(
             {
-                "local_settings": {
+                "execution": {"settings": {
                     "allocation_policy": "equal_notional",
                     "start_date": "2025-01-01",
                     "end_date": "2025-01-31",
-                },
+                }},
                 "allocation_policy": "inverse_volatility",
             },
             [{"id": "group-1"}],
@@ -1018,10 +1018,10 @@ def test_new_run_payload_rejects_top_level_registered_settings() -> None:
         )
 
 
-def test_runtime_execution_projection_reads_nested_local_settings() -> None:
+def test_runtime_execution_projection_reads_nested_execution_settings() -> None:
     from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
 
-    local_settings = {
+    execution_settings = {
         "allocation_policy": "equal_notional",
         "initial_capital_major": 12_345_678,
         "start_date": "2025-01-01",
@@ -1031,11 +1031,11 @@ def test_runtime_execution_projection_reads_nested_local_settings() -> None:
         {
             "run_spec": {
                 "configuration": {
-                    "analyses": {"backtest": {"local_settings": local_settings}},
+                    "analyses": {"backtest": {"execution": {"settings": execution_settings}}},
                 },
             },
-            "local_settings": local_settings,
-            **local_settings,
+            "execution": {"settings": execution_settings},
+            **execution_settings,
         },
         [{"id": "group-1"}],
         [],
@@ -1052,11 +1052,11 @@ def test_conflicting_runtime_execution_projection_is_rejected() -> None:
         _resolve_flat_backtest_settings(
             {
                 "run_spec": {"configuration": {}},
-                "local_settings": {
+                "execution": {"settings": {
                     "allocation_policy": "equal_notional",
                     "start_date": "2025-01-01",
                     "end_date": "2025-01-31",
-                },
+                }},
                 "allocation_policy": "inverse_volatility",
             },
             [{"id": "group-1"}],
@@ -1064,18 +1064,18 @@ def test_conflicting_runtime_execution_projection_is_rejected() -> None:
         )
 
 
-def test_runtime_datetime_reads_time_values_from_local_settings() -> None:
+def test_runtime_datetime_reads_time_values_from_execution_settings() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
     start_dt, end_dt = _runtime_datetimes({
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2025-02-03",
             "end_date": "2025-02-28",
             "start_time": "10:15",
             "end_time": "14:45",
             "time_precision": "exact",
             "timezone": "Asia/Shanghai",
-        },
+        }},
     })
 
     assert start_dt.is_set
@@ -1127,18 +1127,18 @@ def test_group_time_windows_do_not_form_run_envelope_without_local_time_window()
         )
 
 
-def test_local_settings_builds_explicit_start_and_end_datetimes() -> None:
+def test_execution_settings_builds_explicit_start_and_end_datetimes() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
     start_dt, end_dt = _runtime_datetimes({
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
             "start_time": "09:00",
             "end_time": "15:00",
             "time_precision": "exact",
             "timezone": "Asia/Shanghai",
-        },
+        }},
     })
 
     assert start_dt.is_set
@@ -1147,21 +1147,21 @@ def test_local_settings_builds_explicit_start_and_end_datetimes() -> None:
     assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
 
 
-def test_local_settings_builds_trading_day_datetimes_without_time_or_timezone() -> None:
+def test_execution_settings_builds_trading_day_datetimes_without_time_or_timezone() -> None:
     from server.modules.single_factor_test.group import (
         _resolve_flat_backtest_settings,
         _runtime_datetimes,
     )
 
     payload = {
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2025-04-01",
             "end_date": "2025-04-30",
             "start_time": "11:23",
             "end_time": "14:56",
             "time_precision": "trading_day",
             "timezone": "Asia/Shanghai",
-        },
+        }},
     }
     start_dt, end_dt = _runtime_datetimes(payload)
     resolved = _resolve_flat_backtest_settings(payload, [{"id": "group-1"}], [])
@@ -1181,33 +1181,33 @@ def test_legacy_day_precision_is_rejected() -> None:
     with pytest.raises(ValueError, match="invalid value for time_precision"):
         _resolve_flat_backtest_settings(
             {
-                "local_settings": {
+                "execution": {"settings": {
                     "start_date": "2025-04-01",
                     "end_date": "2025-04-30",
                     "time_precision": "day",
-                },
+                }},
             },
             [{"id": "group-1"}],
             [],
         )
 
 
-def test_local_settings_reports_missing_dates_before_dataindex_slice() -> None:
+def test_execution_settings_reports_missing_dates_before_dataindex_slice() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
     with pytest.raises(ValueError, match="运行时间范围缺失: start_date, end_date"):
         _runtime_datetimes({
-            "local_settings": {
+            "execution": {"settings": {
                 "time_precision": "exact",
                 "timezone": "Asia/Shanghai",
-            },
+            }},
         })
 
 
-def test_group_run_resolves_window_from_payload_local_settings() -> None:
+def test_group_run_resolves_window_from_payload_execution_settings() -> None:
     """_resolve_run_datetimes (called directly by run_group_test_stream's
     flattened pipeline, before groups/ls_configs are resolved) must read the
-    run window from payload local_settings, not from any page-runtime-owned
+    run window from payload execution settings, not from any page-runtime-owned
     default -- the same contract the deleted per-selection FactorTester loop
     used to exercise indirectly via create_factor_tester_for_product_path_
     selection's start_dt/end_dt arguments."""

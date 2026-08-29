@@ -262,7 +262,7 @@
   function savedSettings(state) {
     const payload = state.workspace?.configuration?.payload || {};
     return payload.ui?.[state.kind]?.settings
-      || state.analysis.local_settings || state.analysis.settings || {};
+      || state.analysis.execution?.settings || {};
   }
 
   function savedMountedTabs(state) {

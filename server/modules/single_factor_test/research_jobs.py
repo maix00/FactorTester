@@ -855,13 +855,19 @@ def _execution_payload(configuration: dict, kind: str) -> dict:
         raise ValueError(f"configuration has no {kind} analysis payload")
     shared = deepcopy(payload["shared"])
     execution = {**shared, **deepcopy(analysis)}
-    # The frozen configuration keeps registered local fields exactly once in
-    # ``local_settings``.  Runners still receive their established flat input
+    # The frozen configuration keeps registered fields exactly once in
+    # ``execution.settings``. Runners still receive their established flat input
     # contract, so materialize that view only at the execution boundary; it
     # never re-enters the RunSpec or configuration snapshot.
-    local_settings = execution.get("local_settings")
-    if isinstance(local_settings, dict):
-        execution = {**execution, **deepcopy(local_settings)}
+    execution_contract = execution.get("execution")
+    settings = (
+        execution_contract.get("settings")
+        if isinstance(execution_contract, dict)
+        else None
+    )
+    if not isinstance(settings, dict):
+        raise ValueError("RunSpec v4 requires analysis.execution.settings")
+    execution = {**execution, **deepcopy(settings)}
     execution["research_configuration"] = {
         "configuration_id": configuration["configuration_id"],
         "revision": configuration["revision"],

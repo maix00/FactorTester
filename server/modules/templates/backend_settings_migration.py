@@ -51,22 +51,26 @@ def migrate_snapshot_backend_settings(
 
     migrated.pop("time_data", None)
     migrated.pop("backendBacktestSettings", None)
-    local_settings = migrated.get("local_settings")
-    if not isinstance(local_settings, dict):
-        local_settings = {}
-    _normalize_product_path_selection(local_settings.get("product_path_selection"), product_groups or [])
-    for key in list(local_settings.keys()):
+    execution = migrated.get("execution")
+    execution = deepcopy(execution) if isinstance(execution, dict) else {}
+    execution_settings = execution.get("settings")
+    if not isinstance(execution_settings, dict):
+        execution_settings = deepcopy(migrated.get("local_settings") or {})
+    for key in list(execution_settings.keys()):
         if key in LEGACY_LOCAL_KEYS or key == "backendBacktestSettings":
-            local_settings.pop(key, None)
+            execution_settings.pop(key, None)
     for key, value in local_defaults.items():
         if defaults.get(key) != value:
-            local_settings[key] = value
+            execution_settings[key] = value
         else:
-            local_settings.pop(key, None)
-    if local_settings:
-        migrated["local_settings"] = local_settings
-    else:
-        migrated.pop("local_settings", None)
+            execution_settings.pop(key, None)
+    _normalize_product_path_selection(
+        execution_settings.get("product_path_selection"), product_groups or [],
+    )
+    migrated.pop("local_settings", None)
+    migrated.pop("settings", None)
+    execution["settings"] = execution_settings
+    migrated["execution"] = execution
 
     return migrated, migrated != before
 

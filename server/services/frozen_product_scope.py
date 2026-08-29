@@ -118,16 +118,18 @@ def _compact_execution_projections(
     for analysis in analyses.values():
         if not isinstance(analysis, dict):
             continue
-        local_settings = analysis.get("local_settings")
-        if isinstance(local_settings, dict):
-            for key, value in tuple(local_settings.items()):
+        execution = analysis.get("execution")
+        execution_settings = (
+            execution.get("settings") if isinstance(execution, dict) else None
+        )
+        if isinstance(execution_settings, dict):
+            for key, value in tuple(execution_settings.items()):
                 if key in analysis and analysis[key] == value:
                     analysis.pop(key, None)
-        # ``settings`` was an older duplicate of ``local_settings``.  New
-        # configurations never write it; remove the duplicate during freeze
-        # rather than accepting it as a second executable source.
-        if analysis.get("settings") == local_settings:
-            analysis.pop("settings", None)
+        if "local_settings" in analysis or "settings" in analysis:
+            raise ValueError(
+                "legacy analysis settings are incompatible; rebuild this RunSpec"
+            )
         for group in analysis.get("groups") or []:
             if not isinstance(group, dict):
                 continue

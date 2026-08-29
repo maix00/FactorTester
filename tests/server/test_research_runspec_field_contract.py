@@ -100,17 +100,21 @@ def _update(client, workspace) -> None:
     shared = dict(workspace["configuration"]["payload"]["shared"])
     factor_ref = shared["factors"][0]["ref"]
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "shared": shared,
         "analyses": {
-            "ic": {"factor_configs": [{"N": "10d"}], "product_paths": ["core8_path"]},
+            "ic": {
+                "execution": {"settings": {}},
+                "factor_configs": [{"N": "10d"}],
+                "product_paths": ["core8_path"],
+            },
             "backtest": {
-                "local_settings": {
+                "execution": {"settings": {
                     "start_date": "2024-01-02",
                     "end_date": "2024-02-02",
                     "account_currency": "USD",
                     "base_currency": "CNY",
-                },
+                }},
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
                     "factor_candidate_refs": [factor_ref],
@@ -176,13 +180,13 @@ def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -
     controls = {"retention_mode", "step_mode", "output_requests"}
     assert {key for key in run_spec if key in controls} == _run_control_keys("group_test")
     assert run_spec["step_mode"] is False
-    assert run_spec["run_spec_version"] == 3
+    assert run_spec["run_spec_version"] == 4
     assert "factor_families" not in run_spec["configuration"]["shared"]
     group = run_spec["configuration"]["analyses"]["backtest"]["groups"][0]
     assert group["factor_candidate_refs"] == [
         workspace["configuration"]["payload"]["shared"]["factors"][0]["ref"],
     ]
     assert {"factorAlias", "factorAliases", "factor_alias", "factor_aliases"}.isdisjoint(group)
-    local_settings = run_spec["configuration"]["analyses"]["backtest"]["local_settings"]
-    assert local_settings["account_currency"] == "USD"
-    assert local_settings["base_currency"] == "CNY"
+    execution_settings = run_spec["configuration"]["analyses"]["backtest"]["execution"]["settings"]
+    assert execution_settings["account_currency"] == "USD"
+    assert execution_settings["base_currency"] == "CNY"

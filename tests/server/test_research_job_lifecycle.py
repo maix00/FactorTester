@@ -43,6 +43,7 @@ def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
     }
     payload["analyses"]["ic"] = {
         "schema_version": 2,
+        "execution": {"settings": {}},
         "configuration_groups": [{
             "config_group_id": "cg-alpha",
             "product_scope_ref": "product-scope:core8",
@@ -159,12 +160,15 @@ def _payload(workspace, *, n: str = "10d"):
     shared = dict(workspace["configuration"]["payload"]["shared"])
     shared["user_defined_shared_setting"] = {"enabled": True, "threshold": 1.25}
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "shared": shared,
         "analyses": {
-            "ic": {"factor_configs": [{"N": n}], "product_paths": ["core8_path"]},
+            "ic": {
+                "execution": {"settings": {}},
+                "factor_configs": [{"N": n}], "product_paths": ["core8_path"],
+            },
             "backtest": {
-                "local_settings": {"user_defined_local_setting": "kept"},
+                "execution": {"settings": {"user_defined_local_setting": "kept"}},
                 "groups": [{
                     "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
                     "factorAlias": "MmRet|$F:1d",
@@ -177,8 +181,12 @@ def _payload(workspace, *, n: str = "10d"):
                 }],
                 "product_selections": {"core8": {"id": "core8", "selected_paths": ["core8_path"]}},
             },
-            "factor_evaluation": {"factor_alias": "MmRet|$F:1d"},
-            "factor_type_analysis": {"factor_alias": "MmRet|$F:1d"},
+            "factor_evaluation": {
+                "execution": {"settings": {}}, "factor_alias": "MmRet|$F:1d",
+            },
+            "factor_type_analysis": {
+                "execution": {"settings": {}}, "factor_alias": "MmRet|$F:1d",
+            },
         },
         "ui": {"selected_tab": "ic"},
     }
@@ -289,7 +297,7 @@ def test_template_save_and_load_copy_the_same_configuration_schema(client) -> No
     assert saved.status_code == 201
     assert value["payload"] == template["payload"]
     assert value["payload"]["shared"]["user_defined_shared_setting"]["threshold"] == 1.25
-    assert value["payload"]["analyses"]["backtest"]["local_settings"]["user_defined_local_setting"] == "kept"
+    assert value["payload"]["analyses"]["backtest"]["execution"]["settings"]["user_defined_local_setting"] == "kept"
     assert value["payload"]["analyses"]["backtest"]["groups"][0]["user_defined_group_setting"] == {"mode": "custom"}
     assert value["payload"]["analyses"]["backtest"]["ls_configs"][0]["user_defined_ls_setting"] == [1, 2, 3]
     assert value["source_configuration_id"] == template["configuration_id"]
@@ -360,8 +368,8 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
     assert templates[0]["payload"]["analyses"]["backtest"]["groups"][0]["splitCount"] == 5
     migrated_backtest = templates[0]["payload"]["analyses"]["backtest"]
     assert "factor" not in migrated_backtest and "factor_candidates" not in migrated_backtest
-    assert "factor" not in migrated_backtest["local_settings"]
-    assert "factor_candidates" not in migrated_backtest["local_settings"]
+    assert "factor" not in migrated_backtest["execution"]["settings"]
+    assert "factor_candidates" not in migrated_backtest["execution"]["settings"]
     assert migrated_backtest["groups"][0]["factor_candidate_refs"] == [
         factor["ref"],
     ]
@@ -495,7 +503,7 @@ def test_workspace_delete_preserves_immutable_snapshot_evidence(client) -> None:
 def test_run_preview_matches_submission_without_persisting(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
-    payload["analyses"]["backtest"]["local_settings"].update({
+    payload["analyses"]["backtest"]["execution"]["settings"].update({
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
     })
@@ -533,7 +541,7 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
     preview_payload = preview.get_json()
     assert preview_payload["success"] is True
     assert len(preview_payload["run_spec_hash"]) == 64
-    assert preview_payload["run_spec_version"] == 3
+    assert preview_payload["run_spec_version"] == 4
     assert preview_payload["frozen_factors"]
     assert all(
         "source_code" not in manifest
@@ -574,7 +582,7 @@ def test_run_preview_matches_submission_without_persisting(client, monkeypatch) 
 def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
-    payload["analyses"]["backtest"]["local_settings"].update({
+    payload["analyses"]["backtest"]["execution"]["settings"].update({
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
     })
@@ -1004,7 +1012,7 @@ class ProfileScreen(FactorFamily):
         ).cs_ordinal_rank(ascending=False)
 '''
     factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
-    payload["analyses"]["backtest"]["local_settings"].update({
+    payload["analyses"]["backtest"]["execution"]["settings"].update({
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
     })
@@ -1814,10 +1822,39 @@ def test_migration_repairs_registered_settings_in_already_migrated_templates(cli
     applied = research_configurations.migrate_legacy_templates(apply=True)
     repaired = research_configurations.list_templates(owner="alice")[0]
 
-    assert dry_run["canonical_templates_repaired"] == 0
-    assert applied["canonical_templates_repaired"] == 0
+    assert dry_run["canonical_templates_repaired"] == 1
+    assert applied["canonical_templates_repaired"] == 1
     backtest = repaired["payload"]["analyses"]["backtest"]
     assert backtest["factor"] == "MmRet|P:CA|N:10d|$F:1d"
+    assert backtest["execution"]["settings"] == {"start_date": "2024-01-01"}
+    assert "local_settings" not in backtest
+
+
+def test_configuration_schema_migration_replaces_legacy_settings_atomically(client) -> None:
+    workspace = _create_workspace(client)
+    legacy = workspace["configuration"]["payload"]
+    legacy["schema_version"] = 2
+    legacy["analyses"]["backtest"] = {
+        "local_settings": {"start_date": "2024-01-01"},
+        "groups": [],
+    }
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            "UPDATE research_configurations SET schema_version=2, payload_json=? "
+            "WHERE configuration_id=?",
+            (json.dumps(legacy), workspace["configuration"]["configuration_id"]),
+        )
+
+    report = research_configurations.migrate_legacy_workspaces_and_runs(apply=True)
+    migrated = research_configurations.load_workspace_configuration(
+        workspace_id=workspace["workspace_id"], owner="alice",
+    )
+
+    assert report["configuration_schema_upgrades"] == 1
+    assert migrated["schema_version"] == 3
+    backtest = migrated["payload"]["analyses"]["backtest"]
+    assert backtest["execution"]["settings"] == {"start_date": "2024-01-01"}
+    assert "local_settings" not in backtest
 
 
 def test_all_analyses_dispatch_importable_process_runners(client) -> None:

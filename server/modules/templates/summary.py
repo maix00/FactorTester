@@ -11,8 +11,9 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
     """Build a readable summary from a saved single-factor-test snapshot."""
     summary: dict[str, Any] = {}
 
-    local_settings = snapshot.get('local_settings') or {}
-    backend_local = local_settings if isinstance(local_settings, dict) else {}
+    execution = snapshot.get('execution') or {}
+    backend_local = execution.get('settings') if isinstance(execution, dict) else {}
+    backend_local = backend_local if isinstance(backend_local, dict) else {}
 
     if backend_local:
         try:
@@ -196,9 +197,10 @@ def _snapshot_product_path_selections(snapshot: dict) -> list[dict]:
         seen.add(sid)
         selections.append(item)
 
-    local_settings = snapshot.get('local_settings')
-    if isinstance(local_settings, dict):
-        add(local_settings.get('product_path_selection'))
+    execution = snapshot.get('execution')
+    settings = execution.get('settings') if isinstance(execution, dict) else None
+    if isinstance(settings, dict):
+        add(settings.get('product_path_selection'))
     group_settings = snapshot.get('group_settings')
     if isinstance(group_settings, dict):
         for group in group_settings.get('groups') or []:

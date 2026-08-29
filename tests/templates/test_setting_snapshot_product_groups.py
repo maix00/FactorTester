@@ -66,9 +66,9 @@ def test_product_group_template_builds_matching_product_path_selection(monkeypat
 def test_manual_submission_and_missing_group_keep_saved_path_snapshot():
     template = {
         "snapshot": {
-            "local_settings": {
+            "execution": {"settings": {
                 "product_path_selection": {"paths": ["Manual/Path"], "selected_paths": ["Manual/Path"]},
-            },
+            }},
             "group_settings": {
                 "groups": [{
                     "product_path_selection": {"product_group": "Removed", "paths": ["Saved/Path"], "selected_paths": ["Saved/Path"]},
@@ -79,5 +79,5 @@ def test_manual_submission_and_missing_group_keep_saved_path_snapshot():
 
     refreshed = _refresh_template_product_group_paths(template, [{"name": "Other", "paths": ["New/Path"]}])
 
-    assert refreshed["snapshot"]["local_settings"]["product_path_selection"]["paths"] == ["Manual/Path"]
+    assert refreshed["snapshot"]["execution"]["settings"]["product_path_selection"]["paths"] == ["Manual/Path"]
     assert refreshed["snapshot"]["group_settings"]["groups"][0]["product_path_selection"]["paths"] == ["Saved/Path"]

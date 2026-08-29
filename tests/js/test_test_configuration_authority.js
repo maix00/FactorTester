@@ -39,11 +39,12 @@ for (const kind of ["backtest", "ic", "future-test-kind"]) {
   const executable = FTTestConfigurationCompiler.executableConfiguration(
     authoring, kind, manifest,
   );
-  assert.deepEqual(executable.analyses[kind].local_settings, {
+  assert.deepEqual(executable.analyses[kind].execution.settings, {
     start_date: "2024-01-01", end_date: "2025-01-31",
     start_time: "09:00", end_time: "15:00",
   });
   assert.equal(executable.analyses[kind].settings, undefined);
+  assert.equal(executable.analyses[kind].local_settings, undefined);
   assert.deepEqual(FTTestConfigurationCompiler.authoringMountedTabs(
     manifest, configuration.ui[kind].settings, [],
   ), ["time", "notes"]);
