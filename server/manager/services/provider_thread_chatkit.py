@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from hashlib import sha256
-from typing import Any, Mapping
+from typing import Any
 
 
 def _kind(value: object) -> str:
@@ -56,7 +57,7 @@ def _item_id(item: Mapping[str, object], turn_index: int, item_index: int) -> st
     if value:
         return value
     digest = sha256(
-        f"{turn_index}\x1f{item_index}\x1f{item!r}".encode("utf-8")
+        f"{turn_index}\x1f{item_index}\x1f{item!r}".encode()
     ).hexdigest()[:32]
     return f"provider-item-{digest}"
 
@@ -70,7 +71,7 @@ def _turn_id(turn: Mapping[str, object], turn_index: int) -> str:
         default=str,
     )
     digest = sha256(
-        f"{turn_index}\x1f{canonical}".encode("utf-8")
+        f"{turn_index}\x1f{canonical}".encode()
     ).hexdigest()[:32]
     return f"provider-turn-{digest}"
 
@@ -144,6 +145,7 @@ def _workflow(
     *,
     workflow_type: str = "custom",
     tasks: list[dict[str, Any]],
+    expanded: bool = False,
 ) -> dict[str, Any]:
     summary_title = str(
         next((task.get("title") for task in tasks if task.get("title")),
@@ -156,7 +158,7 @@ def _workflow(
             "type": workflow_type,
             "tasks": tasks,
             "summary": {"title": summary_title},
-            "expanded": False,
+            "expanded": expanded,
         },
     }
 
@@ -164,6 +166,21 @@ def _workflow(
 def _status(value: object) -> str:
     return "loading" if _kind(value) in {"inprogress", "pending", "running"} \
         else "complete"
+
+
+def _progress_item(
+    item: Mapping[str, object],
+    base: Mapping[str, object],
+    text: str,
+) -> dict[str, Any]:
+    title, separator, remainder = text.partition("\n")
+    content = remainder.lstrip("\n").strip() if separator else ""
+    return _workflow(base, tasks=[{
+        "type": "custom",
+        "title": title.strip(),
+        "content": content or None,
+        "status_indicator": _status(item.get("status")),
+    }], expanded=True)
 
 
 def _reasoning_item(item: Mapping[str, object], base: Mapping[str, object]) -> dict[str, Any] | None:
@@ -207,7 +224,7 @@ def _file_change_item(item: Mapping[str, object], base: Mapping[str, object]) ->
         diff = _text(change.get("diff")).rstrip()
         tasks.append({
             "type": "custom",
-            "title": f"{str(change.get('kind') or 'update')} · {path}",
+            "title": f"{change.get('kind') or 'update'!s} · {path}",
             "content": f"```diff\n{diff}\n```" if diff else None,
             "status_indicator": _status(item.get("status")),
         })
@@ -317,12 +334,7 @@ def _project_item(
     if kind in {"agentmessage", "assistantmessage", "assistant"}:
         text = _text(item.get("text") or item.get("content")).strip()
         if text and agent_phase == "commentary":
-            return _workflow(base, tasks=[{
-                "type": "custom",
-                "title": "Agent progress",
-                "content": text,
-                "status_indicator": _status(item.get("status")),
-            }])
+            return _progress_item(item, base, text)
         return ({
             **base,
             "type": "assistant_message",
