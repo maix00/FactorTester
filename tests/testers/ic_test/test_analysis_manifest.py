@@ -19,7 +19,13 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
     manifest = ic_analysis_graph_definition().to_dict()
 
     assert manifest["key"] == "ic_analysis_graph"
-    assert manifest["authoring_contract"] == {
+    assert {
+        key: manifest["authoring_contract"][key]
+        for key in (
+            "schema_version", "core_tests_key", "analyses_key",
+            "factor_subject_refs_key", "output_requests_key",
+        )
+    } == {
         "schema_version": 1,
         "core_tests_key": "core_tests",
         "analyses_key": "analyses",
@@ -150,6 +156,17 @@ def test_ic_application_manifest_exposes_graph_without_web_field_knowledge() -> 
     manifest = backtest_setting_registry.get("ic_test").manifest()
 
     assert manifest["analysis_graph"] == ic_analysis_graph_definition().to_dict()
+    group = manifest["analysis_graph"]["authoring_contract"][
+        "configuration_group_schema"
+    ]
+    assert group["required"] == [
+        "config_group_id", "batch_id", "name", "factor_ref",
+        "product_scope_ref", "entry_delay_bars", "horizon", "methods",
+        "return_price_basis",
+    ]
+    assert group["properties"]["entry_delay_bars"] == {
+        "type": "integer", "minimum": 0, "title": "入场延迟",
+    }
 
 
 def test_every_manifest_analysis_has_a_typed_runtime_adapter() -> None:

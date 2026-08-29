@@ -58,6 +58,7 @@
           method: "POST",
           body: JSON.stringify({profile_id: profileID, sequence: item.sequence, ...result}),
         });
+        await assistance.afterAcknowledge?.({item, result});
       }
       if ((payload.applications || []).length) {
         lastPublished = "";

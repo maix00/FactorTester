@@ -61,6 +61,11 @@
         context.checkpointTabSession?.();
         return revision;
       },
+      afterAcknowledge: async value => {
+        if (value?.result?.success === true) {
+          await adapter.afterApply?.(clone(value));
+        }
+      },
     });
     const resolveProfile = async () => options.boundProfileID
         ? await window.FTPageAgentProfiles.bound(context, options.boundProfileID)

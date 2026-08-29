@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 from flask import Flask
-import pandas as pd
 
 from server.modules.single_factor_test import sft_bp
-from tools.testers.settings import backtest_setting_registry, resolve_group_settings
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+from tools.testers.settings import backtest_setting_registry, resolve_group_settings
 
 
 def test_retired_single_factor_html_entry_is_not_registered() -> None:
@@ -16,6 +16,21 @@ def test_retired_single_factor_html_entry_is_not_registered() -> None:
     response = app.test_client().get("/single_factor_test")
 
     assert response.status_code == 404
+
+
+def test_backtest_strategy_contract_is_backend_registered() -> None:
+    contract = backtest_setting_registry.get("group_test").manifest()[
+        "configuration_item_contract"
+    ]
+    assert contract["schema_version"] == 1
+    assert contract["item_kind"] == "strategy"
+    assert contract["schema"]["required"] == [
+        "id", "factor_candidate_refs", "product_path_selection",
+        "splitCount", "groupIndex",
+    ]
+    assert contract["schema"]["properties"]["groupIndex"] == {
+        "type": "integer", "minimum": 1, "title": "分组序号",
+    }
 
 
 def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
