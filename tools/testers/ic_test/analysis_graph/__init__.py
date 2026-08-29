@@ -14,7 +14,7 @@ from .attachment import (
 )
 from .model import ICAnalysisGraph, ICAnalysisNode
 from .node_factory import analysis_node
-from .registry import ic_analysis_graph_definition
+from .registry import ic_analysis_graph_definition, ic_configuration_group_schema
 
 __all__ = [
     "AnalysisAttachmentAssessment",
@@ -28,6 +28,7 @@ __all__ = [
     "assess_analysis_attachment",
     "assess_analysis_selection",
     "ic_analysis_graph_definition",
+    "ic_configuration_group_schema",
     "list_analysis_attachment_candidates",
     "plan_analysis_attachment",
 ]

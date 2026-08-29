@@ -12,11 +12,13 @@ vm.runInThisContext(
   let document = {source: "old"};
   let delivered = false;
   const calls = [];
+  const lifecycle = [];
   const context = {
     tabID: "factor-new",
     assistance: {
       snapshot: () => ({schema_version: 1, revision: 0, document}),
       apply: value => { document = value.document; },
+      afterAcknowledge: () => { lifecycle.push("after-acknowledge"); },
     },
     api: async (url, options = {}) => {
       calls.push({url, options});
@@ -51,6 +53,10 @@ vm.runInThisContext(
   assert.equal(document.source, "new");
   assert.equal(calls.filter(call => call.url.endsWith("/acknowledge")).length, 1);
   assert(calls.some(call => call.url.endsWith("/acknowledge")));
+  const acknowledgeIndex = calls.findIndex(call => call.url.endsWith("/acknowledge"));
+  assert(acknowledgeIndex >= 0);
+  assert.deepEqual(lifecycle, ["after-acknowledge"],
+    "page side effects run only after the application acknowledgement succeeds");
   assert(calls.some(call => call.url.includes("&wait=20")));
 
   let releasePoll;

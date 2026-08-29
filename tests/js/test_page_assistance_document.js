@@ -7,6 +7,7 @@ let attached = null;
 let current = {name: "old"};
 let ready = false;
 let profileReads = 0;
+let afterApply = 0;
 global.window = {
   FTPageAgentProfiles: {self: async () => {
     profileReads += 1;
@@ -37,6 +38,7 @@ vm.runInThisContext(
       if (!document.name) throw new Error("name is required");
     },
     importDocument: document => { imported = document; current = document; },
+    afterApply: () => { afterApply += 1; },
   }, {pageKind: "factor-create"});
   assert.equal(profileReads, 0, "registration does not resolve a Profile eagerly");
   assert.equal(typeof attached.resolveProfile, "function");
@@ -50,6 +52,11 @@ vm.runInThisContext(
   await controller.apply({expected_revision: 1, document: {name: "new"}});
   assert.deepEqual(imported, {name: "new"});
   assert.equal(controller.snapshot().revision, 2);
+  assert.equal(afterApply, 0, "page rebuilding is held until acknowledgement");
+  await controller.afterAcknowledge({result: {success: true}});
+  assert.equal(afterApply, 1);
+  await controller.afterAcknowledge({result: {success: false}});
+  assert.equal(afterApply, 1, "a rejected replacement never redraws page content");
   await assert.rejects(
     controller.apply({expected_revision: 1, document: {name: "stale"}}),
     /revision conflict/,

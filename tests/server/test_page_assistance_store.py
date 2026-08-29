@@ -1,9 +1,12 @@
 import time
 from threading import Thread
 
+import pytest
+
 from server.manager.http.page_assistance_routes import (
     PageAssistanceStore,
     page_assistance_turn_params,
+    validate_document,
 )
 
 
@@ -15,6 +18,38 @@ def _navigation() -> dict:
             "page": {"id": "page", "kind": "page", "children": []},
         },
     }
+
+
+def test_json_schema_constraints_reject_incomplete_registered_values() -> None:
+    schema = {
+        "type": "object",
+        "required": ["groups"],
+        "properties": {
+            "groups": {
+                "type": "array", "minItems": 1, "maxItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["factor_ref", "delay"],
+                    "properties": {
+                        "factor_ref": {
+                            "type": "string", "minLength": 1,
+                            "pattern": r"factor:v2:[A-Za-z0-9_-]{43}",
+                        },
+                        "delay": {"type": "integer", "minimum": 0},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="too few items"):
+        validate_document(schema, {"groups": []})
+    with pytest.raises(ValueError, match="invalid format"):
+        validate_document(schema, {"groups": [{"factor_ref": "alias", "delay": 0}]})
+    with pytest.raises(ValueError, match="below its minimum"):
+        validate_document(schema, {
+            "groups": [{"factor_ref": "factor:v2:" + "a" * 43, "delay": -1}],
+        })
 
 
 def test_structured_document_is_validated_and_replaced_atomically() -> None:
