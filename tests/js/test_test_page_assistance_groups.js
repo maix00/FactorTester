@@ -48,7 +48,20 @@ const group = {
   splitCount: 5, groupIndex: 1,
 };
 const state = {
-  kind: "backtest", manifest: {run_fields: [
+  kind: "backtest", manifest: {
+    configuration_item_contract: {
+      schema_version: 1, item_kind: "strategy", collection_key: "groups",
+      min_items: 1,
+      schema: {
+        type: "object",
+        required: [
+          "id", "factor_candidate_refs", "product_path_selection",
+          "splitCount", "groupIndex",
+        ],
+        properties: {},
+      },
+    },
+    run_fields: [
     {key: "task_name", label: "任务名称", placement: "run_identity", default: "",
       value_descriptor: {editor: "text"}},
     {key: "output_requests", label: "结果与生成物", placement: "outputs", default: [],

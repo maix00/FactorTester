@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from copy import deepcopy
 from threading import Condition, RLock
@@ -27,6 +28,19 @@ def validate_document(schema: dict, value: object, path: str = "$") -> None:
         raise ValueError(f"{path} must equal {schema['const']!r}")
     if "enum" in schema and value not in schema["enum"]:
         raise ValueError(f"{path} is not an allowed value")
+    if isinstance(value, str):
+        if len(value) < int(schema.get("minLength") or 0):
+            raise ValueError(f"{path} is too short")
+        pattern = schema.get("pattern")
+        if pattern and re.fullmatch(str(pattern), value) is None:
+            raise ValueError(f"{path} has an invalid format")
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and "minimum" in schema
+        and value < schema["minimum"]
+    ):
+        raise ValueError(f"{path} is below its minimum")
     if isinstance(value, dict):
         properties = schema.get("properties") or {}
         for key in schema.get("required") or []:
@@ -39,9 +53,14 @@ def validate_document(schema: dict, value: object, path: str = "$") -> None:
         for key, child in properties.items():
             if key in value and isinstance(child, dict):
                 validate_document(child, value[key], f"{path}.{key}")
-    if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        for index, item in enumerate(value):
-            validate_document(schema["items"], item, f"{path}[{index}]")
+    if isinstance(value, list):
+        if len(value) < int(schema.get("minItems") or 0):
+            raise ValueError(f"{path} has too few items")
+        if "maxItems" in schema and len(value) > int(schema["maxItems"]):
+            raise ValueError(f"{path} has too many items")
+        if isinstance(schema.get("items"), dict):
+            for index, item in enumerate(value):
+                validate_document(schema["items"], item, f"{path}[{index}]")
     if (
         path == "$"
         and isinstance(value, dict)

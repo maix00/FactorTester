@@ -70,6 +70,48 @@ for (const kind of ["backtest", "ic"]) {
         factor_mode: {module: "factor-execution", label: "因子模式"},
         product_path_selection: {module: "product-selection", label: "产品组"},
       }},
+      analysis_graph: {authoring_contract: {configuration_group_schema: {
+        type: "object",
+        required: [
+          "config_group_id", "batch_id", "name", "factor_ref",
+          "product_scope_ref", "entry_delay_bars", "horizon", "methods",
+          "return_price_basis",
+        ],
+        properties: {
+          config_group_id: {type: "string", title: "配置组 ID"},
+          entry_delay_bars: {type: "integer", minimum: 0, title: "入场延迟"},
+        },
+        additionalProperties: false,
+      }}},
+      configuration_item_contract: {schema_version: 1,
+        item_kind: kind === "ic" ? "configuration-group" : "strategy",
+        collection_key: kind === "ic" ? "configuration_groups" : "groups",
+        min_items: 1, max_items: kind === "ic" ? 1 : undefined,
+        schema: kind === "ic" ? {
+          type: "object",
+          required: [
+            "config_group_id", "batch_id", "name", "factor_ref",
+            "product_scope_ref", "entry_delay_bars", "horizon", "methods",
+            "return_price_basis",
+          ],
+          properties: {
+            config_group_id: {type: "string", title: "配置组 ID"},
+            entry_delay_bars: {type: "integer", minimum: 0, title: "入场延迟"},
+          },
+        } : {
+        type: "object",
+        required: [
+          "id", "factor_candidate_refs", "product_path_selection",
+          "splitCount", "groupIndex",
+        ],
+        properties: {
+          id: {type: "string", title: "策略 ID"},
+          factor_candidate_refs: {type: "array", title: "因子候选"},
+          product_path_selection: {type: "object", title: "产品组"},
+          splitCount: {type: "integer", title: "分组数"},
+          groupIndex: {type: "integer", title: "分组序号"},
+        },
+      }},
       run_fields: [
         {key: "task_name", label: "任务名称", placement: "run_identity", default: ""},
         {key: "output_requests", label: "结果与生成物", placement: "outputs",
@@ -78,8 +120,18 @@ for (const kind of ["backtest", "ic"]) {
     },
     values: {factor_mode: "native"},
     analysis: kind === "backtest"
-      ? {groups: [{id: "strategy-1", factor_candidate_refs: ["factor:v2:test"]}]}
-      : {configuration_groups: [{config_group_id: "ic-1", factor_ref: "factor:v2:test"}]},
+      ? {groups: [{
+        id: "strategy-1", factor_candidate_refs: [`factor:v2:${"a".repeat(43)}`],
+        product_path_selection: {product_path_selection_id: "product-group:1"},
+        splitCount: 5, groupIndex: 1,
+      }]}
+      : {configuration_groups: [{
+        config_group_id: "ic-1", batch_id: "batch-1", name: "IC 配置 1",
+        factor_ref: `factor:v2:${"a".repeat(43)}`,
+        product_scope_ref: "product-group:1", entry_delay_bars: 0,
+        horizon: {sampling: "scale_aware"}, methods: ["rank"],
+        return_price_basis: "next_open_to_open_adjusted",
+      }]},
     settingsMountedTabs: ["factor-execution"],
     outputRequests: ["equity_curve"],
     runValues: {task_name: `${kind} task`},
@@ -100,6 +152,19 @@ for (const kind of ["backtest", "ic"]) {
     "RunRequest(configuration + registered run_fields)",
   );
   const navigation = FTTestPageAssistance.navigationFor(state);
+  if (kind === "ic") {
+    const groupSchema = FTTestPageAssistance.schemaFor(state).properties
+      .configuration.properties.analyses.properties.ic.properties
+      .configuration_groups;
+    assert.equal(groupSchema.maxItems, 1);
+    assert(groupSchema.items.required.includes("entry_delay_bars"));
+    const groupNode = navigation.nodes["configuration:ic-1"];
+    assert(groupNode.children.includes("configuration:ic-1:field:entry_delay_bars"));
+    assert.equal(
+      navigation.nodes["configuration:ic-1:field:entry_delay_bars"].label,
+      "入场延迟",
+    );
+  }
   assert.equal(navigation.nodes["tab:factor-execution"].mounted, true);
   assert.equal(navigation.nodes["tab:product-selection"].mounted, false);
   assert.deepEqual(
@@ -136,6 +201,8 @@ registeredAdapter.importDocument({
   configuration: {schema_version: 2, shared: {}, analyses: {backtest: {groups: []}}, ui: {}},
   run_fields: {},
 });
+assert.equal(restored, 2, "document state is restored before the deferred page rebuild");
+registeredAdapter.afterApply();
 assert.equal(restored, 3, "the existing workspace restore helpers rebuild the page");
 assert.deepEqual(importState.analysis, {groups: []});
 

@@ -19,32 +19,32 @@
         description: field.label || field.key,
       }]),
     );
+    const itemContract = state.manifest?.configuration_item_contract;
+    const itemSchema = itemContract?.schema;
+    if (!itemSchema) {
+      throw new Error("test manifest is missing its configuration-item contract");
+    }
     const analysisSchema = state.kind === "backtest" ? {
       type: "object",
       required: ["groups"],
       properties: {
         groups: {
           type: "array", minItems: 1,
-          items: {
-            type: "object",
-            required: [
-              "id", "factor_candidate_refs", "product_path_selection",
-              "splitCount", "groupIndex",
-            ],
-            properties: {
-              id: {type: "string", minLength: 1},
-              factor_candidate_refs: {
-                type: "array", minItems: 1,
-                items: {type: "string", minLength: 1},
-              },
-              product_path_selection: {type: "object"},
-              splitCount: {type: "integer", minimum: 1},
-              groupIndex: {type: "integer", minimum: 1},
-            },
-          },
+          items: structuredClone(itemSchema),
         },
       },
-    } : {type: "object"};
+    } : {
+      type: "object",
+      required: ["configuration_groups"],
+      properties: {
+        configuration_groups: {
+          type: "array",
+          minItems: Number(itemContract.min_items) || 1,
+          maxItems: Number(itemContract.max_items) || undefined,
+          items: structuredClone(itemSchema),
+        },
+      },
+    };
     return {
       type: "object",
       required: [
@@ -135,18 +135,36 @@
     }
     const groups = state.kind === "backtest"
       ? analysis.groups || [] : analysis.configuration_groups || [];
+    const groupContract = manifest.configuration_item_contract?.schema;
     const groupIDs = groups.map((group, index) => {
       const key = String(
         group.id || group.config_group_id || group.name || index,
       );
       const id = `configuration:${key}`;
+      const fieldIDs = Object.entries(groupContract?.properties || {}).map(
+        ([fieldKey, descriptor]) => {
+          const fieldID = `${id}:field:${fieldKey}`;
+          nodes[fieldID] = {
+            id: fieldID,
+            kind: "field",
+            label: descriptor.title || fieldKey,
+            field_key: fieldKey,
+            required: (groupContract.required || []).includes(fieldKey),
+            value_descriptor: structuredClone(descriptor),
+            value: group[fieldKey] === undefined
+              ? null : structuredClone(group[fieldKey]),
+            children: [],
+          };
+          return fieldID;
+        },
+      );
       nodes[id] = {
         id,
         kind: state.kind === "backtest" ? "strategy" : "configuration-group",
         label: group.name || group.label || key,
         summary: `${Object.keys(group).length} registered values`,
         configuration_ref: key,
-        children: [],
+        children: fieldIDs,
       };
       return id;
     });
@@ -208,8 +226,8 @@
           window.FTBacktestGroupModel?.initialize?.(state);
         }
         state.settingsInitialized = false;
-        refresh();
       },
+      afterApply: refresh,
     }, {
       pageKind: `${state.kind}-configuration`,
       view: () => ({selected_settings_tab: state.settingsTabKey || ""}),

@@ -52,6 +52,41 @@ def register_group_test_settings(app: Any) -> None:
     )
     register_test_template_base(app)
     register_run_inputs_base(app)
+    app.register_manifest_extension(
+        "configuration_item_contract",
+        {
+            "schema_version": 1,
+            "item_kind": "strategy",
+            "collection_key": "groups",
+            "min_items": 1,
+            "schema": {
+                "type": "object",
+                "required": [
+                    "id", "factor_candidate_refs", "product_path_selection",
+                    "splitCount", "groupIndex",
+                ],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1, "title": "策略 ID"},
+                    "factor_candidate_refs": {
+                        "type": "array", "minItems": 1, "title": "因子候选",
+                        "items": {
+                            "type": "string",
+                            "pattern": r"factor:v2:[A-Za-z0-9_-]{43}",
+                        },
+                    },
+                    "product_path_selection": {
+                        "type": "object", "title": "产品组",
+                    },
+                    "splitCount": {
+                        "type": "integer", "minimum": 1, "title": "分组数",
+                    },
+                    "groupIndex": {
+                        "type": "integer", "minimum": 1, "title": "分组序号",
+                    },
+                },
+            },
+        },
+    )
     _register_sections(app)
 
     # ── SettingModules ──────────────────────────────────────
