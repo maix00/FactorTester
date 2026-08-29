@@ -25,7 +25,8 @@ written ad hoc into the Profile root or temporary storage.
    retained as flat JSON documents in
    `manifests/assistance-drafts/`.  The server assigns identity, page revision,
    content hash, status, and timestamps.
-4. Drafts move through `draft`, `validated`, `applied`, or `rejected` states.
+4. Drafts move through `draft`, `validated`, `queued`, `applied`, or `rejected`
+   states.
    Successful application does not delete a draft.  Quotas warn and eventually
    reject new drafts; they never silently delete retained documents.
 5. The existing Profile workspace resource browser lists these documents and
@@ -33,8 +34,11 @@ written ad hoc into the Profile root or temporary storage.
    owner-authorized regular-file deletion rather than introducing another file
    manager, authentication system, or storage protocol.
 6. The live browser page remains the optimistic-lock authority.  A retained
-   draft can be validated or applied only while its exact tab context is active
-   at the recorded revision.
+   draft records its source tab for audit, but is portable to the currently
+   active tab when the page kind, assistance protocol version and published
+   document schema are compatible.  Validation and application use the target
+   tab's current revision; a draft never carries its source revision into a new
+   tab.  Applying to another page kind remains invalid.
 
 ## Consequences
 
@@ -44,4 +48,7 @@ written ad hoc into the Profile root or temporary storage.
   paths.
 - Drafts remain user-visible and recoverable until the user explicitly deletes
   them, without adding a database table or a new settings tab.
+- Closing a configuration tab does not strand its retained assistance drafts;
+  a later compatible tab can apply them without weakening schema validation or
+  optimistic concurrency.
 - Deployments without Bubblewrap refuse to start server Profile Agents.
