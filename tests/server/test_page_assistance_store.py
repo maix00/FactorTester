@@ -258,6 +258,98 @@ def test_structured_document_rejects_stale_revision() -> None:
         raise AssertionError("stale update was accepted")
 
 
+def test_draft_retargets_to_current_compatible_tab_after_source_tab_closes() -> None:
+    store = PageAssistanceStore()
+    schema = {
+        "type": "object",
+        "required": ["configuration_groups"],
+        "properties": {"configuration_groups": {"type": "array"}},
+        "additionalProperties": False,
+    }
+    document = {"configuration_groups": []}
+    store.publish(
+        "owner", "profile", {
+            "tab_id": "deleted-ic-tab",
+            "assistance": {
+                "schema_version": 1,
+                "navigation": _navigation(),
+                "page_kind": "ic-configuration",
+                "revision": 8,
+                "document_schema": schema,
+                "document": document,
+            },
+        },
+    )
+    stale = store.enqueue(
+        "owner", "profile", {
+            "tab_id": "deleted-ic-tab",
+            "expected_revision": 8,
+            "document": document,
+            "draft_id": "portable-draft",
+        },
+    )
+    store.publish(
+        "owner", "profile", {
+            "tab_id": "new-ic-tab",
+            "assistance": {
+                "schema_version": 1,
+                "navigation": _navigation(),
+                "page_kind": "ic-configuration",
+                "revision": 1,
+                "document_schema": schema,
+                "document": document,
+            },
+        },
+    )
+
+    target = store.resolve_target(
+        "owner", "profile",
+        page_kind="ic-configuration",
+        schema_version=1,
+        document=document,
+    )
+    queued = store.enqueue(
+        "owner", "profile", {
+            "tab_id": target["tab_id"],
+            "expected_revision": target["assistance"]["revision"],
+            "document": document,
+            "draft_id": "portable-draft",
+        },
+    )
+
+    assert target["tab_id"] == "new-ic-tab"
+    assert queued["expected_revision"] == 1
+    assert queued["sequence"] != stale["sequence"]
+    assert store.applications("owner", "profile", "deleted-ic-tab", 0) == []
+    assert store.applications("owner", "profile", "new-ic-tab", 0) == [queued]
+
+
+def test_draft_retarget_rejects_current_page_of_another_kind() -> None:
+    store = PageAssistanceStore()
+    document = {"configuration_groups": []}
+    store.publish(
+        "owner", "profile", {
+            "tab_id": "backtest-tab",
+            "assistance": {
+                "schema_version": 1,
+                "navigation": _navigation(),
+                "page_kind": "backtest-configuration",
+                "revision": 2,
+                "document_schema": {"type": "object"},
+                "document": {},
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="activate a compatible ic-configuration page"):
+        store.resolve_target(
+            "owner", "profile",
+            page_kind="ic-configuration",
+            schema_version=1,
+            document=document,
+        )
+
+
 def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() -> None:
     store = PageAssistanceStore()
     original = {
