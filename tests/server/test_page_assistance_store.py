@@ -396,6 +396,9 @@ def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() ->
     assert "inspect --node <node-id>" in instruction
     assert "page-registered semantic node" in instruction
     assert "factortester assist drafts create --from-current" in instruction
+    assert "inspect the registered `configurations` node" in instruction
+    assert "`create_template`" in instruction
+    assert "do not guess keys" in instruction
     assert "factortester assist drafts patch <draft-id> --stdin" in instruction
     assert "factortester assist drafts validate <draft-id>" in instruction
     assert "factortester assist drafts apply <draft-id>" in instruction

@@ -334,6 +334,12 @@ subtrees or enumerate candidate collections. Use the candidate lookup command
 registered by a field when candidates are needed. Build one complete
 structured document patch. Start from the page's complete document without
 printing it by running `factortester assist drafts create --from-current`.
+For a test configuration, inspect the registered `configurations` node before
+creating a strategy or configuration group. Its `collection_path`,
+`create_template`, `required_fields`, `field_sources`, and `item_schema` are
+the authoritative contract. Copy that template, replace its placeholders from
+the registered candidate sources, and do not guess keys or probe validation
+one field at a time.
 Apply the structured change once with
 `factortester assist drafts patch <draft-id> --stdin`, validate it with
 `factortester assist drafts validate <draft-id>`, then apply it atomically with

@@ -59,6 +59,19 @@ def register_group_test_settings(app: Any) -> None:
             "item_kind": "strategy",
             "collection_key": "groups",
             "min_items": 1,
+            "create_template": {
+                "id": "<unique-strategy-id>",
+                "factor_candidate_refs": ["<factor-ref>"],
+                "product_path_selection": {
+                    "product_path_selection_id": "<product-group-ref>",
+                },
+                "splitCount": 5,
+                "groupIndex": 1,
+            },
+            "field_sources": {
+                "factor_candidate_refs": "field:factor_candidates",
+                "product_path_selection": "field:product_path_selection",
+            },
             "schema": {
                 "type": "object",
                 "required": [

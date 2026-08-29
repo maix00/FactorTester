@@ -26,6 +26,25 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         "collection_key": "configuration_groups",
         "min_items": 1,
         "max_items": 1,
+        "create_template": {
+            "config_group_id": "<unique-configuration-group-id>",
+            "batch_id": "<unique-batch-id>",
+            "name": "<configuration-group-name>",
+            "factor_ref": "<factor-ref>",
+            "product_scope_ref": "<product-group-ref>",
+            "entry_delay_bars": 0,
+            "horizon": {"sampling": "scale_aware"},
+            "methods": ["rank"],
+            "return_price_basis": "next_open_to_open_adjusted",
+            "analysis_attachments": [],
+            "editor_mounted_tabs": [
+                "__configuration__", "factor", "product_path_selection",
+            ],
+        },
+        "field_sources": {
+            "factor_ref": "field:factor_candidates",
+            "product_scope_ref": "field:product_path_selection",
+        },
         "schema": ic_configuration_group_schema(),
     })
     register_authoring_shell(app)

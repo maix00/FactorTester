@@ -104,6 +104,13 @@ def _inspect_summary(page: object) -> object:
         for child in children
         if isinstance(child, dict) and child.get("kind") == "tab"
     ]
+    configuration_collection = next(({
+        key: child.get(key)
+        for key in ("id", "kind", "label", "summary")
+        if key in child
+    } for child in children if (
+        isinstance(child, dict) and child.get("kind") == "collection"
+    )), None)
     entries = tabs or [
         {
             key: child.get(key)
@@ -127,6 +134,8 @@ def _inspect_summary(page: object) -> object:
             if key in root
         },
         "tabs" if tabs else "sections": entries,
+        **({"configuration_collection": configuration_collection}
+           if configuration_collection else {}),
         "usage": {
             "inspect_node": "factortester assist inspect --node <node-id>",
             "candidate_lookup": (
