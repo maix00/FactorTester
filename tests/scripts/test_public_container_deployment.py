@@ -144,21 +144,23 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert 'test "$(codex --version)" = "codex-cli ${CODEX_VERSION}"' in dockerfile
     assert "COPY tools tools" in dockerfile
     assert "AS factortester-cli-builder" in dockerfile
-    assert "ARG PYINSTALLER_VERSION=6.21.0" in dockerfile
-    assert "python -m PyInstaller" in dockerfile
-    assert "--onefile" in dockerfile
-    assert "--name factortester" in dockerfile
-    assert "COPY --from=factortester-cli-builder /dist/factortester" in dockerfile
     assert "AS factortester-public-deps" in dockerfile
     assert "FROM factortester-public-deps AS factortester-cli-builder" in dockerfile
     assert "FROM factortester-public-deps AS factortester-public" in dockerfile
-    assert "--no-deps /build/tools/cli" in dockerfile
+    assert "--target /runtime /build/tools/cli" in dockerfile
+    assert "python -m compileall -q -b /runtime" in dockerfile
+    assert "find /runtime -type f -name '*.py' -delete" in dockerfile
+    assert "COPY --from=factortester-cli-builder /runtime" in dockerfile
+    assert "COPY deploy/docker/factortester-public/factortester-cli" in dockerfile
     runtime_stage = dockerfile.split(
         "FROM factortester-public-deps AS factortester-public", 1
     )[1]
     assert "PyInstaller" not in runtime_stage
     assert "pyinstaller==" not in runtime_stage
     assert "binutils" not in runtime_stage
+    assert "/opt/factortester/app" not in (
+        DEPLOYMENT / "factortester-cli"
+    ).read_text(encoding="utf-8")
     assert "rm -f /usr/local/bin/factortester-manager" in dockerfile
     assert "test -x /usr/local/bin/factortester" in dockerfile
     assert args["CODEX_VERSION"] == "${FACTORTESTER_CODEX_VERSION:-0.147.0}"
