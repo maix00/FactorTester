@@ -16,9 +16,8 @@
     // The legacy global factor selection remains authoring/catalog state only
     // and must never override the factor that identifies the selected group.
     window.FTICConfigurationGroupModel?.initialize?.(state);
-    const groups = window.FTICConfigurationGroupModel?.selected?.(state)
-      || (Array.isArray(state.analysis?.configuration_groups)
-        ? state.analysis.configuration_groups : []);
+    const groups = Array.isArray(state.analysis?.configuration_groups)
+      ? state.analysis.configuration_groups : [];
     const refs = [...new Set(groups.map(item => String(
       item?.factor_ref || "",
     ).trim()).filter(Boolean))];
@@ -130,7 +129,27 @@
   }
 
   async function ensureWorkspace(context, state) {
-    if (state.workspace) return state.workspace;
+    const workspaceID = String(state.workspace?.workspace_id || "").trim();
+    const configuration = state.workspace?.configuration;
+    if (
+      workspaceID
+      && String(configuration?.configuration_id || "").trim()
+      && Number.isInteger(Number(configuration?.revision))
+    ) return state.workspace;
+    if (workspaceID) {
+      const value = await context.api(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}/configuration`,
+      );
+      const restored = value?.configuration || value;
+      if (
+        String(restored?.configuration_id || "").trim()
+        && Number.isInteger(Number(restored?.revision))
+      ) {
+        state.workspace = {...state.workspace, configuration: restored};
+        return state.workspace;
+      }
+      throw new Error("测试工作区没有有效的配置记录");
+    }
     const factors = executionFactors(state);
     const factor = factors[0] || selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
@@ -148,6 +167,9 @@
       method: "POST", body: JSON.stringify(body),
     });
     state.workspace = value.workspace;
+    if (!String(state.workspace?.workspace_id || "").trim()) {
+      throw new Error("测试工作区响应缺少 workspace_id");
+    }
     return state.workspace;
   }
 
