@@ -38,10 +38,10 @@
       ...groupedRefs,
       ...Object.keys(frozenSelections),
       ...Object.values(frozenSelections),
-      ...(analysis.local_settings?.product_path_selections || []),
+      ...(analysis.execution?.settings?.product_path_selections || []),
       analysis.product_path_selection,
       analysis.product_path_selection_id,
-      analysis.local_settings?.product_group_ref,
+      analysis.execution?.settings?.product_group_ref,
       ui.product_group_ref,
     ];
     return uniqueReferences(values);

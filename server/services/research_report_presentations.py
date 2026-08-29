@@ -155,7 +155,7 @@ def _factor_families(run_spec: dict[str, Any]) -> list[str]:
             *((analysis.get("factor_selections") or [])),
             *((analysis.get("factors") or [])),
         ]
-        local = analysis.get("local_settings") or {}
+        local = (analysis.get("execution") or {}).get("settings") or {}
         if local.get("factor"):
             candidates.append({"alias": local["factor"]})
         for item in candidates:
@@ -211,7 +211,7 @@ def _fee_alias(run_spec: dict[str, Any]) -> str:
         ((run_spec.get("configuration") or {}).get("analyses") or {})
         .get("backtest") or {}
     )
-    local = analysis.get("local_settings") or {}
+    local = (analysis.get("execution") or {}).get("settings") or {}
     modes = [str(local.get("fee_mode") or "")]
     groups = analysis.get("groups") or (
         (analysis.get("group_settings") or {}).get("groups") or []

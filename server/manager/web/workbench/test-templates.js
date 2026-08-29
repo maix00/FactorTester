@@ -12,7 +12,7 @@
     const analysis = payload.analyses?.[kind] || {};
     const families = (payload.shared?.factor_families || []).map(item => item.alias).filter(Boolean);
     const factors = (payload.shared?.factors || []).map(item => item.alias).filter(Boolean);
-    const local = analysis.local_settings || analysis.settings || {};
+    const local = analysis.execution?.settings || {};
     return [
       [context.t("模板名称"), template.name],
       [context.t("测试类型"), kind === "ic" ? context.t("IC 测试") : context.t("回测")],

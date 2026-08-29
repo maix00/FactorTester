@@ -104,7 +104,7 @@
     const ui = document.configuration?.ui?.[state.kind] || {};
     const mounted = new Set((ui.mounted_tabs || []).map(semanticKey));
     const values = {
-      ...(analysis.local_settings || {}),
+      ...(analysis.execution?.settings || {}),
       ...(ui.settings || {}),
       ...(document.run_fields || {}),
     };

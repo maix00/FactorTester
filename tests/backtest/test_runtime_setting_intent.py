@@ -5,14 +5,14 @@ from tools.testers.settings.runtime_intent import (
 )
 
 
-def _payload(local_settings: dict, *, group: dict | None = None) -> dict:
+def _payload(execution_settings: dict, *, group: dict | None = None) -> dict:
     return {
         "schema_version": 1,
         "shared": {"factors": []},
         "ui": {},
         "analyses": {
             "backtest": {
-                "local_settings": dict(local_settings),
+                "execution": {"settings": dict(execution_settings)},
                 "groups": [group or {"id": "group-1", "splitCount": 5}],
                 "ls_configs": [],
             },
@@ -34,7 +34,7 @@ def test_old_runtime_display_defaults_are_normalized_to_neutral_intent() -> None
 
     normalized, changes = normalize_backtest_runtime_setting_intent(payload)
 
-    assert normalized["analyses"]["backtest"]["local_settings"] == {
+    assert normalized["analyses"]["backtest"]["execution"]["settings"] == {
         "engine": "native",
         "engine_mode": "auto",
         "cost_basis_method": "auto",
@@ -52,7 +52,7 @@ def test_old_runtime_display_defaults_are_normalized_to_neutral_intent() -> None
         "use_minor_units",
         "transaction_fee_source",
     }
-    assert payload["analyses"]["backtest"]["local_settings"][
+    assert payload["analyses"]["backtest"]["execution"]["settings"][
         "daily_mark_to_market_enabled"
     ] is False
 

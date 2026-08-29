@@ -12,7 +12,7 @@ from .settings import (
     get_group_test_registry,
     groups_with_parent_fallback,
     long_short_strategy_id,
-    payload_local_settings,
+    payload_execution_settings,
     resolve_flat_backtest_settings,
     resolve_group_strategy_settings,
     resolve_long_short_strategy_settings,
@@ -43,9 +43,9 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(flat_ls_configs, list):
         raise ValueError("ls_configs 必须是数组")
 
-    local_settings = payload_local_settings(payload)
-    data_source = str(local_settings.get("data_source") or "").strip()
-    frequency = str(local_settings.get("frequency") or "").strip()
+    execution_settings = payload_execution_settings(payload)
+    data_source = str(execution_settings.get("data_source") or "").strip()
+    frequency = str(execution_settings.get("frequency") or "").strip()
     if data_source and data_source != "auto":
         raise ValueError(
             f"当前分组测试不支持数据源 {data_source}，请使用自动"
@@ -61,20 +61,20 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
         flat_ls_configs,
     )
     run_registry = get_group_test_registry()
-    local_settings_by_module = run_registry.collect_local_only_settings(
+    execution_settings_by_module = run_registry.collect_local_only_settings(
         resolved_backtest_settings
     )
-    market_rule_fallback = local_settings_by_module.get(
+    market_rule_fallback = execution_settings_by_module.get(
         "market_rules", {}
     ).get("market_rule_fallback", "latest_available")
-    evaluation_split = local_settings_by_module.get(
+    evaluation_split = execution_settings_by_module.get(
         "evaluation_range", {}
     ).get("evaluation_split") or None
     first_group_id = str(flat_groups[0].get("id") or "group-0")
     fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
     factor_mode = fallback_group_settings.get("factor_mode", "auto")
     start_dt, end_dt = resolve_run_datetimes(
-        local_settings,
+        execution_settings,
         resolved_backtest_settings,
     )
 
@@ -123,7 +123,7 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
                 resolved_backtest_settings=resolved_backtest_settings,
                 source_settings_by_alias=resolved_settings_by_alias,
                 fallback_group_settings=fallback_group_settings,
-                local_settings=local_settings,
+                execution_settings=execution_settings,
             )
         )
     long_short_owners = build_long_short_owner_rows(
@@ -174,7 +174,7 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
         "resolved_settings_by_alias": resolved_settings_by_alias,
         "group_owner": group_owner,
         "all_products": all_products,
-        "local_settings": local_settings,
+        "execution_settings": execution_settings,
         "market_rule_fallback": market_rule_fallback,
         "evaluation_split": evaluation_split,
         "run_registry": run_registry,

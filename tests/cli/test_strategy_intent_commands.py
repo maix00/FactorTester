@@ -34,7 +34,7 @@ def _configuration():
             "schema_version": 1,
             "shared": {"factors": [{"alias": "Rank"}, {"alias": "Gate"}, {"alias": "Size"}]},
             "analyses": {"backtest": {
-                "local_settings": {"allocation_policy": "equal_notional"},
+                "execution": {"settings": {"allocation_policy": "equal_notional"}},
                 "groups": [{
                     "id": "A1", "name": "A1", "factorAlias": "Rank",
                     "custom": {"preserved": True},

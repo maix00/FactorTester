@@ -120,10 +120,8 @@ const scopedPayload = FTTestConfigurationCompiler.sanitizeExecutionPayload(
 assert.equal("split_count" in scopedPayload, false);
 assert.equal("category" in scopedPayload, false);
 assert.equal("start_date" in scopedPayload, false);
-assert.equal("split_count" in scopedPayload.settings, false);
-assert.equal("split_count" in scopedPayload.local_settings, false);
-assert.equal(scopedPayload.local_settings.category, "industry");
-assert.equal(scopedPayload.local_settings.start_date, "2025-01-02");
+assert.equal(scopedPayload.settings, undefined);
+assert.equal(scopedPayload.local_settings, undefined);
 assert.equal(scopedPayload.groups[0].split_count, 5);
 
 if (configurationSource) {
@@ -159,8 +157,8 @@ if (configurationSource) {
       `backtest RunSpec must not retain registered root field: ${key}`,
     );
   }
-  assert.equal(compiledBacktest.local_settings.category, "industry");
-  assert.equal(compiledBacktest.local_settings.start_date, "2025-01-02");
+  assert.equal(compiledBacktest.execution.settings.category, "industry");
+  assert.equal(compiledBacktest.execution.settings.start_date, "2025-01-02");
   assert.equal(compiledBacktest.groups[0].split_count, 5);
 }
 
@@ -224,10 +222,8 @@ const stalePayload = {
 const sanitized = FTTestConfigurationCompiler.sanitizeExecutionPayload(
   conditionalManifest, stalePayload, basicValues,
 );
-for (const value of [sanitized.settings, sanitized.local_settings]) {
-  assert.equal("conditional_execution" in value, false);
-  assert.equal("conditional_authoring" in value, false);
-}
+assert.equal(sanitized.settings, undefined);
+assert.equal(sanitized.local_settings, undefined);
 assert.equal("conditional_execution" in sanitized, false);
 assert.equal("conditional_authoring" in sanitized, false);
 assert.equal(sanitized.locked_execution, "automatic");
@@ -291,14 +287,14 @@ assert.equal("product_path_selection_id" in analysis, false);
 assert.equal("product_path_selection" in analysis, false);
 assert.equal("factors" in analysis, false);
 assert.equal("product_path_selections" in analysis, false);
-assert.deepEqual(analysis.local_settings, {
+assert.deepEqual(analysis.execution.settings, {
   category: "industry",
   custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
   start_date: "2025-01-02",
 });
-assert.equal("ic_lags" in analysis.local_settings, false);
-assert.equal("forward_return_horizons" in analysis.local_settings, false);
-assert.equal("ic_decay_lags" in analysis.local_settings, false);
+assert.equal("ic_lags" in analysis.execution.settings, false);
+assert.equal("forward_return_horizons" in analysis.execution.settings, false);
+assert.equal("ic_decay_lags" in analysis.execution.settings, false);
 assert.equal("editor_mounted_tabs" in analysis.configuration_groups[0], true);
 
 assert.throws(() => FTICConfiguration.compileAnalysis({
