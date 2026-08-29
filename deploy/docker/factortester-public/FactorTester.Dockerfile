@@ -41,11 +41,9 @@ RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrad
 
 FROM factortester-public-deps AS factortester-cli-builder
 
-COPY tools/cli /build/tools/cli
+COPY tools/cli /runtime/tools/cli
 COPY deploy/docker/factortester-public/factortester-cli /build/factortester-cli
-RUN python -m pip install --no-cache-dir --no-deps \
-        --target /runtime /build/tools/cli \
-    && python -m compileall -q -b /runtime \
+RUN python -m compileall -q -b /runtime \
     && find /runtime -type f -name '*.py' -delete \
     && find /runtime -type d -name __pycache__ -prune -exec rm -rf {} + \
     && PYTHONPATH=/runtime /build/factortester-cli --help \
