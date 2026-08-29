@@ -62,6 +62,14 @@ for (const kind of ["backtest", "ic"]) {
     workspace: {configuration: {payload: {schema_version: 2, shared: {factors: []}}}},
     manifest: {
       defaults: {factor_mode: {tab_key: "factor-execution"}},
+      modules: [
+        {key: "factor-execution", label: "因子执行"},
+        {key: "product-selection", label: "产品组"},
+      ],
+      field_contracts: {settings: {
+        factor_mode: {module: "factor-execution", label: "因子模式"},
+        product_path_selection: {module: "product-selection", label: "产品组"},
+      }},
       run_fields: [
         {key: "task_name", label: "任务名称", placement: "run_identity", default: ""},
         {key: "output_requests", label: "结果与生成物", placement: "outputs",
@@ -90,6 +98,14 @@ for (const kind of ["backtest", "ic"]) {
   assert.equal(
     FTTestPageAssistance.schemaFor(state)["x-run-spec-shape"],
     "RunRequest(configuration + registered run_fields)",
+  );
+  const navigation = FTTestPageAssistance.navigationFor(state);
+  assert.equal(navigation.nodes["tab:factor-execution"].mounted, true);
+  assert.equal(navigation.nodes["tab:product-selection"].mounted, false);
+  assert.deepEqual(
+    navigation.nodes["tab:product-selection"].children,
+    ["field:product_path_selection"],
+    "unmounted tabs expose backend-registered fields without loading UI candidates",
   );
 }
 
