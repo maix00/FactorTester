@@ -173,12 +173,19 @@ def _progress_item(
     base: Mapping[str, object],
     text: str,
 ) -> dict[str, Any]:
-    title, separator, remainder = text.partition("\n")
-    content = remainder.lstrip("\n").strip() if separator else ""
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return {
+            **base,
+            "type": "assistant_message",
+            "content": [{
+                "type": "output_text", "text": text, "annotations": [],
+            }],
+        }
     return _workflow(base, tasks=[{
         "type": "custom",
-        "title": title.strip(),
-        "content": content or None,
+        "title": title,
+        "content": text if text.strip() != title else None,
         "status_indicator": _status(item.get("status")),
     }], expanded=True)
 
