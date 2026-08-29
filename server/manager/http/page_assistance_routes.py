@@ -158,17 +158,30 @@ class PageAssistanceStore:
         validate_document(schema, document)
         return page
 
-    def validate_for_tab(
+    def resolve_target(
         self,
         principal: str,
         profile_id: str,
-        tab_id: str,
+        *,
+        page_kind: str,
+        schema_version: int,
         document: object,
     ) -> dict:
-        page = self.page(principal, profile_id, tab_id)
+        page = self.current(principal, profile_id)
+        expected_kind = str(page_kind or "").strip()
         if not page:
-            raise ValueError("page context is no longer active")
-        schema = page["assistance"].get("document_schema")
+            raise ValueError(
+                f"activate a compatible {expected_kind or 'assisted'} page"
+            )
+        assistance = page["assistance"]
+        if str(assistance.get("page_kind") or "") != expected_kind:
+            raise ValueError(f"activate a compatible {expected_kind} page")
+        if int(assistance.get("schema_version") or 0) != int(schema_version):
+            raise ValueError(
+                f"activate a compatible {expected_kind} page with schema "
+                f"version {schema_version}"
+            )
+        schema = assistance.get("document_schema")
         if not isinstance(schema, dict):
             raise TypeError("assisted page did not publish a document schema")
         validate_document(schema, document)
@@ -183,12 +196,29 @@ class PageAssistanceStore:
             self._prune()
             draft_id = str(value.get("draft_id") or "")
             if draft_id:
-                pending = next((
-                    item for item in self._applications.get(key, [])
-                    if str(item.get("draft_id") or "") == draft_id
-                ), None)
-                if pending is not None:
-                    return deepcopy(pending)
+                for pending_key, items in list(self._applications.items()):
+                    pending = next((
+                        item for item in items
+                        if str(item.get("draft_id") or "") == draft_id
+                    ), None)
+                    if pending is None:
+                        continue
+                    if pending_key == key:
+                        return deepcopy(pending)
+                    retained = [item for item in items if item is not pending]
+                    if retained:
+                        self._applications[pending_key] = retained
+                    else:
+                        self._applications.pop(pending_key, None)
+                    self._results[pending["sequence"]] = {
+                        "sequence": pending["sequence"],
+                        "success": False,
+                        "revision": None,
+                        "error": "assistance draft retargeted to the active page",
+                        "draft_id": draft_id,
+                        "target_tab_id": str(pending.get("tab_id") or ""),
+                        "target_revision": pending.get("expected_revision"),
+                    }
             page = self._contexts.get(key)
             if not page:
                 raise ValueError("page context is no longer active")
@@ -202,6 +232,7 @@ class PageAssistanceStore:
             item = {
                 "sequence": self._sequence,
                 "kind": "replace_document",
+                "tab_id": tab_id,
                 "expected_revision": revision,
                 "document": deepcopy(document),
                 "draft_id": draft_id,
@@ -258,6 +289,8 @@ class PageAssistanceStore:
             if application is None:
                 raise ValueError("unknown assistance application")
             result["draft_id"] = str(application.get("draft_id") or "")
+            result["target_tab_id"] = str(application.get("tab_id") or "")
+            result["target_revision"] = application.get("expected_revision")
             self._results[sequence] = result
             for key, items in list(self._applications.items()):
                 retained = [item for item in items if item["sequence"] != sequence]
@@ -449,16 +482,24 @@ class PageAssistanceRoutesMixin:
                     })
                     return True
                 try:
-                    page = _STORE.validate_for_tab(
+                    page = _STORE.resolve_target(
                         principal,
                         profile_id,
-                        str(draft.get("tab_id") or ""),
-                        draft.get("document"),
+                        page_kind=str(draft.get("page_kind") or ""),
+                        schema_version=int(
+                            draft.get("document_schema_version") or 0
+                        ),
+                        document=draft.get("document"),
                     )
                 except ValueError as exc:
                     drafts.set_status(draft_id, "rejected", error=str(exc))
                     raise
-                drafts.set_status(draft_id, "validated")
+                drafts.set_status(
+                    draft_id,
+                    "validated",
+                    target_tab_id=page["tab_id"],
+                    target_revision=int(page["assistance"]["revision"]),
+                )
                 json_response(
                     self,
                     {
@@ -480,6 +521,8 @@ class PageAssistanceRoutesMixin:
                             "applied" if result["success"] else "rejected",
                             error=result.get("error") or "",
                             applied_revision=result.get("revision"),
+                            target_tab_id=result.get("target_tab_id") or "",
+                            target_revision=result.get("target_revision"),
                         )
                     except AssistanceDraftError:
                         pass
@@ -489,17 +532,31 @@ class PageAssistanceRoutesMixin:
                 drafts = self._agent_service().assistance_drafts(principal, profile_id)
                 draft = drafts.get(draft_id)
                 try:
+                    page = _STORE.resolve_target(
+                        principal,
+                        profile_id,
+                        page_kind=str(draft.get("page_kind") or ""),
+                        schema_version=int(
+                            draft.get("document_schema_version") or 0
+                        ),
+                        document=draft.get("document"),
+                    )
                     item = _STORE.enqueue(
                         principal,
                         profile_id,
                         {
-                            "tab_id": draft.get("tab_id"),
-                            "expected_revision": draft.get("page_revision"),
+                            "tab_id": page["tab_id"],
+                            "expected_revision": page["assistance"]["revision"],
                             "document": draft.get("document"),
                             "draft_id": draft_id,
                         },
                     )
-                    drafts.set_status(draft_id, "queued")
+                    drafts.set_status(
+                        draft_id,
+                        "queued",
+                        target_tab_id=page["tab_id"],
+                        target_revision=int(page["assistance"]["revision"]),
+                    )
                     try:
                         result = _STORE.wait_result(item["sequence"])
                     except TimeoutError:

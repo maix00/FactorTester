@@ -30,10 +30,20 @@ def test_drafts_are_flat_retained_and_explicitly_deleted(tmp_path) -> None:
     assert len(list(root.glob("*.json"))) == 1
     assert not [item for item in root.iterdir() if item.is_dir()]
     assert store.get(created["draft_id"])["document"] == {"payload": "value"}
+    assert created["source_tab_id"] == "backtest-1"
 
-    applied = store.set_status(created["draft_id"], "applied", applied_revision=8)
+    applied = store.set_status(
+        created["draft_id"],
+        "queued",
+        target_tab_id="backtest-2",
+        target_revision=2,
+    )
+    applied = store.set_status(created["draft_id"], "applied", applied_revision=3)
     assert applied["status"] == "applied"
-    assert store.get(created["draft_id"])["application"]["applied_revision"] == 8
+    application = store.get(created["draft_id"])["application"]
+    assert application["applied_revision"] == 3
+    assert application["target_tab_id"] == "backtest-2"
+    assert application["target_revision"] == 2
     assert store.delete(created["draft_id"]) is True
     assert list(root.glob("*.json")) == []
 

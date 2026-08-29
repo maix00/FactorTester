@@ -160,6 +160,7 @@ class AssistanceDraftStore:
                 "profile_id": str(profile_id),
                 "conversation_id": str(conversation_id),
                 "session_id": str(session_id),
+                "source_tab_id": str(tab_id),
                 "tab_id": str(tab_id),
                 "page_kind": str(page_kind),
                 "document_schema_version": int(schema_version),
@@ -232,6 +233,8 @@ class AssistanceDraftStore:
         error: str = "",
         run_spec_ref: str = "",
         applied_revision: int | None = None,
+        target_tab_id: str = "",
+        target_revision: int | None = None,
     ) -> dict[str, Any]:
         normalized = str(status or "").strip()
         if normalized not in _STATUSES:
@@ -242,11 +245,21 @@ class AssistanceDraftStore:
             now = datetime.now().astimezone().isoformat()
             value["status"] = normalized
             value["updated_at"] = now
+            previous = value.get("application")
+            previous = previous if isinstance(previous, dict) else {}
             value["application"] = {
                 "at": now,
                 "error": str(error),
                 "run_spec_ref": str(run_spec_ref),
                 "applied_revision": applied_revision,
+                "target_tab_id": str(
+                    target_tab_id or previous.get("target_tab_id") or ""
+                ),
+                "target_revision": (
+                    target_revision
+                    if target_revision is not None
+                    else previous.get("target_revision")
+                ),
             }
             self._write(path, value)
             value["workspace_path"] = str(ASSISTANCE_DRAFT_RELATIVE_ROOT / path.name)
