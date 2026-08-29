@@ -147,7 +147,11 @@ def test_public_agent_image_pins_codex_and_exposes_only_research_cli() -> None:
     assert "AS factortester-public-deps" in dockerfile
     assert "FROM factortester-public-deps AS factortester-cli-builder" in dockerfile
     assert "FROM factortester-public-deps AS factortester-public" in dockerfile
-    assert "--target /runtime /build/tools/cli" in dockerfile
+    assert "COPY tools/cli /runtime/tools/cli" in dockerfile
+    cli_builder_stage = dockerfile.split(
+        "FROM factortester-public-deps AS factortester-cli-builder", 1
+    )[1].split("FROM factortester-public-deps AS factortester-public", 1)[0]
+    assert "pip install" not in cli_builder_stage
     assert "python -m compileall -q -b /runtime" in dockerfile
     assert "find /runtime -type f -name '*.py' -delete" in dockerfile
     assert "COPY --from=factortester-cli-builder /runtime" in dockerfile
