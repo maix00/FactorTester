@@ -41,7 +41,7 @@ def normalize_backtest_runtime_setting_intent(
     backtest = analyses.get("backtest")
     if not isinstance(backtest, dict):
         return normalized, []
-    local = backtest.get("local_settings")
+    local = (backtest.get("execution") or {}).get("settings")
     if not isinstance(local, dict):
         return normalized, []
 
@@ -128,7 +128,7 @@ def _normalize_local_values(
             continue
         local[key] = new_value
         changes.append({
-            "scope": "local_settings",
+            "scope": "execution.settings",
             "setting_key": key,
             "requested_value": old_value,
             "applied_value": new_value,

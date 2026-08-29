@@ -103,17 +103,18 @@
     manifest, payload, values, {stripRootRegistered = false} = {},
   ) {
     const result = clone(payload || {}) || {};
+    delete result.local_settings;
+    delete result.settings;
     // The analysis root is an authoring merge of prior state and current
-    // values. Registered local fields belong only in local_settings, while
+    // values. Registered outer fields belong only in execution.settings, while
     // GROUP_ONLY fields belong only on strategy groups below. Strip the
     // root copy before this object becomes the frozen RunSpec.
     sanitizeObject(manifest, result, values || {}, {
       localScope: true, stripRegistered: stripRootRegistered,
     });
-    for (const key of ["settings", "local_settings"]) {
-      if (result[key] && typeof result[key] === "object") {
-        sanitizeObject(manifest, result[key], values || {}, {localScope: true});
-      }
+    const executionSettings = result.execution?.settings;
+    if (executionSettings && typeof executionSettings === "object") {
+      sanitizeObject(manifest, executionSettings, values || {}, {localScope: true});
     }
     if (Array.isArray(result.groups)) {
       const parents = new Map(result.groups.map(group => [group.id, group]));
@@ -154,7 +155,7 @@
     return result;
   }
 
-  const DERIVED_SETTINGS_KEYS = Object.freeze(["local_settings", "settings"]);
+  const DERIVED_SETTINGS_KEYS = Object.freeze(["execution", "local_settings", "settings"]);
 
   function authoringConfiguration(configuration, kind) {
     const result = clone(configuration || {}) || {};
@@ -173,7 +174,11 @@
     const ui = result.ui[kind] || (result.ui[kind] = {});
     const settings = ui.settings && typeof ui.settings === "object"
       ? ui.settings : (ui.settings = {});
-    analysis.local_settings = executionSettings(manifest, settings);
+    analysis.execution = {
+      ...(analysis.execution || {}),
+      settings: executionSettings(manifest, settings),
+    };
+    delete analysis.local_settings;
     delete analysis.settings;
     return result;
   }

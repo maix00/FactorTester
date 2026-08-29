@@ -27,7 +27,7 @@ def intent_catalog(manifest: dict[str, Any]) -> dict[str, Any]:
 
 def strategy_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     backtest = _backtest(payload)
-    local = backtest.get("local_settings") or {}
+    local = (backtest.get("execution") or {}).get("settings") or {}
     rows = []
     for group in backtest.get("groups") or []:
         if not isinstance(group, dict):
@@ -57,7 +57,7 @@ def configure_strategy(
     group = next((item for item in groups if str(item.get("id") or item.get("group_id") or "") == group_id), None)
     if group is None:
         raise ValueError(f"unknown strategy group: {group_id}")
-    local = backtest.get("local_settings") or {}
+    local = (backtest.get("execution") or {}).get("settings") or {}
     for key, value in (settings or {}).items():
         if value is not None:
             group[key] = value

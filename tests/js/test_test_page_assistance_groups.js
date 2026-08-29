@@ -18,7 +18,7 @@ global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...(values || {})}),
   authoringMountedTabs: (_manifest, _settings, saved) => [...(saved || [])],
   executionSettings: (_manifest, values) => ({...(values || {})}),
-  derivedSettingsKeys: () => ["local_settings", "settings"],
+  derivedSettingsKeys: () => ["execution", "local_settings", "settings"],
   authoringConfiguration: configuration => structuredClone(configuration),
   executableConfiguration: configuration => structuredClone(configuration),
 };

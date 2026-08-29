@@ -15,9 +15,10 @@ def refresh_template_product_group_paths(template: dict, groups: list[dict]) -> 
     }
     snapshot = refreshed.get('snapshot', {})
     selections = []
-    local_settings = snapshot.get("local_settings") if isinstance(snapshot, dict) else None
-    if isinstance(local_settings, dict) and isinstance(local_settings.get("product_path_selection"), dict):
-        selections.append(local_settings["product_path_selection"])
+    execution = snapshot.get("execution") if isinstance(snapshot, dict) else None
+    settings = execution.get("settings") if isinstance(execution, dict) else None
+    if isinstance(settings, dict) and isinstance(settings.get("product_path_selection"), dict):
+        selections.append(settings["product_path_selection"])
     group_settings = snapshot.get("group_settings") if isinstance(snapshot, dict) else None
     if isinstance(group_settings, dict):
         for group in group_settings.get("groups") or []:

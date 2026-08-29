@@ -117,7 +117,7 @@ def test_product_group_binding_requires_separately_registered_subjects(
         )
 
 
-def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
+def test_snapshot_migration_moves_legacy_time_to_execution_settings():
     snapshot, changed = migrate_snapshot_backend_settings({
         "time_data": {
             "start_date": "2024-01-02",
@@ -135,10 +135,11 @@ def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
 
     assert changed is True
     assert "time_data" not in snapshot
-    assert "initialCapital" not in snapshot["local_settings"]
-    assert "calendarFreq" not in snapshot["local_settings"]
-    assert "backendBacktestSettings" not in snapshot["local_settings"]
-    assert snapshot["local_settings"] == {
+    settings = snapshot["execution"]["settings"]
+    assert "initialCapital" not in settings
+    assert "calendarFreq" not in settings
+    assert "backendBacktestSettings" not in settings
+    assert settings == {
         "start_date": "2024-01-02",
         "start_time": "09:00",
         "end_date": "2026-05-31",
@@ -248,7 +249,7 @@ def test_snapshot_migration_normalizes_existing_product_path_selection_fields():
     )
 
     assert changed is True
-    assert snapshot["local_settings"]["product_path_selection"] == {
+    assert snapshot["execution"]["settings"]["product_path_selection"] == {
         "product_path_selection_id": "pg-local",
     }
     selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]

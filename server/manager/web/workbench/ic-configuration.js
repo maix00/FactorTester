@@ -131,7 +131,7 @@
       schema_version: 2,
       configuration_groups: groups,
       product_selections: selections,
-      local_settings: clone(settings),
+      execution: {settings: clone(settings)},
     };
   }
 

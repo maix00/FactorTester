@@ -7,7 +7,7 @@ global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...values}),
   authoringMountedTabs: (_manifest, _settings, saved) => [...(saved || [])],
   executionSettings: (_manifest, values) => ({...values}),
-  derivedSettingsKeys: () => ["local_settings", "settings"],
+  derivedSettingsKeys: () => ["execution", "local_settings", "settings"],
   authoringConfiguration: (configuration, kind) => {
     const result = structuredClone(configuration);
     delete result.analyses[kind].local_settings;
@@ -16,8 +16,8 @@ global.FTTestConfigurationCompiler = {
   },
   executableConfiguration: (configuration, kind) => {
     const result = structuredClone(configuration);
-    result.analyses[kind].local_settings = {
-      ...(result.ui?.[kind]?.settings || {}),
+    result.analyses[kind].execution = {
+      settings: {...(result.ui?.[kind]?.settings || {})},
     };
     delete result.analyses[kind].settings;
     return result;
@@ -217,7 +217,7 @@ assert.deepEqual(canonical.configuration.ui.ic.settings, {
   start_time: "09:00", end_time: "15:00",
 });
 assert.deepEqual(
-  canonical.configuration.analyses.ic.local_settings,
+  canonical.configuration.analyses.ic.execution.settings,
   canonical.configuration.ui.ic.settings,
   "the applied page state and executable RunSpec use one canonical value set",
 );
@@ -260,6 +260,6 @@ registeredAdapter.importDocument({
 assert.equal(restored, 2, "document state is restored before the deferred page rebuild");
 registeredAdapter.afterApply();
 assert.equal(restored, 3, "the existing workspace restore helpers rebuild the page");
-assert.deepEqual(importState.analysis, {groups: [], local_settings: {}});
+assert.deepEqual(importState.analysis, {groups: [], execution: {settings: {}}});
 
 console.log("PASS: test assistance edits the same configuration shape frozen by RunSpec");

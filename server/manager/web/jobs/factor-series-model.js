@@ -47,7 +47,7 @@
       || configuration || {};
     const analysis = root.analyses?.factor_evaluation
       || root.factor_evaluation || root.analysis || root;
-    return {...analysis, ...(analysis.settings || analysis.local_settings || {})};
+    return {...analysis, ...(analysis.execution?.settings || {})};
   }
 
   function priceRequest(configuration, product, fallbackFrequency = "DAY1") {

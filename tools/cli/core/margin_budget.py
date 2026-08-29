@@ -8,7 +8,7 @@ from typing import Any
 
 def margin_budget_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     backtest = payload.get("analyses", {}).get("backtest", {})
-    local = backtest.get("local_settings") or {}
+    local = (backtest.get("execution") or {}).get("settings") or {}
     rows = []
     for group in backtest.get("groups") or []:
         if not isinstance(group, dict):

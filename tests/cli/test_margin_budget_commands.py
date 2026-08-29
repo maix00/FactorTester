@@ -13,7 +13,7 @@ def _configuration():
     return {
         "revision": 4,
         "payload": {"analyses": {"backtest": {
-            "local_settings": {"margin_mode": "auto", "allocation_policy": "equal_notional"},
+            "execution": {"settings": {"margin_mode": "auto", "allocation_policy": "equal_notional"}},
             "groups": [{"id": "A1", "name": "A1", "custom": {"preserved": True}}],
         }}},
     }

@@ -258,7 +258,7 @@ def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> 
                         "paths": ["Product/ForgedClientPath"],
                     },
                 },
-                "local_settings": {},
+                "execution": {"settings": {}},
             }},
             "ui": {},
         },
@@ -311,7 +311,7 @@ def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
             },
             "analyses": {"backtest": {
                 "factor_mode": "auto",
-                "local_settings": {"factor_mode": "auto"},
+                "execution": {"settings": {"factor_mode": "auto"}},
                 "groups": [{
                     "id": "group-a",
                     "factorAlias": "Momentum|N:20",
@@ -330,7 +330,7 @@ def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
     )["payload"]
 
     assert "factor_mode" not in payload["analyses"]["backtest"]
-    assert payload["analyses"]["backtest"]["local_settings"] == {
+    assert payload["analyses"]["backtest"]["execution"]["settings"] == {
         "factor_mode": "auto"
     }
     assert "settings" not in payload["ui"]["backtest"]
@@ -340,8 +340,9 @@ def test_freeze_product_scope_removes_repeated_execution_projections() -> None:
         "alias": "Momentum|N:20",
         "factor_family_alias": "Momentum",
         "factor_owner_ref": "alice",
-        "factor_family_ref": "Momentum",
-        "factor_params": [{"alias": "N", "value": 20}],
+            "factor_family_ref": "Momentum",
+            "family_ref": "Momentum",
+            "factor_params": [{"alias": "N", "value": 20}],
     }
 
 
@@ -388,14 +389,10 @@ def test_ic_frozen_scope_and_settings_have_one_runspec_source(monkeypatch) -> No
                 "product_path_selection_id": "scope-a",
                 "product_selections": {"scope-a": {"paths": ["Product/A"]}},
                 "start_date": "2026-01-01",
-                "local_settings": {
+                "execution": {"settings": {
                     "start_date": "2026-01-01",
                     "end_date": "2026-01-31",
-                },
-                "settings": {
-                    "start_date": "2026-01-01",
-                    "end_date": "2026-01-31",
-                },
+                }},
             }},
             "ui": {"ic": {"settings": {"start_date": "2026-01-01"}}},
         },
@@ -404,9 +401,9 @@ def test_ic_frozen_scope_and_settings_have_one_runspec_source(monkeypatch) -> No
     analysis = frozen["payload"]["analyses"]["ic"]
     assert analysis == {
         "product_path_selection_id": "scope-a",
-        "local_settings": {
+        "execution": {"settings": {
             "start_date": "2026-01-01", "end_date": "2026-01-31",
-        },
+        }},
     }
     assert "settings" not in frozen["payload"]["ui"]["ic"]
 
@@ -431,8 +428,9 @@ def test_frozen_shared_selection_reaches_backtest_runtime(monkeypatch) -> None:
         "payload": {
             "schema_version": 1,
             "shared": {"factor_families": [], "factors": []},
-            "analyses": {"backtest": {
-                "groups": [{"product_path_selection_id": "scope-a"}],
+                "analyses": {"backtest": {
+                    "execution": {"settings": {}},
+                    "groups": [{"product_path_selection_id": "scope-a"}],
                 "product_selections": {
                     "scope-a": {"paths": ["Product/A"]}
                 },
