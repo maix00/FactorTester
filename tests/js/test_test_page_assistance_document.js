@@ -5,7 +5,7 @@ const vm = require("node:vm");
 global.window = globalThis;
 global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...values}),
-  executionSettings: (_manifest, values) => ({factor_mode: values.factor_mode}),
+  executionSettings: (_manifest, values) => ({...values}),
 };
 global.FTTestConfiguration = {
   configurationPayload: state => ({
@@ -151,6 +151,10 @@ for (const kind of ["backtest", "ic"]) {
     FTTestPageAssistance.schemaFor(state)["x-run-spec-shape"],
     "RunRequest(configuration + registered run_fields)",
   );
+  assert.equal(
+    FTTestPageAssistance.schemaFor(state)["x-canonical-settings-path"],
+    `configuration.ui.${kind}.settings`,
+  );
   const navigation = FTTestPageAssistance.navigationFor(state);
   if (kind === "ic") {
     const groupSchema = FTTestPageAssistance.schemaFor(state).properties
@@ -173,6 +177,42 @@ for (const kind of ["backtest", "ic"]) {
     "unmounted tabs expose backend-registered fields without loading UI candidates",
   );
 }
+
+const canonicalState = {
+  kind: "ic",
+  manifest: {defaults: {
+    start_date: {}, end_date: {}, start_time: {}, end_time: {},
+  }},
+  values: {
+    start_date: "", end_date: "", start_time: "00:00", end_time: "23:59",
+  },
+};
+const canonical = FTTestPageAssistance.canonicalDocument(canonicalState, {
+  configuration: {
+    analyses: {ic: {local_settings: {
+      start_date: "2024-01-01", end_date: "2025-01-31",
+      start_time: "09:00", end_time: "15:00",
+    }}},
+    ui: {ic: {settings: {
+      start_date: "", end_date: "", start_time: "00:00", end_time: "23:59",
+    }}},
+  },
+});
+assert.deepEqual(canonical.configuration.ui.ic.settings, {
+  start_date: "2024-01-01", end_date: "2025-01-31",
+  start_time: "09:00", end_time: "15:00",
+});
+assert.deepEqual(
+  canonical.configuration.analyses.ic.local_settings,
+  canonical.configuration.ui.ic.settings,
+  "the applied page state and executable RunSpec use one canonical value set",
+);
+assert.throws(() => FTTestPageAssistance.canonicalDocument(canonicalState, {
+  configuration: {
+    analyses: {ic: {local_settings: {start_date: "2024-03-01"}}},
+    ui: {ic: {settings: {start_date: "2024-02-01"}}},
+  },
+}), /start_date.*不一致/);
 
 const importState = {
   kind: "backtest", workspace: null, manifest: {}, values: {}, analysis: {},
@@ -204,6 +244,6 @@ registeredAdapter.importDocument({
 assert.equal(restored, 2, "document state is restored before the deferred page rebuild");
 registeredAdapter.afterApply();
 assert.equal(restored, 3, "the existing workspace restore helpers rebuild the page");
-assert.deepEqual(importState.analysis, {groups: []});
+assert.deepEqual(importState.analysis, {groups: [], local_settings: {}});
 
 console.log("PASS: test assistance edits the same configuration shape frozen by RunSpec");

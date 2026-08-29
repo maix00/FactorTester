@@ -14,6 +14,10 @@ global.FTPageAssistance = {
 };
 global.FTTestLazyCode = {loadGroup: async () => {}};
 global.FTTestConfiguration = {configurationPayload: state => state.payload};
+global.FTTestConfigurationCompiler = {
+  authoringSettings: (_manifest, values) => ({...(values || {})}),
+  executionSettings: (_manifest, values) => ({...(values || {})}),
+};
 global.FTTestState = {
   applyWorkspaceConfiguration: state => {
     state.analysis = structuredClone(

@@ -70,11 +70,67 @@
       additionalProperties: false,
       "x-factor-tester-field-registry": structuredClone(state.manifest || {}),
       "x-run-spec-shape": "RunRequest(configuration + registered run_fields)",
+      "x-canonical-settings-path": `configuration.ui.${state.kind}.settings`,
     };
   }
 
   function semanticKey(value) {
     return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  }
+
+  function sameValue(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function canonicalDocument(state, source) {
+    const document = structuredClone(source);
+    const configuration = document.configuration || {};
+    const analysis = configuration.analyses?.[state.kind];
+    if (!analysis || typeof analysis !== "object") return document;
+    configuration.ui = configuration.ui || {};
+    const ui = configuration.ui[state.kind] || (configuration.ui[state.kind] = {});
+    const settings = ui.settings && typeof ui.settings === "object"
+      ? ui.settings : (ui.settings = {});
+    const localSettings = analysis.local_settings
+      && typeof analysis.local_settings === "object"
+      ? analysis.local_settings : {};
+    const currentAuthoring = FTTestConfigurationCompiler.authoringSettings(
+      state.manifest, state.values || {},
+    );
+    const currentExecution = FTTestConfigurationCompiler.executionSettings(
+      state.manifest, currentAuthoring,
+    );
+    const incomingExecution = FTTestConfigurationCompiler.executionSettings(
+      state.manifest, settings,
+    );
+    for (const [fieldKey, field] of Object.entries(state.manifest?.defaults || {})) {
+      if (field?.execution_policy === "authoring_only") continue;
+      const storageKey = field?.serialization?.storage_key || fieldKey;
+      const hasUI = Object.prototype.hasOwnProperty.call(incomingExecution, storageKey);
+      const hasLocal = Object.prototype.hasOwnProperty.call(localSettings, storageKey);
+      if (!hasUI && !hasLocal) continue;
+      if (!hasLocal) continue;
+      if (!hasUI) {
+        settings[fieldKey] = structuredClone(localSettings[storageKey]);
+        continue;
+      }
+      const current = currentExecution[storageKey];
+      const uiValue = incomingExecution[storageKey];
+      const localValue = localSettings[storageKey];
+      if (sameValue(uiValue, localValue)) continue;
+      const uiChanged = !sameValue(uiValue, current);
+      const localChanged = !sameValue(localValue, current);
+      if (localChanged && !uiChanged) {
+        settings[fieldKey] = structuredClone(localValue);
+        continue;
+      }
+      if (uiChanged && !localChanged) continue;
+      throw new Error(`测试设置 ${fieldKey} 在页面字段与运行配置中不一致`);
+    }
+    analysis.local_settings = FTTestConfigurationCompiler.executionSettings(
+      state.manifest, settings,
+    );
+    return document;
   }
 
   function navigationFor(state) {
@@ -212,12 +268,14 @@
             `任务提交字段必须写入文档顶层 run_fields: ${misplaced.join(", ")}`,
           );
         }
+        canonicalDocument(state, document);
       },
       importDocument: document => {
+        const canonical = canonicalDocument(state, document);
         state.workspace = state.workspace || {workspace_id: ""};
         state.workspace.configuration = {
           ...(state.workspace.configuration || {}),
-          payload: structuredClone(document.configuration),
+          payload: structuredClone(canonical.configuration),
         };
         FTTestState.applyWorkspaceConfiguration(state);
         FTTestState.seedSavedCatalogs(state);
@@ -237,6 +295,6 @@
   }
 
   window.FTTestPageAssistance = Object.freeze({
-    documentFor, navigationFor, register, schemaFor,
+    canonicalDocument, documentFor, navigationFor, register, schemaFor,
   });
 })();
