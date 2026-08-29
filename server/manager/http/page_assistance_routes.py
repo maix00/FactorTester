@@ -43,6 +43,12 @@ def validate_document(schema: dict, value: object, path: str = "$") -> None:
         raise ValueError(f"{path} is below its minimum")
     if isinstance(value, dict):
         properties = schema.get("properties") or {}
+        forbidden = sorted(
+            str(key) for key in schema.get("x-forbidden-properties") or []
+            if key in value
+        )
+        if forbidden:
+            raise ValueError(f"{path} has read-only fields: {forbidden}")
         for key in schema.get("required") or []:
             if key not in value:
                 raise ValueError(f"{path}.{key} is required")

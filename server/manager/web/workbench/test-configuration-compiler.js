@@ -154,6 +154,47 @@
     return result;
   }
 
+  const DERIVED_SETTINGS_KEYS = Object.freeze(["local_settings", "settings"]);
+
+  function authoringConfiguration(configuration, kind) {
+    const result = clone(configuration || {}) || {};
+    const analysis = result.analyses?.[kind];
+    if (analysis && typeof analysis === "object") {
+      for (const key of DERIVED_SETTINGS_KEYS) delete analysis[key];
+    }
+    return result;
+  }
+
+  function executableConfiguration(configuration, kind, manifest) {
+    const result = clone(configuration || {}) || {};
+    result.analyses = result.analyses || {};
+    const analysis = result.analyses[kind] || (result.analyses[kind] = {});
+    result.ui = result.ui || {};
+    const ui = result.ui[kind] || (result.ui[kind] = {});
+    const settings = ui.settings && typeof ui.settings === "object"
+      ? ui.settings : (ui.settings = {});
+    analysis.local_settings = executionSettings(manifest, settings);
+    delete analysis.settings;
+    return result;
+  }
+
+  function authoringMountedTabs(manifest, settings, saved) {
+    const tabs = manifest?.tab_lists?.["local-settings"] || [];
+    const available = new Set(tabs.map(tab => String(tab?.key || "")).filter(Boolean));
+    const mounted = new Set((Array.isArray(saved)
+      ? saved : manifest?.default_mounted_tabs?.["local-settings"] || []
+    ).filter(key => available.has(key)));
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      const tabKey = String(field?.tab_key || "");
+      if (!available.has(tabKey)
+          || !Object.prototype.hasOwnProperty.call(settings || {}, key)) continue;
+      if (JSON.stringify(settings[key]) !== JSON.stringify(field?.default)) {
+        mounted.add(tabKey);
+      }
+    }
+    return tabs.map(tab => tab.key).filter(key => mounted.has(key));
+  }
+
   function factorAlias(factor) {
     return String(factor?.alias || "").trim();
   }
@@ -191,7 +232,9 @@
   }
 
   window.FTTestConfigurationCompiler = Object.freeze({
-    authoringSettings,
+    authoringConfiguration, authoringMountedTabs, authoringSettings,
+    derivedSettingsKeys: () => [...DERIVED_SETTINGS_KEYS],
+    executableConfiguration,
     executionSettings,
     factorSubjects,
     sanitizeExecutionPayload,

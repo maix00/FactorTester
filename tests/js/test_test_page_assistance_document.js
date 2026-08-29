@@ -5,7 +5,23 @@ const vm = require("node:vm");
 global.window = globalThis;
 global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...values}),
+  authoringMountedTabs: (_manifest, _settings, saved) => [...(saved || [])],
   executionSettings: (_manifest, values) => ({...values}),
+  derivedSettingsKeys: () => ["local_settings", "settings"],
+  authoringConfiguration: (configuration, kind) => {
+    const result = structuredClone(configuration);
+    delete result.analyses[kind].local_settings;
+    delete result.analyses[kind].settings;
+    return result;
+  },
+  executableConfiguration: (configuration, kind) => {
+    const result = structuredClone(configuration);
+    result.analyses[kind].local_settings = {
+      ...(result.ui?.[kind]?.settings || {}),
+    };
+    delete result.analyses[kind].settings;
+    return result;
+  },
 };
 global.FTTestConfiguration = {
   configurationPayload: state => ({
@@ -141,7 +157,7 @@ for (const kind of ["backtest", "ic"]) {
   assert.equal(document.document_kind, "research_configuration");
   assert.deepEqual(document.analyses, [kind]);
   assert.equal(document.configuration.schema_version, 2);
-  assert.equal(document.configuration.analyses[kind].local_settings.factor_mode, "native");
+  assert.equal(document.configuration.analyses[kind].local_settings, undefined);
   assert.equal(document.configuration.ui[kind].settings.factor_mode, "native");
   assert.deepEqual(document.configuration.run_fields.output_requests, ["equity_curve"]);
   assert.equal(document.configuration.ui[kind].output_requests, undefined);
@@ -189,12 +205,10 @@ const canonicalState = {
 };
 const canonical = FTTestPageAssistance.canonicalDocument(canonicalState, {
   configuration: {
-    analyses: {ic: {local_settings: {
+    analyses: {ic: {}},
+    ui: {ic: {settings: {
       start_date: "2024-01-01", end_date: "2025-01-31",
       start_time: "09:00", end_time: "15:00",
-    }}},
-    ui: {ic: {settings: {
-      start_date: "", end_date: "", start_time: "00:00", end_time: "23:59",
     }}},
   },
 });
@@ -207,12 +221,6 @@ assert.deepEqual(
   canonical.configuration.ui.ic.settings,
   "the applied page state and executable RunSpec use one canonical value set",
 );
-assert.throws(() => FTTestPageAssistance.canonicalDocument(canonicalState, {
-  configuration: {
-    analyses: {ic: {local_settings: {start_date: "2024-03-01"}}},
-    ui: {ic: {settings: {start_date: "2024-02-01"}}},
-  },
-}), /start_date.*不一致/);
 
 const importState = {
   kind: "backtest", workspace: null, manifest: {}, values: {}, analysis: {},
@@ -229,6 +237,14 @@ global.FTTestLazyCode = {
   },
 };
 FTTestPageAssistance.register({}, importState, () => { restored += 1; });
+assert.throws(() => registeredAdapter.validate({
+  document_kind: "research_configuration",
+  configuration: {
+    schema_version: 2,
+    analyses: {backtest: {groups: [{}], local_settings: {start_date: "2024-01-01"}}},
+  },
+  run_fields: {},
+}), /local_settings.*只读运行配置/);
 assert.equal(
   global.FTTestConfiguration, undefined,
   "registering the page must not eagerly require the deferred configuration runtime",
