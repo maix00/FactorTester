@@ -69,7 +69,11 @@
         await adapter.importDocument(document);
         revision += 1;
         session.durable.assistanceRevision = revision;
-        lastSerialized = JSON.stringify(adapter.exportDocument());
+        // The imported document is the authoritative atomic replacement. Some
+        // pages rebuild their view model only after the server acknowledges the
+        // application; exporting during that interval would read a deliberately
+        // transient state and can fail or manufacture a different document.
+        lastSerialized = JSON.stringify(document);
         context.checkpointTabSession?.();
         return revision;
       },
