@@ -12,6 +12,7 @@ let bridgeStarts = 0;
 let bridgeDisposals = 0;
 let bridgeOptions = null;
 let lifecycleRegistration = null;
+let rebuilding = false;
 global.window = {
   FTPageAgentProfiles: {self: async () => {
     profileReads += 1;
@@ -47,13 +48,23 @@ vm.runInThisContext(
     schema: () => ({type: "object"}),
     exportDocument: () => {
       assert.equal(ready, true, "the document is not exported before preparation");
+      if (rebuilding) {
+        throw new Error("document cannot be exported from transient imported state");
+      }
       return current;
     },
     validate: document => {
       if (!document.name) throw new Error("name is required");
     },
-    importDocument: document => { imported = document; current = document; },
-    afterApply: () => { afterApply += 1; },
+    importDocument: document => {
+      imported = document;
+      current = document;
+      rebuilding = true;
+    },
+    afterApply: () => {
+      rebuilding = false;
+      afterApply += 1;
+    },
   }, {pageKind: "factor-create"});
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(profileReads, 1,
@@ -72,10 +83,10 @@ vm.runInThisContext(
   assert.equal(controller.snapshot().revision, 1, "person edits advance the revision");
   await controller.apply({expected_revision: 1, document: {name: "new"}});
   assert.deepEqual(imported, {name: "new"});
-  assert.equal(controller.snapshot().revision, 2);
   assert.equal(afterApply, 0, "page rebuilding is held until acknowledgement");
   await controller.afterAcknowledge({result: {success: true}});
   assert.equal(afterApply, 1);
+  assert.equal(controller.snapshot().revision, 2);
   await controller.afterAcknowledge({result: {success: false}});
   assert.equal(afterApply, 1, "a rejected replacement never redraws page content");
   await assert.rejects(
