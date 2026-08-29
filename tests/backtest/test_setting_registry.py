@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 from flask import Flask
 
+from server.manager.http.page_assistance_routes import validate_document
 from server.modules.single_factor_test import sft_bp
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 from tools.testers.settings import backtest_setting_registry, resolve_group_settings
@@ -31,6 +32,54 @@ def test_backtest_strategy_contract_is_backend_registered() -> None:
     assert contract["schema"]["properties"]["groupIndex"] == {
         "type": "integer", "minimum": 1, "title": "分组序号",
     }
+    assert contract["create_template"] == {
+        "id": "<unique-strategy-id>",
+        "factor_candidate_refs": ["<factor-ref>"],
+        "product_path_selection": {
+            "product_path_selection_id": "<product-group-ref>",
+        },
+        "splitCount": 5,
+        "groupIndex": 1,
+    }
+    assert contract["field_sources"] == {
+        "factor_candidate_refs": "field:factor_candidates",
+        "product_path_selection": "field:product_path_selection",
+    }
+    item = {
+        **contract["create_template"],
+        "id": "strategy-agent-1",
+        "factor_candidate_refs": [f"factor:v2:{'a' * 43}"],
+        "product_path_selection": {
+            "product_path_selection_id": "product-group:agent-1",
+        },
+    }
+    validate_document(contract["schema"], item)
+
+
+def test_ic_configuration_group_contract_teaches_canonical_creation() -> None:
+    contract = backtest_setting_registry.get("ic_test").manifest()[
+        "configuration_item_contract"
+    ]
+
+    assert contract["create_template"]["entry_delay_bars"] == 0
+    assert contract["create_template"]["horizon"] == {"sampling": "scale_aware"}
+    assert contract["create_template"]["methods"] == ["rank"]
+    assert contract["create_template"]["return_price_basis"] == (
+        "next_open_to_open_adjusted"
+    )
+    assert contract["field_sources"] == {
+        "factor_ref": "field:factor_candidates",
+        "product_scope_ref": "field:product_path_selection",
+    }
+    item = {
+        **contract["create_template"],
+        "config_group_id": "icg-agent-1",
+        "batch_id": "icb-agent-1",
+        "name": "Agent IC configuration",
+        "factor_ref": f"factor:v2:{'a' * 43}",
+        "product_scope_ref": "product-group:agent-1",
+    }
+    validate_document(contract["schema"], item)
 
 
 def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:

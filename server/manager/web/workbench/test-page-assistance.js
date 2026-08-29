@@ -155,7 +155,8 @@
     }
     const groups = state.kind === "backtest"
       ? analysis.groups || [] : analysis.configuration_groups || [];
-    const groupContract = manifest.configuration_item_contract?.schema;
+    const itemContract = manifest.configuration_item_contract || {};
+    const groupContract = itemContract.schema;
     const groupIDs = groups.map((group, index) => {
       const key = String(
         group.id || group.config_group_id || group.name || index,
@@ -193,6 +194,14 @@
       kind: "collection",
       label: state.kind === "backtest" ? "策略" : "配置组",
       summary: `${groupIDs.length}`,
+      collection_path: `configuration.analyses.${state.kind}.${
+        itemContract.collection_key
+      }`,
+      item_kind: itemContract.item_kind,
+      required_fields: structuredClone(groupContract?.required || []),
+      create_template: structuredClone(itemContract.create_template || {}),
+      field_sources: structuredClone(itemContract.field_sources || {}),
+      item_schema: structuredClone(groupContract || {}),
       children: groupIDs,
     };
     nodes.page = {

@@ -259,6 +259,17 @@ def test_inspect_lists_mounted_and_unmounted_tabs_only(monkeypatch) -> None:
         },
         "configurations": {
             "id": "configurations", "kind": "collection", "label": "Groups",
+            "summary": "0",
+            "collection_path": "configuration.analyses.ic.configuration_groups",
+            "required_fields": ["factor_ref", "product_scope_ref"],
+            "create_template": {
+                "factor_ref": "<factor-ref>",
+                "product_scope_ref": "<product-group-ref>",
+            },
+            "field_sources": {
+                "factor_ref": "field:factors",
+                "product_scope_ref": "field:products",
+            },
             "children": [],
         },
     }
@@ -278,7 +289,19 @@ def test_inspect_lists_mounted_and_unmounted_tabs_only(monkeypatch) -> None:
         {"id": "tab:time", "label": "Time", "mounted": True},
         {"id": "tab:factors", "label": "Factors", "mounted": False},
     ]
-    assert "Groups" not in result.output
+    assert json.loads(result.output)["configuration_collection"] == {
+        "id": "configurations", "kind": "collection",
+        "label": "Groups", "summary": "0",
+    }
+
+    contract = runner.invoke(
+        commands.assist,
+        ["--profile-id", "self-profile", "inspect", "--node", "configurations"],
+    )
+    assert contract.exit_code == 0
+    contract_payload = json.loads(contract.output)
+    assert contract_payload["create_template"]["factor_ref"] == "<factor-ref>"
+    assert contract_payload["field_sources"]["factor_ref"] == "field:factors"
 
     unmounted = runner.invoke(
         commands.assist,
