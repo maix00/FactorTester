@@ -218,7 +218,7 @@
     const value = responseValue(payload) || {};
     return String(
       value.turn?.id || value.turnId || value.turn_id
-      || ((!value.thread && value.id) ? value.id : "")
+      || ""
     ).trim();
   }
 

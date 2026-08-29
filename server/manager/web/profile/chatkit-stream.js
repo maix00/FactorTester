@@ -435,6 +435,10 @@
   function eventBelongsToCurrentTurn(state, payload) {
     const eventTurnID = P.eventTurnID(payload);
     if (!eventTurnID) return true;
+    if (!state.turnID) {
+      state.turnID = eventTurnID;
+      return true;
+    }
     return !state.turnID || eventTurnID === state.turnID;
   }
 
