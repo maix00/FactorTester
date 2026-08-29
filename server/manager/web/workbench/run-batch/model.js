@@ -156,7 +156,9 @@
         ? [{id: BACKTEST_TASK_ID, label: "回测任务"}] : [];
     }
     if (state?.kind === "ic") {
-      return window.FTICConfigurationGroupModel?.selected?.(state) || [];
+      window.FTICConfigurationGroupModel?.initialize?.(state);
+      return Array.isArray(state?.analysis?.configuration_groups)
+        ? state.analysis.configuration_groups : [];
     }
     const products = window.FTTestProducts;
     products?.synchronize?.(state);
