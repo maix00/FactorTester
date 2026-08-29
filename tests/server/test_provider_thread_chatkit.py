@@ -56,7 +56,14 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
         "title": "factortester products list",
     }
     assert items[4]["arguments"] == {"limit": 20}
-    assert items[-2]["workflow"]["tasks"][0]["title"] == "Agent progress"
+    assert items[-2]["workflow"]["tasks"][0] == {
+        "type": "custom",
+        "title": "正在整理结果。",
+        "content": None,
+        "status_indicator": "complete",
+    }
+    assert items[-2]["workflow"]["summary"] == {"title": "正在整理结果。"}
+    assert items[-2]["workflow"]["expanded"] is True
     assert items[-1]["content"][0]["text"].startswith("完成。\n\n```bash")
     assert all(item["thread_id"] == "conversation-1" for item in items)
 
@@ -182,3 +189,24 @@ def test_provider_thread_preserves_complete_visible_timeline():
         "assistant_message", "workflow", "workflow", "user_message",
     ]
     assert "PRIVATE_CHAIN_OF_THOUGHT" not in repr(timeline)
+
+
+def test_multiline_agent_progress_prints_all_visible_text_without_placeholder():
+    items = provider_thread_items({"turns": [{"items": [{
+        "id": "progress-1",
+        "type": "agentMessage",
+        "phase": "commentary",
+        "text": "正在检查页面。\n\n已读取配置，下一步校验。",
+    }, {
+        "id": "answer-1",
+        "type": "agentMessage",
+        "phase": "final_answer",
+        "text": "完成。",
+    }]}]}, "conversation-progress")
+
+    progress = items[0]["workflow"]
+    assert progress["summary"] == {"title": "正在检查页面。"}
+    assert progress["expanded"] is True
+    assert progress["tasks"][0]["title"] == "正在检查页面。"
+    assert progress["tasks"][0]["content"] == "已读取配置，下一步校验。"
+    assert "Agent progress" not in repr(progress)
