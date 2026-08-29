@@ -15,7 +15,7 @@ from typing import Any
 
 ASSISTANCE_DRAFT_RELATIVE_ROOT = Path("manifests/assistance-drafts")
 _DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
-_STATUSES = frozenset({"draft", "validated", "applied", "rejected"})
+_STATUSES = frozenset({"draft", "validated", "queued", "applied", "rejected"})
 
 
 class AssistanceDraftError(ValueError):

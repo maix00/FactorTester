@@ -184,6 +184,47 @@ def test_application_long_poll_wakes_when_document_is_enqueued() -> None:
     assert received == [[queued]]
 
 
+def test_wait_timeout_keeps_application_queued_for_page_reconnect() -> None:
+    store = PageAssistanceStore(ttl_seconds=900)
+    store.publish(
+        "owner", "profile", {
+            "tab_id": "tab",
+            "assistance": {
+                "schema_version": 1,
+                "navigation": _navigation(),
+                "page_kind": "test",
+                "revision": 1,
+                "document_schema": {"type": "object"},
+                "document": {},
+            },
+        },
+    )
+    queued = store.enqueue(
+        "owner", "profile", {
+            "tab_id": "tab", "expected_revision": 1,
+            "document": {}, "draft_id": "draft-1",
+        },
+    )
+    duplicate = store.enqueue(
+        "owner", "profile", {
+            "tab_id": "tab", "expected_revision": 1,
+            "document": {}, "draft_id": "draft-1",
+        },
+    )
+    assert duplicate["sequence"] == queued["sequence"]
+
+    with pytest.raises(TimeoutError, match="still queued"):
+        store.wait_result(queued["sequence"], timeout=0.001)
+
+    assert store.applications("owner", "profile", "tab", 0) == [queued]
+    acknowledged = store.acknowledge(
+        "owner", "profile", {
+            "sequence": queued["sequence"], "success": True, "revision": 2,
+        },
+    )
+    assert acknowledged["draft_id"] == "draft-1"
+
+
 def test_structured_document_rejects_stale_revision() -> None:
     store = PageAssistanceStore()
     store.publish(

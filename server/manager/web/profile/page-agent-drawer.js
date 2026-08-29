@@ -33,7 +33,6 @@
 
     let mounted = false;
     let opening = null;
-    let bridge = null;
     let profileID = "";
     let desiredOpen = false;
     const setDesiredOpen = value => {
@@ -65,7 +64,6 @@
         agent_profile_id: profileID,
       }),
       dispose: () => {
-        bridge?.dispose();
         shell.remove();
         toggle.remove();
       },
@@ -88,14 +86,9 @@
           if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
           const lifecycle = await context.pageAgentLifecycle.open(profileID, context.tabID);
           body.classList.add("page-agent-drawer-body-conversation-only");
-          const assistanceReady = Promise.resolve(options.assistance.prepare?.()).then(
-            async () => {
-              bridge = window.FTPageAgentContext.create(
-                context, profileID, options.assistance,
-              );
-              await bridge.start();
-            },
-          );
+          const assistanceReady = options.assistance.connect
+            ? options.assistance.connect()
+            : Promise.resolve(options.assistance.prepare?.());
           const chatReady = window.FTAgentChat.render(context, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
@@ -108,8 +101,6 @@
           if (!body.contains?.(chat)) body.replaceChildren(chat);
           mounted = true;
         })().catch(error => {
-          bridge?.dispose();
-          bridge = null;
           if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
           status(`智能体助手加载失败：${String(error?.message || error)}`);
         }).finally(() => { opening = null; });

@@ -273,11 +273,16 @@ def validate_draft(profile_id: str, draft_id: str) -> None:
 @click.pass_obj
 @friendly_errors
 def apply_draft(profile_id: str, draft_id: str) -> None:
-    client_from_config().apply_profile_agent_assistance(
+    result = client_from_config().apply_profile_agent_assistance(
         _profile_id(profile_id),
         draft_id=draft_id,
     )
-    click.echo("Assistance draft applied")
+    if result.get("queued") is True:
+        click.echo(
+            "Assistance draft queued; it will apply when the target page is active"
+        )
+    else:
+        click.echo("Assistance draft applied")
 
 
 @drafts.command("delete")
