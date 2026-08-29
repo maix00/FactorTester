@@ -103,6 +103,19 @@ for (const kind of ["backtest", "ic"]) {
         item_kind: kind === "ic" ? "configuration-group" : "strategy",
         collection_key: kind === "ic" ? "configuration_groups" : "groups",
         min_items: 1, max_items: kind === "ic" ? 1 : undefined,
+        create_template: kind === "ic" ? {
+          config_group_id: "<unique-configuration-group-id>",
+          factor_ref: "<factor-ref>",
+        } : {
+          id: "<unique-strategy-id>", factor_candidate_refs: ["<factor-ref>"],
+        },
+        field_sources: kind === "ic" ? {
+          factor_ref: "field:factor_candidates",
+          product_scope_ref: "field:product_path_selection",
+        } : {
+          factor_candidate_refs: "field:factor_candidates",
+          product_path_selection: "field:product_path_selection",
+        },
         schema: kind === "ic" ? {
           type: "object",
           required: [
@@ -172,6 +185,24 @@ for (const kind of ["backtest", "ic"]) {
     `configuration.ui.${kind}.settings`,
   );
   const navigation = FTTestPageAssistance.navigationFor(state);
+  const collection = navigation.nodes.configurations;
+  assert.equal(
+    collection.collection_path,
+    `configuration.analyses.${kind}.${kind === "ic" ? "configuration_groups" : "groups"}`,
+  );
+  assert.deepEqual(
+    collection.required_fields,
+    state.manifest.configuration_item_contract.schema.required,
+  );
+  assert.deepEqual(
+    collection.create_template,
+    state.manifest.configuration_item_contract.create_template,
+    "the Agent receives the backend-registered canonical item skeleton",
+  );
+  assert.deepEqual(
+    collection.field_sources,
+    state.manifest.configuration_item_contract.field_sources,
+  );
   if (kind === "ic") {
     const groupSchema = FTTestPageAssistance.schemaFor(state).properties
       .configuration.properties.analyses.properties.ic.properties
