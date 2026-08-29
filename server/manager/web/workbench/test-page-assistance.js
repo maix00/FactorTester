@@ -1,7 +1,10 @@
 (() => {
   function documentFor(state) {
-    const payload = window.FTTestConfiguration.configurationPayload(
-      state, null, {allowIncomplete: true},
+    const payload = FTTestConfigurationCompiler.authoringConfiguration(
+      window.FTTestConfiguration.configurationPayload(
+        state, null, {allowIncomplete: true},
+      ),
+      state.kind,
     );
     return {
       schema_version: 1,
@@ -27,6 +30,7 @@
     const analysisSchema = state.kind === "backtest" ? {
       type: "object",
       required: ["groups"],
+      "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
       properties: {
         groups: {
           type: "array", minItems: 1,
@@ -36,6 +40,7 @@
     } : {
       type: "object",
       required: ["configuration_groups"],
+      "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
       properties: {
         configuration_groups: {
           type: "array",
@@ -78,57 +83,16 @@
     return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   }
 
-  function sameValue(left, right) {
-    return JSON.stringify(left) === JSON.stringify(right);
-  }
-
   function canonicalDocument(state, source) {
     const document = structuredClone(source);
-    const configuration = document.configuration || {};
-    const analysis = configuration.analyses?.[state.kind];
-    if (!analysis || typeof analysis !== "object") return document;
-    configuration.ui = configuration.ui || {};
-    const ui = configuration.ui[state.kind] || (configuration.ui[state.kind] = {});
-    const settings = ui.settings && typeof ui.settings === "object"
-      ? ui.settings : (ui.settings = {});
-    const localSettings = analysis.local_settings
-      && typeof analysis.local_settings === "object"
-      ? analysis.local_settings : {};
-    const currentAuthoring = FTTestConfigurationCompiler.authoringSettings(
-      state.manifest, state.values || {},
-    );
-    const currentExecution = FTTestConfigurationCompiler.executionSettings(
-      state.manifest, currentAuthoring,
-    );
-    const incomingExecution = FTTestConfigurationCompiler.executionSettings(
-      state.manifest, settings,
-    );
-    for (const [fieldKey, field] of Object.entries(state.manifest?.defaults || {})) {
-      if (field?.execution_policy === "authoring_only") continue;
-      const storageKey = field?.serialization?.storage_key || fieldKey;
-      const hasUI = Object.prototype.hasOwnProperty.call(incomingExecution, storageKey);
-      const hasLocal = Object.prototype.hasOwnProperty.call(localSettings, storageKey);
-      if (!hasUI && !hasLocal) continue;
-      if (!hasLocal) continue;
-      if (!hasUI) {
-        settings[fieldKey] = structuredClone(localSettings[storageKey]);
-        continue;
-      }
-      const current = currentExecution[storageKey];
-      const uiValue = incomingExecution[storageKey];
-      const localValue = localSettings[storageKey];
-      if (sameValue(uiValue, localValue)) continue;
-      const uiChanged = !sameValue(uiValue, current);
-      const localChanged = !sameValue(localValue, current);
-      if (localChanged && !uiChanged) {
-        settings[fieldKey] = structuredClone(localValue);
-        continue;
-      }
-      if (uiChanged && !localChanged) continue;
-      throw new Error(`测试设置 ${fieldKey} 在页面字段与运行配置中不一致`);
+    const ui = document.configuration?.ui?.[state.kind];
+    if (ui && typeof ui === "object") {
+      ui.mounted_tabs = FTTestConfigurationCompiler.authoringMountedTabs(
+        state.manifest, ui.settings || {}, ui.mounted_tabs,
+      );
     }
-    analysis.local_settings = FTTestConfigurationCompiler.executionSettings(
-      state.manifest, settings,
+    document.configuration = FTTestConfigurationCompiler.executableConfiguration(
+      document.configuration, state.kind, state.manifest,
     );
     return document;
   }
@@ -260,6 +224,13 @@
           throw new Error("回测配置至少需要一个策略");
         }
         const analysis = document.configuration.analyses[state.kind];
+        for (const key of FTTestConfigurationCompiler.derivedSettingsKeys()) {
+          if (Object.prototype.hasOwnProperty.call(analysis, key)) {
+            throw new Error(
+              `测试设置 ${key} 是由页面注册字段生成的只读运行配置`,
+            );
+          }
+        }
         const misplaced = (state.manifest?.run_fields || [])
           .map(field => field.key)
           .filter(key => Object.prototype.hasOwnProperty.call(analysis, key));
