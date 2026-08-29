@@ -17,6 +17,18 @@
     let revision = Math.max(0, Number(session.durable.assistanceRevision) || 0);
     let prepared = false;
     let lastSerialized = null;
+    let bridge = null;
+    let connection = null;
+    let connectionGeneration = 0;
+    let profilePromise = null;
+    const resolveProfile = () => {
+      if (!profilePromise) {
+        profilePromise = Promise.resolve(options.boundProfileID
+          ? window.FTPageAgentProfiles.bound(context, options.boundProfileID)
+          : window.FTPageAgentProfiles.self(context));
+      }
+      return profilePromise;
+    };
     const controller = Object.freeze({
       prepare: async () => {
         if (prepared) return;
@@ -66,11 +78,46 @@
           await adapter.afterApply?.(clone(value));
         }
       },
+      connect: async () => {
+        if (bridge) return bridge;
+        if (!connection) {
+          const generation = connectionGeneration;
+          connection = (async () => {
+            await controller.prepare();
+            const profile = await resolveProfile();
+            const profileID = String(profile?.profile_id || "").trim();
+            if (!profileID) throw new Error("页面 Agent 缺少 Profile");
+            const value = window.FTPageAgentContext.create(
+              context, profileID, controller,
+            );
+            try {
+              await value.start();
+            } catch (error) {
+              value.dispose();
+              throw error;
+            }
+            if (generation !== connectionGeneration) {
+              value.dispose();
+              return null;
+            }
+            bridge = value;
+            return value;
+          })().finally(() => { connection = null; });
+        }
+        return connection;
+      },
+      disconnect: () => {
+        connectionGeneration += 1;
+        bridge?.dispose();
+        bridge = null;
+      },
     });
-    const resolveProfile = async () => options.boundProfileID
-        ? await window.FTPageAgentProfiles.bound(context, options.boundProfileID)
-        : window.FTPageAgentProfiles.self(context);
+    context.pageState?.register?.("page-assistance-connection", {
+      restore: () => { void controller.connect().catch(() => {}); },
+      dispose: controller.disconnect,
+    });
     if (context.isRouteCurrent?.() !== false) {
+      void controller.connect().catch(() => {});
       window.FTPageAgentDrawer.attach(
         context, {...options, resolveProfile, assistance: controller},
       );

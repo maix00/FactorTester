@@ -14,6 +14,7 @@
     ));
 
     async function publish() {
+      if (context.isRouteCurrent?.() === false) return;
       const value = assistance.snapshot();
       const serialized = JSON.stringify(value);
       if (serialized === lastPublished && now() - lastPublishedAt < heartbeatMs) return;
@@ -29,6 +30,7 @@
 
     async function syncOnce() {
       if (disposed) return;
+      if (context.isRouteCurrent?.() === false) return;
       await publish();
       const controller = new AbortController();
       requestController = controller;
@@ -81,7 +83,7 @@
       // it, but waiting for the applications long-poll can block drawer mount
       // for the complete server wait window (normally 20 seconds). Keep that
       // receive loop entirely off the interactive drawer-open path.
-      await publish();
+      if (context.isRouteCurrent?.() !== false) await publish();
       schedule(0);
     }
 

@@ -28,10 +28,6 @@ const assistancePromise = new Promise(resolve => { resolveAssistance = resolve; 
 const events = [];
 let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
-global.FTPageAgentContext = {create: () => ({
-  start: async () => events.push(["bridge"]),
-  dispose: () => {},
-})};
 global.FTAgentChat = {render: async (_context, _profile, options) => {
   const chat = new Element("chat");
   assert(options.mountHost.classes.has("page-agent-drawer-body-conversation-only"));
@@ -67,8 +63,8 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   };
   const drawer = FTPageAgentDrawer.attach(context, {
     resolveProfile: () => profilePromise,
-    assistance: {prepare: async () => {
-      events.push(["prepare"]);
+    assistance: {connect: async () => {
+      events.push(["bridge"]);
       await assistancePromise;
     }},
   });
@@ -94,7 +90,6 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
     "ChatKit mounts without waiting for page-assistance code");
   resolveAssistance();
   await opening;
-  assert(events.some(item => item[0] === "prepare"));
   assert(events.some(item => item[0] === "open"));
   assert(events.some(item => item[0] === "bridge"));
   assert(events.some(item => item[0] === "chat"));
@@ -127,12 +122,12 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   };
   const rebuilt = FTPageAgentDrawer.attach(rebuiltContext, {
     resolveProfile: async () => ({profile_id: "self"}),
-    assistance: {prepare: async () => {}},
+    assistance: {connect: async () => {}},
   });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(rebuiltHooks, "the rebuilt assisted page registers its drawer state");
   assert.equal(rebuilt.shell.hidden, false,
     "a performance-evicted assisted page reopens the drawer after rebuilding");
   assert.equal(rebuilt.toggle.hidden, true);
-  console.log("PASS: page Agent drawer defers all work until it opens");
+  console.log("PASS: page Agent drawer reuses its page-owned assistance receiver");
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -181,6 +181,14 @@ class PageAssistanceStore:
         key = (principal, profile_id, tab_id)
         with self._condition:
             self._prune()
+            draft_id = str(value.get("draft_id") or "")
+            if draft_id:
+                pending = next((
+                    item for item in self._applications.get(key, [])
+                    if str(item.get("draft_id") or "") == draft_id
+                ), None)
+                if pending is not None:
+                    return deepcopy(pending)
             page = self._contexts.get(key)
             if not page:
                 raise ValueError("page context is no longer active")
@@ -196,7 +204,8 @@ class PageAssistanceStore:
                 "kind": "replace_document",
                 "expected_revision": revision,
                 "document": deepcopy(document),
-                "expires_at": time.time() + 15.0,
+                "draft_id": draft_id,
+                "expires_at": time.time() + self.ttl_seconds,
             }
             self._applications.setdefault(key, []).append(item)
             self._condition.notify_all()
@@ -239,14 +248,16 @@ class PageAssistanceStore:
             "error": str(value.get("error") or ""),
         }
         with self._condition:
-            known = any(
-                sequence == item["sequence"]
+            application = next((
+                item
                 for key, items in self._applications.items()
                 if key[:2] == (principal, profile_id)
                 for item in items
-            )
-            if not known:
+                if sequence == item["sequence"]
+            ), None)
+            if application is None:
                 raise ValueError("unknown assistance application")
+            result["draft_id"] = str(application.get("draft_id") or "")
             self._results[sequence] = result
             for key, items in list(self._applications.items()):
                 retained = [item for item in items if item["sequence"] != sequence]
@@ -263,7 +274,7 @@ class PageAssistanceStore:
             while sequence not in self._results:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise ValueError("assisted page did not apply the document in time")
+                    raise TimeoutError("assisted page application is still queued")
                 self._condition.wait(remaining)
             result = deepcopy(self._results.pop(sequence))
         if not result["success"]:
@@ -426,6 +437,17 @@ class PageAssistanceRoutesMixin:
                 draft_id = str(payload.get("draft_id") or "")
                 drafts = self._agent_service().assistance_drafts(principal, profile_id)
                 draft = drafts.get(draft_id)
+                if draft.get("status") == "applied":
+                    application = draft.get("application") or {}
+                    json_response(self, {
+                        "success": True,
+                        "applied": {
+                            "success": True,
+                            "revision": application.get("applied_revision"),
+                            "draft_id": draft_id,
+                        },
+                    })
+                    return True
                 try:
                     page = _STORE.validate_for_tab(
                         principal,
@@ -447,6 +469,20 @@ class PageAssistanceRoutesMixin:
                 )
             elif parsed.path.endswith("/acknowledge"):
                 result = _STORE.acknowledge(principal, profile_id, payload)
+                draft_id = str(result.get("draft_id") or "")
+                if draft_id:
+                    try:
+                        drafts = self._agent_service().assistance_drafts(
+                            principal, profile_id,
+                        )
+                        drafts.set_status(
+                            draft_id,
+                            "applied" if result["success"] else "rejected",
+                            error=result.get("error") or "",
+                            applied_revision=result.get("revision"),
+                        )
+                    except AssistanceDraftError:
+                        pass
                 json_response(self, {"success": True, "result": result})
             else:
                 draft_id = str(payload.get("draft_id") or "")
@@ -460,9 +496,23 @@ class PageAssistanceRoutesMixin:
                             "tab_id": draft.get("tab_id"),
                             "expected_revision": draft.get("page_revision"),
                             "document": draft.get("document"),
+                            "draft_id": draft_id,
                         },
                     )
-                    result = _STORE.wait_result(item["sequence"])
+                    drafts.set_status(draft_id, "queued")
+                    try:
+                        result = _STORE.wait_result(item["sequence"])
+                    except TimeoutError:
+                        json_response(
+                            self,
+                            {
+                                "success": True,
+                                "queued": True,
+                                "sequence": item["sequence"],
+                            },
+                            202,
+                        )
+                        return True
                 except ValueError as exc:
                     drafts.set_status(draft_id, "rejected", error=str(exc))
                     raise

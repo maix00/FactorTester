@@ -91,7 +91,7 @@ class _Client:
 
     def apply_profile_agent_assistance(self, profile_id: str, **value):
         self.applied = (profile_id, value)
-        return {"success": True}
+        return {"success": True, "queued": getattr(self, "queue_apply", False)}
 
 
 def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) -> None:
@@ -201,7 +201,16 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
         ],
     )
     assert applied.exit_code == 0
+    assert "applied" in applied.output
     assert client.applied == ("self-profile", {"draft_id": "a" * 32})
+
+    client.queue_apply = True
+    queued = runner.invoke(
+        commands.assist,
+        ["--profile-id", "self-profile", "drafts", "apply", "a" * 32],
+    )
+    assert queued.exit_code == 0
+    assert "queued" in queued.output
 
     compact = runner.invoke(
         commands.assist,

@@ -81,6 +81,27 @@ vm.runInThisContext(
     "the applications long-poll starts in the background");
   startupBridge.dispose();
   releasePoll({applications: []});
+
+  let routeCurrent = false;
+  const inactiveCalls = [];
+  const inactiveBridge = window.FTPageAgentContext.create({
+    tabID: "parked-tab",
+    isRouteCurrent: () => routeCurrent,
+    api: async (url, options = {}) => {
+      inactiveCalls.push({url, options});
+      return options.method === "POST" ? {success: true} : {applications: []};
+    },
+  }, "self-profile", {
+    snapshot: () => ({schema_version: 1, revision: 0}), apply: () => {},
+  }, {interval: 100});
+  await inactiveBridge.start();
+  assert.equal(inactiveCalls.length, 0,
+    "a parked assisted tab does not publish or long-poll in the background");
+  routeCurrent = true;
+  await inactiveBridge.syncOnce();
+  assert(inactiveCalls.some(call => call.url.endsWith("/publish")));
+  assert(inactiveCalls.some(call => call.url.includes("/applications?")));
+  inactiveBridge.dispose();
   console.log("PASS: CLI atomically replaces the registered page document");
 })().catch(error => {
   console.error(error);
