@@ -194,6 +194,21 @@ class AgentAppServerSupervisor:
         method = str(payload.get("method") or payload.get("type") or "")
         params = payload.get("params")
         params = params if isinstance(params, Mapping) else {}
+        turn = params.get("turn")
+        turn = turn if isinstance(turn, Mapping) else {}
+        event_turn_id = str(
+            params.get("turnId")
+            or params.get("turn_id")
+            or turn.get("id")
+            or payload.get("turnId")
+            or payload.get("turn_id")
+            or ""
+        ).strip()
+        if event_turn_id:
+            with self._lock:
+                active = self._processing_turns.get(key)
+                if active is not None and not active.get("turn_id"):
+                    active["turn_id"] = event_turn_id
         item = params.get("item")
         item = item if isinstance(item, Mapping) else {}
         item_type = str(item.get("type") or "").replace("_", "").casefold()
@@ -500,9 +515,12 @@ class AgentAppServerSupervisor:
         if method == "turn/start" and conversation is not None:
             result = self._response_result(response)
             turn = result.get("turn")
-            turn = turn if isinstance(turn, Mapping) else result
+            turn = turn if isinstance(turn, Mapping) else {}
             turn_id = str(
-                turn.get("id") or turn.get("turnId") or turn.get("turn_id") or ""
+                turn.get("id")
+                or result.get("turnId")
+                or result.get("turn_id")
+                or ""
             ).strip()
             if turn_id:
                 with self._lock:

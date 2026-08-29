@@ -172,8 +172,8 @@ const state = {
           throw new Error('thread must be resumed before turn/start');
         }
         return {success: true, response: {
-          thread: {id: 'provider-thread-1'},
-          turn: {id: 'turn-1'},
+          id: 1007,
+          result: {accepted: true},
         }};
       }
       if (body.method === 'thread/resume') {
@@ -271,6 +271,11 @@ const state = {
   );
   assert.match(output, /thread\.item\.replaced/);
   assert.equal(global.__observedRuntime, true);
+  assert.equal(
+    state.turnID,
+    'turn-1',
+    'the first Provider event binds the turn when RPC only returned a request id',
+  );
   assert.deepEqual(
     state.items.map(item => item.id),
     [
