@@ -255,8 +255,8 @@ class PageAssistanceStore:
 _STORE = PageAssistanceStore()
 
 _PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a
-structured assistance document. First run `factortester assist inspect`; its
-compact summary lists the current revision and queryable document sections.
+structured assistance document. First run `factortester assist inspect`; it
+lists only the page's registered tabs (including mounted and unmounted tabs).
 Read only the page-registered semantic node needed for this request with
 `factortester assist inspect --node <node-id>`. Each page defines its own
 navigation hierarchy: for example tabs, chips and fields for test pages,
@@ -269,6 +269,10 @@ Apply the structured change once with
 `factortester assist drafts patch <draft-id> --stdin`, validate it with
 `factortester assist drafts validate <draft-id>`, then apply it atomically with
 `factortester assist drafts apply <draft-id>`.
+Node values and complete draft documents are omitted by default. Request a
+node value with `assist inspect --node <node-id> --value` only when needed.
+Use `assist drafts show <draft-id> --document` only for explicit diagnosis;
+do not read assistance draft storage files directly.
 Do not write candidate files into the Profile root or /tmp.
 Do not inspect frontend source, tokens, or private HTTP APIs.
 Do not manipulate the DOM or fill fields one at a time. If the revision
