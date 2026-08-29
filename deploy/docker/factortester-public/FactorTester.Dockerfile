@@ -41,29 +41,15 @@ RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrad
 
 FROM factortester-public-deps AS factortester-cli-builder
 
-ARG PIP_INDEX_URL=https://pypi.org/simple
-ARG PYINSTALLER_VERSION=6.21.0
-
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends binutils \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY tools/cli /build/tools/cli
 COPY deploy/docker/factortester-public/factortester-cli /build/factortester-cli
-RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-        "pyinstaller==${PYINSTALLER_VERSION}" \
-    && python -m pip install --no-cache-dir --no-deps /build/tools/cli \
-    && python -m PyInstaller \
-        --clean \
-        --noconfirm \
-        --onefile \
-        --name factortester \
-        --collect-data tools.cli.release \
-        --distpath /dist \
-        --workpath /tmp/factortester-build \
-        --specpath /tmp/factortester-spec \
-        /build/factortester-cli \
-    && /dist/factortester --help >/tmp/factortester-help \
+RUN python -m pip install --no-cache-dir --no-deps \
+        --target /runtime /build/tools/cli \
+    && python -m compileall -q -b /runtime \
+    && find /runtime -type f -name '*.py' -delete \
+    && find /runtime -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && PYTHONPATH=/runtime /build/factortester-cli --help \
+        >/tmp/factortester-help \
     && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
@@ -170,7 +156,9 @@ COPY deploy/docker/factortester-public/factortester-entrypoint.sh \
     /usr/local/bin/factortester-public-entrypoint
 COPY deploy/docker/factortester-public/start-fixed-service.py \
     /usr/local/bin/start-fixed-service
-COPY --from=factortester-cli-builder /dist/factortester \
+COPY --from=factortester-cli-builder /runtime \
+    /usr/local/lib/factortester-cli
+COPY deploy/docker/factortester-public/factortester-cli \
     /usr/local/bin/factortester
 RUN set -eu; \
     rm -f /usr/local/bin/factortester-manager; \
