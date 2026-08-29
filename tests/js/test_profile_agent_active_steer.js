@@ -13,6 +13,12 @@ for (const filename of ['chatkit-protocol.js', 'chatkit-stream.js']) {
   ), 'utf8'), {filename});
 }
 
+assert.equal(
+  window.FTProfileChatKitProtocol.turnIDFrom({id: 1007, result: {accepted: true}}),
+  '',
+  'a JSON-RPC request id is not a Provider turn id',
+);
+
 const rpcMethods = [];
 const chunks = [];
 const existingSource = {closed: false, close() { this.closed = true; }};

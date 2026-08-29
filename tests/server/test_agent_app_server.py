@@ -1118,6 +1118,29 @@ def test_profile_agent_final_item_clears_processing_conversation():
     assert key not in supervisor._processing_turns
 
 
+def test_profile_agent_binds_provider_turn_id_from_runtime_event():
+    supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
+    supervisor._lock = threading.RLock()
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor._processing_turns = {
+        key: {"conversation_id": "conversation-live", "event_after": 0},
+    }
+    observer = SimpleNamespace(observe=lambda _payload: None)
+
+    supervisor._observe_runtime_event(
+        key,
+        observer,
+        {
+            "method": "thread/tokenUsage/updated",
+            "params": {"turnId": "01a04bc2-09d8-7c81-a60c-c369c19c2ca5"},
+        },
+    )
+
+    assert supervisor._processing_turns[key]["turn_id"] == (
+        "01a04bc2-09d8-7c81-a60c-c369c19c2ca5"
+    )
+
+
 def test_profile_agent_turn_completed_waits_for_final_item():
     supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
     supervisor._lock = threading.RLock()
