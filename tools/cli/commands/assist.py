@@ -61,23 +61,26 @@ def _navigation(page: object) -> tuple[dict, dict]:
     return navigation, nodes
 
 
-def _node_view(nodes: dict, node_id: str) -> dict:
+def _node_view(nodes: dict, node_id: str, *, include_value: bool = False) -> dict:
     node = nodes.get(node_id)
     if not isinstance(node, dict):
         raise click.ClickException(f"assistance navigation node was not found: {node_id}")
     child_ids = [str(value) for value in node.get("children") or []]
-    return {
+    result = {
         **node,
         "children": [
             {
                 key: child.get(key)
-                for key in ("id", "kind", "label", "summary")
+                for key in ("id", "kind", "label", "summary", "mounted")
                 if key in child
             }
             for child_id in child_ids
             if isinstance((child := nodes.get(child_id)), dict)
         ],
     }
+    if not include_value:
+        result.pop("value", None)
+    return result
 
 
 def _inspect_summary(page: object) -> object:
@@ -88,6 +91,28 @@ def _inspect_summary(page: object) -> object:
         return page
     navigation, nodes = _navigation(page)
     root_id = str(navigation["root_id"])
+    root = nodes[root_id]
+    children = [
+        nodes.get(str(node_id)) for node_id in root.get("children") or []
+    ]
+    tabs = [
+        {
+            key: child.get(key)
+            for key in ("id", "label", "mounted")
+            if key in child
+        }
+        for child in children
+        if isinstance(child, dict) and child.get("kind") == "tab"
+    ]
+    entries = tabs or [
+        {
+            key: child.get(key)
+            for key in ("id", "kind", "label")
+            if key in child
+        }
+        for child in children
+        if isinstance(child, dict)
+    ]
     return {
         "tab_id": page.get("tab_id"),
         "updated_at": page.get("updated_at"),
@@ -96,7 +121,12 @@ def _inspect_summary(page: object) -> object:
             for key in ("schema_version", "page_kind", "revision")
             if key in assistance
         },
-        "navigation": _node_view(nodes, root_id),
+        "page": {
+            key: root.get(key)
+            for key in ("id", "label")
+            if key in root
+        },
+        "tabs" if tabs else "sections": entries,
         "usage": {
             "inspect_node": "factortester assist inspect --node <node-id>",
             "candidate_lookup": (
@@ -104,6 +134,13 @@ def _inspect_summary(page: object) -> object:
             ),
         },
     }
+
+
+def _draft_receipt(value: object) -> object:
+    """Return draft metadata without echoing its potentially large document."""
+    if not isinstance(value, dict):
+        return value
+    return {key: item for key, item in value.items() if key != "document"}
 
 
 @click.group("assist")
@@ -122,9 +159,15 @@ def assist(context: click.Context, profile_id: str) -> None:
     default="",
     help="Inspect one page-registered semantic navigation node.",
 )
+@click.option(
+    "--value",
+    "include_value",
+    is_flag=True,
+    help="Include the selected node's current value.",
+)
 @click.pass_obj
 @friendly_errors
-def inspect(profile_id: str, node: str) -> None:
+def inspect(profile_id: str, node: str, include_value: bool) -> None:
     profile_id = _profile_id(profile_id)
     value = client_from_config().inspect_profile_agent_assistance(profile_id)
     page = value.get("page")
@@ -132,7 +175,7 @@ def inspect(profile_id: str, node: str) -> None:
         result = _inspect_summary(page)
     else:
         _, nodes = _navigation(page)
-        result = _node_view(nodes, node)
+        result = _node_view(nodes, node, include_value=include_value)
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -161,7 +204,7 @@ def create_draft(
         None if from_current else _document(file, use_stdin),
         from_current=from_current,
     )
-    click.echo(json.dumps(value.get("draft"), ensure_ascii=False, indent=2))
+    click.echo(json.dumps(_draft_receipt(value.get("draft")), ensure_ascii=False, indent=2))
 
 
 @drafts.command("patch")
@@ -178,7 +221,7 @@ def patch_draft(
     value = client_from_config().patch_profile_agent_assistance_draft(
         _profile_id(profile_id), draft_id, _document(file, use_stdin),
     )
-    click.echo(json.dumps(value.get("draft"), ensure_ascii=False, indent=2))
+    click.echo(json.dumps(_draft_receipt(value.get("draft")), ensure_ascii=False, indent=2))
 
 
 @drafts.command("list")
@@ -193,14 +236,24 @@ def list_drafts(profile_id: str) -> None:
 
 @drafts.command("show")
 @click.argument("draft_id")
+@click.option(
+    "--document",
+    "include_document",
+    is_flag=True,
+    help="Explicitly include the complete structured document.",
+)
 @click.pass_obj
 @friendly_errors
-def show_draft(profile_id: str, draft_id: str) -> None:
+def show_draft(profile_id: str, draft_id: str, include_document: bool) -> None:
     value = client_from_config().get_profile_agent_assistance_draft(
         _profile_id(profile_id),
         draft_id,
     )
-    click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+    result = value if include_document else {
+        **value,
+        "draft": _draft_receipt(value.get("draft")),
+    }
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @drafts.command("validate")

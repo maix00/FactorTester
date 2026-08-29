@@ -56,6 +56,18 @@ class _Client:
             }
         }
 
+    def get_profile_agent_assistance_draft(self, profile_id: str, draft_id: str):
+        assert profile_id == "self-profile"
+        assert draft_id == "a" * 32
+        return {
+            "success": True,
+            "draft": {
+                "draft_id": draft_id,
+                "status": "draft",
+                "document": {"large": "x" * 10000},
+            },
+        }
+
     def create_profile_agent_assistance_draft(
         self, profile_id: str, document: dict | None, *, from_current: bool = False,
     ):
@@ -98,11 +110,10 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     )
     assert shown.exit_code == 0
     assert json.loads(shown.output)["assistance"]["revision"] == 7
-    assert json.loads(shown.output)["navigation"]["children"] == [{
+    assert json.loads(shown.output)["sections"] == [{
         "id": "section:source",
         "kind": "section",
         "label": "Source",
-        "summary": "2 fields",
     }]
     assert "candidates" not in shown.output
     assert len(shown.output) < 1500
@@ -111,11 +122,21 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
         commands.assist,
         [
             "--profile-id", "self-profile", "inspect",
-            "--node", "field:source",
+            "--node", "field:source", "--value",
         ],
     )
     assert selected.exit_code == 0
     assert json.loads(selected.output)["value"] == "old"
+
+    contract_only = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "inspect",
+            "--node", "field:source",
+        ],
+    )
+    assert contract_only.exit_code == 0
+    assert "value" not in json.loads(contract_only.output)
 
     missing = runner.invoke(
         commands.assist,
@@ -181,6 +202,83 @@ def test_profile_agent_assist_commands_use_one_structured_document(monkeypatch) 
     )
     assert applied.exit_code == 0
     assert client.applied == ("self-profile", {"draft_id": "a" * 32})
+
+    compact = runner.invoke(
+        commands.assist,
+        ["--profile-id", "self-profile", "drafts", "show", "a" * 32],
+    )
+    assert compact.exit_code == 0
+    assert "document" not in json.loads(compact.output)["draft"]
+    assert len(compact.output) < 500
+
+    complete = runner.invoke(
+        commands.assist,
+        [
+            "--profile-id", "self-profile", "drafts", "show", "a" * 32,
+            "--document",
+        ],
+    )
+    assert complete.exit_code == 0
+    assert json.loads(complete.output)["draft"]["document"]["large"]
+
+
+def test_inspect_lists_mounted_and_unmounted_tabs_only(monkeypatch) -> None:
+    client = _Client()
+    page = client.inspect_profile_agent_assistance("self-profile")["page"]
+    navigation = page["assistance"]["navigation"]
+    navigation["nodes"] = {
+        "page": {
+            "id": "page", "kind": "page", "label": "IC", "children": [
+                "tab:time", "tab:factors", "configurations",
+            ],
+        },
+        "tab:time": {
+            "id": "tab:time", "kind": "tab", "label": "Time",
+            "mounted": True, "children": ["field:start"],
+        },
+        "tab:factors": {
+            "id": "tab:factors", "kind": "tab", "label": "Factors",
+            "mounted": False, "children": ["field:factors"],
+        },
+        "field:start": {
+            "id": "field:start", "kind": "field", "label": "Start",
+            "children": [],
+        },
+        "field:factors": {
+            "id": "field:factors", "kind": "field", "label": "Factors",
+            "candidate_source": "factortester factors list", "children": [],
+        },
+        "configurations": {
+            "id": "configurations", "kind": "collection", "label": "Groups",
+            "children": [],
+        },
+    }
+    monkeypatch.setattr(
+        commands, "client_from_config",
+        lambda: type("Client", (), {
+            "inspect_profile_agent_assistance": lambda self, profile_id: {"page": page},
+        })(),
+    )
+    monkeypatch.setattr(commands, "load_capability", lambda: None)
+    runner = CliRunner()
+    result = runner.invoke(
+        commands.assist, ["--profile-id", "self-profile", "inspect"],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.output)["tabs"] == [
+        {"id": "tab:time", "label": "Time", "mounted": True},
+        {"id": "tab:factors", "label": "Factors", "mounted": False},
+    ]
+    assert "Groups" not in result.output
+
+    unmounted = runner.invoke(
+        commands.assist,
+        ["--profile-id", "self-profile", "inspect", "--node", "tab:factors"],
+    )
+    assert unmounted.exit_code == 0
+    assert json.loads(unmounted.output)["children"] == [
+        {"id": "field:factors", "kind": "field", "label": "Factors"},
+    ]
 
 
 def test_assist_subcommand_help_does_not_require_agent_identity(monkeypatch) -> None:
