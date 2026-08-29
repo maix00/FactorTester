@@ -388,19 +388,22 @@
     return state.threadPromise;
   }
 
-  async function alignEventCursor(state) {
+  async function runtimeStatus(state) {
     try {
       const payload = await state.context.api(
         `/api/client/profile-agent?profile_id=${encodeURIComponent(state.profileID)}`,
       );
-      const sequence = Number(payload?.status?.event_sequence);
-      if (Number.isFinite(sequence) && sequence >= 0) state.cursor = sequence;
       return payload?.status || {};
     } catch (_) {
-      // Keep the last known cursor.  The SSE connection still provides a
-      // durable replay path when the status request is temporarily unavailable.
       return {};
     }
+  }
+
+  async function alignEventCursor(state) {
+    const status = await runtimeStatus(state);
+    const sequence = Number(status?.event_sequence);
+    if (Number.isFinite(sequence) && sequence >= 0) state.cursor = sequence;
+    return status;
   }
 
   function turnRequest(state, status, text) {
@@ -433,6 +436,25 @@
     const eventTurnID = P.eventTurnID(payload);
     if (!eventTurnID) return true;
     return !state.turnID || eventTurnID === state.turnID;
+  }
+
+  async function steerActiveTurn(
+    controller, state, profileState, text, updateConversation,
+  ) {
+    const status = await runtimeStatus(state);
+    const request = turnRequest(state, status, text);
+    if (request.method !== "turn/steer") {
+      throw new Error("Profile Agent active turn is not ready for steering");
+    }
+    await rpc(state, request.method, request.params);
+    const user = P.userItem(state, text);
+    state.items.push(user);
+    writeEvent(controller, {type: "thread.item.added", item: user});
+    writeEvent(controller, {type: "thread.item.done", item: user});
+    await updateConversation(profileState, state, {
+      title: state.threadTitle || text.slice(0, 80),
+      preview: text,
+    }).catch(() => {});
   }
 
   function openEventStream(state, controller, signal) {
@@ -588,7 +610,12 @@
   ) {
     const text = P.extractInputText(params);
     if (!text) throw new Error("A non-empty text message is required");
-    if (state.active) throw new Error("The Profile Agent is already processing a message");
+    if (state.active) {
+      await steerActiveTurn(
+        controller, state, profileState, text, updateConversation,
+      );
+      return;
+    }
     state.active = true;
     const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
     state.assistant = null;
