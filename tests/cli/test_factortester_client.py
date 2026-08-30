@@ -169,7 +169,7 @@ def fake_server() -> Iterator[str]:
             content_type=content_type,
         )
 
-    @app.get("/admin/api/server-instances")
+    @app.get("/api/admin/server-instances")
     def admin_server_instances():
         return jsonify(success=True, instances=[{
             "instance_id": "worktree-opaque",
@@ -178,7 +178,7 @@ def fake_server() -> Iterator[str]:
             "running": True,
         }])
 
-    @app.post("/admin/api/server-instances/<instance_id>/actions")
+    @app.post("/api/admin/server-instances/<instance_id>/actions")
     def admin_server_action(instance_id: str):
         return jsonify(
             success=True,
@@ -186,7 +186,7 @@ def fake_server() -> Iterator[str]:
             action=request.get_json()["action"],
         )
 
-    @app.get("/admin/api/jobs")
+    @app.get("/api/admin/jobs")
     def admin_jobs():
         assert request.args["limit"] == "9"
         assert request.args["cursor"] == "cursor-1"

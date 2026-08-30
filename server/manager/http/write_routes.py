@@ -282,6 +282,8 @@ class WriteRoutesMixin:
             return
         if self._proxy_service_write(parsed, method="POST"):
             return
+        if self._proxy_authenticated_local_service(parsed, method="POST"):
+            return
         actions = {
             "/vibe/start",
             "/vibe/stop",
@@ -355,6 +357,8 @@ class WriteRoutesMixin:
             return
         if self._proxy_service_write(parsed, method="PATCH"):
             return
+        if self._proxy_authenticated_local_service(parsed, method="PATCH"):
+            return
         self.send_error(404)
 
     def do_PUT(self) -> None:
@@ -381,6 +385,8 @@ class WriteRoutesMixin:
             return
         if self._proxy_service_write(parsed, method="PUT"):
             return
+        if self._proxy_authenticated_local_service(parsed, method="PUT"):
+            return
         self.send_error(404)
 
     def do_DELETE(self) -> None:
@@ -402,6 +408,8 @@ class WriteRoutesMixin:
         if self._delete_research_object_routes(parsed):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
+            return
+        if self._proxy_authenticated_local_service(parsed, method="DELETE"):
             return
         if parsed.path == "/api/admin/public-visitor-allowlist":
             self._admin_remove_visitor_allowlist()

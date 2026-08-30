@@ -10,7 +10,7 @@ from .client_base import ClientMixinBase
 class AdminClientMixin(ClientMixinBase):
     def list_server_instances(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/admin/api/server-instances")
+            self.session.get("/api/admin/server-instances")
         )
 
     def run_server_instance_action(
@@ -19,7 +19,7 @@ class AdminClientMixin(ClientMixinBase):
         action: str,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            f"/admin/api/server-instances/{instance_id}/actions",
+            f"/api/admin/server-instances/{instance_id}/actions",
             {"action": action},
         ))
 
@@ -30,6 +30,6 @@ class AdminClientMixin(ClientMixinBase):
         cursor: str = "",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.get(
-            "/admin/api/jobs",
+            "/api/admin/jobs",
             query={"limit": limit, "cursor": cursor or None},
         ))

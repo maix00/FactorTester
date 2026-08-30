@@ -61,27 +61,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     "has_children": False,
                 },
             ]
-        if parent == "custom_factors":
-            return [
-                {
-                    "key": "custom_factors/factor-library",
-                    "label": "因子库",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "custom_factors/workspace",
-                    "label": "本地 factor workspace",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "custom_factors/operators",
-                    "label": "FactorExpr 算子",
-                    "kind": "module",
-                    "has_children": False,
-                },
-            ]
         query = {"parent": parent} if parent else None
         data = self._expect_success(
             self.session.get("/api/testers/modules", query=query)
@@ -164,7 +143,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         category: str = "自编",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/create",
+            "/api/factor-library/create",
             {
                 "source_code": source_code,
                 "chinese_name": chinese_name,
@@ -175,7 +154,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
 
     def factor_expr_operators(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/custom-factors/api/visual-operators")
+            self.session.get("/api/factor-library/operators")
         )
 
     def custom_factor_catalog(
@@ -185,7 +164,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
     ) -> dict[str, Any]:
         query = {"include_subordinates": "1"} if include_subordinates else None
         return self._expect_success(
-            self.session.get("/custom-factors/api/list", query=query)
+            self.session.get("/api/factor-library/catalog", query=query)
         )
 
     def validate_factor_expr(
@@ -193,7 +172,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         return self._expect_success(
-            self.session.post("/custom-factors/api/validate", payload)
+            self.session.post("/api/factor-library/validate", payload)
         )
 
     def create_product_group(
@@ -387,7 +366,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         if include_subordinates:
             query["include_subordinates"] = "1"
         return self._expect_success(self.session.get(
-            "/custom-factors/api/factor-library-overview",
+            "/api/factor-library/overview",
             query=query or None,
         ))
 
@@ -424,7 +403,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
     ) -> dict[str, Any]:
         query = {"product_group": product_group} if product_group else None
         return self._expect_success(self.session.get(
-            f"/custom-factors/api/factor-library-configs/{factor_family}",
+            f"/api/factor-library/configs/{factor_family}",
             query=query,
         ))
 
@@ -443,7 +422,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         if metadata:
             payload["metadata"] = metadata
         return self._expect_success(self.session.put(
-            f"/custom-factors/api/factor-library-configs/{factor_family}",
+            f"/api/factor-library/configs/{factor_family}",
             payload,
         ))
 
@@ -453,7 +432,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
             if value not in (None, "", [], ())
         }
         return self._expect_success(self.session.get(
-            "/custom-factors/api/factor-library-research-runs",
+            "/api/factor-library/research-runs",
             query=query or None,
         ))
 
@@ -462,7 +441,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/factor-library-research-runs",
+            "/api/factor-library/research-runs",
             payload,
         ))
 
@@ -472,7 +451,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
             if value not in (None, "", [], {})
         }
         return self._expect_success(self.session.get(
-            "/custom-factors/api/factor-library-research-metrics",
+            "/api/factor-library/research-metrics",
             query=query or None,
         ))
 
@@ -482,7 +461,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
             if value not in (None, "", [], {})
         }
         return self._expect_success(self.session.get(
-            "/custom-factors/api/factor-library-research-stability",
+            "/api/factor-library/research-stability",
             query=query or None,
         ))
 
@@ -511,7 +490,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
 
     def factor_workspace_source_root(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/custom-factors/api/source-root")
+            self.session.get("/api/factor-library/source-root")
         )
 
     def save_factor_workspace_source_root(
@@ -519,13 +498,13 @@ class FactorLibraryClientMixin(ClientMixinBase):
         source_root: str,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/source-root",
+            "/api/factor-library/source-root",
             {"source_root": source_root},
         ))
 
     def build_factor_workspace(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.post("/custom-factors/api/workspace/build", {})
+            self.session.post("/api/factor-library/workspace/build", {})
         )
 
     def sync_factor_workspace(
@@ -534,7 +513,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         branch_mode: str = "force",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/workspace/sync",
+            "/api/factor-library/workspace/sync",
             {"branch_mode": branch_mode},
         ))
 
@@ -544,18 +523,18 @@ class FactorLibraryClientMixin(ClientMixinBase):
         branch_mode: str = "auto",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/workspace/push",
+            "/api/factor-library/workspace/push",
             {"branch_mode": branch_mode},
         ))
 
     def factor_workspace_snapshot(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/custom-factors/api/workspace/snapshot")
+            self.session.get("/api/factor-library/workspace/snapshot")
         )
 
     def factor_workspace_git_settings(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/custom-factors/api/workspace/git-settings")
+            self.session.get("/api/factor-library/workspace/git-settings")
         )
 
     def save_factor_workspace_git_settings(
@@ -565,7 +544,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         git_repo_root: str,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post(
-            "/custom-factors/api/workspace/git-settings",
+            "/api/factor-library/workspace/git-settings",
             {
                 "git_enabled": git_enabled,
                 "git_repo_root": git_repo_root,
@@ -579,7 +558,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
     ) -> dict[str, Any]:
         data = {"action": action, **payload}
         return self._expect_success(
-            self.session.post("/custom-factors/api/workspace/git", data)
+            self.session.post("/api/factor-library/workspace/git", data)
         )
 
     def factor_source_sync_manifest(

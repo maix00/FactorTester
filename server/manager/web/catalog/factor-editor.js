@@ -239,7 +239,7 @@
     state.validationMessage = context.t("正在校验源码并解析参数…");
     redraw();
     try {
-      const parsed = await context.api("/custom-factors/api/validate", {
+      const parsed = await context.api("/api/factor-library/validate", {
         method: "POST",
         body: JSON.stringify({source_code: state.sourceCode, params: {}}),
       });
@@ -250,7 +250,7 @@
         parsed.params || [], state.parameterValues,
       );
       const value = !state.familyMode && Object.keys(parameterValues).length
-        ? await context.api("/custom-factors/api/validate", {
+        ? await context.api("/api/factor-library/validate", {
           method: "POST",
           body: JSON.stringify({
             source_code: state.sourceCode,
@@ -412,7 +412,7 @@
       const isPublic = state.family?.factor_kind === "public"
         || state.family?.source === "public"
         || owner === "public" || owner === "__public_jobs__";
-      const value = await context.api("/custom-factors/api/validate", {
+      const value = await context.api("/api/factor-library/validate", {
         method: "POST",
         body: JSON.stringify({
           resolve_factor: true,
@@ -437,7 +437,7 @@
       };
     }
     const value = await context.api(
-      `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
+      `/api/factor-library/configs/${encodeURIComponent(alias)}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -472,7 +472,7 @@
     if (context.testObjectTemporary) {
       const alias = state.inspection?.factor_name || state.factorID
         || readInput(fields.name);
-      const value = await context.api("/custom-factors/api/validate", {
+      const value = await context.api("/api/factor-library/validate", {
         method: "POST",
         body: JSON.stringify({
           source_code: state.sourceCode,
@@ -498,14 +498,14 @@
     const endpoint = state.familyMode
       ? state.publicMode
         ? state.mode === "create"
-          ? "/custom-factors/api/create-public"
-          : `/custom-factors/api/update-public/${encodeURIComponent(state.factorID)}`
+          ? "/api/factor-library/create-public"
+          : `/api/factor-library/update-public/${encodeURIComponent(state.factorID)}`
         : state.mode === "create"
-          ? "/custom-factors/api/create"
-          : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`
+          ? "/api/factor-library/create"
+          : `/api/factor-library/update/${encodeURIComponent(state.factorID)}`
       : state.mode === "create"
-        ? "/custom-factors/api/create"
-        : `/custom-factors/api/update/${encodeURIComponent(state.factorID)}`;
+        ? "/api/factor-library/create"
+        : `/api/factor-library/update/${encodeURIComponent(state.factorID)}`;
     const value = await context.api(endpoint, {
       method: "POST", body: JSON.stringify(payload),
     });
@@ -514,7 +514,7 @@
     let registered = null;
     if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
       const libraryValue = await context.api(
-        `/custom-factors/api/factor-library-configs/${encodeURIComponent(alias)}`,
+        `/api/factor-library/configs/${encodeURIComponent(alias)}`,
         {
           method: "PUT",
           body: JSON.stringify({params_list: [state.parameterValues]}),

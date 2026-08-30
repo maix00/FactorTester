@@ -325,6 +325,8 @@ class JobListRoutesMixin:
             return True
         if self._serve_manager_application(parsed, method="GET"):
             return True
+        if self._proxy_authenticated_local_service(parsed, method="GET"):
+            return True
         if self._proxy_job_stream(parsed):
             return True
         if self._proxy_job_request(parsed, method="GET"):

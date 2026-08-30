@@ -185,9 +185,9 @@
     )) return;
     const endpoint = page === "families"
       ? scope === "public"
-        ? `/custom-factors/api/delete-public/${encodeURIComponent(familyAlias)}`
-        : `/custom-factors/api/delete/${encodeURIComponent(familyAlias)}`
-      : `/custom-factors/api/factor-library-configs/${encodeURIComponent(familyAlias)}`
+        ? `/api/factor-library/delete-public/${encodeURIComponent(familyAlias)}`
+        : `/api/factor-library/delete/${encodeURIComponent(familyAlias)}`
+      : `/api/factor-library/configs/${encodeURIComponent(familyAlias)}`
         + `?factor_alias=${encodeURIComponent(item.factor_alias || "")}`
         + `&scope_key=${encodeURIComponent(item.scope_key || item.product_group || "default")}`;
     try {

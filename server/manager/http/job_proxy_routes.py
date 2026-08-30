@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlencode
 from urllib.request import Request, urlopen
 
 from server.manager.domain.federation import (
@@ -25,16 +25,6 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
-        r"/custom-factors/api/workspace/push",
-        r"/custom-factors/api/(?:create|create-public|validate)",
-        r"/custom-factors/api/(?:update|update-public|delete|delete-public)/[A-Za-z0-9._-]{1,256}",
-        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}/add-factor",
-    ),
-    "PUT": (
-        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}",
-    ),
-    "DELETE": (
-        r"/custom-factors/api/factor-library-configs/[A-Za-z0-9._%|:+$-]{1,512}",
     ),
 }
 _JOB_ANALYSIS_PATHS = {
@@ -47,6 +37,132 @@ _JOB_ANALYSIS_PATHS = {
 
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
+
+    def _proxy_authenticated_local_service(self, parsed, *, method: str) -> bool:
+        """Bridge canonical Manager namespaces to one authenticated service."""
+        namespaces = (
+            (
+                "/api/factor-library/",
+                "/custom-factors/api/",
+                {
+                    "catalog": "list",
+                    "operators": "visual-operators",
+                    "overview": "factor-library-overview",
+                    "research-runs": "factor-library-research-runs",
+                    "research-metrics": "factor-library-research-metrics",
+                    "research-stability": "factor-library-research-stability",
+                },
+            ),
+            ("/api/admin/", "/admin/api/", {}),
+        )
+        selected = next(
+            (item for item in namespaces if parsed.path.startswith(item[0])),
+            None,
+        )
+        if selected is None:
+            return False
+        prefix, internal_prefix, aliases = selected
+        query_values = parse_qs(parsed.query, keep_blank_values=True)
+        requested_server = str(
+            query_values.get("server_id", [""])[0] or ""
+        ).strip()
+        if (
+            self._is_local_agent_request()
+            and requested_server not in {"", "local", self.state.server_id}
+        ):
+            json_response(self, {
+                "success": False,
+                "error": "Profile Agent service requests must stay local",
+                "code": "agent_service_target_must_be_local",
+            }, 403)
+            return True
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        suffix = parsed.path.removeprefix(prefix)
+        workspace_push = method == "POST" and suffix == "workspace/push"
+        if workspace_push and str(session.get("role") or "") != "super_admin":
+            json_response(self, {
+                "success": False,
+                "error": "super administrator permission required",
+            }, 403)
+            return True
+        internal_suffix = aliases.get(suffix, suffix)
+        if internal_suffix.startswith("configs/"):
+            internal_suffix = (
+                "factor-library-configs/"
+                + internal_suffix.removeprefix("configs/")
+            )
+        internal_path = internal_prefix + internal_suffix
+        forwarded_query = urlencode([
+            (key, value)
+            for key, values in query_values.items()
+            if key not in {"server_id", "port", "branch", "feature"}
+            for value in values
+        ])
+        if forwarded_query:
+            internal_path += f"?{forwarded_query}"
+        body = None
+        content_type = str(
+            self.headers.get("Content-Type") or "application/json"
+        )
+        if method != "GET":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > 1024 * 1024:
+                json_response(
+                    self,
+                    {"success": False, "error": "invalid request body"},
+                    400,
+                )
+                return True
+            body = self.rfile.read(length) if length else b""
+        try:
+            route = self.state.route_for(server_id=self.state.server_id)
+            response = self.state.route_request(
+                route,
+                path=internal_path,
+                principal=str(session["username"]),
+                method=method,
+                body=body,
+                content_type=content_type,
+            )
+        except (ConnectionError, RuntimeError, ValueError):
+            json_response(
+                self,
+                {"success": False, "error": "local service is unavailable"},
+                502,
+            )
+            return True
+        if workspace_push and 200 <= response.status < 300:
+            try:
+                value = response.json_object()
+                changes = value.get("public_factor_changes") or []
+                if changes:
+                    value["public_factor_replication"] = (
+                        self.state.public_factor_replication.publish(
+                            changes, principal=str(session["username"]),
+                        )
+                    )
+                    response = GatewayResponse(
+                        status=response.status,
+                        body=json.dumps(value, ensure_ascii=False).encode("utf-8"),
+                        content_type="application/json",
+                        content_disposition=response.content_disposition,
+                        etag=response.etag,
+                    )
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                json_response(self, {
+                    "success": False,
+                    "error": str(exc),
+                    "code": "public_factor_replication_failed",
+                }, 503)
+                return True
+        self._send_gateway_response(response, route=route)
+        return True
+
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
         registered_route = any(
