@@ -22,7 +22,15 @@ const manifest = {research_configuration_schema_version: 3, defaults: {
   },
 }, tab_lists: {"local-settings": [
   {key: "time"}, {key: "notes"}, {key: "unused"},
-]}, default_mounted_tabs: {"local-settings": ["unused"]}};
+]}, default_mounted_tabs: {"local-settings": ["unused"]}, strategy_editor: {
+  inner_default_tabs: [
+    {key: "__configuration__"}, {key: "factor"}, {key: "product_path_selection"},
+  ],
+  inner_manual_tabs: [
+    {key: "time", item_field: "start_date", item_default: ""},
+    {key: "delay", item_field: "entry_delay_bars", item_default: 0},
+  ],
+}};
 for (const kind of ["backtest", "ic", "future-test-kind"]) {
   const configuration = {
     schema_version: 3,
@@ -63,6 +71,15 @@ for (const kind of ["backtest", "ic", "future-test-kind"]) {
   assert.deepEqual(FTTestConfigurationCompiler.authoringMountedTabs(
     manifest, {start_time: "00:00", end_time: "23:59"}, ["notes"],
   ), ["notes", "unused"]);
+  assert.deepEqual(FTTestConfigurationCompiler.authoringItemMountedTabs(
+    manifest, {start_date: "2024-01-01", entry_delay_bars: 0}, [],
+  ), ["__configuration__", "factor", "product_path_selection", "time"]);
+  assert.deepEqual(FTTestConfigurationCompiler.authoringItemMountedTabs(
+    manifest, {start_date: "", entry_delay_bars: 3}, [],
+  ), ["__configuration__", "factor", "product_path_selection", "delay"]);
+  assert.deepEqual(FTTestConfigurationCompiler.authoringItemMountedTabs(
+    manifest, {start_date: "", entry_delay_bars: 0}, ["delay"],
+  ), ["__configuration__", "factor", "product_path_selection", "delay"]);
 }
 
 console.log("PASS: every test kind derives executable settings from registered UI fields");
