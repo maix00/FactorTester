@@ -486,6 +486,35 @@
     await ensureLazyKey(context, state, "factors");
   }
 
+  function ensureProductReferenceLabels(context, state, refresh) {
+    if (!(state.groupRefs || []).some(ref => String(ref).startsWith("product-group:"))) {
+      return Promise.resolve(false);
+    }
+    const record = state.productReferenceHydration || (state.productReferenceHydration = {
+      status: "idle", error: "", promise: null,
+    });
+    if (record.status === "ready") return Promise.resolve(false);
+    if (record.promise) return record.promise;
+    record.status = "loading";
+    record.promise = FTTestLazyCode.loadGroup("workbench-products")
+      .then(() => {
+        if (!FTTestProducts.needsReferenceHydration(state)) return false;
+        return FTTestProducts.hydrateStateReferences(context, state);
+      })
+      .then(changed => {
+        record.status = "ready";
+        record.error = "";
+        if (changed) refresh?.();
+        return changed;
+      })
+      .catch(error => {
+        record.status = "error";
+        record.error = error.message || String(error);
+        return false;
+      });
+    return record.promise;
+  }
+
   function render(context, state) {
     // Every deferred loader and job-progress callback closes over the route
     // token in this context. The shared content host may already belong to a
@@ -536,6 +565,7 @@
       ensureRunSubmitCode: () => ensureRunSubmitCode(context, state),
       render: () => render(context, state),
     });
+    ensureProductReferenceLabels(context, state, () => render(context, state));
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
       activeTab: state.settingsTabKey,
@@ -684,6 +714,7 @@
     },
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution, show,
+    ensureProductReferenceLabels,
     ensureRunCode,
     ensureRunBatchCode,
     ensureBacktestCode,

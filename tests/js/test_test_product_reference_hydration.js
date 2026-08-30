@@ -28,6 +28,28 @@ vm.runInThisContext(
     api: async () => { throw new Error("must not fetch"); },
   }, {groupRefs: [ref]}, listed);
   assert.equal(unchanged, listed);
+
+  const state = {
+    kind: "backtest",
+    groupRef: ref,
+    groupRefs: [ref],
+    groups: [{
+      group_ref: ref, title_zh: ref, paths: [], selected_paths: [],
+      _savedPlaceholder: true,
+    }],
+    values: {},
+  };
+  assert.equal(FTTestProducts.needsReferenceHydration(state), true);
+  const changed = await FTTestProducts.hydrateStateReferences({
+    api: async path => {
+      assert.equal(path, `/api/catalog/product-groups/${encodeURIComponent(ref)}`);
+      return {group: {group_ref: ref, name: "中国期货日盘", paths: ["DCE.m"]}};
+    },
+  }, state);
+  assert.equal(changed, true);
+  assert.equal(FTTestProducts.needsReferenceHydration(state), false);
+  assert.equal(state.groups[0].name, "中国期货日盘");
+  assert.equal(state.values.product_path_selections[0].label, "中国期货日盘");
   console.log("PASS: persisted product-group refs hydrate independently of list catalogs");
 })().catch(error => {
   console.error(error);

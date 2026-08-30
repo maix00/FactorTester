@@ -47,6 +47,33 @@
     return [...catalog, ...resolved.filter(Boolean)];
   }
 
+  function hasResolvedLabel(group) {
+    const id = groupID(group);
+    const label = group?.title_zh || group?.name || group?.label || "";
+    return Boolean(id && label && label !== id && group?._savedPlaceholder !== true);
+  }
+
+  function needsReferenceHydration(state) {
+    const catalog = new Map((state.groups || []).map(group => [groupID(group), group]));
+    return uniqueReferences(state.groupRefs || []).some(ref => (
+      ref.startsWith("product-group:") && !hasResolvedLabel(catalog.get(ref))
+    ));
+  }
+
+  async function hydrateStateReferences(context, state) {
+    if (!needsReferenceHydration(state)) return false;
+    const resolvedCatalog = (state.groups || []).filter(hasResolvedLabel);
+    const hydrated = await hydrateReferencedGroups(context, state, resolvedCatalog);
+    const byID = new Map((state.groups || []).map(group => [groupID(group), group]));
+    for (const group of hydrated) {
+      const id = groupID(group);
+      if (id) byID.set(id, group);
+    }
+    state.groups = [...byID.values()];
+    synchronize(state);
+    return true;
+  }
+
   function restoreReferences(analysis = {}, ui = {}) {
     const groupedRefs = (analysis.configuration_groups || [])
       .map(item => item?.product_scope_ref).filter(Boolean);
@@ -262,6 +289,7 @@
   window.FTTestProducts = Object.freeze({
     groupID, groupLabel, projection, restoreReferences, synchronize,
     selectedGroups, selectedProjections, setSelected, selectNew, panel,
-    selectionPanel, hydrateReferencedGroups,
+    selectionPanel, hydrateReferencedGroups, hydrateStateReferences,
+    needsReferenceHydration,
   });
 })();
