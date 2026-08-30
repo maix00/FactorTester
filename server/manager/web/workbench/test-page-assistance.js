@@ -92,6 +92,21 @@
     return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   }
 
+  function invalidateImportedCandidateCaches(state) {
+    for (const key of ["factors", "products", "categories", "templates", "outputs"]) {
+      const record = state.lazy?.[key];
+      if (!record) continue;
+      record.status = "idle";
+      record.error = "";
+      record.promise = null;
+    }
+    state.productReferenceHydration = {
+      status: "idle", error: "", promise: null,
+    };
+    state.settingsTabLoads = Object.create(null);
+    state.settingsLoadedTabs?.clear?.();
+  }
+
   function productGroupID(value) {
     if (typeof value === "string") return value;
     return String(value?.group_ref || value?.product_group_ref || value?.id
@@ -343,6 +358,11 @@
         FTTestState.applyWorkspaceConfiguration(state);
         FTTestState.seedSavedCatalogs(state);
         FTTestState.applyRegisteredRunValues(state, document.run_fields || {});
+        // Candidate catalogs may already be marked ready from the document
+        // that was visible before this atomic replacement.  Keep the imported
+        // references authoritative, but force the corresponding pickers to
+        // lazily resolve fresh visible objects when their tab is next opened.
+        invalidateImportedCandidateCaches(state);
         if (state.kind === "backtest") {
           window.FTBacktestGroupModel?.initialize?.(state);
         }
@@ -358,6 +378,7 @@
   }
 
   window.FTTestPageAssistance = Object.freeze({
-    canonicalDocument, documentFor, navigationFor, register, schemaFor,
+    canonicalDocument, documentFor, invalidateImportedCandidateCaches,
+    navigationFor, register, schemaFor,
   });
 })();
