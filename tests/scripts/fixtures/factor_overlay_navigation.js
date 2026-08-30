@@ -11,6 +11,11 @@ class Element {
     this.hidden = false;
     this.open = false;
     this.textContent = "";
+    this.classes = new Set();
+    this.classList = {
+      toggle: (name, enabled) => enabled
+        ? this.classes.add(name) : this.classes.delete(name),
+    };
   }
 
   append(...children) { this.children.push(...children); }
@@ -30,6 +35,7 @@ global.document = {
   createElement: tagName => new Element(tagName),
 };
 global.window = globalThis;
+global.crypto = {randomUUID: (() => { let value = 0; return () => `frame-${++value}`; })()};
 global.FTUI = window.FTUI = {
   empty: (title, message) => {
     const element = new Element();
@@ -101,14 +107,15 @@ const context = {
   const card = dialog.children[0];
   const heading = card.children[0];
   const back = heading.children[0];
-  const mount = card.children[1];
+  const tabs = card.children[1];
+  const mount = card.children[2];
   assert.equal(calls.sets.length, 1);
   assert.equal(calls.sets[0].viewOnly, true);
   assert.equal(calls.loads.length, 1);
   assert.deepEqual(calls.loads[0], ["factor-catalog-detail"]);
   assert.equal(back.hidden, true);
 
-  mount.children[0].listeners.click();
+  mount.children[0].children[0].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(calls.factors, [{
@@ -116,11 +123,13 @@ const context = {
   }]);
   assert.deepEqual(calls.loads[1], ["factor-catalog-detail-rendering"]);
   assert.equal(back.hidden, false);
+  assert.equal(tabs.hidden, false);
+  assert.equal(tabs.children.length, 2);
 
   back.listeners.click();
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(calls.sets.length, 2);
+  assert.equal(calls.sets.length, 1);
   assert.equal(back.hidden, true);
 
   heading.children[2].listeners.click();

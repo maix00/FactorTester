@@ -96,19 +96,6 @@
     return FTTestFactors.selectedFamily(state, factor);
   }
 
-  function factorRecord(factor, family) {
-    const frozen = window.FTFactorModel?.frozenFactorIdentity?.(factor);
-    if (!frozen) throw new Error("factor must be a complete frozen v2 record");
-    return {
-      ...structuredClone(frozen.record),
-      ...(factor.source_kind === "transient" ? {
-        source_kind: "transient",
-        transient_factor_id: factor.transient_factor_id || "",
-        temporary: factor.temporary === true,
-      } : {}),
-    };
-  }
-
   function temporaryObjects(state) {
     const temporary = item => item?.temporary === true
       || item?.source_kind === "transient"
@@ -161,7 +148,7 @@
     }[state.kind] || state.kind;
     const body = {
       title: `${kindTitle} · ${alias}`,
-      factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
+      factors: FTTestConfigurationCompiler.factorSubjects(factors),
     };
     const value = await context.api("/api/workspaces", {
       method: "POST", body: JSON.stringify(body),
@@ -234,9 +221,7 @@
     payload.schema_version = schemaVersion;
     payload.shared = payload.shared || {};
     delete payload.shared.factor_families;
-    payload.shared.factors = factors.map(item => (
-      factorRecord(item, selectedFamily(state, item))
-    ));
+    payload.shared.factors = FTTestConfigurationCompiler.factorSubjects(factors);
     payload.shared.temporary_objects = temporaryObjects(state);
     payload.run_fields = FTTestState.registeredRunValues(
       state, {templateOnly: true},

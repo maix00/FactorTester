@@ -2394,7 +2394,11 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'parameter.type === "FactorParam"' in detail
     assert 'createLabel: context.t("新建因子")' in detail
     assert "factor-param-reference-control" in detail
-    assert "选择因子/列引用，或手工输入表达式" in detail
+    assert "手工输入 ColumnRef 或因子 alias" in detail
+    assert "请输入有效的 ColumnRef 或因子 alias" in detail
+    assert "onValidateFactorAlias" in detail
+    assert "factor-param-column-" in detail
+    assert "factor-param-factor-" in detail
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" in editor
