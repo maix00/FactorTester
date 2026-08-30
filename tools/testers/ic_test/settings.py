@@ -45,6 +45,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             "factor_ref": "field:factor_candidates",
             "product_scope_ref": "field:product_path_selection",
         },
+        "owned_tabs": ["return_frequency", "delay", "ic_method"],
         "schema": ic_configuration_group_schema(),
     })
     register_authoring_shell(app)

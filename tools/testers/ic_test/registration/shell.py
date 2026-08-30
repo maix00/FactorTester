@@ -120,6 +120,7 @@ def _register_sections(app: ApplicationSettings) -> None:
 
 def _register_tabs(app: ApplicationSettings) -> None:
     local = (TabMountPoint.LOCAL_SETTINGS,)
+    group = (TabMountPoint.GROUP_SETTINGS,)
     for tab in (
         SettingTab(
             "factor", "因子执行", local, "settings-grid", 10, local,
@@ -140,14 +141,20 @@ def _register_tabs(app: ApplicationSettings) -> None:
         ),
         SettingTab("data_source", "数据源", local, "settings-grid", 35),
         SettingTab("frequency", "数据频率", local, "settings-grid", 36),
-        SettingTab("return_frequency", "前瞻收益", local, "settings-grid", 40),
-        SettingTab("delay", "Delay", local, "settings-grid", 50),
-        SettingTab("ic_method", "IC 类型", local, "settings-grid", 55),
         SettingTab("summary", "汇总", local, "settings-grid", 60),
         SettingTab(
             "quantile_portfolio_statistics", "分组组合", local,
             "settings-grid", 65,
         ),
+    ):
+        app.register_tab(tab)
+    # These fields define one IC configuration group. They remain registered
+    # for schema/default/chip reuse, but must never appear in the outer test
+    # settings shell.
+    for tab in (
+        SettingTab("return_frequency", "前瞻收益", group, "settings-grid", 40),
+        SettingTab("delay", "Delay", group, "settings-grid", 50),
+        SettingTab("ic_method", "IC 类型", group, "settings-grid", 55),
     ):
         app.register_tab(tab)
 

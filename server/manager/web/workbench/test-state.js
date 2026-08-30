@@ -167,6 +167,7 @@
     state.values = null;
     state.settingsInitialized = false;
     state.settingsMountedTabs = [];
+    state.settingsExplicitMountedTabs = [];
     state.settingsTabKey = "";
     state.transientFactorSources = [];
     state.transientFactorFamilies = [];
@@ -195,7 +196,7 @@
   const draftKeys = Object.freeze([
     "analysis", "savedFactors", "savedTemporaryObjects",
     "factorRef", "groupRef", "groupRefs", "values",
-    "settingsTabKey", "settingsMountedTabs", "outputRequests",
+    "settingsTabKey", "settingsMountedTabs", "settingsExplicitMountedTabs", "outputRequests",
     "outputRequestsExplicit", "runValues", "transientFactorSources",
     "transientFactorFamilies", "transientStrategySources", "strategySpecs",
     "strategyInspections", "runInputDependencies", "selectedBacktestGroupIDs",
@@ -266,8 +267,12 @@
   }
 
   function savedMountedTabs(state) {
-    const saved = state.workspace?.configuration?.payload?.ui?.[state.kind]?.mounted_tabs;
-    return Array.isArray(saved) ? saved : undefined;
+    const ui = state.workspace?.configuration?.payload?.ui?.[state.kind] || {};
+    const explicit = Array.isArray(ui.explicit_mounted_tabs)
+      ? ui.explicit_mounted_tabs : [];
+    return FTTestConfigurationCompiler.authoringMountedTabs(
+      state.manifest, savedSettings(state), explicit,
+    );
   }
 
   window.FTTestState = Object.freeze({

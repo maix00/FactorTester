@@ -16,6 +16,10 @@ const manifest = {research_configuration_schema_version: 3, defaults: {
   start_time: {tab_key: "time", value: "00:00"},
   end_time: {tab_key: "time", value: "23:59"},
   editor_note: {tab_key: "notes", value: "", execution_policy: "authoring_only"},
+  object_default: {
+    tab_key: "notes", value: {mode: "auto", count: 5},
+    execution_policy: "authoring_only",
+  },
 }, tab_lists: {"local-settings": [
   {key: "time"}, {key: "notes"}, {key: "unused"},
 ]}, default_mounted_tabs: {"local-settings": ["unused"]}};
@@ -29,6 +33,7 @@ for (const kind of ["backtest", "ic", "future-test-kind"]) {
     ui: {[kind]: {settings: {
       start_date: "2024-01-01", end_date: "2025-01-31",
       start_time: "09:00", end_time: "15:00", editor_note: "draft",
+      object_default: {count: 5, mode: "auto"},
     }}},
   };
   const authoring = FTTestConfigurationCompiler.authoringConfiguration(
@@ -47,13 +52,17 @@ for (const kind of ["backtest", "ic", "future-test-kind"]) {
   assert.equal(executable.analyses[kind].local_settings, undefined);
   assert.deepEqual(FTTestConfigurationCompiler.authoringMountedTabs(
     manifest, configuration.ui[kind].settings, [],
-  ), ["time", "notes"]);
+  ), ["time", "notes", "unused"]);
   assert.deepEqual(FTTestConfigurationCompiler.authoringMountedTabs(
     manifest, {
       start_date: "", end_date: "", start_time: "00:00", end_time: "23:59",
       editor_note: "",
+      object_default: {count: 5, mode: "auto"},
     }, [],
-  ), []);
+  ), ["unused"]);
+  assert.deepEqual(FTTestConfigurationCompiler.authoringMountedTabs(
+    manifest, {start_time: "00:00", end_time: "23:59"}, ["notes"],
+  ), ["notes", "unused"]);
 }
 
 console.log("PASS: every test kind derives executable settings from registered UI fields");

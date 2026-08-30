@@ -259,6 +259,9 @@
       factor_ref: state.kind === "ic" ? group?.factor_ref : state.factorRef,
       mounted_tabs: Array.isArray(state.settingsMountedTabs)
         ? [...state.settingsMountedTabs] : [],
+      explicit_mounted_tabs: Array.isArray(state.settingsExplicitMountedTabs)
+        ? [...state.settingsExplicitMountedTabs] : [],
+      mount_policy_version: 2,
     };
     if (state.kind === "ic") {
       ui.selected_configuration_group_ids = group?.config_group_id
