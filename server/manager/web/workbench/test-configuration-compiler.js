@@ -183,23 +183,40 @@
     return result;
   }
 
-  function authoringMountedTabs(manifest, settings, saved) {
+  function authoringMountedTabs(manifest, settings, explicit) {
     const tabs = manifest?.tab_lists?.["local-settings"] || [];
     const available = new Set(tabs.map(tab => String(tab?.key || "")).filter(Boolean));
-    const mounted = new Set((Array.isArray(saved)
-      ? saved : manifest?.default_mounted_tabs?.["local-settings"] || []
-    ).filter(key => available.has(key)));
+    // Assistance documents can inherit a previously polluted mounted_tabs
+    // list. Rebuild the canonical list from registered defaults and actual
+    // non-default field values instead of treating that serialized list as
+    // semantic configuration.
+    const mounted = new Set((manifest?.default_mounted_tabs?.["local-settings"] || [])
+      .filter(key => available.has(key)));
+    for (const key of Array.isArray(explicit) ? explicit : []) {
+      if (available.has(key)) mounted.add(key);
+    }
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
       const tabKey = String(field?.tab_key || "");
       if (!available.has(tabKey)
           || !Object.prototype.hasOwnProperty.call(settings || {}, key)) continue;
       const registeredDefault = Object.prototype.hasOwnProperty.call(field || {}, "default")
         ? field.default : field?.value;
-      if (JSON.stringify(settings[key]) !== JSON.stringify(registeredDefault)) {
+      if (!sameRegisteredValue(settings[key], registeredDefault)) {
         mounted.add(tabKey);
       }
     }
     return tabs.map(tab => tab.key).filter(key => mounted.has(key));
+  }
+
+  function sameRegisteredValue(left, right) {
+    const canonical = value => {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(Object.keys(value).sort().map(key => [
+        key, canonical(value[key]),
+      ]));
+    };
+    return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
   }
 
   function factorAlias(factor) {

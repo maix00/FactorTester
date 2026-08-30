@@ -96,8 +96,9 @@
     const ui = document.configuration?.ui?.[state.kind];
     if (ui && typeof ui === "object") {
       ui.mounted_tabs = FTTestConfigurationCompiler.authoringMountedTabs(
-        state.manifest, ui.settings || {}, ui.mounted_tabs,
+        state.manifest, ui.settings || {}, ui.explicit_mounted_tabs,
       );
+      ui.mount_policy_version = 2;
     }
     document.configuration = FTTestConfigurationCompiler.executableConfiguration(
       document.configuration, state.kind, state.manifest,

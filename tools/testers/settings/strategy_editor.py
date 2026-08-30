@@ -67,10 +67,7 @@ def _inner_manual_tabs(application: str, app: Any | None = None) -> tuple[dict[s
     if application != "ic_test":
         return _SHARED_INNER_MANUAL_TABS
     projections = []
-    for tab_key, field_key in (
-        ("delay", "ic_lags"),
-        ("quantile_portfolio_statistics", "quantile_portfolio_statistics"),
-    ):
+    for tab_key, field_key in (("delay", "ic_lags"),):
         tab = app.tabs.get(tab_key) if app is not None else None
         field = app.settings.get(field_key) if app is not None else None
         if tab is None or field is None or field.tab != tab_key:
