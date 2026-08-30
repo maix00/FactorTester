@@ -418,13 +418,7 @@
       const catalog = await FTTestProducts.hydrateReferencedGroups(
         context, state, listed,
       );
-      const selected = state.groups.filter(group => (
-        group.temporary === true || group.source_kind === "transient"
-        || ["inline", "test_inline"].includes(group.origin)
-        || ["inline", "test_inline"].includes(group.source_origin)
-        || (group._savedPlaceholder
-          && state.groupRefs.includes(FTTestLazyCode.groupID(group)))
-      ));
+      const selected = FTTestProducts.retainedImportedGroups(state);
       // Merge refreshed catalog fields into inline/test-inline objects without
       // erasing their authoring origin; unresolved inline-only objects remain.
       const selectedByID = new Map(selected.map(group => [
