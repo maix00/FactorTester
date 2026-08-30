@@ -210,6 +210,7 @@
       required_fields: structuredClone(groupContract?.required || []),
       create_template: structuredClone(itemContract.create_template || {}),
       field_sources: structuredClone(itemContract.field_sources || {}),
+      batch_contract: structuredClone(itemContract.batch_contract || {}),
       item_schema: structuredClone(groupContract || {}),
       children: groupIDs,
     };
