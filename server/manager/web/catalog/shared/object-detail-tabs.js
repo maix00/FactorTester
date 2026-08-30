@@ -160,6 +160,8 @@
   function stateText(context, item, mode, dirty) {
     if (dirty) return context.t("未保存");
     if (item?.editable === false) return context.t("只读");
+    if (item?.save_mode === "auto") return context.t("自动保存");
+    if (item?.save_mode === "manual") return context.t("需保存");
     return context.t(mode === "create" ? "需填写" : "可修改");
   }
 
@@ -171,7 +173,11 @@
     ].join(" ");
     notice.textContent = item.editable === false
       ? context.t("此分区由对象身份或源码自动确定，当前模式下不可修改。")
-      : context.t("此分区中的字段可以修改；保存前不会影响已登记对象。");
+      : item.save_mode === "auto"
+        ? context.t("此分区的修改会自动保存到当前页面草稿，最终提交前不会影响已登记对象。")
+        : item.save_mode === "manual"
+          ? context.t("此分区需要单独保存；最终提交前不会影响已登记对象。")
+          : context.t("此分区中的字段可以修改；保存前不会影响已登记对象。");
     return notice;
   }
 

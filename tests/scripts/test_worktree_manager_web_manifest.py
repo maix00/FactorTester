@@ -2327,12 +2327,15 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     )
 
     assert 'context.t("上传因子源码")' in editor
-    assert 'FTUI.actionButton(context.t("校验源码")' in editor
+    assert 'FTUI.actionButton(context.t("保存源码")' in editor
     assert "FTUI.codeEditor(state.sourceCode" in editor
     assert "registered = libraryValue.factors?.[0] || null" in editor
     assert "frozen Factor v2 identity" in editor
     assert "factor-editor-upload-action" not in editor
     assert 'FTUI.actionButton(context.t("取消")' in editor
+    assert 'context.t("提交"), () => form.requestSubmit()' in editor
+    assert 'context.toolbar.append(submit)' in editor
+    assert 'source: {save_mode: "manual"}' in editor
     assert "FTUI.actionButton(" in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
