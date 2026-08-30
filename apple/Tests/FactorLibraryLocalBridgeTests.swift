@@ -8,7 +8,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
         )
 
         XCTAssertEqual(arguments, [
-            "factor-library", "profile", "factor-set",
+            "factor-library", "workspace", "factor-set",
             "local-catalog", "--query", "动量", "--json",
         ])
     }
@@ -25,7 +25,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
         )
 
         XCTAssertEqual(arguments, [
-            "factor-library", "profile", "factor-set",
+            "factor-library", "workspace", "factor-set",
             "members", "--target-ref", reference,
             "--offset", "0", "--limit", "100", "--json",
         ])
@@ -38,7 +38,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "action": "descriptor", "target_ref": reference,
             ]),
             [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "descriptor", "--target-ref", reference, "--json",
             ]
         )
@@ -51,7 +51,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "action": "run-input", "target_ref": reference,
             ]),
             [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "run-input", "--target-ref", reference, "--json",
             ]
         )
@@ -82,7 +82,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 message: ["action": "owners"]
             ),
             [
-                "factor-library", "profile", "owners", "list",
+                "factor-library", "workspace", "owners", "list",
                 "--json",
             ]
         )
@@ -93,7 +93,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "limit": 999,
             ]),
             [
-                "factor-library", "profile", "revisions", "list",
+                "factor-library", "workspace", "revisions", "list",
                 "--owner-ref", "profile:maxa", "--limit", "200", "--json",
             ]
         )
@@ -107,7 +107,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "git_commit": "0123456789abcdef",
             ]),
             [
-                "factor-library", "profile", "families", "list",
+                "factor-library", "workspace", "families", "list",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef", "--json",
             ]
@@ -120,7 +120,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "family": "MmRateOfChg",
             ]),
             [
-                "factor-library", "profile", "families", "describe",
+                "factor-library", "workspace", "families", "describe",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef",
                 "--family", "MmRateOfChg", "--json",
@@ -138,7 +138,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "params": ["N": "20d", "P": "CA"],
             ]),
             [
-                "factor-library", "profile", "factors", "instantiate",
+                "factor-library", "workspace", "factors", "instantiate",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef",
                 "--family", "MmRateOfChg",

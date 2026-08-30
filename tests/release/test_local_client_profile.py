@@ -574,7 +574,8 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert receipt["sync_policy"] == {}
         assert receipt["recommended_cwd"] == receipt["workspace_root"]
         assert receipt["next_command"] == (
-            f"factortester factor-library profile create {profile_id}"
+            "factortester factor-library workspace "
+            f"create-profile-worktree {profile_id}"
         )
         assert "profile" not in {
             key.lower() for key in receipt if key != "profile_id"

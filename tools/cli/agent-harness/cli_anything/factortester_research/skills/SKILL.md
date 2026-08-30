@@ -130,8 +130,7 @@ Profile's local factor source is its own
 
 The Profile worktree is an ordinary Git worktree on `agent/<profile>`. Edit
 and commit factor-family source on that branch. Publishing must preserve the
-database synchronization boundary in this exact order: refresh `download` from
-the database factor library; merge `download` into `upload` and stop on any
+database synchronization boundary in this exact order: refresh `download` from the database factor library; merge `download` into `upload` and stop on any
 conflict; merge the committed `agent/<profile>` branch into `upload` and stop on
 any conflict; only then allow the existing `upload` hook to synchronize back to
 the database factor library. Never edit `download`, bypass either merge, or use
@@ -241,7 +240,7 @@ admitting any of that Evidence into Graph remains a separate explicit action.
 - Resolve a committed Profile factor and its navigation-only family reference
   before writing either link:
   ```bash
-  factortester factor-library profile reference maxa \
+  factortester factor-library workspace reference maxa \
     --source-file public_factors/SgCPS.py \
     --identity 'SgCPS|P:[CA]|N:20d|$F:1m' \
     --object-kind factor --revision <commit> --json
@@ -253,11 +252,11 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   not a separately typed factor column. Create its named member manifest, commit
   it, and freeze the exact set version:
   ```bash
-  factortester factor-library profile factor-set create maxa \
+  factortester factor-library workspace factor-set create maxa \
     --set-id momentum-2025 --title-zh '2025年动量因子集合' \
     --description-zh '用于窗口参数比较' \
     --member-ref-file factor-members.json --json
-  factortester factor-library profile factor-set reference maxa \
+  factortester factor-library workspace factor-set reference maxa \
     --set-id momentum-2025 --json
   ```
   Use the returned versioned `target_ref` in report, Evidence, obligation, and
@@ -267,7 +266,7 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   member hash; they never copy the complete member manifest into report state.
   Resolve members only when needed, in bounded pages:
   ```bash
-  factortester factor-library profile factor-set members \
+  factortester factor-library workspace factor-set members \
     --target-ref '<frozen-factor-set-ref>' --offset 0 --limit 50 --json
   ```
   Discover and inspect sets with `factor-set list maxa --json` and
@@ -408,7 +407,7 @@ qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
 Any Evidence or EvidenceUse factor scope must use the exact frozen `factor_ref`
-returned by `factortester factor-library profile reference` (or the frozen
+returned by `factortester factor-library workspace reference` (or the frozen
 factor-set reference command). Select the Profile owner and Git commit in local
 settings, then resolve the complete alias. A Profile already owns its factor
 worktree, so never ask for another workspace path. If source settings are
@@ -417,7 +416,7 @@ its latest commit. Copy the returned reference verbatim into `factor_refs`;
 display names and shortened identities are not object identity.
 
 ```bash
-factortester factor-library profile reference maxa \
+factortester factor-library workspace reference maxa \
   --source-file '<custom_factors-or-public_factors>/<family>.py' \
   --identity '<complete-factor-alias>' \
   --object-kind factor \
