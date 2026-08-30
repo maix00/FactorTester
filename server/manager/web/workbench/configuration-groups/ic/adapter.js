@@ -107,6 +107,7 @@
 
   function summaryChips(context, state, group) {
     const item = {
+      name: group.name,
       factor_candidate_refs: [group.factor_ref],
       product_path_selection_id: group.product_scope_ref,
     };

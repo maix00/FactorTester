@@ -1501,6 +1501,7 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
             )
             assert product_filter["item_field"] == "productMask"
             assert product_filter["item_default"] == {}
+
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
             "factor_candidates",
         ]
@@ -1598,6 +1599,24 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         }
 
     ic_manifest = backtest_setting_registry.get("ic_test").manifest()
+    ic_chips = {item["key"]: item for item in ic_manifest["chip_fields"]}
+    assert ic_chips["configuration_name"] == {
+        "key": "configuration_name",
+        "label": "配置",
+        "category": "identity",
+        "chip_template": "配置: {configurationName}",
+        "source_keys": ("configurationName",),
+        "module": "ic_configuration_group",
+        "target_tab": "__configuration__",
+        "order": 5,
+        "inherit_from_root": False,
+        "value_resolvers": {},
+        "clickable": False,
+        "batch_owned": False,
+        "source_adapter": "primary_ic_configuration_group",
+        "display_scope": "strategy",
+        "detail_overlay": None,
+    }
     category_chip = next(
         item for item in ic_manifest["chip_fields"] if item["key"] == "category"
     )

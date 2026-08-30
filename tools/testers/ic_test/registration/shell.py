@@ -162,6 +162,13 @@ def _register_tabs(app: ApplicationSettings) -> None:
 def _register_chips(app: ApplicationSettings) -> None:
     register_factor_product_scope_chips(app)
     app.register_chip_field(ChipDefinition(
+        "configuration_name", "配置", "identity",
+        "配置: {configurationName}", ("configurationName",),
+        module="ic_configuration_group", target_tab="__configuration__",
+        order=5, source_adapter="primary_ic_configuration_group",
+        display_scope="strategy",
+    ))
+    app.register_chip_field(ChipDefinition(
         "category", "分类", "identity",
         "分类: {categoryLabel}", ("categoryLabel",),
         module="category_grouping", target_tab="category", order=15,

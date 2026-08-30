@@ -207,6 +207,10 @@
         productMask: group.productMask || [],
       };
     }
+    if (adapter === "primary_ic_configuration_group") {
+      const group = item || state.analysis?.configuration_groups?.[0] || {};
+      return {configurationName: String(group.name || "").trim()};
+    }
     if (adapter === "run_inputs") {
       // The source-state module is intentionally deferred until the input
       // tab or a submission path is used.  Chips can still render a cheap

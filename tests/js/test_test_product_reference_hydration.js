@@ -50,6 +50,14 @@ vm.runInThisContext(
   assert.equal(FTTestProducts.needsReferenceHydration(state), false);
   assert.equal(state.groups[0].name, "中国期货日盘");
   assert.equal(state.values.product_path_selections[0].label, "中国期货日盘");
+
+  const imported = {group_ref: ref, name: "辅助写入产品组", paths: ["DCE.m"]};
+  assert.deepEqual(FTTestProducts.retainedImportedGroups({
+    groupRefs: [ref], groups: [imported], savedGroupIDs: new Set([ref]),
+  }), [imported]);
+  assert.deepEqual(FTTestProducts.retainedImportedGroups({
+    groupRefs: [], groups: [imported], savedGroupIDs: new Set([ref]),
+  }), []);
   console.log("PASS: persisted product-group refs hydrate independently of list catalogs");
 })().catch(error => {
   console.error(error);

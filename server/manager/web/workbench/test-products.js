@@ -119,6 +119,23 @@
     return selectedGroups(state).map(projection);
   }
 
+  function retainedImportedGroups(state) {
+    const referenced = new Set(uniqueReferences(state.groupRefs || []));
+    const saved = state.savedGroupIDs instanceof Set
+      ? state.savedGroupIDs : new Set();
+    return (state.groups || []).filter(group => {
+      const id = groupID(group);
+      return group?.temporary === true || group?.source_kind === "transient"
+        || ["inline", "test_inline"].includes(group?.origin)
+        || ["inline", "test_inline"].includes(group?.source_origin)
+        // Assistance documents and old frozen configurations may contain a
+        // complete referenced object without a transient-origin marker.  It
+        // is still an authoritative candidate for this draft and must not be
+        // discarded merely because the server directory does not list it.
+        || (referenced.has(id) && saved.has(id));
+    });
+  }
+
   function setSelected(state, group, checked) {
     const id = groupID(group);
     if (state.kind === "ic") {
@@ -274,6 +291,13 @@
     summaryNote.className = "test-product-selection-summary";
     summaryNote.textContent = summary;
     root.querySelector(".test-field-row-control")?.append(summaryNote);
+    const catalogError = String(state.lazy?.products?.error || "").trim();
+    if (catalogError) {
+      const error = document.createElement("small");
+      error.className = "test-product-warning";
+      error.textContent = `${context.t("产品组候选读取失败")}: ${catalogError}`;
+      root.querySelector(".test-field-row-control")?.append(error);
+    }
     const unavailable = selectedRefs.filter(ref => (
       !groups.some(group => groupID(group) === ref)
     ));
@@ -290,6 +314,7 @@
     groupID, groupLabel, projection, restoreReferences, synchronize,
     selectedGroups, selectedProjections, setSelected, selectNew, panel,
     selectionPanel, hydrateReferencedGroups, hydrateStateReferences,
+    retainedImportedGroups,
     needsReferenceHydration,
   });
 })();
