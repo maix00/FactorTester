@@ -188,6 +188,21 @@
     }).filter(([alias]) => alias));
   }
 
+  function parameterDependencies(values = {}) {
+    const result = [];
+    const seen = new Set();
+    const visit = value => {
+      if (!value || typeof value !== "object") return;
+      for (const dependency of value.factor_dependencies || []) visit(dependency);
+      const ref = String(value.ref || "").trim();
+      if (Number(value.schema_version) !== 2 || !ref || seen.has(ref)) return;
+      seen.add(ref);
+      result.push(value);
+    };
+    for (const value of Object.values(values || {})) visit(value);
+    return result;
+  }
+
   function normalizedInspection(value) {
     const item = value || {};
     const factor = item.factor || item.frozen_factor || {};
@@ -223,10 +238,30 @@
   function parameterEditor(context, data, state, redraw) {
     const list = parameters(state);
     if (!list.length) return null;
-    return window.FTFactorDetailShared.parameterEditor(
+    return window.FTFactorParameterEditor.create(
       context, list, state.parameterValues, {
         factorItems: factorParameterItems(data),
-        onCreateFactor: onSaved => FTTestObjectEditorOverlay.open(context, {
+        onValidateFactorAlias: async alias => {
+          const familyAliasValue = String(alias || "").split("|", 1)[0];
+          const family = (data?.families || []).find(item => (
+            familyAlias(item) === familyAliasValue
+          ));
+          if (!family) {
+            return {valid: false, error: context.t("找不到该 alias 对应的可见因子家族")};
+          }
+          return context.api("/api/factor-library/validate", {
+            resolve_factor_alias: true,
+            factor_alias: alias,
+            factor_family_alias: familyAliasValue,
+            owner_username: family.owner_username || family.workspace_username || "",
+            is_public: family.factor_kind === "public" || family.source === "public",
+          });
+        },
+        onCreateFactor: onSaved => (
+          context.openTestObject || (childOptions => (
+            FTTestObjectEditorOverlay.open(context, childOptions)
+          ))
+        )({
           kind: "factor", mode: "create", ref: "new", onSaved,
           temporary: context.testObjectTemporary === true,
         }),
@@ -488,6 +523,7 @@
               || state.family?.family_formula_fingerprint || null,
             self_formula_fingerprint:
               state.inspection?.self_formula_fingerprint || null,
+            factor_dependencies: parameterDependencies(state.parameterValues),
           },
         }),
       },
@@ -557,7 +593,12 @@
         `/api/factor-library/configs/${encodeURIComponent(alias)}`,
         {
           method: "PUT",
-          body: JSON.stringify({params_list: [state.parameterValues]}),
+          body: JSON.stringify({
+            params_list: [state.parameterValues],
+            metadata: {
+              factor_dependencies: parameterDependencies(state.parameterValues),
+            },
+          }),
         },
       );
       registered = libraryValue.factors?.[0] || null;

@@ -323,8 +323,13 @@ def _clean_library_metadata(metadata: dict | None) -> dict:
         'product_group_paths',
         'product_names',
         'product_count',
+        'factor_dependencies',
     ):
         value = metadata.get(key)
+        if key == 'factor_dependencies':
+            if isinstance(value, list):
+                cleaned[key] = [item for item in value if isinstance(item, dict)]
+            continue
         if isinstance(value, str):
             value = value.strip()
         if isinstance(value, list):

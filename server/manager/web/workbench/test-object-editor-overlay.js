@@ -48,7 +48,8 @@
       activeNav: () => {},
       navigate: callbacks.navigate || (() => closeOverlay()),
       openFactor: callbacks.openFactor,
-      closeTab: () => closeOverlay(),
+      openTestObject: callbacks.openTestObject,
+      closeTab: callbacks.closeFrame || (() => closeOverlay()),
       onSaved,
       testState: options.testState || null,
       testObjectTemporary: options.temporary === true,
@@ -96,26 +97,23 @@
     backButton.title = context.t("返回因子集合");
     backButton.hidden = true;
     heading.append(backButton, copy, closeButton);
+    const tabBar = document.createElement("div");
+    tabBar.className = "test-object-editor-tabs";
     const mount = document.createElement("div");
     mount.className = "test-object-editor-overlay-mount";
-    card.append(heading, mount);
+    card.append(heading, tabBar, mount);
     dialog.append(card);
     const state = {
       closed: false,
       resolve: null,
       cleanup: () => {
-        mount.__ftProductGroupCleanup?.();
-        mount.__ftProductCategoryCleanup?.();
+        for (const frame of frames || []) {
+          frame.mount?.__ftProductGroupCleanup?.();
+          frame.mount?.__ftProductCategoryCleanup?.();
+        }
       },
     };
     const finish = value => close(dialog, state, value);
-    const saved = value => {
-      const normalized = options.temporary === true && value
-        ? {...value, temporary: true, source_origin: value.source_origin || "test_inline"}
-        : value;
-      options.onSaved?.(normalized);
-      finish(normalized);
-    };
     closeButton.addEventListener("click", () => finish(null));
     dialog.addEventListener("close", () => {
       if (!state.closed) {
@@ -129,6 +127,7 @@
     dialog.showModal();
     const promise = new Promise(resolve => { state.resolve = resolve; });
     const frames = [{
+      id: crypto.randomUUID(),
       kind: options.kind,
       ref: options.ref || "new",
       mode,
@@ -136,23 +135,74 @@
       temporary: options.temporary === true,
     }];
     let renderToken = 0;
+    let activeFrame = frames[0];
     const loadedGroups = new Set();
+
+    const normalizedValue = (frame, value) => frame.temporary === true && value
+      ? {...value, temporary: true, source_origin: value.source_origin || "test_inline"}
+      : value;
+
+    const renderTabs = () => {
+      tabBar.replaceChildren(...frames.map((frame, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary test-object-editor-tab";
+        button.classList.toggle("active", frame === activeFrame);
+        const definition = definitions[frame.kind];
+        button.textContent = frame.label || `${context.t(definition.title)} ${index + 1}`;
+        button.addEventListener("click", () => { void renderFrame(frame); });
+        return button;
+      }));
+      tabBar.hidden = frames.length < 2;
+    };
+
+    const closeFrame = frame => {
+      if (frame === frames[0]) {
+        finish(null);
+        return;
+      }
+      const index = frames.indexOf(frame);
+      if (index >= 0) frames.splice(index, 1);
+      frame.resolve?.(null);
+      void renderFrame(frames[Math.max(0, index - 1)] || frames[0]);
+    };
+
+    const saveFrame = (frame, value) => {
+      const normalized = normalizedValue(frame, value);
+      if (frame === frames[0]) {
+        options.onSaved?.(normalized);
+        finish(normalized);
+        return;
+      }
+      frame.onSaved?.(normalized);
+      frame.resolve?.(normalized);
+      const index = frames.indexOf(frame);
+      if (index >= 0) frames.splice(index, 1);
+      void renderFrame(frame.parent || frames.at(-1) || frames[0]);
+    };
 
     const updateFrameHeading = (frame, name = "") => {
       const frameDefinition = definitions[frame.kind] || definition;
       const prefix = frame.mode === "edit"
         ? context.t("编辑") : frame.mode === "view" ? context.t("查看") : context.t("新建");
       title.textContent = prefix + context.t(frameDefinition.title);
+      frame.label = name || `${prefix}${context.t(frameDefinition.title)}`;
       if (name && frame.kind === "factor") title.title = name;
       backButton.hidden = frames.length < 2;
+      renderTabs();
     };
 
     const renderFrame = async frame => {
       const token = ++renderToken;
+      activeFrame = frame;
       const frameDefinition = definitions[frame.kind];
       if (!frameDefinition) return;
       updateFrameHeading(frame);
-      mount.replaceChildren();
+      frame.mount ||= document.createElement("div");
+      frame.mount.className = "test-object-editor-frame";
+      mount.replaceChildren(frame.mount);
+      if (frame.rendered) return;
+      frame.rendered = true;
       const frameOptions = {
         ...options,
         ...frame,
@@ -161,7 +211,7 @@
         temporary: frame.temporary,
       };
       const proxy = editorContext(
-        context, mount, () => finish(null), saved, frameOptions, {
+        context, frame.mount, () => closeFrame(frame), value => saveFrame(frame, value), frameOptions, {
           navigate: path => {
             if (frame.kind === "factor_set" && isFactorPath(path)) {
               const targetRef = factorRefFromPath(path);
@@ -173,6 +223,8 @@
             finish(null);
           },
           openFactor,
+          openTestObject,
+          closeFrame: () => closeFrame(frame),
           setHeading: (name, scope) => {
             updateFrameHeading(frame, name);
           },
@@ -187,7 +239,7 @@
         await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);
       } catch (error) {
         if (!state.closed && token === renderToken) {
-          mount.replaceChildren(FTUI.empty(
+          frame.mount.replaceChildren(FTUI.empty(
             context.t("读取失败"), error.message || context.t("请稍后重试"),
           ));
         }
@@ -199,16 +251,38 @@
       if (!targetRef) return;
       const initialValue = factorInitialValue(item, targetRef);
       frames.push({
+        id: crypto.randomUUID(), parent: activeFrame,
         kind: "factor", ref: targetRef, mode: "view",
         initialValue, temporary: Boolean(initialValue),
       });
       void renderFrame(frames.at(-1));
     };
 
+    const openTestObject = childOptions => {
+      const childDefinition = definitions[childOptions?.kind];
+      if (!childDefinition) {
+        return Promise.reject(new Error(`unsupported test object: ${childOptions?.kind}`));
+      }
+      let resolve;
+      const promise = new Promise(done => { resolve = done; });
+      const child = {
+        id: crypto.randomUUID(), parent: activeFrame,
+        kind: childOptions.kind,
+        ref: childOptions.ref || "new",
+        mode: childOptions.mode || "create",
+        initialValue: childOptions.initialValue || null,
+        temporary: childOptions.temporary === true,
+        onSaved: childOptions.onSaved,
+        resolve,
+      };
+      frames.push(child);
+      void renderFrame(child);
+      return promise;
+    };
+
     backButton.addEventListener("click", () => {
       if (frames.length < 2) return;
-      frames.pop();
-      void renderFrame(frames.at(-1));
+      closeFrame(activeFrame);
     });
     await renderFrame(frames[0]);
     return promise;

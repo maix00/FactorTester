@@ -235,6 +235,13 @@ const subjects = FTTestConfigurationCompiler.factorSubjects([factor]);
 assert.deepEqual(subjects, [{
   ...factor,
 }]);
+const nested = frozenFactor("c", "Nested|N:5d", "Nested");
+assert.deepEqual(
+  FTTestConfigurationCompiler.factorSubjects([{
+    ...factor, factor_dependencies: [nested, nested],
+  }]),
+  [nested, factor],
+);
 assert.deepEqual(
   FTTestConfigurationCompiler.factorSubjects([factor, structuredClone(factor)]),
   [factor],

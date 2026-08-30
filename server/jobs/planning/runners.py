@@ -23,7 +23,11 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
 
     owner = str(spec.get("_owner") or payload.get("_owner") or "").strip()
     if owner:
-        register_factor_param_resolver_for_user(owner)
+        run_spec = spec.get("run_spec") or spec
+        frozen_factors = (run_spec.get("configuration") or {}).get(
+            "shared", {},
+        ).get("factors") or spec.get("factors") or []
+        register_factor_param_resolver_for_user(owner, frozen_factors)
     from server.modules.single_factor_test.planning import build_execution_plan
 
     with transient_factor_source_scope(
