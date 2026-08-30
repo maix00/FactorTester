@@ -11,7 +11,7 @@
 
   function endpoint(source, target = "") {
     const base = source === "local"
-      ? "/api/product-groups" : "/api/catalog/product-groups";
+      ? "/api/client/product-groups" : "/api/catalog/product-groups";
     return target ? `${base}/${encodeURIComponent(target)}` : base;
   }
 
