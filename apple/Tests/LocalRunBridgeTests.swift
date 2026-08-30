@@ -12,7 +12,7 @@ final class LocalRunBridgeTests: XCTestCase {
         XCTAssertEqual(
             Array(arguments.prefix(7)),
             [
-                "client", "catalog", "local-run", "upload",
+                "client", "local-run", "upload",
                 "local-001", "chart.png", "--json",
             ]
         )
@@ -30,8 +30,8 @@ final class LocalRunBridgeTests: XCTestCase {
 
     func testSyncCommandUsesDurableOutbox() {
         XCTAssertEqual(
-            Array(LocalRunBridgeContract.syncArguments().prefix(6)),
-            ["client", "catalog", "local-run", "outbox", "--sync", "--json"]
+            Array(LocalRunBridgeContract.syncArguments().prefix(5)),
+            ["client", "local-run", "outbox", "--sync", "--json"]
         )
     }
 }

@@ -42,7 +42,7 @@ final class ClientLocalCatalogBridgeTests: XCTestCase {
         ])
 
         XCTAssertEqual(arguments, [
-            "client", "catalog", "source", "request",
+            "client", "source", "request",
             "--path", "/api/client/product_sources?data_source=Tiger",
             "--method", "GET", "--json",
         ])

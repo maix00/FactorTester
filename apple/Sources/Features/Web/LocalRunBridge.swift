@@ -14,7 +14,7 @@ enum LocalRunBridgeContract {
             throw LocalRunBridgeError.invalidMessage
         }
         var arguments = [
-            "client", "catalog", "local-run", "upload", jobID, name,
+            "client", "local-run", "upload", jobID, name,
             "--json",
         ]
         let profilePath = UserDefaults.standard.string(
@@ -28,7 +28,7 @@ enum LocalRunBridgeContract {
 
     static func syncArguments() -> [String] {
         var arguments = [
-            "client", "catalog", "local-run", "outbox", "--sync", "--json",
+            "client", "local-run", "outbox", "--sync", "--json",
         ]
         let profilePath = UserDefaults.standard.string(
             forKey: "client.release.profilePath"

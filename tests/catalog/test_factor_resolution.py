@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from tools.cli.catalog import factor_resolution
 from tools.cli.commands import client_catalog as catalog_commands
-from tools.cli.commands.client_catalog import client_catalog
+from tools.cli.commands.client_catalog import catalog_factor
 from tools.factors.formula_identity import (
     require_frozen_factor,
     require_frozen_factor_family,
@@ -191,9 +191,9 @@ def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
     )
 
     result = CliRunner().invoke(
-        client_catalog,
+        catalog_factor,
         [
-            "factor", "resolve",
+            "resolve",
             "--alias", "MmRateOfChg|N:20d|$F:1d",
             "--release-profile", str(profile),
             "--json",

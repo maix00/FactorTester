@@ -38,7 +38,7 @@ class FederationServiceProxyRoutesMixin:
                 and not path.startswith("/api/research-graphs/user-library")
             )
             or path.startswith("/api/trial-plans/")
-            or path == "/custom-factors/api/internal/public-source-applied"
+            or path == "/api/internal/factor-library/public-source-applied"
         )
     def _federation_proxy(self) -> None:
         if not self._has_federation_proxy_token():

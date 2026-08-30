@@ -76,12 +76,15 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
         )
     }
 
-    func testOwnerAndRevisionCommandsUseCatalogCLI() throws {
+    func testOwnerAndRevisionCommandsUseFactorWorktreeCLI() throws {
         XCTAssertEqual(
             try FactorLibraryLocalBridgeContract.arguments(
                 message: ["action": "owners"]
             ),
-            ["client", "catalog", "owner", "list", "--json"]
+            [
+                "client", "profile", "factor-worktree", "owners", "list",
+                "--json",
+            ]
         )
         XCTAssertEqual(
             try FactorLibraryLocalBridgeContract.arguments(message: [
@@ -90,7 +93,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "limit": 999,
             ]),
             [
-                "client", "catalog", "revision", "list",
+                "client", "profile", "factor-worktree", "revisions", "list",
                 "--owner-ref", "profile:maxa", "--limit", "200", "--json",
             ]
         )
@@ -104,7 +107,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "git_commit": "0123456789abcdef",
             ]),
             [
-                "client", "catalog", "family", "list",
+                "client", "profile", "factor-worktree", "families", "list",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef", "--json",
             ]
@@ -117,7 +120,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "family": "MmRateOfChg",
             ]),
             [
-                "client", "catalog", "family", "describe",
+                "client", "profile", "factor-worktree", "families", "describe",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef",
                 "--family", "MmRateOfChg", "--json",
@@ -135,7 +138,7 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
                 "params": ["N": "20d", "P": "CA"],
             ]),
             [
-                "client", "catalog", "factor", "instantiate",
+                "client", "profile", "factor-worktree", "factors", "instantiate",
                 "--owner-ref", "profile:maxa",
                 "--git-commit", "0123456789abcdef",
                 "--family", "MmRateOfChg",
