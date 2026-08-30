@@ -193,7 +193,9 @@
       const tabKey = String(field?.tab_key || "");
       if (!available.has(tabKey)
           || !Object.prototype.hasOwnProperty.call(settings || {}, key)) continue;
-      if (JSON.stringify(settings[key]) !== JSON.stringify(field?.default)) {
+      const registeredDefault = Object.prototype.hasOwnProperty.call(field || {}, "default")
+        ? field.default : field?.value;
+      if (JSON.stringify(settings[key]) !== JSON.stringify(registeredDefault)) {
         mounted.add(tabKey);
       }
     }
