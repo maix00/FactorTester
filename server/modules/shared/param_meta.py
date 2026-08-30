@@ -97,6 +97,9 @@ def serialize_param_options(param) -> list[dict]:
             return []
 
     if cls_name == 'FactorParam':
+        # FactorParam accepts both a visible factor and a raw ColumnRef.  The
+        # account-scoped factor candidates are added by the editor; stable
+        # column choices can be declared here.
         try:
             from tools.data.types import DataColumn
             return [
@@ -142,14 +145,14 @@ def serialize_param_options(param) -> list[dict]:
 
 
 def serialize_param_input_mode(param) -> str:
-    """Frontend control mode: enum, text, or enum_custom."""
+    """Frontend control mode declared by the parameter contract."""
     cls_name = type(param).__name__
     alias = getattr(param, 'alias', '')
 
     if cls_name == 'DataColumnParam':
         return 'enum'
     if cls_name == 'FactorParam':
-        return 'enum_custom'
+        return 'factor_ref_custom'
     if alias == '$Rev':
         return 'enum'
     if alias == '$F':

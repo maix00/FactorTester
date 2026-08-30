@@ -221,6 +221,11 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
+.factor-param-reference-control { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, .8fr); align-items: center; gap: 8px; min-width: 0; }
+.factor-param-reference-control > * { min-width: 0; }
+@media (max-width: 720px) {
+  .factor-param-reference-control { grid-template-columns: minmax(0, 1fr); }
+}
 .catalog-source-providers-button { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 9px; color: var(--accent); background: var(--panel); cursor: pointer; font-size: 12px; }
 .catalog-source-providers-button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .catalog-source-providers-card { max-height: calc(100vh - 48px); overflow: auto; }

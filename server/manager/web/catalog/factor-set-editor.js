@@ -106,20 +106,13 @@
       onReady: editor => {
         window.FTFactorSetAssistance?.register?.(context, {
           mode, state, tabs: editor.tabs,
-          onImport: document => render(context, data, targetRef, mode, {
-            ...options,
-            initialValue: {
-              ...current,
-              set_id: document.set_id,
-              alias: document.alias,
-              description: document.description,
-              identity: {
-                ...identity,
-                set_id: document.set_id,
-                members: [...document.members],
-              },
-            },
-          }),
+          onImport: document => {
+            state.setID = document.set_id;
+            state.alias = document.alias;
+            state.description = document.description;
+            state.members = [...document.members];
+            editor.syncFromState();
+          },
         });
       },
       onCancel: () => cancel(context),
