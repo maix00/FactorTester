@@ -14,6 +14,12 @@
     ).trim();
   }
 
+  function sourceClassName(sourceCode) {
+    return String(sourceCode || "").match(
+      /^\s*class\s+([A-Za-z_]\w*)\s*\(/m,
+    )?.[1] || "";
+  }
+
   function familyItems(data) {
     const seen = new Set();
     return (data?.families || []).flatMap(item => {
@@ -200,11 +206,42 @@
     return state.family?.params || [];
   }
 
-  function parameterEditor(context, state) {
+  function factorParameterItems(data) {
+    const seen = new Set();
+    return (data?.factors || []).flatMap(factor => {
+      const value = String(factor?.factor_alias || factor?.alias || "").trim();
+      if (!value || seen.has(value)) return [];
+      seen.add(value);
+      return [{
+        value, label: value,
+        description: [factor.owner_alias || factor.owner_username,
+          factor.factor_family_alias].filter(Boolean).join(" · "),
+      }];
+    });
+  }
+
+  function parameterEditor(context, data, state, redraw) {
     const list = parameters(state);
     if (!list.length) return null;
     return window.FTFactorDetailShared.parameterEditor(
-      context, list, state.parameterValues,
+      context, list, state.parameterValues, {
+        factorItems: factorParameterItems(data),
+        onCreateFactor: onSaved => FTTestObjectEditorOverlay.open(context, {
+          kind: "factor", mode: "create", ref: "new", onSaved,
+          temporary: context.testObjectTemporary === true,
+        }),
+        onFactorCreated: (factor, alias) => {
+          const value = String(factor?.factor_alias || factor?.alias || "").trim();
+          if (value) {
+            state.parameterValues[alias] = value;
+            data.factors ||= [];
+            if (!data.factors.some(item => (
+              item.factor_alias || item.alias
+            ) === value)) data.factors.push(factor);
+          }
+          redraw();
+        },
+      },
     );
   }
 
@@ -218,6 +255,7 @@
       input.value = "";
       if (!file) return;
       state.sourceCode = await file.text();
+      state.onSourceChanged?.(state.sourceCode);
       state.inspection = null;
       state.validationError = "";
       state.validationMessage = "";
@@ -259,6 +297,7 @@
         }) : parsed;
       if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
       state.inspection = normalizedInspection(value);
+      state.onInspected?.(state.inspection);
       state.validationError = "";
       state.validationMessage = context.t("源码有效，参数已解析");
       state.parameterValues = parameterValues;
@@ -300,6 +339,7 @@
     });
     editor.textarea.addEventListener("input", () => {
       state.sourceCode = editor.value();
+      state.onSourceChanged?.(state.sourceCode);
       state.inspection = null;
       state.validationError = "";
       state.validationMessage = "";
@@ -615,11 +655,19 @@
       mode, `factor-editor-form ${familyMode ? "factor-family-page" : "factor-page"}`,
     );
     const name = textField(context, familyMode ? "因子家族类名" : "因子类名", loaded.name || loaded.factor_alias || "", {
-      readOnly: mode === "edit", required: true,
+      readOnly: mode === "edit" || familyMode, required: true,
     });
     const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
     const description = textField(context, "说明", loaded.description || "");
     const category = textField(context, "分类", loaded.category || "自编");
+    state.onInspected = inspection => {
+      if (state.familyMode && inspection?.factor_name) {
+        name.value = inspection.factor_name;
+      }
+    };
+    state.onSourceChanged = sourceCode => {
+      if (state.familyMode) name.value = sourceClassName(sourceCode);
+    };
     const topMount = document.createElement("div");
     topMount.className = "factor-detail-top";
     const overviewMount = document.createElement("div");
@@ -699,7 +747,7 @@
         sourceMount.append(error);
       }
       parameterMount.replaceChildren();
-      const editor = parameterEditor(context, state);
+      const editor = parameterEditor(context, data, state, redraw);
       if (editor) {
         // parameterEditor owns the mutable values object; keep the same
         // object on state so edits made in the shared editor reach the save
@@ -909,6 +957,6 @@
   }
 
   window.FTFactorEditor = Object.freeze({
-    render, reconcileParameterValues, bindFieldValue,
+    render, reconcileParameterValues, bindFieldValue, sourceClassName,
   });
 })();

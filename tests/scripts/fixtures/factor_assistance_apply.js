@@ -63,4 +63,8 @@ assert.equal(
 );
 visibleInput.value = "自编";
 assert.equal(fieldRow.value, "自编");
+assert.equal(
+  window.FTFactorEditor.sourceClassName("class MmAroonDown(FactorFamily):\n    pass\n"),
+  "MmAroonDown",
+);
 console.log("ok");

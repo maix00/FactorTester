@@ -88,7 +88,7 @@
     return String(help?.title || help?.text || help?.description || "查看说明");
   }
 
-  function parameterEditor(context, parameters = [], initial = {}) {
+  function parameterEditor(context, parameters = [], initial = {}, options = {}) {
     const values = {...initial};
     const root = document.createElement("section");
     root.className = "factor-detail-parameter-editor";
@@ -99,12 +99,57 @@
       row.className = "test-object-field";
       const title = document.createElement("b");
       title.textContent = alias;
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = values[alias] ?? parameter.default_value ?? "";
-      values[alias] = input.value;
-      input.addEventListener("input", () => { values[alias] = input.value; });
-      row.append(title, input);
+      const initialValue = values[alias] ?? parameter.default_value ?? "";
+      values[alias] = initialValue;
+      if (parameter.type === "FactorParam") {
+        const factorItems = [
+          ...(parameter.options || []), ...(options.factorItems || []),
+        ];
+        if (initialValue && !factorItems.some(item => item.value === initialValue)) {
+          factorItems.push({value: initialValue, label: initialValue});
+        }
+        const referenceControl = document.createElement("div");
+        referenceControl.className = "factor-param-reference-control";
+        const custom = document.createElement("input");
+        custom.type = "text";
+        custom.value = initialValue;
+        custom.placeholder = context.t("选择因子/列引用，或手工输入表达式");
+        const picker = (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(
+          context, {
+            compact: true, multi: false, name: `factor-param-${alias}`,
+            title: alias, items: factorItems,
+            selected: initialValue ? [initialValue] : [],
+            onChange: selected => {
+              values[alias] = selected[0] || "";
+              custom.value = values[alias];
+            },
+            onCreate: options.onCreateFactor
+              ? () => options.onCreateFactor(value => {
+                const ref = String(
+                  value?.factor_alias || value?.alias || value?.factor_ref || "",
+                ).trim();
+                if (!ref) return;
+                values[alias] = ref;
+                custom.value = ref;
+                options.onFactorCreated?.(value, alias);
+              }) : null,
+            createLabel: context.t("新建因子"),
+          },
+        );
+        custom.addEventListener("input", () => {
+          values[alias] = custom.value;
+          picker.setValues?.(factorItems.some(item => item.value === custom.value)
+            ? [custom.value] : []);
+        });
+        referenceControl.append(picker.element || picker, custom);
+        row.append(title, referenceControl);
+      } else {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = initialValue;
+        input.addEventListener("input", () => { values[alias] = input.value; });
+        row.append(title, input);
+      }
       if (parameter.desc || parameter.value_space_desc) {
         const help = document.createElement("small");
         help.textContent = parameter.desc || parameter.value_space_desc;
@@ -137,6 +182,9 @@
         return [{
           alias,
           value: parameter.value ?? parameter.default_value ?? "",
+          type: parameter.type || parameter.param_type || "",
+          input_mode: parameter.input_mode || "",
+          options: parameter.options || [],
           redacted: parameter.redacted === true,
           description: parameter.desc || parameter.value_space_desc || "",
         }];
