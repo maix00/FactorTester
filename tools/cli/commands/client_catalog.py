@@ -43,12 +43,7 @@ def _root_option(function):
     )(function)
 
 
-@click.group("catalog", hidden=True)
-def client_catalog() -> None:
-    """Internal embedded storage bridge; not a business-object hierarchy."""
-
-
-@client_catalog.group("source")
+@click.group("source")
 def catalog_source() -> None:
     """Read client-owned data-source manifests."""
 
@@ -83,7 +78,7 @@ def request_source_catalog(
     click.echo(_json(value) if as_json else _human_status(value))
 
 
-@client_catalog.command("init")
+@click.command("init")
 @_root_option
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
@@ -93,7 +88,7 @@ def init_catalog(release_profile: Path | None, as_json: bool) -> None:
     click.echo(_json(value) if as_json else _human_status(value))
 
 
-@client_catalog.command("status")
+@click.command("status")
 @_root_option
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
@@ -103,7 +98,7 @@ def catalog_status(release_profile: Path | None, as_json: bool) -> None:
     click.echo(_json(value) if as_json else _human_status(value))
 
 
-@client_catalog.group("local-run")
+@click.group("local-run")
 def catalog_local_run() -> None:
     """Validate and synchronize client-owned local test runs."""
 
@@ -204,7 +199,7 @@ def local_run_outbox(
     click.echo(_json(value) if as_json else _human_status(value))
 
 
-@client_catalog.group("owner")
+@click.group("owner")
 def catalog_owner() -> None:
     """Inspect factor repositories registered to this client identity."""
 
@@ -221,7 +216,7 @@ def list_owners(release_profile: Path | None, as_json: bool) -> None:
     ))
 
 
-@client_catalog.group("revision")
+@click.group("revision")
 def catalog_revision() -> None:
     """Inspect exact Git revisions for one factor owner."""
 
@@ -248,7 +243,7 @@ def list_revisions(
     ))
 
 
-@client_catalog.group("family")
+@click.group("family")
 def catalog_family() -> None:
     """Inspect factor families at one owner Git revision."""
 
@@ -298,7 +293,7 @@ def describe_family(
     click.echo(_json(value) if as_json else value["family_ref"])
 
 
-@client_catalog.group("group")
+@click.group("group")
 def catalog_group() -> None:
     """Inspect product groups and their local subject bindings."""
 
@@ -331,7 +326,7 @@ def list_group_subjects(
     click.echo(_json(value) if as_json else _human_rows(value, "subject_kind", "subject_ref"))
 
 
-@client_catalog.group("factor")
+@click.group("factor")
 def catalog_factor() -> None:
     """Inspect locally registered concrete factors."""
 
@@ -412,7 +407,7 @@ def instantiate_factor(
     click.echo(_json(value) if as_json else value["factor_ref"])
 
 
-@client_catalog.group("factor-set")
+@click.group("factor-set")
 def catalog_factor_set() -> None:
     """Inspect locally registered immutable factor-set manifests."""
 
@@ -431,7 +426,7 @@ def list_factor_sets(
     click.echo(_json(value) if as_json else _human_rows(value, "set_ref", "title_zh"))
 
 
-@client_catalog.group("migration")
+@click.group("migration")
 def catalog_migration() -> None:
     """Read-only checks for the pre-existing account product groups."""
 

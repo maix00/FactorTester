@@ -38,7 +38,9 @@ class _State:
         return object()
 
     def route_request(self, _route, **kwargs):
-        assert kwargs["path"] == "/custom-factors/api/internal/public-source-applied"
+        assert kwargs["path"] == (
+            "/api/internal/factor-library/public-source-applied"
+        )
         self.invalidations += 1
         return _Response()
 

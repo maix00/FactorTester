@@ -6,7 +6,7 @@ import os
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors import cf_bp, factor_library_internal_bp
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.factor_param_utils import (
@@ -73,7 +73,7 @@ def _freeze_validated_factor(factor_family, params, owner_ref):
     }
 
 
-@cf_bp.route('/api/internal/public-source-applied', methods=['POST'])
+@factor_library_internal_bp.route('/public-source-applied', methods=['POST'])
 @login_required
 def api_public_source_applied():
     username = current_user()

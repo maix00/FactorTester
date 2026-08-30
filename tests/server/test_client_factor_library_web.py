@@ -15,6 +15,7 @@ from server.modules.custom_factors import (
     catalog_routes,
     cf_bp,
     editor_routes,
+    factor_library_internal_bp,
     factor_library_routes,
     factor_library_service,
 )
@@ -82,6 +83,7 @@ def _app() -> Flask:
     )
     app.secret_key = "client-library-test"
     app.register_blueprint(cf_bp)
+    app.register_blueprint(factor_library_internal_bp)
     return app
 
 
@@ -173,11 +175,13 @@ def test_public_source_applied_requires_superadmin_and_verifies_source(
 
     _login(client, "alice")
     assert client.post(
-        "/custom-factors/api/internal/public-source-applied", json=payload,
+        "/api/internal/factor-library/public-source-applied",
+        json=payload,
     ).status_code == 403
     _login(client, "root")
     response = client.post(
-        "/custom-factors/api/internal/public-source-applied", json=payload,
+        "/api/internal/factor-library/public-source-applied",
+        json=payload,
     )
 
     assert response.status_code == 200
