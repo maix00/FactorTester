@@ -37,7 +37,9 @@
         spec.onChange?.(state[spec.key], state);
       },
     });
-    return picker.element || picker;
+    const element = picker.element || picker;
+    element.setSelected = values => picker.setValues?.(values);
+    return element;
   }
 
   function control(context, spec, state) {
@@ -55,6 +57,7 @@
       `factor-object-page factor-${definition.objectKind}-page ${definition.className || ""}`,
     );
     const mounts = Object.create(null);
+    const controls = Object.create(null);
     const mount = key => {
       const resolved = key || "overview";
       if (!mounts[resolved]) {
@@ -65,6 +68,7 @@
     };
     for (const spec of definition.fields || []) {
       const value = control(context, spec, state);
+      controls[spec.key] = value;
       const row = window.FTFactorDetailShared.fieldRow(
         context, context.t(spec.label), value,
       );
@@ -77,6 +81,10 @@
     }
     const status = document.createElement("small");
     status.className = "form-error";
+    // setHeading rebuilds the page header/toolbar.  Establish it before
+    // mounting actions so create-page submit buttons are not discarded.
+    context.setHeading(definition.title, definition.subtitle || "");
+    context.updateActiveTab?.({title: definition.title});
     const cancelEdit = FTUI.actionButton(
       context.t("取消编辑"), () => definition.onCancel?.(state), {variant: "secondary"},
     );
@@ -109,10 +117,22 @@
         save.disabled = false;
       }
     });
-    context.setHeading(definition.title, definition.subtitle || "");
-    context.updateActiveTab?.({title: definition.title});
     context.content.replaceChildren(form);
-    const result = {form, state, status, tabs};
+    const syncFromState = () => {
+      for (const spec of definition.fields || []) {
+        const value = controls[spec.key];
+        if (!value) continue;
+        if (spec.kind === "picker") {
+          value.setSelected?.(spec.multi
+            ? (state[spec.key] || []) : [state[spec.key]].filter(Boolean));
+        } else if (spec.kind === "readonly") {
+          value.textContent = state[spec.key] ?? spec.value ?? "";
+        } else {
+          value.value = state[spec.key] ?? spec.value ?? "";
+        }
+      }
+    };
+    const result = {form, state, status, tabs, controls, syncFromState, submit: save};
     definition.onReady?.(result);
     return result;
 

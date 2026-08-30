@@ -58,12 +58,15 @@
         if (!String(document?.source?.code || "").trim()) throw new Error("因子源码不能为空");
       },
       importDocument: document => {
-        name.value = String(document.name || "");
+        const sourceCode = String(document.source?.code || "");
+        const parsedClass = state.familyMode
+          ? window.FTFactorEditor?.sourceClassName?.(sourceCode) : "";
+        name.value = parsedClass || String(document.name || "");
         chineseName.value = String(document.chinese_name || "");
         description.value = String(document.description || "");
         category.value = String(document.category || "");
         state.sourceMode = String(document.source?.mode || state.sourceMode);
-        state.sourceCode = String(document.source?.code || "");
+        state.sourceCode = sourceCode;
         state.parameterValues = structuredClone(document.parameter_values || {});
         redraw(); markDirty("source");
       },

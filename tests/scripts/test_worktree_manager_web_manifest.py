@@ -2360,6 +2360,36 @@ def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_factor_object_editors_share_submit_assistance_and_reference_controls() -> None:
+    object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
+        encoding="utf-8",
+    )
+    set_editor = (WEB_ROOT / "catalog" / "factor-set-editor.js").read_text(
+        encoding="utf-8",
+    )
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8",
+    )
+    detail = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
+        encoding="utf-8",
+    )
+
+    assert "context.toolbar.append(save)" in object_form
+    assert "submit: save" in object_form
+    assert object_form.index("context.setHeading") < object_form.index(
+        "context.toolbar.append(save)",
+    )
+    assert "editor.syncFromState()" in set_editor
+    assert 'parameter.type === "FactorParam"' in detail
+    assert 'createLabel: context.t("新建因子")' in detail
+    assert "factor-param-reference-control" in detail
+    assert "选择因子/列引用，或手工输入表达式" in detail
+    assert "FTTestObjectEditorOverlay.open" in editor
+    assert "state.onInspected?.(state.inspection)" in editor
+    assert "name.value = inspection.factor_name" in editor
+    assert 'readOnly: mode === "edit" || familyMode' in editor
+
+
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:
     import subprocess
 
