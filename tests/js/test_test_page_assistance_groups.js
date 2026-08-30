@@ -120,9 +120,20 @@ registration.importDocument({
   configuration: state.payload,
   run_fields: {task_name: "Self 写入名称", output_requests: ["period_returns"]},
 });
-assert.deepEqual(state.analysis.groups, [{...group, override_mounted_tabs: [
-  "__strategy__", "factor", "product_path_selection",
-]}]);
+const canonicalProductSelection = {
+  product_path_selection_id: "product-group:1",
+  product_group_template_id: "product-group:1",
+  label: "product-group:1",
+  selected_paths: [], paths: [],
+};
+assert.deepEqual(state.analysis.groups, [{
+  ...group,
+  product_path_selection: canonicalProductSelection,
+  override_mounted_tabs: ["__strategy__", "factor", "product_path_selection"],
+}]);
+assert.deepEqual(state.analysis.product_selections, {
+  "product-group:1": canonicalProductSelection,
+});
 assert.equal(state.runValues.task_name, "Self 写入名称");
 assert.deepEqual(state.outputRequests, ["period_returns"]);
 assert.equal(initialized, 1, "imported strategy groups enter the normal UI model");

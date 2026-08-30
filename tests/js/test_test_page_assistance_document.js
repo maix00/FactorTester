@@ -52,6 +52,16 @@ global.FTTestConfiguration = {
     },
   }),
 };
+global.FTTestProducts = {
+  groupID: value => value?.group_ref || value?.product_path_selection_id || "",
+  projection: value => ({
+    product_path_selection_id: value.group_ref,
+    product_group_template_id: value.group_ref,
+    label: value.name,
+    selected_paths: [...(value.paths || [])],
+    paths: [...(value.paths || [])],
+  }),
+};
 let registeredAdapter = null;
 global.FTPageAssistance = {
   register: (_context, adapter) => { registeredAdapter = adapter; return adapter; },
@@ -171,7 +181,7 @@ for (const kind of ["backtest", "ic"]) {
     analysis: kind === "backtest"
       ? {groups: [{
         id: "strategy-1", factor_candidate_refs: [`factor:v2:${"a".repeat(43)}`],
-        product_path_selection: {product_path_selection_id: "product-group:1"},
+        product_path_selection_id: "product-group:1",
         splitCount: 5, groupIndex: 1,
       }]}
       : {configuration_groups: [{
@@ -184,6 +194,10 @@ for (const kind of ["backtest", "ic"]) {
     settingsMountedTabs: ["factor-execution"],
     outputRequests: ["equity_curve"],
     runValues: {task_name: `${kind} task`},
+    groups: [{
+      group_ref: "product-group:1", name: "中国期货日盘",
+      paths: ["Product/Futures/CNFutures/_products/A.DCE"],
+    }],
     selectedICConfigurationGroupIDs: kind === "ic" ? ["ic-1"] : [],
   };
   const document = FTTestPageAssistance.documentFor(state);
@@ -241,6 +255,21 @@ for (const kind of ["backtest", "ic"]) {
       navigation.nodes["configuration:ic-1:field:entry_delay_bars"].label,
       "入场延迟",
     );
+  }
+  if (kind === "backtest") {
+    assert.deepEqual(document.configuration.analyses.backtest.groups[0]
+      .product_path_selection, {
+      product_path_selection_id: "product-group:1",
+      product_group_template_id: "product-group:1",
+      label: "中国期货日盘",
+      selected_paths: ["Product/Futures/CNFutures/_products/A.DCE"],
+      paths: ["Product/Futures/CNFutures/_products/A.DCE"],
+    });
+    assert.equal(document.configuration.analyses.backtest.groups[0]
+      .product_path_selection_id, undefined);
+    assert.equal(document.configuration.analyses.backtest.product_selections[
+      "product-group:1"
+    ].label, "中国期货日盘");
   }
   assert.equal(navigation.nodes["tab:factor-execution"].mounted, true);
   assert.equal(navigation.nodes["tab:product-selection"].mounted, false);
