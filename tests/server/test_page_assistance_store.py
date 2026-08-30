@@ -399,6 +399,7 @@ def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() ->
     assert "inspect the registered `configurations` node" in instruction
     assert "`create_template`" in instruction
     assert "do not guess keys" in instruction
+    assert "Never patch either schema_version" in instruction
     assert "factortester assist drafts patch <draft-id> --stdin" in instruction
     assert "factortester assist drafts validate <draft-id>" in instruction
     assert "factortester assist drafts apply <draft-id>" in instruction

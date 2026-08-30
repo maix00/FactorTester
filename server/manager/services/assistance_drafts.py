@@ -48,6 +48,39 @@ def _merge_patch(target: object, patch: object) -> object:
     return result
 
 
+def _protect_research_contract(document: object, patch: object) -> None:
+    if not isinstance(document, dict) or not isinstance(patch, dict):
+        return
+    if document.get("document_kind") != "research_configuration":
+        return
+    configuration = document.get("configuration")
+    configuration_patch = patch.get("configuration")
+    if not isinstance(configuration, dict) or not isinstance(configuration_patch, dict):
+        return
+    if (
+        "schema_version" in configuration_patch
+        and configuration_patch["schema_version"] != configuration.get("schema_version")
+    ):
+        raise AssistanceDraftError(
+            "ResearchConfiguration schema_version is authoritative and cannot be patched"
+        )
+    analyses_patch = configuration_patch.get("analyses")
+    if not isinstance(analyses_patch, dict):
+        return
+    guessed = sorted(
+        f"{kind}.{key}"
+        for kind, analysis in analyses_patch.items()
+        if isinstance(analysis, dict)
+        for key in ("local_settings", "settings")
+        if key in analysis
+    )
+    if guessed:
+        raise AssistanceDraftError(
+            "registered settings are authoritative under configuration.ui; "
+            f"legacy analysis fields cannot be patched: {guessed}"
+        )
+
+
 class AssistanceDraftStore:
     def __init__(
         self,
@@ -202,6 +235,7 @@ class AssistanceDraftStore:
         with self._lock:
             path = self._path(draft_id)
             value = self._read(path)
+            _protect_research_contract(value.get("document"), patch)
             document = _merge_patch(value.get("document"), patch)
             if not isinstance(document, dict):
                 raise AssistanceDraftError("assistance document must remain an object")

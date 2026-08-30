@@ -339,7 +339,9 @@ creating a strategy or configuration group. Its `collection_path`,
 `create_template`, `required_fields`, `field_sources`, and `item_schema` are
 the authoritative contract. Copy that template, replace its placeholders from
 the registered candidate sources, and do not guess keys or probe validation
-one field at a time.
+one field at a time. Never patch either schema_version and never add
+local_settings or analysis-level settings; the current draft already carries
+the authoritative document envelope and registered UI setting structure.
 Apply the structured change once with
 `factortester assist drafts patch <draft-id> --stdin`, validate it with
 `factortester assist drafts validate <draft-id>`, then apply it atomically with

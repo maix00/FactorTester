@@ -16,6 +16,13 @@
   }
 
   function schemaFor(state) {
+    const configurationSchemaVersion = Number(
+      state.manifest?.research_configuration_schema_version,
+    );
+    if (!Number.isInteger(configurationSchemaVersion)
+        || configurationSchemaVersion < 1) {
+      throw new Error("test manifest is missing the configuration schema version");
+    }
     const runProperties = Object.fromEntries(
       (state.manifest?.run_fields || []).map(field => [field.key, {
         ...(field.value_descriptor?.editor === "number" ? {type: "number"} : {}),
@@ -65,6 +72,7 @@
         configuration: {
           type: "object", required: ["schema_version", "analyses"],
           properties: {
+            schema_version: {const: configurationSchemaVersion},
             analyses: {
               type: "object", required: [state.kind],
               properties: {[state.kind]: analysisSchema},
@@ -223,8 +231,11 @@
       schema: () => schemaFor(state),
       exportDocument: () => documentFor(state),
       validate: document => {
+        const configurationSchemaVersion = Number(
+          state.manifest?.research_configuration_schema_version,
+        );
         if (document?.document_kind !== "research_configuration"
-            || document?.configuration?.schema_version !== 2
+            || document?.configuration?.schema_version !== configurationSchemaVersion
             || !document.configuration.analyses?.[state.kind]) {
           throw new Error("测试配置文档与当前测试类型不兼容");
         }
