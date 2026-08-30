@@ -241,7 +241,7 @@
     try {
       const parsed = await context.api("/custom-factors/api/validate", {
         method: "POST",
-        body: JSON.stringify({source_code: state.sourceCode}),
+        body: JSON.stringify({source_code: state.sourceCode, params: {}}),
       });
       if (!parsed.valid) {
         throw new Error(parsed.error || context.t("因子源码无法通过检查"));

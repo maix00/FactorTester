@@ -45,7 +45,7 @@ from tools.factors.formula_identity import freeze_factor_identity
 
 def _freeze_validated_factor(factor_family, params, owner_ref):
     """Return the canonical Factor v2 record without persisting it."""
-    normalized = normalize_factor_param_row(factor_family, params)
+    normalized = normalize_factor_param_row(factor_family, params or {})
     factor = factor_family.get_factor(**normalized)
     expression = getattr(factor, '_source_expr', None) or factor.expr
     display_params = {

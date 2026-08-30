@@ -664,3 +664,29 @@ def test_validate_transient_factor_returns_instantiated_alias_and_formula() -> N
     assert payload["factor_alias"].startswith("UploadedMomentum|P:CA|N:5d")
     assert payload["normalized_params"]["N"] == "5d"
     assert r"\frac" in payload["math_expr"]
+
+
+def test_validate_transient_factor_uses_defaults_when_params_are_omitted() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = "\n".join((
+        "from tools.factors import FactorFamily",
+        "from tools.parameters import DataColumnParam, WindowParam",
+        "class DefaultMomentum(FactorFamily):",
+        "    @staticmethod",
+        "    def factor_expr():",
+        "        P = DataColumnParam('P', default_value='CA')",
+        "        N = WindowParam('N', default_value='25d')",
+        "        return P / P.shift(N) - 1",
+        "",
+    ))
+
+    response = client.post(
+        "/custom-factors/api/validate",
+        json={"source_code": source},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["valid"] is True
+    assert payload["normalized_params"]["N"] == "25d"
