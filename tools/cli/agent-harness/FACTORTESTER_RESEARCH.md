@@ -42,15 +42,9 @@ The harness adapts two research skill systems:
    capacity, resource limits, sample roles, freeze proof, and graph branch.
 6. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
    type analysis, product-group coverage, and transaction-cost feasibility.
-7. Query the factor research result store before repeating runs. Import existing
-   report artifacts with `factor-library import-result` or write script results
-   directly with `factor-library save-result`, use
-   `factor-library metrics` for canonical metric names, and use
-   `factor-library history` / `rank` / `stability` to find candidates that
-   deserve revalidation.
-   Prefer structured metadata on every saved run: `sample_role`,
-   `regime_label`, `slice_name`, `test_count`, `grid_size`, `oos_pass`,
-   `multi_product_group_pass`, and `costed_pass`.
+7. Query immutable Jobs and their registered result artifacts before repeating
+   runs. Derive further analysis through supplemental Jobs so every conclusion
+   remains traceable to a frozen RunSpec and artifact hashes.
 8. Run group/backtest grids only after diagnostics pass.
 9. Audit order flow, snapshots, ledger results, volume-capacity constraints,
    margin mode, fee mode, and runtime summaries.
@@ -88,10 +82,8 @@ ignored.
 - Parameter grids record how many hypotheses were tried.
 - Saved research runs carry sample/regime/slice labels and overfit-audit fields
   whenever those are known.
-- New IC/type/backtest runs are queryable through `factor-library history` and
-  old artifacts are backfilled through `factor-library import-result`.
-- `factor-library rank` is a candidate-generation query only; it never replaces
-  sliced validation, cost/capacity checks, or untouched/prospective review.
+- IC/type/backtest evidence comes from immutable Jobs and registered artifacts;
+  ad-hoc imported metrics are not accepted as equivalent evidence.
 - Recency alone does not make a sample OOS. A recent interval or stream is
   untouched only when sealed after the factor, selection boundary, and
   TrialPlan freeze; otherwise report it as historical validation or exploratory

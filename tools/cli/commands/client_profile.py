@@ -606,9 +606,9 @@ def upsert_profile_history(
     ).upsert_research_record(profile_id, value)))
 
 
-@client_profile.group("factor-worktree")
+@click.group("profile", hidden=True)
 def profile_factor_worktree() -> None:
-    """Bind isolated profile worktrees to one canonical factor Git repo."""
+    """Internal bootstrap bridge for an automatically created Profile replica."""
 
 
 @profile_factor_worktree.command("canonical-register")
