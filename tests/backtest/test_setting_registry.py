@@ -519,8 +519,13 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "test_template", "factor", "category", "product_path_selection", "time", "data_source", "frequency",
-        "return_frequency", "delay", "ic_method", "summary",
-        "quantile_portfolio_statistics",
+        "summary", "quantile_portfolio_statistics",
+    ]
+    assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
+        "return_frequency", "delay", "ic_method",
+    ]
+    assert index["configuration_item_contract"]["owned_tabs"] == [
+        "return_frequency", "delay", "ic_method",
     ]
     assert index["defaults"]["setting_template"]["serialization"] == {
         "kind": "setting_template",
@@ -610,7 +615,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
     assert {
         tab["key"]: tab["section_key"]
-        for tab in index["tab_lists"]["local-settings"]
+        for tab in index["tab_lists"]["group-settings"]
     }["delay"] == "core"
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_decay_lags"]["value"] == [5]
@@ -1457,7 +1462,7 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
         assert not set(expected).intersection(contract["outer_only_tabs"])
         manual_keys = [item["key"] for item in contract["inner_manual_tabs"]]
         if application_name == "ic_test":
-            assert manual_keys == ["delay", "quantile_portfolio_statistics"]
+            assert manual_keys == ["delay"]
             assert "category" not in manual_keys
             assert "trading_product_filter" not in manual_keys
             delay = next(item for item in contract["inner_manual_tabs"] if item["key"] == "delay")
@@ -1466,13 +1471,6 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
             assert delay["minimum"] == 0
             assert delay["registration_source"] == {
                 "tab": "delay", "field": "ic_lags",
-            }
-            portfolio = next(item for item in contract["inner_manual_tabs"]
-                             if item["key"] == "quantile_portfolio_statistics")
-            assert portfolio["field"] == "quantile_portfolio_statistics"
-            assert portfolio["registration_source"] == {
-                "tab": "quantile_portfolio_statistics",
-                "field": "quantile_portfolio_statistics",
             }
         else:
             assert "delay" not in manual_keys

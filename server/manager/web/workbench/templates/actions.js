@@ -67,6 +67,10 @@
       state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
         state.manifest, FTTestState.savedMountedTabs(state),
       );
+      state.settingsExplicitMountedTabs = [
+        ...(state.workspace?.configuration?.payload?.ui?.[state.kind]
+          ?.explicit_mounted_tabs || []),
+      ];
       state.values = FTTestSettings.initialValues(
         state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
       );

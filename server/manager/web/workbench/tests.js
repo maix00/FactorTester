@@ -150,7 +150,7 @@
       factors: [], families: [], groups: [],
       workspaces: workspaces.workspaces || [], templates: [],
       workspace: null, factorRef: "", groupRef: "", groupRefs: [], analysis: {}, values: null,
-      settingsTabKey: "", settingsMountedTabs: [],
+      settingsTabKey: "", settingsMountedTabs: [], settingsExplicitMountedTabs: [],
       outputCapabilities: [], outputCapabilitiesLoaded: false,
       outputRequests: [],
       profiles: [], profilesLoaded: false,
@@ -254,6 +254,10 @@
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       state.manifest, FTTestState.savedMountedTabs(state),
     );
+    state.settingsExplicitMountedTabs = [
+      ...(state.workspace?.configuration?.payload?.ui?.[state.kind]
+        ?.explicit_mounted_tabs || []),
+    ];
     state.values = FTTestSettings.initialValues(
       state.manifest, FTTestState.savedSettings(state), state.settingsMountedTabs,
     );
@@ -540,6 +544,10 @@
       },
       onMountedTabsChange: tabs => {
         state.settingsMountedTabs = tabs;
+        const automatic = new Set(FTTestConfigurationCompiler.authoringMountedTabs(
+          state.manifest, state.values || {}, [],
+        ));
+        state.settingsExplicitMountedTabs = tabs.filter(key => !automatic.has(key));
         state.settingsTabKey = "__manage__";
         render(context, state);
       },
