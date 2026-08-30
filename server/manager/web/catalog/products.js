@@ -144,7 +144,11 @@
       const groupsRequest = includeGroups
         ? (origin === "local"
           ? request(context, "/api/client/product-groups")
-          : request(context, "/api/catalog/product-groups"))
+          // The product library and every test editor consume the same
+          // Manager-owned account-domain directory.  Member paths belong to
+          // the detail request and must never make the list page fall back to
+          // the retired business-port product-group API.
+          : request(context, "/api/catalog/product-groups?view=summary"))
         : Promise.resolve({});
       const productsRequest = includeProducts
         ? (origin === "local"

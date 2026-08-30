@@ -46,6 +46,7 @@
 
     const name = input("text", current?.name || "");
     name.placeholder = context.t("配置组名称");
+    name.addEventListener("input", () => editorTabs?.refreshChips());
     let delayValue = current?.entry_delay_bars ?? firstDelay(state.values?.ic_lags);
     const delay = input("number", delayValue);
     delay.min = "0";
@@ -165,6 +166,7 @@
       }),
       chipSources: () => window.FTTestContentAdapters?.chipSources?.(
         factorSourceState || state, {
+        name: name.value.trim(),
         factor_candidate_refs: factorRef ? [factorRef] : [],
         product_path_selection_id: productScopeRef,
         },

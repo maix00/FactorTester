@@ -24,13 +24,13 @@ def _catalog_exchange(product: object, name: str) -> str:
 class ClientProductCatalogMixin:
     """Project product metadata without selecting an execution port."""
 
-    def product_group_summaries(self, principal: str) -> list[dict[str, Any]]:
-        """Return bounded list rows without expanding product memberships."""
+    def _authoritative_product_groups(self, principal: str) -> list[dict[str, Any]]:
+        """Read the one account-domain catalog used by lists and details."""
         from server.modules.products.product_group_store import (
             load_authoritative_product_groups,
         )
 
-        groups = load_authoritative_product_groups(
+        return load_authoritative_product_groups(
             principal,
             domain_rows=self._account_catalog_entities(
                 principal,
@@ -39,6 +39,10 @@ class ClientProductCatalogMixin:
                 include_deleted=True,
             ),
         )
+
+    def product_group_summaries(self, principal: str) -> list[dict[str, Any]]:
+        """Return bounded list rows without expanding product memberships."""
+        groups = self._authoritative_product_groups(principal)
         summaries = []
         for group in groups:
             group_id = str(group.get("id") or "").strip()
@@ -73,22 +77,13 @@ class ClientProductCatalogMixin:
             project_account_product_groups,
         )
         from server.modules.products.product_group_store import (
-            load_authoritative_product_groups,
             product_group_path_bindings,
         )
         from server.services.product_catalog_projection import catalog_product_records
 
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        groups = load_authoritative_product_groups(
-            principal,
-            domain_rows=self._account_catalog_entities(
-                principal,
-                entity_type="product_group",
-                include_shared=False,
-                include_deleted=True,
-            ),
-        )
+        groups = self._authoritative_product_groups(principal)
         for group in groups:
             if "path_bindings" not in group:
                 group["path_bindings"] = product_group_path_bindings(
