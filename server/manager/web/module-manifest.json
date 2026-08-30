@@ -46,6 +46,7 @@
     "code-viewer": ["core"],
     "charts": ["core"],
     "catalog-selection-core": ["core"],
+    "object-editor-overlay": ["core"],
     "catalog-core": ["product-catalog-core", "factor-catalog-core"],
     "output-choice": ["core"],
     "workbench-compiler": ["core"],
@@ -86,7 +87,7 @@
     "factor-catalog-list": ["factor-catalog-core"],
     "factor-catalog-detail": ["factor-catalog-core"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
-    "factor-catalog-editor": ["factor-catalog-core"],
+    "factor-catalog-editor": ["factor-catalog-core", "object-editor-overlay"],
     "profile-agent-chat": ["core"],
     "profile-directory": ["research-core"],
     "profile-skills": ["profile-directory"],
@@ -97,7 +98,7 @@
       "profile-skills", "profile-workspace", "profile-agent-session",
       "profile-agent-models"
     ],
-    "workbench-core": [],
+    "workbench-core": ["object-editor-overlay"],
     "workbench-settings": ["workbench-core", "catalog-selection-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
     "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
@@ -216,6 +217,10 @@
     ],
     "catalog-selection-core": [
       "catalog/shared/multi-select-filter.js"
+    ],
+    "object-editor-overlay": [
+      "workbench/test-object-picker.js",
+      "workbench/test-object-editor-overlay.js"
     ],
     "product-catalog-core": [
       "catalog/product-category-model.js",
@@ -373,8 +378,6 @@
       "workbench/setting-rules.js",
       "workbench/test-lazy-code.js",
       "workbench/templates/actions.js",
-      "workbench/test-object-picker.js",
-      "workbench/test-object-editor-overlay.js",
       "workbench/test-field-row.js",
       "workbench/test-field-help.js",
       "workbench/test-state.js",
