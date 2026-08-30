@@ -27,11 +27,11 @@ extension LocalProfileController {
                 .appendingPathComponent("factor-worktree-\(UUID()).json")
             defer { try? FileManager.default.removeItem(at: planURL) }
             _ = try await ReleaseCommand.runObject([
-                "client", "profile", "factor-worktree", "plan", id,
+                "factor-library", "profile", "plan", id,
                 "--output", planURL.path,
             ], executable: self.cliPath)
             _ = try await ReleaseCommand.runObject([
-                "client", "profile", "factor-worktree", "apply", planURL.path,
+                "factor-library", "profile", "apply", planURL.path,
             ], executable: self.cliPath)
             self.lifecycleReceipt = ProfileLifecycleReceipt(
                 json: created, fallbackAction: "create"
@@ -43,7 +43,7 @@ extension LocalProfileController {
     func unbindFactorWorkspace(_ profile: LocalProfileModel) async {
         guard let binding = profile.factorWorkspaceBinding else { return }
         await lifecycle([
-            "client", "profile", "factor-worktree", "rollback",
+            "factor-library", "profile", "rollback",
             profile.id, binding.id,
         ], action: "unbind")
     }

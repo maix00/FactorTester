@@ -19,7 +19,6 @@ from tools.cli.commands.client_catalog import (
     catalog_factor,
     catalog_factor_set,
     catalog_family,
-    catalog_group,
     catalog_local_run,
     catalog_migration,
     catalog_owner,
@@ -29,6 +28,7 @@ from tools.cli.commands.client_catalog import (
     init_catalog,
 )
 from tools.cli.commands.client_profile import client_profile, profile_factor_worktree
+from tools.cli.modules.custom_factors.factor_library import factor_library
 from tools.cli.commands.client_profile_factor_reference import (
     register_factor_reference_commands,
 )
@@ -126,10 +126,10 @@ register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 register_factor_reference_commands(profile_factor_worktree)
 register_factor_set_commands(profile_factor_worktree)
+factor_library.add_command(profile_factor_worktree, name="profile")
 profile_factor_worktree.add_command(catalog_owner, name="owners")
 profile_factor_worktree.add_command(catalog_revision, name="revisions")
 profile_factor_worktree.add_command(catalog_family, name="families")
-profile_factor_worktree.add_command(catalog_group, name="product-groups")
 profile_factor_worktree.add_command(catalog_factor, name="factors")
 profile_factor_worktree.add_command(catalog_factor_set, name="factor-sets")
 

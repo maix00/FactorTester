@@ -19,7 +19,7 @@ def factor_library(
     factor_family: str,
     product_group: str,
 ) -> None:
-    """Browse server factor-library objects using Web/Swift permissions."""
+    """Browse factor-library objects using the active user's Web/Swift permissions."""
     ctx.ensure_object(dict)
     ctx.obj["factor_family"] = factor_family
     ctx.obj["product_group"] = product_group
@@ -30,7 +30,7 @@ def factor_library(
         click.echo("  factor-sets       因子集合（我的/下一级用户）")
         click.echo("  describe          查看因子家族源码摘要与表达式")
         click.echo("  operators         查看 FactorExpr 算子")
-        click.echo("  workspace         管理因子工作区与 Git")
+        click.echo("  workspace         管理用户因子库的 upload/download 同步")
 
 
 register_factor_library_catalog_commands(factor_library)

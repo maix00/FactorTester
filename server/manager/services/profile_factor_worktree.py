@@ -1,4 +1,4 @@
-"""Bind a server-hosted Profile to the user's canonical factor repository."""
+"""Bind a server-hosted Profile replica to the user's factor repository."""
 
 from __future__ import annotations
 
@@ -34,11 +34,12 @@ def ensure_server_profile_factor_worktree(
     canonical_root: Path | None = None,
     synchronize: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Create one persistent Profile worktree over the server canonical repo.
+    """Create one persistent Profile branch/worktree in the user's factor repo.
 
-    The server database remains authoritative.  Synchronization materializes
-    that authority into the user's canonical Git repository once; each Profile
-    then receives its own branch/worktree while sharing the Git object store.
+    The database factor library materializes the ``download`` branch. Every
+    Profile receives an isolated ``agent/<profile>`` worktree over the same Git
+    object store. Accepted Profile commits merge into ``upload``; the existing
+    upload hook synchronizes that branch back into the database factor library.
     """
     owner = str(principal or "").strip()
     identifier = str(profile_id or "").strip()

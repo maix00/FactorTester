@@ -531,8 +531,8 @@ def _sync_actions(*, profile_id: str, set_id: str) -> list[dict]:
         "action": "sync_factor_set",
         "description_zh": "将冻结因子集合登记到当前服务器",
         "argv": [
-            "factortester", "client", "profile", "factor-worktree",
-            "factor-set", "sync", profile_id,
+            "factortester", "factor-library", "profile", "factor-set",
+            "sync", profile_id,
             "--set-id", set_id, "--json",
         ],
     }]

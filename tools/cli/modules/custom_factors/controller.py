@@ -171,7 +171,7 @@ def describe_factor(
     _print_factor_description(payload, include_source=source_code, include_debug_graph=debug_graph)
 
 
-@factor_library.command("import-result")
+@click.command("import-result")
 @click.option("--artifact", "artifact_paths", multiple=True, type=click.Path(exists=True, dir_okay=False), help="研究 artifact JSON，可重复。")
 @click.option("--dir", "artifact_dirs", multiple=True, type=click.Path(exists=True, file_okay=False), help="递归导入目录下的 JSON artifacts，可重复。")
 @click.option("--factor-family", "--factor_family", default="", help="覆盖 artifact 中的因子家族。")
@@ -239,7 +239,7 @@ def import_factor_research_result(
         click.echo(_research_run_line(run))
 
 
-@factor_library.command("save-result")
+@click.command("save-result")
 @click.option("--factor-family", "--factor_family", required=True, help="因子家族。")
 @click.option("--factor-alias", "--factor_alias", required=True, help="因子 alias。")
 @click.option("--product-group", "--product_group", default="", help="产品组。")
@@ -308,7 +308,7 @@ def save_factor_research_result(
     click.echo(_research_run_line(run))
 
 
-@factor_library.command("rank")
+@click.command("rank")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--factor-alias", "--factor_alias", default="", help="因子 alias。")
 @click.option("--product-group", "--product_group", default="", help="产品组。")
@@ -370,7 +370,7 @@ def rank_factor_research_results(
     _print_research_runs(data.get("runs") or [], metric=resolved["metric"])
 
 
-@factor_library.command("history")
+@click.command("history")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--factor-alias", "--factor_alias", default="", help="因子 alias。")
 @click.option("--product-group", "--product_group", default="", help="产品组。")
@@ -401,7 +401,7 @@ def factor_research_history(
     _print_research_runs(data.get("runs") or [], metric="")
 
 
-@factor_library.command("metrics")
+@click.command("metrics")
 @click.option("--test-type", "--test_type", default="", help="只显示某类测试默认指标。")
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
@@ -434,7 +434,7 @@ def factor_research_metrics(test_type: str, as_json: bool) -> None:
         click.echo(line)
 
 
-@factor_library.command("stability")
+@click.command("stability")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--factor-alias", "--factor_alias", default="", help="因子 alias。")
 @click.option("--product-group", "--product_group", default="", help="产品组。")

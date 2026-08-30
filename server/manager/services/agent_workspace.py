@@ -1,8 +1,8 @@
-"""Canonical server-side Profile workspace layout.
+"""Server-side replica of the client Profile workspace layout.
 
 The layout mirrors the client-side FactorTester contract.  This module only
-resolves the server root and creates the one real Profile workspace; it never
-creates Agent copies, scratch worktrees, or data-source mounts.
+resolves the server root and creates the Profile's persistent workspace replica;
+it never treats that replica as the user's canonical factor library.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def ensure_server_profile_workspace(
     principal: str,
     profile_id: str,
 ) -> Path:
-    """Create the canonical Profile workspace with owner-only permissions."""
+    """Create the Profile workspace replica with owner-only permissions."""
     root = server_profile_workspace(data_root, principal, profile_id)
     root.mkdir(parents=True, exist_ok=True)
     for directory in WORKSPACE_DIRECTORIES:
