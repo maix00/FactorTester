@@ -286,7 +286,9 @@
       status.textContent = context.t("正在校验源码并解析参数…");
     }
     if (!options.fileInput) root.append(file);
-    root.append(actions, field(context.t("Python 源码"), editor.element), status);
+    const sourceRow = field(context.t("Python 源码"), editor.element);
+    sourceRow.classList.add("factor-editor-source-code-row");
+    root.append(actions, sourceRow, status);
     return root;
   }
 

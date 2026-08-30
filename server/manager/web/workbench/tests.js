@@ -150,7 +150,7 @@
       factors: [], families: [], groups: [],
       workspaces: workspaces.workspaces || [], templates: [],
       workspace: null, factorRef: "", groupRef: "", groupRefs: [], analysis: {}, values: null,
-      settingsTabKey: "", settingsMountedTabs: [], settingsExplicitMountedTabs: [],
+      settingsTabKey: null, settingsMountedTabs: [], settingsExplicitMountedTabs: [],
       outputCapabilities: [], outputCapabilitiesLoaded: false,
       outputRequests: [],
       profiles: [], profilesLoaded: false,
@@ -168,6 +168,7 @@
       settingsChipsCode: {status: "idle", error: "", promise: null},
       settingsTabLoads: Object.create(null),
       settingsLoadedTabs: new Set(),
+      backtestGroupsOpen: kind === "backtest",
       restoredWorkspaceID: savedWorkspaceID,
     };
     if (requestedWorkspaceID) {
@@ -624,6 +625,10 @@
 
   async function clearDraft(context, state, refresh) {
     if (!window.confirm(context.t("确定清空当前测试配置吗？"))) return false;
+    // A validation/submission notice describes the configuration that is
+    // about to be discarded. Remove it immediately instead of leaving stale
+    // guidance visible while the persisted draft is deleted.
+    context.showNotice?.("");
     const workspaceID = String(state.workspace?.workspace_id || "");
     if (workspaceID) {
       await context.api(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
@@ -635,7 +640,7 @@
     window.FTTestFactors?.prepare?.(state);
     window.FTTestProducts?.synchronize?.(state);
     window.FTBacktestGroups?.initialize?.(state);
-    context.showNotice?.(context.t("当前测试配置已清空"));
+    context.showNotice?.("");
     refresh?.();
     return true;
   }

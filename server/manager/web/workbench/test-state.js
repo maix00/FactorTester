@@ -168,7 +168,7 @@
     state.settingsInitialized = false;
     state.settingsMountedTabs = [];
     state.settingsExplicitMountedTabs = [];
-    state.settingsTabKey = "";
+    state.settingsTabKey = null;
     state.transientFactorSources = [];
     state.transientFactorFamilies = [];
     state.transientStrategySources = [];
@@ -184,7 +184,7 @@
     state.selectedBacktestLongShortIDs = [];
     state.backtestExpandedBatches = {};
     state.backtestGroupEditor = null;
-    state.backtestGroupsOpen = false;
+    state.backtestGroupsOpen = state.kind === "backtest";
     state.selectedICConfigurationGroupIDs = [];
     state.icConfigurationGroupSurfaceKey = "";
     state.icConfigurationGroupEditor = null;
