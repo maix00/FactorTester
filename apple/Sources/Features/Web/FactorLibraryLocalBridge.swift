@@ -56,19 +56,22 @@ enum FactorLibraryLocalBridgeContract {
                 "run-input", "--target-ref", targetRef, "--json",
             ]
         case "owners":
-            return ["client", "catalog", "owner", "list", "--json"]
+            return [
+                "client", "profile", "factor-worktree", "owners", "list",
+                "--json",
+            ]
         case "revisions":
             let ownerRef = try requiredText(message, key: "owner_ref")
             let limit = min(200, max(1, message["limit"] as? Int ?? 50))
             return [
-                "client", "catalog", "revision", "list",
+                "client", "profile", "factor-worktree", "revisions", "list",
                 "--owner-ref", ownerRef, "--limit", String(limit), "--json",
             ]
         case "families":
             let ownerRef = try requiredText(message, key: "owner_ref")
             let revision = try requiredText(message, key: "git_commit")
             return [
-                "client", "catalog", "family", "list",
+                "client", "profile", "factor-worktree", "families", "list",
                 "--owner-ref", ownerRef, "--git-commit", revision, "--json",
             ]
         case "family":
@@ -76,7 +79,7 @@ enum FactorLibraryLocalBridgeContract {
             let revision = try requiredText(message, key: "git_commit")
             let family = try requiredText(message, key: "family")
             return [
-                "client", "catalog", "family", "describe",
+                "client", "profile", "factor-worktree", "families", "describe",
                 "--owner-ref", ownerRef, "--git-commit", revision,
                 "--family", family, "--json",
             ]
@@ -96,7 +99,7 @@ enum FactorLibraryLocalBridgeContract {
                 throw FactorLibraryLocalBridgeError.invalidMessage
             }
             return [
-                "client", "catalog", "factor", "instantiate",
+                "client", "profile", "factor-worktree", "factors", "instantiate",
                 "--owner-ref", ownerRef, "--git-commit", revision,
                 "--family", family, "--params-json", json, "--json",
             ]

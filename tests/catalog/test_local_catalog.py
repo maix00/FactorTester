@@ -6,7 +6,11 @@ import sqlite3
 import pytest
 from click.testing import CliRunner
 
-from tools.cli.commands.client_catalog import client_catalog
+from tools.cli.commands.client_catalog import (
+    catalog_factor_set,
+    catalog_group,
+    catalog_migration,
+)
 from tools.data.catalog import LocalCatalogStore
 from tools.factors.factor_set_identity import freeze_factor_set_identity
 from tools.factors.formula_identity import freeze_factor_identity
@@ -173,9 +177,9 @@ def test_catalog_cli_preflight_is_read_only_and_reports_category_paths(tmp_path)
         encoding="utf-8",
     )
     result = CliRunner().invoke(
-        client_catalog,
+        catalog_migration,
         [
-            "migration", "preflight", "--username", "alice",
+            "preflight", "--username", "alice",
             "--legacy-db", str(legacy), "--release-profile", str(profile),
             "--json",
         ],
@@ -213,18 +217,18 @@ def test_catalog_cli_lists_owner_scoped_bindings_and_set_members(tmp_path) -> No
     )
     runner = CliRunner()
     groups = runner.invoke(
-        client_catalog,
-        ["group", "list", "--owner-ref", "profile:maxa",
+        catalog_group,
+        ["list", "--owner-ref", "profile:maxa",
          "--release-profile", str(profile), "--json"],
     )
     subjects = runner.invoke(
-        client_catalog,
-        ["group", "subjects", "group:cn", "--release-profile", str(profile),
+        catalog_group,
+        ["subjects", "group:cn", "--release-profile", str(profile),
          "--json"],
     )
     sets = runner.invoke(
-        client_catalog,
-        ["factor-set", "list", "--owner-ref", "profile:maxa",
+        catalog_factor_set,
+        ["list", "--owner-ref", "profile:maxa",
          "--release-profile", str(profile), "--json"],
     )
 

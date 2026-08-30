@@ -40,7 +40,7 @@ enum ClientLocalCatalogBridgeContract {
             throw ClientLocalCatalogBridgeError.invalidMessage
         }
         var arguments = [
-            "client", "catalog", "source", "request",
+            "client", "source", "request",
             "--path", path, "--method", method,
         ]
         if let body = message["body"] as? String, !body.isEmpty {

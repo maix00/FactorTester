@@ -15,7 +15,19 @@ from urllib.error import URLError
 import click
 
 from tools.cli.commands.client_adapter import client_adapter
-from tools.cli.commands.client_catalog import client_catalog
+from tools.cli.commands.client_catalog import (
+    catalog_factor,
+    catalog_factor_set,
+    catalog_family,
+    catalog_group,
+    catalog_local_run,
+    catalog_migration,
+    catalog_owner,
+    catalog_revision,
+    catalog_source,
+    catalog_status,
+    init_catalog,
+)
 from tools.cli.commands.client_profile import client_profile, profile_factor_worktree
 from tools.cli.commands.client_profile_factor_reference import (
     register_factor_reference_commands,
@@ -106,12 +118,29 @@ def _run_release_with_host_python(
 
 
 client.add_command(client_adapter)
-client.add_command(client_catalog)
 client.add_command(client_profile)
+client.add_command(catalog_source, name="source")
+client.add_command(catalog_local_run, name="local-run")
+client.add_command(catalog_migration, name="migration")
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 register_factor_reference_commands(profile_factor_worktree)
 register_factor_set_commands(profile_factor_worktree)
+profile_factor_worktree.add_command(catalog_owner, name="owners")
+profile_factor_worktree.add_command(catalog_revision, name="revisions")
+profile_factor_worktree.add_command(catalog_family, name="families")
+profile_factor_worktree.add_command(catalog_group, name="product-groups")
+profile_factor_worktree.add_command(catalog_factor, name="factors")
+profile_factor_worktree.add_command(catalog_factor_set, name="factor-sets")
+
+
+@client.group("storage", hidden=True)
+def client_storage() -> None:
+    """Maintain the native client's embedded storage."""
+
+
+client_storage.add_command(init_catalog, name="init")
+client_storage.add_command(catalog_status, name="status")
 
 
 @client.group("app-update")

@@ -129,7 +129,7 @@ class PublicFactorReplicationService:
         route = self.state.route_for(server_id=target)
         response = self.state.route_request(
             route,
-            path="/custom-factors/api/internal/public-source-applied",
+            path="/api/internal/factor-library/public-source-applied",
             principal=principal,
             method="POST",
             body=json.dumps({
