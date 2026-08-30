@@ -78,7 +78,7 @@ def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
                 return {
                     "request_field": "evidence_refs",
                     "contract_command": (
-                        "factortester research-evidence source "
+                        "factortester research evidence source "
                         "capture-terminal -- factortester products availability "
                         "<scope> --json"
                     ),

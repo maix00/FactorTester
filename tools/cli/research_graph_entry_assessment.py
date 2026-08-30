@@ -35,7 +35,8 @@ def prepare_entry_assessment(
         raise ValueError("the current node has no active Entry Requirements")
     details = {
         requirement_id: _call_json([
-            "research-graph",
+            "research",
+            "graphs",
             "requirement-detail",
             str((next_packet.get("branch") or {}).get("instance_id") or ""),
             str((next_packet.get("branch") or {}).get("branch_id") or ""),

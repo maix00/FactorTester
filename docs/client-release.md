@@ -85,10 +85,8 @@ factortester client app-update restart --json
 ```
 
 The CLI never downloads, mounts, verifies, copies, or replaces the application.
-`update-app` remains a temporary command-name alias for the Sparkle `download`
-action; it is not a second implementation. The read-only legacy
-`check-update` JSON command remains available for automation during the
-manifest compatibility window.
+There are no separate `update-app` or `check-update` compatibility commands;
+automation uses the same `client app-update` actions as FTClient.
 
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
@@ -159,7 +157,7 @@ HTTPS host. The non-selected URL is never requested. GitHub cache ETags are not 
 content digests; the ECDSA signature is the Main authenticity boundary. The
 FactorTester server defines its own ETag as the raw manifest digest in addition
 to the Beta signature.
-`factortester client check-update --profile client-profile.json --json`
+`factortester client app-update check --json`
 returns the verified version, build, channel, DMG URL/SHA256, minimum client,
 mandatory flag, publication time, source, and manifest hash.
 

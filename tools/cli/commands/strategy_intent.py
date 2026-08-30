@@ -18,9 +18,9 @@ from tools.cli.core.strategy_intent import (
 from tools.cli.state import load_state, save_state
 
 
-@click.group("strategy-intent")
+@click.group("intent")
 def strategy_intent() -> None:
-    """Legacy workspace-role compatibility command; use ``strategy`` for new runs."""
+    """Inspect and configure registered strategy intent policies."""
 
 
 @strategy_intent.command("describe")

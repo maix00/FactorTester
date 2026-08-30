@@ -48,8 +48,8 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     assert "A member factor never implies coverage of the whole set" in canonical
     assert "factortester://run_spec/runspec%3Asha256%3A" in canonical
     assert "factortester://trial_plan/trial-plan%3Asha256%3A" in canonical
-    assert "client research timeline" in canonical
-    assert "research-graph cycle-object" in canonical
+    assert "research workspaces timeline" in canonical
+    assert "research graphs cycle-object" in canonical
     assert "Never expose an Evidence, Job, RunSpec, TrialPlan" in canonical
     assert "ordinary prose or inline" in canonical
     assert "40/64-character" in canonical

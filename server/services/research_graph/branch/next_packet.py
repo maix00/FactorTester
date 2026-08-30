@@ -114,7 +114,7 @@ def build_graph_branch_next(
                 "requirement_before_leaving_current_node"
             ),
             "detail_command": (
-                "factortester research-graph requirement-detail "
+                "factortester research graphs requirement-detail "
                 "<instance> <branch> <requirement-id>"
             ),
         }

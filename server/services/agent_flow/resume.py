@@ -88,14 +88,14 @@ def _research_packet(
         "next_action": "download_graph_and_evaluate_locally",
         "graph_fetch": {
             "command": (
-                "factortester research-graph fetch "
+                "factortester research graphs fetch "
                 f"{graph_ref.split('@v', 1)[0] if '@v' in graph_ref else graph_ref}"
             ),
             "transport": "7998_control_then_7997_data",
             "server_decides_next": False,
         },
         "local_cli": {
-            "command": "factortester research-graph next-local",
+            "command": "factortester research graphs next-local",
             "requires": ["graph_file", "current_node"],
         },
         "running_backend_jobs_action": "continue",

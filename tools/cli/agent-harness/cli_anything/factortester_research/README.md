@@ -422,9 +422,9 @@ The Harness exposes the same policy surface without keeping a second local
 configuration model:
 
 ```bash
-cli-anything-factortester-research strategy-intent describe --json
-cli-anything-factortester-research strategy-intent show --group A1 --json
-cli-anything-factortester-research strategy-intent configure A1 \
+cli-anything-factortester-research strategy intent describe --json
+cli-anything-factortester-research strategy intent show --group A1 --json
+cli-anything-factortester-research strategy intent configure A1 \
   --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
   --role sizing=RiskSize --allocation-policy factor_sizing --json
 ```

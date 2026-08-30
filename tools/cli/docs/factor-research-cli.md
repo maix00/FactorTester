@@ -34,9 +34,9 @@ factortester workspace load-template <configuration_id>
 factortester workspace update --file research-configuration.json
 
 # Inspect policy roles, then configure one strategy atomically.
-factortester strategy-intent describe
-factortester strategy-intent show --group A1 --json
-factortester strategy-intent configure A1 \
+factortester strategy intent describe
+factortester strategy intent show --group A1 --json
+factortester strategy intent configure A1 \
   --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
   --role sizing=InverseRisk --allocation-policy factor_sizing \
   --sizing-transform inverse --json

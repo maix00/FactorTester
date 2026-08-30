@@ -33,10 +33,10 @@ def test_webmcp_capability_catalog_covers_public_cli_root_commands() -> None:
     source = (WEB_ROOT / "app" / "webmcp.js").read_text()
     for command in (
         "configure", "client", "login", "logout", "doctor", "factor-plan",
-        "list", "protocol", "describe", "edit", "strategy-intent", "strategy",
+        "list", "protocol", "describe", "edit", "strategy",
         "margin-budget", "workspace", "external-factor", "run", "job",
         "research", "agents", "trial-plan", "products",
-        "custom_factors", "factor-library",
+        "factor-library",
     ):
         assert f'"{command}"' in source
 

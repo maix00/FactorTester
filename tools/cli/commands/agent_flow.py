@@ -14,7 +14,7 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-@click.group("agent-flow")
+@click.group("flow")
 def agent_flow() -> None:
     """获取研究 Agent 的恢复包。"""
 

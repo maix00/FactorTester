@@ -33,13 +33,13 @@ artifact contracts produced by the workflow.
 
 ## Strategy intent factor-role refinement
 
-- `factortester strategy-intent describe` reads the registered group-test
+- `factortester strategy intent describe` reads the registered group-test
   manifest and reports only strategy kinds and factor roles the runtime
   actually consumes, including group `screen` and `sizing` roles.
-- `factortester strategy-intent show` reads the active workspace configuration
+- `factortester strategy intent show` reads the active workspace configuration
   and exposes each strategy's kind, primary factor, and explicit role bindings
   in both bounded human output and stable JSON.
-- `factortester strategy-intent bind GROUP_ID --role ROLE=FACTOR` validates the
+- `factortester strategy intent bind GROUP_ID --role ROLE=FACTOR` validates the
   role against the manifest, validates the factor against the workspace's
   registered factor candidates, preserves unrelated configuration fields, and
   updates through the real revision-checked workspace API.
@@ -49,7 +49,7 @@ artifact contracts produced by the workflow.
 - Reject a bound group `screen` role while screening is disabled and a bound
   `sizing` role unless factor sizing is selected, so no registered role can be
   a silent no-op.
-- The research Harness delegates its matching `strategy-intent` commands to
+- The research Harness delegates its matching `strategy intent` commands to
   the installed `factortester` executable and propagates its exit status and
   JSON rather than maintaining a second local configuration model.
 - Installed subprocess coverage resolves both console scripts through
@@ -71,7 +71,7 @@ artifact contracts produced by the workflow.
 - Installed Harness subprocess delegation with
   `CLI_ANYTHING_FORCE_INSTALLED=1`: passed using the resolved console script.
 - Installed `factortester` plus Harness against a complete isolated Flask
-  server over TCP: strategy-intent workspace configure/show round-trip passed.
+  server over TCP: strategy intent workspace configure/show round-trip passed.
 - Web factor-role control Node test: passed.
 - Broad `tests/backtest tests/server tests/cli` gate: `1317 passed`, `1 skipped`,
   with 3 failures reproduced unchanged at the exact issue-141 base commit
@@ -629,7 +629,7 @@ $ conda run -n GTHT python -m pytest -q \
 105 passed in 1.45s
 ```
 
-The strategy-intent CLI accepts a deferred `screen` alias without adding it to
+The strategy intent CLI accepts a deferred `screen` alias without adding it to
 the workspace's shared factor list. A real HTTP preview uploads a Profile-only
 factor, freezes its source-free SHA-256 manifest, and exposes the
 `transient_run_source` policy without returning source text. Revision checks

@@ -38,14 +38,14 @@ def _research_graph_command():
         if not (exc.name or "").startswith("cli_anything"):
             raise
 
-        @click.group("research-graph")
+        @click.group("graphs")
         def command() -> None:
             """研究图命令需要安装匹配版本的 Research Harness。"""
 
         @command.command("install-help")
         def install_help() -> None:
             raise click.ClickException(
-                "research-graph requires the matching "
+                "research graphs requires the matching "
                 "cli-anything-factortester-research package; install the "
                 "release bundle with scripts/install_factortester_pipx.sh"
             )
@@ -88,8 +88,8 @@ cli.add_command(list_modules)
 cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
-cli.add_command(strategy_intent)
 cli.add_command(strategy)
+strategy.add_command(strategy_intent)
 register_strategy_actor_commands(strategy)
 cli.add_command(margin_budget)
 cli.add_command(workspace)
