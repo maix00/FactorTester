@@ -351,14 +351,14 @@ def test_cli_create_is_idempotent_and_keeps_sync_manual(
     }))
     runner = CliRunner()
     registered = runner.invoke(cli, [
-        "factor-library", "profile", "canonical-register",
+        "factor-library", "workspace", "canonical-register",
         "--path", str(repo),
         "--owner-ref", OWNER,
         "--release-profile", str(monkey_profile),
     ])
     assert registered.exit_code == 0, registered.output
     created = runner.invoke(cli, [
-        "factor-library", "profile", "create", "maxa",
+        "factor-library", "workspace", "create-profile-worktree", "maxa",
         "--release-profile", str(monkey_profile),
     ])
     assert created.exit_code == 0, created.output
@@ -370,7 +370,7 @@ def test_cli_create_is_idempotent_and_keeps_sync_manual(
     assert Path(value["binding"]["worktree_path"]).is_dir()
 
     repeated = runner.invoke(cli, [
-        "factor-library", "profile", "create", "maxa",
+        "factor-library", "workspace", "create-profile-worktree", "maxa",
         "--release-profile", str(monkey_profile),
     ])
     assert repeated.exit_code == 0, repeated.output

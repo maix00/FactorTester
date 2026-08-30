@@ -433,7 +433,10 @@ class LocalProfileStore:
             "next_command": (
                 ""
                 if worktree_available
-                else f"factortester factor-library profile create {profile_id}"
+                else (
+                    "factortester factor-library workspace "
+                    f"create-profile-worktree {profile_id}"
+                )
             ),
         }
         encoded = json.dumps(

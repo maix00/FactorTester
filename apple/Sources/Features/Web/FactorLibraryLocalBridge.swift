@@ -16,7 +16,7 @@ enum FactorLibraryLocalBridgeContract {
         switch message["action"] as? String {
         case "catalog":
             var arguments = [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "local-catalog", "--json",
             ]
             let query = (message["query"] as? String ?? "")
@@ -33,7 +33,7 @@ enum FactorLibraryLocalBridgeContract {
             let offset = max(0, message["offset"] as? Int ?? 0)
             let limit = min(100, max(1, message["limit"] as? Int ?? 50))
             return [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "members", "--target-ref", targetRef,
                 "--offset", String(offset), "--limit", String(limit), "--json",
             ]
@@ -43,7 +43,7 @@ enum FactorLibraryLocalBridgeContract {
                 throw FactorLibraryLocalBridgeError.invalidTarget
             }
             return [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "descriptor", "--target-ref", targetRef, "--json",
             ]
         case "run-input":
@@ -52,26 +52,26 @@ enum FactorLibraryLocalBridgeContract {
                 throw FactorLibraryLocalBridgeError.invalidTarget
             }
             return [
-                "factor-library", "profile", "factor-set",
+                "factor-library", "workspace", "factor-set",
                 "run-input", "--target-ref", targetRef, "--json",
             ]
         case "owners":
             return [
-                "factor-library", "profile", "owners", "list",
+                "factor-library", "workspace", "owners", "list",
                 "--json",
             ]
         case "revisions":
             let ownerRef = try requiredText(message, key: "owner_ref")
             let limit = min(200, max(1, message["limit"] as? Int ?? 50))
             return [
-                "factor-library", "profile", "revisions", "list",
+                "factor-library", "workspace", "revisions", "list",
                 "--owner-ref", ownerRef, "--limit", String(limit), "--json",
             ]
         case "families":
             let ownerRef = try requiredText(message, key: "owner_ref")
             let revision = try requiredText(message, key: "git_commit")
             return [
-                "factor-library", "profile", "families", "list",
+                "factor-library", "workspace", "families", "list",
                 "--owner-ref", ownerRef, "--git-commit", revision, "--json",
             ]
         case "family":
@@ -79,7 +79,7 @@ enum FactorLibraryLocalBridgeContract {
             let revision = try requiredText(message, key: "git_commit")
             let family = try requiredText(message, key: "family")
             return [
-                "factor-library", "profile", "families", "describe",
+                "factor-library", "workspace", "families", "describe",
                 "--owner-ref", ownerRef, "--git-commit", revision,
                 "--family", family, "--json",
             ]
@@ -99,7 +99,7 @@ enum FactorLibraryLocalBridgeContract {
                 throw FactorLibraryLocalBridgeError.invalidMessage
             }
             return [
-                "factor-library", "profile", "factors", "instantiate",
+                "factor-library", "workspace", "factors", "instantiate",
                 "--owner-ref", ownerRef, "--git-commit", revision,
                 "--family", family, "--params-json", json, "--json",
             ]

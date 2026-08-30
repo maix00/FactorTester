@@ -602,12 +602,7 @@ def upsert_profile_history(
     ).upsert_research_record(profile_id, value)))
 
 
-@click.group("profile", hidden=True)
-def profile_factor_worktree() -> None:
-    """Internal bootstrap bridge for an automatically created Profile replica."""
-
-
-@profile_factor_worktree.command("canonical-register")
+@click.command("canonical-register", hidden=True)
 @click.option(
     "--path",
     required=True,
@@ -632,7 +627,7 @@ def register_canonical_factor_repo(
     ))
 
 
-@profile_factor_worktree.command("canonical-show")
+@click.command("canonical-show", hidden=True)
 @_root_option
 @friendly_errors
 def show_canonical_factor_repo(
@@ -642,7 +637,7 @@ def show_canonical_factor_repo(
     click.echo(_json(CanonicalFactorRepoStore(root).load()))
 
 
-@profile_factor_worktree.command("create")
+@click.command("create-profile-worktree")
 @click.argument("profile_id")
 @click.option("--branch", default="")
 @click.option(
