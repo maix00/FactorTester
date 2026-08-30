@@ -131,8 +131,8 @@
         if (!window.confirm(context.t("确认删除该因子家族？"))) return;
         const alias = baseFamily.factor_family_alias || baseFamily.factor_family_name;
         const endpoint = publicFamily
-          ? `/custom-factors/api/delete-public/${encodeURIComponent(alias)}`
-          : `/custom-factors/api/delete/${encodeURIComponent(alias)}`;
+          ? `/api/factor-library/delete-public/${encodeURIComponent(alias)}`
+          : `/api/factor-library/delete/${encodeURIComponent(alias)}`;
         try {
           await context.api(endpoint, {method: "POST"});
           context.showNotice?.(context.t("已删除"));

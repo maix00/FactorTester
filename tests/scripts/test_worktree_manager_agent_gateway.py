@@ -9,6 +9,8 @@ from urllib.request import Request, urlopen
 import pytest
 
 from server.manager import runtime as manager
+from server.manager.domain.federation import ServiceRoute
+from server.manager.http.gateway import GatewayResponse
 
 
 @contextmanager
@@ -70,6 +72,52 @@ def test_local_profile_agent_unknown_get_does_not_fall_back_to_service_gateway(
             assert failed.value.code == 404
 
 
+def test_profile_agent_uses_canonical_factor_library_gateway(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="main",
+        branch="main",
+        revision="test",
+        port=8000,
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    forwarded = []
+
+    def route_request(selected, **values):
+        forwarded.append((selected, values))
+        return GatewayResponse(
+            status=200,
+            body=json.dumps({"success": True, "items": []}).encode(),
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    with running_manager(state) as base_url:
+        for path in (
+            "/api/factor-library/catalog",
+            "/api/factor-library/operators",
+            "/api/factor-library/research-runs?limit=1",
+            "/api/factor-library/workspace/snapshot",
+            "/api/admin/server-instances",
+        ):
+            with urlopen(Request(
+                f"{base_url}{path}", headers=agent_headers(state),
+            )) as response:
+                assert json.loads(response.read())["success"] is True
+
+    assert {values["principal"] for _route, values in forwarded} == {"user@1"}
+    assert [values["path"] for _route, values in forwarded] == [
+        "/custom-factors/api/list",
+        "/custom-factors/api/visual-operators",
+        "/custom-factors/api/factor-library-research-runs?limit=1",
+        "/custom-factors/api/workspace/snapshot",
+        "/admin/api/server-instances",
+    ]
+
+
 def test_local_profile_agent_unknown_write_does_not_fall_back_to_service_gateway(
     tmp_path, monkeypatch,
 ) -> None:
@@ -105,7 +153,7 @@ def test_local_profile_agent_cannot_target_a_remote_service(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/api/profile-research"
+                f"{base_url}/api/factor-library/catalog"
                 "?server_id=remote-main",
                 headers=agent_headers(state),
             ))
