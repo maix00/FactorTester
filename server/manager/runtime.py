@@ -566,6 +566,22 @@ class Handler(
     BaseHTTPRequestHandler,
 ):
     state: ManagerState
+    protocol_version = "HTTP/1.1"
+
+    def end_headers(self) -> None:
+        """Keep framed responses alive and close legacy unframed responses.
+
+        Manager responses normally carry ``Content-Length``.  HTTP/1.1 lets a
+        browser reuse one TLS connection for those requests instead of doing a
+        new handshake for every asset and API call.  A few streaming or legacy
+        routes are not framed; explicitly closing those preserves their prior
+        EOF-delimited HTTP/1.0 behaviour.
+        """
+        headers = b"".join(getattr(self, "_headers_buffer", ())).lower()
+        if b"content-length:" not in headers and b"transfer-encoding:" not in headers:
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        super().end_headers()
 
     @staticmethod
     def _runtime_port_in_use(port: int) -> bool:

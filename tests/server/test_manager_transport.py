@@ -139,6 +139,13 @@ def test_manager_tls_listener_redirects_plain_http_on_the_same_port(
         assert protected.status == 303
         assert protected.getheader("Location") == "/compliance?next=/"
         protected.read()
+        tls_socket = secure.sock
+        assert tls_socket is not None
+        secure.request("GET", "/compliance")
+        compliance = secure.getresponse()
+        assert compliance.status == 200
+        compliance.read()
+        assert secure.sock is tls_socket
         secure.close()
     finally:
         idle.close()
