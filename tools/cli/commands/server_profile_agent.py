@@ -37,7 +37,7 @@ def _target(profile_id: str) -> _ProfileAgentTarget:
     return _ProfileAgentTarget(requested)
 
 
-@click.group("profile-agent")
+@click.group("profile")
 @click.option(
     "--profile-id",
     default="",

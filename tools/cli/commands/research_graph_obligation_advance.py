@@ -743,7 +743,7 @@ def _validate_selection(
 ) -> None:
     if not isinstance(selected, dict):
         raise ValueError(
-            "node advance requires research-graph edge choose first"
+            "node advance requires research graphs edge choose first"
         )
     edge = edge_packet.get("edge") or {}
     edge_requirement_ids = [

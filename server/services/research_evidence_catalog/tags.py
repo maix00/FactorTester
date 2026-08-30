@@ -86,14 +86,14 @@ def propose_tag(
             [{
                 "action": "create_tag",
                 "argv": [
-                    "factortester", "research-evidence", "tag", "create",
+                    "factortester", "research", "evidence", "tag", "create",
                     "--proposal-token", token,
                 ],
             }]
             if token else [{
                 "action": "reuse_tag_or_explain_distinction",
                 "argv": [
-                    "factortester", "research-evidence", "tag", "propose",
+                    "factortester", "research", "evidence", "tag", "propose",
                     "--distinct-reason", "<区别说明>",
                 ],
             }]

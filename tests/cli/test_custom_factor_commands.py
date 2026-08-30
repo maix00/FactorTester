@@ -171,25 +171,6 @@ def test_factor_library_factors_and_sets_share_web_projection(monkeypatch) -> No
     assert json.loads(sets.output)["items"][0]["title_zh"] == "动量集合"
 
 
-def test_legacy_parameter_listing_is_explicit(monkeypatch) -> None:
-    fake = type("ParameterClient", (), {
-        "factor_library_overview": lambda self, **_values: {"factors": []},
-    })()
-    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
-
-    old = CliRunner().invoke(cli, [
-        "factor-library", "list",
-    ])
-    explicit = CliRunner().invoke(cli, [
-        "factor-library", "parameter-configs", "--json",
-    ])
-
-    assert old.exit_code != 0
-    assert "parameter-configs" in old.output
-    assert explicit.exit_code == 0
-    assert json.loads(explicit.output)["items"] == []
-
-
 def test_owner_qualified_describe_resolves_metadata_without_source(
     monkeypatch,
 ) -> None:

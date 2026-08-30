@@ -22,7 +22,7 @@ r_i,s_i,k_i,c_i
 1. `cycle entry-validate` 生成包含 `report_submission` 的 projection。
 2. 本地 publisher 把完整正文写入不可变 journal artifact。
 3. 执行
-   `factortester research-graph checkpoint-report INSTANCE BRANCH
+   `factortester research graphs checkpoint-report INSTANCE BRANCH
    --node-id NODE --projection-file projection.json
    --work-package-id WP --profile-id PROFILE --agent-id AGENT
    --release-profile release.json`。命令先用现有 publisher 原子更新

@@ -171,112 +171,6 @@ def describe_factor(
     _print_factor_description(payload, include_source=source_code, include_debug_graph=debug_graph)
 
 
-@factor_library.command("parameter-configs")
-@click.option("--factor-family", "--factor_family", default="", help="因子家族。")
-@click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
-@click.option("--include-subordinates", is_flag=True, help="包含下级用户可见配置。")
-@click.option("--with-research", is_flag=True, help="附带最近结构化研究摘要。")
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@click.pass_context
-@friendly_errors
-def list_parameter_configs(
-    ctx: click.Context,
-    factor_family: str,
-    product_group: str,
-    include_subordinates: bool,
-    with_research: bool,
-    as_json: bool,
-) -> None:
-    """List explicit legacy factor parameter configurations."""
-    factor_family = factor_family or ctx.obj.get("factor_family", "")
-    product_group = product_group or ctx.obj.get("product_group", "")
-    overview = client_from_config().factor_library_overview(
-        factor_family=factor_family,
-        product_group=product_group,
-        include_subordinates=include_subordinates,
-    )
-    factors = overview.get("factors") or []
-    research_by_alias = _latest_research_by_alias(
-        factor_family,
-        product_group,
-        include_subordinates=include_subordinates,
-    ) if with_research else {}
-    values = []
-    for factor in factors:
-        value = dict(factor)
-        alias = str(
-            factor.get("factor_alias")
-            or factor.get("alias")
-            or factor.get("name")
-            or ""
-        )
-        if research_by_alias.get(alias):
-            value["latest_research"] = research_by_alias[alias]
-        values.append(value)
-    if as_json:
-        click.echo(json.dumps({
-            "schema_version": 1,
-            "object_type": "factor_parameter_config",
-            "count": len(values),
-            "items": values,
-        }, ensure_ascii=False, indent=2))
-        return
-    if not values:
-        click.echo("暂无因子参数配置")
-        return
-    for factor in values:
-        line = factor_line(factor, default_family=factor_family, default_product_group=product_group)
-        summary = factor.get("latest_research")
-        click.echo(line + (f" · 研究={summary}" if summary else ""))
-
-
-@factor_library.command("list")
-def deprecated_factor_library_list() -> None:
-    """Reject the old ambiguous listing instead of reporting a fake empty library."""
-    raise click.ClickException(
-        "factor-library list 已移除；请明确使用 families、factors、"
-        "factor-sets 或 parameter-configs"
-    )
-
-
-@factor_library.command("add")
-@click.option("--factor-family", "--factor_family", required=True, help="因子家族。")
-@click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
-@click.option("--param", "params", multiple=True, required=True, metavar="KEY=VALUE", help="参数键值，可重复传入。")
-@click.option("--note", default="", help="保存到因子库配置的研究备注。")
-@click.option("--research-report", "--research_report", default="", help="关联的研究报告路径或标识。")
-@click.option("--product-path", "--product_path", "product_paths", multiple=True, help="当场产品组路径，可重复；默认按产品组库同名 scope 自动快照。")
-@friendly_errors
-def add_factor_params(
-    factor_family: str,
-    product_group: str,
-    params: tuple[str, ...],
-    note: str,
-    research_report: str,
-    product_paths: tuple[str, ...],
-) -> None:
-    """Append one parameter row to the factor library."""
-    client = client_from_config()
-    current_rows = current_user_params(client.factor_library_configs(factor_family, product_group=product_group))
-    row = dict(parse_key_value(item) for item in params)
-    current_rows.append(row)
-    metadata = {
-        "note": note,
-        "research_report": research_report,
-        "product_group_paths": list(product_paths),
-    }
-    data = client.save_factor_library_config(
-        factor_family,
-        product_group=product_group,
-        params_list=current_rows,
-        metadata={key: value for key, value in metadata.items() if value},
-    )
-    factors = data.get("factors") or []
-    click.echo("已新增因子参数")
-    if factors:
-        click.echo(factor_line(factors[-1], default_family=factor_family, default_product_group=product_group))
-
-
 @factor_library.command("import-result")
 @click.option("--artifact", "artifact_paths", multiple=True, type=click.Path(exists=True, dir_okay=False), help="研究 artifact JSON，可重复。")
 @click.option("--dir", "artifact_dirs", multiple=True, type=click.Path(exists=True, file_okay=False), help="递归导入目录下的 JSON artifacts，可重复。")
@@ -714,36 +608,6 @@ def workspace_local_state(root: str, as_json: bool) -> None:
         _print_workspace_state(result, "本地 canonical 因子库")
 
 
-@workspace.command("sync-to-server", hidden=True)
-@click.argument("root", required=False)
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@friendly_errors
-def workspace_sync_to_server(root: str | None, as_json: bool) -> None:
-    """兼容旧入口：按 upload 分支流程上传，不再导入任意 snapshot。"""
-    if root:
-        _assert_local_canonical_root(root)
-    result = client_from_config().push_factor_workspace(branch_mode="auto")
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_action("上传到服务器", result)
-
-
-@workspace.command("sync-to-local", hidden=True)
-@click.argument("root", required=False)
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@friendly_errors
-def workspace_sync_to_local(root: str | None, as_json: bool) -> None:
-    """兼容旧入口：按 download 分支流程下载，不再写入任意目录。"""
-    if root:
-        _assert_local_canonical_root(root)
-    result = client_from_config().sync_factor_workspace(branch_mode="force")
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_action("下载到本地", result)
-
-
 @workspace.command("git-settings")
 @click.option("--enable/--disable", "git_enabled", default=None, help="启用或禁用 workspace Git。")
 @click.option("--repo-root", default="", help="Git 仓库根目录。")
@@ -811,43 +675,6 @@ def workspace_git_checkout(branch: str, create: bool) -> None:
     _print_workspace_git_action(
         client_from_config().factor_workspace_git_action("checkout", branch=branch, create=create)
     )
-
-
-def current_user_params(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    for user in payload.get("users") or []:
-        if not user.get("editable"):
-            continue
-        config = user.get("config") or {}
-        params = config.get("params_list") or []
-        return [dict(row) for row in params if isinstance(row, dict)]
-    return []
-
-
-def _latest_research_by_alias(factor_family: str, product_group: str, *, include_subordinates: bool) -> dict[str, str]:
-    data = client_from_config().list_factor_research_runs(
-        factor_family=factor_family,
-        product_group=product_group,
-        include_subordinates="1" if include_subordinates else "",
-        limit=200,
-    )
-    out: dict[str, str] = {}
-    for run in data.get("runs") or []:
-        alias = str(run.get("factor_alias") or "")
-        if not alias or alias in out:
-            continue
-        metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
-        display_metric = default_display_metric(run, metrics)
-        metric_text = f"{display_metric}={_format_metric(metrics.get(display_metric))}" if display_metric else ""
-        out[alias] = " · ".join(
-            part
-            for part in (
-                str(run.get("test_type") or ""),
-                f"{run.get('start_date') or ''}..{run.get('end_date') or ''}",
-                metric_text,
-            )
-            if part
-        )
-    return out
 
 
 _RESEARCH_METRIC_REGISTRY = RESEARCH_METRIC_REGISTRY
@@ -1113,19 +940,6 @@ def _local_workspace_root(root: str) -> Path:
     target = Path(root).expanduser().resolve()
     if not target.exists() or not target.is_dir():
         raise click.ClickException(f"本地 canonical 因子库目录不存在: {target}")
-    return target
-
-
-def _assert_local_canonical_root(root: str) -> Path:
-    """Reject Profile worktrees from legacy sync aliases."""
-    target = _local_workspace_root(root)
-    parts = target.parts
-    for index, part in enumerate(parts[:-2]):
-        if part == "profiles" and parts[index + 2] == "factor-worktree":
-            raise click.ClickException(
-                "Profile factor-worktree 只能随单次任务上传源码，"
-                "不能作为 canonical 因子库同步目录"
-            )
     return target
 
 

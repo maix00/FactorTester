@@ -453,7 +453,7 @@ def test_node_advance_support_prepares_current_details_and_factor_describe(
 
     def run(args: list[str], *, timeout: int):
         calls.append(args)
-        if args[:2] == ["research-graph", "requirement-detail"]:
+        if args[:3] == ["research", "graphs", "requirement-detail"]:
             return _Result(_detail(args[-1]))
         if args[:2] == ["factor-library", "describe"]:
             return _Result(_describe())

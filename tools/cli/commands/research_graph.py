@@ -55,7 +55,7 @@ def _client_for_profile(client_root: Path, profile_id: str) -> FactorTesterClien
     return client_from_config()
 
 
-@click.group("research-graph")
+@click.group("graphs")
 def research_graph() -> None:
     """下载研究图并在本地检查或推进研究状态。"""
 

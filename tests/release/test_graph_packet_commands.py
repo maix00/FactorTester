@@ -11,10 +11,10 @@ def test_graph_packet_commands_use_public_factortester_groups() -> None:
     })
 
     commands = packet["report_packet"]["document_commands"]
-    assert commands[0].startswith("factortester research-graph node info ")
-    assert commands[1].startswith("factortester research-graph edge info ")
+    assert commands[0].startswith("factortester research graphs node info ")
+    assert commands[1].startswith("factortester research graphs edge info ")
     assert commands[-1].startswith(
-        "factortester research-graph node advance "
+        "factortester research graphs node advance "
     )
     assert all("factortester node " not in command for command in commands)
     assert all("factortester edge " not in command for command in commands)

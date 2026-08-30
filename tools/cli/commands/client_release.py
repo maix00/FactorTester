@@ -41,7 +41,6 @@ from tools.cli.release.locations import default_client_root, validate_client_roo
 from tools.cli.release.profile import (
     load_profile_root,
     load_release_inputs,
-    load_update_inputs,
 )
 from tools.cli.release.transaction import ClientReleaseStore
 
@@ -531,53 +530,6 @@ def update(profile: Path, dry_run: bool, as_json: bool) -> None:
 def status(profile: Path | None, as_json: bool) -> None:
     """Read local receipts without network, database, or Agent calls."""
     _echo(ClientReleaseStore(load_profile_root(profile)).status(), as_json)
-
-
-@client.command("check-update")
-@click.option(
-    "--profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    required=True,
-)
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def check_update(profile: Path, as_json: bool) -> None:
-    """Read trusted server-first stable/beta update metadata."""
-    _, update, source = load_update_inputs(profile)
-    value = {
-        "schema_version": 1,
-        "source": source,
-        "version": update.version,
-        "build": update.build,
-        "channel": update.channel,
-        "dmg_url": update.dmg_url,
-        "sha256": update.dmg_sha256,
-        "minimum_client": update.minimum_client,
-        "mandatory": update.mandatory,
-        "published_at": update.published_at,
-        "manifest_hash": update.manifest_hash,
-        "signature_verified": True,
-    }
-    if as_json:
-        click.echo(json.dumps(value, ensure_ascii=False, indent=2))
-        return
-    click.echo(
-        f"version={update.version} build={update.build} "
-        f"channel={update.channel} source={source} signature=verified"
-    )
-
-
-@client.command("update-app")
-@click.option(
-    "--profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    required=True,
-)
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def update_app(profile: Path, as_json: bool) -> None:
-    """Compatibility alias: ask FTClient/Sparkle to download the update."""
-    _echo(dispatch_app_update("download"), as_json)
 
 
 @client.command("rollback")

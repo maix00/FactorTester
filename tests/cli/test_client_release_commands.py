@@ -15,7 +15,6 @@ from tools.cli.release.profile import (
     load_release_inputs,
     load_update_inputs,
 )
-from tools.cli.release.update_channel import ValidatedUpdateManifest
 
 
 def test_beta_release_upload_only_skips_network_failures() -> None:
@@ -146,48 +145,6 @@ def test_profile_cannot_replace_packaged_release_trust_anchor(
         assert "fixed by the client package" in str(exc)
     else:
         raise AssertionError("profile replaced packaged trust anchor")
-
-
-def test_check_update_reports_only_verified_server_first_metadata(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    profile = tmp_path / "profile.json"
-    profile.write_text("{}")
-    update = ValidatedUpdateManifest(
-        version="2.0.0",
-        build=9,
-        channel="beta",
-        dmg_url="https://github.example/FactorTester-Client.dmg",
-        dmg_sha256="a" * 64,
-        minimum_client="1.2.0",
-        mandatory=False,
-        published_at="2026-07-20T12:00:00Z",
-        manifest_hash="b" * 64,
-    )
-    monkeypatch.setattr(
-        commands,
-        "load_update_inputs",
-        lambda _: ({}, update, "server"),
-    )
-    result = CliRunner().invoke(cli, [
-        "client", "check-update", "--profile", str(profile), "--json",
-    ])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {
-        "schema_version": 1,
-        "source": "server",
-        "version": "2.0.0",
-        "build": 9,
-        "channel": "beta",
-        "dmg_url": "https://github.example/FactorTester-Client.dmg",
-        "sha256": "a" * 64,
-        "minimum_client": "1.2.0",
-        "mandatory": False,
-        "published_at": "2026-07-20T12:00:00Z",
-        "manifest_hash": "b" * 64,
-        "signature_verified": True,
-    }
 
 
 def test_main_update_source_is_fixed_before_network_access(

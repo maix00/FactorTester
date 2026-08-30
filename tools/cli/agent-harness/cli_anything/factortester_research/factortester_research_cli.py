@@ -49,11 +49,12 @@ for command in (
     workspace, decision, gap, status, checklist, external_factor,
     evidence,
     report,
-    strategy_intent,
     strategy,
     margin_budget,
 ):
     cli.add_command(command)
+
+strategy.add_command(strategy_intent)
 
 
 if __name__ == "__main__":

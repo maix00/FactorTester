@@ -9,7 +9,7 @@ from .research_evidence_sources import register_source_commands
 from .research_evidence_tags import register_tag_commands
 
 
-@click.group("research-evidence")
+@click.group("evidence")
 def research_evidence() -> None:
     """Capture fragments, create Evidence, search facets and manage tags."""
 

@@ -198,6 +198,9 @@ def test_tag_proposal_blocks_near_duplicate_without_distinction_reason(
 
     assert duplicate["proposal_token"] is None
     assert duplicate["candidates"]
+    assert duplicate["next_actions"][0]["argv"][:3] == [
+        "factortester", "research", "evidence",
+    ]
 
 
 def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
@@ -262,6 +265,9 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
 
     assert matched["items"][0]["evidence_ref"] == evidence["evidence_ref"]
     assert "product_ref" in matched["items"][0]["matched_by"]
+    assert matched["next_actions"][0]["argv"][:3] == [
+        "factortester", "research", "evidence",
+    ]
     assert rejected["items"] == []
 
 

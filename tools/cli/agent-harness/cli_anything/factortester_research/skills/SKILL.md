@@ -64,8 +64,9 @@ The downloaded graph and local session are authoritative for the current node,
 candidate edges, blockers, obligations, report tasks, and whether Agent
 judgment is needed. Do not ask a Manager to calculate the next step. Load only
 the local graph document and the evidence/facts needed by the current node.
-`research step inspect` is retained only as a legacy compatibility read for
-older remote Jobs; it is not part of offline research navigation.
+`research step inspect` is the bounded, on-demand contract reader for an edge
+that declares a server action; it is not an alias for offline graph navigation.
+Use it only when `research graphs node info` returns that exact next action.
 
 ```bash
 factortester research graphs next-local \
@@ -119,13 +120,12 @@ projection as Web and Swift:
 factortester factor-library families --scope all --json
 factortester factor-library factors --scope mine --json
 factortester factor-library factor-sets --scope subordinates --json
-factortester factor-library parameter-configs
 ```
 
 `families`, `factors`, and `factor-sets` read the Manager-owned public, own,
-and direct-subordinate scopes. `parameter-configs` is only the older explicit
-parameter-configuration store. Never use the internal client SQLite store as
-a factor-library reader. A Profile's local factor source is its own
+and direct-subordinate scopes. Never use the removed parameter-configuration
+store or the internal client SQLite store as a factor-library reader. A
+Profile's local factor source is its own
 `factor-worktree`; a server Profile has the same workspace layout.
 
 ## Ownership and safety boundaries

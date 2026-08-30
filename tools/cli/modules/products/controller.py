@@ -7,7 +7,6 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
-from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.core.json_output import echo_json, json_text
 from tools.cli.table import render_table
@@ -28,15 +27,6 @@ def products(ctx: click.Context) -> None:
             "可用功能: factortester products info <产品>；"
             "factortester products groups list|add|subjects"
         )
-
-
-@products.command("modules", hidden=True)
-@friendly_errors
-def list_products_children() -> None:
-    """List product module children."""
-    click.echo("当前位置: products")
-    for line in module_lines(client_from_config().list_modules(parent="products")):
-        click.echo(line)
 
 
 @products.command("info")

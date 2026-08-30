@@ -23,6 +23,41 @@ def test_root_exposes_business_domains_without_split_legacy_groups() -> None:
     assert "agent-flow" not in result.output
     assert "research-graph" not in result.output
     assert "research-evidence" not in result.output
+    assert "strategy-intent" not in result.output
+
+
+def test_removed_cli_compatibility_aliases_are_not_callable() -> None:
+    runner = CliRunner()
+    removed = (
+        ["strategy-intent", "describe"],
+        ["research-graph", "active", "graph"],
+        ["factor-library", "list"],
+        ["factor-library", "parameter-configs"],
+        ["factor-library", "add"],
+        ["factor-library", "workspace", "sync-to-server"],
+        ["factor-library", "workspace", "sync-to-local"],
+        ["client", "check-update"],
+        ["client", "update-app"],
+        ["products", "modules"],
+    )
+
+    for args in removed:
+        result = runner.invoke(cli, args)
+        assert result.exit_code != 0, args
+        assert "No such command" in result.output, (args, result.output)
+
+
+def test_canonical_nested_cli_surfaces_are_registered() -> None:
+    runner = CliRunner()
+    for args in (
+        ["strategy", "intent", "--help"],
+        ["research", "graphs", "--help"],
+        ["factor-library", "workspace", "sync", "--help"],
+        ["factor-library", "workspace", "push", "--help"],
+        ["client", "app-update", "--help"],
+    ):
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0, (args, result.output)
 
 
 def test_products_list_reads_the_real_server_catalog(monkeypatch) -> None:

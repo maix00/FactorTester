@@ -247,7 +247,7 @@ def _transition_report_requirement_ids(
 
 
 def register_navigation_commands(parent: click.Group) -> None:
-    """Register the short ``node`` and ``edge`` surfaces beside legacy names."""
+    """Register the canonical grouped ``node`` and ``edge`` surfaces."""
     node = click.Group("node", help="查看当前节点并沿已选边推进")
     edge = click.Group("edge", help="查看并选择当前节点的候选边")
     parent.add_command(node)
@@ -557,7 +557,7 @@ def register_navigation_commands(parent: click.Group) -> None:
                 if not ledger_path(local_package_root, branch_id).is_file():
                     raise ValueError(
                         "Profile-bound node advance requires the branch-local "
-                        "obligation ledger; run research-graph edge choose "
+                        "obligation ledger; run research graphs edge choose "
                         "with --profile-id, --agent-id and --reason-file first"
                     )
                 current_snapshot = load_authoring(
