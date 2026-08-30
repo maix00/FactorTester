@@ -2519,3 +2519,13 @@ def test_factor_catalog_runtime_loads_only_requested_sources() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_product_group_detail_never_uses_retired_business_route() -> None:
+    detail = (
+        WEB_ROOT / "catalog" / "product-group-detail.js"
+    ).read_text(encoding="utf-8")
+
+    assert '"/api/client/product-groups"' in detail
+    assert '"/api/catalog/product-groups"' in detail
+    assert '"/api/product-groups"' not in detail
