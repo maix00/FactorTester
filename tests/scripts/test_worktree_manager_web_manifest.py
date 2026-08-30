@@ -2350,6 +2350,16 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert "FTFactorSetAssistance" in set_editor
 
 
+def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_assistance_apply.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:
     import subprocess
 
