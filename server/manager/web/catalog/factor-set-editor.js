@@ -61,7 +61,8 @@
         manifest.description || current.description_zh || current.description || "",
       owner: ownerLabel(context, current),
       members: (identity.members || related.map(item => item.data || item))
-        .map(item => item?.ref || item?.target_ref).filter(Boolean),
+        .map(item => typeof item === "string" ? item : item?.ref || item?.target_ref)
+        .filter(Boolean),
     };
     const title = mode === "create"
       ? context.t("新增因子集合") : state.alias || context.t("编辑因子集合");
@@ -101,6 +102,25 @@
           hidden: mode !== "edit" || context.testObjectTemporary === true,
           onActivate: jobs.load,
         },
+      },
+      onReady: editor => {
+        window.FTFactorSetAssistance?.register?.(context, {
+          mode, state, tabs: editor.tabs,
+          onImport: document => render(context, data, targetRef, mode, {
+            ...options,
+            initialValue: {
+              ...current,
+              set_id: document.set_id,
+              alias: document.alias,
+              description: document.description,
+              identity: {
+                ...identity,
+                set_id: document.set_id,
+                members: [...document.members],
+              },
+            },
+          }),
+        });
       },
       onCancel: () => cancel(context),
       onSubmit: async values => {

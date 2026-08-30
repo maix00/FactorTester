@@ -48,7 +48,7 @@ vm.runInThisContext(
 const context = {t: value => value};
 const definitions = window.FTObjectDetailTabs.definitions("family", {
   overview: {save_mode: "auto"},
-  source: {save_mode: "manual"},
+  source: {save_mode: "auto"},
   members: {hidden: true},
 });
 assert.deepStrictEqual(
@@ -81,7 +81,7 @@ assert.match(
 );
 assert.match(
   tabs.buttons.source.children[0].children[1].textContent,
-  /需保存/,
+  /自动保存/,
 );
 assert.match(
   tabs.buttons.parameters.children[0].children[1].textContent,

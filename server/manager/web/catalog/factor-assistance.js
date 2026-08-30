@@ -8,7 +8,7 @@
         nodes: {
           page: {
             id: "page", kind: "page",
-            label: state.familyMode ? "新建因子家族" : "新建因子",
+            label: `${state.mode === "edit" ? "编辑" : "新建"}${state.familyMode ? "因子家族" : "因子"}`,
             children: ["section:metadata", "section:source", "section:parameters"],
           },
           "section:metadata": {
@@ -68,7 +68,7 @@
         redraw(); markDirty();
       },
     }, {
-      pageKind: state.familyMode ? "factor-family-create" : "factor-create",
+      pageKind: `${state.familyMode ? "factor-family" : "factor"}-${state.mode}`,
       view: () => ({selected_tab: tabs.current()}),
     });
   }
