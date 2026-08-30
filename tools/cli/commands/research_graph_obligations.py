@@ -422,7 +422,7 @@ def _register_split_command(obligation: click.Group) -> None:
         ):
             raise click.ClickException(
                 "obligation ledger projection is stale; run "
-                "research-graph obligation status and rebuild the split"
+                "research graphs obligation status and rebuild the split"
             )
         try:
             prepared = prepare_obligation_split(
@@ -500,7 +500,7 @@ def _record_change_payload(
         if ledger["current_projection"]["projection_hash"] != expected:
             raise click.ClickException(
                 "obligation ledger projection is stale; run "
-                "research-graph obligation status and rebuild the change"
+                "research graphs obligation status and rebuild the change"
             )
         obligations, changed = apply_obligation_deltas(
             ledger["current_projection"]["obligations"],

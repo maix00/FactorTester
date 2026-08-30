@@ -16,7 +16,7 @@
     },
     {
       id: "backtest", path: "/backtest", title: "Backtest workbench", access: "public",
-      cli: ["factor-plan", "workspace", "run", "strategy", "strategy-intent", "margin-budget"],
+      cli: ["factor-plan", "workspace", "run", "strategy", "margin-budget"],
       description: "Configure strategies and submit factor backtests.",
     },
     {
@@ -26,7 +26,7 @@
     },
     {
       id: "factor_library", path: "/factors", title: "Factor library", access: "public",
-      cli: ["factor-plan", "external-factor", "custom_factors", "factor-library"],
+      cli: ["factor-plan", "external-factor", "factor-library"],
       description: "Browse, create and edit factor families, factors and factor sets.",
     },
     {

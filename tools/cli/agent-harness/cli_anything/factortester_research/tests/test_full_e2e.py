@@ -51,7 +51,7 @@ class TestCLISubprocess:
             "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "assert sys.argv[1:] == [\n"
-            "  'strategy-intent', 'configure', 'A1',\n"
+            "  'strategy', 'intent', 'configure', 'A1',\n"
             "  '--role', 'screen=Gate', '--role', 'sizing=Size',\n"
             "  '--screen-rule', 'gte', '--screen-lower', '1.5',\n"
             "  '--allocation-policy', 'factor_sizing', '--json'\n"
@@ -63,7 +63,7 @@ class TestCLISubprocess:
 
         result = self._run(
             [
-                "strategy-intent", "configure", "A1",
+                "strategy", "intent", "configure", "A1",
                 "--role", "screen=Gate", "--role", "sizing=Size",
                 "--screen-rule", "gte", "--screen-lower", "1.5",
                 "--allocation-policy", "factor_sizing", "--json",

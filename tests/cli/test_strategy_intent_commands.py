@@ -76,8 +76,8 @@ def test_describe_and_show_have_stable_json(monkeypatch):
     _install(monkeypatch)
     runner = CliRunner()
 
-    described = runner.invoke(cli, ["strategy-intent", "describe", "--json"])
-    shown = runner.invoke(cli, ["strategy-intent", "show", "--json"])
+    described = runner.invoke(cli, ["strategy", "intent", "describe", "--json"])
+    shown = runner.invoke(cli, ["strategy", "intent", "show", "--json"])
 
     assert described.exit_code == 0, described.output
     assert json.loads(described.output)["roles_by_strategy_kind"]["group"] == [
@@ -91,7 +91,7 @@ def test_configure_updates_real_workspace_payload_and_preserves_fields(monkeypat
     fake = _install(monkeypatch)
 
     result = CliRunner().invoke(cli, [
-        "strategy-intent", "configure", "A1",
+        "strategy", "intent", "configure", "A1",
         "--role", "screen=Gate", "--screen-rule", "gte", "--screen-lower", "1.5",
         "--role", "sizing=Size", "--allocation-policy", "factor_sizing", "--json",
     ])
@@ -107,9 +107,9 @@ def test_configure_rejects_noop_and_incompatible_role_without_mutation(monkeypat
     fake = _install(monkeypatch)
     runner = CliRunner()
 
-    noop = runner.invoke(cli, ["strategy-intent", "configure", "A1", "--role", "screen=Gate"])
+    noop = runner.invoke(cli, ["strategy", "intent", "configure", "A1", "--role", "screen=Gate"])
     invalid_role = runner.invoke(cli, [
-        "strategy-intent", "configure", "A1", "--role", "entry=Unknown",
+        "strategy", "intent", "configure", "A1", "--role", "entry=Unknown",
     ])
 
     assert noop.exit_code != 0 and "screen-rule" in noop.output
@@ -121,7 +121,7 @@ def test_configure_accepts_deferred_profile_role_factor(monkeypatch):
     fake = _install(monkeypatch)
 
     result = CliRunner().invoke(cli, [
-        "strategy-intent", "configure", "A1",
+        "strategy", "intent", "configure", "A1",
         "--role", "screen=StTurnoverOrdinalRank|N:20d",
         "--screen-rule", "lte", "--screen-upper", "12", "--json",
     ])

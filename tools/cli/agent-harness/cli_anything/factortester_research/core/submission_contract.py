@@ -125,7 +125,7 @@ def build_cycle_submission_contract(
             ),
             "report_document": (
                 "local generic report document; attach report_requirement "
-                "chips before research-graph node advance"
+                "chips before research graphs node advance"
             ),
             "obligation_coverage": (
                 "node advance reads branches/<branch>/obligations.json, "
@@ -191,7 +191,7 @@ def build_cycle_submission_contract(
         },
         "repair_hints": {
             "stale_contract": (
-                "rerun research-graph node advance so it rebuilds the "
+                "rerun research graphs node advance so it rebuilds the "
                 "current contract; never edit context_ref or contract_hash"
             ),
             "unknown_field": (
@@ -300,7 +300,7 @@ def validate_contract_for_current_packet(
         if contract.get(field) != expected.get(field):
             raise ValueError(
                 "submission contract is stale for the current branch; "
-                "rerun research-graph node advance"
+                "rerun research graphs node advance"
             )
     return {
         "contract_current": True,
@@ -373,7 +373,7 @@ def _validated_contract_hash(contract: dict[str, Any]) -> str:
     expected = _contract_hash(contract)
     if supplied != expected:
         raise ValueError(
-            "submission contract hash mismatch; rerun research-graph "
+            "submission contract hash mismatch; rerun research graphs "
             "node advance"
         )
     return expected

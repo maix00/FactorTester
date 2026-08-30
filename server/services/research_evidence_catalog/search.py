@@ -185,14 +185,14 @@ def search_evidence(
             {
                 "action": "inspect_evidence",
                 "argv": [
-                    "factortester", "research-evidence", "get",
+                    "factortester", "research", "evidence", "get",
                     "<evidence_ref>", "--json",
                 ],
             },
             {
                 "action": "capture_source_if_no_match",
                 "argv": [
-                    "factortester", "research-evidence", "source", "--help",
+                    "factortester", "research", "evidence", "source", "--help",
                 ],
             },
         ],

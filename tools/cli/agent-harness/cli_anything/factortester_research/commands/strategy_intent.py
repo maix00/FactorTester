@@ -1,4 +1,4 @@
-"""Thin research-Harness proxy for the real strategy-intent CLI."""
+"""Thin research-Harness proxy for the real strategy intent CLI."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import click
 from ..utils.factortester_backend import run_factortester
 
 
-@click.group("strategy-intent")
+@click.group("intent")
 def strategy_intent() -> None:
     """Inspect or configure strategy intent through real FactorTester state."""
 
@@ -15,14 +15,14 @@ def strategy_intent() -> None:
 @strategy_intent.command("describe")
 @click.option("--json", "as_json", is_flag=True)
 def describe(as_json: bool) -> None:
-    _delegate(["strategy-intent", "describe", *(["--json"] if as_json else [])])
+    _delegate(["strategy", "intent", "describe", *(["--json"] if as_json else [])])
 
 
 @strategy_intent.command("show")
 @click.option("--group", "group_id", default="")
 @click.option("--json", "as_json", is_flag=True)
 def show(group_id: str, as_json: bool) -> None:
-    args = ["strategy-intent", "show"]
+    args = ["strategy", "intent", "show"]
     if group_id:
         args.extend(["--group", group_id])
     if as_json:
@@ -45,7 +45,7 @@ def configure(
     screen_rule: str | None, screen_lower: float | None, screen_upper: float | None,
     allocation_policy: str | None, sizing_transform: str | None, as_json: bool,
 ) -> None:
-    args = ["strategy-intent", "configure", group_id]
+    args = ["strategy", "intent", "configure", group_id]
     for role in roles:
         args.extend(["--role", role])
     for role in clear_roles:
