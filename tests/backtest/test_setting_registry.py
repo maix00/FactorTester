@@ -20,7 +20,9 @@ def test_retired_single_factor_html_entry_is_not_registered() -> None:
 
 
 def test_backtest_strategy_contract_is_backend_registered() -> None:
-    contract = backtest_setting_registry.get("group_test").manifest()[
+    manifest = backtest_setting_registry.get("group_test").manifest()
+    assert manifest["research_configuration_schema_version"] == 3
+    contract = manifest[
         "configuration_item_contract"
     ]
     assert contract["schema_version"] == 1

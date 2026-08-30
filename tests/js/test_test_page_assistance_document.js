@@ -25,7 +25,7 @@ global.FTTestConfigurationCompiler = {
 };
 global.FTTestConfiguration = {
   configurationPayload: state => ({
-    schema_version: 2,
+    schema_version: 3,
     shared: state.workspace.configuration.payload.shared,
     run_fields: {output_requests: [...state.outputRequests]},
     analyses: {
@@ -75,8 +75,9 @@ vm.runInThisContext(
 for (const kind of ["backtest", "ic"]) {
   const state = {
     kind,
-    workspace: {configuration: {payload: {schema_version: 2, shared: {factors: []}}}},
+    workspace: {configuration: {payload: {schema_version: 3, shared: {factors: []}}}},
     manifest: {
+      research_configuration_schema_version: 3,
       defaults: {factor_mode: {tab_key: "factor-execution"}},
       modules: [
         {key: "factor-execution", label: "因子执行"},
@@ -169,7 +170,7 @@ for (const kind of ["backtest", "ic"]) {
   const document = FTTestPageAssistance.documentFor(state);
   assert.equal(document.document_kind, "research_configuration");
   assert.deepEqual(document.analyses, [kind]);
-  assert.equal(document.configuration.schema_version, 2);
+  assert.equal(document.configuration.schema_version, 3);
   assert.equal(document.configuration.analyses[kind].local_settings, undefined);
   assert.equal(document.configuration.ui[kind].settings.factor_mode, "native");
   assert.deepEqual(document.configuration.run_fields.output_requests, ["equity_curve"]);
@@ -183,6 +184,12 @@ for (const kind of ["backtest", "ic"]) {
   assert.equal(
     FTTestPageAssistance.schemaFor(state)["x-canonical-settings-path"],
     `configuration.ui.${kind}.settings`,
+  );
+  assert.equal(
+    FTTestPageAssistance.schemaFor(state).properties.configuration
+      .properties.schema_version.const,
+    3,
+    "page assistance uses the backend-registered ResearchConfiguration version",
   );
   const navigation = FTTestPageAssistance.navigationFor(state);
   const collection = navigation.nodes.configurations;
@@ -254,7 +261,8 @@ assert.deepEqual(
 );
 
 const importState = {
-  kind: "backtest", workspace: null, manifest: {}, values: {}, analysis: {},
+  kind: "backtest", workspace: null,
+  manifest: {research_configuration_schema_version: 3}, values: {}, analysis: {},
   settingsMountedTabs: [], outputRequests: [], selectedICConfigurationGroupIDs: [],
 };
 const configurationRuntime = global.FTTestConfiguration;
@@ -271,7 +279,7 @@ FTTestPageAssistance.register({}, importState, () => { restored += 1; });
 assert.throws(() => registeredAdapter.validate({
   document_kind: "research_configuration",
   configuration: {
-    schema_version: 2,
+    schema_version: 3,
     analyses: {backtest: {groups: [{}], local_settings: {start_date: "2024-01-01"}}},
   },
   run_fields: {},
@@ -285,7 +293,7 @@ assert.equal(loadedGroup, "workbench-run-submit");
 assert.equal(global.FTTestConfiguration, configurationRuntime);
 registeredAdapter.importDocument({
   document_kind: "research_configuration",
-  configuration: {schema_version: 2, shared: {}, analyses: {backtest: {groups: []}}, ui: {}},
+  configuration: {schema_version: 3, shared: {}, analyses: {backtest: {groups: []}}, ui: {}},
   run_fields: {},
 });
 assert.equal(restored, 2, "document state is restored before the deferred page rebuild");

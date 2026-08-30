@@ -13,14 +13,18 @@ from typing import Any
 import orjson
 
 import settings as Settings
-from tools.data.sqlite.db import connect_sqlite
-from tools.data.types.object_identity import unique_frozen_identities
+
 # Register the Factor v2 identity protocol for standalone migration commands.
 # The web process imports it through feature modules, but migrations must not
 # rely on incidental application startup order.
-from tools.cli.identities.factor import require_frozen_factor as _require_frozen_factor
+from tools.cli.identities.factor import (  # noqa: F401
+    require_frozen_factor as _require_frozen_factor,
+)
+from tools.data.sqlite.db import connect_sqlite
+from tools.data.types.object_identity import unique_frozen_identities
+from tools.testers.configuration_schema import RESEARCH_CONFIGURATION_SCHEMA_VERSION
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = RESEARCH_CONFIGURATION_SCHEMA_VERSION
 ROLES = {"workspace", "template"}
 
 

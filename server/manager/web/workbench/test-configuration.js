@@ -225,7 +225,13 @@
     const isBacktest = state.kind === "backtest";
     FTTestProducts.synchronize(state);
     const payload = structuredClone(state.workspace?.configuration?.payload || {});
-    payload.schema_version = 2;
+    const schemaVersion = Number(
+      state.manifest?.research_configuration_schema_version,
+    );
+    if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
+      throw new Error("测试配置清单缺少 ResearchConfiguration schema 版本");
+    }
+    payload.schema_version = schemaVersion;
     payload.shared = payload.shared || {};
     delete payload.shared.factor_families;
     payload.shared.factors = factors.map(item => (

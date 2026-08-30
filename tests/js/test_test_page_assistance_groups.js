@@ -57,6 +57,7 @@ const group = {
 };
 const state = {
   kind: "backtest", manifest: {
+    research_configuration_schema_version: 3,
     configuration_item_contract: {
       schema_version: 1, item_kind: "strategy", collection_key: "groups",
       min_items: 1,
@@ -75,7 +76,7 @@ const state = {
     {key: "output_requests", label: "结果与生成物", placement: "outputs", default: [],
       value_descriptor: {editor: "output_picker"}},
   ]}, workspace: null, runValues: {task_name: "原名称"}, outputRequests: ["equity_curve"],
-  payload: {schema_version: 2, analyses: {backtest: {groups: [group]}}},
+  payload: {schema_version: 3, analyses: {backtest: {groups: [group]}}},
 };
 const pageState = {};
 const context = {t: value => value, pageState};
@@ -98,12 +99,12 @@ assert.equal(
 );
 assert.throws(() => registration.validate({
   document_kind: "research_configuration",
-  configuration: {schema_version: 2, analyses: {backtest: {groups: []}}},
+  configuration: {schema_version: 3, analyses: {backtest: {groups: []}}},
 }), /至少需要一个策略/);
 assert.throws(() => registration.validate({
   document_kind: "research_configuration",
   configuration: {
-    schema_version: 2,
+    schema_version: 3,
     analyses: {backtest: {groups: [group], task_name: "wrong"}},
   },
   run_fields: {},

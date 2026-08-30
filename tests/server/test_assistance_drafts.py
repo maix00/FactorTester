@@ -91,6 +91,43 @@ def test_draft_merge_patch_updates_only_requested_document_fields(tmp_path) -> N
     }
 
 
+def test_research_draft_rejects_schema_and_legacy_setting_guesses(tmp_path) -> None:
+    store = AssistanceDraftStore(tmp_path)
+    created = store.create(
+        principal="owner",
+        profile_id="self",
+        tab_id="ic-1",
+        page_kind="ic-configuration",
+        page_revision=1,
+        schema_version=1,
+        document={
+            "schema_version": 1,
+            "document_kind": "research_configuration",
+            "analyses": ["ic"],
+            "configuration": {
+                "schema_version": 3,
+                "shared": {},
+                "analyses": {"ic": {"configuration_groups": []}},
+                "ui": {"ic": {"settings": {}}},
+            },
+            "run_fields": {},
+        },
+    )
+
+    for patch in (
+        {"configuration": {"schema_version": 2}},
+        {"configuration": {"schema_version": None}},
+        {"configuration": {"analyses": {"ic": {"local_settings": {}}}}},
+        {"configuration": {"analyses": {"ic": {"settings": {}}}}},
+    ):
+        with pytest.raises(AssistanceDraftError, match="authoritative"):
+            store.patch(created["draft_id"], patch)
+
+    assert store.get(created["draft_id"])["document"]["configuration"][
+        "schema_version"
+    ] == 3
+
+
 def test_draft_quota_refuses_new_content_without_deleting_old_drafts(tmp_path) -> None:
     store = AssistanceDraftStore(tmp_path, quota_bytes=1800)
     first = _create(store, payload="x" * 600)

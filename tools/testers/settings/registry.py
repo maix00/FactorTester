@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from tools.testers.configuration_schema import RESEARCH_CONFIGURATION_SCHEMA_VERSION
+
 from .audit import audit_application_mounts
 from .contracts import (
     ChipDefinition,
@@ -228,6 +230,9 @@ class ApplicationSettings:
 
         manifest = {
             "schema_version": 1,
+            "research_configuration_schema_version": (
+                RESEARCH_CONFIGURATION_SCHEMA_VERSION
+            ),
             "application": self.application,
             "modules": [module.to_dict() for module in ordered_modules],
             "tab_lists": {
