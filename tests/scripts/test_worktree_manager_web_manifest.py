@@ -1318,10 +1318,21 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",
     ]
-    assert manifest["group_dependencies"]["workbench-core"] == []
+    assert manifest["group_dependencies"]["workbench-core"] == [
+        "object-editor-overlay",
+    ]
     assert "workbench/templates/actions.js" in manifest["groups"]["workbench-core"]
     assert "workbench/templates/actions.js" not in manifest["groups"]["workbench-templates"]
     assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
+
+    assert manifest["group_dependencies"]["factor-catalog-editor"] == [
+        "factor-catalog-core",
+        "object-editor-overlay",
+    ]
+    assert manifest["groups"]["object-editor-overlay"] == [
+        "workbench/test-object-picker.js",
+        "workbench/test-object-editor-overlay.js",
+    ]
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
     assert manifest["group_dependencies"]["workbench-run-batch"] == ["workbench-core"]
