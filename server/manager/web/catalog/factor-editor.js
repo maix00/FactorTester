@@ -263,11 +263,10 @@
       );
       actions.append(upload);
     }
-    const validate = FTUI.actionButton(context.t("保存源码"), async () => {
+    const validate = FTUI.actionButton(context.t("校验源码"), async () => {
       validate.disabled = true;
       await inspect(context, state, redraw);
       validate.disabled = false;
-      if (state.inspection && !state.validationError) options.onSaved?.();
     }, {variant: "secondary"});
     actions.append(validate);
     const editor = FTUI.codeEditor(state.sourceCode, {
@@ -281,6 +280,7 @@
       state.inspection = null;
       state.validationError = "";
       state.validationMessage = "";
+      options.onChanged?.();
     });
     const status = document.createElement("small");
     status.className = state.validationError
@@ -642,7 +642,6 @@
         sourceMount.append(sourceControls(context, state, redraw, {
           fileInput: familyFileInput,
           onChanged: () => tabs?.setDirty("source", true),
-          onSaved: () => tabs?.setDirty("source", false),
         }));
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
@@ -653,13 +652,11 @@
         } else {
           sourceMount.append(sourceControls(context, state, redraw, {
             onChanged: () => tabs?.setDirty("source", true),
-            onSaved: () => tabs?.setDirty("source", false),
           }));
         }
       } else {
         sourceMount.append(sourceControls(context, state, redraw, {
           onChanged: () => tabs?.setDirty("source", true),
-          onSaved: () => tabs?.setDirty("source", false),
         }));
       }
       const metadata = sourceMetadata(context, state);
@@ -692,21 +689,21 @@
     const familyFileInput = familyMode ? filePicker(
       context, state, redraw, () => tabs?.setDirty("source", true),
     ) : null;
-    const actions = document.createElement("div"); actions.className = "detail-actions";
-    const cancel = FTUI.actionButton(context.t("取消"), () => {
+    const cancelEdit = FTUI.actionButton(context.t("取消编辑"), () => {
       if (!FTTabReturn.returnToSource(context)) {
         context.closeTab?.(context.tabID); context.navigate("/factors");
       }
     }, {variant: "secondary"});
     const submit = FTUI.actionButton(
-      context.t("提交"), () => form.requestSubmit(), {variant: "primary"},
+      context.t(mode === "create" ? "提交" : "保存"),
+      () => form.requestSubmit(), {variant: "primary"},
     );
+    if (mode === "edit") context.toolbar.append(cancelEdit);
     context.toolbar.append(submit);
-    actions.append(cancel);
     if (familyFileInput) form.append(familyFileInput);
     const overrides = state.familyMode ? {
       overview: {save_mode: "auto"},
-      source: {save_mode: "manual"},
+      source: {save_mode: "auto"},
       members: {hidden: true},
       parameters: {editable: false},
       jobs: {
@@ -718,7 +715,7 @@
       // Family descriptive metadata belongs to family creation, not factor
       // creation; keep the shared detail surface for factor view/edit only.
       overview: {hidden: mode === "create", save_mode: "auto"},
-      source: {save_mode: "manual"},
+      source: {save_mode: "auto"},
       parameters: {save_mode: "auto"},
       jobs: {
         hidden: mode === "create" || context.testObjectTemporary === true,
@@ -736,6 +733,15 @@
         identity: identityMount,
         jobs: jobs.mount,
       },
+    });
+    let selectedTab = tabs.current();
+    tabs.root.addEventListener("object-detail-tab-change", event => {
+      const nextTab = event.detail?.key || tabs.current();
+      const previousTab = selectedTab;
+      selectedTab = nextTab;
+      if (previousTab === "source" && nextTab !== "source") {
+        void validateSourceDraft();
+      }
     });
     if (mode === "create") {
       const stateKey = `factor-create:${state.familyMode ? "family" : "factor"}`;
@@ -762,19 +768,21 @@
         },
       });
     }
-    form.append(topMount, tabs.root, status, actions);
+    form.append(topMount, tabs.root, status);
     context.content.replaceChildren(form);
     redraw();
-    if (mode === "create") {
-      FTFactorAssistance.register(context, {
-        state, name, chineseName, description, category, tabs, redraw, markDirty,
-      });
-    }
+    FTFactorAssistance.register(context, {
+      state, name, chineseName, description, category, tabs, redraw, markDirty,
+    });
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
       event.preventDefault(); submit.disabled = true; status.textContent = "";
       try {
+        if (!await validateSourceDraft()) {
+          tabs.select("source", true);
+          throw new Error(state.validationError || context.t("因子源码无法通过检查"));
+        }
         const saved = state.sourceMode === "family"
           ? await saveLibraryFactor(context, state)
           : await saveSourceFactor(context, state, {
@@ -812,6 +820,18 @@
         submit.disabled = false;
       }
     });
+
+    async function validateSourceDraft() {
+      const usesEditableSource = state.familyMode || state.sourceMode !== "family";
+      if (!usesEditableSource) {
+        tabs.setDirty("source", false);
+        return true;
+      }
+      await inspect(context, state, redraw);
+      const valid = Boolean(state.inspection && !state.validationError);
+      tabs.setDirty("source", !valid);
+      return valid;
+    }
 
     function markDirty(event) {
       const panel = event.target?.closest?.(".object-detail-tab-panel");

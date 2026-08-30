@@ -77,15 +77,15 @@
     }
     const status = document.createElement("small");
     status.className = "form-error";
-    const actions = document.createElement("div");
-    actions.className = "detail-actions";
-    const cancel = FTUI.actionButton(
-      context.t("取消"), () => definition.onCancel?.(state), {variant: "secondary"},
+    const cancelEdit = FTUI.actionButton(
+      context.t("取消编辑"), () => definition.onCancel?.(state), {variant: "secondary"},
     );
     const save = FTUI.actionButton(
-      context.t("保存"), () => form.requestSubmit(), {variant: "primary"},
+      context.t(definition.mode === "create" ? "提交" : "保存"),
+      () => form.requestSubmit(), {variant: "primary"},
     );
-    actions.append(cancel, save);
+    if (definition.mode === "edit") context.toolbar.append(cancelEdit);
+    context.toolbar.append(save);
     const definitions = window.FTObjectDetailTabs.definitions(
       definition.objectKind, definition.tabOverrides || {},
     );
@@ -95,7 +95,7 @@
       tabs: definitions.filter(item => mounts[item.key] || item.hidden !== true),
       panels: mounts,
     });
-    form.append(tabs.root, status, actions);
+    form.append(tabs.root, status);
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
@@ -112,7 +112,9 @@
     context.setHeading(definition.title, definition.subtitle || "");
     context.updateActiveTab?.({title: definition.title});
     context.content.replaceChildren(form);
-    return {form, state, status, tabs};
+    const result = {form, state, status, tabs};
+    definition.onReady?.(result);
+    return result;
 
     function markDirty(event) {
       const panel = event.target?.closest?.(".object-detail-tab-panel");

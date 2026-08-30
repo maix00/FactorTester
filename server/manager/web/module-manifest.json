@@ -244,6 +244,7 @@
       "catalog/factor-assistance.js",
       "catalog/factor-editor.js",
       "catalog/factor-object-form.js",
+      "catalog/factor-set-assistance.js",
       "catalog/factor-set-editor.js"
     ],
     "output-choice": [
@@ -637,6 +638,7 @@
     "catalog/factor-assistance.js",
     "catalog/factor-editor.js",
     "catalog/factor-object-form.js",
+    "catalog/factor-set-assistance.js",
     "catalog/factor-set-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
