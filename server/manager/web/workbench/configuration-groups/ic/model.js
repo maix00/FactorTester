@@ -18,7 +18,9 @@
     if (!Array.isArray(state.analysis.configuration_groups)) {
       state.analysis.configuration_groups = [];
     }
-    state.analysis.configuration_groups = state.analysis.configuration_groups.map(normalize);
+    state.analysis.configuration_groups = state.analysis.configuration_groups.map(
+      item => normalize(item, state.manifest),
+    );
     const selectionDeclared = Array.isArray(state.selectedICConfigurationGroupIDs);
     if (!selectionDeclared) state.selectedICConfigurationGroupIDs = [];
     const available = new Set(
@@ -43,7 +45,7 @@
       ...draft,
       config_group_id: identifier("icg", draft.config_group_id),
       batch_id: identifier("icb", draft.batch_id),
-    });
+    }, state.manifest);
     const requestedName = String(draft.name || "").trim();
     group.name = uniqueName(
       state, requestedName || `IC 配置组 ${state.analysis.configuration_groups.length + 1}`,
@@ -60,7 +62,7 @@
     );
     if (index < 0) throw new Error("IC configuration group not found");
     const current = state.analysis.configuration_groups[index];
-    const next = normalize({...current, ...structuredClone(patch)});
+    const next = normalize({...current, ...structuredClone(patch)}, state.manifest);
     if (Object.prototype.hasOwnProperty.call(patch, "name")) {
       next.name = uniqueName(state, String(patch.name || "").trim(), id);
     }
@@ -107,7 +109,7 @@
     ) || null;
   }
 
-  function normalize(value = {}) {
+  function normalize(value = {}, manifest = null) {
     const factorRef = String(value.factor_ref || "").trim();
     if (!/^factor:v2:[A-Za-z0-9_-]{43}$/.test(factorRef)) {
       throw new Error("configuration group requires one frozen factor_ref");
@@ -150,10 +152,14 @@
       return_price_basis: basis,
       analysis_attachments: Array.isArray(value.analysis_attachments)
         ? structuredClone(value.analysis_attachments) : [],
-      editor_mounted_tabs: unique([
-        "__configuration__", "factor", "product_path_selection",
-        ...(Array.isArray(value.editor_mounted_tabs) ? value.editor_mounted_tabs : []),
-      ]),
+      editor_mounted_tabs: window.FTTestConfigurationCompiler?.authoringItemMountedTabs
+        ? FTTestConfigurationCompiler.authoringItemMountedTabs(
+          manifest, value, value.editor_mounted_tabs,
+        )
+        : unique([
+          "__configuration__", "factor", "product_path_selection",
+          ...(Array.isArray(value.editor_mounted_tabs) ? value.editor_mounted_tabs : []),
+        ]),
     };
   }
 

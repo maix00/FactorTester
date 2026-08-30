@@ -57,6 +57,8 @@ _SHARED_INNER_MANUAL_TABS = (
         "kind": "product_filter",
         "mount_policy": "manual",
         "field": "productMask",
+        "item_field": "productMask",
+        "item_default": {},
         "scope_policy": "overridable",
         "independent_of": "derived_strategy",
     },
@@ -79,7 +81,12 @@ def _inner_manual_tabs(application: str, app: Any | None = None) -> tuple[dict[s
             "registration_source": {"tab": tab.key, "field": field.key},
         }
         if field_key == "ic_lags":
-            projection.update(cardinality="one", minimum=0)
+            projection.update(
+                cardinality="one",
+                minimum=0,
+                item_field="entry_delay_bars",
+                item_default=0,
+            )
         projections.append(projection)
     return tuple(projections)
 

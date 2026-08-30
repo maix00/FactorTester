@@ -27,16 +27,20 @@
       // Remove deprecated display-only aliases without making them part of
       // the authoring or execution schema again.
       removeDeprecatedDisplayMetadata(group);
-      if (!Array.isArray(group.override_mounted_tabs)) {
-        group.override_mounted_tabs = ["__strategy__", "factor", "product_path_selection"];
-      }
+      group.override_mounted_tabs = window.FTTestConfigurationCompiler?.authoringItemMountedTabs
+        ? FTTestConfigurationCompiler.authoringItemMountedTabs(
+          state.manifest, group, group.override_mounted_tabs,
+        )
+        : ["__strategy__", "factor", "product_path_selection"];
       if (!group.name) group.name = defaultName(group.batchId, group.id);
     });
     state.analysis.ls_configs.forEach(item => {
       removeDeprecatedDisplayMetadata(item);
-      if (!Array.isArray(item.override_mounted_tabs)) {
-        item.override_mounted_tabs = ["__strategy__", "factor", "product_path_selection"];
-      }
+      item.override_mounted_tabs = window.FTTestConfigurationCompiler?.authoringItemMountedTabs
+        ? FTTestConfigurationCompiler.authoringItemMountedTabs(
+          state.manifest, item, item.override_mounted_tabs,
+        )
+        : ["__strategy__", "factor", "product_path_selection"];
       if (!item.batchId) item.batchId = `batch:${item.id || "long-short"}`;
       if (!item.name) item.name = defaultName(item.batchId, item.id);
     });

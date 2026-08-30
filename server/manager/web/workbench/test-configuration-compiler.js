@@ -208,6 +208,34 @@
     return tabs.map(tab => tab.key).filter(key => mounted.has(key));
   }
 
+  function authoringItemMountedTabs(manifest, item, explicit) {
+    const editor = manifest?.strategy_editor || {};
+    const defaults = Array.isArray(editor.inner_default_tabs)
+      ? editor.inner_default_tabs : [];
+    const manual = Array.isArray(editor.inner_manual_tabs)
+      ? editor.inner_manual_tabs : [];
+    const ordered = [...defaults, ...manual];
+    const available = new Set(ordered.map(tab => String(tab?.key || "")).filter(Boolean));
+    const mounted = new Set(defaults.map(tab => tab.key).filter(Boolean));
+    for (const key of Array.isArray(explicit) ? explicit : []) {
+      if (available.has(key)) mounted.add(key);
+    }
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      const tabKey = String(field?.tab_key || "");
+      if (!available.has(tabKey)
+          || !Object.prototype.hasOwnProperty.call(item || {}, key)) continue;
+      const registeredDefault = Object.prototype.hasOwnProperty.call(field || {}, "default")
+        ? field.default : field?.value;
+      if (!sameRegisteredValue(item[key], registeredDefault)) mounted.add(tabKey);
+    }
+    for (const tab of manual) {
+      const field = String(tab?.item_field || "");
+      if (!field || !Object.prototype.hasOwnProperty.call(item || {}, field)) continue;
+      if (!sameRegisteredValue(item[field], tab.item_default)) mounted.add(tab.key);
+    }
+    return ordered.map(tab => tab.key).filter(key => mounted.has(key));
+  }
+
   function sameRegisteredValue(left, right) {
     const canonical = value => {
       if (Array.isArray(value)) return value.map(canonical);
@@ -258,7 +286,7 @@
   }
 
   window.FTTestConfigurationCompiler = Object.freeze({
-    authoringConfiguration, authoringMountedTabs, authoringSettings,
+    authoringConfiguration, authoringItemMountedTabs, authoringMountedTabs, authoringSettings,
     derivedSettingsKeys: () => [...DERIVED_SETTINGS_KEYS],
     executableConfiguration,
     executionSettings,
