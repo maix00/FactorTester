@@ -405,7 +405,10 @@
     if (key === "products") {
       await FTTestLazyCode.loadGroup("workbench-products");
       const value = await context.api("/api/catalog/product-groups");
-      const catalog = Array.isArray(value.groups) ? value.groups : [];
+      const listed = Array.isArray(value.groups) ? value.groups : [];
+      const catalog = await FTTestProducts.hydrateReferencedGroups(
+        context, state, listed,
+      );
       const selected = state.groups.filter(group => (
         group.temporary === true || group.source_kind === "transient"
         || ["inline", "test_inline"].includes(group.origin)

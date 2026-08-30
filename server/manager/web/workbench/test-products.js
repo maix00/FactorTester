@@ -28,6 +28,25 @@
     return [...new Set((values || []).map(referenceOf).filter(Boolean))];
   }
 
+  async function hydrateReferencedGroups(context, state, catalog = []) {
+    const known = new Set((catalog || []).map(groupID).filter(Boolean));
+    const missing = uniqueReferences(state.groupRefs || []).filter(ref => (
+      ref.startsWith("product-group:") && !known.has(ref)
+    ));
+    if (!missing.length) return catalog;
+    const resolved = await Promise.all(missing.map(async ref => {
+      try {
+        const value = await context.api(
+          `/api/catalog/product-groups/${encodeURIComponent(ref)}`,
+        );
+        return value?.group || null;
+      } catch (_error) {
+        return null;
+      }
+    }));
+    return [...catalog, ...resolved.filter(Boolean)];
+  }
+
   function restoreReferences(analysis = {}, ui = {}) {
     const groupedRefs = (analysis.configuration_groups || [])
       .map(item => item?.product_scope_ref).filter(Boolean);
@@ -243,6 +262,6 @@
   window.FTTestProducts = Object.freeze({
     groupID, groupLabel, projection, restoreReferences, synchronize,
     selectedGroups, selectedProjections, setSelected, selectNew, panel,
-    selectionPanel,
+    selectionPanel, hydrateReferencedGroups,
   });
 })();
