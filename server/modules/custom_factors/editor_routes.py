@@ -457,8 +457,8 @@ def api_workspace_snapshot():
         ),
         'code': 'workspace_snapshot_write_disabled',
         'next_commands': [
-            'factortester custom_factors workspace push',
-            'factortester custom_factors workspace sync',
+            'factortester factor-library workspace push',
+            'factortester factor-library workspace sync',
         ],
     }), 410
 

@@ -44,7 +44,7 @@ def prepare_entry_assessment(
         for requirement_id in requirement_ids
     }
     describe = _call_json([
-        "custom_factors",
+        "factor-library",
         "describe",
         factor_family,
         "--source",

@@ -106,7 +106,7 @@ obligations when first principles require them, and omit irrelevant lenses.
 At `factor_semantics`, inspect the exact expression revision authorized for the
 current Profile before creating empirical obligations. Read an authorized local
 worktree source directly. When local source is unavailable but source access is
-authorized, use `factortester custom_factors describe <factor-ref> --source-code
+authorized, use `factortester factor-library describe <factor-ref> --source-code
 --json`; otherwise use the same command without `--source-code` and retain the
 visibility limitation. Do not infer a private expression from execution access.
 

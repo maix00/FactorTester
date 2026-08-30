@@ -315,7 +315,7 @@ def _completed_document(decision: str) -> dict:
     }
     assessment["first_resolution_action"] = {
         "kind": "cli_evidence",
-        "action_ref": "cli:custom_factors.describe:SgCPS",
+        "action_ref": "cli:factor-library.describe:SgCPS",
         "trial_ref": "",
         "description_zh": "复用当前表达式事实包完成身份核对。",
     }
@@ -455,7 +455,7 @@ def test_node_advance_support_prepares_current_details_and_factor_describe(
         calls.append(args)
         if args[:2] == ["research-graph", "requirement-detail"]:
             return _Result(_detail(args[-1]))
-        if args[:2] == ["custom_factors", "describe"]:
+        if args[:2] == ["factor-library", "describe"]:
             return _Result(_describe())
         raise AssertionError(args)
 
@@ -471,7 +471,7 @@ def test_node_advance_support_prepares_current_details_and_factor_describe(
     assert output.exists()
     assert len(calls) == 3
     assert calls[-1] == [
-        "custom_factors", "describe", "SgCPS",
+        "factor-library", "describe", "SgCPS",
         "--source", "auto", "--debug-graph", "--json",
     ]
     assert document["selected_requirement_ids"] == [

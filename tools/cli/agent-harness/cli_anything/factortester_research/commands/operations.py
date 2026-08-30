@@ -140,13 +140,13 @@ def workspace_prepare(ctx: click.Context, do_build: bool, sync: bool, as_json: b
     session = load_session(session_path)
     commands: list[list[str]] = []
     if do_build:
-        commands.append(["custom_factors", "workspace", "build"])
+        commands.append(["factor-library", "workspace", "build"])
     if sync:
-        commands.append(["custom_factors", "workspace", "sync"])
+        commands.append(["factor-library", "workspace", "sync"])
     commands.extend(
         [
-            ["custom_factors", "workspace", "show"],
-            ["custom_factors", "workspace", "git", "status"],
+            ["factor-library", "workspace", "show"],
+            ["factor-library", "workspace", "git", "status"],
         ]
     )
     results = []
@@ -188,7 +188,7 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
     session = load_session(session_path)
     workspace_root = root or str(session.factor_source.get("workspace_root") or "")
     if sync:
-        sync_result = run_factortester(["custom_factors", "workspace", "sync"], timeout=600)
+        sync_result = run_factortester(["factor-library", "workspace", "sync"], timeout=600)
         record_event(session, "workspace_sync_before_inspect", returncode=sync_result.returncode)
         if sync_result.returncode != 0:
             record_gap(session, "Factor workspace sync failed", sync_result.stderr or sync_result.stdout, command=sync_result.argv)
@@ -196,7 +196,7 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
             raise click.ClickException(sync_result.stderr or sync_result.stdout)
         workspace_root = workspace_root or parse_workspace_root(sync_result.stdout)
     if not workspace_root:
-        show_result = run_factortester(["custom_factors", "workspace", "show"], timeout=60)
+        show_result = run_factortester(["factor-library", "workspace", "show"], timeout=60)
         if show_result.returncode != 0:
             record_gap(session, "Factor workspace root unavailable", show_result.stderr or show_result.stdout, command=show_result.argv)
             save_session(session, session_path)
@@ -208,7 +208,7 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
         raise click.ClickException("无法解析 factor workspace root")
     report = inspect_factor_source(workspace_root, factor_family)
     describe_result = run_factortester(
-        ["custom_factors", "describe", factor_family, "--source-code", "--json"],
+        ["factor-library", "describe", factor_family, "--source-code", "--json"],
         timeout=120,
     )
     if describe_result.returncode != 0:

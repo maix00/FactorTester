@@ -10,8 +10,7 @@ from typing import Any
 
 import click
 
-from tools.cli.core.context import client_from_config, ensure_child_available
-from tools.cli.core.display import module_lines
+from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.cli.modules.custom_factors.factor_library import factor_library
@@ -25,36 +24,7 @@ from tools.cli.research_metrics import (
 from tools.cli.table import render_table
 
 
-@click.group("custom_factors", invoke_without_command=True)
-@click.pass_context
-@friendly_errors
-def custom_factors(ctx: click.Context) -> None:
-    """Enter custom factors module."""
-    if ctx.invoked_subcommand is None:
-        ensure_child_available(None, "custom_factors")
-        click.echo("因子管理")
-        click.echo("下一层: factortester custom_factors list")
-        click.echo("可用功能:")
-        click.echo(
-            "  factortester factor-library "
-            "families|factors|factor-sets|parameter-configs"
-        )
-        click.echo("  factortester factor-library add|metrics|history|rank|stability|import-result|save-result")
-        click.echo("  factortester custom_factors workspace show|root|build|sync|push|merge-download")
-        click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
-        click.echo("  factortester custom_factors operators")
-
-
-@custom_factors.command("list")
-@friendly_errors
-def list_custom_factor_children() -> None:
-    """List custom factor module children."""
-    click.echo("当前位置: custom_factors")
-    for line in module_lines(client_from_config().list_modules(parent="custom_factors")):
-        click.echo(line)
-
-
-@custom_factors.command("operators")
+@factor_library.command("operators")
 @click.option("--group", "group_filter", default="", help="只显示某个算子组 key。")
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
@@ -98,7 +68,7 @@ def factor_expr_operators(group_filter: str, as_json: bool) -> None:
             click.echo(line)
 
 
-@custom_factors.command("describe")
+@factor_library.command("describe")
 @click.argument("factor_family")
 @click.option(
     "--source",
@@ -640,7 +610,7 @@ def factor_research_stability(
         click.echo(line)
 
 
-@custom_factors.group("workspace", invoke_without_command=True)
+@factor_library.group("workspace", invoke_without_command=True)
 @click.pass_context
 @friendly_errors
 def workspace(ctx: click.Context) -> None:

@@ -353,8 +353,8 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
     assert "本地 canonical 因子库" in view
     assert "Legacy quarantine" not in view
     assert "迁移" not in view
-    assert '"custom_factors", "workspace", "local-state"' in controller
-    assert '"custom_factors", "workspace", "server-state"' in controller
+    assert '"factor-library", "workspace", "local-state"' in controller
+    assert '"factor-library", "workspace", "server-state"' in controller
     assert "Process()" not in controller
     assert '"git"' not in controller
 
