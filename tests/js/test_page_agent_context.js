@@ -102,6 +102,66 @@ vm.runInThisContext(
   assert(inactiveCalls.some(call => call.url.endsWith("/publish")));
   assert(inactiveCalls.some(call => call.url.includes("/applications?")));
   inactiveBridge.dispose();
+
+  let firstPollSignal;
+  const firstBridge = window.FTPageAgentContext.create({
+    tabID: "first-active-tab",
+    isRouteCurrent: () => true,
+    api: async (url, options = {}) => {
+      if (options.method === "POST") return {success: true};
+      firstPollSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(
+          Object.assign(new Error("aborted"), {name: "AbortError"}),
+        ));
+      });
+    },
+  }, "self-profile", {
+    snapshot: () => ({schema_version: 1, revision: 0}), apply: () => {},
+  });
+  await firstBridge.start();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(firstPollSignal.aborted, false);
+
+  const secondBridge = window.FTPageAgentContext.create({
+    tabID: "second-active-tab",
+    isRouteCurrent: () => true,
+    api: async (_url, options = {}) => (
+      options.method === "POST" ? {success: true} : {applications: []}
+    ),
+  }, "self-profile", {
+    snapshot: () => ({schema_version: 1, revision: 0}), apply: () => {},
+  });
+  await secondBridge.syncOnce();
+  assert.equal(firstPollSignal.aborted, true,
+    "a newly active assisted page preempts the previous page long-poll");
+  firstBridge.dispose();
+  secondBridge.dispose();
+
+  let guardedRouteCurrent = true;
+  let guardedSignal;
+  const guardedBridge = window.FTPageAgentContext.create({
+    tabID: "route-guarded-tab",
+    isRouteCurrent: () => guardedRouteCurrent,
+    api: async (_url, options = {}) => {
+      if (options.method === "POST") return {success: true};
+      guardedSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(
+          Object.assign(new Error("aborted"), {name: "AbortError"}),
+        ));
+      });
+    },
+  }, "self-profile", {
+    snapshot: () => ({schema_version: 1, revision: 0}), apply: () => {},
+  });
+  await guardedBridge.start();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  guardedRouteCurrent = false;
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(guardedSignal.aborted, true,
+    "leaving an assisted page promptly aborts its outstanding long-poll");
+  guardedBridge.dispose();
   console.log("PASS: CLI atomically replaces the registered page document");
 })().catch(error => {
   console.error(error);
