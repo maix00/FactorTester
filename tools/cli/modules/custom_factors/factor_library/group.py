@@ -29,6 +29,9 @@ def factor_library(
         click.echo("  factors           已登记因子（公共/我的/下一级用户）")
         click.echo("  factor-sets       因子集合（我的/下一级用户）")
         click.echo("  parameter-configs 旧参数配置记录")
+        click.echo("  describe          查看因子家族源码摘要与表达式")
+        click.echo("  operators         查看 FactorExpr 算子")
+        click.echo("  workspace         管理因子工作区与 Git")
 
 
 register_factor_library_catalog_commands(factor_library)

@@ -1112,7 +1112,7 @@ def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
     assert "Do not generate the Cartesian product" in discovery
     assert "Do not load" in discovery
     assert "search the web for ordinary stable windows" in discovery
-    assert "factortester custom_factors describe <factor-ref>" in discovery
+    assert "factortester factor-library describe <factor-ref>" in discovery
     assert "self-discovery, a grill, or an external audit" in discovery
     assert "match an existing obligation category" in discovery
     assert "explicitly unclassified" in discovery

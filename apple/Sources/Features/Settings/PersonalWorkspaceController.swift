@@ -28,7 +28,7 @@ final class PersonalWorkspaceController: ObservableObject {
                 let root = URL(fileURLWithPath: rootPath, isDirectory: true)
                 let local = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
                     try await ReleaseCommand.runObject([
-                        "custom_factors", "workspace", "local-state", root.path, "--json",
+                        "factor-library", "workspace", "local-state", root.path, "--json",
                     ], executable: self.cliPath)
                 }
                 self.localFactorLibrary = CanonicalFactorLibraryState(json: local, source: "local")
@@ -37,7 +37,7 @@ final class PersonalWorkspaceController: ObservableObject {
             }
 
             let server = try await ReleaseCommand.runObject([
-                "custom_factors", "workspace", "server-state", "--json",
+                "factor-library", "workspace", "server-state", "--json",
             ], executable: self.cliPath)
             self.serverFactorLibrary = CanonicalFactorLibraryState(json: server, source: "server")
         }
@@ -47,7 +47,7 @@ final class PersonalWorkspaceController: ObservableObject {
         await perform {
             _ = try self.ensureRoot(principal: principal)
             _ = try await ReleaseCommand.runObject([
-                "custom_factors", "workspace", "push", "--branch-mode", "auto", "--json",
+                "factor-library", "workspace", "push", "--branch-mode", "auto", "--json",
             ], executable: self.cliPath)
             await self.refresh(principal: principal)
         }
@@ -57,7 +57,7 @@ final class PersonalWorkspaceController: ObservableObject {
         await perform {
             _ = try self.ensureRoot(principal: principal)
             _ = try await ReleaseCommand.runObject([
-                "custom_factors", "workspace", "sync", "--branch-mode", "force", "--json",
+                "factor-library", "workspace", "sync", "--branch-mode", "force", "--json",
             ], executable: self.cliPath)
             await self.refresh(principal: principal)
         }
