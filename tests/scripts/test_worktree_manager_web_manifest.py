@@ -14,6 +14,14 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "server" / "manager" / "web"
 
 
+def test_settings_runtime_loads_configuration_compiler_first() -> None:
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
+
+    dependencies = manifest["group_dependencies"]
+    assert "workbench-compiler" in dependencies["workbench-backtest"]
+    assert "workbench-compiler" in dependencies["workbench-ic-controls"]
+
+
 def test_manifest_matches_html_script_order_and_files() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
     template = (WEB_ROOT / manifest["entry"]).read_text(encoding="utf-8")
