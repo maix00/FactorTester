@@ -47,6 +47,8 @@ vm.runInThisContext(
 
 const context = {t: value => value};
 const definitions = window.FTObjectDetailTabs.definitions("family", {
+  overview: {save_mode: "auto"},
+  source: {save_mode: "manual"},
   members: {hidden: true},
 });
 assert.deepStrictEqual(
@@ -74,8 +76,12 @@ assert.strictEqual(tabs.current(), "overview");
 assert.strictEqual(tabs.buttons.overview.attributes["aria-selected"], "true");
 assert.strictEqual(tabs.panels.source.hidden, true);
 assert.match(
+  tabs.buttons.overview.children[0].children[1].textContent,
+  /自动保存/,
+);
+assert.match(
   tabs.buttons.source.children[0].children[1].textContent,
-  /可修改/,
+  /需保存/,
 );
 assert.match(
   tabs.buttons.parameters.children[0].children[1].textContent,

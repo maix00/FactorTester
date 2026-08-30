@@ -196,7 +196,7 @@
     );
   }
 
-  function filePicker(context, state, redraw) {
+  function filePicker(context, state, redraw, onChanged) {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".py,text/x-python";
@@ -209,6 +209,7 @@
       state.inspection = null;
       state.validationError = "";
       state.validationMessage = "";
+      onChanged?.();
       redraw();
     });
     return input;
@@ -253,15 +254,20 @@
     root.className = "factor-editor-source-controls";
     const actions = document.createElement("div");
     actions.className = "detail-actions factor-editor-source-actions";
-    const file = options.fileInput || filePicker(context, state, redraw);
+    const file = options.fileInput || filePicker(
+      context, state, redraw, options.onChanged,
+    );
     if (options.showUpload !== false) {
       const upload = FTUI.actionButton(
         context.t("上传因子源码"), () => file.click(), {variant: "secondary"},
       );
       actions.append(upload);
     }
-    const validate = FTUI.actionButton(context.t("校验源码"), () => {
-      void inspect(context, state, redraw);
+    const validate = FTUI.actionButton(context.t("保存源码"), async () => {
+      validate.disabled = true;
+      await inspect(context, state, redraw);
+      validate.disabled = false;
+      if (state.inspection && !state.validationError) options.onSaved?.();
     }, {variant: "secondary"});
     actions.append(validate);
     const editor = FTUI.codeEditor(state.sourceCode, {
@@ -635,6 +641,8 @@
       if (state.familyMode) {
         sourceMount.append(sourceControls(context, state, redraw, {
           fileInput: familyFileInput,
+          onChanged: () => tabs?.setDirty("source", true),
+          onSaved: () => tabs?.setDirty("source", false),
         }));
       } else if (state.mode === "create") {
         sourceMount.append(sourceModePicker(context, state, redraw));
@@ -643,10 +651,16 @@
           const version = sourceVersionPicker(context, state, redraw);
           if (version) sourceMount.append(version);
         } else {
-          sourceMount.append(sourceControls(context, state, redraw));
+          sourceMount.append(sourceControls(context, state, redraw, {
+            onChanged: () => tabs?.setDirty("source", true),
+            onSaved: () => tabs?.setDirty("source", false),
+          }));
         }
       } else {
-        sourceMount.append(sourceControls(context, state, redraw));
+        sourceMount.append(sourceControls(context, state, redraw, {
+          onChanged: () => tabs?.setDirty("source", true),
+          onSaved: () => tabs?.setDirty("source", false),
+        }));
       }
       const metadata = sourceMetadata(context, state);
       identityMount.replaceChildren();
@@ -675,19 +689,24 @@
       } else parameterMount.append(emptyState(context, state.familyMode
         ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
-    const familyFileInput = familyMode ? filePicker(context, state, redraw) : null;
+    const familyFileInput = familyMode ? filePicker(
+      context, state, redraw, () => tabs?.setDirty("source", true),
+    ) : null;
     const actions = document.createElement("div"); actions.className = "detail-actions";
     const cancel = FTUI.actionButton(context.t("取消"), () => {
       if (!FTTabReturn.returnToSource(context)) {
         context.closeTab?.(context.tabID); context.navigate("/factors");
       }
     }, {variant: "secondary"});
-    const save = FTUI.actionButton(
-      context.t("保存"), () => form.requestSubmit(), {variant: "primary"},
+    const submit = FTUI.actionButton(
+      context.t("提交"), () => form.requestSubmit(), {variant: "primary"},
     );
-    actions.append(cancel, save);
+    context.toolbar.append(submit);
+    actions.append(cancel);
     if (familyFileInput) form.append(familyFileInput);
     const overrides = state.familyMode ? {
+      overview: {save_mode: "auto"},
+      source: {save_mode: "manual"},
       members: {hidden: true},
       parameters: {editable: false},
       jobs: {
@@ -698,7 +717,9 @@
       // A factor is defined by its frozen family formula and parameter values.
       // Family descriptive metadata belongs to family creation, not factor
       // creation; keep the shared detail surface for factor view/edit only.
-      overview: {hidden: mode === "create"},
+      overview: {hidden: mode === "create", save_mode: "auto"},
+      source: {save_mode: "manual"},
+      parameters: {save_mode: "auto"},
       jobs: {
         hidden: mode === "create" || context.testObjectTemporary === true,
         onActivate: jobs.load,
@@ -752,7 +773,7 @@
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
-      event.preventDefault(); save.disabled = true; status.textContent = "";
+      event.preventDefault(); submit.disabled = true; status.textContent = "";
       try {
         const saved = state.sourceMode === "family"
           ? await saveLibraryFactor(context, state)
@@ -788,13 +809,14 @@
         context.navigate(path);
       } catch (error) {
         status.textContent = error.message || context.t("因子保存失败");
-        save.disabled = false;
+        submit.disabled = false;
       }
     });
 
     function markDirty(event) {
       const panel = event.target?.closest?.(".object-detail-tab-panel");
-      if (panel?.dataset?.tabKey) tabs.setDirty(panel.dataset.tabKey, true);
+      const key = panel?.dataset?.tabKey;
+      if (key) tabs.setDirty(key, key === "source");
     }
   }
 
