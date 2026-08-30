@@ -65,7 +65,7 @@
         state.sourceMode = String(document.source?.mode || state.sourceMode);
         state.sourceCode = String(document.source?.code || "");
         state.parameterValues = structuredClone(document.parameter_values || {});
-        redraw(); markDirty();
+        redraw(); markDirty("source");
       },
     }, {
       pageKind: `${state.familyMode ? "factor-family" : "factor"}-${state.mode}`,

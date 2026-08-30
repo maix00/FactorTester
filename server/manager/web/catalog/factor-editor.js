@@ -170,6 +170,18 @@
     ]).filter(([alias]) => alias));
   }
 
+  function reconcileParameterValues(parameters, previous = {}) {
+    return Object.fromEntries((parameters || []).map(parameter => {
+      const alias = parameter.alias || parameter.name;
+      const fallback = parameter.value ?? parameter.default_value ?? "";
+      return [
+        alias,
+        Object.prototype.hasOwnProperty.call(previous || {}, alias)
+          ? previous[alias] : fallback,
+      ];
+    }).filter(([alias]) => alias));
+  }
+
   function normalizedInspection(value) {
     const item = value || {};
     const factor = item.factor || item.frozen_factor || {};
@@ -227,18 +239,29 @@
     state.validationMessage = context.t("正在校验源码并解析参数…");
     redraw();
     try {
-      const value = await context.api("/custom-factors/api/validate", {
+      const parsed = await context.api("/custom-factors/api/validate", {
         method: "POST",
-        body: JSON.stringify({
-          source_code: state.sourceCode,
-          params: state.parameterValues || {},
-        }),
+        body: JSON.stringify({source_code: state.sourceCode}),
       });
+      if (!parsed.valid) {
+        throw new Error(parsed.error || context.t("因子源码无法通过检查"));
+      }
+      const parameterValues = reconcileParameterValues(
+        parsed.params || [], state.parameterValues,
+      );
+      const value = !state.familyMode && Object.keys(parameterValues).length
+        ? await context.api("/custom-factors/api/validate", {
+          method: "POST",
+          body: JSON.stringify({
+            source_code: state.sourceCode,
+            params: parameterValues,
+          }),
+        }) : parsed;
       if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
       state.inspection = normalizedInspection(value);
       state.validationError = "";
       state.validationMessage = context.t("源码有效，参数已解析");
-      state.parameterValues = defaults(value.params || []);
+      state.parameterValues = parameterValues;
     } catch (error) {
       state.inspection = null;
       state.validationError = error.message || context.t("因子源码无法通过检查");
@@ -833,9 +856,11 @@
       return valid;
     }
 
-    function markDirty(event) {
-      const panel = event.target?.closest?.(".object-detail-tab-panel");
-      const key = panel?.dataset?.tabKey;
+    function markDirty(eventOrKey) {
+      const panel = typeof eventOrKey === "string" ? null
+        : eventOrKey?.target?.closest?.(".object-detail-tab-panel");
+      const key = typeof eventOrKey === "string"
+        ? eventOrKey : panel?.dataset?.tabKey;
       if (key) tabs.setDirty(key, key === "source");
     }
   }
@@ -874,5 +899,5 @@
     return row;
   }
 
-  window.FTFactorEditor = Object.freeze({render});
+  window.FTFactorEditor = Object.freeze({render, reconcileParameterValues});
 })();
