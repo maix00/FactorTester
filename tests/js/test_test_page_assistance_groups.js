@@ -17,6 +17,10 @@ global.FTTestConfiguration = {configurationPayload: state => state.payload};
 global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...(values || {})}),
   authoringMountedTabs: (_manifest, _settings, saved) => [...(saved || [])],
+  authoringItemMountedTabs: (manifest, _item, saved) => [
+    ...(manifest.strategy_editor?.inner_default_tabs || []).map(tab => tab.key),
+    ...(saved || []),
+  ],
   executionSettings: (_manifest, values) => ({...(values || {})}),
   derivedSettingsKeys: () => ["execution", "local_settings", "settings"],
   authoringConfiguration: configuration => structuredClone(configuration),
@@ -58,6 +62,9 @@ const group = {
 const state = {
   kind: "backtest", manifest: {
     research_configuration_schema_version: 3,
+    strategy_editor: {inner_default_tabs: [
+      {key: "__strategy__"}, {key: "factor"}, {key: "product_path_selection"},
+    ]},
     configuration_item_contract: {
       schema_version: 1, item_kind: "strategy", collection_key: "groups",
       min_items: 1,
@@ -113,7 +120,9 @@ registration.importDocument({
   configuration: state.payload,
   run_fields: {task_name: "Self 写入名称", output_requests: ["period_returns"]},
 });
-assert.deepEqual(state.analysis.groups, [group]);
+assert.deepEqual(state.analysis.groups, [{...group, override_mounted_tabs: [
+  "__strategy__", "factor", "product_path_selection",
+]}]);
 assert.equal(state.runValues.task_name, "Self 写入名称");
 assert.deepEqual(state.outputRequests, ["period_returns"]);
 assert.equal(initialized, 1, "imported strategy groups enter the normal UI model");

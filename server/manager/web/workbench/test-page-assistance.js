@@ -100,6 +100,20 @@
       );
       ui.mount_policy_version = 2;
     }
+    const itemContract = state.manifest?.configuration_item_contract || {};
+    const collection = document.configuration?.analyses?.[state.kind]?.[
+      itemContract.collection_key
+    ];
+    const mountedKey = state.kind === "ic"
+      ? "editor_mounted_tabs" : "override_mounted_tabs";
+    if (Array.isArray(collection)) {
+      for (const item of collection) {
+        if (!item || typeof item !== "object") continue;
+        item[mountedKey] = FTTestConfigurationCompiler.authoringItemMountedTabs(
+          state.manifest, item, item[mountedKey],
+        );
+      }
+    }
     document.configuration = FTTestConfigurationCompiler.executableConfiguration(
       document.configuration, state.kind, state.manifest,
     );

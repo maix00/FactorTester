@@ -6,6 +6,16 @@ global.window = globalThis;
 global.FTTestConfigurationCompiler = {
   authoringSettings: (_manifest, values) => ({...values}),
   authoringMountedTabs: (_manifest, _settings, saved) => [...(saved || [])],
+  authoringItemMountedTabs: (manifest, item, saved) => {
+    const defaults = manifest.strategy_editor?.inner_default_tabs || [];
+    const manual = manifest.strategy_editor?.inner_manual_tabs || [];
+    const mounted = new Set(defaults.map(tab => tab.key));
+    for (const key of saved || []) mounted.add(key);
+    for (const tab of manual) {
+      if (item[tab.item_field] !== tab.item_default) mounted.add(tab.key);
+    }
+    return [...defaults, ...manual].map(tab => tab.key).filter(key => mounted.has(key));
+  },
   executionSettings: (_manifest, values) => ({...values}),
   derivedSettingsKeys: () => ["execution", "local_settings", "settings"],
   authoringConfiguration: (configuration, kind) => {
@@ -142,6 +152,15 @@ for (const kind of ["backtest", "ic"]) {
           groupIndex: {type: "integer", title: "分组序号"},
         },
       }},
+      strategy_editor: {
+        inner_default_tabs: [
+          {key: kind === "ic" ? "__configuration__" : "__strategy__"},
+          {key: "factor"}, {key: "product_path_selection"},
+        ],
+        inner_manual_tabs: kind === "ic" ? [
+          {key: "delay", item_field: "entry_delay_bars", item_default: 0},
+        ] : [],
+      },
       run_fields: [
         {key: "task_name", label: "任务名称", placement: "run_identity", default: ""},
         {key: "output_requests", label: "结果与生成物", placement: "outputs",
@@ -236,6 +255,14 @@ const canonicalState = {
   kind: "ic",
   manifest: {defaults: {
     start_date: {}, end_date: {}, start_time: {}, end_time: {},
+  }, configuration_item_contract: {collection_key: "configuration_groups"},
+  strategy_editor: {
+    inner_default_tabs: [
+      {key: "__configuration__"}, {key: "factor"}, {key: "product_path_selection"},
+    ],
+    inner_manual_tabs: [
+      {key: "delay", item_field: "entry_delay_bars", item_default: 0},
+    ],
   }},
   values: {
     start_date: "", end_date: "", start_time: "00:00", end_time: "23:59",
@@ -243,7 +270,10 @@ const canonicalState = {
 };
 const canonical = FTTestPageAssistance.canonicalDocument(canonicalState, {
   configuration: {
-    analyses: {ic: {}},
+    analyses: {ic: {configuration_groups: [
+      {config_group_id: "ic-1", entry_delay_bars: 2},
+      {config_group_id: "ic-2", entry_delay_bars: 0},
+    ]}},
     ui: {ic: {settings: {
       start_date: "2024-01-01", end_date: "2025-01-31",
       start_time: "09:00", end_time: "15:00",
@@ -258,6 +288,16 @@ assert.deepEqual(
   canonical.configuration.analyses.ic.execution.settings,
   canonical.configuration.ui.ic.settings,
   "the applied page state and executable RunSpec use one canonical value set",
+);
+assert.deepEqual(
+  canonical.configuration.analyses.ic.configuration_groups[0].editor_mounted_tabs,
+  ["__configuration__", "factor", "product_path_selection", "delay"],
+  "a non-default item field mounts its registered inner tab",
+);
+assert.deepEqual(
+  canonical.configuration.analyses.ic.configuration_groups[1].editor_mounted_tabs,
+  ["__configuration__", "factor", "product_path_selection"],
+  "an untouched default does not mount an optional inner tab",
 );
 
 const importState = {

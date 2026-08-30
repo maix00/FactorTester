@@ -1488,11 +1488,19 @@ def test_nested_strategy_editor_contract_is_shared_by_backtest_and_ic() -> None:
             assert delay["field"] == "ic_lags"
             assert delay["cardinality"] == "one"
             assert delay["minimum"] == 0
+            assert delay["item_field"] == "entry_delay_bars"
+            assert delay["item_default"] == 0
             assert delay["registration_source"] == {
                 "tab": "delay", "field": "ic_lags",
             }
         else:
             assert "delay" not in manual_keys
+            product_filter = next(
+                item for item in contract["inner_manual_tabs"]
+                if item["key"] == "trading_product_filter"
+            )
+            assert product_filter["item_field"] == "productMask"
+            assert product_filter["item_default"] == {}
         assert contract["outer_scope_tabs"]["factor"]["selection_fields"] == [
             "factor_candidates",
         ]
