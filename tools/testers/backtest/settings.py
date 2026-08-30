@@ -61,6 +61,8 @@ def register_group_test_settings(app: Any) -> None:
             "min_items": 1,
             "create_template": {
                 "id": "<unique-strategy-id>",
+                "batchId": "<shared-addition-batch-id>",
+                "name": "<strategy-name>",
                 "factor_candidate_refs": ["<factor-ref>"],
                 "product_path_selection": {
                     "product_path_selection_id": "<product-group-ref>",
@@ -72,14 +74,28 @@ def register_group_test_settings(app: Any) -> None:
                 "factor_candidate_refs": "field:factor_candidates",
                 "product_path_selection": "field:product_path_selection",
             },
+            "batch_contract": {
+                "identity_field": "batchId",
+                "semantics": "one_addition_event",
+                "shared_for_partition_members": True,
+                "partition_fields": ["splitCount", "groupIndex"],
+                "instruction": (
+                    "Strategies created as the members of one N-group partition "
+                    "must share one batchId; vary groupIndex from 1 through splitCount."
+                ),
+            },
             "schema": {
                 "type": "object",
                 "required": [
-                    "id", "factor_candidate_refs", "product_path_selection",
+                    "id", "batchId", "name", "factor_candidate_refs", "product_path_selection",
                     "splitCount", "groupIndex",
                 ],
                 "properties": {
                     "id": {"type": "string", "minLength": 1, "title": "策略 ID"},
+                    "batchId": {
+                        "type": "string", "minLength": 1, "title": "添加批次 ID",
+                    },
+                    "name": {"type": "string", "minLength": 1, "title": "策略名称"},
                     "factor_candidate_refs": {
                         "type": "array", "minItems": 1, "title": "因子候选",
                         "items": {
