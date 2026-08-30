@@ -10,7 +10,7 @@ vm.runInThisContext(
   {filename: "test-configuration-compiler.js"},
 );
 
-const manifest = {defaults: {
+const manifest = {research_configuration_schema_version: 3, defaults: {
   start_date: {tab_key: "time", default: ""},
   end_date: {tab_key: "time", default: ""},
   start_time: {tab_key: "time", default: "00:00"},
@@ -21,7 +21,7 @@ const manifest = {defaults: {
 ]}, default_mounted_tabs: {"local-settings": ["unused"]}};
 for (const kind of ["backtest", "ic", "future-test-kind"]) {
   const configuration = {
-    schema_version: 2,
+    schema_version: 3,
     analyses: {[kind]: {
       local_settings: {start_date: "wrong"},
       settings: {end_date: "wrong"},
