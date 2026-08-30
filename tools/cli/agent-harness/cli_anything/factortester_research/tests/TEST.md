@@ -567,7 +567,7 @@ feature.
 ## Unit test plan
 
 - `core/entry_preparation/factor_facts.py`
-  - Compact the real `custom_factors describe --debug-graph` response.
+  - Compact the real `factor-library describe --debug-graph` response.
   - Preserve parameter, fixed `ColumnRef`, AST identity and deterministic LaTeX facts.
   - Do not retain source code, full parameter option catalogs or the full debug payload.
 - `core/entry_preparation/skeleton.py`

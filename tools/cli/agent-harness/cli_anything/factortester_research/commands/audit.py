@@ -130,9 +130,9 @@ def decision_poor_result(ctx: click.Context, reason: str, evidence: str, as_json
         return
     click.echo("状态: factor_improvement_required")
     click.echo("下一步:")
-    click.echo("  factortester custom_factors workspace git diff")
+    click.echo("  factortester factor-library workspace git diff")
     click.echo("  编辑 workspace 中的因子源码/参数")
-    click.echo("  factortester custom_factors workspace push")
+    click.echo("  factortester factor-library workspace push")
     click.echo("  重新运行 workspace inspect、IC、类型分析和回测")
 
 

@@ -67,7 +67,7 @@ def build_factor_research_plan(
         {
             "phase": "inspect_factor_expr_dsl",
             "purpose": "确认 FactorExpr 算子、输入窗口和无未来函数约束。",
-            "command": "factortester custom_factors operators",
+            "command": "factortester factor-library operators",
         },
         {
             "phase": "prepare_factor_workspace",

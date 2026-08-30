@@ -8,6 +8,14 @@ from tools.cli.app import cli
 from tools.cli.modules.custom_factors import controller
 
 
+def test_factor_library_is_the_only_public_factor_cli_entry() -> None:
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0
+    assert "factor-library" in result.output
+    assert "custom_factors" not in result.output
+
+
 class _CatalogClient:
     def __init__(self) -> None:
         self.include_subordinates = False
@@ -189,7 +197,7 @@ def test_owner_qualified_describe_resolves_metadata_without_source(
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "custom_factors",
+        "factor-library",
         "describe",
         "18717974771:SgCCS",
         "--source",
@@ -214,7 +222,7 @@ def test_owner_qualified_describe_rejects_cross_owner_source_read(
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "custom_factors",
+        "factor-library",
         "describe",
         "18717974771:SgCCS",
         "--source-code",
@@ -231,7 +239,7 @@ def test_describe_reports_fixed_column_refs_from_validation(monkeypatch) -> None
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "custom_factors",
+        "factor-library",
         "describe",
         "SgCCS",
         "--source",

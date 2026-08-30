@@ -563,7 +563,7 @@ def _sync_policy_workspace(root: str) -> bool:
         "1. Define or edit factors in `custom_factors/` and parameter candidates through "
         "the CLI factor-library commands.\n"
         "2. Draft policy ideas in `policies/`.\n"
-        "3. Use `factortester custom_factors workspace git status|diff|commit` to keep "
+        "3. Use `factortester factor-library workspace git status|diff|commit` to keep "
         "the experiment reproducible.\n"
         "4. Run CLI backtests against selected product groups and compare results.\n",
     )
