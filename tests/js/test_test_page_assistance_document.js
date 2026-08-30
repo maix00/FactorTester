@@ -333,6 +333,11 @@ const importState = {
   kind: "backtest", workspace: null,
   manifest: {research_configuration_schema_version: 3}, values: {}, analysis: {},
   settingsMountedTabs: [], outputRequests: [], selectedICConfigurationGroupIDs: [],
+  lazy: Object.fromEntries(["factors", "products", "categories", "templates", "outputs"]
+    .map(key => [key, {status: "ready", error: "stale", promise: Promise.resolve()}])),
+  productReferenceHydration: {status: "ready", error: "", promise: null},
+  settingsTabLoads: {product_path_selection: {status: "ready"}},
+  settingsLoadedTabs: new Set(["product_path_selection"]),
 };
 const configurationRuntime = global.FTTestConfiguration;
 delete global.FTTestConfiguration;
@@ -366,6 +371,12 @@ registeredAdapter.importDocument({
   run_fields: {},
 });
 assert.equal(restored, 2, "document state is restored before the deferred page rebuild");
+for (const record of Object.values(importState.lazy)) {
+  assert.deepEqual(record, {status: "idle", error: "", promise: null});
+}
+assert.equal(importState.productReferenceHydration.status, "idle");
+assert.deepEqual(Object.keys(importState.settingsTabLoads), []);
+assert.equal(importState.settingsLoadedTabs.size, 0);
 registeredAdapter.afterApply();
 assert.equal(restored, 3, "the existing workspace restore helpers rebuild the page");
 assert.deepEqual(importState.analysis, {groups: [], execution: {settings: {}}});

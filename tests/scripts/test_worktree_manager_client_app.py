@@ -2891,7 +2891,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
 
     script = scripts["tests"]
     assert 'context.api("/api/catalog/factors")' in script
-    assert 'context.api("/api/catalog/product-groups"' in script
+    assert (
+        'context.api("/api/catalog/product-groups?view=summary"' in script
+    )
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
     assert "return_freq" not in scripts["test-configuration-compiler"]
