@@ -2,27 +2,27 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
-from tools.cli.app import cli
-from tools.cli.release.factor_worktree import (
-    CanonicalFactorRepoStore,
-    apply_factor_worktree_binding,
-    plan_factor_worktree_binding,
-    rollback_factor_worktree_binding,
-    verify_factor_worktree_binding,
-)
-from tools.cli.release import factor_worktree
-from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
 from server.manager.services.profile_factor_worktree import (
     ensure_server_profile_factor_worktree,
 )
-
+from tools.cli.app import cli
+from tools.cli.release import factor_worktree
+from tools.cli.release.factor_worktree import (
+    CanonicalFactorRepoStore,
+    apply_factor_worktree_binding,
+    ensure_factor_worktree_binding,
+    plan_factor_worktree_binding,
+    rollback_factor_worktree_binding,
+    verify_factor_worktree_binding,
+)
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 OWNER = "factor-owner"
 
@@ -182,6 +182,24 @@ def test_two_profiles_use_isolated_branches_over_shared_object_store(
     assert path_b.is_dir()
 
 
+def test_create_is_the_single_idempotent_lifecycle_entry(tmp_path: Path) -> None:
+    repo, _ = _canonical(tmp_path)
+    client_root = tmp_path / "support"
+    store = LocalProfileStore(client_root)
+    _profile(store, tmp_path, "maxa")
+    CanonicalFactorRepoStore(client_root).register(repo, owner_ref=OWNER)
+
+    created = ensure_factor_worktree_binding(client_root, "maxa")
+    existing = ensure_factor_worktree_binding(client_root, "maxa")
+
+    assert created["status"] == "created"
+    assert created["created"] is True
+    assert created["verification"]["valid"] is True
+    assert existing["status"] == "existing"
+    assert existing["created"] is False
+    assert existing["binding"] == created["binding"]
+
+
 def test_server_profile_adopts_portable_empty_factor_worktree_directory(
     tmp_path: Path,
 ) -> None:
@@ -314,7 +332,7 @@ def test_unchecked_profile_branch_behind_canonical_base_is_recovered(
     ) == ""
 
 
-def test_cli_requires_preview_and_keeps_sync_manual(
+def test_cli_create_is_idempotent_and_keeps_sync_manual(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -339,16 +357,21 @@ def test_cli_requires_preview_and_keeps_sync_manual(
         "--release-profile", str(monkey_profile),
     ])
     assert registered.exit_code == 0, registered.output
-    output = tmp_path / "plan.json"
-    preview = runner.invoke(cli, [
-        "factor-library", "profile", "plan", "maxa",
-        "--output", str(output),
+    created = runner.invoke(cli, [
+        "factor-library", "profile", "create", "maxa",
         "--release-profile", str(monkey_profile),
     ])
-    assert preview.exit_code == 0, preview.output
-    value = json.loads(preview.output)
-    assert value["ready"] is True
-    assert value["sync_policy"]["auto_push"] is False
-    assert value["sync_policy"]["auto_merge"] is False
-    assert output.is_file()
-    assert not Path(value["worktree_path"]).exists()
+    assert created.exit_code == 0, created.output
+    value = json.loads(created.output)
+    assert value["status"] == "created"
+    assert value["verification"]["valid"] is True
+    assert value["binding"]["sync_policy"]["auto_push"] is False
+    assert value["binding"]["sync_policy"]["auto_merge"] is False
+    assert Path(value["binding"]["worktree_path"]).is_dir()
+
+    repeated = runner.invoke(cli, [
+        "factor-library", "profile", "create", "maxa",
+        "--release-profile", str(monkey_profile),
+    ])
+    assert repeated.exit_code == 0, repeated.output
+    assert json.loads(repeated.output)["status"] == "existing"
