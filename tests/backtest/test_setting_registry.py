@@ -28,7 +28,7 @@ def test_backtest_strategy_contract_is_backend_registered() -> None:
     assert contract["schema_version"] == 1
     assert contract["item_kind"] == "strategy"
     assert contract["schema"]["required"] == [
-        "id", "factor_candidate_refs", "product_path_selection",
+        "id", "batchId", "name", "factor_candidate_refs", "product_path_selection",
         "splitCount", "groupIndex",
     ]
     assert contract["schema"]["properties"]["groupIndex"] == {
@@ -36,6 +36,8 @@ def test_backtest_strategy_contract_is_backend_registered() -> None:
     }
     assert contract["create_template"] == {
         "id": "<unique-strategy-id>",
+        "batchId": "<shared-addition-batch-id>",
+        "name": "<strategy-name>",
         "factor_candidate_refs": ["<factor-ref>"],
         "product_path_selection": {
             "product_path_selection_id": "<product-group-ref>",
@@ -47,15 +49,31 @@ def test_backtest_strategy_contract_is_backend_registered() -> None:
         "factor_candidate_refs": "field:factor_candidates",
         "product_path_selection": "field:product_path_selection",
     }
+    assert contract["batch_contract"] == {
+        "identity_field": "batchId",
+        "semantics": "one_addition_event",
+        "shared_for_partition_members": True,
+        "partition_fields": ["splitCount", "groupIndex"],
+        "instruction": (
+            "Strategies created as the members of one N-group partition "
+            "must share one batchId; vary groupIndex from 1 through splitCount."
+        ),
+    }
     item = {
         **contract["create_template"],
         "id": "strategy-agent-1",
+        "batchId": "batch:agent-1",
+        "name": "Agent strategy 1",
         "factor_candidate_refs": [f"factor:v2:{'a' * 43}"],
         "product_path_selection": {
             "product_path_selection_id": "product-group:agent-1",
         },
     }
     validate_document(contract["schema"], item)
+    with pytest.raises(ValueError, match="batchId"):
+        validate_document(contract["schema"], {
+            key: value for key, value in item.items() if key != "batchId"
+        })
 
 
 def test_ic_configuration_group_contract_teaches_canonical_creation() -> None:
@@ -73,6 +91,7 @@ def test_ic_configuration_group_contract_teaches_canonical_creation() -> None:
         "factor_ref": "field:factor_candidates",
         "product_scope_ref": "field:product_path_selection",
     }
+    assert "batch_contract" not in contract
     item = {
         **contract["create_template"],
         "config_group_id": "icg-agent-1",
