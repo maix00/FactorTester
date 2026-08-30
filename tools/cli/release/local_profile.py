@@ -432,11 +432,11 @@ class LocalProfileStore:
                 worktree_path if worktree_available else str(workspace_root)
             ),
             "next_command": (
-                "factortester client profile factor-worktree verify "
+                "factortester factor-library profile verify "
                 f"{profile_id} --run-pyright"
                 if binding
                 else (
-                    "factortester client profile factor-worktree plan "
+                    "factortester factor-library profile plan "
                     f"{profile_id} --output {json.dumps(str(plan_path))}"
                 )
             ),

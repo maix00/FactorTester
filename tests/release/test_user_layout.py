@@ -128,7 +128,7 @@ def test_profile_cli_has_no_legacy_layout_commands(tmp_path, monkeypatch):
     outside = tmp_path / "outside-factor-library"
     outside.mkdir()
     rejected = runner.invoke(cli, [
-        "client", "profile", "factor-worktree", "canonical-register",
+        "factor-library", "profile", "canonical-register",
         "--path", str(outside), "--owner-ref", OWNER,
         "--release-profile", str(release),
     ])

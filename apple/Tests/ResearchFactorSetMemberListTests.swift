@@ -9,7 +9,7 @@ final class ResearchFactorSetMemberListTests: XCTestCase {
                 targetRef: target, offset: 50, limit: 50
             ),
             [
-                "client", "profile", "factor-worktree", "factor-set",
+                "factor-library", "profile", "factor-set",
                 "members", "--target-ref", target,
                 "--offset", "50", "--limit", "50", "--json",
             ]

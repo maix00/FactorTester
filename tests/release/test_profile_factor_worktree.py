@@ -333,7 +333,7 @@ def test_cli_requires_preview_and_keeps_sync_manual(
     }))
     runner = CliRunner()
     registered = runner.invoke(cli, [
-        "client", "profile", "factor-worktree", "canonical-register",
+        "factor-library", "profile", "canonical-register",
         "--path", str(repo),
         "--owner-ref", OWNER,
         "--release-profile", str(monkey_profile),
@@ -341,7 +341,7 @@ def test_cli_requires_preview_and_keeps_sync_manual(
     assert registered.exit_code == 0, registered.output
     output = tmp_path / "plan.json"
     preview = runner.invoke(cli, [
-        "client", "profile", "factor-worktree", "plan", "maxa",
+        "factor-library", "profile", "plan", "maxa",
         "--output", str(output),
         "--release-profile", str(monkey_profile),
     ])

@@ -141,11 +141,27 @@ def test_factor_library_families_uses_server_scopes(monkeypatch) -> None:
 def test_factor_library_is_top_level_and_internal_catalog_is_hidden() -> None:
     root_help = CliRunner().invoke(cli, ["--help"])
     client_help = CliRunner().invoke(cli, ["client", "--help"])
+    factor_help = CliRunner().invoke(cli, ["factor-library", "--help"])
+    profile_help = CliRunner().invoke(
+        cli, ["factor-library", "profile", "--help"],
+    )
+    client_profile_help = CliRunner().invoke(cli, ["client", "profile", "--help"])
 
     assert root_help.exit_code == 0
     assert "factor-library" in root_help.output
     assert client_help.exit_code == 0
     assert "catalog" not in client_help.output
+    assert factor_help.exit_code == 0
+    for removed in (
+        "import-result", "save-result", "metrics", "history", "rank",
+        "stability",
+    ):
+        assert removed not in factor_help.output
+    assert "profile" not in factor_help.output
+    assert profile_help.exit_code == 0
+    assert "families" in profile_help.output
+    assert client_profile_help.exit_code == 0
+    assert "factor-worktree" not in client_profile_help.output
 
 
 def test_factor_library_factors_and_sets_share_web_projection(monkeypatch) -> None:
