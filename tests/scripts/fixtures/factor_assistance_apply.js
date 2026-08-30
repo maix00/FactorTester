@@ -54,4 +54,13 @@ assert.deepStrictEqual(
   {$F: "5m", $Rev: "0"},
   "source validation must discard parameters not declared by the new source",
 );
+const visibleInput = {value: ""};
+const fieldRow = window.FTFactorEditor.bindFieldValue({}, visibleInput);
+fieldRow.value = "Aroon指标下轨";
+assert.equal(
+  visibleInput.value, "Aroon指标下轨",
+  "assistance must write the visible input instead of a property on its row",
+);
+visibleInput.value = "自编";
+assert.equal(fieldRow.value, "自编");
 console.log("ok");

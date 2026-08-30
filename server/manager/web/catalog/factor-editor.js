@@ -877,7 +877,16 @@
     input.value = value || "";
     input.readOnly = options.readOnly === true;
     input.required = options.required === true;
-    return field(labelText, input);
+    return bindFieldValue(field(labelText, input), input);
+  }
+
+  function bindFieldValue(row, input) {
+    Object.defineProperty(row, "value", {
+      configurable: true,
+      get: () => input.value,
+      set: value => { input.value = value ?? ""; },
+    });
+    return row;
   }
 
   function field(labelText, input) {
@@ -899,5 +908,7 @@
     return row;
   }
 
-  window.FTFactorEditor = Object.freeze({render, reconcileParameterValues});
+  window.FTFactorEditor = Object.freeze({
+    render, reconcileParameterValues, bindFieldValue,
+  });
 })();
