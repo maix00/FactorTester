@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
-from typing import Any
 import uuid
+from hashlib import sha256
+from pathlib import Path
+from typing import Any
 
 from .authoring_runtime import (
     AUTHORING_CONTRACT_ID,
@@ -23,7 +23,6 @@ from .local_profile import LocalProfileStore
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
-
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _HOOK_ENV = {
@@ -348,6 +347,76 @@ def apply_factor_worktree_binding(
     )
     store.save(profile)
     return receipt
+
+
+def ensure_factor_worktree_binding(
+    client_root: Path,
+    profile_id: str,
+    *,
+    branch: str = "",
+    worktree_path: Path | None = None,
+    source_sync_enabled: bool = False,
+) -> dict[str, Any]:
+    """Create or safely restore one Profile factor-worktree binding.
+
+    Planning, verification, repair and publication rollback are implementation
+    details of this idempotent operation.  Callers must not orchestrate those
+    phases independently.
+    """
+    root = validate_client_root(client_root)
+    profile = LocalProfileStore(root).load(profile_id)
+    binding = profile.get("factor_workspace_binding") or {}
+    if binding:
+        verification = verify_factor_worktree_binding(root, profile_id)
+        if verification["valid"]:
+            return {
+                "schema_version": 1,
+                "status": "existing",
+                "created": False,
+                "profile_id": profile_id,
+                "binding": binding,
+                "verification": verification,
+            }
+        repaired = repair_factor_worktree_binding(
+            root,
+            profile_id,
+            run_pyright=False,
+        )
+        if not repaired["valid"]:
+            raise ValueError("factor worktree could not be safely restored")
+        return {
+            "schema_version": 1,
+            "status": "restored",
+            "created": False,
+            "profile_id": profile_id,
+            "binding": LocalProfileStore(root).load(profile_id)[
+                "factor_workspace_binding"
+            ],
+            "verification": repaired,
+        }
+
+    plan = plan_factor_worktree_binding(
+        root,
+        profile_id,
+        branch=branch,
+        worktree_path=worktree_path,
+        source_sync_enabled=source_sync_enabled,
+    )
+    receipt = apply_factor_worktree_binding(root, plan)
+    verification = verify_factor_worktree_binding(root, profile_id)
+    if not verification["valid"]:
+        raise ValueError("created factor worktree failed verification")
+    return {
+        "schema_version": 1,
+        "status": "created",
+        "created": True,
+        "profile_id": profile_id,
+        "binding": LocalProfileStore(root).load(profile_id)[
+            "factor_workspace_binding"
+        ],
+        "receipt": receipt,
+        "verification": verification,
+    }
 
 
 def verify_factor_worktree_binding(

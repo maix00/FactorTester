@@ -393,7 +393,6 @@ class LocalProfileStore:
         worktree = Path(worktree_path) if worktree_path else None
         worktree_available = bool(worktree and worktree.is_dir())
         commit, commit_kind = _factor_worktree_commit(binding, worktree)
-        plan_path = workspace_root / "factor-worktree-plan.json"
         receipt = {
             "schema_version": 2,
             "profile_id": profile_id,
@@ -432,13 +431,9 @@ class LocalProfileStore:
                 worktree_path if worktree_available else str(workspace_root)
             ),
             "next_command": (
-                "factortester factor-library profile verify "
-                f"{profile_id} --run-pyright"
-                if binding
-                else (
-                    "factortester factor-library profile plan "
-                    f"{profile_id} --output {json.dumps(str(plan_path))}"
-                )
+                ""
+                if worktree_available
+                else f"factortester factor-library profile create {profile_id}"
             ),
         }
         encoded = json.dumps(
