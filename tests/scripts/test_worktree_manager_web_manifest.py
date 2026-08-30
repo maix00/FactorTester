@@ -2381,7 +2381,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
         encoding="utf-8",
     )
-    detail = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
+    parameter_editor = (WEB_ROOT / "catalog" / "factor-parameter-editor.js").read_text(
         encoding="utf-8",
     )
 
@@ -2391,10 +2391,14 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
         "context.toolbar.append(save)",
     )
     assert "editor.syncFromState()" in set_editor
-    assert 'parameter.type === "FactorParam"' in detail
-    assert 'createLabel: context.t("新建因子")' in detail
-    assert "factor-param-reference-control" in detail
-    assert "选择因子/列引用，或手工输入表达式" in detail
+    assert 'parameter.type === "FactorParam"' in parameter_editor
+    assert 'createLabel: context.t("新建因子")' in parameter_editor
+    assert "factor-param-reference-control" in parameter_editor
+    assert "手工输入 ColumnRef 或因子 alias" in parameter_editor
+    assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
+    assert "onValidateFactorAlias" in parameter_editor
+    assert "factor-param-column-" in parameter_editor
+    assert "factor-param-factor-" in parameter_editor
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" in editor

@@ -230,7 +230,8 @@
   function factorSubjects(factors) {
     const result = [];
     const byRef = new Map();
-    for (const factor of Array.isArray(factors) ? factors : []) {
+    const visit = factor => {
+      for (const dependency of factor?.factor_dependencies || []) visit(dependency);
       const alias = factorAlias(factor);
       const factorRef = factorReference(factor);
       if (!alias) throw new Error("因子缺少可执行别名");
@@ -247,11 +248,12 @@
         if (byRef.get(factorRef) !== encoded) {
           throw new Error(`因子引用对应了不同的冻结对象: ${factorRef}`);
         }
-        continue;
+        return;
       }
       byRef.set(factorRef, encoded);
       result.push(record);
-    }
+    };
+    for (const factor of Array.isArray(factors) ? factors : []) visit(factor);
     return result;
   }
 

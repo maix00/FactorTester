@@ -14,7 +14,13 @@ def _factor_runtime_scope(payload: dict[str, Any]):
     )
     from server.services.factor_registry import transient_factor_source_scope
 
-    register_factor_param_resolver_for_user(str(payload.get("_owner") or ""))
+    run_spec = payload.get("run_spec") or {}
+    frozen_factors = (run_spec.get("configuration") or {}).get(
+        "shared", {},
+    ).get("factors") or payload.get("factors") or []
+    register_factor_param_resolver_for_user(
+        str(payload.get("_owner") or ""), frozen_factors,
+    )
     return transient_factor_source_scope(
         str(payload.get("transient_factor_source_scope_id") or ""),
         owner=str(payload.get("_owner") or "").strip(),

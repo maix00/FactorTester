@@ -11,6 +11,8 @@ from server.modules.custom_factors.expression_inspection import fixed_column_ref
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.factor_param_utils import (
     factor_param_value_display,
+    factor_param_value_storage,
+    frozen_factor_dependencies,
     normalize_factor_param_row,
 )
 from server.modules.shared.param_meta import serialize_param_meta
@@ -48,20 +50,27 @@ def _freeze_validated_factor(factor_family, params, owner_ref):
     normalized = normalize_factor_param_row(factor_family, params or {})
     factor = factor_family.get_factor(**normalized)
     expression = getattr(factor, '_source_expr', None) or factor.expr
-    display_params = {
-        parameter.alias: factor_param_value_display(
+    frozen_params = {
+        parameter.alias: factor_param_value_storage(
             parameter, normalized.get(parameter.alias),
         )
         for parameter in factor_family.params
     }
-    return freeze_factor_identity(
+    frozen = freeze_factor_identity(
         owner_ref=str(owner_ref or '').strip(),
         family_alias=str(getattr(factor_family, 'alias', '') or '').strip(),
         factor_alias=str(factor.alias),
         family_formula_fingerprint=factor_family.expr.semantic_fingerprint(),
         self_formula_fingerprint=expression.semantic_fingerprint(),
-        params=display_params,
+        params=frozen_params,
     )
+    dependencies = frozen_factor_dependencies(
+        factor_family.params, normalized,
+    )
+    return {
+        **frozen,
+        **({'factor_dependencies': dependencies} if dependencies else {}),
+    }
 
 
 @cf_bp.route('/api/internal/public-source-applied', methods=['POST'])
@@ -100,6 +109,50 @@ def api_public_source_applied():
 def api_validate_expr():
     data = request.get_json(silent=True) or {}
     username = current_user()
+
+    if data.get('resolve_factor_alias'):
+        factor_alias = str(data.get('factor_alias') or '').strip()
+        family_alias = str(
+            data.get('factor_family_alias') or factor_alias.split('|', 1)[0]
+        ).strip()
+        owner_username = str(data.get('owner_username') or username or '').strip()
+        is_public = bool(data.get('is_public')) or owner_username in {
+            'public', '__public_jobs__',
+        }
+        if not is_public and not can_view_user_scope(username, owner_username):
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'error': '当前身份无权读取该因子家族',
+            }), 403
+        family_ref = (
+            f'public:{family_alias}' if is_public
+            else f'{owner_username}:{family_alias}'
+        )
+        try:
+            factor_family = get_factor_family_instance(
+                family_ref, username=username,
+            )
+            params = factor_family.parse_alias(factor_alias)
+            factor = factor_family.get_factor(**params)
+            owner_ref = 'public' if is_public else owner_username
+            frozen = _freeze_validated_factor(
+                factor_family, params, owner_ref,
+            )
+            return jsonify({
+                'success': True,
+                'valid': True,
+                'error': None,
+                'factor_alias': str(factor.alias),
+                'factor_family_alias': family_alias,
+                'factor': frozen,
+            })
+        except Exception as exc:
+            return jsonify({
+                'success': True,
+                'valid': False,
+                'error': f'因子 alias 解析失败: {exc!s}',
+            })
 
     if data.get('resolve_factor') and data.get('factor_family_alias'):
         family_alias = str(data.get('factor_family_alias') or '').strip()

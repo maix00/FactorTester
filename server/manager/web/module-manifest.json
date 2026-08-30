@@ -247,6 +247,7 @@
     "factor-catalog-detail-rendering": [],
     "factor-catalog-editor": [
       "catalog/factor-assistance.js",
+      "catalog/factor-parameter-editor.js",
       "catalog/factor-editor.js",
       "catalog/factor-object-form.js",
       "catalog/factor-set-assistance.js",
@@ -639,6 +640,7 @@
     "catalog/factor-list.js",
     "catalog/factor-catalog-list.js",
     "catalog/factor-assistance.js",
+    "catalog/factor-parameter-editor.js",
     "catalog/factor-editor.js",
     "catalog/factor-object-form.js",
     "catalog/factor-set-assistance.js",

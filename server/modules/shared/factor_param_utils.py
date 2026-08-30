@@ -12,7 +12,8 @@ from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
 from tools.factors.formula_identity import freeze_factor_identity
-from tools.parameters import TypeParam
+from tools.factors.formula_identity import require_frozen_factor
+from tools.parameters import FactorParam, TypeParam
 
 
 def _clean_factor_alias(value: str) -> str:
@@ -85,6 +86,33 @@ def factor_param_value_display(param, value) -> str:
         return str(value)
 
 
+def factor_param_value_storage(param, value):
+    """Store FactorParam dependencies by opaque v2 ref, never nested inline."""
+    if isinstance(param, FactorParam) and isinstance(value, dict):
+        return require_frozen_factor(value)['ref']
+    return factor_param_value_display(param, value)
+
+
+def frozen_factor_dependencies(parameters, values: dict) -> list[dict]:
+    """Flatten complete FactorParam records in stable parameter order."""
+    result = []
+    seen = set()
+    for param in parameters:
+        value = values.get(param.alias)
+        if not isinstance(param, FactorParam) or not isinstance(value, dict):
+            continue
+        factor = require_frozen_factor(value)
+        for dependency in value.get('factor_dependencies') or []:
+            dependency = require_frozen_factor(dependency)
+            if dependency['ref'] not in seen:
+                seen.add(dependency['ref'])
+                result.append(dependency)
+        if factor['ref'] not in seen:
+            seen.add(factor['ref'])
+            result.append(factor)
+    return result
+
+
 def build_factor_rows(factor_family, params_list: list) -> list:
     """Build factor row payload for parameter table rendering."""
     factors = factor_family.get_factors(params_list=params_list)
@@ -113,7 +141,7 @@ def serialize_factor_param_rows(factor_family, params_list: list) -> list:
             continue
         seen_aliases.add(factor_alias)
         item = {
-            p.alias: factor_param_value_display(p, row.get(p.alias))
+            p.alias: factor_param_value_storage(p, row.get(p.alias))
             for p in factor_family.params
         }
         # 保留条目级 category（如果原始 params_list 中提供）
@@ -173,8 +201,10 @@ def build_factor_param_item(
         family_formula_fingerprint=family_formula_fingerprint,
         self_formula_fingerprint=self_formula_fingerprint,
         params={
-            item['alias']: item['value']
-            for item in params_display
+            p.alias: factor_param_value_storage(
+                p, normalized_row.get(p.alias),
+            )
+            for p in factor_family.params
         },
     )
     # 条目级 category 优先于因子家族 meta category
@@ -201,6 +231,9 @@ def build_factor_param_item(
         'template_row_index': row_idx,
         'params': params_display,
         'factor_params': params_display,
+        'factor_dependencies': frozen_factor_dependencies(
+            factor_family.params, normalized_row,
+        ) or list(metadata.get('factor_dependencies') or []),
         'params_count': len(params_display),
         'owner_username': owner_username,
         'owner_alias': owner_acct.get('alias') or owner_username,

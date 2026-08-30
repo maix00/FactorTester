@@ -64,6 +64,7 @@ global.FTICConfigurationGroupModel = {
   )),
 };
 global.FTTestRunFields = {selection: () => ["ic_series"]};
+global.FTTestState = {registeredRunValues: () => ({})};
 load("server/manager/web/catalog/factor-model.js");
 load("server/manager/web/workbench/setting-rules.js");
 load("server/manager/web/workbench/test-configuration-compiler.js");
@@ -71,6 +72,7 @@ load("server/manager/web/workbench/ic-configuration.js");
 load("server/manager/web/workbench/test-configuration.js");
 
 const manifest = {
+  research_configuration_schema_version: 3,
   defaults: {
     factor_selections: {execution_policy: "authoring_only", serialization: {}},
     product_path_selection: {execution_policy: "authoring_only", serialization: {}},
@@ -85,7 +87,7 @@ const state = {
   kind: "ic",
   workspace: {
     workspace_id: "workspace-ic",
-    configuration: {revision: 7, payload: {}},
+    configuration: {configuration_id: "configuration-ic", revision: 7, payload: {}},
   },
   manifest,
   analysis: {configuration_groups: [structuredClone(configurationGroup)]},
@@ -119,10 +121,10 @@ assert.deepEqual(compiled.configuration_groups, [configurationGroup]);
 assert.deepEqual(compiled.product_selections, {
   "product-group:day": {product_path_selection_id: "product-group:day"},
 });
-assert.deepEqual(compiled.local_settings, {start_date: "2025-01-02"});
+assert.deepEqual(compiled.execution.settings, {start_date: "2025-01-02"});
 assert.equal("factors" in compiled, false);
 assert.equal("product_path_selection_id" in compiled, false);
-assert.equal("ic_lags" in compiled.local_settings, false);
+assert.equal("ic_lags" in compiled.execution.settings, false);
 
 const missingFactorState = {
   ...state,

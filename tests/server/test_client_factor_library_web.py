@@ -690,3 +690,49 @@ def test_validate_transient_factor_uses_defaults_when_params_are_omitted() -> No
     payload = response.get_json()
     assert payload["valid"] is True
     assert payload["normalized_params"]["N"] == "25d"
+
+
+def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch) -> None:
+    class Family:
+        @staticmethod
+        def parse_alias(alias):
+            assert alias == "Momentum|N:20d"
+            return {"N": "20d"}
+
+        @staticmethod
+        def get_factor(**params):
+            assert params == {"N": "20d"}
+            return type("Factor", (), {"alias": "Momentum|N:20d"})()
+
+    monkeypatch.setattr(editor_routes, "can_view_user_scope", lambda *_args: True)
+    monkeypatch.setattr(
+        editor_routes, "get_factor_family_instance",
+        lambda family_ref, **_kwargs: Family()
+        if family_ref == "alice:Momentum" else None,
+    )
+    monkeypatch.setattr(
+        editor_routes, "_freeze_validated_factor",
+        lambda *_args: {"schema_version": 2, "alias": "Momentum|N:20d"},
+    )
+    client = _app().test_client()
+    _login(client)
+
+    response = client.post(
+        "/custom-factors/api/validate",
+        json={
+            "resolve_factor_alias": True,
+            "factor_alias": "Momentum|N:20d",
+            "factor_family_alias": "Momentum",
+            "owner_username": "alice",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "success": True,
+        "valid": True,
+        "error": None,
+        "factor_alias": "Momentum|N:20d",
+        "factor_family_alias": "Momentum",
+        "factor": {"schema_version": 2, "alias": "Momentum|N:20d"},
+    }

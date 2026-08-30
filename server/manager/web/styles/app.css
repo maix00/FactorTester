@@ -221,8 +221,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
-.factor-param-reference-control { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, .8fr); align-items: center; gap: 8px; min-width: 0; }
+.factor-param-reference-control { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); align-items: start; gap: 12px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }
+.factor-param-choice-group { display: grid; gap: 6px; min-width: 0; }
+.factor-param-choice-group > small { color: var(--muted); font-weight: 600; }
 @media (max-width: 720px) {
   .factor-param-reference-control { grid-template-columns: minmax(0, 1fr); }
 }
