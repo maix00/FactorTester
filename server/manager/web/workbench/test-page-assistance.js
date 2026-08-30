@@ -6,6 +6,7 @@
       ),
       state.kind,
     );
+    canonicalizeConfigurationItems(state, payload);
     return {
       schema_version: 1,
       document_kind: "research_configuration",
@@ -91,8 +92,63 @@
     return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   }
 
+  function productGroupID(value) {
+    if (typeof value === "string") return value;
+    return String(value?.group_ref || value?.product_group_ref || value?.id
+      || value?.product_group_template_id || value?.product_path_selection_id || "");
+  }
+
+  function productProjection(value, fallbackID = "") {
+    const id = productGroupID(value) || fallbackID;
+    const paths = [...(value?.paths || value?.selected_paths || [])];
+    return {
+      product_path_selection_id: id,
+      product_group_template_id: id,
+      label: value?.title_zh || value?.name || value?.label || id,
+      selected_paths: paths,
+      paths,
+    };
+  }
+
+  function canonicalizeConfigurationItems(state, configuration) {
+    if (state.kind !== "backtest") return configuration;
+    const analysis = configuration?.analyses?.backtest;
+    if (!analysis || !Array.isArray(analysis.groups)) return configuration;
+    const candidates = [
+      ...(Array.isArray(state.groups) ? state.groups : []),
+      ...Object.values(state.analysis?.product_selections || {}),
+      ...Object.values(analysis.product_selections || {}),
+      ...(Array.isArray(state.values?.product_path_selections)
+        ? state.values.product_path_selections : []),
+    ].filter(Boolean);
+    const catalog = new Map();
+    for (const value of candidates) {
+      const id = productGroupID(value);
+      if (!id) continue;
+      const previous = catalog.get(id);
+      if (!previous || previous._savedPlaceholder === true) catalog.set(id, value);
+    }
+    const selections = {...(analysis.product_selections || {})};
+    let changed = false;
+    for (const group of analysis.groups) {
+      const id = productGroupID(group.product_path_selection)
+        || String(group.product_path_selection_id || "");
+      if (!id) continue;
+      const stored = group.product_path_selection;
+      const candidate = catalog.get(id);
+      const source = candidate && candidate._savedPlaceholder !== true ? candidate : stored;
+      group.product_path_selection = productProjection(source, id);
+      delete group.product_path_selection_id;
+      selections[id] = structuredClone(group.product_path_selection);
+      changed = true;
+    }
+    if (changed || Object.keys(selections).length) analysis.product_selections = selections;
+    return configuration;
+  }
+
   function canonicalDocument(state, source) {
     const document = structuredClone(source);
+    canonicalizeConfigurationItems(state, document.configuration);
     const ui = document.configuration?.ui?.[state.kind];
     if (ui && typeof ui === "object") {
       ui.mounted_tabs = FTTestConfigurationCompiler.authoringMountedTabs(
