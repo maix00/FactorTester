@@ -152,6 +152,9 @@
 .test-object-editor-overlay .factor-editor-form { width: 100%; max-width: none; margin-inline: 0; }
 .test-object-editor-overlay .factor-editor-form .test-setting-row { grid-template-columns: minmax(180px, .52fr) minmax(0, 1.48fr); }
 .test-object-editor-overlay .factor-editor-form .test-setting-row > .test-field-row-control { width: 100%; min-width: 0; }
+.factor-editor-source-code-row { grid-template-columns: minmax(120px, .28fr) minmax(0, 1.72fr); }
+.factor-editor-source-code-row .test-field-row-control,
+.factor-editor-source-code-row .editable-code-editor { width: 100%; min-width: 0; }
 .backtest-group-form .editable-code-editor textarea,
 .test-object-editor-overlay .editable-code-editor textarea {
   border: 0;

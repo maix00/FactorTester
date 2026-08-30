@@ -51,6 +51,8 @@ assert.deepStrictEqual(state.testRunBatch, []);
 assert.deepStrictEqual(state.runValues, {retention_mode: "summary"});
 assert.strictEqual(state.values, null);
 assert.strictEqual(state.settingsInitialized, false);
+assert.strictEqual(state.settingsTabKey, null);
+assert.strictEqual(state.backtestGroupsOpen, true);
 assert.deepStrictEqual(removed, []);
 
 state.analysis = {groups: [{id: "restored", factor_candidate_refs: [factorRef]}]};

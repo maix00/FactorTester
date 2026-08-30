@@ -425,8 +425,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .custom-analysis-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .custom-analysis-toolbar > input { flex: 1 1 220px; min-width: 140px; }
 .custom-analysis-status { margin-left: auto; }
-.custom-analysis-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; min-height: 420px; }
-.custom-analysis-source textarea { width: 100%; height: 100%; min-height: 420px; box-sizing: border-box; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.custom-analysis-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 12px; min-height: 420px; }
+.custom-analysis-source, .custom-analysis-source .editable-code-editor { width: 100%; min-width: 0; min-height: 420px; }
+.custom-analysis-source .editable-code-editor pre,
+.custom-analysis-source .editable-code-editor textarea { min-height: 420px; }
 .custom-analysis-output { min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
 @media (max-width: 760px) { .custom-analysis-workspace { grid-template-columns: 1fr; } }
 .job-detail .field-table { max-height: min(300px, 34vh); }
@@ -744,14 +746,19 @@ button.reference-item { cursor: pointer; }
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .code-viewer code.hljs { padding: 0; color: inherit; background: transparent; }
-.editable-code-editor { position: relative; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #0d1117; }
+.editable-code-editor { position: relative; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #f6f8fa; }
 .editable-code-editor pre,
 .editable-code-editor textarea { box-sizing: border-box; width: 100%; height: 100%; min-height: 320px; margin: 0; padding: 14px 16px; border: 0; border-radius: inherit; overflow: auto; white-space: pre; tab-size: 4; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-.editable-code-editor pre { position: absolute; z-index: 1; inset: 0; pointer-events: none; color: #c9d1d9; background: transparent; }
+.editable-code-editor pre { position: absolute; z-index: 1; inset: 0; pointer-events: none; color: #24292f; background: transparent; }
 .editable-code-editor pre code.hljs { padding: 0; color: inherit; background: transparent; }
-.editable-code-editor textarea { position: relative; z-index: 2; resize: vertical; color: transparent; caret-color: #f0f6fc; background: transparent !important; -webkit-text-fill-color: transparent; }
+.editable-code-editor textarea { position: relative; z-index: 2; resize: vertical; color: transparent; caret-color: #24292f; background: transparent !important; -webkit-text-fill-color: transparent; }
 .editable-code-editor textarea::selection { color: transparent; background: rgba(56, 139, 253, .38); }
 .editable-code-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+@media (prefers-color-scheme: dark) {
+  .editable-code-editor { background: #161b22; }
+  .editable-code-editor pre { color: #c9d1d9; }
+  .editable-code-editor textarea { caret-color: #f0f6fc; }
+}
 @media (prefers-color-scheme: dark) {
   .code-viewer .hljs-doctag, .code-viewer .hljs-keyword,
   .code-viewer .hljs-meta .hljs-keyword, .code-viewer .hljs-template-tag,

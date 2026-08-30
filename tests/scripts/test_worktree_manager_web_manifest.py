@@ -2051,6 +2051,8 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "FTMultiSelectFilter.create" in output_choices
     assert "FTOutputChoices.fieldValueSelector" in generation
     assert "activeTab: state.settingsTabKey" in tests
+    assert 'settingsTabKey: null' in tests
+    assert 'backtestGroupsOpen: kind === "backtest"' in tests
     assert "installRunToolbar" in tests
     assert "headerActions" in tests
     assert "FTTestRunBatch.render(" not in tests

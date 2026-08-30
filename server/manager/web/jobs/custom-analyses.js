@@ -195,8 +195,12 @@
       const workspace = document.createElement("div");
       workspace.className = "custom-analysis-workspace";
       const editor = document.createElement("div"); editor.className = "custom-analysis-source";
-      const source = document.createElement("textarea"); source.value = analysis.source || "";
-      source.spellcheck = false; source.setAttribute("aria-label", context.t("Python 分析代码"));
+      const sourceEditor = FTUI.codeEditor(analysis.source || "", {
+        language: "python",
+        className: "custom-analysis-code-editor",
+        ariaLabel: context.t("Python 分析代码"),
+      });
+      const source = sourceEditor.textarea;
       context.pageState?.register?.(`custom-analysis:${tabID}`, {
         capture: () => ({title: title.value, source: source.value}),
         restore: value => {
@@ -205,7 +209,7 @@
         },
       });
       FTCustomAnalysisAssistance.register(context, {tabID, title, source});
-      editor.append(source);
+      editor.append(sourceEditor.element);
       const output = document.createElement("div"); output.className = "custom-analysis-output";
       output.append(FTUI.empty(context.t("结构化输出"), context.t("运行后在这里显示结果")));
       if (context.session && analysis.source != null) {
