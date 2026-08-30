@@ -126,7 +126,7 @@
     "workbench-ic-groups": [
       "workbench-configuration-groups", "workbench-ic-controls"
     ],
-    "workbench-backtest": ["workbench-configuration-groups"],
+    "workbench-backtest": ["workbench-configuration-groups", "workbench-compiler"],
     "workbench-templates": ["workbench-core", "code-viewer"],
     "settings": ["core"],
     "settings-devices": ["settings"],

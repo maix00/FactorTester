@@ -270,6 +270,10 @@
     const ui = state.workspace?.configuration?.payload?.ui?.[state.kind] || {};
     const explicit = Array.isArray(ui.explicit_mounted_tabs)
       ? ui.explicit_mounted_tabs : [];
+    if (!window.FTTestConfigurationCompiler?.authoringMountedTabs) {
+      const saved = Array.isArray(ui.mounted_tabs) ? ui.mounted_tabs : undefined;
+      return saved;
+    }
     return FTTestConfigurationCompiler.authoringMountedTabs(
       state.manifest, savedSettings(state), explicit,
     );
