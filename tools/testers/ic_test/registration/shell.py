@@ -64,6 +64,7 @@ def _register_global_keys(app: ApplicationSettings) -> None:
 
 def _register_modules(app: ApplicationSettings) -> None:
     for module in (
+        SettingModule("ic_configuration_group", "配置", "analysis", 5),
         SettingModule("factor_execution", "因子执行", "factor", 10),
         SettingModule("product_selection", "品种/路径选择", "product", 20),
         SettingModule("category_grouping", "分类分组", "product", 25),
