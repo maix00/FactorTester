@@ -573,7 +573,9 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert receipt["canonical_repo_ref"] == ""
         assert receipt["sync_policy"] == {}
         assert receipt["recommended_cwd"] == receipt["workspace_root"]
-        assert "factor-worktree plan" in receipt["next_command"]
+        assert receipt["next_command"] == (
+            f"factortester factor-library profile create {profile_id}"
+        )
         assert "profile" not in {
             key.lower() for key in receipt if key != "profile_id"
         }
@@ -714,7 +716,7 @@ def test_claim_receipt_exposes_compact_bound_factor_worktree(
     assert first["canonical_repo_ref"] == "local-factor-git://canonical/test"
     assert first["sync_policy"]["auto_push"] is False
     assert first["recommended_cwd"] == str(worktree)
-    assert first["next_command"].endswith("maxa --run-pyright")
+    assert first["next_command"] == ""
     assert "profile" not in first
     assert len(json.dumps(first)) < 2_500
 

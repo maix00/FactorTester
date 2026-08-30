@@ -10,9 +10,7 @@ from typing import Any
 from server.services.factor_workspace import sync_factor_workspace
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
-    apply_factor_worktree_binding,
-    plan_factor_worktree_binding,
-    verify_factor_worktree_binding,
+    ensure_factor_worktree_binding,
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
@@ -69,19 +67,7 @@ def ensure_server_profile_factor_worktree(
 
         current = store.load(identifier).get("factor_workspace_binding") or {}
         if current:
-            verification = verify_factor_worktree_binding(
-                local_root,
-                identifier,
-                run_pyright=False,
-            )
-            if not verification.get("valid"):
-                raise ValueError("server Profile factor worktree binding is invalid")
-            return {
-                "schema_version": 1,
-                "profile_id": identifier,
-                "created": False,
-                "verification": verification,
-            }
+            return ensure_factor_worktree_binding(local_root, identifier)
 
         source = canonical_root
         if source is None:
@@ -96,25 +82,10 @@ def ensure_server_profile_factor_worktree(
             owner_ref=owner,
         )
 
-        plan = plan_factor_worktree_binding(
+        return ensure_factor_worktree_binding(
             local_root,
             identifier,
             branch=f"agent/{identifier}",
             worktree_path=workspace / "factor-worktree",
             source_sync_enabled=False,
         )
-        receipt = apply_factor_worktree_binding(local_root, plan)
-        verification = verify_factor_worktree_binding(
-            local_root,
-            identifier,
-            run_pyright=False,
-        )
-        if not verification.get("valid"):
-            raise ValueError("server Profile factor worktree verification failed")
-        return {
-            "schema_version": 1,
-            "profile_id": identifier,
-            "created": True,
-            "binding_id": receipt.get("binding_id", ""),
-            "verification": verification,
-        }

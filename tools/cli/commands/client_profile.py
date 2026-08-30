@@ -15,11 +15,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.http import ClientConfig, HttpSession, save_config
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
-    apply_factor_worktree_binding,
-    plan_factor_worktree_binding,
-    repair_factor_worktree_binding,
-    rollback_factor_worktree_binding,
-    verify_factor_worktree_binding,
+    ensure_factor_worktree_binding,
 )
 from tools.cli.release.local_profile import (
     LocalProfileStore,
@@ -34,7 +30,7 @@ from tools.cli.release.profile_sync import (
 from tools.cli.release.profile_sync import (
     sync_profile as _sync_profile,
 )
-from tools.cli.release.storage import read_json, write_json
+from tools.cli.release.storage import read_json
 from tools.cli.release.user_layout import (
     default_user_factor_library,
     default_user_profile_root,
@@ -646,7 +642,7 @@ def show_canonical_factor_repo(
     click.echo(_json(CanonicalFactorRepoStore(root).load()))
 
 
-@profile_factor_worktree.command("plan")
+@profile_factor_worktree.command("create")
 @click.argument("profile_id")
 @click.option("--branch", default="")
 @click.option(
@@ -654,94 +650,21 @@ def show_canonical_factor_repo(
     type=click.Path(file_okay=False, path_type=Path),
 )
 @click.option("--source-sync/--no-source-sync", default=False)
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
 @_root_option
 @friendly_errors
-def plan_profile_factor_worktree(
+def create_profile_factor_worktree(
     profile_id: str,
     branch: str,
     worktree_path: Path | None,
     source_sync: bool,
-    output: Path,
     release_profile: Path | None,
 ) -> None:
-    root = load_profile_root(release_profile)
-    plan = plan_factor_worktree_binding(
-        root,
+    click.echo(_json(ensure_factor_worktree_binding(
+        load_profile_root(release_profile),
         profile_id,
         branch=branch,
         worktree_path=worktree_path,
         source_sync_enabled=source_sync,
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@profile_factor_worktree.command("apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_profile_factor_worktree(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("factor worktree plan is invalid")
-    click.echo(_json(apply_factor_worktree_binding(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@profile_factor_worktree.command("verify")
-@click.argument("profile_id")
-@click.option("--run-pyright", is_flag=True)
-@_root_option
-@friendly_errors
-def verify_profile_factor_worktree(
-    profile_id: str,
-    run_pyright: bool,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(verify_factor_worktree_binding(
-        load_profile_root(release_profile),
-        profile_id,
-        run_pyright=run_pyright,
-    )))
-
-
-@profile_factor_worktree.command("repair")
-@click.argument("profile_id")
-@_root_option
-@friendly_errors
-def repair_profile_factor_worktree(
-    profile_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(repair_factor_worktree_binding(
-        load_profile_root(release_profile), profile_id
-    )))
-
-
-@profile_factor_worktree.command("rollback")
-@click.argument("profile_id")
-@click.argument("binding_id")
-@_root_option
-@friendly_errors
-def rollback_profile_factor_worktree(
-    profile_id: str,
-    binding_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(rollback_factor_worktree_binding(
-        load_profile_root(release_profile), profile_id, binding_id
     )))
 
 
