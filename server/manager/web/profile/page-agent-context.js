@@ -1,11 +1,26 @@
 (() => {
+  let activePoll = null;
+
+  function claimPoll(owner, controller) {
+    if (activePoll?.owner !== owner) activePoll?.controller?.abort();
+    activePoll = {owner, controller};
+  }
+
+  function releasePoll(owner, controller) {
+    if (activePoll?.owner === owner && activePoll?.controller === controller) {
+      activePoll = null;
+    }
+  }
+
   function create(context, profileID, assistance, options = {}) {
+    const owner = {};
     let sequence = 0;
     let timer = null;
     let disposed = false;
     let lastPublished = "";
     let lastPublishedAt = 0;
     let requestController = null;
+    let routeGuard = null;
     const interval = Math.max(100, Number(options.interval) || 250);
     const heartbeatMs = Math.max(1000, Number(options.heartbeatMs) || 60000);
     const now = typeof options.now === "function" ? options.now : () => Date.now();
@@ -34,14 +49,22 @@
       await publish();
       const controller = new AbortController();
       requestController = controller;
+      claimPoll(owner, controller);
+      routeGuard = setInterval(() => {
+        if (context.isRouteCurrent?.() === false) controller.abort();
+      }, 100);
       const payload = await context.api(
         `/api/client/profile-agent/assistance/applications?profile_id=${encodeURIComponent(profileID)}`
         + `&tab_id=${encodeURIComponent(context.tabID)}&after=${sequence}`
         + `&wait=${waitSeconds}`,
         {signal: controller.signal},
       ).finally(() => {
+        clearInterval(routeGuard);
+        routeGuard = null;
+        releasePoll(owner, controller);
         if (requestController === controller) requestController = null;
       });
+      if (disposed || context.isRouteCurrent?.() === false) return;
       for (const item of payload.applications || []) {
         sequence = Math.max(sequence, Number(item.sequence || 0));
         let result;
@@ -90,6 +113,9 @@
     function dispose() {
       disposed = true;
       requestController?.abort();
+      if (routeGuard) clearInterval(routeGuard);
+      routeGuard = null;
+      if (requestController) releasePoll(owner, requestController);
       requestController = null;
       if (timer) clearTimeout(timer);
       timer = null;
