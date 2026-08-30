@@ -142,8 +142,8 @@ def test_factor_library_is_top_level_and_internal_catalog_is_hidden() -> None:
     root_help = CliRunner().invoke(cli, ["--help"])
     client_help = CliRunner().invoke(cli, ["client", "--help"])
     factor_help = CliRunner().invoke(cli, ["factor-library", "--help"])
-    profile_help = CliRunner().invoke(
-        cli, ["factor-library", "profile", "--help"],
+    workspace_help = CliRunner().invoke(
+        cli, ["factor-library", "workspace", "--help"],
     )
     client_profile_help = CliRunner().invoke(cli, ["client", "profile", "--help"])
 
@@ -158,11 +158,11 @@ def test_factor_library_is_top_level_and_internal_catalog_is_hidden() -> None:
     ):
         assert removed not in factor_help.output
     assert "profile" not in factor_help.output
-    assert profile_help.exit_code == 0
-    assert "families" in profile_help.output
-    assert "create" in profile_help.output
+    assert workspace_help.exit_code == 0
+    assert "families" in workspace_help.output
+    assert "create-profile-worktree" in workspace_help.output
     for removed in ("plan", "apply", "verify", "repair", "rollback"):
-        assert removed not in profile_help.output
+        assert removed not in workspace_help.output
     assert client_profile_help.exit_code == 0
     assert "factor-worktree" not in client_profile_help.output
 

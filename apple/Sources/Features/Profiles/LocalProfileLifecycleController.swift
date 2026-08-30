@@ -23,29 +23,15 @@ extension LocalProfileController {
             let created = try await ReleaseCommand.runObject(
                 createArguments, executable: self.cliPath
             )
-            let planURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("factor-worktree-\(UUID()).json")
-            defer { try? FileManager.default.removeItem(at: planURL) }
             _ = try await ReleaseCommand.runObject([
-                "factor-library", "profile", "plan", id,
-                "--output", planURL.path,
-            ], executable: self.cliPath)
-            _ = try await ReleaseCommand.runObject([
-                "factor-library", "profile", "apply", planURL.path,
+                "factor-library", "workspace",
+                "create-profile-worktree", id,
             ], executable: self.cliPath)
             self.lifecycleReceipt = ProfileLifecycleReceipt(
                 json: created, fallbackAction: "create"
             )
             try await self.refreshFromCLI()
         }
-    }
-
-    func unbindFactorWorkspace(_ profile: LocalProfileModel) async {
-        guard let binding = profile.factorWorkspaceBinding else { return }
-        await lifecycle([
-            "factor-library", "profile", "rollback",
-            profile.id, binding.id,
-        ], action: "unbind")
     }
 
     func deactivateProfile(_ profileID: String) async {

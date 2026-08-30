@@ -75,7 +75,7 @@ struct ResearchFactorSetMemberList: View {
         limit: Int
     ) -> [String] {
         [
-            "factor-library", "profile", "factor-set",
+            "factor-library", "workspace", "factor-set",
             "members", "--target-ref", targetRef,
             "--offset", String(offset), "--limit", String(limit), "--json",
         ]

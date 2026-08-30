@@ -31,7 +31,7 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
 
     assert PACKAGED.read_text(encoding="utf-8") == canonical
-    assert "factor-library profile reference" in canonical
+    assert "factor-library workspace reference" in canonical
     assert "client catalog factor" not in canonical
     assert "--source-file '<custom_factors-or-public_factors>/<family>.py'" in canonical
     assert "--revision <commit>" in canonical
@@ -40,8 +40,8 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     assert "Do not fall back to an older commit" in canonical
     assert "factortester://factor/factor-family%3A" in canonical
     assert "factortester://factor_family/" not in canonical
-    assert "factor-library profile factor-set create" in canonical
-    assert "factor-library profile factor-set reference" in canonical
+    assert "factor-library workspace factor-set create" in canonical
+    assert "factor-library workspace factor-set reference" in canonical
     assert "factor-set sync" in canonical
     assert "factor-set registered" in canonical
     assert "factor-set unsync" in canonical
