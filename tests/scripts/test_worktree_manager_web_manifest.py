@@ -2327,20 +2327,27 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     )
 
     assert 'context.t("上传因子源码")' in editor
-    assert 'FTUI.actionButton(context.t("保存源码")' in editor
+    assert 'FTUI.actionButton(context.t("校验源码")' in editor
     assert "FTUI.codeEditor(state.sourceCode" in editor
     assert "registered = libraryValue.factors?.[0] || null" in editor
     assert "frozen Factor v2 identity" in editor
     assert "factor-editor-upload-action" not in editor
-    assert 'FTUI.actionButton(context.t("取消")' in editor
-    assert 'context.t("提交"), () => form.requestSubmit()' in editor
+    assert 'FTUI.actionButton(context.t("取消编辑")' in editor
+    assert 'context.t(mode === "create" ? "提交" : "保存")' in editor
+    assert 'if (mode === "edit") context.toolbar.append(cancelEdit)' in editor
     assert 'context.toolbar.append(submit)' in editor
-    assert 'source: {save_mode: "manual"}' in editor
+    assert 'source: {save_mode: "auto"}' in editor
+    assert 'await validateSourceDraft()' in editor
+    assert 'object-detail-tab-change' in editor
+    assert 'form.append(topMount, tabs.root, status)' in editor
     assert "FTUI.actionButton(" in object_form
+    assert 'if (definition.mode === "edit") context.toolbar.append(cancelEdit)' in object_form
+    assert 'form.append(tabs.root, status)' in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
     assert 'context.api("/api/catalog/factor-sets"' in set_editor
     assert "/custom-factors/api/client/factor-sets" not in set_editor
+    assert "FTFactorSetAssistance" in set_editor
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:
