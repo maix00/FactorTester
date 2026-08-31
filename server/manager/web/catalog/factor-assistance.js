@@ -59,9 +59,7 @@
       },
       importDocument: document => {
         const sourceCode = String(document.source?.code || "");
-        const parsedClass = state.familyMode
-          ? window.FTFactorEditor?.sourceClassName?.(sourceCode) : "";
-        name.value = parsedClass || String(document.name || "");
+        name.value = String(document.name || "");
         chineseName.value = String(document.chinese_name || "");
         description.value = String(document.description || "");
         category.value = String(document.category || "");
