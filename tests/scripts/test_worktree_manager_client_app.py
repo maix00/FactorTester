@@ -550,7 +550,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     class Authoring:
         @staticmethod
         def handles(path, method):
-            return path == "/api/workspaces/workspace-one/configuration" and method == "PUT"
+            return path == "/api/test-authoring/workspaces/workspace-one/configuration" and method == "PUT"
 
         @staticmethod
         def write(method, path, *, owner, payload):
@@ -575,7 +575,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     body = b'{"expected_revision":1,"payload":{}}'
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/workspaces/workspace-one/configuration?port=8141",
+            f"{base_url}/api/test-authoring/workspaces/workspace-one/configuration?port=8141",
             data=body,
             method="PUT",
             headers={
@@ -588,7 +588,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     assert value["configuration"]["revision"] == 2
     assert calls == [{
         "method": "PUT",
-        "path": "/api/workspaces/workspace-one/configuration",
+        "path": "/api/test-authoring/workspaces/workspace-one/configuration",
         "owner": "user@1",
         "payload": {"expected_revision": 1, "payload": {}},
     }]
@@ -629,7 +629,7 @@ def test_configuration_snapshot_is_manager_owned_without_service_port(
     }).encode()
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/workspaces/workspace-one/configuration-snapshots",
+            f"{base_url}/api/test-authoring/workspaces/workspace-one/configuration-snapshots",
             data=body,
             method="POST",
             headers={
@@ -665,9 +665,12 @@ def test_workspace_draft_delete_is_manager_owned_without_service_port(
         "delete_draft_workspace",
         lambda **values: calls.append(values) or {"deleted": True},
     )
-    assert service.handles("/api/workspaces/workspace-one", "DELETE") is True
+    assert service.handles("/api/test-authoring/workspaces/workspace-one", "DELETE") is True
+    assert service.handles("/api/workspaces/workspace-one", "DELETE") is False
+    assert service.handles("/api/backtest/settings/ic_test", "GET") is False
+    assert service.handles("/api/testers/modules", "GET") is False
     response = service.write(
-        "DELETE", "/api/workspaces/workspace-one",
+        "DELETE", "/api/test-authoring/workspaces/workspace-one",
         owner="user@1", payload={},
     )
 
@@ -692,7 +695,7 @@ def test_test_settings_are_available_without_execution_service(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/backtest/settings/ic_test?port=8141",
+            f"{base_url}/api/test-authoring/modules/ic_test?port=8141",
             headers=headers,
         )) as response:
             settings = json.loads(response.read())
@@ -735,15 +738,15 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
         lambda: pytest.fail("authoring must not inspect service ports"),
     )
     paths = (
-        "/api/backtest/settings/ic_test",
+        "/api/test-authoring/modules/ic_test",
         "/api/factor-library/families",
         "/api/factor-library/factors",
         "/api/product-library/product-groups",
-        "/api/workspaces",
-        "/api/configuration-templates",
+        "/api/test-authoring/workspaces",
+        "/api/test-authoring/configuration-templates",
         "/api/jobs/artifact-capabilities",
         "/api/product-library/data-source-categories",
-        "/api/testers/modules?parent=ic_test",
+        "/api/test-authoring/modules?parent=ic_test",
     )
 
     with running_manager(state) as base_url:
@@ -2137,10 +2140,10 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             else:
                 assert f'/research-static/{relative}' not in shell
 
-    assert "/api/backtest/settings/" in scripts["tests.js"]
-    assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
-    assert "/api/workspaces" in scripts["tests.js"]
-    assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
+    assert "/api/test-authoring/modules/" in scripts["tests.js"]
+    assert "servicePath(`/api/test-authoring/modules/" not in scripts["tests.js"]
+    assert "/api/test-authoring/workspaces" in scripts["tests.js"]
+    assert 'servicePath("/api/test-authoring/workspaces")' not in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["run-batch-actions.js"]
     assert "ensureFactorsForExecution" in scripts["run-batch-actions.js"]
     assert "ensureProductsForExecution" in scripts["run-batch-actions.js"]

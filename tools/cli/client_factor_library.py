@@ -1,4 +1,4 @@
-"""Navigation, factor library, and factor workspace HTTP client methods."""
+"""Factor library and factor workspace HTTP client methods."""
 
 from __future__ import annotations
 
@@ -9,88 +9,6 @@ from .client_base import ClientMixinBase
 
 
 class FactorLibraryClientMixin(ClientMixinBase):
-    def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
-        if parent is None:
-            return self.home_modules()
-        if parent == "products":
-            return [
-                {
-                    "key": "products/info",
-                    "label": "产品后端信息",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "products/product-groups",
-                    "label": "产品组库",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "products/categories",
-                    "label": "产品分类库",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "products/availability",
-                    "label": "数据可用性",
-                    "kind": "module",
-                    "has_children": False,
-                },
-                {
-                    "key": "products/liquidity",
-                    "label": "逐产品流动性证据",
-                    "kind": "module",
-                    "has_children": False,
-                },
-            ]
-        query = {"parent": parent} if parent else None
-        data = self._expect_success(
-            self.session.get("/api/testers/modules", query=query)
-        )
-        if parent and data.get("parent") != parent:
-            raise RuntimeError(
-                "服务端 /api/testers/modules 还不是分层导航版本，"
-                "请更新并重启服务端后再访问下一层。"
-            )
-        modules = data.get("modules")
-        if not isinstance(modules, list):
-            raise ValueError("服务器 modules 响应格式错误")
-        return modules
-
-    def home_modules(self) -> list[dict[str, Any]]:
-        data = self.session.get("/static/config/modules.json")
-        modules = data.get("modules")
-        if not isinstance(modules, list):
-            raise ValueError("服务器 home modules 响应格式错误")
-        return [
-            {
-                "key": str(module.get("id") or ""),
-                "label": module.get("title") or module.get("id"),
-                "kind": "module",
-                "path": module.get("path"),
-                "description": module.get("desc"),
-                "has_children": True,
-            }
-            for module in modules
-            if module.get("id")
-        ]
-
-    def manifest(self, application: str) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.get(f"/api/backtest/settings/{application}")
-        )
-
-    def tab_manifest(
-        self,
-        application: str,
-        tab_key: str,
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            f"/api/backtest/settings/{application}/tabs/{tab_key}"
-        ))
-
     def list_candidates(
         self,
         kind: str,
@@ -106,17 +24,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     return value
             return []
         raise ValueError(f"CLI 暂不支持候选列表类型: {kind}")
-
-    def add_candidate(
-        self,
-        kind: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        if kind in {"factor", "factor_candidates", "factor_selections"}:
-            return self._expect_success(
-                self.session.post("/add_factor_by_params", payload)
-            )
-        raise ValueError(f"CLI 暂不支持新增候选类型: {kind}")
 
     def create_custom_factor(
         self,
@@ -290,29 +197,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
             f"/api/factor-library/configurations/{factor_family}",
             payload,
         ))
-
-    def group_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/get_group_snapshot", payload)
-        )
-
-    def group_order_flow(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/get_group_order_flow", payload)
-        )
-
-    def group_detail(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/get_group_detail", payload)
-        )
-
-    def group_ranking_detail(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/get_group_ranking_detail", payload)
-        )
 
     def factor_workspace_source_root(self) -> dict[str, Any]:
         return self._expect_success(

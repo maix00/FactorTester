@@ -11,7 +11,6 @@ from tools.testers.settings.resolver import resolve_group_settings
 
 from .factor_roles import resolve_factor_ref, resolve_factor_role_bindings
 
-
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "_expanded"}
 _AUTO_INFERRED_LEDGER_DEFAULTS = {
     "cost_basis_method": "WeightAverage",
@@ -255,11 +254,19 @@ def group_product_path_selection_id(group: dict[str, Any]) -> str:
             selection.get("product_path_selection_id")
             or selection.get("selection_id")
             or selection.get("id")
+            or selection.get("group_ref")
+            or selection.get("product_group_ref")
+            or selection.get("product_group_template_id")
             or ""
         )
         if selection_id:
             return selection_id
-    return str(group.get("product_path_selection_id") or "")
+    return str(
+        group.get("product_path_selection_id")
+        or group.get("product_scope_ref")
+        or group.get("product_group_ref")
+        or ""
+    )
 
 
 def _product_list_from_group_payload(group: dict) -> list[str] | None:

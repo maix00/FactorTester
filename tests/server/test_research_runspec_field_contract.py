@@ -68,7 +68,7 @@ def _create_workspace(client):
             self_formula_fingerprint=metadata["self_formula_fingerprint"],
             params=metadata["normalized_params"],
         ))
-    response = client.post("/api/workspaces", json={
+    response = client.post("/api/test-authoring/workspaces", json={
         "title": "RunSpec field contract",
         "factors": factors,
     })
@@ -130,7 +130,7 @@ def _update(client, workspace) -> None:
         "ui": {"selected_tab": "ic"},
     }
     response = client.put(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration",
         json={
             "expected_revision": workspace["configuration"]["revision"],
             "payload": payload,

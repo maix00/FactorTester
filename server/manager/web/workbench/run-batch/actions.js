@@ -80,7 +80,7 @@
       throw new Error("无法为运行配置创建不可变快照");
     }
     const value = await context.api(
-      `/api/workspaces/${encodeURIComponent(workspaceID)}/configuration-snapshots`,
+      `/api/test-authoring/workspaces/${encodeURIComponent(workspaceID)}/configuration-snapshots`,
       {
         method: "POST",
         body: JSON.stringify({

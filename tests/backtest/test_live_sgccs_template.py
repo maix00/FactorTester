@@ -27,7 +27,7 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
         session["username"] = USERNAME
         session["_sid"] = "live-durable-research-job"
 
-    created = client.post("/api/workspaces", json={
+    created = client.post("/api/test-authoring/workspaces", json={
         "title": "live durable template acceptance",
         "factor_families": [{"alias": FACTOR_FAMILY}],
         "factors": [],
@@ -35,7 +35,7 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
     assert created.status_code == 201, created.get_data(as_text=True)
     workspace = created.get_json()["workspace"]
 
-    listed = client.get("/api/configuration-templates")
+    listed = client.get("/api/test-authoring/configuration-templates")
     assert listed.status_code == 200, listed.get_data(as_text=True)
     legacy_key = f"{FACTOR_FAMILY}:{TEMPLATE_ID}"
     template = next(
@@ -48,7 +48,7 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
     assert template is not None, f"migrated template {legacy_key} not found"
 
     loaded = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration/load-template",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration/load-template",
         json={"expected_revision": 1, "configuration_id": template["configuration_id"]},
     )
     assert loaded.status_code == 200, loaded.get_data(as_text=True)

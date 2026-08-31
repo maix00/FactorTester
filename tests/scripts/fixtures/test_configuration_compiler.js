@@ -15,7 +15,8 @@ eval(fs.readFileSync(
 ));
 if (configurationSource) {
   global.FTTestProducts = {
-    groupID: group => group.product_path_selection_id || group.id,
+    groupID: group => group.group_ref || group.product_group_ref || group.id
+      || group.product_group_template_id || group.product_path_selection_id,
     projection: group => group.product_path_selection,
   };
   global.FTTestFactors = {};
@@ -140,9 +141,8 @@ if (configurationSource) {
       groups: [{
         id: "group-1", factor_candidate_refs: [factor.ref],
         split_count: 5,
-        product_path_selection_id: "day",
         product_path_selection: {
-          product_path_selection_id: "day",
+          group_ref: "day",
           selected_paths: ["CNFutures/day"],
         },
       }],
@@ -160,6 +160,11 @@ if (configurationSource) {
   assert.equal(compiledBacktest.execution.settings.category, "industry");
   assert.equal(compiledBacktest.execution.settings.start_date, "2025-01-02");
   assert.equal(compiledBacktest.groups[0].split_count, 5);
+  assert.equal(compiledBacktest.groups[0].product_path_selection_id, "day");
+  assert.equal(
+    compiledBacktest.groups[0].product_path_selection.product_path_selection_id,
+    "day",
+  );
 }
 
 const conditionalManifest = {

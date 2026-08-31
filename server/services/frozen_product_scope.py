@@ -42,7 +42,9 @@ def freeze_product_scope(
         for kind in analyses
         if isinstance(analysis_map.get(kind), dict)
     ]
-    selections: dict[str, dict[str, Any]] = {}
+    selections: dict[str, dict[str, Any]] = _selection_index(
+        shared.pop("product_selections", None)
+    )
     for analysis in analysis_values:
         selections.update(_selection_index(analysis.pop("product_selections", None)))
     selections.update(_selection_index(temporary.get("product_selections")))
@@ -133,6 +135,12 @@ def _compact_execution_projections(
         for group in analysis.get("groups") or []:
             if not isinstance(group, dict):
                 continue
+            selection_id = _selection_id(group)
+            if selection_id:
+                group["product_path_selection_id"] = selection_id
+                embedded_selection = group.get("product_path_selection")
+                if isinstance(embedded_selection, dict):
+                    embedded_selection["product_path_selection_id"] = selection_id
             for legacy_key in (
                 "factorAlias", "factorAliases", "factor_alias", "factor_aliases",
             ):
@@ -159,10 +167,15 @@ def _selection_id(group: dict[str, Any]) -> str:
             embedded.get("product_path_selection_id")
             or embedded.get("selection_id")
             or embedded.get("id")
+            or embedded.get("group_ref")
+            or embedded.get("product_group_ref")
+            or embedded.get("product_group_template_id")
             or ""
         ).strip()
     return str(
         group.get("product_path_selection_id")
+        or group.get("product_scope_ref")
+        or group.get("product_group_ref")
         or group.get("testerId")
         or ""
     ).strip()

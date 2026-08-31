@@ -56,14 +56,14 @@ def fake_server() -> Iterator[str]:
         session.clear()
         return jsonify(success=True)
 
-    @app.post("/api/workspaces")
+    @app.post("/api/test-authoring/workspaces")
     def create_workspace():
         assert session.get("username") == "alice"
         return jsonify(success=True, workspace={
             "workspace_id": "workspace-1", "configuration": {"revision": 1},
         }), 201
 
-    @app.get("/api/workspaces")
+    @app.get("/api/test-authoring/workspaces")
     def list_workspaces():
         assert session.get("username") == "alice"
         return jsonify(success=True, workspaces=[{"workspace_id": "workspace-1", "revision": 1}])
@@ -264,7 +264,7 @@ def fake_server() -> Iterator[str]:
             checkpoint_ref="trace:trace-1",
         )
 
-    @app.get("/api/testers/modules")
+    @app.get("/api/test-authoring/modules")
     def modules():
         parent = request.args.get("parent")
         if parent == "single_factor_page":
@@ -275,7 +275,7 @@ def fake_server() -> Iterator[str]:
     def home_modules():
         return jsonify(success=True, modules=[{"id": "single_factor_test", "title": "单因子测试"}])
 
-    @app.get("/api/backtest/settings/<application>")
+    @app.get("/api/test-authoring/modules/<application>")
     def settings(application: str):
         return jsonify(
             success=True,
@@ -284,7 +284,7 @@ def fake_server() -> Iterator[str]:
             defaults={"engine_mode": {"value": "auto", "label": "执行模式", "editor": "select", "tab_key": "engine"}},
         )
 
-    @app.get("/api/backtest/settings/<application>/tabs/<tab_key>")
+    @app.get("/api/test-authoring/modules/<application>/tabs/<tab_key>")
     def tab(application: str, tab_key: str):
         return jsonify(
             success=True,
@@ -679,7 +679,7 @@ def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> N
 def test_client_detects_old_module_endpoint_when_parent_is_ignored(tmp_path) -> None:
     app = Flask(__name__)
 
-    @app.get("/api/testers/modules")
+    @app.get("/api/test-authoring/modules")
     def modules():
         return jsonify(success=True, modules=[{"key": "single_factor_family_test"}])
 

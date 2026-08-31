@@ -148,7 +148,7 @@ def _create_workspace(client):
         "MmRet|$F:1d",
         "MmMADevRat|$F:1d|$Rev",
     ]
-    response = client.post("/api/workspaces", json={
+    response = client.post("/api/test-authoring/workspaces", json={
         "title": "multi factor research",
         "factors": [_frozen_factor(alias) for alias in aliases],
     })
@@ -194,7 +194,7 @@ def _payload(workspace, *, n: str = "10d"):
 
 def _update(client, workspace, payload):
     response = client.put(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration",
         json={
             "expected_revision": workspace["configuration"]["revision"],
             "payload": payload,
@@ -260,7 +260,7 @@ def test_workspace_has_one_mutable_configuration_not_revision_history(client) ->
     _update(client, workspace, _payload(workspace))
     _update(client, workspace, _payload(workspace, n="20d"))
 
-    reopened = client.get(f"/api/workspaces/{workspace['workspace_id']}").get_json()["workspace"]
+    reopened = client.get(f"/api/test-authoring/workspaces/{workspace['workspace_id']}").get_json()["workspace"]
 
     assert reopened["configuration"]["revision"] == 3
     assert reopened["configuration"]["payload"]["analyses"]["ic"]["factor_configs"] == [{"N": "20d"}]
@@ -279,14 +279,14 @@ def test_template_save_and_load_copy_the_same_configuration_schema(client) -> No
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     saved = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration/templates",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration/templates",
         json={"name": "Core 8 template"},
     )
     template = saved.get_json()["template"]
 
     _update(client, workspace, _payload(workspace, n="20d"))
     loaded = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration/load-template",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration/load-template",
         json={
             "configuration_id": template["configuration_id"],
             "expected_revision": workspace["configuration"]["revision"],
@@ -466,19 +466,19 @@ def test_unsubmitted_workspace_can_be_deleted_without_touching_other_tabs(client
     first = _create_workspace(client)
     second = _create_workspace(client)
 
-    response = client.delete(f"/api/workspaces/{first['workspace_id']}")
+    response = client.delete(f"/api/test-authoring/workspaces/{first['workspace_id']}")
 
     assert response.status_code == 200
     assert response.get_json()["deleted"] is True
-    assert client.get(f"/api/workspaces/{first['workspace_id']}").status_code == 404
-    assert client.get(f"/api/workspaces/{second['workspace_id']}").status_code == 200
+    assert client.get(f"/api/test-authoring/workspaces/{first['workspace_id']}").status_code == 404
+    assert client.get(f"/api/test-authoring/workspaces/{second['workspace_id']}").status_code == 200
 
 
 def test_workspace_delete_preserves_immutable_snapshot_evidence(client) -> None:
     workspace = _create_workspace(client)
     configuration = workspace["configuration"]
     snapshot = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration-snapshots",
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration-snapshots",
         json={
             "source_workspace_id": workspace["workspace_id"],
             "source_configuration_id": configuration["configuration_id"],
@@ -488,11 +488,11 @@ def test_workspace_delete_preserves_immutable_snapshot_evidence(client) -> None:
     )
     assert snapshot.status_code == 201
 
-    response = client.delete(f"/api/workspaces/{workspace['workspace_id']}")
+    response = client.delete(f"/api/test-authoring/workspaces/{workspace['workspace_id']}")
 
     assert response.status_code == 200
     assert response.get_json() == {"success": True, "deleted": True}
-    assert client.get(f"/api/workspaces/{workspace['workspace_id']}").status_code == 404
+    assert client.get(f"/api/test-authoring/workspaces/{workspace['workspace_id']}").status_code == 404
     snapshots = research_configuration_snapshots.list_snapshots(
         owner="alice", workspace_id=workspace["workspace_id"],
     )
@@ -1055,7 +1055,7 @@ class ProfileScreen(FactorFamily):
     assert "source_code" not in policy["files"][0]
     assert source not in json.dumps(preview)
     configuration = client.get(
-        f"/api/workspaces/{workspace['workspace_id']}/configuration"
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/configuration"
     ).get_json()["configuration"]["payload"]
     assert any(
         item.get("ref") == factor["ref"]
@@ -1084,7 +1084,7 @@ class ProfileScreen(FactorFamily):
         ).cs_ordinal_rank(ascending=False)
 '''
     factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
-    created = client.post("/api/workspaces", json={
+    created = client.post("/api/test-authoring/workspaces", json={
         "title": "transient factor inputs",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [factor],
@@ -1183,7 +1183,7 @@ class ProfileScreen(FactorFamily):
         ).cs_ordinal_rank(ascending=False)
 '''
     factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
-    created = client.post("/api/workspaces", json={
+    created = client.post("/api/test-authoring/workspaces", json={
         "title": "retry retained source",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [factor],
@@ -1261,7 +1261,7 @@ class ProfileScreen(FactorFamily):
         )
 '''
     factor = _inline_factor(tmp_path, source, "ProfileScreen|N:20d")
-    created = client.post("/api/workspaces", json={
+    created = client.post("/api/test-authoring/workspaces", json={
         "title": "retry input copy failure",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [factor],
@@ -1340,7 +1340,7 @@ class ProfileScreen(FactorFamily):
     factor = _inline_factor(
         tmp_path, factor_source, "ProfileScreen|N:20d",
     )
-    created = client.post("/api/workspaces", json={
+    created = client.post("/api/test-authoring/workspaces", json={
         "title": "strategy hook inputs",
         "factor_families": [{"alias": "ProfileScreen"}],
         "factors": [factor],
@@ -1503,7 +1503,7 @@ def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
     _update(client, workspace, _payload(workspace, n="10d"))
     source = workspace["configuration"]
     response = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/"
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/"
         "configuration-snapshots",
         json={
             "source_workspace_id": workspace["workspace_id"],
@@ -1552,7 +1552,7 @@ def test_configuration_snapshot_rejects_wrong_scope_stale_or_deleted(
     _update(client, workspace, _payload(workspace))
     source = workspace["configuration"]
     snapshot = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/"
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/"
         "configuration-snapshots",
         json={
             "source_configuration_id": source["configuration_id"],
@@ -1603,7 +1603,7 @@ def test_configuration_snapshot_selection_adds_one_select(
     workspace = _create_workspace(client)
     source = workspace["configuration"]
     snapshot = client.post(
-        f"/api/workspaces/{workspace['workspace_id']}/"
+        f"/api/test-authoring/workspaces/{workspace['workspace_id']}/"
         "configuration-snapshots",
         json={
             "source_configuration_id": source["configuration_id"],
@@ -1653,7 +1653,7 @@ def test_configuration_snapshot_copies_owned_source_into_target_workspace(
     target_workspace = _create_workspace(client)
     source = source_workspace["configuration"]
     response = client.post(
-        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        f"/api/test-authoring/workspaces/{target_workspace['workspace_id']}/"
         "configuration-snapshots",
         json={
             "source_workspace_id": source_workspace["workspace_id"],
@@ -1672,7 +1672,7 @@ def test_configuration_snapshot_copies_owned_source_into_target_workspace(
         {"N": "30d"}
     ]
     listed = client.get(
-        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        f"/api/test-authoring/workspaces/{target_workspace['workspace_id']}/"
         "configuration-snapshots"
     ).get_json()["snapshots"]
     assert [item["snapshot_id"] for item in listed] == [

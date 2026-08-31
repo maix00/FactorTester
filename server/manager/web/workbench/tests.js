@@ -136,13 +136,13 @@
       savedDraft?.schemaVersion === 2 ? String(savedDraft.workspaceID || "") : ""
     );
     const savedWorkspaceConfigurationPromise = savedWorkspaceID
-      ? context.api(`/api/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
+      ? context.api(`/api/test-authoring/workspaces/${encodeURIComponent(savedWorkspaceID)}/configuration`)
         .then(value => ({value, error: null}))
         .catch(error => ({value: null, error}))
       : Promise.resolve({value: null, error: null});
     const [manifest, workspaces, savedWorkspaceConfiguration] = await Promise.all([
-      context.api(`/api/backtest/settings/${application}/summary${clientQuery}`),
-      context.api("/api/workspace-summaries"),
+      context.api(`/api/test-authoring/modules/${application}/summary${clientQuery}`),
+      context.api("/api/test-authoring/workspace-summaries"),
       savedWorkspaceConfigurationPromise,
     ]);
     const state = {
@@ -183,7 +183,7 @@
         value = savedWorkspaceConfiguration.value;
       } else {
         const workspaceID = encodeURIComponent(state.workspace.workspace_id);
-        value = await context.api(`/api/workspaces/${workspaceID}/configuration`);
+        value = await context.api(`/api/test-authoring/workspaces/${workspaceID}/configuration`);
       }
       state.workspace.configuration = value?.configuration || null;
       FTTestState.applyWorkspaceConfiguration(state);
@@ -451,7 +451,7 @@
     }
     if (key === "templates") {
       await FTTestLazyCode.loadGroup("workbench-templates");
-      const value = await context.api("/api/configuration-templates");
+      const value = await context.api("/api/test-authoring/configuration-templates");
       state.templates = Array.isArray(value.templates) ? value.templates : [];
       return;
     }
@@ -663,7 +663,7 @@
     context.showNotice?.("");
     const workspaceID = String(state.workspace?.workspace_id || "");
     if (workspaceID) {
-      await context.api(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
+      await context.api(`/api/test-authoring/workspaces/${encodeURIComponent(workspaceID)}`, {
         method: "DELETE",
       });
     }

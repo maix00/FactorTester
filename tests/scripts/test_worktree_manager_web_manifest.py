@@ -551,7 +551,7 @@ def test_backend_registered_run_fields_compile_into_run_requests() -> None:
     assert result.stdout.strip() == "ok"
 
     settings = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
-    assert '/api/backtest/settings/group_test' in settings
+    assert '/api/test-authoring/modules/group_test' in settings
     assert 'item?.key === "service_port"' in settings
 
 
@@ -1263,20 +1263,20 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     first_load = source.split(
         "const [manifest, workspaces, savedWorkspaceConfiguration]", 1
     )[1].split("]);", 1)[0]
-    assert "/api/backtest/settings/${application}/summary" in first_load
-    assert "/api/backtest/settings/${application}`" not in first_load
+    assert "/api/test-authoring/modules/${application}/summary" in first_load
+    assert "/api/test-authoring/modules/${application}`" not in first_load
     for endpoint in (
         "/api/factor-library/families", "/api/factor-library/factors",
         "/api/product-library/product-groups",
-        "/api/product-library/data-source-categories", "/api/configuration-templates",
+        "/api/product-library/data-source-categories", "/api/test-authoring/configuration-templates",
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
         assert endpoint not in first_load
-    assert "/api/workspace-summaries" in first_load
+    assert "/api/test-authoring/workspace-summaries" in first_load
     assert "workbench-settings" not in first_load
     assert "FTTestInputState.initialize" not in first_load
     assert "FTTestState.initializeInputState(state)" in source
-    assert "/api/workspaces/${workspaceID}/configuration" in source
+    assert "/api/test-authoring/workspaces/${workspaceID}/configuration" in source
     assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
     assert "ensureProductsForExecution" in source

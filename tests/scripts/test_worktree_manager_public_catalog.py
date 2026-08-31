@@ -409,12 +409,12 @@ def test_visitor_can_load_test_workbench_without_account_session(
 
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/backtest/settings/group_test/summary",
+            f"{base_url}/api/test-authoring/modules/group_test/summary",
             headers=headers,
         )) as response:
             settings = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/workspace-summaries",
+            f"{base_url}/api/test-authoring/workspace-summaries",
             headers=headers,
         )) as response:
             workspaces = json.loads(response.read())

@@ -94,6 +94,47 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     }
 
 
+def test_resolve_group_strategy_settings_accepts_assisted_product_group_ref(
+    monkeypatch,
+):
+    product = _product()
+    selection = _FakeSelection("product-group:day", [product])
+    resolved_ids: list[str] = []
+
+    def resolve_selection(data, selection_id, *, page_uuid):
+        del data, page_uuid
+        resolved_ids.append(selection_id)
+        return selection
+
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime."
+        "selection_for_product_path_selection",
+        resolve_selection,
+    )
+    factor = _FakeFactor(pd.DataFrame({product: [1.0]}))
+    group = {
+        "id": "group-1",
+        "name": "SgCCS 五分位1",
+        "product_path_selection": {"group_ref": "product-group:day"},
+        "factor_candidate_refs": ["FactorA"],
+        "splitCount": 5,
+        "groupIndex": 1,
+    }
+
+    settings = group_module._resolve_group_strategy_settings(
+        group,
+        resolved_backtest_settings={"group-1": {}},
+        fallback_group_settings={},
+        page_uuid="page-1",
+        data={},
+        page_factors_dict={"FactorA": factor},
+        selection_cache={},
+    )
+
+    assert resolved_ids == ["product-group:day"]
+    assert settings["product_path_selection"] is selection
+
+
 def test_resolve_group_strategy_settings_strips_implicit_auto_cost_basis_default(monkeypatch):
     p1 = _product()
     selection = _FakeSelection("sel-1", [p1])
