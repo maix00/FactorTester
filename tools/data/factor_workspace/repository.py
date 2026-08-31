@@ -6,9 +6,12 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from . import git
-from . import storage
-from tools.data.sqlite.factor_source_workspace_settings import FIXED_DOWNLOAD_BRANCH, FIXED_UPLOAD_BRANCH
+from tools.data.sqlite.factor_source_workspace_settings import (
+    FIXED_DOWNLOAD_BRANCH,
+    FIXED_UPLOAD_BRANCH,
+)
+
+from . import git, storage
 
 
 @dataclass(frozen=True)

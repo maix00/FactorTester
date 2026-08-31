@@ -52,8 +52,8 @@ def test_canonical_nested_cli_surfaces_are_registered() -> None:
     for args in (
         ["strategy", "intent", "--help"],
         ["research", "graphs", "--help"],
-        ["factor-library", "workspace", "sync", "--help"],
-        ["factor-library", "workspace", "push", "--help"],
+        ["factor-library", "workspace", "user", "download", "--help"],
+        ["factor-library", "workspace", "user", "upload", "--help"],
         ["client", "app-update", "--help"],
     ):
         result = runner.invoke(cli, args)

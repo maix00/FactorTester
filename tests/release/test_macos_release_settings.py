@@ -353,8 +353,8 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
     assert "本地 canonical 因子库" in view
     assert "Legacy quarantine" not in view
     assert "迁移" not in view
-    assert '"factor-library", "workspace", "local-state"' in controller
-    assert '"factor-library", "workspace", "server-state"' in controller
+    assert '"factor-library", "workspace", "user", "download"' in controller
+    assert '"factor-library", "workspace", "user", "upload"' in controller
     assert "Process()" not in controller
     assert '"git"' not in controller
 
@@ -478,7 +478,8 @@ def test_macos_profile_directory_fails_closed_on_profile_deletion() -> None:
     for command in ("create", "deactivate", "purge"):
         assert f'"{command}"' in lifecycle
     assert '"delete"' not in lifecycle
-    assert '"factor-worktree", "rollback"' in lifecycle
+    assert '"factor-worktree"' not in lifecycle
+    assert '"rollback"' not in lifecycle
     assert "Process()" not in lifecycle
     assert "git " not in lifecycle.lower()
     assert not (profile_root / "ProfileDirectoryCard.swift").exists()

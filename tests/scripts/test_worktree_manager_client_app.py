@@ -2201,9 +2201,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTFactors.factorDetail" in scripts[
         "test-object-editor-overlay.js"
     ]
-    assert "FTFactorDetailShared.parameterEditor" in scripts[
-        "factor-editor.js"
-    ]
+    assert "function parameterEditor" in scripts["factor-editor.js"]
     assert "setting_template" not in scripts["tests.js"]
     assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
     assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]
@@ -2858,9 +2856,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
     assert "/api/catalog/product-groups" in runtime
-    assert "factorTesterLocalFactorSets" in runtime
-    assert "mergeFactorSets" in runtime
-    assert 'visibility: "local"' in model
+    assert "factorTesterLocalFactorSets" not in runtime
     assert 'context.t("因子家族")' in listing
     assert 'context.t("因子")' in listing
     assert 'context.t("因子集合")' in listing

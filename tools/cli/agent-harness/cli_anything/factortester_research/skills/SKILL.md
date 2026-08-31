@@ -136,6 +136,17 @@ any conflict; only then allow the existing `upload` hook to synchronize back to
 the database factor library. Never edit `download`, bypass either merge, or use
 hidden bootstrap commands as a second workspace protocol.
 
+Every test-created factor family, factor, and factor set must remain
+auditable and be submitted atomically in its ResearchConfiguration, immutable
+RunSpec, and Job. A Profile
+may additionally document those objects anywhere appropriate in its own
+research worktree; do not impose a second manifest format. Only the `self`
+Profile may run `factor-library workspace user download|upload` or promote
+objects into the user's database factor library. Other Profiles commit
+proposals only to their own `agent/<profile>` worktree for later user review.
+A member factor never implies coverage of the whole set: preserve the explicit
+factor-set identity and its flattened immutable member references together.
+
 ## Ownership and safety boundaries
 
 - Workspace is editable configuration; `ResearchRun` owns an immutable RunSpec;
@@ -237,50 +248,16 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   submitted. Copy exact stable references from their owning Git, Profile
   registry, product catalog, Evidence, or Job response; never ask a resolver to
   guess one from a label or code.
-- Resolve a committed Profile factor and its navigation-only family reference
-  before writing either link:
-  ```bash
-  factortester factor-library workspace reference maxa \
-    --source-file public_factors/SgCPS.py \
-    --identity 'SgCPS|P:[CA]|N:20d|$F:1m' \
-    --object-kind factor --revision <commit> --json
-  ```
-  Use the returned `target_ref` verbatim in the corresponding
-  `factortester://factor/` link. The command reads the exact selected commit and
-  rejects an alias that is absent or non-canonical there.
-- A multi-factor subject is a first-class `factor-set`, not a factor family and
-  not a separately typed factor column. Create its named member manifest, commit
-  it, and freeze the exact set version:
-  ```bash
-  factortester factor-library workspace factor-set create maxa \
-    --set-id momentum-2025 --title-zh '2025年动量因子集合' \
-    --description-zh '用于窗口参数比较' \
-    --member-ref-file factor-members.json --json
-  factortester factor-library workspace factor-set reference maxa \
-    --set-id momentum-2025 --json
-  ```
-  Use the returned versioned `target_ref` in report, Evidence, obligation, and
-  Edge scope. The stable `set_ref` names the long-lived set; it is not a frozen
-  research scope. A member factor never implies coverage of the whole set.
-  Reports bind only the frozen `target_ref`, stable `set_ref`, member count and
-  member hash; they never copy the complete member manifest into report state.
-  Resolve members only when needed, in bounded pages:
-  ```bash
-  factortester factor-library workspace factor-set members \
-    --target-ref '<frozen-factor-set-ref>' --offset 0 --limit 50 --json
-  ```
-  Discover and inspect sets with `factor-set list maxa --json` and
-  `factor-set show maxa --set-id momentum-2025 --json`; `show` returns only a
-  compact summary, so use `members` for the paginated member list. Update a set
-  only with `factor-set update ... --expected-member-hash '<current-hash>'`.
-  Compare two frozen versions with `factor-set diff --from-target-ref ...
-  --to-target-ref ... --json`. Never hand-edit a manifest or blindly replace a
-  version whose current member hash was not read first.
-  The manifest is an unordered set saved in canonical sorted order. Do not use
-  its storage order as research meaning.
-  To discover local factor sets across every registered Profile in one bounded
-  read, use `factor-set profiles --json`. This Profile listing does not imply
-  that any returned set is registered on a server.
+- Resolve reusable factors and factor sets through the user-visible business
+  catalog: `factortester factor-library factors --json` and
+  `factortester factor-library factor-sets --json`. Copy returned v2 refs
+  verbatim; never derive object identity from a label.
+- A test may create a factor family, factor, or factor set in the current
+  ResearchConfiguration. Put those objects in `temporary_objects`, reference
+  their v2 refs from the test configuration, and submit them atomically with
+  the RunSpec. Nested factors must be flattened into the frozen input. This
+  does not create a Profile-local factor-set manifest. Register an object in
+  the user database library only when the user requests later reuse.
   Product-group applicability is a separate registry relation owned by each
   product group. A factor or factor-set manifest never stores
   `product_group_refs`. Read and change that relation only through the native
@@ -301,18 +278,10 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   the exact product-group and factor/factor-set references selected for that
   trial. Change the shared association only when the user explicitly intends
   to persist it beyond the current research trial.
-  Registration and association are separate operations. Create the product
-  group, register the factor in the server factor library or explicitly sync
-  the committed factor-set, and only then call `subjects add`. The server
-  rejects a dangling factor or factor-set reference. Removing an obsolete
-  association remains allowed even after its subject has been unregistered.
-  The server Web client can display only factor sets explicitly synchronized
-  to that server. Register a committed local set with
-  `factor-set sync <profile-id> --set-id '<set-id>' --json`; inspect registered
-  objects with `factor-set registered --json`, and remove only the server copy
-  with `factor-set unsync --target-ref '<factor-set:v2:...>' --json`. A set sent
-  transiently with one Job is not registered. Never infer server visibility
-  from the existence of a local manifest.
+  Registration and association are separate operations. Persist the factor or
+  factor set in the user database library before adding a durable association.
+  A temporary set submitted with one Job remains visible through that frozen
+  Job/RunSpec only and must not be mistaken for a registered library object.
   Freeze a specific Profile configuration with
   `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:
@@ -406,23 +375,10 @@ subclasses, state why it applies, and freeze the server-checked scope and
 qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
-Any Evidence or EvidenceUse factor scope must use the exact frozen `factor_ref`
-returned by `factortester factor-library workspace reference` (or the frozen
-factor-set reference command). Select the Profile owner and Git commit in local
-settings, then resolve the complete alias. A Profile already owns its factor
-worktree, so never ask for another workspace path. If source settings are
-omitted, the CLI uses the current human user's personal factor repository at
-its latest commit. Copy the returned reference verbatim into `factor_refs`;
-display names and shortened identities are not object identity.
-
-```bash
-factortester factor-library workspace reference maxa \
-  --source-file '<custom_factors-or-public_factors>/<family>.py' \
-  --identity '<complete-factor-alias>' \
-  --object-kind factor \
-  --revision <commit> \
-  --json
-```
+Any Evidence or EvidenceUse factor scope must use an exact frozen `factor_ref`
+from a Job/RunSpec, the user-visible factor library, or an atomically submitted
+temporary test object. Copy the reference verbatim into `factor_refs`; display
+names and shortened identities are not object identity.
 
 Do not fall back to an older commit when the selected revision lacks that
 factor. Factor-family references are navigation objects only and cannot replace

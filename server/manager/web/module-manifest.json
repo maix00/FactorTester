@@ -7,7 +7,7 @@
       "default_max_first_party_script_bytes": 204800,
       "first_party_script_overrides": {
         "backtest": 512000,
-        "factor-evaluation": 220000,
+        "factor-evaluation": 224000,
         "ic-test": 480000
       },
       "default_max_initial_external_scripts": 1,
@@ -101,7 +101,7 @@
     "workbench-core": ["object-editor-overlay"],
     "workbench-settings": ["workbench-core", "catalog-selection-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
-    "workbench-ic-controls": ["workbench-core", "workbench-compiler"],
+    "workbench-ic-controls": ["workbench-core"],
     "workbench-factor-controls": ["workbench-core"],
     "workbench-product-controls": ["workbench-core"],
     "workbench-source-inputs": ["workbench-input-state"],
@@ -127,7 +127,7 @@
     "workbench-ic-groups": [
       "workbench-configuration-groups", "workbench-ic-controls"
     ],
-    "workbench-backtest": ["workbench-configuration-groups", "workbench-compiler"],
+    "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core", "code-viewer"],
     "settings": ["core"],
     "settings-devices": ["settings"],

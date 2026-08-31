@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-from pathlib import Path
 from typing import Any
 
 import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
+from tools.cli.factor_library_access import require_user_factor_library_write
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.cli.modules.custom_factors.factor_library import factor_library
 from tools.cli.table import render_table
@@ -164,177 +163,59 @@ def describe_factor(
     _print_factor_description(payload, include_source=source_code, include_debug_graph=debug_graph)
 
 
-@factor_library.group("workspace", invoke_without_command=True)
-@click.pass_context
-@friendly_errors
-def workspace(ctx: click.Context) -> None:
-    """管理本地 factor workspace。"""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(show_workspace)
+@factor_library.group("workspace")
+def workspace() -> None:
+    """Synchronize the user factor workspace or explain research Git collaboration."""
 
 
-@workspace.command("show")
-@friendly_errors
-def show_workspace() -> None:
-    """显示本地 factor workspace 目录与 Git 状态。"""
-    client = client_from_config()
-    source = client.factor_workspace_source_root()
-    git_state = client.factor_workspace_git_settings()
-    _print_workspace_source(source)
-    _print_workspace_git(git_state)
+@workspace.group("user")
+def user_workspace() -> None:
+    """Synchronize the database-backed user factor workspace."""
 
 
-@workspace.command("root")
-@click.argument("path", required=False)
-@friendly_errors
-def set_workspace_root(path: str | None) -> None:
-    """读取或保存源码目录。省略 PATH 时只显示当前目录。"""
-    client = client_from_config()
-    if path is None:
-        _print_workspace_source(client.factor_workspace_source_root())
-        return
-    _print_workspace_source(client.save_factor_workspace_source_root(path))
-
-
-@workspace.command("build")
-@friendly_errors
-def build_workspace() -> None:
-    """建立本地 factor workspace。"""
-    _print_workspace_action("建立", client_from_config().build_factor_workspace())
-
-
-@workspace.command("sync")
-@click.option("--branch-mode", default="force", show_default=True, help="同步分支模式。")
+@user_workspace.command("download")
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def sync_workspace(branch_mode: str, as_json: bool) -> None:
-    """从数据库下载同步到本地 workspace。"""
-    result = client_from_config().sync_factor_workspace(branch_mode=branch_mode)
+def download_user_workspace(as_json: bool) -> None:
+    """Refresh the download branch from the database factor library."""
+    require_user_factor_library_write()
+    result = client_from_config().sync_factor_workspace(branch_mode="force")
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_workspace_action("下载同步", result)
 
 
-@workspace.command("push")
-@click.option("--branch-mode", default="auto", show_default=True, help="上传分支模式。")
+@user_workspace.command("upload")
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def push_workspace(branch_mode: str, as_json: bool) -> None:
-    """上传本地 workspace 到数据库。"""
-    result = client_from_config().push_factor_workspace(branch_mode=branch_mode)
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_action("上传入库", result)
-
-
-@workspace.command("merge-download")
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@friendly_errors
-def merge_download_workspace(as_json: bool) -> None:
-    """把 download 分支按既定流程合并到 upload 分支。"""
-    result = client_from_config().factor_workspace_git_action("merge-download")
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_action("合并 download 到 upload", result)
-
-
-@workspace.command("server-state")
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@friendly_errors
-def workspace_server_state(as_json: bool) -> None:
-    """读取服务器 canonical 因子库快照和 Git 版本。"""
-    payload = client_from_config().factor_workspace_snapshot()
-    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
-    result = {"source": "server", **snapshot}
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_state(result, "服务器 canonical 因子库")
-
-
-@workspace.command("local-state")
-@click.argument("root")
-@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
-@friendly_errors
-def workspace_local_state(root: str, as_json: bool) -> None:
-    """读取本地 canonical 因子库目录和 Git 版本。"""
-    result = _local_workspace_state(root)
-    if as_json:
-        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_workspace_state(result, "本地 canonical 因子库")
-
-
-@workspace.command("git-settings")
-@click.option("--enable/--disable", "git_enabled", default=None, help="启用或禁用 workspace Git。")
-@click.option("--repo-root", default="", help="Git 仓库根目录。")
-@friendly_errors
-def workspace_git_settings(git_enabled: bool | None, repo_root: str) -> None:
-    """读取或修改 workspace Git 设置。"""
+def upload_user_workspace(as_json: bool) -> None:
+    """Refresh, merge with conflict checks, then write upload back to the database."""
+    require_user_factor_library_write()
     client = client_from_config()
-    if git_enabled is None and not repo_root:
-        _print_workspace_git(client.factor_workspace_git_settings())
-        return
-    current = client.factor_workspace_git_settings()
-    enabled = bool(current.get("git_enabled")) if git_enabled is None else git_enabled
-    root = repo_root or str(current.get("git_repo_root") or "")
-    _print_workspace_git(client.save_factor_workspace_git_settings(git_enabled=enabled, git_repo_root=root))
+    downloaded = client.sync_factor_workspace(branch_mode="force")
+    merged = client.merge_factor_workspace_download()
+    uploaded = client.push_factor_workspace(branch_mode="auto")
+    result = {"download": downloaded, "merge": merged, "upload": uploaded}
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("上传入库", uploaded)
 
 
-@workspace.group("git", invoke_without_command=True)
-@click.pass_context
-@friendly_errors
-def workspace_git(ctx: click.Context) -> None:
-    """Run local Git commands inside the factor workspace."""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(workspace_git_status)
-
-
-@workspace_git.command("status")
-@friendly_errors
-def workspace_git_status() -> None:
-    """Show local Git status for the factor workspace."""
-    _print_workspace_git_action(client_from_config().factor_workspace_git_action("status"))
-
-
-@workspace_git.command("diff")
-@click.option("--stat", "show_stat", is_flag=True, help="只显示 diff stat。")
-@click.option("--cached", is_flag=True, help="查看 staged diff。")
-@friendly_errors
-def workspace_git_diff(show_stat: bool, cached: bool) -> None:
-    """Show local Git diff for the factor workspace."""
-    _print_workspace_git_action(
-        client_from_config().factor_workspace_git_action("diff", cached=cached, stat=show_stat)
-    )
-
-
-@workspace_git.command("commit")
-@click.option("-m", "--message", required=True, help="提交信息。")
-@friendly_errors
-def workspace_git_commit(message: str) -> None:
-    """Stage all workspace changes and commit them locally."""
-    _print_workspace_git_action(client_from_config().factor_workspace_git_action("commit", message=message))
-
-
-@workspace_git.command("branch")
-@friendly_errors
-def workspace_git_branch() -> None:
-    """List local Git branches for the factor workspace."""
-    _print_workspace_git_action(client_from_config().factor_workspace_git_action("branch"))
-
-
-@workspace_git.command("checkout")
-@click.argument("branch")
-@click.option("--create", is_flag=True, help="如果分支不存在则创建。")
-@friendly_errors
-def workspace_git_checkout(branch: str, create: bool) -> None:
-    """Switch workspace Git branch."""
-    _print_workspace_git_action(
-        client_from_config().factor_workspace_git_action("checkout", branch=branch, create=create)
-    )
+@workspace.command("profile")
+@click.argument("profile_id")
+def profile_workspace_guidance(profile_id: str) -> None:
+    """Explain ordinary Git collaboration for one research identity worktree."""
+    branch = f"agent/{profile_id}"
+    click.echo(f"研究身份工作区分支: {branch}")
+    click.echo("在该 worktree 中使用普通 Git 编辑并提交因子家族源码。")
+    click.echo("发布时由用户工作区依次执行：")
+    click.echo("  1. 从数据库刷新 download 分支")
+    click.echo("  2. 合并 download 到 upload，并解决冲突")
+    click.echo(f"  3. 合并已提交的 {branch} 到 upload，并解决冲突")
+    click.echo("  4. 将 upload 写回数据库因子库")
+    click.echo("FactorTester 不提供另一套 Profile Git 命令。")
 
 
 def _resolve_factor_from_catalog(
@@ -516,86 +397,6 @@ def _source_operator_tokens(source: str) -> list[str]:
     return [token for token in tokens if token in seen]
 
 
-def _print_workspace_source(payload: dict[str, Any]) -> None:
-    click.echo("本地 factor workspace")
-    click.echo(f"源码目录: {payload.get('source_root') or '默认用户目录'}")
-    click.echo(f"实际目录: {payload.get('resolved_root') or payload.get('workspace_root') or ''}")
-
-
-def _print_workspace_git(payload: dict[str, Any]) -> None:
-    click.echo("Git 状态:")
-    click.echo(f"  启用: {'是' if payload.get('git_enabled') else '否'}")
-    if payload.get("git_repo_root"):
-        click.echo(f"  仓库: {payload.get('git_repo_root')}")
-    if payload.get("git_current_branch"):
-        click.echo(f"  当前分支: {payload.get('git_current_branch')}")
-    branches = payload.get("git_branches") or []
-    if branches:
-        click.echo("  分支: " + ", ".join(str(branch) for branch in branches))
-
-
-def _local_workspace_root(root: str) -> Path:
-    target = Path(root).expanduser().resolve()
-    if not target.exists() or not target.is_dir():
-        raise click.ClickException(f"本地 canonical 因子库目录不存在: {target}")
-    return target
-
-
-def _local_workspace_files(root: str) -> list[dict[str, str]]:
-    target = _local_workspace_root(root)
-    files: list[dict[str, str]] = []
-    for kind, directory in (("custom", "custom_factors"), ("public", "public_factors")):
-        source_dir = target / directory
-        if not source_dir.is_dir():
-            continue
-        for path in sorted(source_dir.glob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            if source.strip():
-                files.append({
-                    "path": f"{directory}/{path.name}",
-                    "kind": kind,
-                    "source_code": source,
-                })
-    return files
-
-
-def _local_git(root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
-
-
-def _local_workspace_state(root: str) -> dict[str, Any]:
-    target = _local_workspace_root(root)
-    files = _local_workspace_files(str(target))
-    return {
-        "source": "local",
-        "workspace_root": str(target),
-        "git_head": _local_git(target, "rev-parse", "--short", "HEAD"),
-        "git_current_branch": _local_git(target, "branch", "--show-current"),
-        "git_dirty": bool(_local_git(target, "status", "--porcelain")),
-        "custom_factor_count": sum(item["kind"] == "custom" for item in files),
-        "public_factor_count": sum(item["kind"] == "public" for item in files),
-    }
-
-
-def _print_workspace_state(payload: dict[str, Any], title: str) -> None:
-    click.echo(title)
-    click.echo(f"目录: {payload.get('workspace_root') or '未设置'}")
-    click.echo(f"Git 版本: {payload.get('git_head') or '无'}")
-    click.echo(f"分支: {payload.get('git_current_branch') or '无'}")
-    if payload.get("source") == "local":
-        click.echo(f"本地改动: {'有' if payload.get('git_dirty') else '无'}")
-    click.echo(f"自定义因子: {payload.get('custom_factor_count') or 0}")
-    click.echo(f"公共因子: {payload.get('public_factor_count') or 0}")
-
-
 def _print_workspace_action(action: str, payload: dict[str, Any]) -> None:
     click.echo(f"{action}完成")
     if payload.get("workspace_root"):
@@ -642,14 +443,3 @@ def factor_line(factor: dict[str, Any], *, default_family: str = "", default_pro
     if metadata.get("product_group_paths"):
         parts.append(f"路径数={len(metadata.get('product_group_paths') or [])}")
     return " · ".join(parts)
-
-
-def _print_workspace_git_action(payload: dict[str, Any]) -> None:
-    stdout = str(payload.get("stdout") or "").rstrip()
-    stderr = str(payload.get("stderr") or "").rstrip()
-    if stdout:
-        click.echo(stdout)
-    if stderr:
-        click.echo(stderr, err=True)
-    if payload.get("commit_sha"):
-        click.echo(f"commit: {payload.get('commit_sha')}")

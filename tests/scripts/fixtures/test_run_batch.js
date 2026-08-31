@@ -266,12 +266,12 @@ const strategyScopedBacktest = {
   const emptyHeader = batch.headerActions(context, emptyState, () => {});
   assert.equal(emptyHeader[0].disabled, false,
     "view RunSpec must remain clickable without a product group");
-  assert.equal(emptyHeader[1].disabled, true,
-    "run action stays disabled without a product group");
+  assert.equal(emptyHeader[1].disabled, false,
+    "IC configuration-group selection is resolved by the unified run flow");
   emptyHeader[0].listeners.click();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.ok(notices.some(item => item.isError && /请先选择配置组/.test(item.message)),
-    "missing IC configuration-group selection must be explained by the header action");
+  assert.ok(!notices.some(item => item.isError && /请先选择配置组/.test(item.message)),
+    "IC preview covers all authored configuration groups without a prior selection");
 
   const lateState = {
     ...state,
@@ -297,6 +297,7 @@ const strategyScopedBacktest = {
   assert.ok(notices.some(item => item.isError && /submission module failed/.test(item.message)),
     "run action failures must be visible instead of becoming unhandled rejections");
   delete window.FTTestRunBatchActions;
+  actionLoaded = false;
 
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen"]);
@@ -458,6 +459,11 @@ const strategyScopedBacktest = {
   );
   assert.deepEqual(batch.submittedItems(state).map(item => item.jobID), ["job-1"],
     "submitted jobs must remain available to the test-page progress/result observer");
+  assert.deepEqual(
+    window.FTTestRunBatchModel.resultEntries(state).map(item => item.jobID),
+    ["job-1"],
+    "result tabs must be keyed by submitted Jobs rather than configuration groups",
+  );
   assert.equal(state.activeRunGroupID, "icg-day");
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
@@ -484,6 +490,11 @@ const strategyScopedBacktest = {
   )).at(-1).body;
   await batch.runAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].jobID, "job-2");
+  assert.deepEqual(
+    window.FTTestRunBatchModel.resultEntries(backtest).map(item => item.jobID),
+    ["job-2"],
+    "one backtest RunSpec and Job must expose exactly one result tab",
+  );
   assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-2?server_id=public-1");
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(requests.at(-1).body.retention_mode, "summary");

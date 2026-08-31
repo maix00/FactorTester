@@ -14,12 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "server" / "manager" / "web"
 
 
-def test_settings_runtime_loads_configuration_compiler_first() -> None:
+def test_configuration_compiler_loads_only_for_preview_and_submission() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     dependencies = manifest["group_dependencies"]
-    assert "workbench-compiler" in dependencies["workbench-backtest"]
-    assert "workbench-compiler" in dependencies["workbench-ic-controls"]
+    assert "workbench-compiler" not in dependencies["workbench-backtest"]
+    assert "workbench-compiler" not in dependencies["workbench-ic-controls"]
+    assert "workbench-compiler" in dependencies["workbench-run-submit"]
 
 
 def test_manifest_matches_html_script_order_and_files() -> None:
@@ -478,23 +479,6 @@ def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None
     assert result.stdout.strip() == "ok"
 
 
-def test_factor_set_selection_freezes_descriptor_and_local_sources() -> None:
-    import subprocess
-
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_set_selection.js"
-    modules = [
-        WEB_ROOT / "catalog" / "factor-model.js",
-        WEB_ROOT / "workbench" / "factor-selection.js",
-        WEB_ROOT / "workbench" / "factor-set-selection.js",
-    ]
-    result = subprocess.run(
-        ["node", str(fixture), *(str(item) for item in modules)], cwd=ROOT,
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
-
-
 def test_strategy_dependencies_compile_from_uploaded_text_files() -> None:
     import subprocess
 
@@ -929,7 +913,7 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "function sharedPicker" in source
     assert "function familyPicker" in source
     assert "FTTestFieldRow.create" in source
-    assert "FTFactorDetailShared.parameterEditor" in source
+    assert "function parameterEditor" in source
     assert "factor-editor-source-metadata" in source
     source_controls = source.split("function sourceControls", 1)[1].split(
         "function sourceMetadata", 1,
@@ -1418,7 +1402,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-run", "workbench-compiler", "workbench-ic-controls",
     ]
     assert manifest["group_dependencies"]["workbench-ic-controls"] == [
-        "workbench-core", "workbench-compiler",
+        "workbench-core",
     ]
     assert manifest["groups"]["workbench-compiler"] == [
         "workbench/test-configuration-compiler.js",

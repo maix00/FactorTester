@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import stat
@@ -467,49 +466,6 @@ class TestCLISubprocess:
         second = json.loads(reused.stdout)["skill_usage"]
         assert second["previous_record_hash"] == first["record_hash"]
         assert second["skill_document_tokens"] == 0
-
-    def test_workspace_inspect_records_gap_on_source_tree_mismatch(self, tmp_path: Path) -> None:
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        (workspace / "MyAlpha.py").write_text(
-            "class MyAlpha(FactorFamily):\n"
-            "    def factor_expr():\n"
-            "        return CLOSE.rolling_mean(N)\n",
-            encoding="utf-8",
-        )
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        fake = bindir / "factortester"
-        fake.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, sys\n"
-            "args = sys.argv[1:]\n"
-            "if args[:3] == ['factor-library', 'workspace', 'show']:\n"
-            f"    print('实际目录: {workspace}')\n"
-            "    sys.exit(0)\n"
-            "if args[:3] == ['factor-library', 'describe', 'MyAlpha']:\n"
-            "    print(json.dumps({\n"
-            "        'factor': {'name': 'MyAlpha'},\n"
-            "        'tree_repr': 'ColumnRef CLOSE',\n"
-            "        'operator_keys': [],\n"
-            "        'source_checks': {'ok': False, 'has_tree': True, 'source_tokens': ['rolling_mean'], 'tree_tokens': [], 'missing_in_tree': ['rolling_mean']}\n"
-            "    }, ensure_ascii=False))\n"
-            "    sys.exit(0)\n"
-            "print('unexpected: ' + ' '.join(args), file=sys.stderr)\n"
-            "sys.exit(2)\n",
-            encoding="utf-8",
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        session = tmp_path / "session.json"
-        result = self._run(
-            ["--session", str(session), "workspace", "inspect", "--factor-family", "MyAlpha", "--no-sync", "--json"],
-            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
-            check=False,
-        )
-        assert result.returncode != 0
-        payload = json.loads(session.read_text(encoding="utf-8"))
-        assert payload["status"] == "code_improvement_required"
-        assert payload["gaps"][0]["title"] == "Factor source and operator tree mismatch"
 
     def test_operator_mode_blocks_client_only_service_restart(self, tmp_path: Path) -> None:
         session = tmp_path / "session.json"

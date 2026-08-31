@@ -1,6 +1,7 @@
 """Shared, token-stable CLI presentation helpers."""
 
 import json
+
 import click
 
 

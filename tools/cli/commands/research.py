@@ -24,13 +24,8 @@ from tools.cli.core.run_input_dependencies import (
 from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.artifact_paths import artifact_destination
 from tools.cli.release.job_cache import job_cache_directory
-from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.profile_factor_set_queries import profile_factor_context
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
-from tools.cli.release.research_reporting.references.factor_set_workspace import (
-    validate_factor_set_reference,
-)
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 
@@ -82,33 +77,19 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
 
 def _load_factor_set_descriptors(
     target_refs: tuple[str, ...],
-    *,
-    release_profile: Path | None,
 ) -> list[dict[str, Any]]:
     if not target_refs:
         return []
-    client_root = load_profile_root(release_profile)
-    store = LocalProfileStore(client_root)
-    values = []
+    client = client_from_config()
+    values: list[dict[str, Any]] = []
     for target_ref in target_refs:
-        matches = []
-        for profile in store.list():
-            try:
-                _repository, roots = profile_factor_context(profile)
-                matches.append(validate_factor_set_reference(
-                    kind="factor", target_ref=target_ref, roots=roots,
-                ))
-            except (OSError, ValueError):
-                continue
-        if len(matches) != 1:
+        payload = client.factor_set_descriptor(target_ref)
+        descriptor = payload.get("descriptor")
+        if not isinstance(descriptor, dict):
             raise click.ClickException(
-                "--factor-set-ref 必须精确匹配一个已登记工作区中的 v2 因子集合"
+                "--factor-set-ref 必须匹配当前用户可见的数据库因子集合"
             )
-        value = matches[0]
-        values.append({
-            "target_ref": target_ref,
-            "manifest": value["descriptor"],
-        })
+        values.append(descriptor)
     return values
 
 
@@ -578,7 +559,7 @@ def run(run_ports: tuple[int, ...]) -> None:
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
-    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
+    help="将数据库因子库中可见的冻结因子集合绑定到本次 RunSpec，可重复",
 )
 @click.option(
     "--release-profile",
@@ -649,9 +630,7 @@ def run_preview(
         preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
         )
-    descriptors = _load_factor_set_descriptors(
-        factor_set_refs, release_profile=release_profile,
-    )
+    descriptors = _load_factor_set_descriptors(factor_set_refs)
     if descriptors:
         preview_kwargs["factor_subject_descriptors"] = descriptors
     specs = _load_strategy_specs(strategy_spec_paths)
@@ -715,7 +694,7 @@ def run_preview(
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
-    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
+    help="将数据库因子库中可见的冻结因子集合绑定到本次 RunSpec，可重复",
 )
 @click.option(
     "--strategy-spec",
@@ -895,9 +874,7 @@ def run_submit(
         submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
         )
-    descriptors = _load_factor_set_descriptors(
-        factor_set_refs, release_profile=release_profile,
-    )
+    descriptors = _load_factor_set_descriptors(factor_set_refs)
     if descriptors:
         submit_kwargs["factor_subject_descriptors"] = descriptors
     specs = _load_strategy_specs(strategy_spec_paths)

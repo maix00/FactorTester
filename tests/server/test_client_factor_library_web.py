@@ -584,62 +584,6 @@ def test_public_factor_registration_does_not_manufacture_user_family() -> None:
     assert payload["families"] == []
 
 
-def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(
-    monkeypatch,
-) -> None:
-    rows = {
-        "custom": [{
-            "owner_username": "alice",
-            "factor_id": "LocalAlpha",
-            "source_code": "class LocalAlpha: pass\n",
-        }],
-        "public": [{
-            "owner_username": "",
-            "factor_id": "PublicAlpha",
-            "source_code": "class PublicAlpha: pass\n",
-        }],
-    }
-    monkeypatch.setattr(editor_routes, "list_factor_sources", lambda kind: rows[kind])
-    monkeypatch.setattr(
-        editor_routes,
-        "get_factor_workspace_git_state",
-        lambda username: {
-            "workspace_root": "/srv/factors/alice",
-            "git_head": "abc1234",
-            "git_current_branch": "main",
-        },
-    )
-    monkeypatch.setattr(editor_routes, "get_account", lambda username: {})
-    monkeypatch.setattr(editor_routes, "is_super_admin_account", lambda account: False)
-
-    client = _app().test_client()
-    _login(client)
-    response = client.get("/custom-factors/api/workspace/snapshot")
-    assert response.status_code == 200
-    snapshot = response.get_json()["snapshot"]
-    assert snapshot["git_head"] == "abc1234"
-    assert [item["path"] for item in snapshot["files"]] == [
-        "custom_factors/LocalAlpha.py",
-        "public_factors/PublicAlpha.py",
-    ]
-    assert all("source_code" not in item for item in snapshot["files"])
-    assert all(item["source_sha256"] for item in snapshot["files"])
-
-    imported = client.post(
-        "/custom-factors/api/workspace/snapshot",
-        json={
-            "snapshot": {
-                "files": [{
-                    "path": "custom_factors/NextAlpha.py",
-                    "source_code": "class NextAlpha: pass\n",
-                }],
-            },
-        },
-    )
-    assert imported.status_code == 410
-    assert imported.get_json()["code"] == "workspace_snapshot_write_disabled"
-
-
 def test_validate_transient_factor_returns_instantiated_alias_and_formula() -> None:
     client = _app().test_client()
     _login(client)

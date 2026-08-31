@@ -23,10 +23,6 @@ extension LocalProfileController {
             let created = try await ReleaseCommand.runObject(
                 createArguments, executable: self.cliPath
             )
-            _ = try await ReleaseCommand.runObject([
-                "factor-library", "workspace",
-                "create-profile-worktree", id,
-            ], executable: self.cliPath)
             self.lifecycleReceipt = ProfileLifecycleReceipt(
                 json: created, fallbackAction: "create"
             )

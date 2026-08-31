@@ -9,8 +9,6 @@ from typing import Any
 
 from tools.data.sqlite.factor_source_store import list_factor_sources
 
-from .git import get_factor_workspace_autosync_branch
-from .repository import FactorWorkspaceRepository
 from . import storage as factor_workspace_storage
 from .construct import (
     _clear_workspace_generated,
@@ -24,6 +22,8 @@ from .construct import (
     _write_json,
     _write_text_if_changed,
 )
+from .git import get_factor_workspace_autosync_branch
+from .repository import FactorWorkspaceRepository
 
 
 def _assert_workspace_owner(root: str, username: str) -> None:
@@ -134,7 +134,6 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
 def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str, Any]:
     result = sync_database_to_workspace(username, branch_mode=branch_mode)
     if branch_mode == "force":
-        root = str(result.get("workspace_root") or _workspace_root(username))
         commit_sha = FactorWorkspaceRepository(username).commit_generated(
             "chore: sync database to workspace"
         )

@@ -264,6 +264,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
             "/api/catalog/factor-sets", query=params,
         ))
 
+    def factor_set_descriptor(self, target_ref: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/catalog/factor-sets/descriptor",
+            query={"target_ref": target_ref},
+        ))
+
     def register_factor_set(self, descriptor: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(self.session.post(
             "/api/catalog/factor-sets",
@@ -463,11 +469,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
             {"source_root": source_root},
         ))
 
-    def build_factor_workspace(self) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/api/factor-library/workspace/build", {})
-        )
-
     def sync_factor_workspace(
         self,
         *,
@@ -488,36 +489,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
             {"branch_mode": branch_mode},
         ))
 
-    def factor_workspace_snapshot(self) -> dict[str, Any]:
+    def merge_factor_workspace_download(self) -> dict[str, Any]:
         return self._expect_success(
-            self.session.get("/api/factor-library/workspace/snapshot")
-        )
-
-    def factor_workspace_git_settings(self) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.get("/api/factor-library/workspace/git-settings")
-        )
-
-    def save_factor_workspace_git_settings(
-        self,
-        *,
-        git_enabled: bool,
-        git_repo_root: str,
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/factor-library/workspace/git-settings",
-            {
-                "git_enabled": git_enabled,
-                "git_repo_root": git_repo_root,
-            },
-        ))
-
-    def factor_workspace_git_action(
-        self,
-        action: str,
-        **payload: Any,
-    ) -> dict[str, Any]:
-        data = {"action": action, **payload}
-        return self._expect_success(
-            self.session.post("/api/factor-library/workspace/git", data)
+            self.session.post("/api/factor-library/workspace/merge-download", {})
         )

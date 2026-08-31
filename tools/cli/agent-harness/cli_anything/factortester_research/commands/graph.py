@@ -7,11 +7,15 @@ from pathlib import Path
 
 import click
 
-from ..core.capabilities import load_builtin_capability_registry, resolve_graph_capabilities
+from tools.cli.local_graph_navigation import evaluate_next
+
+from ..core.capabilities import (
+    load_builtin_capability_registry,
+    resolve_graph_capabilities,
+)
 from ..core.graph import build_draft_graph, build_observed_graph, graph_content_hash
 from ..core.replay import replay_graph_trace
 from ..core.session import load_session
-from tools.cli.local_graph_navigation import evaluate_next
 from .common import echo_json
 from .graph_successor import (
     graph_requirements,
@@ -19,6 +23,7 @@ from .graph_successor import (
     graph_successor,
     graph_trial_plan_check,
 )
+
 
 @click.group("graph")
 def graph() -> None:

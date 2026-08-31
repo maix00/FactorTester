@@ -430,14 +430,7 @@ class LocalProfileStore:
             "recommended_cwd": (
                 worktree_path if worktree_available else str(workspace_root)
             ),
-            "next_command": (
-                ""
-                if worktree_available
-                else (
-                    "factortester factor-library workspace "
-                    f"create-profile-worktree {profile_id}"
-                )
-            ),
+            "next_command": "",
         }
         encoded = json.dumps(
             receipt, sort_keys=True, separators=(",", ":")

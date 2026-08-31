@@ -100,7 +100,6 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
             "/api/factor-library/catalog",
             "/api/factor-library/operators",
             "/api/factor-library/research-runs?limit=1",
-            "/api/factor-library/workspace/snapshot",
             "/api/admin/server-instances",
         ):
             with urlopen(Request(
@@ -113,7 +112,6 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
         "/custom-factors/api/list",
         "/custom-factors/api/visual-operators",
         "/custom-factors/api/factor-library-research-runs?limit=1",
-        "/custom-factors/api/workspace/snapshot",
         "/admin/api/server-instances",
     ]
 

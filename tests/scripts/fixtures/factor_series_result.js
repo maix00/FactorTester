@@ -37,9 +37,9 @@ assert.strictEqual(context.FTFactorSeriesModel.label(model.series[0]), "SI.GFE Â
 assert.strictEqual(context.FTFactorSeriesModel.points(model.series[0]).length, 2);
 assert.deepStrictEqual(
   JSON.parse(JSON.stringify(context.FTFactorSeriesModel.priceRequest({
-    payload: {analyses: {factor_evaluation: {settings: {
+    payload: {analyses: {factor_evaluation: {execution: {settings: {
       frequency: "MIN5", price_type: "raw", start_date: "2025-01-01",
-    }}}},
+    }}}}},
   }, "SI.GFE"))),
   {product_name: "SI.GFE", freq: "MIN5", adjusted: false, start_date: "2025-01-01"},
 );
