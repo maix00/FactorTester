@@ -77,6 +77,35 @@
     return data;
   }
 
+  function mergeLibraryResources(familyResource, factorResource) {
+    const familyValue = familyResource || {};
+    const factorValue = factorResource || {};
+    const familyScopes = familyValue.family_scopes || familyValue.family_tabs || {};
+    const factorScopes = factorValue.family_scopes || factorValue.family_tabs || {};
+    const scopes = {};
+    for (const key of new Set([
+      ...Object.keys(familyScopes), ...Object.keys(factorScopes),
+    ])) {
+      const familyScope = familyScopes[key] || {};
+      const factorScope = factorScopes[key] || {};
+      scopes[key] = {
+        ...familyScope,
+        ...factorScope,
+        families: Array.isArray(familyScope.families)
+          ? familyScope.families : [],
+        factors: Array.isArray(factorScope.factors)
+          ? factorScope.factors : [],
+      };
+    }
+    return {
+      ...familyValue,
+      ...factorValue,
+      families: Array.isArray(familyValue.families) ? familyValue.families : [],
+      factors: Array.isArray(factorValue.factors) ? factorValue.factors : [],
+      family_scopes: scopes,
+    };
+  }
+
   async function loadLibrary(context, refresh = false) {
     const data = ensureCache();
     if (data.libraryLoaded) return data;
@@ -85,7 +114,7 @@
       const request = Promise.all([
         context.api(`/api/factor-library/families${suffix}`),
         context.api(`/api/factor-library/factors${suffix}`),
-      ]).then(([families, factors]) => ({...families, ...factors}));
+      ]).then(([families, factors]) => mergeLibraryResources(families, factors));
       libraryPromise = request
         .then(applyLibrary)
         .catch(error => {
