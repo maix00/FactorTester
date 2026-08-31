@@ -2307,6 +2307,7 @@ def test_swift_research_shell_keeps_section_switches_in_the_pinned_tab() -> None
 
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
     tabs = (ROOT / "server" / "manager" / "web" / "app" / "tabs.js").read_text(encoding="utf-8")
+    shell = (ROOT / "server" / "manager" / "web" / "app" / "shell.js").read_text(encoding="utf-8")
     jobs = (ROOT / "server" / "manager" / "web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
     job_detail = (ROOT / "server" / "manager" / "web" / "jobs" / "detail.js").read_text(encoding="utf-8")
     styles = "\n".join(
@@ -2316,8 +2317,11 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
         for relative in ("styles/app.css", "styles/report.css")
     )
 
-    assert "row.append(...(handle ? [handle] : []), tabButton(tab, nested), tabCloseButton(tab))" in tabs
+    assert "row.append(tabButton(tab, nested), tabCloseButton(tab))" in tabs
+    assert "tab-drag-handle" not in tabs
     assert "button.append(close)" not in tabs
+    assert "nav-module-folder" not in shell
+    assert "return moduleButton(module);" in shell
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
     assert "statusCell(job, context)" in jobs
     list_format = (ROOT / "server" / "manager" / "web" / "jobs" / "list-format.js").read_text(encoding="utf-8")

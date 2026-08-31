@@ -112,14 +112,6 @@
       return t(module.title_key || module.title || module.id);
     }
 
-    function folderKey(module) {
-      return `ft-nav-folder-${encodeURIComponent(String(module.id || ""))}-collapsed`;
-    }
-
-    function isFolderExpanded(module) {
-      return localStorage.getItem(folderKey(module)) !== "1";
-    }
-
     function moduleButton(module) {
       const row = document.createElement("button");
       row.className = "nav-button";
@@ -133,50 +125,10 @@
       return row;
     }
 
-    function renderModuleNode(module, depth = 0) {
-      const children = Array.isArray(module.children) ? module.children : [];
-      if (!children.length) return moduleButton(module);
-
-      const folder = document.createElement("div");
-      folder.className = `nav-folder nav-module-folder nav-depth-${Math.min(depth, 3)}`;
-      folder.dataset.navFolder = module.id;
-      const row = document.createElement("div");
-      row.className = "nav-folder-row";
-      const disclosure = document.createElement("button");
-      disclosure.type = "button";
-      disclosure.className = "nav-folder-toggle";
-      disclosure.title = t(isFolderExpanded(module) ? "收起" : "展开");
-      const childrenHost = document.createElement("div");
-      childrenHost.className = "nav-folder-children nav-folder-static-children";
-      childrenHost.id = `ft-nav-children-${encodeURIComponent(module.id)}`;
-      const updateDisclosure = expanded => {
-        disclosure.textContent = expanded ? "⌄" : "›";
-        disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
-        disclosure.title = t(expanded ? "收起" : "展开");
-        childrenHost.hidden = !expanded;
-      };
-      let expanded = isFolderExpanded(module);
-      updateDisclosure(expanded);
-      disclosure.setAttribute("aria-controls", childrenHost.id);
-      disclosure.addEventListener("click", event => {
-        event.stopPropagation();
-        expanded = !expanded;
-        updateDisclosure(expanded);
-        localStorage.setItem(folderKey(module), expanded ? "0" : "1");
-      });
-      row.append(disclosure, moduleButton(module));
-      children.forEach(child => childrenHost.append(renderModuleNode(child, depth + 1)));
-      // Research detail/report tabs are dynamic children of the Research
-      // folder.  They are filled by FTTabs and deliberately have no module
-      // registration of their own.
-      if (module.id === "research") {
-        const dynamic = document.createElement("div");
-        dynamic.className = "nav-folder-dynamic";
-        dynamic.dataset.navFolderDynamic = "research";
-        childrenHost.append(dynamic);
-      }
-      folder.append(row, childrenHost);
-      return folder;
+    function renderModuleNode(module) {
+      // The sidebar lists feature entries only. Children describe pages
+      // inside that feature and are rendered by the feature's own tabs.
+      return moduleButton(module);
     }
 
     async function loadModules() {
