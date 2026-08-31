@@ -14,8 +14,8 @@ from server.services.research_evidence_scope import (
 )
 from tools.data.sqlite.db import connect_sqlite
 
-from .provenance import validate_file_provenance
 from .fragments import extract_job_fragment
+from .provenance import validate_file_provenance
 from .schema import ensure_schema
 from .validation import (
     canonical,
@@ -260,6 +260,38 @@ def list_source_fragments(
             (owner, source_ref),
         ).fetchall()
     return [_fragment_row(row) for row in rows]
+
+
+def evidence_contains_job_source(
+    *, owner: str, evidence_ref: str, job_id: str,
+) -> bool:
+    """Return whether an Evidence object contains a fragment from one Job."""
+    target_job = required_text(job_id, "job_id", maximum=128)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT fragment_refs_json FROM research_fragment_evidence_objects "
+            "WHERE owner=? AND evidence_ref=?",
+            (owner, evidence_ref),
+        ).fetchone()
+        if row is None:
+            return False
+        refs = json.loads(row["fragment_refs_json"])
+        if not refs:
+            return False
+        sources = conn.execute(
+            f"""SELECT s.identity_json
+                  FROM research_evidence_fragments f
+                  JOIN research_evidence_sources s
+                    ON s.source_ref=f.source_ref AND s.owner=f.owner
+                 WHERE f.owner=? AND s.source_kind='job'
+                   AND f.fragment_ref IN ({','.join('?' for _ in refs)})""",
+            (owner, *refs),
+        ).fetchall()
+    return any(
+        str(json.loads(item["identity_json"]).get("job_id") or "") == target_job
+        for item in sources
+    )
 
 
 def create_evidence(
