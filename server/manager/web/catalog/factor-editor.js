@@ -14,10 +14,11 @@
     ).trim();
   }
 
-  function sourceClassName(sourceCode) {
-    return String(sourceCode || "").match(
-      /^\s*class\s+([A-Za-z_]\w*)\s*\(/m,
-    )?.[1] || "";
+  function persistedFamilyClassName(value) {
+    return String(
+      value?.name || value?.factor_family_name || value?.family_class_name
+      || value?.factor_family_alias || value?.family_alias || value?.family || "",
+    ).trim();
   }
 
   function familyItems(data) {
@@ -73,6 +74,7 @@
           ? state.inspection : null;
         state.validationError = "";
         state.validationMessage = "";
+        state.onFamilyChanged?.(state.family);
         redraw();
       },
     });
@@ -153,6 +155,7 @@
           payload.family_formula_fingerprint || fingerprint,
       };
       state.sourceCode = payload.source_code || "";
+      state.onFamilyChanged?.(state.family);
       const nextParameters = payload.params || state.family.params || [];
       const previous = state.parameterValues || {};
       state.parameterValues = Object.fromEntries(nextParameters.map(parameter => {
@@ -696,19 +699,20 @@
     form.className = window.FTFactorDetailShared.pageClass(
       mode, `factor-editor-form ${familyMode ? "factor-family-page" : "factor-page"}`,
     );
-    const name = textField(context, familyMode ? "因子家族类名" : "因子类名", loaded.name || loaded.factor_alias || "", {
+    const name = textField(
+      context, "因子家族类名",
+      persistedFamilyClassName(familyMode ? loaded : state.family || loaded), {
       readOnly: mode === "edit" || familyMode, required: true,
-    });
+      },
+    );
     const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
     const description = textField(context, "说明", loaded.description || "");
     const category = textField(context, "分类", loaded.category || "自编");
     state.onInspected = inspection => {
-      if (state.familyMode && inspection?.factor_name) {
-        name.value = inspection.factor_name;
-      }
+      if (inspection?.factor_name) name.value = inspection.factor_name;
     };
-    state.onSourceChanged = sourceCode => {
-      if (state.familyMode) name.value = sourceClassName(sourceCode);
+    state.onFamilyChanged = family => {
+      name.value = persistedFamilyClassName(family);
     };
     const topMount = document.createElement("div");
     topMount.className = "factor-detail-top";
@@ -846,15 +850,6 @@
         identity: identityMount,
         jobs: jobs.mount,
       },
-    });
-    let selectedTab = tabs.current();
-    tabs.root.addEventListener("object-detail-tab-change", event => {
-      const nextTab = event.detail?.key || tabs.current();
-      const previousTab = selectedTab;
-      selectedTab = nextTab;
-      if (previousTab === "source" && nextTab !== "source") {
-        void validateSourceDraft();
-      }
     });
     if (mode === "create") {
       const stateKey = `factor-create:${state.familyMode ? "family" : "factor"}`;
@@ -999,6 +994,6 @@
   }
 
   window.FTFactorEditor = Object.freeze({
-    render, reconcileParameterValues, bindFieldValue, sourceClassName,
+    render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
   });
 })();

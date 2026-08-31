@@ -2334,7 +2334,7 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'context.toolbar.append(submit)' in editor
     assert 'source: {save_mode: "auto"}' in editor
     assert 'await validateSourceDraft()' in editor
-    assert 'object-detail-tab-change' in editor
+    assert 'object-detail-tab-change' not in editor
     assert 'form.append(topMount, tabs.root, status)' in editor
     assert "FTUI.actionButton(" in object_form
     assert 'if (definition.mode === "edit") context.toolbar.append(cancelEdit)' in object_form
