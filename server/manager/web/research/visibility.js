@@ -10,6 +10,12 @@
     return context.t(definitions.find(item => item[0] === value)?.[1] || value || "仅自己");
   }
 
+  function styledButton(context, title, action, style = "secondary") {
+    const button = context.button(context.t(title), action);
+    button.classList.add(style);
+    return button;
+  }
+
   async function authorizedDialog(context, currentUsers) {
     const response = await context.api("/api/research/principals");
     const principals = response.principals || [];
@@ -21,7 +27,7 @@
       const heading = document.createElement("h2");
       heading.textContent = context.t("指定可见用户");
       const note = document.createElement("p");
-      note.className = "secondary";
+      note.className = "research-dialog-note";
       note.textContent = context.t("搜索并选择可查看该内容的用户");
       const search = document.createElement("input");
       search.type = "search";
@@ -51,8 +57,8 @@
       const actions = document.createElement("div");
       actions.className = "dialog-actions";
       actions.append(
-        context.button(context.t("取消"), () => dialog.close("cancel")),
-        context.button(context.t("保存"), () => dialog.close("save")),
+        styledButton(context, "取消", () => dialog.close("cancel")),
+        styledButton(context, "保存", () => dialog.close("save"), "primary"),
       );
       card.append(heading, note, search, choices, actions);
       dialog.append(card);
@@ -105,7 +111,7 @@
         const text = document.createElement("span");
         text.textContent = context.t(link.mode === "one_time" ? "一次性链接" : "长期链接")
           + (link.redeemed_by ? ` · ${context.t("已领取")}: ${link.redeemed_by}` : "");
-        const revoke = context.button(context.t("撤销"), async () => {
+        const revoke = styledButton(context, "撤销", async () => {
           revoke.disabled = true;
           try {
             await context.api(
@@ -125,8 +131,8 @@
     };
     const actions = document.createElement("div");
     actions.className = "dialog-actions";
-    const close = context.button(context.t("关闭"), () => dialog.close());
-    const create = context.button(context.t("创建并复制"), async () => {
+    const close = styledButton(context, "关闭", () => dialog.close());
+    const create = styledButton(context, "创建并复制", async () => {
       create.disabled = true;
       try {
         const payload = await context.api(
@@ -150,7 +156,7 @@
       } finally {
         create.disabled = false;
       }
-    });
+    }, "primary");
     actions.append(close, create);
     card.append(heading, mode, expires, output, links, actions);
     dialog.append(card);
@@ -228,11 +234,10 @@
         select.disabled = false;
       }
     });
-    const share = context.button(context.t("分享链接"), event => {
+    const share = FTUI.iconButton(context, "link", "分享链接", event => {
       event.stopPropagation();
       shareDialog(context, item, kind);
-    });
-    share.classList.add("research-share-link-button");
+    }, {className: "research-share-link-button"});
     wrapper.append(select, share);
     return wrapper;
   }

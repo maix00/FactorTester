@@ -82,31 +82,35 @@
   function ownerDisplay(context, item) {
     const owner = String(item.owner_ref || item.owner_username || "").trim();
     const profile = String(item.profile_ref || item.profile_id || "").trim();
-    if (owner && profile) return `${owner}（${profile}）`;
-    return owner || profile || context.t("未知");
+    const parts = owner.split("@").filter(Boolean);
+    const alias = String(item.owner_alias || (parts.length >= 2 ? parts[1] : owner)).trim();
+    const institution = String(item.owner_institution || "").trim();
+    const label = [alias || context.t("未知"), institution ? `· ${institution}` : ""]
+      .filter(Boolean).join(" ") + (profile ? `（${profile}）` : "");
+    const value = document.createElement("span");
+    value.className = "research-report-owner";
+    value.textContent = label;
+    if (owner && owner !== alias) value.title = owner;
+    return value;
   }
 
   function researchDisplay(context, item) {
     const research = item?.research || {};
     const title = String(research.title || item?.research_title || "").trim();
-    const id = String(research.research_id || item?.research_id || "").trim();
-    if (title && id) return `${title}（${id}）`;
-    return title || id || context.t("未关联研究");
+    return title || context.t("未关联研究");
   }
 
   function table(context, rows, state, scope, root) {
     const view = FTUI.pagedTable(
       [
         context.t("报告"), context.t("所属研究"), context.t("用户（Profile）"),
-        context.t("构建来源"),
-        context.t("共享状态"), context.t("访问范围"), context.t("更新时间"),
+        context.t("构建来源"), context.t("访问范围"), context.t("更新时间"),
       ],
       rows.map(item => [
         item.title || item.name || item.filename || context.t("未命名研究报告"),
         researchDisplay(context, item),
         ownerDisplay(context, item),
         buildSource(context, item),
-        sharing(context, item),
         FTResearchVisibility.control(context, item, {
           kind: "report", onSaved: () => renderScope(context, root, false),
         }),
