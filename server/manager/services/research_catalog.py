@@ -786,7 +786,7 @@ class ResearchCatalog:
                 (target,),
             ).fetchone()
         if row is None:
-            raise KeyError("evidence is not linked to a research")
+            raise KeyError("evidence is not linked by a report")
         return str(row["evidence_owner_ref"])
 
     # ------------------------------------------------------------------
