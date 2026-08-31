@@ -14,9 +14,9 @@ FactorTester 目前同时存在三套研究相关代码：
 3. `tools/cli/agent-harness/`、`tools/cli/release/research_reporting/` 与
    `apple/Sources/Features/Profiles/` 下的本地研究运行和展示。
 
-新的职责边界是：Manager 没有常驻研究 Agent，不负责研究推进、边选择、
-研究会话、报告编辑或本地测试执行。研究过程必须能在 Swift/CLI 离线运行；
-共享研究报告只在联网时同步其公开投影和对象。
+新的职责边界是：Manager 的公开研究能力负责目录、服务器 Profile 报告读取、
+共享投影和对象传输；不把这些能力误认为本地研究 Agent 的推进权威。研究过程可以
+在 Swift/CLI 离线运行；共享研究报告只在联网时同步其公开投影和对象。
 
 ## 决策
 
@@ -90,10 +90,11 @@ Flow 和 Research Step 路由，属于待迁出的旧服务器运行时，不再
 3. 更新 Web/Swift 读取路径到本地研究存储或公开报告读取路径。
 4. 删除旧的服务器研究推进模块、表和测试；删除旧导入兼容层。
 
-在第 2 步完成前，不移动整个 `server/services/research_graph` 包。当前
-`server/modules/single_factor_test/__init__.py` 会自动注册旧路由，
-`server/manager/http/federation/service_proxy.py` 仍会转发旧研究 API，且
-大量测试直接导入旧模块；半迁移会导致启动失败或形成两个不一致的实现。
+在研究推进旧模块完全退出前，不移动整个 `server/services/research_graph` 包。
+当前 `server/modules/single_factor_test/__init__.py` 会自动注册部分测试/研究路由，
+`server/manager/http/federation/service_proxy.py` 仍承担部分内部转发，且大量测试直接
+导入旧模块；半迁移会导致启动失败或形成两个不一致的实现。是否移除旧路由必须以
+路由注册、Web/Swift 调用方和测试均已迁出为验收条件，不能仅凭目录名称判断。
 
 本阶段已经完成目录接口的第一步：
 
@@ -104,9 +105,11 @@ server/manager/http/research_graph_catalog_routes.py
 ```
 
 这是一层明确的 Manager HTTP seam，不是第二套数据库或第二份研究图权威；
-它只调用 catalog 子模块，并在 Manager 启动时创建目录所需的最小表。旧的
-`/api/research-graphs/...` 仍作为已发布客户端的兼容路由保留，直到研究运行
-时调用全部迁出后再删除。
+它只调用 catalog 子模块，并在 Manager 启动时创建目录所需的最小表。当前实现以
+`/api/catalog/research-graphs/...` 为 canonical catalog 路径；`/api/server-research`
+是服务器 Profile 报告源的独立传输面，不是研究图 catalog，也不能在新代码中当作通用
+目录别名。旧路径是否仍可用，必须以当前路由注册和兼容测试为准，本文不再宣称存在
+未经源码确认的 `/api/research-graphs/...` 兼容路由。
 
 ## 不做的事
 
@@ -119,7 +122,7 @@ server/manager/http/research_graph_catalog_routes.py
 ## 后果
 
 - 当前服务器旧研究模块会暂时存在，但被明确标记为待删除的迁移遗留，不再
-  是新功能的放置位置。
+  是新功能的放置位置；服务器 Profile 报告读取面与研究图目录面必须分别维护。
 - 客户端目录承担离线研究的状态和行为，Manager 目录承担公开投影与对象
   传输，代码归属与网络断开时的行为一致。
 - 迁移完成后，服务器部署包可以删除研究推进依赖，启动面更小；在此之前由

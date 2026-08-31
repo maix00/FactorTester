@@ -1,104 +1,71 @@
-# ADR 024: Backtest Module Ownership and RQAlpha Adapter Boundary
+# ADR-024：回测模块所有权与 RQAlpha 适配器边界
 
-## Status
+## 状态
 
-Accepted.
+已接受。后续 API/CLI 对外入口由 ADR-141 统一；本文只定义回测领域内部
+的所有权。
 
-## Context
+## 背景
 
-The grouped backtest route has grown into a composition point for unrelated
-concerns: HTTP/SSE transport, template payload parsing, setting defaults,
-membership preparation, factor execution, market-rule fallback, order execution,
-ledger serialization, and snapshot overlays. That makes semantics such as
-rebalance trigger, target allocation, fee-aware executable target, lot rounding,
-and product selection easy to confuse.
+分组回测路由曾同时承担 HTTP/SSE 传输、模板解析、默认值、成员准备、因子
+执行、市场规则回退、订单执行、账本序列化和快照覆盖层，容易混淆再平衡、
+目标配置、费用后的可执行目标、手数舍入和产品选择。
 
-RQAlpha is a useful reference point because it is explicitly modular. Its public
-repository describes RQAlpha as an extendable and replaceable backtest/trading
-framework, and its documented mods split accounts, analyser, progress, risk,
-simulation, scheduler, and transaction-cost responsibilities. Its order API also
-separates high-level target orders from lower-level submitted orders. The wider
-systematic-trading ecosystem likewise treats order type, slippage, commission,
-liquidity, margin, and portfolio construction as execution-model choices rather
-than route-layer details.
+RQAlpha 的模块化设计以及其他系统化交易框架的共同做法表明：调度、组合
+配置、订单、佣金、滑点、流动性、保证金和账本应该是可替换但有明确接口的
+执行部件。
 
-References:
+## 决策
+
+`server/modules/*` 仍是 HTTP 边界，不整体搬到 `tools/`。各领域在
+`tools/*` 中拥有对象、设置、校验、CLI 适配器和框架适配器；服务器路由只
+负责认证、解析传输、调用服务并序列化响应。
+
+回测所有权划分如下：
+
+- **产品选择**：`SubmissionSpec` 类对象拥有路径、产品掩码、产品/合约转换
+  和元数据；页面提交只是 UI 选择，直到后端将它物化。
+- **因子研究**：`FactorTester` 拥有因子定义、因子评估和因子信号表，不拥有
+  执行、下单或记账。
+- **测试对象**：IC 和分组测试是由 `FactorTester` 支撑的研究任务；分组
+  测试拥有成员策略构造，但不是通用回测引擎。
+- **回测运行器**：`BacktestRunner` 或框架适配器拥有目标计算、订单生成、
+  撮合、费用、流动性、保证金、账本和事件回放。
+- **快照轨迹**：各执行模块只产生自己决策的轨迹，后续由轨迹合成器按需
+  构造详细覆盖层。
+- **异步交易日历**：属于市场日历/数据可用性模块；无可交易 K 线的产品
+  保持持仓，可交易产品在当前时间片内重新配置。分组模块只负责解释成员
+  桶内部的配置结果。
+
+因子执行遵循 ADR-022：`FactorExpr` 是唯一作者接口；批量/向量执行和
+增量/事件执行编译同一个表达式。外部框架从表达式或声明式
+`FactorSource` 适配，而不是重新手写框架专属因子。分组成员可以作为策略
+信号，但必须由相同的 `FactorExpr` 结果产生并做等价校验。
+
+`split_count_by_membership_key` 只表示某个
+`(tester_id, factor_alias)` 成员来源的桶数量，是成员张量复用键，不是因子
+预计算开关。
+
+货币精度是注册的执行设置。Native 可以使用最小货币单位整数账本；若适配器
+不能实现某个值，必须声明能力并拒绝或映射到明确的适配器默认值，不能静默
+忽略用户设置。
+
+## 后果
+
+- 长文件按所有权拆分，而不是机械按长度拆分；优先提取设置解析、快照序列
+  化、产品显示元数据和运行编排。
+- 新执行设置先登记在 `tools/backtest/settings`，再由 Native 和适配器消费；
+  前端 chip 与 tab 使用后端 manifest。
+- 如果加入 RQAlpha，必须同时实现数据 bundle/feed、FactorExpr 适配、策略
+  运行、订单/撮合/费用/保证金映射以及与 Native 的等价测试。
+- CLI 入口放在其领域适配器旁边，负责物化产品选择、编译表达式、运行 IC/
+  分组诊断和输出类型安全的轨迹摘要；不得另造一套本地策略解析器。
+- 全仓类型检查是验收门槛；`type: ignore` 只允许出现在有说明的第三方
+  互操作位置。
+
+## 参考
 
 - https://github.com/ricequant/rqalpha
 - https://www.ricequant.com/doc/rqalpha-plus/api/order-api
 - https://rqalpha.readthedocs.io/zh-cn/latest/history.html
 - https://github.com/paperswithbacktest/awesome-systematic-trading
-
-## Decision
-
-`server/modules/*` remains the HTTP boundary. It should not be moved wholesale
-under `tools/`. Instead, each business module in `tools/*` owns its domain
-objects, settings, validation, CLI entrypoints, and framework adapters. Server
-routes become thin adapters that authenticate, parse request transport, call
-domain services, and serialize responses.
-
-Backtest ownership is split as follows:
-
-- Product selection: a backend `SubmissionSpec`-style object owns selected paths,
-  product masks, product/contract conversion, and metadata. A frontend
-  "submission" is only a UI path selection until the backend materializes it.
-- Factor research: `FactorTester` owns factor definitions, factor evaluation, and
-  factor-signal tables for a product selection. It should not own execution,
-  order routing, or accounting.
-- Test business objects: IC tests and grouped tests are `FactorTester`-backed
-  research jobs. `FactorGroupTester` owns grouped-membership strategy
-  construction; it is not a general backtest engine.
-- Backtest runner: a `BacktestRunner`/framework adapter owns target calculation,
-  order generation, matching, fees, liquidity, margin, ledger, and event replay.
-- Snapshot trace: each execution module owns trace fragments for its own
-  decisions. A later trace composer can build a detailed overlay on demand.
-- Asynchronous trading calendars are not unique to grouped tests. Any portfolio
-  holding instruments with different sessions, missing bars, or time zones can
-  encounter the same tradability problem. The generic ownership is the
-  market-calendar/data-availability module: instruments without a tradable bar
-  keep their existing holdings, and tradable instruments may be reallocated
-  within the current slice. Grouped tests add a strategy-specific explanation
-  layer because membership buckets affect how capital is distributed inside each
-  group. Both the generic tradability event and the grouped allocation
-  consequence must be surfaced immediately during progress and later in strategy
-  diagnostics.
-
-Factor execution follows ADR 022:
-
-- `FactorExpr` is the single authoring interface.
-- Batch/vector and incremental/event engines compile the same `FactorExpr`.
-- External frameworks should start from a framework adapter of `FactorExpr` or a
-  declared `FactorSource`, not from framework-specific handwritten factor logic.
-- In the special grouped-test domain, membership may be the strategy signal sent
-  into all engines, but that membership must be generated from the same
-  `FactorExpr` result and checked for equivalence.
-
-`split_count_by_membership_key` means the grouped strategy bucket count for a
-specific `(tester_id, factor_alias)` membership source. It is not factor
-precomputation. It exists so several selected groups can reuse one membership
-tensor produced from the same factor signal.
-
-Money precision is a registered execution setting. Native accounting can keep
-minor-unit integer ledgers, while adapters such as Qlib may expose an engine
-native major-unit ledger. When a framework cannot honor a setting value, the
-adapter must declare that capability and either reject the value or map it to an
-explicit framework-managed default. It must not silently ignore user settings.
-
-## Consequences
-
-- Large files such as `server/modules/single_factor_test/group.py` should be
-  split by ownership, not by arbitrary length. The first extraction targets are
-  payload/settings resolution, snapshot serialization, product display metadata,
-  and group-run orchestration.
-- New execution settings should be registered in `tools/backtest/settings`, then
-  consumed by Native and adapter runners. Frontend chips and tabs use the backend
-  manifest only.
-- RQAlpha should be added as a fifth framework from the data and adapter layer:
-  data bundle/feed, FactorExpr adapter or explicit FactorSource, strategy runner,
-  order/matching/fee/margin mapping, and equivalence tests against Native.
-- CLI entrypoints belong beside the domain modules, for example a backtest CLI
-  that can materialize a product selection, compile a FactorExpr, run group/IC
-  diagnostics, and print type-safe trace summaries for agent workflows.
-- Repository-wide type checking is an acceptance gate. Type errors should be
-  fixed at the ownership boundary; `type: ignore` is reserved for narrow,
-  documented third-party interop cases.

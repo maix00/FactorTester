@@ -1,72 +1,25 @@
-# ADR 063: Separate server federation from control-database settings
+# ADR 063：分离服务器联邦与控制数据库设置
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-The settings title “peer attachment” mixed two independent concerns. Manager
-federation exchanges server endpoints, online execution ports, load, and data
-source capabilities over port 7998. PostgreSQL on port 5432 is instead the
-authoritative store for users, organizations, hierarchy, quotas, public visitor
-allowlist entries, and device records, including the small cross-Manager user-language
-preference. A remote server's loopback database URL
-(`127.0.0.1:5432`) cannot be copied unchanged to another Manager.
+“对等节点挂载”这个设置标题混合了两个独立问题。Manager 联邦在 7998 交换服务器端点、在线执行端口、负载和数据源能力；PostgreSQL 5432 则是用户、组织、层级、配额、公共访客白名单、设备记录以及跨 Manager 语言偏好的权威存储。远程服务器的 `127.0.0.1:5432` 不能原样复制给另一台 Manager。
 
-The old federation page also rendered stopped worktree ports as selectable,
-even though registration payloads correctly filtered them before advertising
-to a peer. That UI suggested an offline service could be offered remotely.
+旧联邦页还把已停止的 worktree 端口显示为可选，虽然注册 payload 在发送给对等节点前已经过滤；这会让 UI 暗示离线服务可以被远程提供。
 
-## Decision
+## 决策
 
-1. Rename the user-facing “peer attachment” section to “server federation”.
-   It configures only Manager-to-Manager registration, callback endpoints,
-   heartbeat state, and task synchronization.
-2. Show only currently online service ports in the federation settings page.
-   Heartbeats dynamically advertise every online Manager-owned service and
-   never advertise a stopped port. This supersedes ADR 056's manual per-port
-   checkbox: an empty stored port selection now means automatic discovery,
-   and the outward capability APIs also omit offline ports. A Manager with no
-   execution port remains a valid online peer and may advertise ports in a
-   later heartbeat.
-3. Add a separate super-administrator control-database page. A local Manager
-   may configure PostgreSQL host/IP, port, database, application role,
-   write-only password, TLS mode, and timeout.
-4. Validate connectivity, credentials, and schema before replacing the active
-   control store. On success, account authentication and device registration
-   switch immediately. Newly started execution and
-   artifact children receive the same URL; already-running children report a
-   restart requirement instead of inheriting a process-global mutation.
-5. Persist UI-managed credentials only in the Manager state directory with
-   mode 0600. API responses return host, port, database, user, TLS mode, and a
-   password-present boolean, never the password or raw URL.
-6. A deployment-provided environment URL remains authoritative and read-only
-   in the UI. This keeps the public systemd node under server configuration
-   management while allowing a local LaunchAgent node to be configured by an
-   authenticated super administrator.
-7. Explicit user-language preferences are write-through PostgreSQL records.
-   Managers cache them locally for five minutes, so normal page/API reads do
-   not put PostgreSQL on every-request paths. Language preference data is
-   scoped to the account and remains independent of device enrollment.
-   The preference projection exposes whether a PostgreSQL row is configured;
-   an absent row is not equivalent to an explicit `system` selection. On
-   first authenticated synchronization, a native client may bootstrap the
-   missing row only from a language value already scoped to that same
-   principal. A process-wide or last-used language must never be assigned to
-   a different account. Older Managers that omit the additive configured flag
-   remain authoritative to newer clients, preventing an unsafe upload during
-   a mixed-version rollout.
+1. 用户界面的“对等节点挂载”改名为“服务器联邦”，只配置 Manager 间注册、回调端点、心跳和任务同步。
+2. 联邦设置只显示当前在线服务端口。心跳动态公布每个在线的 Manager 服务，不公布已停止端口。它取代 ADR-056 的手工端口勾选：空的保存端口选择表示自动发现，能力 API 也省略离线端口。没有执行端口的 Manager 仍可作为在线对等节点，并在之后心跳中公布端口。
+3. 增加独立的超级管理员控制数据库页面。本地 Manager 可配置 PostgreSQL 主机/IP、端口、数据库、应用角色、只写密码、TLS 模式和超时。
+4. 替换活动控制存储前校验连接、凭据和 schema。成功后账户认证和设备注册立即切换；新启动的执行/生成物子进程收到同一 URL，已运行子进程报告需要重启，不继承进程级变更。
+5. UI 管理的凭据只保存在 Manager 状态目录，权限 0600。API 只返回主机、端口、数据库、用户、TLS 模式和“有密码”布尔值，不返回密码或原始 URL。
+6. 部署提供的环境 URL 在 UI 中保持只读权威，公共 systemd 节点由服务器配置管理；本地 LaunchAgent 节点允许认证的超级管理员配置。
+7. 用户语言偏好写入 PostgreSQL，并在 Manager 本地缓存五分钟；普通页面/API 读取不会每次访问 PostgreSQL。偏好按账户隔离，独立于设备注册。投影显式表示是否存在 PostgreSQL 行；缺失不等价于显式 `system`。首次认证同步时，原生客户端只能用同一主体已有的语言值补建缺失行，不能使用进程级或上次使用的语言赋给其他账户。旧 Manager 缺少新增的 configured 标记时，仍由旧端权威，防止混合版本不安全上传。
 
-## Consequences
+## 后果
 
-- Public visitor allowlist and device records remain visible to every Manager
-  that shares the same PostgreSQL authority; device enrollment itself happens
-  only after an allowlisted visitor login on the public Manager.
-- The database host shown on the remote node may be loopback, while another
-  node must use the remote server's reachable IP or hostname.
-- Federation and database failures are reported independently and no longer
-  share a misleading settings title.
-- Rotating an environment-managed database password remains an operational
-  deployment action; rotating a UI-managed local password is available only
-  to a super administrator over an accepted secure/private transport.
+共享同一 PostgreSQL 权威的 Manager 都能看到公共访客白名单和设备记录，但设备注册仍只在公共 Manager 的白名单访客登录后发生。远程节点显示的数据库主机可以是 loopback，另一节点必须使用可达 IP/主机名。联邦和数据库故障分开报告，不再共用误导性的设置标题。环境管理的数据库密码轮换仍是运维动作，UI 管理的本地密码只能由超级管理员通过安全/私有传输轮换。

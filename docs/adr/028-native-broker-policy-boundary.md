@@ -30,7 +30,7 @@
 处理这个遗留问题，避免 `BrokerModule` 把死选项也继承过去。
 
 具体执行步骤见配套文档
-[028-native-broker-policy-implementation-plan.md](028-native-broker-policy-implementation-plan.md)。
+[ADR-128：Native Broker Policy 迁移实施计划](128-native-broker-policy-implementation-plan.md)。
 
 ## 背景
 
@@ -70,7 +70,7 @@ broker 语义，本 ADR 的 `BrokerModule` 范围不包含它们——见下方"
 TargetStrategyModule -> OrderBookModule -> BrokerModule policies -> LedgerModule
 ```
 
-### TargetStrategyModule
+### 目标策略模块（TargetStrategyModule）
 
 `TargetStrategyModule` 负责“想要什么仓位”。它的子类只生成 target，不关心订单后续处理：
 
@@ -81,7 +81,7 @@ TargetStrategyModule -> OrderBookModule -> BrokerModule policies -> LedgerModule
 `TargetStrategyModule` 不是 broker 的子模块，也不应知道订单是否被撤销、拒绝、
 部分成交或以什么价格成交。
 
-### OrderBookModule
+### 订单簿模块（OrderBookModule）
 
 `OrderBookModule` 是 target 与 broker 之间的转换层：
 
@@ -89,7 +89,7 @@ TargetStrategyModule -> OrderBookModule -> BrokerModule policies -> LedgerModule
 - 输出：订单意图和数量 delta；
 - 不负责 broker-side 订单有效期、撤单、撮合、成交确认。
 
-### BrokerModule
+### Broker 模块（BrokerModule）
 
 `BrokerModule` 负责注册 broker 字段、构造 broker object，并暴露 callable policy。
 它是订单行为语义服务，不是 flow 编排器。现有订单相关 flow 仍由 scheduler 调用，
@@ -108,7 +108,7 @@ TargetStrategyModule -> OrderBookModule -> BrokerModule policies -> LedgerModule
 这些模块在自己的 flow 中调用 `broker_for(run_state, strategy)` 获得 broker，
 再调用对应 policy。
 
-### NativeBroker
+### 原生 Broker（NativeBroker）
 
 当前 native 默认行为应被命名并复刻为 `NativeBroker`，默认字段为：
 
@@ -140,7 +140,7 @@ callable policy。
 selector——它们是成交价确定之后的成本模型，明确排除在 `BrokerModule` 范围外
 （见"背景"一节末尾的边界说明）。
 
-### CustomBroker
+### 自定义 Broker（CustomBroker）
 
 CLI / factor workspace 可以注册自定义 broker 或单个 policy，并通过 id 传入
 `BrokerModule`。前端不直接传任意 callable。
@@ -191,7 +191,7 @@ broker-side open orders，再迁移或重命名为 `BrokerStore.open_orders`。
     `volume_participation` 等），因为这些是已经上线的真实用户选项，不是假设。
 
 具体到每一步该跑哪些回归测试、以什么顺序推进，见配套的实施计划文档
-[028-native-broker-policy-implementation-plan.md](028-native-broker-policy-implementation-plan.md)。
+[ADR-128：Native Broker Policy 迁移实施计划](128-native-broker-policy-implementation-plan.md)。
 
 ## 后果
 

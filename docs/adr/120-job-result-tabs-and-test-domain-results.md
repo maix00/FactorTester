@@ -1,75 +1,54 @@
-# ADR-120: Job Result Tabs and Test-Domain Results
+# ADR-120：Job 结果选项卡与测试领域结果
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-Job detail, embedded workbench results, IC results, and backtest results all
-need the same result-area navigation. Their domain filters are not the same:
-strategy identity and grouped-strategy diagnostics currently belong only to
-backtest. Keeping both concerns in `jobs/` makes generic Job lifecycle code
-interpret test-domain semantics and encourages parallel tab implementations.
+Job 详情、嵌入式工作台、IC 结果和回测结果需要同一种结果区域导航，但
+策略身份和分组策略诊断只属于回测。若全部放进 `jobs/`，通用 Job 生命周期
+就会解释测试领域语义，并产生多套选项卡实现。
 
-## Decision
+## 决策
 
-`jobs/result-tabs.js` owns the reusable result-area tab Interface: tab labels,
-active state, activation events, and a slot for caller-provided controls. It
-does not know strategies, factors, portfolios, or any RunSpec field.
+`jobs/result-tabs.js` 拥有可复用的结果区域 tab 契约：标签、活动状态、切换
+事件和调用方控制区插槽。它不理解策略、因子、组合或 RunSpec 字段。
 
-Each test Module owns its result model and result-specific controls under
-`test-modules/<test>/results/`. Backtest therefore owns stable strategy
-identity, the exclusive “全部策略” multi-select Adapter, strategy filtering,
-strategy statistics, grouped detail, and ranking diagnostics. Job detail and
-the test workbench mount the same exported result Interface without copying a
-parser or result-state model.
+每个测试模块在 `test-modules/<test>/results/` 拥有自己的结果模型和控制项。
+回测模块负责稳定策略身份、“全部策略”排他多选项、策略筛选、策略统计、
+分组详情和排序诊断。Job 详情与测试工作台复用同一结果接口，不复制解析器
+或结果状态模型。
 
-A terminal parent Job may also own supplemental computations. They remain
-ordinary `research_jobs` child rows with `job_role=supplemental`; the parent
-keeps its terminal state and the ordinary Job list continues to project one
-parent row. While any child is active, that row may display the aggregate
-status “分析中”. The parent detail owns a lazy, searchable and paginated history
-of its supplemental children.
+终态父 Job 的补充计算仍是 `research_jobs` 中的普通子行，使用
+`job_role=supplemental`；父 Job 保留终态，普通 Job 列表继续聚合为一行。子
+任务活动时该行可以显示“分析中”。父详情以懒加载、可搜索、可换页列表展示
+补充历史。
 
-Built-in supplemental analyses navigate back into the test Module that owns
-their semantics. Backtest strategy-analysis history therefore resolves a
-stable strategy identity and opens the existing strategy-analysis overlay at
-the recorded analysis tab. Generic Job code does not interpret those tabs.
+内置补充分析回到拥有语义的测试模块。回测策略分析通过稳定策略身份打开
+已有的策略分析 overlay；通用 Job 代码不解释这些 tab。
 
-Custom supplemental analyses are persistent result-area Tabs owned by the
-parent Job. A random stable `tab_id` identifies one draft, its current Python
-submission snapshot, and its current structured result. Renaming does not
-change that identity. Re-running overwrites the current snapshot and result,
-but every supplemental child remains in history. Explicit Tab deletion removes
-the draft and current files while preserving those history rows as
-non-recoverable audit records.
+自定义补充分析是父 Job 结果区域拥有的持久 tab。稳定 `tab_id` 同时标识草稿、
+当前 Python 提交快照和当前结构化结果。重命名不改变身份；重运行覆盖当前
+快照和结果，但补充子 Job 历史全部保留。显式删除 tab 才删除草稿和当前文件，
+历史行仍作为不可恢复的审计记录。
 
-The generic Jobs result shell appends these custom Tabs to backtest, IC,
-factor-series, and non-domain result viewers. Test Modules keep ownership of
-their built-in result tabs. Visitors may read retained custom results but never
-receive source or mutation controls.
+通用 Jobs 结果壳向回测、IC、因子序列和非领域结果查看器追加自定义 tab；内置
+结果 tab 仍由测试模块拥有。访客可读取保留的自定义结果，但不能获得源码或
+修改控制。
 
-Custom Python receives only a bounded read-only virtual artifact API. Execution
-requires an operating-system sandbox, has no unsafe fallback, and denies
-network, environment, subprocess, and filesystem mutation. CPU, memory,
-wall-time, file-descriptor, input-artifact, and structured-output bounds apply.
-Only the trusted supplemental sink may replace the result artifact beneath
-`<parent-job-id>/custom-analyses/<tab-id>/`.
+自定义 Python 只能使用有界、只读的虚拟生成物 API。执行必须在操作系统沙箱
+内进行，禁止网络、环境读取、子进程和文件系统变更；CPU、内存、墙钟、文件
+描述符、输入生成物和结构化输出都有上限。只有可信补充 sink 可以替换
+`<parent-job-id>/custom-analyses/<tab-id>/` 下的当前结果。
 
-Result selection, pagination, folding, and active tabs are presentation state.
-They do not enter RunSpec.
+结果选择、换页、折叠和活动 tab 是展示状态，不进入 RunSpec。
 
-## Consequences
+## 后果
 
-- New test Modules reuse one result-tab shell without inheriting backtest
-  terminology or behavior.
-- Backtest charts and tables consume one strategy-selection Interface.
-- Physical paths express ownership: generic lifecycle UI under `jobs/`, test
-  semantics under `test-modules/`.
-- Existing browser globals remain stable while files move, preserving current
-  Job-detail and embedded-workbench integrations.
-- Supplemental computation is routed by the parent Job's storage server, not
-  by a historical business port.
-- Deleting a custom-analysis result artifact does not delete its Tab; deleting
-  the Tab is the only operation that removes its current submission and result.
+- 新测试模块复用结果 tab 壳，但不继承回测术语或策略语义。
+- 回测图表和表格消费一个策略选择接口。
+- 通用生命周期 UI 位于 `jobs/`，测试语义位于 `test-modules/`；移动文件时必须
+  保留既有浏览器全局和注册契约。
+- 补充计算按父 Job 的存储服务器路由，不依赖历史业务端口。
+- 删除生成物不删除 tab；删除 tab 是移除当前提交物和结果的唯一操作。

@@ -1,12 +1,12 @@
 # ADR 096: CLI 与测试运行时的环境所有权
 
 > 本 ADR 的终端安装方案已由 [ADR 098](098-app-managed-cli-environment.md)
-> supersede。`pipx` 不再是普通 FTClient 用户的安装方式；本文件保留用于
+> 取代。`pipx` 不再是普通 FTClient 用户的安装方式；本文件保留用于
 > 说明测试运行时与 CLI 依赖为何分离。
 
 ## 状态
 
-已被 ADR 098 supersede（保留为历史决策）
+已被 ADR-098 取代（保留为历史决策）
 
 ## 背景
 

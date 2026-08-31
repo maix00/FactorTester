@@ -1,43 +1,21 @@
-# ADR 065: Advertise a distinct federated artifact endpoint
+# ADR 065：公布独立的联邦生成物端点
 
-## Status
+## 状态
 
-Superseded by ADR-068. Retained only as the historical reverse-tunnel proposal;
-distinct tunnel endpoint advertisement is no longer a production protocol.
+已由 ADR-068 取代。本文只保留历史反向隧道提案；独立隧道端点公布不再是生产协议。
 
-## Context
+## 背景
 
-ADR 057 assigns large generated and submitted files to the per-server 7997
-data plane, while Manager-to-Manager control traffic stays on 7998. A direct
-server can derive `https://host:7997` from its Manager endpoint. A reverse
-tunnel cannot: the peer may reach the Manager through a peer-local port such
-as 17998 and the artifact service through a different peer-local port such as
-17997. Deriving 7997 from the Manager callback then points at the peer's own
-loopback listener instead of the source server.
+ADR-057 把大生成物和提交物放入每服务器 7997 数据面，把 Manager 间控制流量留在 7998。直连服务器可以从 Manager 端点推导 `https://host:7997`，但反向隧道不行：对等节点可能通过 17998 到达源 Manager 的控制面，同时通过 17997 到达源生成物服务。若从 Manager callback 推导 7997，就会错误地指向对等节点自己的 loopback listener。
 
-## Decision
+## 历史决策
 
-1. Federation settings store an optional exact `artifact_endpoint` separately
-   from the Manager `public_endpoint`.
-2. Registration heartbeats advertise that exact endpoint when configured.
-   When it is empty, the existing same-host 7997 derivation remains the
-   default for directly reachable servers. Environment-managed deployments
-   may supply the same value through `FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT`.
-3. Reverse-tunnel deployments expose two independent channels: 17998 to the
-   source Manager's 7998 control plane, and 17997 to its 7997 artifact data
-   plane. Service execution ports remain private and are never tunneled.
-4. The artifact endpoint carries only short-lived, job-scoped ticket requests;
-   user sessions and Manager capability tokens remain on 7998.
-5. The execution server signs the artifact ticket, but the requesting Manager
-   rebuilds the returned download URL from its own registered
-   `artifact_endpoint`. The execution server's local 7997 URL is not a
-   routable authority for another host.
+1. 联邦设置曾把 `artifact_endpoint` 与 Manager 的 `public_endpoint` 分开保存。
+2. 心跳在配置时公布精确端点；为空时，直连服务器继续默认推导同主机 7997。环境部署可用 `FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT` 提供同一值。
+3. 反向隧道曾暴露两条独立通道：17998 到源 Manager 7998 控制面，17997 到源 7997 生成物数据面；执行端口保持私有，不通过隧道。
+4. 生成物端点只承载短期、Job 作用域的 ticket 请求；用户会话和 Manager capability token 留在 7998。
+5. 执行服务器签发生成物 ticket，请求 Manager 用自己登记的 `artifact_endpoint` 重建下载 URL；执行服务器本地 7997 URL 不是其他主机的可路由权威。
 
-## Consequences
+## 历史后果
 
-- Large downloads do not consume the 7998 control-plane tunnel.
-- Each peer sees the endpoint that is reachable from its own network context,
-  including peer-local loopback endpoints created by reverse SSH tunnels.
-- Existing direct deployments need no configuration change.
-- A deployment must keep its advertised artifact endpoint and tunnel/listener
-  lifecycle aligned; health checks should verify both 7998 and 7997 paths.
+大下载不会消耗 7998 控制隧道；每个对等节点看到的是自己网络上下文可达的端点。直接部署无需改配置，但端点和隧道/监听生命周期必须一致，健康检查应同时验证 7998 和 7997。当前生产传输边界以 ADR-068 为准。

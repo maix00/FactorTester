@@ -1,72 +1,26 @@
-# ADR 087: Shared Account-Domain Synchronization
+# ADR 087：共享账户域同步
 
-## Status
+## 状态
 
-Accepted — implemented in #214
+已接受，已在 Issue #214 实施。
 
-## Context
+## 背景
 
-Multiple Managers must expose the same user's account-owned metadata while
-remaining usable when the central PostgreSQL service is temporarily
-unavailable. Product categories are one example; the same problem applies to
-product groups, registered Profiles, factor registrations, preferences, and
-other small account records. Copying each feature directly between every pair
-of Managers would create a separate conflict and retry protocol for each
-feature.
+多个 Manager 必须暴露同一用户的账户元数据，同时在中央 PostgreSQL 暂时不可用时仍可使用。产品分类只是一个例子，同样的问题也适用于产品组、已注册 Profile、因子注册、偏好和其他小型账户记录。如果每个功能都在 Manager 之间直接复制，就会形成各自的冲突和重试协议。
 
-## Decision
+## 决策
 
-Use one account-domain synchronization protocol with per-entity adapters:
+使用一个账户域同步协议，并为每种实体提供 adapter：
 
-1. PostgreSQL is the cross-Manager authority for account metadata. Each
-   Manager's existing account SQLite remains a durable local mirror and
-   offline working copy.
-2. The local mirror records pending changes in a shared outbox and a pull
-   cursor. Operations are idempotent and carry an entity type, stable entity
-   ID, principal ID, origin Manager ID, payload revision, and tombstone state.
-3. Reads serve the local mirror first and lazily pull newer revisions when
-   PostgreSQL is reachable. Local writes are immediately durable; they are
-   pushed synchronously when possible or remain in the outbox until recovery.
-   Real-time replication is not required.
-4. Stable global user IDs and entity IDs are the merge keys. Usernames and
-   display aliases are labels, not synchronization identities. Concurrent
-   edits use optimistic revision checks and produce an explicit conflict
-   instead of silently overwriting newer data.
-5. Large or server-local objects (factor source files, generated artifacts,
-   submissions, and research files) do not pass through PostgreSQL. Their
-   metadata and ownership manifests use the account protocol; bytes use the
-   authenticated 7997/WireGuard data plane. A research publication metadata
-   row includes owner, Profile, visibility, authorized users, generation,
-   projection hash, and storage Manager. Revoking a publication emits a
-   tombstone; it does not delete a remote copy's bytes.
-6. Runtime state is excluded from account synchronization: Manager sessions,
-   live node capabilities, provider online status, and route selection remain
-   local/federated projections.
+1. PostgreSQL 是跨 Manager 的账户元数据权威；每个 Manager 现有账户 SQLite 是持久本地镜像和离线工作副本。
+2. 本地镜像通过共享 outbox 和 pull cursor 记录待处理变更。操作幂等，并带实体类型、稳定实体 ID、主体 ID、源 Manager ID、payload revision 和 tombstone 状态。
+3. 读取优先使用本地镜像；PostgreSQL 可达时按需拉取更新 revision。本地写入立即持久化，能推送时同步推送，否则留在 outbox；不要求实时复制。
+4. 稳定全局用户 ID 和实体 ID 是合并键；用户名和显示 alias 只是标签。并发编辑使用乐观 revision 检查，遇到冲突显式返回，不静默覆盖较新数据。
+5. 大型或服务器本地对象（因子源码、生成物、提交物、研究文件）不经过 PostgreSQL。其元数据和所有权 manifest 走账户协议，字节走认证的 7997/WireGuard 数据面。研究 publication 元数据包含所有者、Profile、可见性、授权用户、generation、投影哈希和存储 Manager；撤销 publication 写 tombstone，不删除远端副本字节。
+6. 运行时状态不做账户同步：Manager 会话、在线节点能力、提供方在线状态和路由选择保持本地/联邦投影。
 
-## Consequences
+## 后果
 
-- Product categories can be created while PostgreSQL is offline and become
-  visible on other Managers after lazy synchronization.
-- A data-source bundle remains distinct from its providers: one category may
-  refer to `Local`, while the federated source descriptor lists every online
-  server that provides `Local`.
-- Each new account-owned feature adds an adapter and schema projection, not a
-  new Manager-to-Manager synchronization protocol.
-- The implementation is intentionally lazy rather than real-time: an affected
-  view pulls after its per-principal cooldown, then flushes the local outbox.
-  PostgreSQL downtime therefore leaves local login and local metadata reads
-  available; new remote visibility waits for recovery.
-- `account_domain_entities`, `account_domain_outbox`,
-  `account_domain_cursors`, and `account_domain_conflicts` live in the existing
-  Manager SQLite database. The corresponding PostgreSQL table is only a
-  metadata authority. No second SQLite file, port, or peer listener is added.
-- Product categories/groups, factor sets/parameter configurations, factor
-  source manifests, Profiles, user/org/level metadata, factor research-run
-  metadata, and uploaded/shared research publication metadata use the same
-  local adapter seam. Source code, report projections, assets, and generated
-  bytes remain on their owning storage Manager and are never copied into the
-  account-domain tables. Job artifacts/submissions continue to use the
-  existing authenticated 7997/WireGuard data plane; the existing public
-  research read-through endpoint is intentionally unchanged by #214 and
-  still needs a separate research-object data-plane adapter before its
-  cross-Manager byte path can be described as 7997-native.
+产品分类可在 PostgreSQL 离线时创建，恢复后经懒同步在其他 Manager 可见；数据源 bundle 与其 provider 保持不同语义；新增账户功能只需新增 adapter 和 schema 投影，不再新增 Manager 间同步协议。同步有意是懒性的：受影响视图经过主体级冷却后拉取并 flush outbox，故障期间本地登录和元数据读取仍可用，远程可见性等待恢复。
+
+`account_domain_entities`、`account_domain_outbox`、`account_domain_cursors` 和 `account_domain_conflicts` 位于现有 Manager SQLite，对应 PostgreSQL 表只是元数据权威；不增加第二个 SQLite、端口或 peer listener。产品分类/组、因子集合/参数配置、因子源码 manifest、Profile、用户/组织/层级、因子研究任务元数据和共享研究 publication 元数据共用该 adapter seam；源码、报告投影、资产和生成物字节留在所属存储 Manager。Job 生成物/提交物继续走 7997/WireGuard 数据面，公共研究 read-through 字节路径仍需单独的研究对象 data-plane adapter。

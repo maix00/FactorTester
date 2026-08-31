@@ -1,52 +1,36 @@
-# ADR 085: Explicit Product Categories and Canonical Product-Group Paths
+# ADR-085：显式产品分类绑定与规范产品组路径
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The product catalog exposes two different concepts that had been conflated:
-the category-free classifier path of a Product, and a category projection such
-as `日夜盘/日盘` or `行业/工业品`. Product groups persisted the path emitted by
-the selected tree, while composite-category choices lived in browser
-`localStorage`. As a result, a group could not be resolved reproducibly away
-from the browser that created it, and the old resolver had an implicit category
-context.
+产品目录包含两个曾被混淆的概念：不带分类的 Product 分类器路径，以及
+`日夜盘/日盘`、`行业/工业品` 这样的分类投影。产品组过去保存所选树直接
+返回的路径，而复合分类只在浏览器 `localStorage` 中存在，导致产品组离开
+创建它的浏览器后无法重现。
 
-## Decision
+## 决策
 
-1. A canonical product path is the classifier object path, for example
-   `Product/Futures/CNFutures/_products/SI.GFE`. Category segments are never
-   persisted in a new product-group `paths` value.
-2. A category-qualified path is normalized at write time. The selected
-   `category_ids` are required for new product groups; the category tree is
-   used to expand a category branch to exact canonical object paths while
-   preserving positive and negative path semantics.
-3. User-created category definitions and composite definitions are stored in
-   the Manager account SQLite store, scoped by username. Provider categories
-   remain source-owned projections and carry a data-source bundle identity
-   such as `Local`; a bundle identity is not a server identity. Composite
-   definitions are explicit rows, not browser-local state.
-4. Product groups persist `category_ids` even after their paths have been
-   expanded. This records the category context used to create the group and
-   lets the UI display the binding. The runtime resolver uses the canonical
-   paths and never adds a default category.
-5. Existing rows are read with a compatibility migration: recognizable
-   legacy category paths infer a source category and are rewritten to
-   canonical paths. Unrecognized legacy rows remain readable and report their
-   unresolved paths; new writes fail instead of silently guessing.
+1. 规范产品路径是分类器对象路径，例如
+   `Product/Futures/CNFutures/_products/SI.GFE`；新产品组的 `paths` 不再
+   保存分类段。
+2. 带分类的路径在写入时规范化；新产品组必须保存 `category_ids`，分类树
+   将分支展开为精确的规范对象路径，同时保留正/负路径语义。
+3. 用户创建的分类和复合分类存储在按用户名隔离的 Manager 账户 SQLite 中；
+   提供方分类是带 `Local` 等数据源 bundle 身份的源投影，bundle 身份不是
+   服务器身份。复合定义是明确的持久行，不是浏览器状态。
+4. 产品组即使已展开路径也保留 `category_ids`，以记录创建时的分类上下文；
+   运行时只解析规范路径，不能偷偷加入默认分类。
+5. 旧行只在兼容迁移边界读取：能识别的旧分类路径被转换并写回规范路径；
+   无法识别的行仍可读但报告未解析路径，新写入直接失败而不是猜测。
 
-## Consequences
+## 后果
 
-- Product groups are portable across Web, Swift, and Manager instances that
-  share the same canonical catalog contract.
-- One data-source bundle may have multiple server providers. The federated
-  source descriptor is authoritative for the online provider list; category
-  metadata must never select a single server implicitly.
-- Changing a category later does not silently mutate an existing group; the
-  group contains the exact canonical product paths used at creation time.
-- The product tree is a read/selection surface. Category creation and
-  composition are managed only from the dedicated 产品分类 tab.
-- User category synchronization can be added as an account-domain projection
-  later without reintroducing browser-local definitions.
+- 产品组可以在共享同一规范目录契约的 Web、Swift 和 Manager 实例间传递。
+- 一个数据源 bundle 可以拥有多个服务器提供方；联邦源描述决定在线提供方，
+  分类元数据不能隐含选择某台服务器。
+- 后续修改分类不会静默修改既有产品组，因为产品组保存创建时的精确路径。
+- 产品树负责读取和选择；分类创建与组合只由产品分类页面管理。
+- 未来可以增加账户域分类同步，但不能重新引入浏览器本地定义。

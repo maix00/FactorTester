@@ -1,58 +1,24 @@
-# ADR 062: Public Manager HTTP and certificate boundary
+# ADR 062：公共 Manager 的 HTTP 与证书边界
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-The public Manager is reached directly by IP address on port 7998. There is
-no domain or DNS entry, and deployment policy prohibits opening ports 80 and
-443. The existing listener used a self-signed IP certificate and wrapped the
-entire listening socket in TLS. Consequently, an ordinary
-`http://<ip>:7998` request received an empty response instead of being guided
-to HTTPS. TLS handshakes were also performed before the threaded request
-handler, so an idle handshake could temporarily block later accepts.
+公共 Manager 通过 7998 端口的 IP 直接访问，没有域名或 DNS，部署策略禁止打开 80 和 443。旧监听器使用 IP 自签名证书并把整个监听 socket 包在 TLS 中，因此普通 `http://<ip>:7998` 得到空响应，无法引导到 HTTPS；TLS 握手还发生在线程化请求处理器之前，空闲握手可能暂时阻塞后续 accept。
 
-A self-signed certificate is cryptographically signed and encrypts traffic,
-but its issuer is not in browser or operating-system public trust stores. A
-publicly trusted Let's Encrypt IP certificate is not available under the
-current port policy: IP validation supports HTTP-01 on port 80 or
-TLS-ALPN-01 on port 443, not a challenge on port 7998. IP certificates are
-also short-lived and require reliable automated renewal.
+自签名证书虽然加密并有密码学签名，但签发者不在浏览器或系统公共信任库。当前端口政策也不能使用公开 Let's Encrypt IP 证书：IP 校验只支持 80 上的 HTTP-01 或 443 上的 TLS-ALPN-01，不支持在 7998 上挑战；IP 证书寿命短且需要可靠自动续期。
 
-## Decision
+## 决策
 
-1. A TLS-configured Manager accepts both protocol prefaces on port 7998.
-   Protocol detection and TLS negotiation occur inside each request worker,
-   not in the shared accept loop.
-2. Plain HTTP never reaches login, device enrollment, federation, or another
-   application route. Every HTTP method receives a `308 Permanent Redirect`
-   to the same path and query on `https://<public-endpoint>:7998`.
-3. HTTPS remains the only secure transport for credentials, sessions, device
-   signatures, federation tokens, and application APIs.
-4. Ports 80 and 443 remain closed. Deployment must not install or invoke an
-   ACME client while that policy is active.
-5. Until a managed private CA and client trust-distribution flow are
-   introduced, the persisted self-signed certificate is retained. Approved
-   clients must explicitly trust or pin it; native clients must not silently
-   disable certificate validation.
-6. Manager-to-Manager HTTPS may load an explicitly provisioned CA bundle from
-   `FACTORTESTER_FEDERATION_CA_FILE`. It augments the operating-system roots;
-   hostname verification and certificate-chain validation remain enabled.
+1. 配置 TLS 的 Manager 在 7998 同时接受两种协议前导。协议检测和 TLS 协商在每个请求 worker 内完成，不放在共享 accept 循环。
+2. 明文 HTTP 不得到达登录、设备注册、联邦或其他应用路由；所有 HTTP 方法返回 `308 Permanent Redirect`，保留原路径和查询串并转到 `https://<public-endpoint>:7998`。
+3. HTTPS 是凭据、会话、设备签名、联邦 token 和应用 API 的唯一安全传输。
+4. 80 和 443 保持关闭，策略有效期间部署不得安装或调用 ACME 客户端。
+5. 在引入受管理私有 CA 和客户端信任分发前，保留持久化自签名证书；获准客户端必须显式信任或固定证书，原生客户端不得静默关闭校验。
+6. Manager 间 HTTPS 可以从 `FACTORTESTER_FEDERATION_CA_FILE` 加载显式 CA bundle，补充系统根；主机名校验和证书链校验仍开启。
 
-## Consequences
+## 后果
 
-- Typing `http://<ip>:7998` leads to the encrypted endpoint without exposing
-  a usable plaintext login or API.
-- The first plaintext navigation cannot itself authenticate the server and
-  remains redirectable by an on-path attacker. Approved users and clients
-  should retain an HTTPS bookmark and must never submit credentials directly
-  to an HTTP URL.
-- HTTP access does not make port 7998 eligible for public-CA HTTP-01
-  validation, because that validation is fixed to port 80.
-- Browsers continue to warn until the certificate or a future private CA is
-  installed in the device trust store.
-- A future public-CA migration requires an explicit policy change opening
-  port 80 or 443; a future private-CA migration requires a secure root
-  distribution and revocation design.
+访问 `http://<ip>:7998` 会到达加密端点，但首次明文导航本身不能认证服务器，仍可能被链路攻击者重定向；用户和客户端应保存 HTTPS 书签，绝不能向 HTTP URL 直接提交凭据。浏览器在证书或未来私有 CA 加入设备信任库前会继续告警。未来公开 CA 迁移必须显式开放 80/443；私有 CA 迁移必须另行设计安全根分发和撤销。

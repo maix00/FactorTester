@@ -1,72 +1,27 @@
-# ADR 069: Cut over the public host to two isolated containers
+# ADR 069：公共主机切换到两个隔离容器
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-ADR 066 defines the local server container boundary and the public host's two
-trust domains. The existing public host still runs FactorTester and PostgreSQL
-as native system services, exposes PostgreSQL on host TCP 5432, and couples
-release cleanup to mutable host paths. Issue #184 additionally requires
-server-only `17998/17997` surfaces bound to FactorTester's WireGuard address.
+ADR-066 定义本地服务器容器边界和公共主机的两个信任域，但公共主机曾仍以原生系统服务运行 FactorTester 与 PostgreSQL，把 PostgreSQL 以主机 TCP 5432 暴露，并把发布清理耦合到可变主机路径。Issue #184 还要求仅服务器可用、绑定 FactorTester WireGuard 地址的 17998/17997。
 
-## Decision
+## 决策
 
-The public host is cut over to exactly `factortester-public` and
-`postgresql-control`. Each container establishes and owns its own WireGuard
-interface and root-only key. The application image embeds one full Git SHA and
-runs no source watcher. PostgreSQL uses a named volume and a checked restore
-from the native custom-format dump.
+公共主机只运行 `factortester-public` 和 `postgresql-control` 两个容器。每个容器建立并拥有自己的 WireGuard 接口和 root-only 密钥。应用镜像嵌入一个完整 Git SHA，不运行源码 watcher；PostgreSQL 使用 named volume，并从原生 custom-format dump 做校验恢复。
 
-Public host mappings are limited to `7998`, `7997`, federation UDP `51820`, and
-database-tunnel UDP `51821`. Main test port `8000`, PostgreSQL TCP `5432`, and
-peer TCP `17998/17997` are not host-published. Port 8000 is loopback-only in the
-FactorTester container and reached through Manager. Same-host database traffic
-uses an internal Docker network. Peer listeners from Issue #184 bind only the
-FactorTester WireGuard address inside its container.
+公共主机只映射 7998、7997、联邦 UDP 51820 和数据库隧道 UDP 51821。主测试端口 8000、PostgreSQL TCP 5432、对等 TCP 17998/17997 不发布到主机；8000 在 FactorTester 容器内仅 loopback，通过 Manager 访问；同主机数据库流量走 Docker 内网；对等监听只绑定容器内 FactorTester WireGuard 地址。
 
-Container startup does not depend on PostgreSQL health. This preserves the
-Manager, existing local task state, and byte-plane availability when the
-control database is down. Database-backed operations return their existing
-degraded errors and recover after PostgreSQL reconnects.
+容器启动不依赖 PostgreSQL 健康状态，以便控制库宕机时 Manager、本地任务状态和字节数据面继续服务。依赖数据库的操作返回既有降级错误，恢复后继续。
 
-The release verifier, rather than the container entrypoint, performs the
-idempotent control-database schema migration and checks that the stored schema
-version equals the application revision's declared version. A PostgreSQL
-outage therefore does not restart or hide an already-running Manager, but the
-release cannot be accepted as verified until migration and version validation
-succeed.
+发布校验器而不是容器 entrypoint 执行幂等控制库 schema 迁移，并检查存储 schema 版本等于应用 revision 声明版本。新的应用通过运行时验证和数据库 restore check 后，才写入已验证部署回执并清理旧应用版本；默认保留三份已验证 revision。清理只允许应用完整 SHA 镜像 tag 和匹配 Git release worktree；PostgreSQL 镜像、volume、备份、无关 Docker 项目和全局 build cache 不在范围内。
 
-The normal publisher uses incremental Git transfer and Docker layer caching.
-Only after the new application passes runtime verification and a database
-restore check does it append a verified deployment receipt and prune old
-application releases. The default rollback depth is three verified revisions.
-Pruning is allowlisted to the application's full-SHA image tags and matching
-Git release worktrees; PostgreSQL images, volumes, backups, unrelated Docker
-projects, and the global build cache are outside that operation. Cleanup
-failures are reported without rolling back an already verified application.
+可信本地发布器通过本地 2222 维护通道把 `main` 推到公共 bare repository 后执行激活事务；公共主机不从 GitHub 拉取。主机锁串行化发布；传输、构建或验证失败时继续提供已验证版本，重复执行同一命令是幂等重试。
 
-The activation transaction is invoked by the trusted local publisher after it
-pushes `main` directly to the public bare repository over the local `2222`
-maintenance channel. The public host never fetches GitHub, because outbound
-GitHub access is not part of the deployment network contract. The host lock
-serializes publication attempts. Transfer, build, or verification failure
-leaves the verified release serving traffic; rerunning the same local command
-retries the idempotent transaction.
+移除原生服务前必须确认容器数据库已有迁移后的 schema/data、自身备份能测试恢复、Manager/data/main 端点通过检查。观察窗口内在 volume 外保留回滚 dump。
 
-Native service removal follows, rather than precedes, three checks: the
-container database has the migrated schema/data, its own backup passes a test
-restore, and Manager/data/main endpoints pass. A rollback dump is retained
-outside the volume during the observation window.
+## 后果
 
-## Consequences
-
-- Application releases restart only FactorTester; PostgreSQL remains online.
-- Public TCP 5432 and host-level 8000 disappear from the runtime surface.
-- FactorTester and database peers can be revoked independently.
-- Issue #184 is validated against the final WireGuard topology instead of a
-  temporary SSH/NAT transport.
-- Deleting old host runtimes is an explicit post-validation cleanup and cannot
-  remove the container database volume.
+应用发布只重启 FactorTester，PostgreSQL 保持在线；公共 TCP 5432 和主机级 8000 消失；FactorTester 与数据库对等身份可以独立撤销。旧主机运行时只能在验证后显式删除，不能误删容器数据库 volume。

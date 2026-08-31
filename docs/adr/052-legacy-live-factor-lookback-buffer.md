@@ -1,59 +1,36 @@
-# ADR-052: Bounded history for legacy live-factor adapters
+# ADR-052：旧式实时因子适配器的有界历史缓冲
 
-- **Status**: Proposed for issue #180
-- **Date**: 2026-08-11
+- **状态**：针对 Issue #180 提议
+- **日期**：2026-08-11
 
-## Context
+## 背景
 
-Opaque non-`FactorExpr` live factors receive a pandas price table on SIGNAL.
-Appending one row with `pd.concat` copied the complete history on every signal,
-so a one-bar-per-signal replay accumulated a superlinear cost.  The adapter
-also cannot infer whether an opaque factor needs a finite trailing window or a
-cumulative history without changing its economics.
+不透明的非 `FactorExpr` 实时因子在 SIGNAL 时接收 pandas 价格表。每次用 `pd.concat` 追加一行都会复制完整历史，因此逐信号回放会产生超线性成本。适配器也不能在不改变经济语义的情况下猜测一个不透明因子需要有限尾窗还是累计历史。
 
-## Decision
+## 决策
 
-The adapter accepts an optional factor declaration:
+适配器接受可选的因子声明：
 
 ```python
 live_lookback_bars = 120
-# or, when expressing the contract in time:
+# 或用时间表达合约：
 live_lookback_window = "2h"
 ```
 
-The existing `required_lookback` declaration is accepted as a compatibility
-alias for `live_lookback_window`.  A declaration may be a positive integer
-(already expressed in bars) or a time duration.  A duration is parsed with the
-same `DataFreq`/product-session rules as internal rolling operators: the source
-frequency is resolved once, the duration is converted to an integer bar count,
-and the live adapter never performs timestamp subtraction while appending.  A
-callable declaration is evaluated once per live factor instance.  An absent
-declaration means unbounded history, so legacy behavior is unchanged.
+已有的 `required_lookback` 作为 `live_lookback_window` 的兼容别名。声明可以是正整数（已是 K 线数）或时间长度。时间长度使用内部滚动算子的相同 `DataFreq`/产品时段规则解析：只解析一次源频率，把时长换算成整数 K 线数，追加时不再做时间戳相减。可调用声明每个实时因子实例只求值一次。没有声明表示无限历史，因此旧行为不变。
 
-When a finite window is declared, the live table keeps exactly the last
-resolved number of logical visible bars.  The visibility clock (`available_at`)
-still controls which rows may enter the table; the retention declaration never
-permits a future row.  A factor that needs cumulative state must omit the
-declaration or maintain that state in `on_bar`.
+声明有限窗口时，实时表只保留解析出的最后若干条逻辑可见 K 线。`available_at` 可见性时钟仍决定哪些行可以进入，保留规则绝不能放入未来行。需要累计状态的因子应省略声明，或在 `on_bar` 中维护自身状态。
 
-For intraday durations spanning one or more days, product session metadata is
-used when available, matching `_resolve_windows`.  If only opaque product
-identifiers are available, the adapter uses a conservative elapsed-frequency
-ceiling rather than silently retaining fewer bars than the declared duration.
+跨越一个或多个交易日的日内时长优先使用产品时段元数据，与 `_resolve_windows` 一致。只有不透明产品标识时，适配器才使用保守的经过频率上限，避免比声明时长少保留数据。
 
-The table store uses an append-only, chunk-growing numeric buffer and exposes a
-pandas view of the populated rows.  Duplicate timestamps and timezone-aware
-indexes retain the compatibility path with the previous pandas merge rules.
+表存储采用追加式、按块增长的数值缓冲，并暴露已填充行的 pandas 视图。重复时间戳和带时区索引继续遵循旧 pandas 合并规则。
 
-## Acceptance
+## 验收
 
-- undeclared factors receive the same full-history rows and duplicate handling;
-- explicit bar declarations keep exactly that many trailing logical bars;
-- duration declarations resolve to the same bar count as internal rolling
-  window resolution before the first append;
-- hidden causal bars remain pending until `available_at`;
-- snapshots held by a factor remain stable under later appends (pandas
-  copy-on-write plus copy-on-grow storage);
-- live and precomputed factor tests continue to pass;
-- windowed legacy replay scales linearly in bar count and does not retain the
-  complete history.
+- 未声明因子收到相同的完整历史行并保持重复处理行为；
+- 显式 K 线声明恰好保留对应数量的尾部逻辑 K 线；
+- 时长声明在第一次追加前解析为与内部滚动窗口相同的 K 线数；
+- 隐藏的因果 K 线在 `available_at` 前保持待处理；
+- 因子持有的快照不受后续追加影响（pandas copy-on-write 和增长复制）；
+- 实时与预计算因子测试继续通过；
+- 窗口化旧式回放按 K 线数量线性增长，且不保留完整历史。

@@ -1,72 +1,55 @@
-# ADR-036: Durable Research Job Lifecycle
+# ADR-036：可持久化研究任务生命周期
 
-## Status
+## 状态
 
-Superseded by ADR-037, ADR-038, and ADR-039.
+已被 ADR-037、ADR-038 和 ADR-039 取代。
 
-This document records the first durable-job design. Its view-owned
-cancellation, persisted progress/events, renewable process slots, replay-based
-step continuation, and TTL semantics are no longer current.
+本文记录第一版可持久化任务设计。其中由视图拥有取消权、持久化进度/事件、可续租进程槽位、
+基于重放的 step continuation 和 TTL 语义已经不再是当前实现。
 
-## Context
+## 背景
 
-Long-running backtests and factor analyses previously belonged to a browser
-page runtime. The HTTP request submitted an in-process closure that read mutable
-page factors and wrote a single latest result. That made concurrent runs race,
-made refresh/restart recovery unreliable, and prevented process isolation.
+长时间运行的回测和因子分析过去属于浏览器页面运行时。HTTP 请求提交一个进程内闭包，读取可变的页面
+因子并覆盖单一的最新结果。这会造成并发运行竞争，使刷新和重启恢复不可靠，也无法实现进程隔离。
 
-## Decision
+## 决策
 
-Research execution uses four distinct identities:
+研究执行使用四种彼此独立的身份：
 
-- `session_uuid` authenticates HTTP requests. It does not own research data.
-- `view_uuid` identifies one browser-tab observer lease. Refresh reclaims the
-  same value from session storage; close marks it detaching.
-- `workspace_id` owns research context and points to one mutable configuration.
-- `run_id` owns one immutable RunSpec; each analysis is a durable `job_id` and
-  retries or step continuations are linked attempts with new job IDs.
+- `session_uuid` 用于 HTTP 请求认证，不拥有研究数据。
+- `view_uuid` 标识一个浏览器 tab 的观察租约。刷新从 session storage 恢复同一值，关闭时标记为脱离。
+- `workspace_id` 拥有研究上下文，并指向一个可变配置。
+- `run_id` 拥有一个不可变 RunSpec；每个分析都有可持久化的 `job_id`，重试或 step continuation
+  通过新的 Job ID 形成关联尝试。
 
-User configuration has one schema and one table. A workspace configuration and
-a named reusable template are both `ResearchConfiguration` rows with different
-roles. Editing overwrites the workspace row and increments an optimistic-lock
-counter; it does not retain draft history. Saving or loading a template copies
-the same canonical payload between configuration rows. Submitting copies that
-payload into an immutable RunSpec, which is the historical execution record.
+用户配置使用一套 schema 和一张表。工作区配置与命名的可复用模板都是 `ResearchConfiguration` 行，
+只是角色不同。编辑覆盖工作区行并递增乐观锁计数器，不保留草稿历史。保存或加载模板时，在配置行之间
+复制同一个规范 payload。提交时把该 payload 复制为不可变 RunSpec，RunSpec 才是历史执行记录。
 
-The submission boundary serializes the selected paths, factor aliases, settings,
-time window, and analysis options. Workers receive only this RunSpec payload and
-an importable runner path. They never receive Flask requests, sessions, browser
-objects, or FactorTester instances, and do not consult mutable page state.
+提交边界序列化选中的路径、因子 alias、设置、时间范围和分析选项。Worker 只接收 RunSpec payload
+和可导入的 runner 路径；不会接收 Flask 请求、session、浏览器对象或 FactorTester 实例，也不查询
+可变页面状态。
 
-SQLite is canonical for job metadata, RunSpecs, status, cancellation requests,
-bounded events, latest progress/manifest, checkpoints, errors, and artifact
-metadata. Live process handles and SSE fanout remain process-local caches.
-Process slots use renewable SQLite leases, so the configured concurrency limit
-applies across Flask workers sharing the same database.
+SQLite 是任务元数据、RunSpec、状态、取消请求、有界事件、最新进度/manifest、checkpoint、错误和
+生成物元数据的权威存储。活动进程句柄和 SSE 广播仍是进程内缓存。进程槽位使用可续租的 SQLite 租约，
+因此共享同一数据库的 Flask worker 仍共同遵守并发上限。
 
-Cancellation is durable. The dispatching worker polls the canonical request and
-forwards it to the child cancellation event, then terminates an unresponsive
-worker after a grace interval. Dead dispatchers are reconciled to a readable
-failed terminal record on startup.
+取消请求是可持久化的。调度 Worker 读取规范取消请求并转发给子进程取消事件；子进程在宽限期后仍无响应时
+被终止。启动时会把已死亡的调度器协调为可读取的失败终态记录。
 
-Step mode persists a deterministic flow cursor and marks an attempt `paused`,
-releasing its worker slot. `continue`, `until`, and `end` create explicit linked
-attempts. Replay to the cursor may recompute prior deterministic flows; no
-worker remains blocked waiting for UI input.
+Step 模式持久化确定性的 flow cursor，并把尝试标记为 `paused` 后释放 Worker 槽位。`continue`、
+`until` 和 `end` 创建有明确关联的新尝试。回放到 cursor 可能重新计算先前的确定性 flow；不会让 Worker
+一直阻塞等待 UI 输入。
 
-Observer-bound Web jobs are cancelled only after the view lease grace expires.
-A refresh renews the same lease. CLI jobs default to durable and do not depend
-on a view. Terminal records and artifacts remain queryable until TTL expiry;
-expiry is represented explicitly rather than deletion.
+绑定观察者的 Web 任务只有在视图租约宽限期结束后才取消；刷新会续租同一租约。CLI 任务默认可持久化，
+不依赖视图。终态记录和生成物在 TTL 到期前仍可查询；到期以显式状态表示，而不是直接删除。
 
-## Consequences
+## 后果
 
-- Web and CLI share `/api/test-authoring/workspaces`, `/api/runs`, and `/api/jobs`.
-- Web and CLI share the same configuration/template schema and load/save API.
-- Workspace revision numbers are counters, not stored historical snapshots.
-- There is no direct job submission endpoint and no analysis-specific job API.
-- SSE supports `Last-Event-ID` and `after`; a retained-event gap emits `reset`.
-- Large artifact storage may move to files or object storage without changing
-  job ownership; the database stores the artifact identity and integrity data.
-- Deployments must share the configured SQLite database and artifact storage.
-  Moving dispatch to a dedicated service later preserves the same API contract.
+- Web 和 CLI 共用 `/api/test-authoring/workspaces`、`/api/runs` 与 `/api/jobs`。
+- Web 和 CLI 共用配置/模板 schema 及加载/保存 API。
+- 工作区 revision 是计数器，不是保存的历史快照。
+- 没有直接提交任务的旁路端点，也没有按分析类型拆出的任务 API。
+- SSE 支持 `Last-Event-ID` 与 `after`；保留事件出现间隙时发送 `reset`。
+- 大型生成物可以迁移到文件或对象存储，不改变任务所有权；数据库保存生成物身份和完整性信息。
+- 部署必须共享配置的 SQLite 数据库和生成物存储。以后把调度移到独立服务时仍保持相同 API 合约。

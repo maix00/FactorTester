@@ -1,65 +1,38 @@
-# ADR 103: Central public visitor allowlist and automatic browser enrollment
+# ADR-103：公共访客白名单与浏览器自动注册
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-Public visitor login was previously controlled by a deployment environment
-variable.  That made the policy difficult to audit and meant that two Managers
-could not manage the same public-access policy from a single authority.  A
-small group of explicitly allowlisted accounts also needs a convenient browser
-path into the public Manager; this may include a super-admin when that access
-is explicitly granted.
+公共访客登录曾由部署环境变量控制，难以审计，也无法让多个 Manager 共享
+同一公共访问策略。浏览器 API 不能可靠地判断普通窗口和隐私窗口，因此不能
+把这种判断作为认证条件或设备策略绕过。
 
-Browser APIs do not provide a reliable, security-grade way to distinguish a
-private/incognito window from an ordinary window.  The distinction must
-therefore not be used as an authentication condition or as a way to bypass
-device policy.
+## 决策
 
-## Decision
+1. 公共访客策略存储在共享 PostgreSQL 控制库的
+   `control_public_visitor_allowlist(server_id, username, enabled, ...)` 中，
+   `server_id` 明确限定作用域。只有有效账户能加入，允许管理员在明确授权后
+   进入；环境配置只作为中心策略 API 缺失或既有本地登录故障路径的兼容回退。
+2. 白名单和 `control_devices` 只能由超级管理员“用户与机构”页面管理；控制库
+   不可用时读写明确返回不可用，不展示陈旧管理副本。
+3. 设备注册只发生在白名单账户成功完成 `visitor-password` 登录后。Web 在当前
+   origin 的 IndexedDB 生成不可导出的 P-256 密钥，只向
+   `/api/devices/enroll` 发送设备 ID 和公钥 JWK，私钥不离开浏览器。旧的
+   内部目标发现、一次性授权页和授权链接兑换流程删除，不以 UI 隐藏。
+4. 服务端根据活跃会话的认证方式和新鲜白名单检查计算注册权限，忽略客户端
+   提供的设备策略标记。现有 `control_devices` 行迁移为公共白名单设备，仍
+   对用户和超级管理员可见、可撤销；不设普通设备配额或内部原生注册路径。
 
-1. Store public visitor policy in the shared PostgreSQL control database as
-   `control_public_visitor_allowlist(server_id, username, enabled, ...)`.
-   The `server_id` scope is explicit, so every Manager sharing PostgreSQL
-   reads the same policy for that server.  Only active accounts may be added;
-   the allowlist is the explicit authorization boundary and may include an
-   administrator.  Environment configuration remains only as a compatibility
-   fallback when the central policy API is absent or the established local-
-   login outage path is active.
-2. Expose allowlist and `control_devices` administration only through the
-   super-admin “用户与机构” settings page.  Management reads and writes fail
-   with an unavailable response when the central database is not usable; no
-   stale local management copy is presented.
-3. Device enrollment is available only as part of a successful
-   `visitor-password` login for an allowlisted account.  The web client may
-   generate a non-exportable P-256 browser key in the existing origin-local
-   IndexedDB.  It submits only the device id and public JWK to
-   `/api/devices/enroll`; the private key never leaves browser storage.  The
-   old internal Manager target-discovery, one-time authorization page, and
-   authorization-link redemption flow are removed rather than hidden behind a
-   UI-only restriction.
-4. The server derives enrollment permission from the live session
-   authentication method and a fresh allowlist check. It ignores any
-   client-supplied device-policy flag. Every surviving `control_devices` row is
-   a public allowlist device; existing rows are migrated to that policy and
-   remain visible and revocable to users and super administrators. There is
-   no ordinary-device quota or internal/native enrollment path.
+## 后果
 
-## Consequences
-
-- A normal browser can become a persistent approved device after an
-  allowlisted visitor login without sharing a private key between IP and
-  ingress origins.
-- There is no internal-network registration step.  A user must first be
-  present in the public-server allowlist; the compliance page explains this
-  path and never links to an internal Manager enrollment page.
-- A private window may create a temporary, separately registered browser key;
-  the server intentionally does not claim to detect that mode. Revocation and
-  audit metadata remain the controls.
-- `public_device_count` and `public_device_total_count` both report enabled
-  allowlist devices for compatibility with existing clients; no quota is
-  enforced.
-- The existing device registry and IndexedDB store are reused.  No duplicate
-  device-authentication protocol or device-cache table is introduced.
+- 普通浏览器在白名单访客登录后可以成为持久批准设备，不需要在 IP 和入口
+  origin 间共享私钥。
+- 没有内部网络注册步骤；用户必须先进入公共服务器白名单。
+- 隐私窗口可以创建临时、独立注册的浏览器密钥，服务端不声称能够识别该模式；
+  撤销和审计元数据是控制手段。
+- `public_device_count` 和 `public_device_total_count` 为兼容现有客户端都报告
+  启用的白名单设备，不执行配额。
+- 继续复用现有设备注册表和 IndexedDB，不增加第二套设备认证协议或缓存表。

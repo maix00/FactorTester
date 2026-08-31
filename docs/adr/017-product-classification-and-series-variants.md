@@ -1,23 +1,15 @@
-# ADR 017: Separate Product Classification from Series Variants
+# ADR 017：分离产品分类与产品序列变体
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Decision
+## 决策
 
-CategoryTree classifies financial Product identities only. Primary continuous,
-secondary continuous, raw, adjusted/smoothed, index, and future curve choices are
-represented by typed `ProductSeriesRef` values beneath a product in view-specific
-trees.
+`CategoryTree` 只负责分类金融 `Product` 身份。主力连续、次主力连续、原始、复权/平滑、指数和未来期限曲线等选择，使用产品节点下、面向视图的类型化 `ProductSeriesRef` 子节点表示。
 
-The single-factor submission tree continues to return Products. The price-view
-tree requests series children explicitly and sends `product_name` and
-`series_variant` as separate API fields. A variant may resolve to a different
-backing data series without creating another classified Product.
+单因子提交树仍返回 `Product`。价格视图树显式请求序列子节点，并将 `product_name` 与 `series_variant` 作为两个独立 API 字段发送。一个变体可以解析到不同的底层数据序列，但不会因此创建另一个分类产品。
 
-## Consequences
+## 后果
 
-Adding a series no longer duplicates sector/session categories or changes factor
-submission groups. Data sources can advertise only variants for which data exists,
-and future index/month/curve variants can use the same reference contract.
+增加产品序列不会复制板块/交易时段分类，也不会改变因子提交分组。数据源可以只声明实际存在的变体；将来的指数、月份和曲线变体可以复用同一引用合约。

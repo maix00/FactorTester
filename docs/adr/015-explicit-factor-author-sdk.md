@@ -1,41 +1,23 @@
-# ADR 015: Explicit Factor Author SDK and Repository Boundary
+# ADR 015：显式因子作者 SDK 与仓库边界
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-Factor workspace stubs were selected by recursively following implementation
-dependencies from `@factor_workspace`, `__factor_workspace__`, and guarded
-`FACTOR_WORKSPACE` imports. Internal runtime types therefore became visible to
-authors, generated imports could point to missing stubs, and the public surface
-changed when implementation imports changed.
+因子工作区桩文件过去会从 `@factor_workspace`、`__factor_workspace__` 和受保护的 `FACTOR_WORKSPACE` 导入递归跟随实现依赖。因此内部运行时类型会意外暴露给作者，生成的导入可能指向不存在的桩文件，公共接口也会随着实现导入变化。工作区 Git 行为同样分散在构造、同步、钩子和自动同步脚本中；生成的钩子还会捕获当时的 Issue worktree 路径，worktree 删除后就失效。
 
-Workspace Git behavior was also split between construction, synchronization,
-hooks, and the autosync script. Generated hooks captured the current issue
-worktree path, which became invalid after that worktree was removed.
+## 决策
 
-## Decision
+- `tools.data.factor_workspace.sdk` 是生成作者 SDK 的唯一模块级白名单。
+- `@factor_workspace` 只在允许的源模块内选择作者可见的符号和方法，不会因为导入关系把其他模块拉入 SDK。
+- `__factor_workspace__` 只表示允许模块内导出的单例值；运行时导入不定义 SDK 表面。
+- 生成的桩文件不包含作者装饰器及其扫描基础设施。
+- `FactorWorkspaceRepository` 负责初始化、分支选择、提交、分支物化、状态、HEAD 查询以及下载到上传的合并。
+- 钩子指向稳定的共享 `feat` 根目录，而不是生成钩子时碰巧使用的 worktree。
+- 分支物化后刷新 manifest，使选择的分支与实际仓库状态一致。
 
-- `tools.data.factor_workspace.sdk` is the sole module-level allowlist for the
-  generated author SDK.
-- `@factor_workspace` selects author-visible symbols and methods only inside an
-  allowed source module. It never pulls another module into the SDK.
-- `__factor_workspace__` identifies exported singleton values inside an allowed
-  module. Runtime imports do not define the SDK surface.
-- Generated stubs omit authoring decorators and their scanner infrastructure.
-- `FactorWorkspaceRepository` owns initialization, branch selection, commits,
-  branch materialization, state, HEAD lookup, and download-to-upload merging.
-- Hooks target the stable shared `feat` root rather than the worktree that
-  happened to generate them.
-- The manifest is refreshed after branch materialization so its selected branch
-  matches the actual repository state.
+## 后果
 
-## Consequences
-
-Adding a new author API now requires an explicit SDK contract change and a
-generated-artifact test update. This is intentional review friction. Runtime
-refactoring no longer expands the author workspace accidentally, while operator
-method signatures can still be maintained next to their implementation with
-`@factor_workspace`.
+增加作者 API 必须显式修改 SDK 合约并更新生成物测试，这是有意保留的审查门槛。运行时重构不会再意外扩大作者工作区；同时，算子方法签名仍可通过 `@factor_workspace` 与实现放在一起维护。

@@ -1,4 +1,7 @@
-# ADR 098：Beta 版本号由可达服务器的频道清单递增
+# ADR-137：Beta 版本号由可达服务器的频道清单递增
+
+> **编号迁移说明：** 本文原文件名为 `098-beta-version-resolved-from-live-channel.md`。因 ADR-098 已用于
+> App 管理 CLI 运行时，本文迁移为 ADR-137；决策内容不因重编号改变。
 
 ## 状态
 

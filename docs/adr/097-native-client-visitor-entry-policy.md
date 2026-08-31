@@ -1,54 +1,31 @@
-# ADR 097: Native clients use a dedicated visitor-entry policy
+# ADR 097：原生客户端使用专用访客入口策略
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public Manager has two intentionally different browser entry points:
+公共 Manager 有两个有意不同的浏览器入口：配置的 ngrok 入口可以显示有界访客模式，规范公共 IP 对普通浏览器只能显示合规页。Swift 客户端和将来的原生客户端首次连接公共 IP 时仍需要打开同一访客体验；若把公共 IP 本身当访客来源，普通浏览器就会看到访客链接，违反公共入口策略。
 
-- the configured ngrok ingress may show the bounded visitor-mode entry;
-- the canonical public IP must remain compliance-only for an ordinary browser.
+## 决策
 
-The Swift client and future native clients still need to open the same bounded
-visitor experience when they first connect to the public IP.  Treating the
-public IP itself as a visitor origin would make the visitor link visible to
-ordinary browser traffic and would violate the public-entry policy.
-
-## Decision
-
-Native clients identify the initial Manager navigation with:
+原生客户端用以下标记表示初始 Manager 导航：
 
 ```text
 X-FactorTester-Client-Access: ftclient
 ```
 
-The public Manager exchanges that non-privileged marker for an origin-bound,
-short-lived client-access cookie.  The cookie only enables the visitor link on
-the compliance page and an explicit `/visitor` click can create the existing
-bounded visitor session.  It never authenticates a user, registers a device,
-or grants API, Manager, or artifact access.
+公共 Manager 把这个非特权标记换成绑定来源的短期 client-access cookie。cookie 只允许合规页显示访客链接；用户显式点击 `/visitor` 后才创建已有的有界访客会话。它绝不认证用户、注册设备或授予 API、Manager、生成物访问。
 
-The policy is therefore:
+| 入口 | 是否显示访客入口 |
+|---|---|
+| 直接公共 IP，普通浏览器 | 隐藏 |
+| 配置的 ngrok 入口 | 通过既有一次性 grant 显示 |
+| 带 client-access 标记的原生客户端 | 通过 client-access cookie 显示 |
 
-| Entry | Visitor entry |
-| --- | --- |
-| Direct public IP, ordinary browser | Hidden |
-| Configured ngrok ingress | Shown through the existing one-time grant |
-| Native client with the client-access marker | Shown through the client-access cookie |
+协议名称保持客户端无关，其他原生客户端可复用；标记不是安全边界，所有特权操作仍走会话和设备校验。
 
-The protocol name is client-neutral so other native clients can implement the
-same behavior without adding another Swift-specific exception.  The marker is
-not a security boundary; all privileged operations retain their normal session
-and device checks.
+## 后果
 
-## Consequences
-
-- The public IP remains compliance-only for normal browser navigation.
-- Swift and future native clients can use the public IP without depending on
-  ngrok or on a browser-origin IndexedDB store.
-- A client marker does not permit login or registration; a registered device
-  is still required for public authentication.
-- The Web shell owns the visible settings entry.  The native shell no longer
-  duplicates it with a top-right settings/update toolbar.
+普通浏览器访问公共 IP 仍只有合规页；Swift 和未来原生客户端不依赖 ngrok 或浏览器 IndexedDB。标记不能登录或注册，公共认证仍需要注册设备。Web 壳负责可见的设置入口，原生壳不再复制右上角设置/更新工具栏。

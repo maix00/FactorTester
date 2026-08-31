@@ -1,57 +1,29 @@
-# ADR 054: Public factor registry and client asset boundary
+# ADR 054：公共因子注册表与客户端资产边界
 
-- Status: Accepted
-- Date: 2026-08-11
+- **状态**：已接受
+- **日期**：2026-08-11
 
-## Context
+## 背景
 
-The server checkout previously carried three repository-local mirrors:
+服务器 checkout 过去带有三套仓库内镜像：`Factors/` 保存公共 `FactorFamily` 源码，`client-sources/` 保存提供方 manifest 与 connector，`client-adapters/` 保存客户端适配器包。公共因子源码已经持久化在 SQLite 的 `factor_family_sources` 注册表中；客户端源和适配器属于客户端发行物，不属于服务器运行时。继续保留镜像会形成两个权威来源，让缺失数据库行或过期发行缓存被本地文件静默遮蔽。
 
-- `Factors/` for public FactorFamily source;
-- `client-sources/` for provider manifests and connector code;
-- `client-adapters/` for client adapter packages.
+## 决策
 
-The public factor source is already persisted in the SQLite
-`factor_family_sources` registry. Client sources and adapters are owned by the
-client distribution, not by the server runtime. Keeping repository mirrors
-created two authorities and allowed a missing database row or stale release
-cache to be silently masked by a local file.
+1. `factor_family_sources` 是服务器公共 `FactorFamily` 源码的唯一权威。公共目录、元数据、分组发现、运行时加载和数据字典扫描都直接读取该注册表。
+2. 删除仓库级 `Factors/` 兼容回退。即使工作区文件缺失，也不删除数据库里的公共行。
+3. 从服务器 checkout 删除 `client-sources/` 与 `client-adapters/`。发行物嵌入只接受显式外部根目录；未提供根目录时，构建 provider-neutral 运行时，不创建受管理的源或适配器目录。
+4. 只有显式提供外部根目录时，运行时缓存键才包含客户端资产。缓存中出现意外源/适配器目录时拒绝复用，不能隐式使用。
+5. 用户因子工作区继续在自己的 `public_factors/` 下物化公共源码。超级管理员 push 可以更新公共 SQLite 注册表，但该工作区是作者界面，不是服务器回退源。
 
-## Decision
+## 后果
 
-1. `factor_family_sources` is the only server authority for public
-   FactorFamily source. Public catalog, metadata, group discovery, runtime
-   loading, and data-dictionary scanning read that registry directly.
-2. The repository-level `Factors/` compatibility fallback is removed. Public
-   rows are not deleted when a local workspace file is missing.
-3. `client-sources/` and `client-adapters/` are removed from the server
-   checkout. Release embedding accepts explicit external roots for these
-   assets; with no roots, it produces a provider-neutral runtime with no
-   managed source or adapter directories.
-4. Runtime cache keys include external client assets only when their roots are
-   explicitly supplied. A cache containing unexpected source or adapter
-   directories is rejected instead of being reused implicitly.
-5. User factor workspaces continue to materialize public source under their
-   own `public_factors/` directory. A super-admin push may update the public
-   SQLite registry; that workspace is an authoring surface, not a server
-   fallback.
+- 公共因子不能只因为出现在服务器工作树中就变得可执行，必须先注册到 SQLite。
+- 需要 provider 资产的客户端发行构建必须从独立客户端发行物获得，并显式传入根目录。
+- 公共因子测试读取注册源码；客户端目录和发行测试使用临时外部 manifest/构建器。
+- 既有 SQLite 公共行保持不变；本决策移除的是镜像和回退路径，不是因子定义。
 
-## Consequences
+## 验证
 
-- A public factor cannot become executable merely by appearing in the server
-  working tree; it must be registered in SQLite.
-- Client release builds that need provider assets must obtain them from the
-  separate client distribution and pass those roots explicitly.
-- Tests for public factors load the registered source, while client catalog and
-  release tests use temporary external manifests/builders.
-- Existing SQLite public rows remain intact; this change removes mirrors and
-  fallback paths, not factor definitions.
-
-## Verification
-
-- The registry and deleted public mirror were compared before removal: 48
-  public rows and 48 source files matched one-to-one.
-- Focused factor-workspace, catalog, metadata, client-manifest, and release
-  tests cover registry-only loading and optional external asset injection.
-- The server is not restarted or deployed as part of this local repository
-  change; runtime activation remains a separate maintenance operation.
+- 删除前已比较注册表与公共镜像：48 条公共行与 48 个源码文件一一对应。
+- 因子工作区、目录、元数据、客户端 manifest 和发行测试覆盖“仅注册表加载”和可选外部资产注入。
+- 本地仓库变更不自动重启或部署服务器；运行时激活仍是独立维护操作。

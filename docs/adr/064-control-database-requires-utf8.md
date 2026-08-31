@@ -1,36 +1,21 @@
-# ADR 064: PostgreSQL control database requires UTF-8
+# ADR 064：PostgreSQL 控制数据库必须使用 UTF-8
 
-## Status
+## 状态
 
-Accepted — 2026-08-13
+已接受，2026-08-13。
 
-## Context
+## 背景
 
-FactorTester stores usernames, organizations, hierarchy labels, profile metadata,
-device names, and client descriptions in the shared PostgreSQL control plane.
-The first remote cluster was initialized with `SQL_ASCII`; psycopg consequently
-returned text columns as bytes. That broke account matching, super-administrator
-authorization, Manager identity projection, and device allow-list enrollment.
-It also left non-ASCII organization and device text without database-level
-validation.
+FactorTester 在共享 PostgreSQL 控制面保存用户名、组织、层级标签、Profile 元数据、设备名称和客户端描述。第一套远程集群以 `SQL_ASCII` 初始化，psycopg 因此把文本列返回为 bytes，破坏了账户匹配、超级管理员授权、Manager 身份投影和设备白名单注册，也让非 ASCII 组织/设备文本缺少数据库级校验。
 
-## Decision
+## 决策
 
-- Every FactorTester control database must use PostgreSQL `UTF8` encoding.
-- Bootstrap creates the database with `ENCODING 'UTF8' TEMPLATE template0`, so
-  it does not inherit an unsuitable encoding from the cluster's default
-  template database.
-- Bootstrap rejects an existing control database whose encoding is not UTF-8.
-- Runtime connections reject a non-UTF-8 control database before reading or
-  writing identity data. Application code must not silently decode arbitrary
-  bytes as a substitute for a correctly encoded database.
-- Existing `SQL_ASCII` deployments are migrated through a consistent dump into
-  a UTF-8 database. The old database and dump are retained until the new
-  database has passed account, device, and cross-server authentication checks.
+- 每个 FactorTester 控制数据库必须使用 PostgreSQL `UTF8` 编码。
+- 初始化用 `ENCODING 'UTF8' TEMPLATE template0` 创建数据库，不继承集群默认 template 的不合适编码。
+- 已存在且非 UTF-8 的控制库在启动时拒绝。
+- 运行时连接在读取/写入身份数据前拒绝非 UTF-8 控制库；应用不得把任意 bytes 静默解码来替代正确编码。
+- 既有 `SQL_ASCII` 部署通过一致性 dump 迁移到 UTF-8 数据库；旧库和 dump 在新的账户、设备和跨服务器认证检查通过前保留。
 
-## Consequences
+## 后果
 
-Text values are consistently returned as strings on every Manager, and Chinese
-organization, hierarchy, profile, browser, and device labels are validated by
-PostgreSQL. A misconfigured database fails with a precise operator error instead
-of producing misleading login failures or `b'...'` account identities.
+所有 Manager 返回的文本值一致为字符串，中文组织、层级、Profile、浏览器和设备标签由 PostgreSQL 校验。错误配置会给出明确的运维错误，而不是误导性的登录失败或 `b'...'` 账户身份。

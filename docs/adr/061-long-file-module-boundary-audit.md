@@ -1,115 +1,44 @@
-# ADR 061: Long-file audit and semantic module boundaries
+# ADR 061：长文件审计与语义模块边界
 
-## Status
+## 状态
 
-Accepted as the staged refactoring direction on 2026-08-13.
+已接受，作为 2026-08-13 起分阶段重构方向。
 
-## Context
+## 背景
 
-The Manager composition-root migration reduced `server/manager/runtime.py` from
-more than six thousand lines to roughly 350 lines and retired the former
-`scripts/worktree_*` import namespace. A repository-wide follow-up audit found
-that length alone was not the remaining architectural problem:
+Manager 组合根迁移已经把 `server/manager/runtime.py` 从六千多行降到约 350 行，并退役 `scripts/worktree_*` 导入命名空间。全仓后续审计发现，剩余问题不是单纯的文件长度：生产 Python 文件中有 61 个至少 600 行、31 个至少 800 行、12 个至少 1200 行；其中有些是拥有有意宽接口的内聚深领域接口，有些则混合了不相关的存储、传输、投影、CLI 和兼容实现；若干未完成迁移同时保留旧兼容函数和新所有模块。
 
-- 61 production Python files contain at least 600 lines;
-- 31 contain at least 800 lines;
-- 12 contain at least 1,200 lines;
-- some files are cohesive, deep domain Interfaces with a deliberately broad
-  API, while others combine unrelated storage, transport, projection, CLI, and
-  compatibility Implementations;
-- several incomplete migrations retain both the old compatibility function and
-  the new owning Module.
+本文记录后续重构的优先级和约束，不授权在移动代码时改变运行语义。
 
-This ADR records the priority and constraints for subsequent refactoring. It is
-an audit decision, not authorization to change runtime behavior while moving
-code.
+## 决策
 
-## Decision
+只有存在语义所有权 seam 时才拆分长文件。行数只是审查信号，不是设计目标。新模块至少改善以下一项且不能降低其他项：接口深度、所有权局部性、独立可测性、依赖方向或删除重复实现。
 
-Long files are split only where a semantic ownership Seam exists. Line count is
-a review signal, not the design goal. A new Module must improve at least one of
-the following without reducing the others: Interface Depth, ownership
-Locality, independent testability, dependency direction, or removal of a
-duplicate Implementation.
+分阶段顺序如下：
 
-The staged order is:
+1. 完成分组测试迁移。让 `server/modules/single_factor_test/group.py` 保持浅层 HTTP adapter，把快照、产品元数据、详情投影和研究运行行为移入既有 `tools/factors/tester_calc/single_factor_test/group/` 包；测试迁移到公共接口后删除兼容桩和重复辅助函数。
+2. 按所有权拆分 Manager 持久化。PostgreSQL 连接和事务仍共享；账户/设备、组织与层级、数据源版本与 Profile、配额/任务预留各自拥有聚焦仓库实现。本地任务索引将事件同步、路由投影、对账和读取查询置于稳定 facade 后。
+3. 分离 Manager 联邦职责：服务器注册、远程 HTTP Gateway adapter、路由/能力选择、同步 worker、任务投影和管理 HTTP 路由。公共任务、全服务器任务和账户任务聚合必须共用一条分页/投影流水线。
+4. 从调度核心提取原生调度审计序列化和 step-diff 投影；`FlowContext`、`EventQueue`、Flow 顺序及热路径缓存继续相邻，除非剖析证明存在更好边界。
+5. 将 FieldHistory CLI、持久化 codec/store 和运行时接入与查询 Provider 分离；统一的 FieldHistory 视图规范化和序列化只保留一个实现。
+6. 按面向用户的命令族拆分宽 CLI controller，但保留一个组合 CLI 接口；生成物转换和终端渲染不属于命令注册职责。
+7. 只有在 characterization 与性能测试覆盖缓存及事件顺序合约后，才拆分 MarketData、FactorSignal 和 TermStructure；候选 seam 包括请求规划、源加载、历史规则、事件快照、实时/预计算信号、生命周期数据和移仓执行。
+8. 把 Research Graph 转换拆成纯准备、守卫、投影和轨迹构造阶段，但保留一个外层原子数据库事务。CLI 导航与义务命令继续作为这些领域操作的 adapter。
 
-1. Finish the grouped-test migration. Keep
-   `server/modules/single_factor_test/group.py` as a shallow HTTP Adapter, move
-   snapshot, product metadata, detail projection, and research-run behavior to
-   the existing `tools/factors/tester_calc/single_factor_test/group/` package,
-   migrate tests to public Interfaces, and delete compatibility stubs and
-   duplicate helpers.
-2. Split Manager persistence by ownership. PostgreSQL connection and
-   transaction handling remain shared, while account/device, organization and
-   level, source version and Profile, and quota/task reservation behavior gain
-   focused repository Implementations. The local job index separates event
-   synchronization, routing projection, reconciliation, and read queries behind
-   a stable facade.
-3. Separate Manager federation responsibilities: server registry, remote HTTP
-   Gateway Adapter, route and capability selection, synchronization workers,
-   task projection, and administrative HTTP routes. Public, server-wide, and
-   account task aggregation must share one paging/projection pipeline instead
-   of repeating the same control flow.
-4. Extract native scheduler audit serialization and step-diff projection from
-   the scheduling core. `FlowContext`, `EventQueue`, flow ordering, and their
-   hot-path caches remain colocated unless profiling proves a better boundary.
-5. Separate FieldHistory CLI, persistence codec/store, and runtime integration
-   from the lookup Provider. Shared FieldHistory view normalization and
-   serialization become one implementation.
-6. Split broad CLI controllers by user-facing command family while retaining a
-   single composed CLI Interface. Artifact conversion and terminal rendering
-   are not command registration responsibilities.
-7. Refactor MarketData, FactorSignal, and TermStructure only after
-   characterization and performance tests cover their cache and event-order
-   contracts. Candidate Seams are request planning, source loading, historical
-   rules, event snapshots, live versus precomputed signals, lifecycle data, and
-   rollover execution.
-8. Decompose Research Graph transitions into pure preparation, guard,
-   projection, and trace-construction stages, but retain one outer atomic
-   database transaction. CLI navigation and obligation commands remain
-   Adapters over those domain operations.
+已确认的重复实现应在所属区域改动时删除，包括：`tools/testers/settings/applications.py` 与 `tools/testers/_shared/` 的因子执行/行情设置注册；Qlib 与 Zipline runner 重复的可执行差额计算；三个视图模块重复的 FieldHistory 统一帧规范化；旧路由和新研究运行设置模块重复的分组测试父级继承及产品选择身份辅助函数。
 
-Confirmed active duplicate Implementations are removed as the owning areas are
-changed, including:
+## 约束
 
-- factor-execution and market-data setting registration in both
-  `tools/testers/settings/applications.py` and `tools/testers/_shared/`;
-- executable-delta calculation duplicated by the Qlib and Zipline runners;
-- FieldHistory unified-frame normalization repeated in three view modules;
-- grouped-test parent inheritance and product-selection identity helpers in the
-  old route module and the new research-run settings Module.
+- `FactorExpr`、`DataIndex` 和 `FactorFamily` 不为降低行数而拆分；它们是内聚、深接口，浅 mixin 会降低可发现性和局部性。
+- 热路径 store 和缓存与其保护的状态保持相邻，符合 ADR-053。
+- 事务可以调用提取出的纯函数，但数据库原子性不得分散到各自提交的仓库中。
+- 兼容 adapter 必须有明确删除条件；只移动实现而生产或测试仍依赖旧私有辅助函数，不算完成。
+- 生成的或有意镜像的 Skill 负载不参与重复合并，除非先变更其打包合约。
 
-## Constraints
+## 执行
 
-- `FactorExpr`, `DataIndex`, and `FactorFamily` are not split merely to lower
-  line counts. They currently provide cohesive, deep Interfaces; shallow
-  mixins would reduce discoverability and Locality.
-- Hot-path stores and caches remain with the state they protect, consistent
-  with ADR 053.
-- A transaction may call extracted pure functions, but database atomicity must
-  not be distributed across independently committing repositories.
-- Compatibility Adapters are temporary and must have an explicit deletion
-  condition. A moved implementation is not complete while production or tests
-  still depend on the retired private helper.
-- Generated or deliberately mirrored skill payloads are excluded from duplicate
-  consolidation unless their packaging contract is changed first.
+前三个阶段建立代表性边界后，CI 增加架构尺寸审计：新的生产 Python 文件达到 800 行或函数达到 250 行时，必须拆分或给出文档化的白名单理由。现存文件在所属阶段完成前只能维持不增长的基线。检查器不能通过创建浅层转发模块或无类型数据文件来规避。
 
-## Enforcement
+## 后果
 
-After the first three stages establish representative boundaries, CI will add
-an architectural size audit. New production Python files at or above 800 lines
-and new functions at or above 250 lines require either decomposition or a
-documented allow-list reason. Existing files are tracked as a non-increasing
-baseline until their owning stage is completed. The guard must not reward
-shallow pass-through Modules or moving code into untyped data files.
-
-## Consequences
-
-- Refactoring follows ownership and dependency direction rather than arbitrary
-  file-size targets.
-- The highest-Leverage incomplete migration and Manager control-plane work are
-  addressed before riskier backtest hot paths.
-- Long but cohesive domain Interfaces remain readable and stable.
-- Duplicate behavior has one owner, and compatibility paths have a defined end
-  state.
+重构遵循所有权和依赖方向，而不是任意文件大小目标；优先解决高杠杆的未完成迁移和 Manager 控制面工作，再处理风险更高的回测热路径。长但内聚的领域接口保持可读稳定；重复行为只有一个所有者，兼容路径都有明确终点。

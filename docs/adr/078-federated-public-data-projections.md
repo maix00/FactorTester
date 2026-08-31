@@ -1,48 +1,21 @@
-# ADR 078: Federated public data projections
+# ADR 078：联邦公共数据投影
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public Manager is a browser entry point, but a user's Profile metadata,
-factor catalog, and shared research publication may be owned by an internal
-Manager.  Mounting the internal Client home or copying source code into the
-public container would leak device-local paths and make the public node a
-second authority.  The existing cross-server task query also fan-outs to
-registered Managers when the tab opens, so stale registrations and oversized
-peer pages make the first view slow.
+公共 Manager 是浏览器入口，但用户 Profile 元数据、因子目录和共享研究发布物可能由内网 Manager 所有。把内网 Client home 挂进公共容器或复制源码会泄露设备路径，并把公共节点变成第二个权威。旧的跨服务器任务查询在页面打开时向所有注册 Manager fan-out，陈旧注册和过大的对等页使首次加载变慢。
 
-## Decision
+## 决策
 
-1. Add one authenticated peer-control read surface for bounded `research` and
-   `catalog` projections.  It is available only behind the existing Manager
-   federation proxy token and has an explicit operation allow-list.
-2. Public research list entries carry their owning `source_server_id`.  The
-   public Manager reads report metadata from all live peers, then fetches a
-   selected projection/chapter/asset on demand from the owning peer.  Report
-   mirrors and bytes remain on the owner; PostgreSQL is not placed in this
-   content path.
-3. Profile responses use PostgreSQL's safe `control_profiles` projection when
-   available and fall back to the local Client root.  The federated response
-   strips device-local paths, source code, credentials, and session secrets.
-4. Factor responses merge source-free public metadata for visitors and the
-   authenticated principal's source-free library for logged-in users.  Factor
-   source bodies remain on the owning node and are never returned by the peer
-   projection.
-5. Peer discovery uses only online leases for read-through requests.  A
-   five-second in-process cache and requested-page-sized peer queries reduce
-   repeated cross-server task-list latency; offline registrations remain
-   status data but never block the request.
+1. 增加一个认证的对等控制只读面，提供有界的 `research` 和 `catalog` 投影，只能通过既有 Manager 联邦 proxy token 和显式操作白名单访问。
+2. 公共研究列表项携带拥有者 `source_server_id`。公共 Manager 从在线对等节点读取报告元数据，用户选择后再向拥有者按需读取投影、章节或资产。报告镜像和字节留在拥有者，PostgreSQL 不进入内容路径。
+3. Profile 响应优先使用 PostgreSQL 的安全 `control_profiles` 投影，必要时回退到本地 Client 根。联邦响应去除设备路径、源码、凭据和会话秘密。
+4. 因子响应为访客合并无源码的公共元数据，为登录主体合并其无源码因子库；源码正文留在所有者节点，绝不通过对等投影返回。
+5. 只使用在线租约进行穿透读取。五秒进程内缓存和与请求页等大的对等查询减少重复任务列表延迟；离线注册仍作为状态数据返回，但不阻塞请求。
 
-## Consequences
+## 后果
 
-- The public Manager can display shared research, registered Profiles, and
-  factor metadata without mirroring private client directories.
-- A source node being offline makes its on-demand content unavailable, while
-  already cached metadata remains bounded and clearly source-labelled.
-- PostgreSQL remains the control-plane authority for migrated Profile metadata;
-  it is not required for report bytes or task-list fan-out.
-- A future persistent projection cache can replace the in-process cache without
-  changing the peer operation contract.
+公共 Manager 可以在不镜像私有 Client 目录的情况下显示共享研究、已注册 Profile 和因子元数据。源码节点离线时，其按需内容不可用，但已有缓存的元数据仍有界且明确标注来源。PostgreSQL 是迁移后 Profile 元数据的控制面权威，但不是报告字节或任务列表 fan-out 的必要条件。未来可用持久化投影缓存替换进程缓存，不改变对等操作合约。
