@@ -21,7 +21,7 @@
       ? requested : (sections[0]?.[0] || "researches");
     const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
-    context.setHeading(context.t("研究"), context.t(labelFor(selected, sections)));
+    context.setHeading(context.t("研究台"), context.t(labelFor(selected, sections)));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取研究…")));
     // The Web page is the single owner of the research section switcher in
     // both standalone Web and embedded Swift presentation.  Swift owns the

@@ -3453,6 +3453,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             jobs = response.read().decode("utf-8")
 
     assert '["researches", "研究"]' in workspaces
+    assert 'context.setHeading(context.t("研究台")' in workspaces
     assert '["graph", "研究图"]' in workspaces
     assert '["agent-models", "智能体模型"]' in workspaces
     assert 'FTAgentModels.list' in workspaces
@@ -3483,6 +3484,14 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
+    assert 'line.className = "research-report-info-line"' in reports
+    assert 'body.className = "research-report-embedded-body"' in reports
+    assert 'loadGroups?.(["report"])' in reports
+    assert "FTReportSource.create" in reports
+    assert "FTReportRenderer.render" in reports
+    assert 'context.t("属于研究")' not in reports
+    assert "research-report-table-embedded" not in reports
+    assert 'context.t("独立打开")' not in reports
     assert 'section.className = "research-client-download-action"' in local_page
     assert "window.FTResearchCatalog" in researches
     assert "FTUI.pagedTable" in researches

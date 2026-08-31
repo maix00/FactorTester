@@ -27,7 +27,7 @@
 
   function render(context) {
     context.activeNav("jobs");
-    context.setHeading(context.t("测试"));
+    context.setHeading(context.t("测试台"));
     context.toolbar.replaceChildren(FTTestPageTabs.render(context, "types"));
 
     const root = document.createElement("div");
